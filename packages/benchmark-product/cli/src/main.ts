@@ -305,6 +305,13 @@ export interface ColophonCliContext {
   readonly progress: (line: string) => void;
   /** The process has an attached human terminal and may open a long-lived viewer. */
   readonly interactive?: boolean;
+  /**
+   * Installs and returns a shutdown request for the verbs that run until interrupted
+   * (`publication serve`). Supplied by `bin.ts` from SIGINT/SIGTERM; absent in an embedder that
+   * cannot take the process's signals over, in which case those verbs refuse rather than binding
+   * a socket nothing can stop.
+   */
+  readonly createShutdownSignal?: () => AbortSignal;
   /** Explicit Colophon-owned OS data directory; never a Claude/Codex home. */
   readonly agentDataDir?: string;
   /** Injectable only for the interactive terminal boundary and its regression coverage. */
@@ -357,6 +364,7 @@ function runCoreFromPublicCli(argv: readonly string[], context: ColophonCliConte
     runtimeHost,
     agentDataDir: context.agentDataDir,
     progress: context.progress,
+    ...(context.createShutdownSignal === undefined ? {} : { createShutdownSignal: context.createShutdownSignal }),
     ...(context.interactive === true
       ? {
           subscriptionLogin: context.subscriptionLogin

@@ -45,79 +45,6 @@ const INVENTORY_PACKAGES = [
   ['oci-grader', '@jinn-network/task-execution-oci-grader'],
 ];
 
-const INVENTORY_JOB_BY_PATH = new Map([
-  ['protocol', 'foundation'],
-  ['backend', 'backend'],
-  ['testing', 'testing'],
-  ['profiles', 'profiles'],
-  ['backend-local/supervisor', 'supervisor'],
-  ['backend-local/workspace', 'workspace'],
-  ['backend-local/launchers', 'launchers'],
-  ['backend-local/assembly', 'backend-local'],
-  ['evaluation-harness', 'evaluation-harness'],
-  ['evaluator-adapters', 'evaluator-adapters'],
-  ['oci-grader', 'oci-grader'],
-]);
-
-function artifactSlugForPath(packagePath) {
-  if (packagePath === 'backend-local/assembly') return 'backend-local';
-  if (packagePath.startsWith('backend-local/')) {
-    return packagePath.slice('backend-local/'.length);
-  }
-  return packagePath;
-}
-
-function artifactNameForPath(packagePath) {
-  return `task-execution-${artifactSlugForPath(packagePath)}-dist`;
-}
-
-function parseVerifyPlacementSlugs() {
-  const marker = '      - name: Place package distributions\n        run: |\n';
-  const start = workflow.indexOf(marker);
-  assert.notEqual(start, -1, 'verify job must place package distributions');
-  const block = workflow.slice(start, start + 2500);
-  const topLevelMatch = block.match(
-    /for package in ([^;]+); do\n\s+mkdir -p "packages\/task-execution\/\$\{package\}\/dist"/u,
-  );
-  assert.ok(topLevelMatch, 'verify must stage top-level task-execution packages');
-  const backendLocalMatch = block.match(
-    /for package in ([^;]+); do\n\s+mkdir -p "packages\/task-execution\/backend-local\/\$\{package\}\/dist"/u,
-  );
-  assert.ok(backendLocalMatch, 'verify must stage backend-local packages');
-  const topLevel = topLevelMatch[1].trim().split(/\s+/u);
-  const backendLocal = backendLocalMatch[1].trim().split(/\s+/u);
-  assert.ok(
-    block.includes('task-execution-backend-local-dist'),
-    'verify must stage backend-local assembly dist',
-  );
-  return { topLevel, backendLocal, stagesAssembly: true };
-}
-
-function parseVerifyNeeds() {
-  const marker = '  verify:\n    needs: [';
-  const start = workflow.indexOf(marker);
-  assert.notEqual(start, -1, 'verify job must declare needs');
-  const end = workflow.indexOf(']', start);
-  return workflow.slice(start + marker.length - 1, end + 1)
-    .replace(/[\[\]]/gu, '')
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-function parseVerifyResultJobs() {
-  const marker = '      - name: Require every Task Execution CI stage to succeed\n        env:\n';
-  const start = workflow.indexOf(marker);
-  assert.notEqual(start, -1, 'verify must aggregate upstream job results');
-  const block = workflow.slice(start, start + 1200);
-  const envMatches = [...block.matchAll(/^\s+([A-Z0-9_]+_RESULT): \$\{\{ needs\.([a-z0-9-]+)\.result \}\}/gmu)];
-  return new Map(envMatches.map((match) => [match[2], match[1]]));
-}
-
-function parseUploadArtifactNames() {
-  return new Set([...workflow.matchAll(/name: (task-execution-[a-z0-9-]+-dist)/gu)].map((match) => match[1]));
-}
-
 test('packed-types source stays aligned with the canonical pack list', () => {
   for (const [, packageName] of PACKED_PACKAGES) {
     assert.match(
@@ -140,53 +67,60 @@ test('inventory source stays aligned with the canonical package inventory', () =
   }
 });
 
-test('every packed-types package is staged by the verify job placement loop', () => {
-  const placement = parseVerifyPlacementSlugs();
-  for (const [packagePath] of PACKED_PACKAGES) {
-    if (packagePath.startsWith('backend-local/')) {
-      const slug = packagePath.slice('backend-local/'.length);
-      if (slug === 'assembly') {
-        assert.ok(placement.stagesAssembly, 'verify must stage backend-local assembly dist');
-        continue;
-      }
-      assert.ok(
-        placement.backendLocal.includes(slug),
-        `verify placement loop must stage ${packagePath} (slug ${slug})`,
-      );
-      continue;
-    }
-    assert.ok(
-      placement.topLevel.includes(packagePath),
-      `verify placement loop must stage ${packagePath}`,
-    );
-  }
-});
+// Consolidated shape (#2997): the packages job verifies every inventory
+// package in one workspace, in dependency order, with the packed-types
+// compile at the tail. There is no artifact staging left to align - the
+// alignment guarantee is now positional: every package's verbatim verify
+// step must precede the packed-types step in the same job.
 
-test('every packed-types package has a matching upload-artifact step', () => {
-  const artifactNames = parseUploadArtifactNames();
-  for (const [packagePath] of PACKED_PACKAGES) {
-    const artifactName = artifactNameForPath(packagePath);
-    assert.ok(
-      artifactNames.has(artifactName),
-      `workflow must upload ${artifactName} for ${packagePath}`,
-    );
-  }
-});
+function packagesJobBlock() {
+  const start = workflow.indexOf('\n  packages:\n');
+  assert.notEqual(start, -1, 'workflow must declare the consolidated packages job');
+  const end = workflow.indexOf('\n  ', start + 14);
+  return end === -1 ? workflow.slice(start) : workflow.slice(start);
+}
 
-test('every inventory package has a CI job gated by verify needs and result loop', () => {
-  const verifyNeeds = new Set(parseVerifyNeeds());
-  const resultJobs = parseVerifyResultJobs();
-
+test('every inventory package is verified inside the consolidated packages job', () => {
+  const block = packagesJobBlock();
   for (const [packagePath] of INVENTORY_PACKAGES) {
-    const jobId = INVENTORY_JOB_BY_PATH.get(packagePath);
-    assert.ok(jobId, `missing job mapping for ${packagePath}`);
+    const marker = `        working-directory: packages/task-execution/${packagePath}\n`;
+    const at = block.indexOf(marker);
+    assert.notEqual(at, -1, `packages job must carry a step in packages/task-execution/${packagePath}`);
+    const stepBlock = block.slice(at, at + 700);
+    for (const command of ['yarn typecheck', 'yarn test', 'yarn build']) {
+      assert.ok(
+        stepBlock.includes(command),
+        `the ${packagePath} verify step must run ${command}`,
+      );
+    }
+  }
+});
+
+test('the packed-types compile runs after every package verify', () => {
+  const block = packagesJobBlock();
+  const packedAt = block.indexOf('task-execution-packed-types.test.mjs');
+  assert.notEqual(packedAt, -1, 'packages job must end with the packed-types compile');
+  for (const [packagePath] of INVENTORY_PACKAGES) {
+    const at = block.indexOf(`        working-directory: packages/task-execution/${packagePath}\n`);
     assert.ok(
-      verifyNeeds.has(jobId),
-      `verify.needs must include ${jobId} for ${packagePath}`,
-    );
-    assert.ok(
-      resultJobs.has(jobId),
-      `verify result loop must gate ${jobId} for ${packagePath}`,
+      at < packedAt,
+      `${packagePath} must be verified before the packed-types compile consumes its dist`,
     );
   }
+});
+
+test('the consolidated workflow carries no artifact round-trips', () => {
+  // Dist hand-offs between jobs are exactly what the consolidation removed;
+  // one creeping back in would silently reintroduce the staging-alignment
+  // problem this file used to police.
+  assert.doesNotMatch(workflow, /upload-artifact|download-artifact/u);
+});
+
+test('the native custody binary is built and probed in-workspace', () => {
+  assert.match(workflow, /build-native\.mjs/u, 'the assembly step must rebuild the native shim');
+  assert.match(
+    workflow,
+    /JINN_NATIVE_CUSTODY_BINARY/u,
+    'the custody binary path must stay pinned for the assembly and harness steps',
+  );
 });

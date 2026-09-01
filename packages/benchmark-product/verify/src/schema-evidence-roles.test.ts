@@ -31,7 +31,12 @@ import {
 
 describe("evidence role vocabularies (§6.8a Group C)", () => {
   test("BUNDLE_V4_EVIDENCE_ROLES carries the nested screening roles as an appended tail", () => {
-    const tail = BUNDLE_V4_EVIDENCE_ROLES.slice(-11);
+    // Anchored on this block's own last member rather than on the array's end: issue #2839 appended
+    // `disclosure-specification` AFTER it, which is the correct additive move and must not make this
+    // assertion about P6's contiguous block fail. What is asserted is unchanged — the eleven roles
+    // are still contiguous, still in this order, still starting at `snapshot-probe`.
+    const blockEnd = BUNDLE_V4_EVIDENCE_ROLES.indexOf("screening-transcript");
+    const tail = BUNDLE_V4_EVIDENCE_ROLES.slice(blockEnd - 10, blockEnd + 1);
     expect(tail).toEqual([
       "snapshot-probe", "screening-table", "screening-reveal-receipt",
       "screening-instrument", "screening-sampling-script", "screening-raw-outputs",

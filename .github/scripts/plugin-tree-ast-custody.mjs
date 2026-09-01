@@ -90,6 +90,24 @@ function moduleRoot(specifier) {
   return normalizeModuleSpecifier(specifier);
 }
 
+/**
+ * Packages that hand a caller ambient network without ever naming `fetch`.
+ *
+ * `isNetworkModule` catches the node built-ins, and the `fetch` identifier is
+ * forbidden outright — but `createHttpTransport` defaults to `globalThis.fetch`
+ * on the caller's behalf, so importing it acquires the network with neither
+ * signal firing. The corpus composition root legitimately needs it; nothing
+ * else in the runtime library does, so the allowance is scoped the same way
+ * the filesystem allowance is: to the named host-adapter layer.
+ */
+const HOST_ADAPTER_ONLY_NETWORK_PACKAGES = ['@jinn-network/record-discovery-transport-http'];
+
+function isHostAdapterOnlyNetworkPackage(specifier) {
+  // `packageSpecifierMatches` rather than `moduleRoot`, which stops at the
+  // first slash and so reads a scoped name as bare `@jinn-network`.
+  return HOST_ADAPTER_ONLY_NETWORK_PACKAGES.some((name) => packageSpecifierMatches(specifier, name));
+}
+
 function isNetworkModule(specifier) {
   const rootName = moduleRoot(specifier);
   return NETWORK_MODULES.some((name) =>
@@ -516,6 +534,26 @@ function isSessionHostSignerPath(filePath) {
     || filePath.endsWith('\\src\\session-host-signer.ts');
 }
 
+/**
+ * The C7 host-adapter layer: the named modules outside the runtime library
+ * where a process composition root is allowed to touch the disk. Deliberately
+ * a SEPARATE predicate from `isSessionHostSignerPath` above: the fs allowance
+ * belongs to the whole layer, but the key-material canary exemption stays on
+ * the signer alone, because that is the only module that handles private key
+ * material. A single predicate for both would silently extend the exemption
+ * to every adapter added later.
+ */
+const HOST_ADAPTER_BASENAMES = [
+  'session-host-signer.ts',
+  'session-host-corpus.ts',
+  'session-host-crypto.ts',
+];
+
+function isHostAdapterPath(filePath) {
+  return HOST_ADAPTER_BASENAMES.some((basename) =>
+    filePath.endsWith(`/src/${basename}`) || filePath.endsWith(`\\src\\${basename}`));
+}
+
 function isAllowedCaptureProcessUse(node, ts, member, assignOps) {
   if (!CAPTURE_ALLOWED_PROCESS_MEMBERS.has(member)) return false;
   return !isAssignmentToExpression(node, node, ts, assignOps);
@@ -707,6 +745,7 @@ function scanSourceFile(filePath, content, options) {
     isCaptureProduction = false,
     isBinNodeFsProduction = false,
     isSessionHostSigner = false,
+    isHostAdapter = false,
   } = options;
   const label = relativeFromRoot(filePath);
   const violations = [];
@@ -743,7 +782,7 @@ function scanSourceFile(filePath, content, options) {
   }
 
   let scope = new Scope(authCtx);
-  const ctx = { isBinEntry, isCaptureProduction, isBinNodeFsProduction, isSessionHostSigner, add, authCtx };
+  const ctx = { isBinEntry, isCaptureProduction, isBinNodeFsProduction, isSessionHostSigner, isHostAdapter, add, authCtx };
   const assignOps = assignmentOperatorKinds(ts);
 
   for (const stmt of sourceFile.statements) {
@@ -775,6 +814,10 @@ function scanSourceFile(filePath, content, options) {
       add(`network module ${specifier}`);
       return;
     }
+    if (isHostAdapterOnlyNetworkPackage(specifier)) {
+      if (!isHostAdapter) add(`network-acquiring package ${specifier}`);
+      return;
+    }
     if (isProcessModule(specifier)) {
       add(`import ${specifier}`);
       return;
@@ -789,7 +832,7 @@ function scanSourceFile(filePath, content, options) {
     }
     if (isForbiddenFs(specifier)) {
       if (isBinEntry && isAllowedBinImport(specifier, node, ts)) return;
-      if (isCaptureProduction || isBinNodeFsProduction || isSessionHostSigner) return;
+      if (isCaptureProduction || isBinNodeFsProduction || isHostAdapter) return;
       add(specifier);
     }
   }
@@ -1360,12 +1403,14 @@ export function scanProductionSources(packages, scanOptions) {
     const isCaptureProduction = isCaptureProductionPath(filePath);
     const isBinNodeFsProduction = isBinNodeFsProductionPath(filePath);
     const isSessionHostSigner = isSessionHostSignerPath(filePath);
+    const isHostAdapter = isHostAdapterPath(filePath);
     return scanSourceFile(filePath, content, {
       ...scanOptions,
       isBinEntry,
       isCaptureProduction,
       isBinNodeFsProduction,
       isSessionHostSigner,
+      isHostAdapter,
     });
   })).sort(compareCodeUnit);
 }
@@ -1374,10 +1419,12 @@ export {
   insideForbiddenRoot,
   isBinNodeFsProductionPath,
   isCaptureProductionPath,
+  isHostAdapterPath,
   isProcessCompositionEntryPath,
   isSessionHostSignerPath,
   isForbiddenChildProcess,
   isForbiddenFs,
+  isHostAdapterOnlyNetworkPackage,
   isNetworkModule,
   isProcessModule,
   packageSpecifierMatches,

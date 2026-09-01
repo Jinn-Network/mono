@@ -27,6 +27,7 @@ describe("resolveRuntimeConfig", () => {
         maxEntriesPerSync: 500,
         syncTimeoutMs: 30_000,
         acknowledgeUnverifiedChain: false,
+        chainVerification: "verified",
       },
       relevance: {
         maxTerms: 10,
@@ -115,5 +116,82 @@ describe("resolveRuntimeConfig", () => {
 
   test("resolution is pure: the same source yields an equal result", () => {
     expect(resolveRuntimeConfig(base)).toEqual(resolveRuntimeConfig({ ...base }));
+  });
+});
+
+describe("corpus.sources[].signingKeys", () => {
+  const source = {
+    agent: "https://agents.test/alice",
+    name: "attempts",
+    servingRoot: "https://archive.test",
+    archiveRootUrl: "https://archive.test/sources/attempts/entries/0000000000000001",
+    repositoryId: "archive.test/attempts",
+  } as const;
+
+  function resolve(signingKeys: unknown) {
+    return resolveRuntimeConfig({
+      ...base,
+      file: { corpus: { sources: [{ ...source, ...(signingKeys === undefined ? {} : { signingKeys }) }] } },
+    });
+  }
+
+  test("defaults to no declared signing authority", () => {
+    expect(resolve(undefined).corpus.sources[0]!.signingKeys).toEqual([]);
+  });
+
+  test("accepts did:key entries with an RFC 3339 validFrom", () => {
+    const keys = [
+      { keyid: "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz", validFrom: "2026-01-01T00:00:00.000Z" },
+    ];
+    expect(resolve(keys).corpus.sources[0]!.signingKeys).toEqual(keys);
+  });
+
+  test("canonicalizes validFrom to UTC, so string ordering matches instant ordering", () => {
+    // Every consumer orders this value AS A STRING — the binding resolver
+    // against the probe instant, `trust-adapter` against `now.toISOString()`.
+    // `2026-07-31T23:00:00-05:00` IS `2026-08-01T04:00Z`, but written that way
+    // it sorts before an `2026-08-01T00:00Z` probe and would admit the key
+    // four hours early.
+    expect(
+      resolve([
+        { keyid: "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz", validFrom: "2026-07-31T23:00:00-05:00" },
+      ]).corpus.sources[0]!.signingKeys[0]!.validFrom,
+    ).toBe("2026-08-01T04:00:00.000Z");
+  });
+
+  test("canonicalizes a second-precision validFrom to milliseconds", () => {
+    // "Z" sorts after ".", so `…T00:00:00Z` would compare as LATER than a
+    // `…T00:00:00.500Z` clock and fail closed for half a second.
+    expect(
+      resolve([
+        { keyid: "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz", validFrom: "2026-01-01T00:00:00Z" },
+      ]).corpus.sources[0]!.signingKeys[0]!.validFrom,
+    ).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  test("rejects a keyid that is not a did:key", () => {
+    expect(() => resolve([{ keyid: "key-1", validFrom: "2026-01-01T00:00:00.000Z" }])).toThrow(
+      PluginRuntimeError,
+    );
+  });
+
+  test("rejects a non-RFC-3339 validFrom", () => {
+    expect(() =>
+      resolve([
+        { keyid: "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz", validFrom: "yesterday" },
+      ]),
+    ).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects an unknown key inside a signing-key entry", () => {
+    expect(() =>
+      resolve([
+        {
+          keyid: "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz",
+          validFrom: "2026-01-01T00:00:00.000Z",
+          revoked: true,
+        },
+      ]),
+    ).toThrow(PluginRuntimeError);
   });
 });

@@ -8,7 +8,7 @@ step 7 unfinished.
 > the evidence tables at open time. Supersedes the per-stage drains for the collapsed
 > flows: [`cutover-stage-2-drain.md`](cutover-stage-2-drain.md) (stage-2 sections are
 > historical), the never-written stage-3/stage-4 runbooks.
-> **Rollback pin (record at PR open, re-check before merge):** `@jinn-network/client@<version>-canary.sha.<sha40>`
+> **Rollback pin (record at PR open, re-check before merge):** `@jinn-network/operator@<version>-canary.sha.<sha40>`
 
 ## Before this deploy PR merges
 

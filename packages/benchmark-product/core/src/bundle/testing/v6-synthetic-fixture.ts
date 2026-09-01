@@ -511,6 +511,8 @@ export async function createSyntheticV6BundleFixture(input: {
   /** §7.3 declared intent, sealed into the Run at lock time. Declaring a profile no plan supplies
    * is how a `declared-but-absent` bundle is produced. */
   readonly declaredProviders?: readonly string[];
+  /** #2980 task-selection provenance, sealed into the Run at lock time. */
+  readonly taskSelection?: "claimant-chosen" | "fixed-public-set" | "drawn-post-lock";
 }): Promise<SyntheticV6BundleFixture> {
   const context: OperationContext = {
     workspaceDir: input.workspaceDir,
@@ -550,6 +552,13 @@ export async function createSyntheticV6BundleFixture(input: {
         patch: { anchoring: { declaredProviders: [...input.declaredProviders] } },
       }),
       "draft anchoring intent",
+    );
+  }
+
+  if (input.taskSelection !== undefined) {
+    requireOk(
+      updateDraft(context, { draftId: DRAFT_ID, patch: { taskSelection: input.taskSelection } }),
+      "draft task selection",
     );
   }
 

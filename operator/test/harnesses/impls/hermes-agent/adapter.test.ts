@@ -4,9 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse as yamlParse } from 'yaml';
 import { HermesHarnessAdapter } from '../../../../src/harnesses/impls/hermes-agent/adapter.js';
+import { ResolvedHermesModelMismatchError } from '../../../../src/harnesses/impls/hermes-agent/resolved-model-guard.js';
 import type { TaskSessionInputs } from '../../../../src/harnesses/impls/learner/types.js';
 
 const networkToolsRoot = fileURLToPath(new URL('../../../../plugins/network-tools/', import.meta.url));
@@ -68,6 +69,28 @@ function inputs(workingDir: string, implStateDir: string): TaskSessionInputs {
 }
 
 describe('HermesHarnessAdapter', () => {
+  // These tests assert on the model/provider the adapter resolves, and
+  // `buildHermesConfig` gives `JINN_HERMES_MODEL` / `JINN_HERMES_PROVIDER`
+  // precedence over the per-task inputs (bootstrap.ts). Both are documented
+  // operator overrides, so a contributor may legitimately have them exported;
+  // isolate them per test so the suite never reads ambient state.
+  const AMBIENT_ENV_KEYS = ['JINN_HERMES_MODEL', 'JINN_HERMES_PROVIDER'] as const;
+  const ambientSaved: Partial<Record<(typeof AMBIENT_ENV_KEYS)[number], string | undefined>> = {};
+
+  beforeEach(() => {
+    for (const key of AMBIENT_ENV_KEYS) {
+      ambientSaved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of AMBIENT_ENV_KEYS) {
+      if (ambientSaved[key] === undefined) delete process.env[key];
+      else process.env[key] = ambientSaved[key];
+    }
+  });
+
   it('spawns hermes chat -q with model/provider flags and HERMES_HOME env', async () => {
     const spawnCalls: SpawnCall[] = [];
     const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
@@ -809,6 +832,108 @@ describe('HermesHarnessAdapter', () => {
       expect(existsSync(join(work, '.hermes-agent', 'session.json'))).toBe(false);
     } finally {
       warnSpy.mockRestore();
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('HermesHarnessAdapter T3.1 resolved-model guard', () => {
+  const T31_ENV_KEYS = [
+    'JINN_T31_EXPECTED_HERMES_MODEL',
+    'JINN_T31_EXPECTED_HERMES_PROVIDER',
+    'JINN_T31_APPROVED_HERMES_MODEL',
+    'JINN_T31_APPROVED_HERMES_PROVIDER',
+    'JINN_HERMES_MODEL',
+    'JINN_HERMES_PROVIDER',
+  ] as const;
+  const saved: Partial<Record<(typeof T31_ENV_KEYS)[number], string | undefined>> = {};
+
+  beforeEach(() => {
+    for (const key of T31_ENV_KEYS) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of T31_ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  it('does not spawn Hermes when an unapproved env override writes a different model', async () => {
+    process.env['JINN_T31_EXPECTED_HERMES_MODEL'] = 'deepseek/deepseek-v4-flash';
+    process.env['JINN_T31_EXPECTED_HERMES_PROVIDER'] = 'openrouter';
+    process.env['JINN_HERMES_MODEL'] = 'anthropic/claude-opus-4.6';
+    process.env['JINN_HERMES_PROVIDER'] = 'anthropic';
+
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const task = inputs(work, home);
+      task.model = 'deepseek/deepseek-v4-flash';
+      await expect(adapter.runTask(task)).rejects.toBeInstanceOf(ResolvedHermesModelMismatchError);
+      expect(spawnCalls).toHaveLength(0);
+      expect(existsSync(join(home, 'config.yaml'))).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('spawns when the written config matches an approved explicit override', async () => {
+    process.env['JINN_T31_EXPECTED_HERMES_MODEL'] = 'deepseek/deepseek-v4-flash';
+    process.env['JINN_T31_EXPECTED_HERMES_PROVIDER'] = 'openrouter';
+    process.env['JINN_T31_APPROVED_HERMES_MODEL'] = 'google/gemini-2.5-flash';
+    process.env['JINN_T31_APPROVED_HERMES_PROVIDER'] = 'openrouter';
+    process.env['JINN_HERMES_MODEL'] = 'google/gemini-2.5-flash';
+    process.env['JINN_HERMES_PROVIDER'] = 'openrouter';
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const task = inputs(work, home);
+      task.model = 'google/gemini-2.5-flash';
+      task.provider = 'openrouter';
+      await adapter.runTask(task);
+      expect(spawnCalls).toHaveLength(1);
+      expect(logSpy.mock.calls.some(([line]) =>
+        String(line).includes('T3.1 resolved-model guard ok') &&
+        String(line).includes('approved override of requested model=deepseek/deepseek-v4-flash'),
+      )).toBe(true);
+    } finally {
+      logSpy.mockRestore();
       rmSync(home, { recursive: true, force: true });
       rmSync(work, { recursive: true, force: true });
     }

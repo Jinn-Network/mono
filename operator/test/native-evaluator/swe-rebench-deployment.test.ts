@@ -291,8 +291,14 @@ describe("production swe-rebench-v2 deployment module — identity, parser, dige
     expect(registration!.signer.handle).toBe(SIGNER_HANDLE);
     // Proves the whitespace-padded sidecar agent (see beforeAll) was trimmed, not used verbatim.
     expect(registration!.evaluatorIdentity.id).toBe(AGENT);
-    expect(registration!.evaluationMethod.uri).toBe(SWE_METHOD_URI);
-    expect(registration!.evaluationMethod.digest.sha256).toBe(
+    // The host pins this registration's method digest at composition time, so it must declare a
+    // concrete descriptor rather than deriving one per EvaluationSpec.
+    const method = registration!.evaluationMethod;
+    if (typeof method === "function") {
+      throw new Error("swe-rebench registration must declare a concrete evaluation method descriptor");
+    }
+    expect(method.uri).toBe(SWE_METHOD_URI);
+    expect(method.digest.sha256).toBe(
       (await sweRebenchEvaluatorMethodDigest()).slice("sha256:".length),
     );
     // Narrowed to exactly the swe-rebench parser.

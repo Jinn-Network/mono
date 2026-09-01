@@ -14,7 +14,11 @@ import {
 export { resolveConformanceSources } from './public-surface-assets.mjs';
 export { repositoryCandidateFiles } from './repository-candidates.mjs';
 
-export const REQUIRED_ARCHITECTURE_OWNERS = ['@oaksprout', '@ritsukai'];
+// Both operator credentials are code owners (DR-2026-08-31): they are one
+// principal split only so GitHub will record an approval, and pinning only
+// one of them deadlocked every canon PR the other authored. `@oaksprout`
+// is retained as the third, non-engine owner.
+export const REQUIRED_ARCHITECTURE_OWNERS = ['@oaksprout', '@ritsukai', '@ritsuKai2000'];
 export const ARCHITECTURE_OWNERS_PATH = '.github/architecture-owners';
 const USERNAME = /^@[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/u;
 const SURFACE_DIRECTORIES = new Set([
@@ -291,6 +295,30 @@ export function validateArchitectureControl({ repoRoot, codeownersText, ownersTe
     requiredOwners: REQUIRED_ARCHITECTURE_OWNERS,
     counts,
     paths: entries,
+  };
+}
+
+/**
+ * The subset of the ownership report that is safe to COMMIT (#3076).
+ *
+ * `paths` and `counts` are a file census: they change whenever any file is
+ * added, renamed, or deleted anywhere in the controlled scopes. Committing
+ * them made every long-lived branch conflict, and — worse — made independent
+ * branches mutually inconsistent: two PRs that each add files and each
+ * regenerate correctly produce a clean textual merge whose counts are wrong
+ * for the combined tree, which the `--check` byte-compare then correctly
+ * rejects at the merge queue (PR #2952 was ejected twice this way).
+ *
+ * The invariant itself is unaffected: validateArchitectureControl still
+ * enumerates every controlled path and still THROWS when one does not resolve
+ * to the required owners. Only the snapshot stops being committed. The full
+ * report, census included, remains available from this module's CLI and is
+ * uploaded as the coverage artifact by platform-architecture-control.
+ */
+export function committedOwnershipView(report) {
+  return {
+    version: report.version,
+    requiredOwners: report.requiredOwners,
   };
 }
 

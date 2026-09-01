@@ -165,6 +165,7 @@ import {
 } from './preflight/version-check.js';
 import { openBrowser } from './cli/open-browser.js';
 import { resolveDefaultStateDir } from './state-dir.js';
+import { sanitizeErrorText } from './rpc/transport.js';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
   dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
@@ -813,7 +814,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             return {
               serviceIndex,
               status: 'reverted' as const,
-              detail: err instanceof Error ? err.message : String(err),
+              // #3036: walk `Error.cause` so a nested viem HttpRequestError's
+              // RPC URL is masked before it reaches the API response body.
+              detail: sanitizeErrorText(err),
             };
           }
         },
@@ -1007,10 +1010,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   // Deployment-readiness gate (#958). In a deployment context (JINN_STATE_DIR
   // set or a container/compose auth context) this fails loud and exits when a
-  // hard check fails (writable-volume, state-on-volume, agent-cli-non-root).
-  // Outside a deployment context it only logs advisories — a plain local
-  // `jinn run` is NEVER newly gated here. Runs before the pidfile gate so an
-  // unfit environment refuses before we touch the pidfile.
+  // hard check fails (writable-volume, state-on-volume, agent-cli-non-root,
+  // credentials_valid for a required runtime). Outside a deployment context it
+  // only logs advisories — a plain local `jinn run` is NEVER newly gated
+  // here. Runs before the pidfile gate so an unfit environment refuses before
+  // we touch the pidfile.
   //
   // #2407 B1: this and the pidfile block below used to run much later, right
   // before Daemon construction — AFTER the entire bootstrap retry loop and
@@ -1026,6 +1030,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       stateDir: config.stateDir,
       earningDir: config.earningDir,
       runtimeMode: config.runtimeMode,
+      executionWiring: config.executionWiring,
+      claudePath: config.claudePath,
+      ...(config.hermesPath !== undefined ? { hermesPath: config.hermesPath } : {}),
+      ...(config.hermesProvider !== undefined ? { hermesProvider: config.hermesProvider } : {}),
+      ...(config.hermesBaseUrl !== undefined ? { hermesBaseUrl: config.hermesBaseUrl } : {}),
+      ...(config.codexPath !== undefined ? { codexPath: config.codexPath } : {}),
     },
     {
       env: process.env,
@@ -1414,7 +1424,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   // ── Harness registry ─────────────────────────────────────────────────────────
 
-  const solverNetRegistry = await loadSolverNets(config);
+  const solverNetRegistry = await loadSolverNets(config, { gcOrphanedVendorCopies: true });
   for (const net of solverNetRegistry.list()) {
     const plugins = net.runtimePlugins
       .map((plugin) => `${plugin.name}@${plugin.version}`)

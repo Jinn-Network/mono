@@ -84,7 +84,12 @@ export function executionEnv(launch: LaunchEnv): Record<string, string> {
     "JINN_CLAUDE_OAUTH_TOKEN_FILE",
     "CODEX_HOME",
     "HERMES_HOME",
+    // All three, and not TMPDIR alone: the launcher pins each of them at `paths.tmp`, and dropping
+    // two of the three here would send a child that reads TEMP or TMP back to the platform default
+    // — outside the attempt directory this allowlist exists to confine it to.
     "TMPDIR",
+    "TMP",
+    "TEMP",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     // These are still generic launcher environment names. Values cross only as a declared

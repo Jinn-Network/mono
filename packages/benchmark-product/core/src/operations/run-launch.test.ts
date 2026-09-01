@@ -998,11 +998,25 @@ describe("runResume — re-dispatches only outstanding cells", () => {
       createVenue: () => fakeVenue(resumeBackend),
     });
     expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
-    expect(recoveries).toHaveLength(1);
     const capturedDocument = JSON.parse(new TextDecoder().decode(
       getSealedBytes(workspaceDir, captured.submissionSha256),
     )) as { readonly submission: string };
-    expect(recoveries).toEqual([capturedDocument.submission]);
+    // Both legs of this cell resume from bytes the backend already accepted, and every replayed
+    // Submission is reconciled before it is resubmitted: the solve leg in `runResume`, the
+    // evaluation leg in `dispatchEvaluation` (a replayed leg may point at an attempt the killed
+    // process left mid-execution, which `submit` alone hands back nonterminal). Order follows
+    // dispatch order — solve first, then its evaluation leg.
+    const acceptedEvaluation = fullEntries.find(
+      (entry) => entry.kind === "submission-accepted" && entry.leg === "evaluation"
+        && entry.cellKey === cellKey,
+    );
+    if (acceptedEvaluation?.kind !== "submission-accepted") {
+      throw new Error("fixture produced no accepted evaluation Submission");
+    }
+    const acceptedEvaluationDocument = JSON.parse(new TextDecoder().decode(
+      getSealedBytes(workspaceDir, acceptedEvaluation.submissionSha256),
+    )) as { readonly submission: string };
+    expect(recoveries).toEqual([capturedDocument.submission, acceptedEvaluationDocument.submission]);
     expect(submits).toHaveLength(2);
     const afterEntries = readRunJournalEntries(workspaceDir, "draft-1");
     expect(afterEntries.filter(
