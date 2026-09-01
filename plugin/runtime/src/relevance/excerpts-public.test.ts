@@ -38,7 +38,7 @@ describe("public-plane excerpts", () => {
   test("the task artifact supplies the summary", () => {
     const outcome = excerptsFromRetrieval(
       result([artifact("task.json", "task", "b", encode('{"summary":"Rebuild the corpus index"}'))]),
-      { spanSource: { spansFor: () => [] } },
+      { spanSource: { spansFor: () => [] }, taskEntityId: "task.json", traceEntityId: "trace.jsonl" },
     );
     expect(outcome.summary).toBe("Rebuild the corpus index");
   });
@@ -49,7 +49,7 @@ describe("public-plane excerpts", () => {
         artifact("task.json", "task", "b", encode('{"summary":"t"}')),
         artifact("result.json", "result", "c", encode('{"output":"127 tests passed"}')),
       ]),
-      { spanSource: { spansFor: () => [] } },
+      { spanSource: { spansFor: () => [] }, taskEntityId: "task.json", traceEntityId: "trace.jsonl" },
     );
     expect(outcome.excerpts).toHaveLength(1);
     expect(outcome.excerpts[0]!.label).toBe("note");
@@ -66,6 +66,8 @@ describe("public-plane excerpts", () => {
         artifact("trace.jsonl", "native-trace", "d", encode('{"command":"yarn build"}')),
       ]),
       {
+        taskEntityId: "task.json",
+        traceEntityId: "trace.jsonl",
         spanSource: {
           spansFor: () => [
             {
@@ -97,14 +99,17 @@ describe("public-plane excerpts", () => {
         artifact("task.json", "task", "b", encode('{"summary":"t"}')),
         { declaration: { entityId: "r", reference: { digest: digest("c") }, roles: ["result"] }, status: "unavailable" },
       ]),
-      { spanSource: { spansFor: () => [] } },
+      { spanSource: { spansFor: () => [] }, taskEntityId: "task.json", traceEntityId: "trace.jsonl" },
     );
     expect(outcome.excerpts).toEqual([]);
     expect(outcome.summary).toBe("t");
   });
 
   test("a record with no task artifact yields an empty summary and is the caller's problem", () => {
-    const outcome = excerptsFromRetrieval(result([]), { spanSource: { spansFor: () => [] } });
+    const outcome = excerptsFromRetrieval(result([]), {
+      spanSource: { spansFor: () => [] },
+      taskEntityId: "task.json",
+    });
     expect(outcome.summary).toBe("");
     expect(outcome.excerpts).toEqual([]);
   });

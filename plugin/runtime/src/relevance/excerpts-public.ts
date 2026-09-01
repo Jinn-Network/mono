@@ -9,6 +9,19 @@ import type { TraceSpanSource } from "./trace-decode-adapter.js";
 
 export interface PublicExcerptOptions {
   readonly spanSource: TraceSpanSource;
+  /**
+   * The record's own task and native-trace entity `@id`s, from the catalog
+   * projection.
+   *
+   * Identity comes from the projection rather than from an artifact ROLE
+   * because the retrieval vocabulary for `execution-evidence` is the RO-Crate
+   * property names the record declares (`object`, `result`, `instrument`,
+   * `subjectOf`, `hasPart` — `declared-artifacts.ts`). There is no `task` role
+   * and no `native-trace` role to select on; the projection is where those two
+   * entities are named.
+   */
+  readonly taskEntityId: string;
+  readonly traceEntityId?: string;
   /** The record's declared native-trace format IRI, when it carries one. */
   readonly traceFormatIri?: string;
 }
@@ -28,11 +41,52 @@ function hydrated(artifact: HydratedArtifact): Uint8Array | undefined {
   return artifact.status === "verified" ? artifact.bytes : undefined;
 }
 
+function byEntityId(
+  artifacts: ValidatedEvidenceResult["artifacts"],
+  entityId: string | undefined,
+): HydratedArtifact | undefined {
+  if (entityId === undefined) return undefined;
+  return artifacts.find((artifact) => artifact.declaration.entityId === entityId);
+}
+
+/**
+ * The task statement the record itself declares, read out of its own graph.
+ *
+ * The mirrored bytes are the only thing a public record is guaranteed to
+ * carry: the record-discovery serving plane defines `/records/<digest>` and no
+ * artifact path at all (C5 Finding F3, `repositories.ts`), so
+ * `getArtifact` on a followed archive returns `null` and the task artifact's
+ * BYTES are structurally unavailable for a mirrored record. Without this the
+ * public plane produced an empty summary for every record it walked and
+ * indexed none of them.
+ *
+ * It is still the record's own declared task statement, not text synthesised
+ * here — the `name`, then the `description`, of the entity the projection
+ * names as the task.
+ */
+function declaredTaskStatement(
+  result: ValidatedEvidenceResult,
+  taskEntityId: string,
+): string {
+  const record = result.validatedRecord;
+  if (record.family !== "execution-evidence") return "";
+  const graph = (record.value as { readonly "@graph"?: readonly Record<string, unknown>[] })["@graph"];
+  const entity = graph?.find((candidate) => candidate["@id"] === taskEntityId);
+  for (const field of ["name", "description"] as const) {
+    const value = entity?.[field];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value.slice(0, MAX_SUMMARY_CHARS).trim();
+    }
+  }
+  return "";
+}
+
 /**
  * Excerpts for a mirrored public record. Preference order: decoded native-trace spans
  * (highest fidelity), then result artifacts (always present, format-independent). The
- * summary always comes from the task artifact — a public record's own declared task
- * statement, never text C6 synthesised.
+ * summary always comes from the record's own declared task statement, never text C6
+ * synthesised — the task artifact's first line when its bytes were hydrated, and the
+ * task entity's declared name when they were not.
  */
 export function excerptsFromRetrieval(
   result: ValidatedEvidenceResult,
@@ -40,14 +94,14 @@ export function excerptsFromRetrieval(
 ): PublicExcerptOutcome {
   const artifacts = result.artifacts;
 
-  const taskArtifact = artifacts.find((artifact) => hasRole(artifact, "task"));
+  const taskArtifact = byEntityId(artifacts, options.taskEntityId);
   const taskBytes = taskArtifact === undefined ? undefined : hydrated(taskArtifact);
   const summary =
     taskBytes === undefined
-      ? ""
+      ? declaredTaskStatement(result, options.taskEntityId)
       : extractArtifactText(taskBytes).split("\n")[0]?.slice(0, MAX_SUMMARY_CHARS).trim() ?? "";
 
-  const traceArtifact = artifacts.find((artifact) => hasRole(artifact, "native-trace"));
+  const traceArtifact = byEntityId(artifacts, options.traceEntityId);
   const traceBytes = traceArtifact === undefined ? undefined : hydrated(traceArtifact);
   if (traceArtifact !== undefined && traceBytes !== undefined) {
     const spans = options.spanSource.spansFor({
