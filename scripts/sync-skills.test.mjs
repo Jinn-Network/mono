@@ -256,3 +256,15 @@ test('write prunes a dangling mirror link and then passes', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('--check does not blame a dangling symlink for ordinary name drift', () => {
+  const root = fixture(['eng-day']);
+  try {
+    const result = run(root, ['--check']);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /drift/i);
+    assert.doesNotMatch(result.stderr, /dangling/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

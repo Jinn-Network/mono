@@ -85,6 +85,7 @@ if [[ ${#SKILLS[@]} -gt 0 ]]; then
 fi
 
 DRIFT=0
+DANGLING=0
 
 report_drift() {
   echo "drift: $1" >&2
@@ -174,6 +175,7 @@ check_dangling() {
   while IFS= read -r link; do
     [[ -n "${link}" ]] || continue
     if [[ ! -e "${link}" ]]; then
+      DANGLING=1
       report_drift "dangling symlink ${link} -> $(readlink "${link}")"
     fi
   done < <(find "${dir}" -type l | LC_ALL=C sort)
@@ -202,7 +204,9 @@ done
 if [[ "${CHECK}" -eq 1 ]]; then
   if [[ "${DRIFT}" -ne 0 ]]; then
     echo "skill mirror drifted; run ./scripts/sync-skills.sh and commit the generated trees" >&2
-    echo "a dangling symlink under ${CANON} is not generated - fix or remove it by hand" >&2
+    if [[ "${DANGLING}" -ne 0 ]]; then
+      echo "a dangling symlink under ${CANON} is not generated - fix or remove it by hand" >&2
+    fi
     exit 1
   fi
   echo "Skill mirrors match ${CANON}"
@@ -210,7 +214,7 @@ if [[ "${CHECK}" -eq 1 ]]; then
   exit 0
 fi
 
-if [[ "${DRIFT}" -ne 0 ]]; then
+if [[ "${DANGLING}" -ne 0 ]]; then
   echo "dangling symlink(s) remain; the generator never writes ${CANON}, so fix or remove them by hand" >&2
   exit 1
 fi
