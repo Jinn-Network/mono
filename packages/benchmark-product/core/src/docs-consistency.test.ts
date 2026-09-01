@@ -332,18 +332,52 @@ describe("product documentation consistency", () => {
    */
   const LEGACY_READER_COMMAND = /npx\s+@colophon-claims\/verify@/u;
   const LEGACY_READER_NAMES = /@colophon-claims\/verify(?![-\w])|colophon-verify(?![-\w])/u;
+  /** Same alternation, global and version-capturing, for extracting every literal in a file. */
+  const LEGACY_READER_NAMES_ALL =
+    /@colophon-claims\/verify(?:@[\w.-]+)?(?![-\w])|colophon-verify(?![-\w])/gu;
 
   /**
    * Modules whose whole job is to state the immutable command an already-sealed bundle format
-   * pins. Their strings are claim bytes: `profile/claim.ts` REJECTS a bundle whose recorded
-   * command differs, so editing one of these to the new name would fail every published bundle.
-   * A new entry here is a deliberate, reviewed act; anything else in the product tree is not.
+   * pins, mapped to the exact retired-name literals each one is frozen to carry. Those strings
+   * are claim bytes: `profile/claim.ts` REJECTS a bundle whose recorded command differs, so
+   * editing one of these to the new name would fail every published bundle.
+   *
+   * The allowlist is per literal, not per file, so sealing a NEW format with the retired name —
+   * the ordinary way a regression would arrive, since a new per-format command constant is added
+   * to precisely these files — fails on an unexpected literal. Removing or rewording an existing
+   * one fails on a missing literal, so the guard cannot go vacuous either.
    */
-  const SEALED_COMMAND_MODULES = [
-    resolve(productRoot, "check/src/reader-instructions.ts"),
-    resolve(productRoot, "check/src/profile/claim.ts"),
-    resolve(coreRoot, "src/report/claim.ts"),
-  ] as const;
+  const SEALED_COMMAND_LITERALS = new Map<string, readonly string[]>([
+    [
+      resolve(productRoot, "check/src/reader-instructions.ts"),
+      [
+        "@colophon-claims/verify@0.1",
+        "@colophon-claims/verify@0.1.0",
+        "@colophon-claims/verify@0.2",
+        "@colophon-claims/verify@0.2.1",
+      ],
+    ],
+    [
+      resolve(productRoot, "check/src/profile/claim.ts"),
+      [
+        "@colophon-claims/verify@0.1",
+        "@colophon-claims/verify@0.1.0",
+        "@colophon-claims/verify@0.2",
+        "@colophon-claims/verify@0.2.0",
+        "@colophon-claims/verify@0.2.1",
+      ],
+    ],
+    [
+      resolve(coreRoot, "src/report/claim.ts"),
+      [
+        "@colophon-claims/verify@0.1",
+        "@colophon-claims/verify@0.1.0",
+        "@colophon-claims/verify@0.2",
+        "@colophon-claims/verify@0.2.0",
+        "@colophon-claims/verify@0.2.1",
+      ],
+    ],
+  ]);
 
   /**
    * Code that emits a fresh instruction for a reader to run. `check/src/assets.ts` reads the
@@ -381,11 +415,14 @@ describe("product documentation consistency", () => {
   });
 
   it("confines the retired reader name to the frozen per-format command constants", () => {
-    for (const path of SEALED_COMMAND_MODULES) {
+    for (const [path, expected] of SEALED_COMMAND_LITERALS) {
       expect(existsSync(path), path).toBe(true);
-      expect(read(path), path).toMatch(LEGACY_READER_NAMES);
+      const found = [...read(path).matchAll(LEGACY_READER_NAMES_ALL)]
+        .map((match) => match[0])
+        .sort();
+      expect(found, path).toEqual([...expected].sort());
     }
-    const sealed = new Set<string>(SEALED_COMMAND_MODULES);
+    const sealed = new Set<string>(SEALED_COMMAND_LITERALS.keys());
     const offenders = productSourceFiles()
       .filter((path) => !sealed.has(path))
       .filter((path) => LEGACY_READER_NAMES.test(read(path)));
