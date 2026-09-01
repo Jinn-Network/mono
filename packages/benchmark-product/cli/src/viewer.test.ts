@@ -89,7 +89,74 @@ async function claim(viewer: VerifiedBundleViewer): Promise<{ readonly cookie: s
   return { cookie: cookie!, base: `http://127.0.0.1:${viewer.port}` };
 }
 
+/** A verified metadata-first evidence-native bundle (issue #2986): artifact digests, no bodies. */
+function metadataFirstSnapshot(notFetchedDigests: readonly string[]): VerifiedPublicBundleSnapshot {
+  const encoder = new TextEncoder();
+  const manifest = {
+    format: "benchmark-product-public-bundle/5" as const,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first" as const,
+    files: [{ path: "report.json", sha256: "a".repeat(64), bytes: 2 }],
+  };
+  const manifestBytes = encoder.encode(JSON.stringify(manifest));
+  return {
+    verification: {
+      format: "benchmark-product-public-bundle/5",
+      profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+      identity: `sha256:${"b".repeat(64)}`,
+      checks: [
+        "manifest", "evidence-closure", "artifact-integrity", "signature-validity",
+        "matrix-rederivation", "report-verification", "claim-consistency",
+      ],
+      artifactContent: {
+        status: "not-fetched",
+        verified: 2,
+        notFetched: notFetchedDigests.length,
+        notFetchedDigests,
+      },
+      benchmarkDigest: `sha256:${"c".repeat(64)}`,
+      manifestDigest: `sha256:${"d".repeat(64)}`,
+      cohortDigest: `sha256:${"e".repeat(64)}`,
+      matrixDigest: `sha256:${"f".repeat(64)}`,
+      reportDigest: `sha256:${"1".repeat(64)}`,
+      evidenceRecords: 336,
+      artifacts: 5,
+      verifiedSignerKeyIds: [],
+    },
+    snapshot: {
+      manifest,
+      bytes: manifestBytes,
+      identity: `sha256:${"b".repeat(64)}`,
+      fileBytes: new Map([
+        ["bundle.json", manifestBytes],
+        ["report.json", encoder.encode("{}")],
+      ]),
+    },
+  };
+}
+
 describe("verified bundle viewer", () => {
+  test("never folds a deferred artifact check into the headline pass count", async () => {
+    const root = mkdtempSync(join(tmpdir(), "colophon-viewer-metadata-first-"));
+    roots.push(root);
+    writeFileSync(join(root, "report.json"), "{}");
+    const snapshot = metadataFirstSnapshot(["1".repeat(64), "2".repeat(64), "3".repeat(64)]);
+    const viewer = await createVerifiedBundleViewer(root, 0, { verify: async () => snapshot });
+    viewers.push(viewer);
+    const session = await claim(viewer);
+    const page = await (await fetch(session.base, { headers: { cookie: session.cookie } })).text();
+
+    expect(page).toContain("6 of 7 bundle checks passed, 1 not fetched.");
+    expect(page).not.toContain("7 of 7 bundle checks passed");
+    expect(page).toContain("<strong>artifact-integrity</strong> <span class=\"deferred\">not fetched</span>");
+    expect(page).toContain("<strong>manifest</strong> <span class=\"pass\">passed</span>");
+    // The deferred state must not be painted in the success colour.
+    expect(page).toContain(".checks span.deferred{color:#9d6b23}");
+    expect(page).toContain("3 artifact bodies were not fetched.");
+    // No released npx reader understands this profile, so the page must not hand out one.
+    expect(page).not.toContain("npx @colophon-claims/verify@0.1");
+    expect(page).toContain("colophon bundle verify --bundle");
+  });
+
   test("serves every authenticated report link from the verified snapshot", async () => {
     const root = mkdtempSync(join(tmpdir(), "colophon-viewer-"));
     roots.push(root);

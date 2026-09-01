@@ -1,0 +1,27 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/chain-environment/v1",
+  "profile": "https://spec.jinn.network/facts/chain-environment/v2",
+  "fields": [
+    { "name": "chainEnvironmentRecordDigest", "class": "record" },
+    { "name": "runtime.family", "class": "record", "cloudEvents": { "attribute": "family", "scalar": "string" } },
+    { "name": "runtime.version", "class": "record", "cloudEvents": { "attribute": "rtversion", "scalar": "string" } },
+    { "name": "runtime.image.manifestDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "image", "scalar": "string" } },
+    { "name": "runtime.image.indexDigest", "class": "record", "referenceBearing": true },
+    { "name": "runtime.binary.digest", "class": "record", "referenceBearing": true },
+    { "name": "sourceAnchor.headerProofDigest", "class": "record", "referenceBearing": true },
+    { "name": "stateMaterialization.closureClass", "class": "record", "cloudEvents": { "attribute": "closure", "scalar": "string" } },
+    { "name": "stateMaterialization.fidelityClass", "class": "record", "cloudEvents": { "attribute": "fidelity", "scalar": "string" } },
+    { "name": "stateMaterialization.stateArtifactDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "artifact", "scalar": "string" } },
+    { "name": "stateMaterialization.materializerDigest", "class": "record", "referenceBearing": true },
+    { "name": "stateMaterialization.sourceProofsDigest", "class": "record", "referenceBearing": true },
+    { "name": "stateMaterialization.fixtureCoverageManifestDigest", "class": "record", "referenceBearing": true },
+    { "name": "fixtureModuleDigests", "class": "record", "referenceBearing": true },
+    { "name": "capabilityEnvelope.toolInterfaceSchemaDigests", "class": "record", "referenceBearing": true },
+    { "name": "verificationContract.probeSuiteDigest", "class": "record", "referenceBearing": true },
+    { "name": "verificationContract.observationSchemaDigest", "class": "record", "referenceBearing": true },
+    { "name": "verificationContract.baselineObservationDigest", "class": "record", "referenceBearing": true },
+    { "name": "verificationContract.comparatorDigest", "class": "record", "referenceBearing": true },
+    { "name": "supersedesDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "supersedes", "scalar": "string" } }
+  ]
+}

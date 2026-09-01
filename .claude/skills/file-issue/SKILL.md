@@ -85,7 +85,7 @@ The issue body has five short sections. Keep it tight — scoped issues with bin
 
 **Files/components.** [Path(s) and surface name(s), or "Unknown." If a path was inferred by you — not stated by the person — mark it `(estimated)`. If genuinely uncertain, write "Unknown." Internal repo paths (spec files, source files) are welcome here; they help autonomous agents navigate the codebase.]
 
-**Base / stacking.** [The branch/PR this stacks on or must wait for, or "None — independent of all in-flight work." When the base is an unmerged PR/branch, name it here **and** set `Blocked on: Another issue` referencing that PR — not `Nothing`.]
+**Base / stacking.** [The branch/PR this stacks on or must wait for, or "None — independent of all in-flight work." When the base is an unmerged PR/branch, name it here **and** set `Blocked on: Another issue` referencing the **issue** that PR closes — not `Nothing`. The native edge only accepts an issue, so a PR blocker needs an issue to stand for it (Step 5).]
 ```
 
 **Human-surface section (only when the `human-surface` label applies).** After the five sections above, append a `## Human-surface change` block carrying the three fields from Step 3.5 — Domain-model delta, Design artifact, and Existing-user impact + comms plan.
@@ -115,10 +115,16 @@ claim-status query that feeds it.
 If instead the issue built on unmerged code, that line would name the base and the `Blocked on` field would follow it:
 
 ```markdown
-**Base / stacking.** Stacks on #1461 (branch `feat/1461-hero-schema`) — the
-shared claim-status schema change lands there first. `Blocked on: Another
-issue` (#1461).
+**Base / stacking.** Stacks on issue #1461, whose PR #1462 (branch
+`feat/1461-hero-schema`) carries the shared claim-status schema change that
+must land first. `Blocked on: Another issue` (#1461).
 ```
+
+The blocker named here is always an **issue**, even when the thing you are
+really waiting on is an open PR: `addBlockedBy` resolves only Issue nodes and
+rejects a PR node id (`Could not resolve to Issue node with the global id of
+'PR_…'`). If the PR has no issue, file one for it first — see the PR-blocker
+recipe in Step 5.
 
 **Quality bar:** if an acceptance criterion cannot be answered yes or no by running the app or a test, rewrite it until it can.
 
@@ -132,7 +138,7 @@ Three Project fields route the issue to the right queue. Set all three — an is
 - `Nothing` (default — almost all fresh dogfooding issues)
 - `Human` — only if a product or design decision is needed before any work can start
 - `Another issue` — the person names a prerequisite. Two kinds both map here (the Project option is named `Another issue`; put the specific issue/PR number in the issue body):
-  - **Branch/base dependency** — the work builds on unmerged code (a stacked PR / unmerged schema change / a shared file an open PR also edits), so it must start from that base, not `next`. Example: "builds on the JinnRouterV3 ABI change in unmerged PR #1461." This is the case the `Base / stacking` body line names.
+  - **Branch/base dependency** — the work builds on unmerged code (a stacked PR / unmerged schema change / a shared file an open PR also edits), so it must start from that base, not `next`. Example: "builds on the JinnRouterV3 ABI change in unmerged PR #1462 (issue #1461)." This is the case the `Base / stacking` body line names.
   - **Resource / logical blocker** — a pure prerequisite that is not a code-base dependency (a decision, an external dependency, an ordering constraint). Example: "can't start until the testnet-gate secrets are provisioned."
 
   **Whenever the prerequisite is another issue, ALSO set the GitHub-native `blocked_by` edge — the Project field alone is not machine-readable.** The dispatcher's stacking resolver (#1626) reads ONLY native `blocked_by` edges: with the edge set, a dependent auto-unblocks the moment its blocker's PR opens and dispatches **stacked on that PR's branch**; without it, the tri-state field leaves the issue waiting for a manual flip, and same-surface siblings dispatched in parallel invalidate each other (observed 2026-07-15: Stage 1 PRs #1730/#1731 were built on stale bases and thrown away because the plan's ordering existed only as prose). Recipe:
@@ -147,6 +153,15 @@ Three Project fields route the issue to the right queue. Set all three — an is
   ```
 
   Set BOTH surfaces: the `Blocked on: Another issue` field (the dispatcher ready-filter reads it) and the native edge (the stacking resolver reads it).
+
+  **`addBlockedBy` accepts only an Issue node.** Passing a pull-request node id fails with `Could not resolve to Issue node with the global id of 'PR_…'`. So when the prerequisite is an open PR, the PR has to be represented by an issue before the edge can exist:
+
+  1. **Find or file the PR's issue.** If the PR already closes one (`Closes #N` in its body, or the `closingIssuesReferences` check in `references/gh-taxonomy.md` — the PR-keyed direction, which is the one you can run here because you hold a PR number and no issue number), use that issue. Otherwise file a parent issue describing the PR's work, with the same taxonomy discipline as any other issue.
+  2. **Link the PR to it.** Add `Closes #N` to the PR body. `gh pr edit --body-file` **replaces** the whole body, so read the current body into the file first and append to it — never write a file containing only `Closes #N`, which wipes the PR description: `gh pr view <pr> --json body --jq .body > body.md && printf '\n\nCloses #N\n' >> body.md && gh pr edit <pr> --body-file body.md`.
+  3. **Set the native edge to that issue**, using the `addBlockedBy` recipe above with the parent issue's node id as `blockingIssueId`.
+  4. **Verify the link** with the `closedByPullRequestsReferences` query in `references/gh-taxonomy.md`, and the edge with the `blockedBy` query above.
+
+  Observed 2026-08-28: #3393 was filed against open PR #3392 with the blocker recorded only as prose in `Blocked on`, because the edge mutation had been skipped after rejecting the PR node. The repair was exactly this recipe — parent issue #3394, `Closes #3394` on the PR, edge from #3393 to #3394.
 
 **Effort** — estimate from the drafted scope, then confirm with the person:
 - `Low` — a localized change in one or two files
@@ -208,5 +223,6 @@ If any check fails, fix before showing the draft.
 | Leaving a routing field unset | All three fields must be set; an issue without them is not triage-complete |
 | Putting external URLs or Slack links in the body | Put web/Slack links in a comment after filing; internal repo paths in `Files/components` are fine |
 | Long body with multiple problems bundled | One issue per problem; offer to file separate issues if scope is unclear |
-| Filing as `Blocked on: Nothing` when the issue stacks on an unmerged PR | Set `Another issue` (referencing that PR) and add the `Base / stacking` line naming the branch/base |
+| Filing as `Blocked on: Nothing` when the issue stacks on an unmerged PR | Set `Another issue` (referencing the issue that PR closes) and add the `Base / stacking` line naming the branch/base |
+| Leaving a PR blocker as prose after `addBlockedBy` rejects the PR node | File or find the issue the PR closes, add `Closes #N` to the PR body, then set the edge to that issue (Step 5) |
 | Filing a frontend / operator-visible change without the human-surface fields | Run the Step 3.5 check; if it's a human-surface change, add the label and the `## Human-surface change` block, or `implement-issue` will refuse it |

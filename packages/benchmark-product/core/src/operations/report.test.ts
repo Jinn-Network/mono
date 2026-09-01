@@ -989,6 +989,28 @@ describe("portable public bundle", () => {
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
   }, 30_000);
 
+  test("a throw between the rename and the return removes the bundle directory it renamed into place", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    expect((await runReport(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    // Throws while `materializePublicBundle` is still on the stack, after `renameSync` has put the
+    // digest-addressed directory in place. The caller never sees the return value, so before issue
+    // #3195 its cleanup list was empty and the directory survived a publication that never
+    // advanced — the same visible outcome issue #3074 removed, reached through an I/O failure.
+    const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
+      afterRename: () => { throw new Error("fault between rename and return"); },
+    });
+    expect(refused.ok).toBe(false);
+    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
+      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
+      : []).toHaveLength(0);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
+    expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+    const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
+    expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
+  }, 30_000);
+
   test("a fault before rename leaves no final bundle and no state advancement", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);
@@ -1002,6 +1024,102 @@ describe("portable public bundle", () => {
       : []).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+  }, 30_000);
+
+  test("a refusal after the bundle is materialized removes the bundle directory it staged", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    expect((await runReport(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    // Refuses after `materializePublicBundle` has already renamed the digest-addressed directory
+    // into place and before RunState names it — the window that used to strand a shippable-looking
+    // bundle directory from a publication the lifecycle never advanced (issue #3074).
+    const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
+      beforeRunState: () => { throw new Error("refused after materialization"); },
+    });
+    expect(refused.ok).toBe(false);
+    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
+      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
+      : []).toHaveLength(0);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
+    expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+    const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
+    expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
+  }, 30_000);
+
+  test("a refusal after materialization removes the additional-Report bundle directories too", async () => {
+    // The sibling test above pins only the single-bundle case. A publish with additional Reports
+    // materializes one directory per Report (packet P5), all accumulated into the one `created`
+    // list; a regression that dropped the `created` argument from the additional call site, or
+    // reset the list per bundle, would strand the additional directories and go unnoticed
+    // (issue #3193). Setup mirrors the P5 packaging test: pairing needs task provenance the
+    // bundled sample benchmark does not carry, so every evaluation is dispatched "no-verdict".
+    const clock = makeClock();
+    await setUpClosedRun(clock, "draft-1", {
+      evaluationModes: Array(8).fill("no-verdict"),
+      additionalAnalyses: [
+        {
+          method: "jinn.benchmarking.method/paired-delta",
+          version: "1",
+          baseline: "baseline",
+          candidate: "sample",
+          parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+        },
+      ],
+    });
+    const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    if (!reported.ok) return;
+    // Guards the assertion below against passing vacuously: without an additional Report the
+    // refusal would only ever stage the canonical bundle.
+    expect(readRunState(workspaceDir, "draft-1")?.additionalReports).toHaveLength(1);
+
+    const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
+      beforeRunState: () => { throw new Error("refused after materialization"); },
+    });
+    expect(refused.ok).toBe(false);
+    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
+      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
+      : []).toHaveLength(0);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
+    expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+
+    const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
+    expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    if (!retry.ok) return;
+    expect(retry.result.additionalBundles).toHaveLength(1);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
+  }, 60_000);
+
+  test("a refusal does not remove a bundle directory a concurrent publisher has already named", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    expect((await runReport(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    // Bundle materialization happens outside the publication lock, so a concurrent publisher of the
+    // same draft adopts the byte-identical directory this invocation renamed into place and can go
+    // on to name it in RunState. `beforeRunState` stands in for that peer: it makes the directory
+    // durable and then refuses this invocation. The cleanup runs under the lock and must skip a
+    // directory RunState names (issue #3194).
+    const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
+      beforeRunState: () => {
+        const identity = readdirSync(publicBundlesDir(workspaceDir, "draft-1")).find((name) => /^[a-f0-9]{64}$/u.test(name));
+        expect(identity).toBeDefined();
+        const state = readRunState(workspaceDir, "draft-1");
+        expect(state).toBeDefined();
+        if (state === undefined || identity === undefined) return;
+        writeRunState(workspaceDir, "draft-1", {
+          ...state,
+          bundleIdentity: identity,
+          bundleRelativePath: `artifacts/draft-1/public-bundles/${identity}`,
+        });
+        throw new Error("refused after a peer published the same bundle");
+      },
+    });
+    expect(refused.ok).toBe(false);
+    const identity = readRunState(workspaceDir, "draft-1")?.bundleIdentity;
+    expect(identity).toMatch(/^[a-f0-9]{64}$/);
+    if (identity === undefined) return;
+    expect(existsSync(publicBundlePath(workspaceDir, "draft-1", identity))).toBe(true);
   }, 30_000);
 
   test("workspace tampering refuses before staging and leaves the reported draft unchanged", async () => {

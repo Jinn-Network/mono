@@ -27,6 +27,7 @@
 import {
   cellIdempotencyKey,
   expectedCellSet,
+  orderCellsByTask,
   parseBenchmark,
   parseRun,
   submissionExtensionBlock,
@@ -65,6 +66,7 @@ import {
   readRunJournalEntries,
 } from "../run/journal.js";
 import { requireRunState, writeRunState, type PublicationState } from "../run/state.js";
+import { readRunBindingCarriage } from "../binding/carriage.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
@@ -137,6 +139,14 @@ interface LoadedRun {
   readonly runRecord: RunRecord;
   readonly runSha256: string;
   readonly owner: string;
+  /**
+   * The beacon-derived execution order of a run bound by `beacon-binding/1` (issue #2976), as task
+   * digests without the `sha256:` prefix. Undefined for an unbound run, which keeps
+   * `expectedCellSet`'s order. Read here rather than at each dispatch site so the first launch and
+   * every resume use the one order: applying it to only one of them would mean the order the run
+   * bound itself to was not the order it ran in.
+   */
+  readonly dispatchTaskOrder?: readonly string[];
 }
 
 function loadLockedOrRunningRun(workspaceDir: string, draftId: string, expectedState: "locked" | "running"): LoadedRun {
@@ -157,7 +167,15 @@ function loadLockedOrRunningRun(workspaceDir: string, draftId: string, expectedS
     refuse("conflict", `drafts.${draftId}.taskSet`, `draft ${draftId} has no attached benchmark`);
   }
   const benchRecord = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
-  return { document, benchRecord, runRecord, runSha256: runState.runSha256, owner: runState.owner };
+  const binding = readRunBindingCarriage(workspaceDir, runState);
+  return {
+    document,
+    benchRecord,
+    runRecord,
+    runSha256: runState.runSha256,
+    owner: runState.owner,
+    ...(binding === undefined ? {} : { dispatchTaskOrder: binding.order.map((item) => item.slice("sha256:".length)) }),
+  };
 }
 
 const APEX_SWE_DEV_OPERATOR_HOST_REFUSAL =
@@ -586,6 +604,7 @@ export function runLaunch(
                 capture,
                 hostTerminalFacts: composeHostTerminalFacts(clockedContext.workspaceDir, deps.hostTerminalFacts),
                 maxConcurrentCells,
+                ...(loaded.dispatchTaskOrder === undefined ? {} : { dispatchTaskOrder: loaded.dispatchTaskOrder }),
               });
               await driveCellEvents(driveDeps, events);
               return { draft };
@@ -647,9 +666,17 @@ export function runResume(
       const entries = readRunJournalEntries(clockedContext.workspaceDir, input.draftId);
       const fold = foldRunJournal(entries);
       const expected = expectedCellSet(loaded.benchRecord, loaded.runRecord);
-      const outstanding = outstandingCells(expected, fold);
+      // Resume dispatches in the same beacon-derived order the first launch used; see LoadedRun.
+      const outstanding = orderCellsByTask(outstandingCells(expected, fold), loaded.dispatchTaskOrder);
 
       const journaledSubmissions = new Map<string, string>();
+      // Same crash boundary, one leg down. An evaluation Submission the backend already accepted
+      // must be REPLAYED, never re-sealed: `dispatchEvaluation` stamps `liveClock() +
+      // cellWindow` as the deadline, so fresh bytes under the same idempotency key are refused
+      // ("already has different exact bytes") and terminal the leg could-not-grade forever.
+      // Keyed leg-distinctly (cellKey, dispatch, evalIndex, evaluationAttempt) to match the
+      // idempotency key `eval:<run>:e<evalIndex>[:r<attempt>]:<cellKey>:<dispatch>`.
+      const journaledEvaluationSubmissions = new Map<string, string>();
       for (const entry of entries) {
         // Pre-submit capture is the crash boundary. An interruption after backend acceptance but
         // before the accepted observation archive still resumes with these exact bytes rather
@@ -658,6 +685,11 @@ export function runResume(
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
         } else if (entry.kind === "submission-accepted" && entry.leg !== "evaluation") {
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
+        } else if (entry.kind === "submission-accepted" && entry.evalIndex !== undefined) {
+          journaledEvaluationSubmissions.set(
+            `${entry.cellKey}::${entry.dispatch}::e${entry.evalIndex}::a${entry.evaluationAttempt ?? 1}`,
+            entry.submissionSha256,
+          );
         }
       }
 
@@ -718,6 +750,14 @@ export function runResume(
                 minVerdicts,
                 maxInfrastructureRetries,
                 liveClock: context.clock,
+                acceptedEvaluationSubmissionBytes: (cellKey, dispatch, evalIndex, evaluationAttempt) => {
+                  const sha256 = journaledEvaluationSubmissions.get(
+                    `${cellKey}::${dispatch}::e${evalIndex}::a${evaluationAttempt}`,
+                  );
+                  return sha256 === undefined
+                    ? undefined
+                    : getSealedBytes(clockedContext.workspaceDir, sha256);
+                },
                 onProgress: deps.onProgress,
               };
 
@@ -797,19 +837,24 @@ export function runResume(
               // Re-fold fresh: catches gaps left by THIS resume's own new deliveries as well as
               // any carried over from before it, without re-driving a solve dispatch for either.
               const freshFold = foldRunJournal(readRunJournalEntries(clockedContext.workspaceDir, input.draftId));
-              const gaps = (cancelRequested(clockedContext.workspaceDir, input.draftId)
+              // Never filtered (issue #3081): `../operations/run-collect.js` decides whether the
+              // run is terminal-accounted from this SAME unfiltered set, so dropping a gap here
+              // deadlocks the run — resume reports nothing to do while collect refuses until
+              // closeAt. A gap whose `deliverySha256` is missing is a cell killed between its
+              // `delivered` cell-event journal write and its `delivery` journal write; its
+              // Delivery is still durable in the attempt the cell-event named, and
+              // `driveEvaluationCatchUp` heals it from there.
+              const gaps = cancelRequested(clockedContext.workspaceDir, input.draftId)
                 ? []
-                : evaluationGaps(freshFold, minVerdicts, maxInfrastructureRetries)).filter(
-                (gap): gap is typeof gap & { cell: typeof gap.cell & { deliverySha256: string } } =>
-                  gap.cell.deliverySha256 !== undefined,
-              );
+                : evaluationGaps(freshFold, minVerdicts, maxInfrastructureRetries);
               if (gaps.length > 0) {
                 await driveEvaluationCatchUp(
                   driveDeps,
                   gaps.map((gap) => ({
                     cellKey: gap.cell.cellKey,
                     lastDispatch: gap.cell.lastDispatch,
-                    deliverySha256: gap.cell.deliverySha256,
+                    ...(gap.cell.deliverySha256 !== undefined ? { deliverySha256: gap.cell.deliverySha256 } : {}),
+                    ...(gap.cell.attempt !== undefined ? { attempt: gap.cell.attempt } : {}),
                     ...(gap.cell.deliveryOutputs !== undefined ? { deliveryOutputs: gap.cell.deliveryOutputs } : {}),
                     missingEvalIndexes: gap.missingEvalIndexes,
                     nextEvaluationAttempts: gap.nextEvaluationAttempts,

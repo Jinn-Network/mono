@@ -227,6 +227,25 @@ export interface DriveDeps {
   readonly maxInfrastructureRetries?: 0 | 1;
   /** The live, unfrozen clock — journal timestamps reflect when each event actually happened. */
   readonly liveClock: () => string;
+  /**
+   * Resume's byte-exact replay seam for the EVALUATION leg, symmetric with the solve leg's
+   * `acceptedSubmissions.acceptedSubmissionBytes` (`../operations/run-launch.js`'s `resumeRun`
+   * call). Returns the exact Submission bytes the backend already accepted for this leg, or
+   * `undefined` when this leg was never submitted.
+   *
+   * Without it, a process killed between backend acceptance and the leg's verdict resumes by
+   * sealing FRESH bytes: `dispatchEvaluation`'s deadline is `liveClock() + cellWindowMs`, so the
+   * replay carries a later deadline under the SAME idempotency key. The backend rehydrates its
+   * accepted-submission scope from the durable state root and correctly refuses ("already has
+   * different exact bytes in this requester/backend scope"), which terminals the leg
+   * could-not-grade — permanently, since that completes the evalIndex.
+   */
+  readonly acceptedEvaluationSubmissionBytes?: (
+    cellKey: string,
+    dispatch: number,
+    evalIndex: number,
+    evaluationAttempt: number,
+  ) => Uint8Array | undefined;
   /** Live diagnostic stream (BP-13, CLI `launch`/`resume`) — one short line per journaled
    * cell-event or evaluation terminal, emitted right after the journal write it describes.
    * Optional and purely additive: absent, nothing streams, and every journal write and return
@@ -248,7 +267,13 @@ type CapturedDelivery = Pick<DeliveryRecord, "outputs" | "evidenceRecords"> & { 
 
 /** A managed LocalVenue which proves ownership returns product-captured records without foreign
  * source coordinates. Bind only its locally-created Delivery and execution record families at
- * that first durable boundary; result-evaluation is bound after this product fetches its bytes. */
+ * that first durable boundary; result-evaluation is bound after this product fetches its bytes.
+ *
+ * The deferral is the point, not an omission: at this boundary the evaluation's envelope bytes
+ * are still the evaluator's, and authorship over bytes this workspace has not sealed would be a
+ * claim it cannot support. `dispatchEvaluation` below seals those bytes and records their
+ * `resultEvaluation` authorship there, and `operations/publication-accounting.ts` announces
+ * evaluations from the journal's verdicts for exactly that reason. */
 function recordManagedDeliveryAuthorship(
   deps: DriveDeps,
   deliverySha256: string,
@@ -480,17 +505,86 @@ async function dispatchEvaluation(
     ? `eval:${deps.runSha256}:e${evalIndex}:${cellKey}:${dispatch}`
     : `eval:${deps.runSha256}:e${evalIndex}:r${evaluationAttempt}:${cellKey}:${dispatch}`;
   const submissionUri = deterministicUuidUri(idempotencyKey);
-  const deadline = new Date(Date.parse(deps.liveClock()) + deps.cellWindowMs).toISOString();
-  const evalSubmissionBytes = sealSubmission({
+  // Resume replays the bytes the backend already accepted for this leg. Sealing fresh ones would
+  // stamp a new `deadline` under this same idempotency key, which the backend refuses — see
+  // `DriveDeps.acceptedEvaluationSubmissionBytes`.
+  const replayed = deps.acceptedEvaluationSubmissionBytes?.(
+    cellKey,
+    dispatch,
+    evalIndex,
+    evaluationAttempt,
+  );
+  const evalSubmissionBytes = replayed ?? sealSubmission({
     protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: submissionUri,
     task: { digest: { sha256: prepared.taskSha256 } },
     requester: deps.owner,
     nonce: idempotencyKey,
     idempotencyKey,
-    deadline,
+    deadline: new Date(Date.parse(deps.liveClock()) + deps.cellWindowMs).toISOString(),
     requirements: { harness: EVALUATION_HARNESS_PIN, [EVALUATOR_REQUIREMENT_KEY]: evaluator.id },
   });
+
+  if (replayed !== undefined) {
+    // A resumed leg whose Submission the backend already accepted may point at an attempt the
+    // killed process left MID-EXECUTION. Replay makes `submit` idempotent, so it hands back that
+    // same nonterminal attempt; `drain()` is a no-op in a fresh process (no workers, no inflight),
+    // `observe` reports the state the attempt froze at, and `retryableFailureFromSnapshot` sees no
+    // `attempt-terminal` observation — so the leg terminals could-not-grade, which completes the
+    // evalIndex and loses the verdict for good. Exact resubmission is idempotent, never the
+    // backend's recovery operation: `recover` is. It settles the attempt (durable delivery
+    // checkpoint -> delivered; orphaned/absent -> an infrastructure terminal the retry ladder can
+    // classify) BEFORE `observe` reads it. Mirrors the solve leg's reconciliation in
+    // `../operations/run-launch.ts`, including its ref discipline — the recovery ref is read out of
+    // the replayed bytes, never recomputed from the idempotency key, so a drift between the two
+    // refuses here rather than reconciling nothing and silently degrading to the loss above.
+    //
+    // The seam is HERE, not beside that solve loop in `runResume`: `recover` re-enters
+    // `completeAttempt` -> the evaluation provisioner's `harvest()`, whose materials registry stays
+    // empty in a fresh process until `venue.prepareEvaluationCell()` populates it, and
+    // `prepareAndDispatchEvaluation` calls that once per cell before dispatching its legs. Called
+    // any earlier, recovery throws "harvest ran before setup registered evaluation-cell materials"
+    // (`../venue/provisioner.ts`). A never-submitted leg has no attempt to reconcile, so the launch
+    // path stays byte-identically untouched.
+    //
+    // Both refusals below are contained PER LEG, not run-fatal like the solve leg's:
+    // `prepareAndDispatchEvaluation`'s catch encloses them, and a `BenchmarkProductError` is no
+    // `TaskExecutionError`, so the leg lands a could-not-grade carrying the message as its detail
+    // while the run and the other cells' legs continue.
+    //
+    // Residual sub-window: a kill landing BEFORE the delivery checkpoint is durable leaves nothing
+    // recoverable — the verdict never existed. Recovery terminals that attempt `blame:
+    // infrastructure` / `backend-unavailable`, which IS retryable, but `journalEvaluationFailure`
+    // gates the retry on `evaluationAttempt <= (deps.maxInfrastructureRetries ?? 0)`, so on the
+    // legacy default of 0 the leg still terminals could-not-grade — now carrying `failureCategory`,
+    // a categorized terminal rather than a silent one. Closing that window is a matter of setting
+    // `policy.evaluation.maxInfrastructureRetries` to 1, not of this seam.
+    const replayedSubmission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
+      replayed,
+    )) as { readonly submission?: unknown };
+    if (
+      typeof replayedSubmission.submission !== "string"
+      || !replayedSubmission.submission.startsWith("urn:uuid:")
+    ) {
+      refuse(
+        "record-integrity",
+        `runs.${deps.draftId}.${cellKey}.${dispatch}`,
+        `replayed evaluation Submission carries no valid Submission URI (e${evalIndex}, `
+          + `attempt ${evaluationAttempt})`,
+      );
+    }
+    const reconciliation = await deps.backend.recover(replayedSubmission.submission as SubmissionUri);
+    if (reconciliation.classification === "contradictory") {
+      refuse(
+        "record-integrity",
+        `runs.${deps.draftId}.${cellKey}.${dispatch}`,
+        `backend recovery contradicted the accepted evaluation Submission (e${evalIndex}, `
+          + `attempt ${evaluationAttempt})${
+            reconciliation.detail === undefined ? "" : `: ${reconciliation.detail}`
+          }`,
+      );
+    }
+  }
 
   const ack = await deps.backend.submit(prepared.taskBytes, evalSubmissionBytes);
   if (!ack.accepted) {
@@ -699,64 +793,91 @@ async function prepareAndDispatchEvaluation(
   }
 }
 
+/** A harvested Delivery: the subject bytes the evaluation leg grades, plus its output artifacts. */
+interface HarvestedDelivery {
+  readonly deliveryBytes: Uint8Array;
+  readonly resultArtifacts: readonly { readonly name: string; readonly bytes: Uint8Array }[];
+}
+
+/**
+ * Fetches a delivered attempt's Delivery and output artifacts from the backend and journals the
+ * `delivery` entry. Returns `undefined` after journaling a could-not-grade terminal for every leg
+ * in `evalIndexes` when the delivery cannot be harvested at all.
+ *
+ * Every step reads the attempt's own already-durable bytes and stores them content-addressed, so
+ * running this a second time for the same attempt re-derives the identical digests and the
+ * identical journal entry — nothing is re-minted. That is what lets `driveEvaluationCatchUp` heal
+ * a cell whose `delivery` entry was lost to a crash (issue #3081) without touching the solve leg.
+ */
+async function harvestDelivery(
+  deps: DriveDeps,
+  cellKey: string,
+  dispatch: number,
+  attempt: string,
+  evalIndexes: readonly number[],
+): Promise<HarvestedDelivery | undefined> {
+  const refs = await deps.backend.deliveries(attempt as AttemptUri);
+  const deliveryRef = refs.at(-1);
+  if (deliveryRef === undefined) {
+    journalCouldNotGradeLegs(deps, cellKey, "no Delivery recorded for a delivered attempt", evalIndexes);
+    return undefined;
+  }
+  const deliveryBytes = await deps.backend.fetchDelivery(deliveryRef);
+  const deliverySha256 = putSealedBytes(deps.workspaceDir, deliveryBytes);
+  const deliveryDoc = recordManagedDeliveryAuthorship(deps, deliverySha256, deliveryBytes);
+
+  if (deps.backend.fetchArtifact === undefined) {
+    journalCouldNotGradeLegs(deps, cellKey, "backend does not support fetchArtifact", evalIndexes);
+    return undefined;
+  }
+  const resultArtifacts: { name: string; bytes: Uint8Array }[] = [];
+  const journaledOutputs: { name: string; sha256: string }[] = [];
+  for (const output of deliveryDoc.outputs) {
+    if (output.digest?.sha256 === undefined) continue;
+    const bytes = await deps.backend.fetchArtifact({ digest: { sha256: output.digest.sha256 } });
+    resultArtifacts.push({ name: output.name, bytes });
+    journaledOutputs.push({ name: output.name, sha256: putSealedBytes(deps.workspaceDir, bytes) });
+  }
+
+  appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
+    kind: "delivery",
+    at: deps.liveClock(),
+    cellKey,
+    dispatch,
+    attempt,
+    deliverySha256,
+    outputs: journaledOutputs,
+  });
+  return { deliveryBytes, resultArtifacts };
+}
+
 /** Fetches a delivered solve cell's outputs from the backend, journals the delivery, then
  * prepares + dispatches its evaluation leg. */
 async function driveEvaluationForDelivery(deps: DriveDeps, event: CellStatusEvent): Promise<void> {
   const { cellKey, dispatch } = event;
   const attempt = event.attempt;
+  const evalIndexes = allEvalIndexes(deps);
   if (attempt === undefined) {
-    journalCouldNotGradeLegs(deps, cellKey, "delivered cell-event carried no attempt reference", allEvalIndexes(deps));
+    journalCouldNotGradeLegs(deps, cellKey, "delivered cell-event carried no attempt reference", evalIndexes);
     return;
   }
 
   try {
-    const refs = await deps.backend.deliveries(attempt as AttemptUri);
-    const deliveryRef = refs.at(-1);
-    if (deliveryRef === undefined) {
-      journalCouldNotGradeLegs(deps, cellKey, "no Delivery recorded for a delivered attempt", allEvalIndexes(deps));
-      return;
-    }
-    const deliveryBytes = await deps.backend.fetchDelivery(deliveryRef);
-    const deliverySha256 = putSealedBytes(deps.workspaceDir, deliveryBytes);
-    const deliveryDoc = recordManagedDeliveryAuthorship(deps, deliverySha256, deliveryBytes);
-
-    if (deps.backend.fetchArtifact === undefined) {
-      journalCouldNotGradeLegs(deps, cellKey, "backend does not support fetchArtifact", allEvalIndexes(deps));
-      return;
-    }
-    const resultArtifacts: { name: string; bytes: Uint8Array }[] = [];
-    const journaledOutputs: { name: string; sha256: string }[] = [];
-    for (const output of deliveryDoc.outputs) {
-      if (output.digest?.sha256 === undefined) continue;
-      const bytes = await deps.backend.fetchArtifact({ digest: { sha256: output.digest.sha256 } });
-      resultArtifacts.push({ name: output.name, bytes });
-      journaledOutputs.push({ name: output.name, sha256: putSealedBytes(deps.workspaceDir, bytes) });
-    }
-
-    appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
-      kind: "delivery",
-      at: deps.liveClock(),
-      cellKey,
-      dispatch,
-      attempt,
-      deliverySha256,
-      outputs: journaledOutputs,
-    });
-
-    const evalIndexes = allEvalIndexes(deps);
+    const harvested = await harvestDelivery(deps, cellKey, dispatch, attempt, evalIndexes);
+    if (harvested === undefined) return;
     await prepareAndDispatchEvaluation(
       deps,
       cellKey,
       dispatch,
-      deliveryBytes,
-      resultArtifacts,
+      harvested.deliveryBytes,
+      harvested.resultArtifacts,
       evalIndexes,
       Object.fromEntries(evalIndexes.map((evalIndex) => [evalIndex, 1])),
     );
   } catch (cause) {
     // Reached only from pre-leg work (delivery fetch/journal, spec resolution, prepare) — the
     // per-leg loop inside prepareAndDispatchEvaluation catches its own legs' failures.
-    journalCouldNotGradeLegs(deps, cellKey, cause instanceof Error ? cause.message : String(cause), allEvalIndexes(deps));
+    journalCouldNotGradeLegs(deps, cellKey, cause instanceof Error ? cause.message : String(cause), evalIndexes);
   }
 }
 
@@ -815,7 +936,13 @@ export async function driveCellEvents(
 export interface DeliveredCellGap {
   readonly cellKey: string;
   readonly lastDispatch: number;
-  readonly deliverySha256: string;
+  /** Present when the cell's `delivery` journal entry survived — the ordinary gap. Absent only
+   * for a cell stranded inside the crash window between the `delivered` cell-event's journal
+   * write and the `delivery` entry's (issue #3081); `attempt` is then the handle. */
+  readonly deliverySha256?: string;
+  /** The delivered cell-event's attempt URI, from the fold. The only route back to the Delivery
+   * when `deliverySha256` is absent. */
+  readonly attempt?: string;
   readonly deliveryOutputs?: readonly { readonly name: string; readonly sha256: string }[];
   /** The uncovered 1-based leg indexes (ascending) — ONLY these legs are re-run. */
   readonly missingEvalIndexes: readonly number[];
@@ -826,7 +953,20 @@ export interface DeliveredCellGap {
  * Re-runs only the missing evaluation legs for cells that delivered but never reached a
  * journaled terminal for every leg (interrupted between delivery and verdict, or between
  * verdict-submit and observe). Reads the already-journaled delivery straight from the
- * sealed-bytes store — the solve side is done; nothing here re-contacts the backend for it.
+ * sealed-bytes store — the solve side is done; nothing here re-dispatches it.
+ *
+ * A cell killed inside the narrower window between its `delivered` cell-event journal write and
+ * its `delivery` journal write (issue #3081) has no journaled delivery to read. Its Delivery is
+ * nonetheless durable in the attempt the cell-event named, so that gap is healed by re-entering
+ * `harvestDelivery` for that attempt: the sealed Delivery is re-read and re-stored
+ * content-addressed, never re-minted, and the missing `delivery` entry is journaled before the
+ * evaluation legs run. A repeated resume then finds `deliverySha256` present and takes the
+ * ordinary path, so healing converges.
+ *
+ * Every gap reaching this function terminates: a cell with neither a journaled delivery nor an
+ * attempt reference journals could-not-grade for its missing legs rather than being skipped, so
+ * resume's accounting and `../operations/run-collect.js`'s cannot disagree about what is
+ * outstanding.
  */
 export async function driveEvaluationCatchUp(
   deps: DriveDeps,
@@ -835,23 +975,46 @@ export async function driveEvaluationCatchUp(
   requireEvaluatorCoverage(deps);
   for (const gap of gaps) {
     try {
-      const deliveryBytes = getSealedBytes(deps.workspaceDir, gap.deliverySha256);
-      const resultArtifacts = (gap.deliveryOutputs ?? []).map((output) => ({
-        name: output.name,
-        bytes: getSealedBytes(deps.workspaceDir, output.sha256),
-      }));
+      let harvested: HarvestedDelivery | undefined;
+      if (gap.deliverySha256 !== undefined) {
+        harvested = {
+          deliveryBytes: getSealedBytes(deps.workspaceDir, gap.deliverySha256),
+          resultArtifacts: (gap.deliveryOutputs ?? []).map((output) => ({
+            name: output.name,
+            bytes: getSealedBytes(deps.workspaceDir, output.sha256),
+          })),
+        };
+      } else if (gap.attempt === undefined) {
+        journalCouldNotGradeLegs(
+          deps,
+          gap.cellKey,
+          "delivered cell has neither a journaled Delivery nor an attempt reference",
+          gap.missingEvalIndexes,
+        );
+        continue;
+      } else {
+        harvested = await harvestDelivery(
+          deps,
+          gap.cellKey,
+          gap.lastDispatch,
+          gap.attempt,
+          gap.missingEvalIndexes,
+        );
+        if (harvested === undefined) continue;
+      }
       await prepareAndDispatchEvaluation(
         deps,
         gap.cellKey,
         gap.lastDispatch,
-        deliveryBytes,
-        resultArtifacts,
+        harvested.deliveryBytes,
+        harvested.resultArtifacts,
         gap.missingEvalIndexes,
         gap.nextEvaluationAttempts
           ?? Object.fromEntries(gap.missingEvalIndexes.map((evalIndex) => [evalIndex, 1])),
       );
     } catch (cause) {
-      // Pre-leg failure (stored bytes unreadable) — fan out so every missing leg terminates.
+      // Pre-leg failure (stored bytes unreadable, delivery re-harvest failed) — fan out so every
+      // missing leg terminates.
       journalCouldNotGradeLegs(deps, gap.cellKey, cause instanceof Error ? cause.message : String(cause), gap.missingEvalIndexes);
     }
   }

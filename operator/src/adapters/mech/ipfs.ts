@@ -4,10 +4,8 @@ import { parseSignedTaskV1, type SignedTaskV1 } from '../../types/task-document.
 import { IPFS_GATEWAY_PREFIX } from './types.js';
 import { canonicalJson } from '../../util/canonical-json.js';
 import {
-  buildIpfsFetchCidPathCandidates,
-  buildIpfsHexCidCandidatesFromPartialHex,
+  fetchBytesFromIpfs,
   fetchFromIpfs,
-  normalizeIpfsGatewayBase,
   type FetchFromIpfsOptions,
 } from '@jinn-network/core/corpus-read';
 
@@ -88,30 +86,7 @@ export function buildResultPayload(requestId: string, result: TaskResult): Resto
   };
 }
 
-/**
- * Default per-request timeout (ms) when fetching from a gateway.
- * jinn-node uses 7–10s; we allow a bit more for slow public gateways.
- */
-const IPFS_FETCH_TIMEOUT_MS = 15_000;
 const IPFS_UPLOAD_TIMEOUT_MS = 60_000;
-
-const FALLBACK_IPFS_GATEWAY_BASE = 'https://ipfs.io/ipfs/';
-
-/** Same opts semantics as core `fetchFromIpfs` — raw fetchers share the pin for hermetic parity (#1648). */
-function resolveMechIpfsGateways(
-  gatewayUrl: string,
-  opts?: FetchFromIpfsOptions,
-): Array<readonly [string, string]> {
-  const primary = normalizeIpfsGatewayBase(gatewayUrl);
-  const list: Array<readonly [string, string]> = [['primary', primary]];
-  if (opts?.fallbackGatewayBase === false) return list;
-  if (typeof opts?.fallbackGatewayBase === 'string') {
-    list.push(['fallback', normalizeIpfsGatewayBase(opts.fallbackGatewayBase)]);
-    return list;
-  }
-  list.push(['fallback', FALLBACK_IPFS_GATEWAY_BASE]);
-  return list;
-}
 
 export function normalizeIpfsRegistryAddUrl(registryUrl: string): string {
   let t = registryUrl.trim();
@@ -326,14 +301,6 @@ export async function fetchFromDigest(digestHex: string): Promise<unknown> {
 
 // ── Conformance harness IPFS fetch helpers ───────────────────────────────────
 
-async function fetchRawBytesFromUrl(url: string, signal: AbortSignal): Promise<Uint8Array> {
-  const response = await fetch(url, { method: 'GET', signal });
-  if (!response.ok) {
-    throw new Error(`IPFS fetch failed: ${response.status} ${response.statusText} (${url.slice(0, 80)}…)`);
-  }
-  return new Uint8Array(await response.arrayBuffer());
-}
-
 /**
  * Fetch a SignedEnvelope from IPFS by CID as raw bytes.
  * Returns the exact bytes stored at the CID — no JSON parse/re-encode roundtrip.
@@ -344,25 +311,7 @@ export async function fetchSignedEnvelopeBytesRaw(
   cid: string,
   opts?: FetchFromIpfsOptions,
 ): Promise<Uint8Array> {
-  const gateways = resolveMechIpfsGateways(gatewayUrl, opts);
-  const candidates = buildIpfsFetchCidPathCandidates(cid);
-  const errors: string[] = [];
-  for (const cidPath of candidates) {
-    for (const [name, baseUrl] of gateways) {
-      const url = `${baseUrl}${cidPath}`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), IPFS_FETCH_TIMEOUT_MS);
-      try {
-        return await fetchRawBytesFromUrl(url, controller.signal);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        errors.push(`${name}:${url.slice(0, 100)}: ${message}`);
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-  }
-  throw new Error(`IPFS raw bytes fetch failed after all candidates: ${errors.join(' | ')}`);
+  return fetchBytesFromIpfs(gatewayUrl, cid, opts);
 }
 
 /**
@@ -401,25 +350,7 @@ export async function fetchRawBytesFromIpfs(
   cid: string,
   opts?: FetchFromIpfsOptions,
 ): Promise<Uint8Array> {
-  const gateways = resolveMechIpfsGateways(gatewayUrl, opts);
-  const candidates = buildIpfsFetchCidPathCandidates(cid);
-  const errors: string[] = [];
-  for (const cidPath of candidates) {
-    for (const [name, baseUrl] of gateways) {
-      const url = `${baseUrl}${cidPath}`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), IPFS_FETCH_TIMEOUT_MS);
-      try {
-        return await fetchRawBytesFromUrl(url, controller.signal);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        errors.push(`${name}:${url.slice(0, 100)}: ${message}`);
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-  }
-  throw new Error(`IPFS raw bytes fetch failed after all candidates: ${errors.join(' | ')}`);
+  return fetchBytesFromIpfs(gatewayUrl, cid, opts);
 }
 
 /**

@@ -478,7 +478,8 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
     });
   }
 
-  async function seedValidatedPoolWithTwoEntries(): Promise<void> {
+  /** Seeds the validated pool and returns the store's own `updatedAt`. */
+  async function seedValidatedPoolWithTwoEntries(): Promise<string> {
     const store = new ValidatedPoolStore({ stateDir });
     await store.record(
       'org__repo-1',
@@ -490,6 +491,9 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
       { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-22T00:00:00.000Z' },
       EVAL_SEMANTICS_VERSION,
     );
+    const scorable = await store.getScorableEntries(EVAL_SEMANTICS_VERSION);
+    expect(scorable).not.toBeNull();
+    return scorable!.updatedAt;
   }
 
   function bumpValidatedPoolMtime(): void {
@@ -522,7 +526,7 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
     expect(gen.getState().poolPublicationUpdatedAt).toBeTypeOf('string');
   });
 
-  it('does not re-publish when validated-pool.json mtime is unchanged across ticks', async () => {
+  it('does not re-publish when the validated pool is no newer than the existing publication', async () => {
     const artifact: SweRebenchV2VettedPoolArtifact = {
       schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
       evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
@@ -549,23 +553,18 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
       evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
       publishedAt: '2026-05-22T00:00:00.000Z',
     });
-    // Seed the validated pool FIRST, then publish with an explicit `updatedAt`
-    // strictly after it. The gate under test is
-    // `scorable.updatedAt > existing.updatedAt` (swe-rebench-v2.ts), and both
-    // sides are ISO strings at millisecond precision. This describe's
-    // `beforeEach` uses `shouldAdvanceTime: true` (required — see the comment
-    // there), so `Date.now()` tracks real elapsed wall-clock time even under
-    // fake timers: relying on `writeVettedPoolArtifactPublication`'s default
-    // `new Date().toISOString()` and the store's own `new Date().toISOString()`
-    // landing in the SAME millisecond is a CPU-contention flake under parallel
-    // vitest workers (issue #1627). The explicit timestamp is load-bearing —
-    // it mirrors the `future` constant `bumpValidatedPoolMtime()` already uses.
-    await seedValidatedPoolWithTwoEntries();
+    // Pin the publication's `updatedAt` to the pool store's own value.
+    // `resolvePublishedVettedPool` re-publishes when the store's `updatedAt`
+    // is strictly newer than the publication's, and this block runs with
+    // `shouldAdvanceTime: true` — so letting both default to `new Date()`
+    // makes the outcome depend on how much real time bled into the fake clock
+    // between the two writes, which is host-speed dependent (#3048).
+    const poolUpdatedAt = await seedValidatedPoolWithTwoEntries();
     await writeVettedPoolArtifactPublication({
       stateDir,
       ref,
       artifact,
-      updatedAt: '2026-05-22T01:00:00.000Z',
+      updatedAt: poolUpdatedAt,
     });
 
     const gen = makeTestGenerator({

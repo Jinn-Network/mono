@@ -119,6 +119,12 @@ test('the guard actually catches a synthetic violation', () => {
   // containing a quote character (this one lives under a directory named "life's-work") would
   // otherwise leak into the specifier and break the `["']` delimited parse below, same as it
   // would for a real gate-path violation.
+  //
+  // Creating it inside the checkout is safe only while the name stays dot-prefixed and gitignored:
+  // `node --test` runs a batch in parallel, so a sibling suite walking the tree would otherwise see
+  // a path `git ls-files --cached --others --exclude-standard` cannot return (run 32982011618,
+  // issue #3148). Both conditions are enforced by LIVE_TREE_FIXTURES in workflow-script-tests.test.mjs,
+  // which this prefix is declared in; renaming it means updating that declaration too.
   const dir = mkdtempSync(join(root, '.github', 'scripts', '.tmp-observation-reader-guard-'));
   try {
     const violatingFile = join(dir, 'synthetic-gate.test.mjs');

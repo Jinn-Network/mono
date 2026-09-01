@@ -1,0 +1,31 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/benchmark-accounting/v1",
+  "profile": "https://spec.jinn.network/facts/benchmark-accounting/v2",
+  "fields": [
+    { "name": "accountingDigest", "class": "record" },
+    { "name": "recordMediaType", "class": "record", "cloudEvents": { "attribute": "recordmedia", "scalar": "string" } },
+    { "name": "runDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "run", "scalar": "string" } },
+    { "name": "publisher", "class": "record", "cloudEvents": { "attribute": "publisher", "scalar": "string" } },
+    { "name": "procedureId", "class": "record", "cloudEvents": { "attribute": "procedureid", "scalar": "string" } },
+    { "name": "procedureVersion", "class": "record" },
+    { "name": "closeAt", "class": "record", "cloudEvents": { "attribute": "closeat", "scalar": "string" } },
+    { "name": "closeAnchorChain", "class": "record" },
+    { "name": "closeAnchorBlockNumber", "class": "record" },
+    { "name": "closeAnchorBlockHash", "class": "record" },
+    { "name": "scopeStreamCount", "class": "record" },
+    { "name": "scopeStreams", "class": "record" },
+    { "name": "publicRegistrationStatus", "class": "record", "cloudEvents": { "attribute": "registration", "scalar": "string" } },
+    { "name": "publisherAuthorityKind", "class": "record", "cloudEvents": { "attribute": "publisherauth", "scalar": "string" } },
+    { "name": "publisherAuthorizationDigest", "class": "record", "referenceBearing": true },
+    { "name": "cellCount", "class": "record" },
+    { "name": "dispatchCount", "class": "record" },
+    { "name": "submissionDigests", "class": "record", "referenceBearing": true },
+    { "name": "deliveryDigests", "class": "record", "referenceBearing": true },
+    { "name": "evidenceDigests", "class": "record", "referenceBearing": true },
+    { "name": "evaluationDigests", "class": "record", "referenceBearing": true },
+    { "name": "observationArchiveDigests", "class": "record", "referenceBearing": true },
+    { "name": "correlationArtifactDigests", "class": "record", "referenceBearing": true },
+    { "name": "nativeArtifactDigests", "class": "record", "referenceBearing": true }
+  ]
+}

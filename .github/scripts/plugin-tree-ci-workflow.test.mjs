@@ -13,6 +13,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
+import { citedPrecedents } from './workflow-precedent-citations.mjs';
+
 const root = resolve(import.meta.dirname, '../..');
 const workflow = readFileSync(
   resolve(root, '.github/workflows/plugin-tree-ci.yml'),
@@ -88,33 +90,23 @@ test('the runtime distribution is restored straight into its package', () => {
   );
 });
 
-// The restore comment cites sibling workflows as precedent for restoring by
-// name. A citation that outlives the shape it names is worse than no citation:
-// it reads as settled while pointing at a workflow that no longer restores
-// anything. marketplace-ci.yml was cited until #2997 consolidated its jobs and
-// removed every artifact hand-off. This gate keeps the sentence honest.
-test('every workflow cited as by-name precedent actually restores by name', () => {
+// The restore step's comment is where the by-name shape is explained and its
+// precedent cited. The repository-wide gate in
+// `workflow-precedent-citations.test.mjs` checks that every cited workflow
+// still restores by name; this keeps the `# Precedent:` marker line it reads
+// from simply disappearing from this workflow. The guard calls the shared
+// `citedPrecedents` from `workflow-precedent-citations.mjs` rather than
+// re-deriving the citation shape, so the two halves of the invariant cannot
+// drift apart: a marker deleted, misspelled, or moved out of the attached
+// comment block fails here instead of silently leaving the repository-wide
+// gate with nothing to enforce.
+test('the restore step carries a comment citing a precedent workflow', () => {
   const lines = workflow.split('\n');
-  const restoreStep = lines.findIndex((line) =>
-    line.includes('- name: Restore Plugin Runtime distribution'),
-  );
+  const restoreStep = lines.findIndex((line) => line.includes('- name: Restore Plugin Runtime distribution'));
   assert.ok(restoreStep > 0, 'the runtime restore step must exist');
 
-  const comment = [];
-  for (let cursor = restoreStep - 1; cursor >= 0; cursor -= 1) {
-    if (!/^\s*#/.test(lines[cursor])) break;
-    comment.unshift(lines[cursor]);
-  }
-  assert.ok(comment.length > 0, 'the restore step must carry its explanatory comment');
-
-  const cited = [...new Set(comment.join('\n').match(/[\w-]+\.ya?ml/g) ?? [])];
-  assert.ok(cited.length > 0, 'the comment must cite at least one precedent workflow');
-
-  for (const name of cited) {
-    const source = readFileSync(resolve(root, '.github/workflows', name), 'utf8');
-    assert.ok(
-      restoredArtifactNames(source).length > 0,
-      `${name} is cited as by-name-restore precedent but restores no artifact by name`,
-    );
-  }
+  assert.ok(
+    citedPrecedents(workflow, 'plugin-tree-ci.yml').length > 0,
+    'the restore step must carry a `# Precedent: <workflow>.yml` marker in its attached comment',
+  );
 });

@@ -38,7 +38,10 @@ import {
   sealEvaluationSpec,
   type AcceptedJudgeModelId,
 } from "@jinn-network/task-execution-profiles";
-import { buildBinaryJudgmentEvaluationSpecification } from "@jinn-network/task-execution-evaluator-adapters";
+import {
+  buildBinaryJudgmentEvaluationSpecification,
+  isBinaryJudgmentEvaluationSpecification,
+} from "@jinn-network/task-execution-evaluator-adapters";
 import {
   TASK_EXECUTION_PROTOCOL_URI,
   documentDigest,
@@ -639,6 +642,24 @@ describe("binary-instrument@1 lock-time composition", () => {
     const benchmark = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256)));
     expect(() => compileBinaryInstrumentProfile({ workspaceDir, draft: fixture.draft, benchmark }))
       .toThrow(/EvaluationSpec parser-invalid policy differs from the run arms' instruments/u);
+  });
+
+  // The abstain spec gained its recorded-inconclusive class and inconclusiveWhen node (the live
+  // cell-535 fix). Lock-time policy derivation reads the GRADER digest, which did not move, so
+  // every abstain fixture above still round-trips. The gate the lock leans on for anything else
+  // is the exact-contract admission: a future v3 identity nobody taught the derivation about is
+  // not admitted at all, so it can never reach paid execution.
+  test("does not admit a v3-style evaluation parser identity", () => {
+    const abstain = buildBinaryJudgmentEvaluationSpecification(`sha256:${"2".repeat(64)}`, "abstain");
+    expect(isBinaryJudgmentEvaluationSpecification(abstain)).toBe(true);
+    expect(isBinaryJudgmentEvaluationSpecification({
+      ...abstain,
+      grader: {
+        name: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.id,
+        digest: { sha256: "c".repeat(64) },
+        accessClass: "public",
+      },
+    } as never)).toBe(false);
   });
 
   test("refuses a roster that mixes v1 and neutral arm instruments", () => {

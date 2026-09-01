@@ -1,15 +1,11 @@
 /**
- * Regression test for issue #1052 (AC2): `resolveSolverPlugin(..., { noVendor })`
- * must NOT write to the vendor root (default `~/.jinn-client/solver-plugins/`).
- *
- * `jinn solver-plugins validate` / `show` are read-only inspection verbs — they
- * should never silently materialise a copy of the plug-in into the operator's
- * global dir. The `noVendor` flag makes the resolver use the source path
- * directly as `root`. Without it, the default vendoring path is unchanged.
+ * Regression: bundled/local SolverPlugins resolve in place (#1242) and never
+ * write to the vendor root. The legacy `noVendor` flag is a no-op retained for
+ * CLI callers on read-only inspection verbs.
  */
 
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveSolverPlugin } from '../../src/plugins/resolvers.js';
@@ -23,7 +19,7 @@ import {
   parsedLine,
 } from '../cli/commands/solver-plugins-test-helpers.js';
 
-describe('resolveSolverPlugin noVendor', () => {
+describe('resolveSolverPlugin in-place resolution (#1242)', () => {
   it('Test A: resolves a local plugin in place and writes nothing to vendorRoot', async () => {
     const localDir = withTempPlugin();
     const vendorRoot = mkdtempSync(join(tmpdir(), 'no-vendor-'));
@@ -46,14 +42,14 @@ describe('resolveSolverPlugin noVendor', () => {
     }
   });
 
-  it('Test B: without noVendor, still materialises into vendorRoot (default path unbroken)', async () => {
-    const localDir = withTempPlugin();
+  it('Test B: resolves bundled plugins in place without writing to vendorRoot', async () => {
     const vendorRoot = mkdtempSync(join(tmpdir(), 'yes-vendor-'));
     try {
-      const plugin = await resolveSolverPlugin(localDir, { vendorRoot });
+      const plugin = await resolveSolverPlugin('bundled:network-tools', { vendorRoot });
 
-      expect(plugin.root.startsWith(vendorRoot)).toBe(true);
-      expect(readdirSync(vendorRoot).length).toBeGreaterThan(0);
+      expect(plugin.root).not.toMatch(new RegExp(`^${vendorRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+      expect(existsSync(join(plugin.root, 'jinn.plugin.json'))).toBe(true);
+      expect(readdirSync(vendorRoot)).toEqual([]);
     } finally {
       rmSync(vendorRoot, { recursive: true, force: true });
     }

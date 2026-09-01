@@ -60,14 +60,6 @@ function nonEmpty(value: string, label: string): string {
   return value;
 }
 
-function methodDigest(registration: EvaluatorRegistration): `sha256:${string}` {
-  const value = registration.evaluationMethod.digest?.sha256;
-  if (typeof value !== "string" || !/^[0-9a-f]{64}$/u.test(value)) {
-    throw new TypeError("evaluation launcher registration requires a canonical evaluation method sha256 digest");
-  }
-  return `sha256:${value}`;
-}
-
 /** Forward Yarn PnP bootstrap when the launcher itself runs under PnP (CI/dev). */
 function nodeBootstrapEnv(): Record<string, string> {
   const nodeOptions = process.env["NODE_OPTIONS"];

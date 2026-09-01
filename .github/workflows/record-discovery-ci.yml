@@ -35,7 +35,7 @@ env:
 # upload/download-artifact dist round-trips, rebuilding trust-core from source
 # in ELEVEN separate jobs. Under the merge queue's free-plan 20-slot runner
 # pool that fan-out was almost entirely queue-wait. The packages job below
-# builds the same 14 packages with the same five commands each, in dependency
+# builds every discovery package with the same five commands each, in dependency
 # order in ONE workspace: same coverage, one slot, no artifact round-trips,
 # every cross-tree portal built exactly once (in the same section order the old
 # verify job used).
@@ -71,7 +71,14 @@ jobs:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.23.1
+      # A freshly rolled runner image can regress the packed-consumer smoke:
+      # node 22.23.2's bundled npm dies with "Cannot read properties of null
+      # (reading 'edgesOut')" on yarn-packed tarballs (first seen on the
+      # task-execution lane, PR #3010). evidence-ci and the old task-execution
+      # foundation job always pinned both for exactly this reason.
+      - name: Pin npm for packed-consumer smoke coverage
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
@@ -174,6 +181,11 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
+      - name: Build cross-tree portal dependency from source (evidence-offer, §7.8)
+        working-directory: packages/evidence/offer
+        run: |
+          yarn install --immutable
+          yarn build
       - name: Verify Record Discovery Facts (Evidence)
         working-directory: packages/discovery/facts/evidence
         run: |
@@ -216,6 +228,14 @@ jobs:
           yarn pack:smoke
       - name: Verify Record Discovery Facts (Chain Environments)
         working-directory: packages/discovery/facts/chain-environments
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Verify Record Discovery Facts (Offers)
+        working-directory: packages/discovery/facts/offers
         run: |
           yarn install --immutable
           yarn typecheck
