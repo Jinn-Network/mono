@@ -21,6 +21,75 @@ const MAX_IPFS_REDIRECT_HOPS = 3;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const FALLBACK_IPFS_GATEWAY_BASE = 'https://ipfs.io/ipfs/';
 
+/**
+ * A gateway response the byte cap refused. FAILURE IS NOT ABSENCE (#2647, #3451): the gateway
+ * answered FOR this content, so the refusal is positive evidence that it EXISTS and is merely
+ * larger than policy allows. (On the declared-`content-length` path the body is discarded unread,
+ * so the evidence is the headers rather than the bytes — still an answer, not a miss.) A caller
+ * that reports it as "not on IPFS" turns a size-policy decision into a silent data gap.
+ */
+export class IpfsResponseTooLargeError extends Error {
+  override readonly name = 'IpfsResponseTooLargeError';
+
+  constructor(readonly limitBytes: number, readonly declaredBytes?: number) {
+    super(
+      `IPFS response exceeds the ${limitBytes}-byte cap`
+        + (declaredBytes === undefined ? '' : ` (content-length ${declaredBytes})`),
+    );
+  }
+}
+
+/**
+ * The gateway answered that this content is not there. The one failure mode that IS absence
+ * (#3451) — every other one leaves the question unanswered.
+ */
+export class IpfsContentNotFoundError extends Error {
+  override readonly name = 'IpfsContentNotFoundError';
+
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+/**
+ * Every gateway x CID candidate failed. Carries the per-candidate causes so a caller can classify
+ * the whole operation with {@link classifyIpfsFetchFailure} instead of string-matching the joined
+ * message, which is a display artifact and not a contract.
+ */
+export class IpfsFetchFailedError extends Error {
+  override readonly name = 'IpfsFetchFailedError';
+
+  constructor(message: string, readonly causes: readonly unknown[]) {
+    super(message);
+  }
+}
+
+/**
+ * Classify a failed IPFS fetch into the three answers a caller can act on differently:
+ *
+ *   - `'too-large'` — at least one candidate served the content and the byte cap refused it. This
+ *     dominates: a size refusal is positive proof of presence, so it outranks any number of
+ *     not-found answers from other candidates.
+ *   - `'not-found'` — every candidate answered, and every answer was "not there". Genuine absence.
+ *   - `'unavailable'` — anything else (transport error, timeout, malformed candidate URL). Nothing
+ *     was learned about whether the content exists.
+ *
+ * `'not-found'` is deliberately strict, and in production it is therefore the rarest answer: a
+ * default fetch also tries the `ipfs.io` fallback, which typically stalls into a 504 or an abort
+ * for an unpinned digest rather than answering 404. Such a run classifies `'unavailable'` — the
+ * safe direction, since absence is never claimed without proof of it.
+ */
+export function classifyIpfsFetchFailure(
+  error: unknown,
+): 'too-large' | 'not-found' | 'unavailable' {
+  const causes = error instanceof IpfsFetchFailedError ? error.causes : [error];
+  if (causes.some((cause) => cause instanceof IpfsResponseTooLargeError)) return 'too-large';
+  if (causes.length > 0 && causes.every((cause) => cause instanceof IpfsContentNotFoundError)) {
+    return 'not-found';
+  }
+  return 'unavailable';
+}
+
 export function normalizeIpfsGatewayBase(gatewayUrl: string): string {
   let normalized = gatewayUrl.trim();
   if (normalized === '') normalized = 'https://gateway.autonolas.tech';
@@ -117,10 +186,7 @@ async function readBoundedBytes(response: Response): Promise<Uint8Array> {
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > MAX_IPFS_RESPONSE_BYTES) {
     await discardBody(response);
-    throw new Error(
-      `IPFS response exceeds the ${MAX_IPFS_RESPONSE_BYTES}-byte cap ` +
-        `(content-length ${declared})`,
-    );
+    throw new IpfsResponseTooLargeError(MAX_IPFS_RESPONSE_BYTES, declared);
   }
   const body = response.body;
   if (!body) return new Uint8Array(0);
@@ -134,7 +200,7 @@ async function readBoundedBytes(response: Response): Promise<Uint8Array> {
       if (!value) continue;
       total += value.byteLength;
       if (total > MAX_IPFS_RESPONSE_BYTES) {
-        throw new Error(`IPFS response exceeds the ${MAX_IPFS_RESPONSE_BYTES}-byte cap`);
+        throw new IpfsResponseTooLargeError(MAX_IPFS_RESPONSE_BYTES);
       }
       chunks.push(value);
     }
@@ -195,10 +261,15 @@ async function fetchThroughGateway(url: URL, signal: AbortSignal): Promise<Respo
     }
     if (!response.ok) {
       await discardBody(response);
-      throw new Error(
+      const message =
         `IPFS fetch failed: ${response.status} ${response.statusText} ` +
-          `(${displayUrl(current)}…)`,
-      );
+        `(${displayUrl(current)}…)`;
+      // 404/410 is the gateway ANSWERING "not there" — the only status that carries absence.
+      // Every other one (429, 5xx, …) leaves the question open and stays a plain failure.
+      if (response.status === 404 || response.status === 410) {
+        throw new IpfsContentNotFoundError(message, response.status);
+      }
+      throw new Error(message);
     }
     return response;
   }
@@ -262,12 +333,18 @@ async function fetchCandidatesFromIpfs<T>(
   }
 
   const errors: string[] = [];
+  // Parallel to `errors`: the display message is for the operator, the cause is what
+  // `classifyIpfsFetchFailure` reads to tell a size refusal and a transport failure apart from
+  // genuine absence (#3451).
+  const causes: unknown[] = [];
   const deadline = Date.now() + IPFS_TOTAL_FETCH_TIMEOUT_MS;
   for (let index = 0; index < attempts.length; index += 1) {
     const [name, url] = attempts[index];
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
-      errors.push(`whole-operation timeout after ${IPFS_TOTAL_FETCH_TIMEOUT_MS}ms`);
+      const message = `whole-operation timeout after ${IPFS_TOTAL_FETCH_TIMEOUT_MS}ms`;
+      errors.push(message);
+      causes.push(new Error(message));
       break;
     }
     // Share what is left of the budget across the candidates still to try, so a
@@ -287,7 +364,9 @@ async function fetchCandidatesFromIpfs<T>(
     try {
       target = new URL(url);
     } catch {
-      errors.push(`${name}: candidate URL could not be parsed`);
+      const message = `${name}: candidate URL could not be parsed`;
+      errors.push(message);
+      causes.push(new Error(message));
       clearTimeout(timer);
       continue;
     }
@@ -298,11 +377,12 @@ async function fetchCandidatesFromIpfs<T>(
         `${name}:${displayUrl(target)}: ` +
           `${error instanceof Error ? error.message : String(error)}`,
       );
+      causes.push(error);
     } finally {
       clearTimeout(timer);
     }
   }
-  throw new Error(`${failureLabel}: ${errors.join(' | ')}`);
+  throw new IpfsFetchFailedError(`${failureLabel}: ${errors.join(' | ')}`, causes);
 }
 
 /** Read-only multi-codec, primary-plus-fallback IPFS JSON fetch. */

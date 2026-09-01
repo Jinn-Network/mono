@@ -8325,6 +8325,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/record-discovery-testing",
         "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/issued-at-regression-v2/vector.json",
+        "relativeSource": "fixtures/vectors/issued-at-regression-v2/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/issued-at-regression/vector.json",
         "relativeSource": "fixtures/vectors/issued-at-regression/vector.json"
       },

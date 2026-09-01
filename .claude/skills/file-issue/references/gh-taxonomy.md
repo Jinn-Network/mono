@@ -303,6 +303,53 @@ echo "Filed: $ISSUE_URL (#$ISSUE_NUMBER) — Blocked on: $BLOCKED_VALUE, Effort:
 
 ---
 
+## Step 5.5 — Verify the issue-to-PR link (PR blockers)
+
+`addBlockedBy` resolves only Issue nodes; a pull-request node id fails with
+`Could not resolve to Issue node with the global id of 'PR_…'`. When the real
+prerequisite is an open PR, an issue must stand for it — the PR carries
+`Closes #N`, and the native edge points at `#N`.
+
+`closedByPullRequestsReferences` is the query that proves the link exists (it
+is the inverse of a PR's `closingIssuesReferences`).
+These two fields are not behind the `issue_dependencies` feature flag, so they
+need no `GraphQL-Features` header (unlike `addBlockedBy` / `blockedBy` above).
+
+```bash
+# Which PRs will close this issue?
+gh api graphql -f query='
+query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    issue(number:$number){
+      closedByPullRequestsReferences(first:10,includeClosedPrs:true){
+        nodes{ number state url }
+      }
+    }
+  }
+}' -F owner=Jinn-Network -F name=mono -F number=<N> \
+  --jq '.data.repository.issue.closedByPullRequestsReferences.nodes'
+```
+
+An empty array means the PR body has no `Closes #N` for this issue — add it
+(`gh pr edit <pr> --body-file …`) before relying on the edge, or the dependent
+never auto-unblocks when the PR merges.
+
+The mirror check, from the PR side:
+
+```bash
+gh api graphql -f query='
+query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      closingIssuesReferences(first:10){ nodes{ number url } }
+    }
+  }
+}' -F owner=Jinn-Network -F name=mono -F number=<PR> \
+  --jq '.data.repository.pullRequest.closingIssuesReferences.nodes'
+```
+
+---
+
 ## Step 6 — Commit (for contributors adding this file)
 
 ```bash

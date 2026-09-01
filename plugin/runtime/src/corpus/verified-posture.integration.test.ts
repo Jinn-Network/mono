@@ -205,7 +205,7 @@ describe("the verified posture over a genuinely signed archive", () => {
   });
 
   test("a re-signed idle head at the same position is a clean no-op too, and raises the floor (#3468)", async () => {
-    const { archive, capability, config } = await compose();
+    const { archive, capability, config, advanceTo } = await compose();
     expect((await capability.mirror.syncOnce()).status).toBe("synced");
 
     // The idle re-signing §5.2 obliges a live source to perform before
@@ -215,10 +215,17 @@ describe("the verified posture over a genuinely signed archive", () => {
     // this reached `verifySourceChain`, whose linkage walk is fed no entries
     // above the mark and reported `broken-chain` at `linkage` -- so a healthy
     // archive went red the moment it re-signed.
+    // The re-sign happens at the source's own clock, and both consumers now
+    // bound the whole freshness window (#3467): `refreshBy` no further than the
+    // published-source profile's 24h ceiling ahead of `issuedAt`, and
+    // `issuedAt` no further ahead of the consumer's own clock than one window
+    // is long. So the poll moves with the re-sign, and the window it carries
+    // sits at the same ceiling the fixture's original head does.
+    advanceTo(new Date("2026-07-30T12:00:00Z"));
     await archive.serveHead({
       ...archive.head,
-      issuedAt: "2026-07-31T00:00:00Z",
-      refreshBy: "2026-08-31T00:00:00Z",
+      issuedAt: "2026-07-30T12:00:00Z",
+      refreshBy: "2026-07-31T12:00:00Z",
     });
     const second = await capability.mirror.syncOnce();
 
@@ -235,14 +242,19 @@ describe("the verified posture over a genuinely signed archive", () => {
     };
     expect(state.marks[`${source.agent}/${source.name}`]).toMatchObject({
       sequence: "0000000000000001",
-      issuedAt: "2026-07-31T00:00:00Z",
+      issuedAt: "2026-07-30T12:00:00Z",
     });
   });
 
   test("the head a re-sign replaced is then refused as a chain regression (#3468)", async () => {
-    const { archive, capability } = await compose();
+    const { archive, capability, advanceTo } = await compose();
     expect((await capability.mirror.syncOnce()).status).toBe("synced");
-    await archive.serveHead({ ...archive.head, issuedAt: "2026-07-31T00:00:00Z" });
+    advanceTo(new Date("2026-07-30T12:00:00Z"));
+    await archive.serveHead({
+      ...archive.head,
+      issuedAt: "2026-07-30T12:00:00Z",
+      refreshBy: "2026-07-31T12:00:00Z",
+    });
     expect((await capability.mirror.syncOnce()).status).toBe("synced");
 
     // Replaying the original head after the floor moved past it. It is

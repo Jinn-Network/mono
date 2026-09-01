@@ -18,6 +18,7 @@ export * from "./facts-profile.js";
 export * from "./cloudevents.js";
 export * from "./query.js";
 export * from "./verify/ports.js";
+export * from "./verify/refresh-bound.js";
 export * from "./verify/outcomes.js";
 export * from "./verify/source-chain.js";
 export * from "./verify/source-head.js";

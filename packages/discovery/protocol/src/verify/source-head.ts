@@ -5,6 +5,7 @@ import { MEDIA_HEAD } from "../identifiers.js";
 import { dssePreAuthEncoding, parseWireDsseEnvelope } from "../dsse.js";
 import { sealJson } from "../sealing.js";
 import type { SourceIdentity } from "../item.js";
+import { MAX_REFRESH_BY_AHEAD_MS, checkRefreshWindow } from "./refresh-bound.js";
 import type { FreshnessPolicy, KeyResolver, SignatureVerifier } from "./ports.js";
 import type { SourceHeadOutcome } from "./outcomes.js";
 
@@ -13,7 +14,7 @@ import type { SourceHeadOutcome } from "./outcomes.js";
 //   1. resolve the source's working keys under the discovery signing scope;
 //   2. verify the head's DSSE signature against a key currently valid at
 //      `now`;
-//   3. verify `refreshBy` freshness.
+//   3. verify the `refreshBy` window (§5.2) and `refreshBy` freshness.
 //
 // It exists for the cases the seven-step procedure cannot express, both of
 // them a source serving the chain position this consumer already holds:
@@ -48,8 +49,9 @@ import type { SourceHeadOutcome } from "./outcomes.js";
 //
 // What it is NOT is a cached acceptance. Signature, currently-valid-key and
 // freshness are re-checked on every call, so a rotated-out or revoked signer,
-// a tampered envelope, or a head that has crossed `refreshBy` still refuses
-// even though the bytes are ones this consumer once accepted.
+// a tampered envelope, a head whose freshness window breaks the profile's
+// §5.2 rules, or a head that has crossed `refreshBy` still refuses even though
+// the bytes are ones this consumer once accepted.
 
 export async function verifySourceHead(opts: {
   /**
@@ -67,10 +69,18 @@ export async function verifySourceHead(opts: {
     sigs: SignatureVerifier;
     fresh: FreshnessPolicy;
     now: Date;
+    /**
+     * The verifying profile's `refreshBy` ceiling (§5.2), in milliseconds
+     * ahead of the head's own `issuedAt`. Defaults to the published-source
+     * profile's bound; a deployment profile that pins a tighter one (the
+     * marketplace profile does) passes it here. A profile may only tighten.
+     */
+    maxRefreshByAheadMs?: number;
   };
 }): Promise<SourceHeadOutcome> {
   const { head, headSignature, source } = opts;
   const { keys, sigs, fresh, now } = opts.ports;
+  const maxRefreshByAheadMs = opts.ports.maxRefreshByAheadMs ?? MAX_REFRESH_BY_AHEAD_MS;
 
   let origin;
   try {
@@ -107,6 +117,12 @@ export async function verifySourceHead(opts: {
     const key = currentKeys.find((candidate) => candidate.keyid === signature.keyid);
     if (key === undefined) continue;
     if (await sigs.verify(pae, signature.signatureBytes, key)) {
+      // The window is checked BEFORE freshness for the same reason the chain
+      // procedure checks it first: a head whose `refreshBy` runs past the
+      // profile bound, or whose `issuedAt` is in the future, is always fresh,
+      // so the clock can never catch it.
+      const windowFailure = checkRefreshWindow(head, now, maxRefreshByAheadMs);
+      if (windowFailure !== undefined) return { status: windowFailure };
       return fresh.isFresh(head.refreshBy, now) ? { status: "ok" } : { status: "stale" };
     }
   }

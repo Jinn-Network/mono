@@ -106,15 +106,16 @@ export interface CreateCorpusMirrorOptions {
  * The operator's equivalent (`sameHead`, `operator/src/daemon/native-discovery.ts`)
  * compares `refreshBy` and the signature bytes too, because it persists a whole
  * signed high-water record. `HighWaterMark` carries only `sequence`/`entry`/
- * `issuedAt`, so this predicate cannot. The residue is narrow: a head with the
- * same position and `issuedAt` but a stretched `refreshBy` is a §5.2-violating
- * re-sign that would be revalidated as fresh -- and minting one needs the
- * source's own currently-valid signing key, which already buys the ability to
- * re-sign correctly. It is not a door an outsider can reach. Admitting the
- * re-signed head does widen that door's reach -- a source can now install a
- * far-future `refreshBy` without appending -- and closing it is #3467's
- * (the ceiling neither named procedure enforces), deliberately not this
- * change's.
+ * `issuedAt`, so this predicate cannot. What that leaves is now bounded rather
+ * than merely narrow: a head with the same position and `issuedAt` but a
+ * stretched `refreshBy` still reaches revalidation, and `verifySourceHead`
+ * refuses it there once the window breaks the published-source profile's §5.2
+ * rules (#3467) -- whether the stretch arrived by re-signing (the shape this
+ * path now admits, above) or was baked into the original head at adoption.
+ * Stretching `issuedAt` instead does not evade it: the same check bounds
+ * `issuedAt` against the consumer's own clock, so both halves of the window
+ * are bounded, not just their difference. Inside the bound the divergence is a
+ * scheduling difference, not a trust one.
  *
  * The second divergence is one of shape: this consumer classifies only after
  * the walk yielded nothing (`entries.length === 0` at the call site), while
