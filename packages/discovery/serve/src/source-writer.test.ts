@@ -479,6 +479,14 @@ describe("durable Record Discovery source writer", () => {
     await expect(collapsed.append(command())).rejects.toThrow(/no consumer accepts/);
   });
 
+  it("refuses a timestamp whose freshness window overflows the representable range", async () => {
+    const harness = makeHarness();
+    const extreme: AppendAnnouncementCommand = { ...command(), timestamp: "+275760-09-13T00:00:00.000Z" };
+
+    await expect(writer(harness).append(extreme)).rejects.toThrow(SourceWriterIntegrityError);
+    await expect(writer(harness).append(extreme)).rejects.toThrow(/out of representable range/);
+  });
+
   it("does not re-bound an already-signed recovery intent against the clock", async () => {
     const harness = makeHarness();
     await expect(writer(harness, "after-intent-before-page").append(command())).rejects.toThrow();

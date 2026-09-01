@@ -33,6 +33,8 @@ import type { Clock, ReadableImmutableBlobStore, StoredBlob } from "./ports.js";
 const ARCHIVE_PAGE_CONTENT_TYPE = "application/json";
 const DEFAULT_RECORD_CONTENT_TYPE = "application/octet-stream";
 const MAX_CAS_ATTEMPTS = 32;
+/** ECMAScript's time-value limit; beyond it `new Date(ms).toISOString()` throws. */
+const MAX_TIME_VALUE_MS = 8_640_000_000_000_000;
 
 export interface CasSnapshot<T> {
   readonly revision: string;
@@ -667,6 +669,14 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     // re-bounding a head that was in-window when minted would not delay it, it would
     // wedge the source. Once the intent is durable, finishing the commit is the only
     // safe act.
+    // `Number.isFinite` above admits timestamps near the ECMAScript Date limit, whose
+    // window end overflows the range and makes `toISOString()` throw a bare RangeError.
+    // Such a head is refused by the bound below anyway; refuse it in this taxonomy.
+    if (Math.abs(timestampMs + refreshWithinMs) > MAX_TIME_VALUE_MS) {
+      throw new SourceWriterIntegrityError(
+        `announcement timestamp is out of representable range: ${command.timestamp}`,
+      );
+    }
     const refreshBy = new Date(timestampMs + refreshWithinMs).toISOString();
     const now = clock.now();
     const windowFailure = checkRefreshWindow({ issuedAt: command.timestamp, refreshBy }, now);
