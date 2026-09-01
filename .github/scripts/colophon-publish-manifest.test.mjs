@@ -74,6 +74,12 @@ test('the verifier 0.2 patch release selects its attested parser-capable closure
   assert.equal(loadFirstCutPlatformPin(repoRoot).platformVersion, PIN_VERSION);
 });
 
+test('the shipped README states the pin the selected receipt actually applies', () => {
+  const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/README.md'), 'utf8');
+  assert.match(readme, new RegExp(V21_PIN_VERSION, 'u'));
+  assert.doesNotMatch(readme, /e00b2fc47fc5635b007eb349fb1e41aa81bb3c50/u);
+});
+
 test('the verifier 0.2 exception cannot become an implicit product or version exception', () => {
   const manifest = verifyManifest();
   assert.throws(
