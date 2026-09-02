@@ -1,6 +1,8 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.2 (revised 2026-08-07 per independent design review of v0.1; see §10 review record)
+**Version:** 0.3 (§3.2a amendment — the authored role → scope map and the #2527
+announce-plane ruling; v0.2 revised v0.1 per independent design review, see §10 review
+record)
 
 **Date:** 2026-08-07
 
@@ -302,7 +304,7 @@ export function performEoaCeremony(input: {
 }): Promise<EoaCeremonyEvidence>;
 
 /** Seals one role binding: KeyBinding (voucher = didPkh of the ceremony EOA,
- * relationship 'controls', scope from NATIVE_ROLE_IDENTITY_REQUIREMENTS,
+ * relationship 'controls', scope from NATIVE_ROLE_IDENTITY_REQUIREMENTS (§3.2a),
  * validFrom = anchor block time, anchors = [anchorDigest]), self-signed by the
  * role's DsseSigner. */
 export function authorRoleBinding(input: { …see PR1… }): Promise<SealedBindingEntry>;
@@ -365,6 +367,63 @@ export function sealPolicySuccessor(input: { … }): Promise<…>;
  * anchor). Surface fixed here so rotation needs no schema change. */
 export function revokeBinding(input: { … }): Promise<…>;
 ```
+
+### 3.2a Authored binding scope (normative amendment, ruled 2026-08-07)
+
+`authorRoleBinding` seals each binding's `scope` from `NATIVE_ROLE_IDENTITY_REQUIREMENTS`
+(`packages/trust/authoring/src/roles.ts`), which is the single source of truth and is the map
+below. A scope is not a synonym for a trust-core record family: it is any entry some verifier
+checks the binding under, and four of the nine roles carry one that is not a family at all.
+
+| Role | Authored scope |
+| --- | --- |
+| `requester-submission` | `authorizations` |
+| `admission` | `https://spec.jinn.network/trust-scopes/admission-receipts/v1` |
+| `requester-discovery` | `observations`, `jinn:discovery-announcements` |
+| `solver-delivery` | `deliveries` |
+| `solver-settlement` | `settlements` |
+| `solver-discovery` | `observations`, `jinn:discovery-announcements` |
+| `evaluator-verdict` | `verdicts`, `deliveries` |
+| `evaluator-settlement` | `settlements` |
+| `evaluator-discovery` | `observations`, `jinn:discovery-announcements` |
+
+**The discovery roles carry two scopes, and this ceremony is the document that was wrong.**
+v0.2 mapped roles to trust-core record families alone, so the three `*-discovery` roles were
+minted with `observations` only. The Record Discovery client will not treat a key as an
+announcement signer unless its **binding** declares `jinn:discovery-announcements`
+(`packages/discovery/client/src/trust-adapter.ts`, filtering on `DISCOVERY_SIGNING_SCOPE` from
+`packages/discovery/protocol/src/identifiers.ts`; stack implementation program §7.11). No key
+this ceremony minted could pass that filter, so `keys.resolve` returned an empty set and every
+native head verified as `unauthorized-signer` — at any catalog, on any host. Confirmed against
+the live DR-2026-08-05 gate catalog: all 14 bindings across both operators carried exactly one
+scope, and none carried the announce plane.
+
+The conflict between two ratified documents — this ceremony's §3.2 and program §7.11 — was
+ruled **in favour of §7.11** ([#2527](https://github.com/Jinn-Network/mono/issues/2527)). The
+discovery keys were already being used to sign announcements; their scope simply never said so,
+so declaring it is strictly additive: nothing checked before is checked less, and
+`RoleIdentitySet.open` runs one authority gate per required scope. The rejected alternative was
+making `DISCOVERY_SIGNING_SCOPE` host-injectable so native could nominate `observations` as its
+announcement scope — an interop divergence disguised as a config knob, with nothing downstream
+able to detect the drift.
+
+`admission` carries the admission-receipt trust scope rather than `authorizations` for the same
+class of reason, under its own later ruling: every receipt verifier — the fleet evaluator, the
+canonical marketplace-binding consumer, and the native consumer — checks the admission key's
+binding under that scope, so an `authorizations`-scoped binding satisfied none of them.
+
+**Widening a role's scope invalidates already-authored bindings.** `RoleIdentitySet.open`
+refuses at boot, naming the role and the missing scope, until the catalog's bindings are
+re-signed. Keys, identity stores and Agent IRIs are all preserved, so the recovery is a
+re-author and not a re-mint —
+[`docs/runbooks/native-trust-reauthor.md`](../docs/runbooks/native-trust-reauthor.md).
+
+The map is pinned on both sides of the deliberate cross-tree literal duplication:
+`packages/trust/authoring/src/roles.test.ts` pins every role's scope inside the trust tree, and
+`operator/test/daemon/trust-authoring-round-trip.test.ts` imports both `DISCOVERY_SIGNING_SCOPE`
+and the requirements table, asserts they agree, and drives a head one operator signed through
+the other operator's `createTrustAdapter(...).keys.resolve` over a real authored catalog — the
+poll-time path no test in the repository reached before this amendment.
 
 ### 3.3 What the package does NOT do
 
