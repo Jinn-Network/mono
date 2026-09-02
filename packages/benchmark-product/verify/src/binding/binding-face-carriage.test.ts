@@ -23,13 +23,20 @@
  * fails and names the constraint -- rather than a silent bypass.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 
-/** `packages/benchmark-product` -- both members whose source can reach the face. */
+/**
+ * Every product member's source, read off the tree rather than listed here: the face is exported
+ * from this package's public entry, so `cli` and `web` can reach it as readily as `core` can, and a
+ * hard-coded pair would stop scanning the member a future caller lands in.
+ */
 const productRoot = resolve(import.meta.dirname, "../../..");
-const memberRoots = ["core", "verify"].map((member) => join(productRoot, member, "src"));
+const memberRoots = readdirSync(productRoot, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && entry.name !== "node_modules")
+  .map((entry) => join(productRoot, entry.name, "src"))
+  .filter((directory) => existsSync(directory));
 
 /**
  * The two functions through which a binding becomes reader-visible prose, and the zero-based
@@ -72,7 +79,9 @@ function blankComments(text: string): string {
 
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    if (["node_modules", "dist", "testing"].includes(entry.name)) return [];
+    // `testing/` is scanned like any other source: a fixture builder that assembles a bundle is
+    // exactly where a binding record would first be added, so exempting it would exempt the case.
+    if (["node_modules", "dist", ".next"].includes(entry.name)) return [];
     const path = join(directory, entry.name);
     if (entry.isDirectory()) return sourceFiles(path);
     return entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts") ? [path] : [];
@@ -175,7 +184,9 @@ describe("the binding face is never emitted from an unchecked binding", () => {
         emitterCallSites(readFileSync(file, "utf8"), relative(productRoot, file))
       )
     );
-    // A vacuous pass is a failed scan: the emitters are called somewhere, or the names moved.
+    // A vacuous pass is a failed scan: the emitters are called somewhere, or the names moved, and
+    // the member roots are read off a tree that must contain more than this package.
+    expect(memberRoots.length).toBeGreaterThan(1);
     expect(sites.length).toBeGreaterThan(0);
     const unjustified = sites
       .filter((entry) => entry.binding !== undefined && entry.binding !== "undefined" && !entry.justified)

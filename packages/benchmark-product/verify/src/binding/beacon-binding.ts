@@ -148,10 +148,12 @@ const InstantSchema = z.string().datetime({ offset: true });
 
 /**
  * The admitted-source registry as a schema: exactly the ids of `BEACON_SOURCES`, nothing wider.
- * Exported on its own because the source is named in two places that are not this record -- the
- * draft spec that declares it before the lock and the sealed Run extension that carries it -- and
- * both validate against this one enum rather than against a second list free to drift from the
- * registry the derivation actually reads.
+ * Exported on its own because the source is chosen once, before any binding record exists -- the
+ * draft spec declares it (`core/src/domain/draft.ts`) and the lock seals it into the Run -- so the
+ * declaration is validated against this one enum rather than against a second list free to drift
+ * from the registry the derivation actually reads. `records` deliberately does not narrow the
+ * sealed extension to this set: it cannot import the verifier that depends on it, and the producer
+ * refuses an inadmissible source at the draft, before it seals one.
  */
 export const BeaconSourceIdSchema = z.enum(
   Object.keys(BEACON_SOURCES) as [BeaconSourceId, ...BeaconSourceId[]],
