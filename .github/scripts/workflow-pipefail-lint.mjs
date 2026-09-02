@@ -272,6 +272,39 @@ function collectDefaultShells(lines) {
   return scopes;
 }
 
+// The lines each top-level job spans, so a job-level `defaults:` is resolved against the
+// steps it actually covers rather than leaking into the next job.
+function collectJobRanges(lines) {
+  const starts = [];
+  let inJobs = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    if (/^jobs:\s*$/u.test(line)) {
+      inJobs = true;
+      continue;
+    }
+    if (indentOf(line) === 0) {
+      inJobs = false;
+      continue;
+    }
+    if (inJobs && /^ {2}[A-Za-z0-9_-]+:\s*$/u.test(line)) starts.push(index);
+  }
+  return starts.map((start, position) => ({ start, end: starts[position + 1] ?? lines.length }));
+}
+
+// `shell:` from the innermost `defaults:` covering `line`: the enclosing job's, else the
+// workflow's.
+function inheritedShell(scopes, jobs, line) {
+  const job = jobs.find((range) => line >= range.start && line < range.end);
+  const jobScope =
+    job === undefined
+      ? undefined
+      : scopes.findLast((scope) => scope.indent > 0 && scope.line >= job.start && scope.line < job.end);
+  if (jobScope !== undefined) return jobScope.shell;
+  return scopes.findLast((scope) => scope.indent === 0)?.shell ?? null;
+}
+
 // The `shell:` declared on the step that owns the `run:` at `runLine`. Step keys share
 // the `run:` key's column; the step opens on the `- ` one level out.
 function stepShell(lines, runLine, keyIndent) {
@@ -322,6 +355,7 @@ function stepShellForward(lines, runLine, keyIndent) {
 export function collectRunBlocks(source) {
   const lines = source.split('\n');
   const defaultScopes = collectDefaultShells(lines);
+  const jobRanges = collectJobRanges(lines);
   const blocks = [];
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -351,7 +385,7 @@ export function collectRunBlocks(source) {
     if (body.length === 0) continue;
 
     const declared = stepShell(lines, index, keyIndent) ?? stepShellForward(lines, index, keyIndent);
-    const inherited = defaultScopes.filter((scope) => scope.line < index).at(-1)?.shell ?? null;
+    const inherited = inheritedShell(defaultScopes, jobRanges, index);
     blocks.push({ runLine: index + 1, shell: declared ?? inherited, body });
   }
   return blocks;
@@ -497,10 +531,12 @@ export function analyzeWorkflow(file, source) {
   return findings;
 }
 
-/** Findings for every `.yml` in a workflows directory, ordered by file then line. */
+/** Findings for every workflow in a directory, ordered by file then line. */
 export function lintWorkflows(workflowsDir = WORKFLOWS_DIR) {
   return readdirSync(workflowsDir)
-    .filter((name) => name.endsWith('.yml'))
+    // GitHub reads both spellings, so linting only `.yml` would leave a hole the day
+    // someone adds a `.yaml`.
+    .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
     .sort()
     .flatMap((name) => analyzeWorkflow(name, readFileSync(join(workflowsDir, name), 'utf8')));
 }

@@ -107,6 +107,32 @@ test('a mid-block `set -o pipefail` moves the boundary, and `set +o pipefail` mo
   );
 });
 
+test('a job-level `defaults:` covers its own job only', () => {
+  const source = [
+    'defaults:',
+    '  run:',
+    '    shell: sh',
+    'jobs:',
+    '  first:',
+    '    defaults:',
+    '      run:',
+    '        shell: bash',
+    '    steps:',
+    '      - run: |',
+    '          git tag | head -1',
+    '  second:',
+    '    steps:',
+    '      - run: |',
+    '          git tag | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => finding.severity),
+    ['error', 'warning'],
+    "the second job inherits the workflow's `sh`, not the first job's `bash`",
+  );
+});
+
 test('a non-shell `shell:` is skipped whole', () => {
   assert.deepEqual(severities("x = 'a | head -1'", { shell: 'python' }), []);
   assert.deepEqual(severities('$x = "a | head -1"', { shell: 'pwsh' }), []);
