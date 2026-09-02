@@ -48,7 +48,12 @@ import {
 
 /** Rows per GraphQL page on every lifecycle leg. */
 const LIFECYCLE_PAGE_LIMIT = 1000;
-/** Hard page cap per leg. 50 x 1000 = 50k rows before the honesty guard fires. */
+/**
+ * Hard page cap per PAGE WALK — not per leg (#3117).
+ * `drainLifecycleLegBatched` starts a fresh walk for each `LIFECYCLE_IN_BATCH`
+ * slice, so a leg batched into N requests can fetch up to 50N pages before any
+ * cap engages. 50 x 1000 = 50k rows per walk before the honesty guard fires.
+ */
 const MAX_LIFECYCLE_PAGES = 50;
 /**
  * Values per `*_in` filter argument. The attempts leg can drain 50k rows, and
@@ -533,15 +538,23 @@ export interface TaskLifecycleReader {
    * fact would otherwise go missing without the caller being able to tell. That
    * is: a leg that cannot be drained whole (page cap, missing connection,
    * missing/unusable `pageInfo` on any page other than a first page that is
-   * itself empty), a task/attempt/verdict row that cannot be parsed, and an
-   * attempt or verdict row that has no place on the spine (no task row, a
-   * chainId contradicting its task's, or — the live case, since the legs are
-   * separate unpinned reads — a verdict for an attempt indexed after the
-   * attempts leg ran). Every one of them warns.
+   * itself empty), a task/attempt/verdict row that cannot be parsed, a repeated
+   * primary key within one leg, and an attempt or verdict row that has no place
+   * on the spine (no task row, or — the live case, since the legs are separate
+   * unpinned reads — a verdict for an attempt indexed after the attempts leg
+   * ran). Every one of them warns.
    *
-   * That list is exhaustive. Exactly TWO drops are survivable, and both warn
-   * once per leg: a row outside the scope its leg queried (a leaky indexer
+   * The assembler also withdraws for an attempt whose chainId contradicts its
+   * task's, but that shape is unreachable FROM THIS READER: the scope guard
+   * below drops such a row first, with a warning, as one of the survivable
+   * drops named next.
+   *
+   * That list is exhaustive for the withdrawals. Two drops are survivable and
+   * warn once per leg: a row outside the scope its leg queried (a leaky indexer
    * filter), and a malformed row on an untrusted `*EnvelopeMeta` candidate leg.
+   * A third drop is SILENT by design and documented in the assembler's module
+   * header: a candidate matching no spine row is discarded, because a candidate
+   * may never create the row it would attach to.
    */
   getTaskLifecycleEvidence(args: { taskIds: string[] }): Promise<Map<string, TaskLifecycleEvidence>>;
 }
@@ -583,10 +596,16 @@ export function createTaskLifecycleReader(
       // one of the identity fields a consumer needs to re-derive the row against
       // an RPC. Omitting it on a bad value would fail OPEN on the same row where
       // a bad `creator` withdraws the read.
+      // `finalized` and `refunded` are checked, not coerced with `=== true`:
+      // that comparison read every non-boolean as `false`, so a finalized task
+      // would have presented as not-finalized — failing OPEN, and in the more
+      // dangerous of the two directions, on the one pair of authoritative task
+      // columns that did (#3114).
       if (createdAtBlock === undefined
         || !isCount(row.chainId) || !isCount(row.maxClaims) || !isCount(row.requiredVerdicts)
         || !isBytes32(row.manifestDigest) || !isBytes32(row.taskCidDigest)
-        || !isAddress(row.creator) || !isBytes32(row.createdAtTx)) {
+        || !isAddress(row.creator) || !isBytes32(row.createdAtTx)
+        || typeof row.finalized !== 'boolean' || typeof row.refunded !== 'boolean') {
         return emptyOnLifecycleRowReject('tasks', `taskId=${row.id}`);
       }
       const task: RawTaskRow = {
@@ -603,8 +622,8 @@ export function createTaskLifecycleReader(
         requiredVerdicts: row.requiredVerdicts > 0 ? row.requiredVerdicts : 1,
         createdAtBlock,
         createdAtTx: row.createdAtTx.toLowerCase() as `0x${string}`,
-        finalized: row.finalized === true,
-        refunded: row.refunded === true,
+        finalized: row.finalized,
+        refunded: row.refunded,
       };
       tasks.push(task);
     }
@@ -645,9 +664,18 @@ export function createTaskLifecycleReader(
         // `String(...)`: without this guard `String(null)` enters it as the
         // literal "null". It stays a string — the column is wei, and Number
         // would round it.
+        //
+        // The `number` branch is narrowed to `isCount` for the same reason
+        // (#3115): `String(1234567890123456789012)` is
+        // "1.2345678901234568e+21" — rounded, not a decimal integer, and a
+        // downstream `BigInt(...)` throws on it. Ponder serializes `t.bigint()`
+        // as a string so the branch never fires against the real indexer, but a
+        // guard that would misbehave if it came alive is the opposite of a
+        // guard. `String()` of a non-negative safe integer is always
+        // decimal-integer form; every other number now warns and withdraws.
         if (createdAtBlock === undefined
           || !isCount(row.attemptIndex)
-          || (typeof row.deliveryRate !== 'string' && typeof row.deliveryRate !== 'number')
+          || (typeof row.deliveryRate !== 'string' && !isCount(row.deliveryRate))
           || !isBytes32(row.requestId) || !isAddress(row.operator)
           || !isAddress(row.priorityMech)) {
           return emptyOnLifecycleRowReject(
@@ -728,8 +756,15 @@ export function createTaskLifecycleReader(
         // Candidates are untrusted hints, so a malformed one is skipped rather
         // than fatal — but never silently.
         const enrichedAtBlock = parseExactBlock(row.enrichedAtBlock);
+        // `manifestCid` and `publisherAgentId` are guarded alongside their
+        // siblings rather than copied raw (#3114): both are `notNull`
+        // primary-key components of the meta table, and a null or non-string
+        // wire value would otherwise land in a field this module's type
+        // declares `string`, with nothing downstream re-checking it.
         if (enrichedAtBlock === undefined || !isCount(row.chainId)
-          || !isBytes32(row.requestId) || !isHex(row.manifestHash)) {
+          || !isBytes32(row.requestId) || !isHex(row.manifestHash)
+          || typeof row.manifestCid !== 'string'
+          || typeof row.publisherAgentId !== 'string') {
           warnSkip('unparseable candidate row');
           continue;
         }
@@ -765,8 +800,15 @@ export function createTaskLifecycleReader(
       const warnSkip = skipWarner('verdictEnvelopeMetas');
       for (const row of rows) {
         const enrichedAtBlock = parseExactBlock(row.enrichedAtBlock);
+        // `manifestCid` and `publisherAgentId` are guarded alongside their
+        // siblings rather than copied raw (#3114): both are `notNull`
+        // primary-key components of the meta table, and a null or non-string
+        // wire value would otherwise land in a field this module's type
+        // declares `string`, with nothing downstream re-checking it.
         if (enrichedAtBlock === undefined || !isCount(row.chainId)
-          || !isBytes32(row.requestId) || !isHex(row.manifestHash)) {
+          || !isBytes32(row.requestId) || !isHex(row.manifestHash)
+          || typeof row.manifestCid !== 'string'
+          || typeof row.publisherAgentId !== 'string') {
           warnSkip('unparseable candidate row');
           continue;
         }
