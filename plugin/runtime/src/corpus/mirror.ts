@@ -72,11 +72,9 @@ export interface CreateCorpusMirrorOptions {
  * `"unchanged"` is the archive re-serving the exact head this consumer already
  * accepted; `"re-signed"` is the same chain position re-signed at a later
  * instant. §5.2 obliges a live source to re-sign an idle head before
- * `refreshBy` expires, and `serve` ships `maintainHead` for exactly that. The
- * operator's projector loop now honours that obligation for the requester
- * source it serves (#2549), so the shape arrives from in-tree publishers as
- * well as from conformant external ones; the solver/evaluator sources written
- * through `serve`'s durable source writer still re-sign only on append.
+ * `refreshBy` expires, and `serve` ships `maintainHead` for exactly that -- but
+ * every in-tree publisher calls it only after an append, so the shape arrives
+ * from a conformant external source rather than from anything here (#2549).
  * Both are revalidation's to judge (#3443, #3468); `undefined` means the head
  * is making a chain claim, which is `verifySourceChain`'s to judge and never
  * this path's.

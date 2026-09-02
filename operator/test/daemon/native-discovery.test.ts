@@ -527,9 +527,8 @@ describe('native discovery consumer', () => {
   // #3468 — §5.2 obliges a live source to re-sign its idle head before `refreshBy` expires
   // (`serve`'s `maintainHead`): same sequence, same entry, a later `issuedAt`. That is not
   // `sameHead`, and before #3468 it fell to the sequence guard, so a conformant archive would go
-  // red the moment it re-signed (#2549). The operator's own projector loop now re-signs its idle
-  // requester head (#2549, `projector-loop.ts`), and a conformant peer may too — these fixtures
-  // mint the shape by hand so the consumer's judgment is pinned independently of either writer.
+  // red the moment it re-signed (#2549). No in-tree publisher re-signs while idle, so the shape
+  // arrives from an external source — which is why these fixtures mint it by hand.
   describe('a re-signed idle head at an unchanged position (#3468)', () => {
     async function checkpointed() {
       const first = entry('0000000000000001', null, DIGEST_A);

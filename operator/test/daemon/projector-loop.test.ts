@@ -4,8 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeAbiParameters, encodeEventTopics, type Address, type Hex, type PublicClient } from 'viem';
 import { BASE_SEPOLIA_TODAY, JINN_ROUTER_V3_ABI } from '@jinn-network/marketplace-binding';
-import { archivePagePath, DISCOVERY_SIGNING_SCOPE, headPath } from '@jinn-network/record-discovery-protocol';
-import type { SourceHead } from '@jinn-network/record-discovery-protocol';
+import { archivePagePath, DISCOVERY_SIGNING_SCOPE } from '@jinn-network/record-discovery-protocol';
 import type { ScopedDiscoverySigner } from '@jinn-network/marketplace-projector';
 import { RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 import { openVenueState, type VenueStateDatabase } from '@jinn-network/marketplace-venue-base';
@@ -169,7 +168,6 @@ function loop(input: {
   logger?: { info(m: string): void; warn(m: string): void };
   resolveRecord?: ProjectorLoopConfig['ports']['resolveRecord'];
   signer?: ProjectorLoopConfig['ports']['signer'];
-  clock?: ProjectorLoopConfig['ports']['clock'];
   overrides?: Partial<ProjectorLoopConfig>;
 }): {
   readonly projector: ProjectorLoop;
@@ -201,7 +199,6 @@ function loop(input: {
       })),
       verifyVerdictObservation: async () => ({ gate: { decisionGrade: true, failures: [] } }),
       referencedBytes: { fetch: async () => undefined },
-      ...(input.clock === undefined ? {} : { clock: input.clock }),
       readPageCount: () => pageCounts.get('test-operator') ?? 0,
       writePageCount: (count: number) => {
         pageCounts.set('test-operator', count);
@@ -570,174 +567,5 @@ describe('projector loop', () => {
     expect(logged).toContain('dropped the "submission" announcement for TaskCreated');
     expect(logged).toContain('120');
     expect(logged).toContain('projector_canonical_events row cleared/orphaned by event_key');
-  });
-  // ## The idle head heartbeat (#2549)
-  //
-  // §5.2 obliges a LIVE source to re-sign its head before `refreshBy` expires even when it
-  // announced nothing -- an expired head is a withholding signal, not silence. Until this loop
-  // did it, no in-tree publisher re-signed while idle: every `maintainHead` call followed an
-  // append. The live cost was measured in the round-10 gate (#2549): operator A idled >24h, its
-  // served requester head lapsed, and operator B's cold boot refused it -- correctly, since a
-  // PEER's lapsed head is a fail-closed `stale` refusal that throws out of `sync()`. An
-  // idle-but-live operator was therefore un-joinable until it happened to post again.
-  //
-  // The re-stamp is the same shape #3468 taught consumers to follow: same `sequence`, same
-  // `entry`, a strictly later `issuedAt`. Nothing is announced and no sequence moves.
-  describe('idle head heartbeat (#2549)', () => {
-    const START = new Date('2026-08-01T00:00:00.000Z');
-
-    function readServedHead(archiveRoot: string): SourceHead {
-      const raw = readFileSync(`${archiveRoot}${headPath('test-operator')}`, 'utf8');
-      const wire = JSON.parse(raw) as { payload?: string };
-      // The fixture signer is present, so the served object is a DSSE envelope.
-      return JSON.parse(Buffer.from(wire.payload!, 'base64').toString('utf8')) as SourceHead;
-    }
-
-    /** A loop whose head was minted by a real append at `START`, with a movable clock. */
-    function published() {
-      const chain = buildScriptedChain();
-      chain.mine(120);
-      chain.setFinalized(120n);
-      chain.addLog(120n, taskCreatedLog());
-      let now = START;
-      const built = loop({ chain, state, clock: { now: () => now } });
-      return {
-        ...built,
-        chain,
-        at(instant: string): void {
-          now = new Date(instant);
-        },
-        /** Advance the chain without producing any log, so the next tick appends nothing. */
-        idle(blockNumber: bigint): void {
-          chain.mine(5);
-          chain.setFinalized(blockNumber);
-        },
-      };
-    }
-
-    it('re-stamps a head that has spent half its refresh window, at the same chain position', async () => {
-      const published_ = published();
-      expect((await published_.projector.tick()).announcements).toBe(1);
-      const before = readServedHead(published_.archiveRoot);
-      expect(before.issuedAt).toBe(START.toISOString());
-
-      published_.idle(125n);
-      published_.at('2026-08-01T13:00:00.000Z'); // 13h into a 24h window
-      const idleTick = await published_.projector.tick();
-
-      const after = readServedHead(published_.archiveRoot);
-      expect(idleTick.announcements).toBe(0);
-      expect(after.sequence).toBe(before.sequence);
-      expect(after.entry).toBe(before.entry);
-      expect(after.issuedAt).toBe('2026-08-01T13:00:00.000Z');
-      expect(new Date(after.refreshBy).getTime()).toBeGreaterThan(new Date(before.refreshBy).getTime());
-      // Persisted, so the NEXT tick refreshes from the head that was actually served -- otherwise
-      // `refreshHead`'s monotonicity floor is the superseded instant.
-      expect(JSON.parse(published_.cursorStore.read()!.headJson!)).toEqual(after);
-      expect(published_.cursorStore.read()!.sequence).toBe(before.sequence);
-    });
-
-    it('leaves a head that is still well inside its window untouched', async () => {
-      const published_ = published();
-      await published_.projector.tick();
-      const before = readFileSync(`${published_.archiveRoot}${headPath('test-operator')}`, 'utf8');
-      const beforeCursor = published_.cursorStore.read()!.headJson;
-
-      published_.idle(125n);
-      published_.at('2026-08-01T11:00:00.000Z'); // 11h into a 24h window
-      await published_.projector.tick();
-
-      expect(readFileSync(`${published_.archiveRoot}${headPath('test-operator')}`, 'utf8')).toBe(before);
-      expect(published_.cursorStore.read()!.headJson).toBe(beforeCursor);
-    });
-
-    it('lets an append win the tick it happens in rather than re-stamping the old position', async () => {
-      const published_ = published();
-      await published_.projector.tick();
-      const before = readServedHead(published_.archiveRoot);
-
-      published_.chain.mine(5);
-      published_.chain.setFinalized(125n);
-      published_.chain.addLog(125n, taskCreatedLog({
-        taskId: 43n,
-        transactionHash: `0x${'3'.repeat(64)}`,
-      }));
-      published_.at('2026-08-01T13:00:00.000Z'); // also past the half-window
-      expect((await published_.projector.tick()).announcements).toBe(1);
-
-      const after = readServedHead(published_.archiveRoot);
-      expect(BigInt(after.sequence)).toBe(BigInt(before.sequence) + 1n);
-      expect(after.entry).not.toBe(before.entry);
-    });
-
-    it('does nothing before the source has ever published a head', async () => {
-      const chain = buildScriptedChain();
-      chain.mine(120);
-      chain.setFinalized(120n);
-      const { projector, cursorStore, archiveRoot } = loop({
-        chain,
-        state,
-        clock: { now: () => new Date('2026-08-01T13:00:00.000Z') },
-      });
-
-      await projector.tick();
-
-      expect(cursorStore.read()!.headJson).toBeNull();
-      expect(() => readFileSync(`${archiveRoot}${headPath('test-operator')}`, 'utf8')).toThrow();
-    });
-
-    it('refuses to re-sign a head whose own timestamps do not parse', async () => {
-      const published_ = published();
-      await published_.projector.tick();
-      const served = readFileSync(`${published_.archiveRoot}${headPath('test-operator')}`, 'utf8');
-      const cursor = published_.cursorStore.read()!;
-      // A head this consumer's own verifier would refuse must not be laundered into a freshly
-      // signed one: NaN comparisons are false, so the heartbeat declines it.
-      const corrupt = { ...JSON.parse(cursor.headJson!), issuedAt: 'not-a-date' };
-      published_.cursorStore.write({ ...cursor, headJson: JSON.stringify(corrupt) });
-
-      published_.idle(125n);
-      published_.at('2026-09-01T00:00:00.000Z');
-      await published_.projector.tick();
-
-      expect(readFileSync(`${published_.archiveRoot}${headPath('test-operator')}`, 'utf8')).toBe(served);
-      expect(JSON.parse(published_.cursorStore.read()!.headJson!)).toEqual(corrupt);
-    });
-
-    // The head object is written BEFORE the cursor transaction, so a crash between them leaves the
-    // archive ahead of the cursor. That order is the safe one: the next mint bases `issuedAt` on
-    // the cursor's older instant but takes `max(now, prev + 1)`, so it still lands past the head a
-    // consumer may already have accepted. The reverse order could mint at or below it, which every
-    // consumer reads as a rewind.
-    it('survives a cursor crash mid-heartbeat without ever re-serving an older instant', async () => {
-      const published_ = published();
-      await published_.projector.tick();
-
-      published_.idle(125n);
-      published_.at('2026-08-01T13:00:00.000Z');
-      const originalWrite = published_.cursorStore.write.bind(published_.cursorStore);
-      let failOnce = true;
-      (published_.cursorStore as unknown as { write: typeof originalWrite }).write = (...args) => {
-        if (failOnce) {
-          failOnce = false;
-          throw new Error('simulated cursor transaction crash');
-        }
-        originalWrite(...args);
-      };
-      await expect(published_.projector.tick()).rejects.toThrow('simulated cursor transaction crash');
-      (published_.cursorStore as unknown as { write: typeof originalWrite }).write = originalWrite;
-
-      const crashed = readServedHead(published_.archiveRoot);
-      expect(crashed.issuedAt).toBe('2026-08-01T13:00:00.000Z');
-      // The cursor still holds the pre-heartbeat head.
-      expect(JSON.parse(published_.cursorStore.read()!.headJson!).issuedAt).toBe(START.toISOString());
-
-      published_.at('2026-08-01T14:00:00.000Z');
-      await published_.projector.tick();
-      const recovered = readServedHead(published_.archiveRoot);
-      expect(new Date(recovered.issuedAt).getTime())
-        .toBeGreaterThan(new Date(crashed.issuedAt).getTime());
-      expect(recovered.sequence).toBe(crashed.sequence);
-    });
   });
 });

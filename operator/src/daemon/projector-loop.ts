@@ -41,8 +41,6 @@ import {
   type ObservationMarketplaceEvent,
   type ProjectedAnnouncement,
 } from '@jinn-network/marketplace-projector';
-import { maintainHead } from '@jinn-network/record-discovery-serve';
-import type { SourceHead } from '@jinn-network/record-discovery-protocol';
 import type { ChainLogSource } from '@jinn-network/marketplace-venue-base';
 import type { MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
 import type { Store } from '../store/store.js';
@@ -57,50 +55,6 @@ import { buildAnnouncementProjectionPorts, type ProjectorPortsInput } from './pr
 
 /** Cursor sequence floor before any announcement has ever been emitted (16-digit zero form). */
 const NO_ANNOUNCEMENTS_SEQUENCE = '0000000000000000';
-
-/**
- * How much of its own freshness window a served head may spend before this loop re-signs it in
- * place (#2549).
- *
- * Design §5.2 obliges a LIVE source to re-sign its head before `refreshBy` expires even when it
- * announced nothing -- an expired head is a withholding signal, not silence -- and `serve` ships
- * `maintainHead` for exactly that. Until this loop, no in-tree publisher honoured that while idle:
- * every `maintainHead` call followed an append, so the head's `refreshBy` only ever moved when the
- * sequence did. The round-10 gate measured the cost: operator A idled past `refreshBy`, and
- * operator B's cold boot refused A's served head -- correctly, since a PEER's lapsed head is a
- * fail-closed `stale` refusal that throws out of `sync()` (`native-discovery.ts`, `degradedReason`
- * deliberately does not degrade `stale`). An idle-but-live operator was un-joinable until it
- * happened to post again.
- *
- * The threshold is a fraction of the head's OWN window rather than an absolute duration, so it
- * tracks whatever `refreshWithinMs` minted the head instead of drifting away from it. At the
- * published-source default (`MAX_REFRESH_BY_AHEAD_MS`, 24h) a half-window means roughly two
- * re-signs a day against a 5s tick, and leaves 12h of margin for a consumer's poll interval,
- * downtime and clock skew. It is also self-healing: an operator that was down for 25h boots with a
- * head well past the half-window, so its first tick re-stamps it -- which is precisely the
- * condition the gate hit.
- *
- * Not configurable. The clock is already injectable (`ProjectorPortsInput.clock`), which is all a
- * test needs, and a knob here would be a config surface nobody has asked for.
- */
-const HEAD_REFRESH_ELAPSED_FRACTION = 0.5;
-
-/**
- * Whether the served head has spent at least `HEAD_REFRESH_ELAPSED_FRACTION` of its own window.
- *
- * Fail-closed on anything it cannot compare: an unparseable `issuedAt` or `refreshBy`, or a
- * non-positive window, makes every comparison below `false`, so such a head is LEFT AS IT IS
- * rather than used as the base for a fresh signature. A head with those timestamps is one both
- * named verification procedures already refuse (`checkRefreshWindow`); re-signing it would launder
- * a malformed head into a validly-signed malformed head, and this operator's own consumer would
- * still refuse it -- loudly and for the right reason -- either way.
- */
-function dueForHeadRefresh(head: SourceHead, now: Date): boolean {
-  const issuedAtMs = new Date(head.issuedAt).getTime();
-  const windowMs = new Date(head.refreshBy).getTime() - issuedAtMs;
-  if (!(windowMs > 0)) return false;
-  return now.getTime() - issuedAtMs >= windowMs * HEAD_REFRESH_ELAPSED_FRACTION;
-}
 
 export interface ProjectorLoopConfig {
   readonly chain: MarketplaceChainConfig;
@@ -310,45 +264,7 @@ export class ProjectorLoop {
       }
     }
 
-    // ## The idle head heartbeat (#2549)
-    //
-    // A tick that appended nothing leaves the served head exactly where the last append left it,
-    // and §5.2 gives that head a finite life. Re-sign it in place once it has spent enough of its
-    // window (see `HEAD_REFRESH_ELAPSED_FRACTION`): same `sequence`, same `entry`, a strictly
-    // later `issuedAt`, a fresh `refreshBy`. Nothing is announced and no sequence moves -- this is
-    // the shape #3468 taught consumers to follow (`reSignedIdleHead` in `native-discovery.ts`,
-    // `classifyIdleHead` in the plugin runtime's corpus mirror), so a peer already checkpointed at
-    // this position revalidates it instead of reading it as a rollback.
-    //
-    // It runs only when this tick appended nothing: an append already mints a strictly newer head
-    // inside `projectAnnouncements`/`appendSignedReorgCorrections`, so the two never both write in
-    // one tick and the append always wins the tick it happens in.
-    //
-    // `maintainHead` writes the head object to the archive BEFORE the cursor transaction below
-    // records it. That order is the safe one. A crash between them leaves the archive at an
-    // instant the cursor has not seen; the next tick refreshes from the cursor's older head but
-    // takes `issuedAt = max(now, prev + 1)`, so it still lands past the head a consumer may
-    // already have accepted. The reverse order could mint at or below that head, which every
-    // consumer reads as a rewind.
-    let heartbeatHead: SourceHead | undefined;
-    const appended = result.entries.length > 0 || correctionResult !== undefined;
-    if (!appended && priorHead !== undefined && dueForHeadRefresh(priorHead, ports.clock.now())) {
-      const maintained = await maintainHead(
-        ports.store,
-        ports.signer,
-        ports.clock,
-        ports.source,
-        priorHead,
-      );
-      heartbeatHead = maintained.head;
-      this.config.logger?.info(
-        `[projector] re-signed the idle head of ${ports.source.agent}/${ports.source.name} at `
-          + `sequence ${maintained.head.sequence} (issuedAt ${maintained.head.issuedAt}, `
-          + `refreshBy ${maintained.head.refreshBy}); no entry was appended`,
-      );
-    }
-
-    const emittedHead = heartbeatHead ?? result.head ?? correctionResult?.head;
+    const emittedHead = result.head ?? correctionResult?.head;
     const nextSequence = emittedHead?.sequence ?? cursor?.sequence ?? NO_ANNOUNCEMENTS_SEQUENCE;
     const nextEntryDigest = emittedHead?.entry ?? cursor?.entryDigest ?? null;
     const nextHeadJson = emittedHead !== undefined ? JSON.stringify(emittedHead) : (cursor?.headJson ?? null);
