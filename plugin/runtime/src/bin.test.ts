@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,6 +6,7 @@ import type { DsseSigner } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
 
 import { main, buildMirrorCapabilities, buildOwnedEnvSnapshot, buildServeCapabilities } from "./bin.js";
+import { createNodeRuntimeConfigFileReader } from "./bin-node-fs.js";
 import { resolveRuntimeConfig } from "./config.js";
 import { createLineLogger } from "./logger.js";
 import { createPluginRuntime, type PluginRuntime } from "./runtime.js";
@@ -240,20 +241,23 @@ describe("the composed corpus ports", () => {
     // closure is what the MCP `health` tool returns — so this composes the
     // capability set exactly as `main` does and reads the report directly.
     // Constructing the corpus capability on every real launch (which the
-    // injected ports now do) must not make that report permanently red: no
-    // in-repo entry point passes a config `file`, so `corpus.trust` is always
-    // `undefined` here, and its remedy names keys nothing can read.
+    // injected ports now do) must not make that report permanently red: a
+    // default install writes no configuration file, so the reader below yields
+    // `undefined`, `corpus.trust` is `undefined`, and its remedy would name
+    // keys nothing has declared.
     const home = await mkdtemp(join(tmpdir(), "jinn-bin-corpus-health-"));
+    const readConfigFile = createNodeRuntimeConfigFileReader(home);
     const binIo = {
       writeOut: () => {},
       writeErr: () => {},
       homeDirectory: home,
       untilShutdown: async () => {},
-      ...resolveCorpusBinIoFields({ env: {}, homeDirectory: home }),
+      readConfigFile,
+      ...resolveCorpusBinIoFields({ env: {}, homeDirectory: home, readConfigFile }),
     };
     let runtime: PluginRuntime;
     runtime = createPluginRuntime({
-      config: resolveRuntimeConfig({ env: {}, homeDirectory: home }),
+      config: resolveRuntimeConfig({ env: {}, homeDirectory: home, file: readConfigFile() }),
       log: createLineLogger("info", () => {}),
       capabilities: buildServeCapabilities("tools", binIo, () => runtime.health()),
     });
@@ -267,5 +271,55 @@ describe("the composed corpus ports", () => {
     });
     expect(report.checks.filter((check) => !check.ok)).toEqual([]);
     expect(report.ok).toBe(true);
+  });
+});
+
+describe("the runtime configuration file", () => {
+  /** The `main` invocation every test below shares, minus the document under test. */
+  async function serveWithConfigFile(home: string): Promise<{ code: number; err: string }> {
+    const err: string[] = [];
+    const code = await main(["serve"], {}, {
+      writeOut: () => {},
+      writeErr: (line) => err.push(line),
+      homeDirectory: home,
+      untilShutdown: async () => {},
+      readConfigFile: createNodeRuntimeConfigFileReader(home),
+    });
+    return { code, err: err.join("\n") };
+  }
+
+  test("an absent file reads as no document at all, not as a failure", async () => {
+    // A default install has none, and the defaults are the whole configuration.
+    expect(createNodeRuntimeConfigFileReader(await writableHome())()).toBeUndefined();
+  });
+
+  test("a present file reaches main, and its home key relocates the tree", async () => {
+    // Also pins the precedence: the document is read from the PRE-resolution
+    // home, so a `home` key inside it moves the data tree and not the file.
+    const home = await writableHome();
+    const relocated = await writableHome();
+    await writeFile(join(home, "config.json"), JSON.stringify({ home: relocated }));
+    const { code, err } = await serveWithConfigFile(home);
+    expect(code).toBe(0);
+    expect(err).toContain(relocated);
+  });
+
+  test("a malformed file fails loud instead of resolving an empty configuration", async () => {
+    // Swallowing this would follow no archives while the operator who wrote
+    // the corpus block believes their sources are live.
+    const home = await writableHome();
+    await writeFile(join(home, "config.json"), "{ not json");
+    const { code, err } = await serveWithConfigFile(home);
+    expect(code).toBe(2);
+    expect(err).toContain("configuration failed");
+    expect(err).toContain("is not valid JSON");
+  });
+
+  test("a schema-invalid corpus block still reaches the operator", async () => {
+    const home = await writableHome();
+    await writeFile(join(home, "config.json"), JSON.stringify({ corpus: { sources: [{ agent: "a" }] } }));
+    const { code, err } = await serveWithConfigFile(home);
+    expect(code).toBe(2);
+    expect(err).toContain("corpus configuration is invalid");
   });
 });

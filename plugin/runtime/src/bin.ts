@@ -13,6 +13,7 @@ import { openLocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
 
 import { createCaptureCapability } from "./capture/capability.js";
 import {
+  createNodeRuntimeConfigFileReader,
   nodeIndexDatabaseIo,
   nodeSensitivityNonceIo,
 } from "./bin-node-fs.js";
@@ -132,6 +133,16 @@ export interface BinIo {
    * `corpus-chain-verification` health check.
    */
   readonly corpusVerifyDriver?: VerifyDriver;
+  /**
+   * Reads the host's optional configuration document. Injected like every other
+   * port here, so a test drives it without a real filesystem — and shared with
+   * the corpus composition root, which must resolve over the SAME document or
+   * the composed ports and the resolved configuration would disagree about
+   * which archives this install follows.
+   *
+   * Absent means no document, which is exactly a default install.
+   */
+  readonly readConfigFile?: () => unknown;
 }
 
 /** `serve [--role tools|session]`. Default `tools`: read-only MCP without capture signer. */
@@ -325,7 +336,11 @@ export async function main(
 
   let config;
   try {
-    config = resolveRuntimeConfig({ env, homeDirectory: io.homeDirectory });
+    config = resolveRuntimeConfig({
+      env,
+      homeDirectory: io.homeDirectory,
+      file: io.readConfigFile?.(),
+    });
   } catch (error) {
     io.writeErr(`configuration failed: ${describeUnknownError(error)}`);
     return 2;
@@ -412,15 +427,20 @@ if (isProcessEntry()) {
 
   const env = readConfigEnvFromProcess();
   const homeDirectory = process.env.JINN_PLUGIN_HOME ?? join(homedir(), ".jinn-plugin");
+  // One reader, both consumers: `main` below and the corpus composition root
+  // beside it resolve the same document. A read failure is replayed to
+  // whichever of them asks second, so it stays `main`'s to report.
+  const readConfigFile = createNodeRuntimeConfigFileReader(homeDirectory);
 
   process.exitCode = await main(process.argv.slice(2), env, {
     writeOut: (line) => process.stdout.write(`${line}\n`),
     writeErr: (line) => process.stderr.write(`${line}\n`),
     homeDirectory,
     untilShutdown,
+    readConfigFile,
     // The corpus composition root. Unresolvable configuration yields no
     // fields, so `main` still owns the `configuration failed` message and its
     // exit code rather than this block replacing it with a crash.
-    ...resolveCorpusBinIoFields({ env, homeDirectory }),
+    ...resolveCorpusBinIoFields({ env, homeDirectory, readConfigFile }),
   });
 }

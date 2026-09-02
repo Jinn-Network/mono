@@ -216,12 +216,12 @@ export function createCorpusCapability(
         // Empty by configuration, exactly as `corpus-mirror` treats a
         // followed-nothing install: with no archives there is no producer to
         // admit, so an absent trust policy is not a fault. Reporting it as one
-        // made every default `serve` process red — no in-repo entry point
-        // passes a config `file`, so `corpus.trust` is `undefined` on every
-        // real launch — with a remedy naming two keys nothing reads, which is
-        // the operator-unfixable remedy spec §9.3 forbids by name. Declining a
-        // trust policy WHILE following archives is still a fault, and stays
-        // red. See Finding F-C7-1.
+        // made every default `serve` process red — an install with no
+        // `config.json` leaves `corpus.trust` `undefined` — with a remedy
+        // naming two keys that install declares nothing in. Declining a trust
+        // policy WHILE following archives is still a fault, and stays red.
+        // (F-C7-1's wider gap — that no entry point read a config file at all
+        // — is closed: `createNodeRuntimeConfigFileReader` supplies one.)
         checks.push({
           name: "corpus-trust-policy",
           ok: followed === 0,

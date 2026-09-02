@@ -27,7 +27,11 @@ import type { DsseSigner } from "@jinn-network/trust-core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { buildMirrorCapabilities, type BinIo } from "../bin.js";
-import { nodeIndexDatabaseIo, nodeSensitivityNonceIo } from "../bin-node-fs.js";
+import {
+  createNodeRuntimeConfigFileReader,
+  nodeIndexDatabaseIo,
+  nodeSensitivityNonceIo,
+} from "../bin-node-fs.js";
 import { resolveRuntimeConfig, type MirrorSourceConfig, type RuntimeConfig } from "../config.js";
 import type { HealthCheck } from "../health.js";
 import type { RuntimeLogger } from "../logger.js";
@@ -36,7 +40,11 @@ import { TOOL_NAMES } from "../mcp/identifiers.js";
 import { createCorpusAdmissionFilter } from "../relevance/admission.js";
 import { createSensitivityClassifier, openRelevanceIndex } from "../relevance/index.js";
 import { createPluginRuntime, type PluginRuntime } from "../runtime.js";
-import { createLocalCorpusPorts } from "../session-host-corpus.js";
+import {
+  createLocalCorpusPorts,
+  resolveCorpusBinIoFields,
+  type LocalCorpusPorts,
+} from "../session-host-corpus.js";
 import { didKeyFromEd25519PublicKey } from "../session-host-crypto.js";
 import { RUNTIME_VERSION } from "../version.js";
 import { createCorpusCapability, type CorpusCapability } from "./capability.js";
@@ -415,6 +423,60 @@ describe("the mirror as a standing service", () => {
       expect(check.detail).toContain("HTTP 500");
     } finally {
       await service.runtime.stop();
+    }
+  });
+
+  test("the service follows the archives the home's configuration file declares", async () => {
+    // The last link in the chain. Everything above resolves its configuration
+    // in the test; a CLI-launched `mirror` resolves its own, and until the
+    // entry points read a document it followed nothing at all (F-C7-1).
+    const { archive, didKey } = await buildArchive();
+    await writeFile(
+      join(home, "config.json"),
+      JSON.stringify({
+        corpus: {
+          sources: [
+            {
+              ...source,
+              signingKeys: [{ keyid: didKey, validFrom: "2026-01-01T00:00:00.000Z" }],
+            },
+          ],
+          chainVerification: "verified",
+          trust: { genesisDigest: archive.genesisDigest, policyDirectory: "policy" },
+        },
+      }),
+    );
+
+    // The one document both entry-point paths resolve over, read exactly as
+    // `bin.ts` reads it.
+    const readConfigFile = createNodeRuntimeConfigFileReader(home);
+    const config = resolveRuntimeConfig({ env: {}, homeDirectory: home, file: readConfigFile() });
+    expect(config.corpus.sources.map((followed) => followed.repositoryId)).toEqual([
+      source.repositoryId,
+    ]);
+
+    // The corpus composition root resolves the SAME document. Its verify
+    // driver is the observable: the declared signing key is what the head
+    // resolves against, so a driver built over an empty document would refuse
+    // this chain `unauthorized-signer` and the cycle below would fail.
+    const ports = resolveCorpusBinIoFields({ env: {}, homeDirectory: home, readConfigFile });
+    expect(Object.keys(ports)).toContain("corpusVerifyDriver");
+
+    const recorder = cycleRecorder();
+    const runtime = createPluginRuntime({
+      config,
+      log: recorder.log,
+      capabilities: buildMirrorCapabilities({
+        ...binIo(config, loopbackFetch(archive.routes)),
+        corpusVerifyDriver: (ports as LocalCorpusPorts).corpusVerifyDriver,
+      }),
+    });
+    await runtime.start();
+    try {
+      await recorder.waitFor(1);
+      expect(recorder.cycles[0]).toMatchObject({ status: "synced", indexed: true });
+    } finally {
+      await runtime.stop();
     }
   });
 });
