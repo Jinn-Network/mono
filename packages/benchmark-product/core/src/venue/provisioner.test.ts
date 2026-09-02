@@ -721,11 +721,10 @@ describe("createLocalProvisioner — repository-work cells", () => {
         { name: "demo1", description: "Use for repository implementation tasks." },
       );
       const requirements = {
-        harness: { id: DEMO1_CLAUDE_HARNESS_ID, version: "2.1.222", digest: "a".repeat(64) },
+        harness: { id: DEMO1_CLAUDE_HARNESS_ID, version: "2.1.222" },
         model: { id: "claude-haiku-4-5-20251001" },
-        effort: "low",
-        isolationPolicy: "unrestricted",
-        loadout: { kind: "skill", name: "demo1" },
+        effort: "high",
+        loadout: artifacts.baseline,
       };
 
       await provisionerFor(task, mirror, requirements, artifacts)
