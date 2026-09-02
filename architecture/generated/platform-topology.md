@@ -945,6 +945,7 @@ The exact 75-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/forked-chain-second-signed-child/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/forked-chain-shared-previous/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/genesis-pinned-sequence/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/head-issued-ahead/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/issued-at-regression-v2/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/issued-at-regression/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/item-content-corruption/vector.json | — | — | — |
