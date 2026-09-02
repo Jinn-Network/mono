@@ -9,7 +9,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -325,6 +325,27 @@ describe("freeze repository bundle-format support table", () => {
       if (FREEZE_REPO_BUNDLE_SUPPORT[format].disclosure) {
         expect(FREEZE_REPO_BUNDLE_SUPPORT[format].qualification, format).toBe(true);
       }
+    }
+  });
+});
+
+describe("the verifier README's accepted-format list", () => {
+  test("names exactly the closures the export accepts", () => {
+    // A third party reads this section to learn which bundles the projection takes, and it
+    // enumerated the accepted versions by hand -- the same shape that let `/8` be refused for its
+    // version alone (issue #3540). `PUBLIC-BUNDLE.md` is pinned to the support table by the
+    // product's docs-consistency suite; this pins the copy that ships in the npm tarball.
+    const readme = readFileSync(join(import.meta.dirname, "..", "README.md"), "utf8");
+    const start = readme.indexOf("\n## Freeze-artifact repositories\n");
+    expect(start, "the freeze-artifact section must exist").toBeGreaterThan(-1);
+    const rest = readme.indexOf("\n## ", start + 1);
+    const section = readme.slice(start, rest === -1 ? undefined : rest);
+
+    for (const format of SUPPORTED_BUNDLE_FORMATS) {
+      // The section speaks in short names (`v8`), not whole format strings.
+      const shortName = `v${format.slice(format.lastIndexOf("/") + 1)}`;
+      const accepted = FREEZE_REPO_BUNDLE_SUPPORT[format].qualification;
+      expect(section.includes(shortName), `${format} accepted=${accepted}`).toBe(accepted);
     }
   });
 });
