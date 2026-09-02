@@ -118,9 +118,9 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
      * `submission-captured`, one leg down. It carries no accounting and participates in no fold:
      * its sole consumer is `runResume`'s `journaledEvaluationSubmissions` replay map, which
      * without it covers only legs whose `submission-accepted` append survived the crash. A
-     * capture with no later acceptance simply means the crash preceded backend acceptance; the
-     * replay then re-offers these same bytes, which `backend.recover` classifies `absent` and
-     * `submit` accepts normally — the solve leg's own semantics.
+     * capture with no later acceptance means the crash preceded backend acceptance; `recover`
+     * then classifies it `absent` and `dispatchEvaluation` re-seals rather than replaying a
+     * deadline stamped before the crash.
      *
      * Kept a distinct kind rather than a `leg`-marked `submission-captured` deliberately: that
      * kind sets the cell's SOLVE `submissionSha256` and dispatch count in `foldRunJournal`,

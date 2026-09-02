@@ -443,7 +443,13 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
     );
 
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
-    expect(entries.map((entry) => entry.kind)).toEqual(["cell-event", "delivery", "evaluation"]);
+    // The evaluation leg's pre-submit capture (#3237) sits between the delivery and the verdict.
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "cell-event",
+      "delivery",
+      "evaluation-submission-captured",
+      "evaluation",
+    ]);
 
     const deliveryEntry = entries.find((entry) => entry.kind === "delivery");
     expect(deliveryEntry).toMatchObject({ cellKey, dispatch: 1, attempt: "att-solve-1" });
@@ -1067,9 +1073,13 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
     );
 
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
-    // No "delivery" entry is re-written — only the evaluation leg runs.
-    expect(entries.map((entry) => entry.kind)).toEqual(["evaluation"]);
-    expect(entries[0]).toMatchObject({ cellKey, evalTaskSha256: sha256Hex(new Uint8Array([4, 5])) });
+    // No "delivery" entry is re-written — only the evaluation leg runs (preceded by its own
+    // pre-submit capture, #3237).
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "evaluation-submission-captured",
+      "evaluation",
+    ]);
+    expect(entries[1]).toMatchObject({ cellKey, evalTaskSha256: sha256Hex(new Uint8Array([4, 5])) });
   });
 
   test("heals a gap whose delivery entry was lost by re-harvesting the attempt, byte-exactly (#3081)", async () => {
@@ -1109,7 +1119,11 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
 
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
     // The lost delivery entry is written back FIRST, then the evaluation leg runs.
-    expect(entries.map((entry) => entry.kind)).toEqual(["delivery", "evaluation"]);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "delivery",
+      "evaluation-submission-captured",
+      "evaluation",
+    ]);
     expect(entries[0]).toMatchObject({
       cellKey,
       dispatch: 1,
@@ -1119,7 +1133,7 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
       outputs: [{ name: "prediction", sha256: sha256Hex(predictionBytes) }],
     });
     expect(getSealedBytes(workspaceDir, sha256Hex(solveDeliveryBytes))).toEqual(solveDeliveryBytes);
-    expect(entries[1]).toMatchObject({ kind: "evaluation", cellKey, evalIndex: 1 });
+    expect(entries[2]).toMatchObject({ kind: "evaluation", cellKey, evalIndex: 1 });
     // A second catch-up now takes the ordinary already-journaled path: healing converges.
     expect(evaluationGaps(foldRunJournal(entries), 1)).toEqual([]);
   });
@@ -1186,8 +1200,11 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
     expect(doc.requirements?.[EVALUATOR_REQUIREMENT_KEY]).toBe(evaluatorIri(2));
 
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
-    expect(entries.map((entry) => entry.kind)).toEqual(["evaluation"]);
-    expect(entries[0]).toMatchObject({ cellKey, evaluator: evaluatorIri(2), evalIndex: 2 });
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "evaluation-submission-captured",
+      "evaluation",
+    ]);
+    expect(entries[1]).toMatchObject({ cellKey, evaluator: evaluatorIri(2), evalIndex: 2 });
   });
 
   test("the same retryable failure terminalizes immediately at attempt 1 when maxInfrastructureRetries is 0 (the pin is load-bearing, spec §5.3's control)", async () => {
@@ -1236,6 +1253,7 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
     expect(entries.some((entry) => entry.kind === "evaluation-retryable-failure")).toBe(false);
     expect(entries).toEqual([
+      expect.objectContaining({ kind: "evaluation-submission-captured", cellKey, evalIndex: 1 }),
       expect.objectContaining({
         kind: "evaluation",
         cellKey,
@@ -1243,8 +1261,9 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
         failureCategory: "dependency-unavailable",
       }),
     ]);
-    // evaluationAttempt is only journaled when > 1 — this terminalized on attempt 1.
-    expect(entries[0] && "evaluationAttempt" in entries[0]).toBe(false);
+    // evaluationAttempt is only journaled when > 1 — this terminalized on attempt 1. (The
+    // capture at index 0 always carries one; the terminal at index 1 is the subject here.)
+    expect(entries[1] && "evaluationAttempt" in entries[1]).toBe(false);
   });
 
   test("a typed provider outage retries the same derived Task once without re-running solve", async () => {
@@ -1308,6 +1327,7 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
 
     await driveEvaluationCatchUp(deps, [gap]);
     expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual([
+      expect.objectContaining({ kind: "evaluation-submission-captured", cellKey, evalIndex: 1 }),
       expect.objectContaining({
         kind: "evaluation-retryable-failure",
         cellKey,

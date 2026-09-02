@@ -139,6 +139,7 @@ function sha256Hex(bytes: Uint8Array): string {
 
 interface Interruption {
   hung: boolean;
+  settled?: boolean;
   submissionBytes?: Uint8Array;
   resolveHung?: () => void;
 }
@@ -153,12 +154,22 @@ interface Interruption {
 function hangAfterEvaluationAcceptance(
   backend: ProxiedBackend,
   interruption: Interruption,
+  when: "after-acceptance" | "before-acceptance" = "after-acceptance",
 ): ProxiedBackend {
   return {
     capabilities: () => backend.capabilities(),
     submit: async (taskBytes, submissionBytes, engagement) => {
       const arm = !interruption.hung && isEvaluationSubmission(submissionBytes);
       if (arm) interruption.hung = true;
+      if (arm && when === "before-acceptance") {
+        // The backend never sees these bytes at all: the capture is journaled (it precedes
+        // `submit`), the acceptance is not, and no attempt exists. `recover` will classify this
+        // Submission `absent` on resume.
+        interruption.settled = true;
+        interruption.submissionBytes = submissionBytes;
+        interruption.resolveHung?.();
+        return new Promise(() => {});
+      }
       const ack = await backend.submit(taskBytes, submissionBytes, engagement);
       if (!arm || !ack.accepted) {
         if (arm) interruption.hung = false;
@@ -169,11 +180,15 @@ function hangAfterEvaluationAcceptance(
       // than whatever state a mid-execution shutdown happened to leave — that mid-execution
       // window is a DIFFERENT one, already covered by
       // `./run-resume-evaluation-midexecution.integration.test.ts`.
-      for (let poll = 0; poll < 1_200; poll += 1) {
+      let settled = false;
+      for (let poll = 0; poll < 1_200 && !settled; poll += 1) {
         const snapshot = await backend.observe(ack.submission);
-        if (snapshot.descriptor.derived.state === "delivered") break;
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        settled = snapshot.descriptor.derived.state === "delivered";
+        if (!settled) await new Promise((resolve) => setTimeout(resolve, 100));
       }
+      // Assert rather than fall through: a slow host that never reached `delivered` would
+      // silently degrade this test into the mid-execution scenario the sibling test owns.
+      interruption.settled = settled;
       interruption.submissionBytes = submissionBytes;
       interruption.resolveHung?.();
       // Never returns: the recording proxy's journal append is unreachable, exactly as it is for
@@ -205,6 +220,7 @@ function hangAfterEvaluationAcceptance(
 async function driveUntilEvaluationAcceptedUnjournaled(
   clock: () => string,
   draftId: string,
+  when: "after-acceptance" | "before-acceptance" = "after-acceptance",
 ): Promise<Interruption> {
   const at = clock();
   const document = readDraftDocument(workspaceDir, draftId);
@@ -233,7 +249,7 @@ async function driveUntilEvaluationAcceptedUnjournaled(
   });
   try {
     const backend = createRecordingProxy(
-      hangAfterEvaluationAcceptance(venue.backend, interruption),
+      hangAfterEvaluationAcceptance(venue.backend, interruption, when),
       { workspaceDir, draftId, liveClock: clock },
     );
     const driveDeps: DriveDeps = {
@@ -276,6 +292,11 @@ describe("resume replays an evaluation Submission accepted but not yet journaled
       const acceptedBytes = interruption.submissionBytes;
       expect(acceptedBytes, "the interruption never fired on an evaluation Submission").toBeDefined();
       if (acceptedBytes === undefined) throw new Error("unreachable");
+      expect(
+        interruption.settled,
+        "the evaluation attempt never reached `delivered`, so this is the mid-execution window "
+        + "`./run-resume-evaluation-midexecution.integration.test.ts` owns, not this one",
+      ).toBe(true);
       const coordinate = evaluationCoordinate(acceptedBytes);
       const acceptedSha256 = sha256Hex(acceptedBytes);
 
@@ -367,6 +388,96 @@ describe("resume replays an evaluation Submission accepted but not yet journaled
         judged: matrix.cells.length,
         runOutcome: "complete",
       });
+    },
+    240_000,
+  );
+
+  test(
+    "a capture the backend never saw is re-sealed on resume, not replayed",
+    async () => {
+      const clock = makeClock();
+      const draftId = "draft-never-accepted";
+      await setUpLockedDraft(clock, draftId);
+
+      // The other half of the pre-submit capture boundary: the capture is durable and the backend
+      // never accepted the bytes. Replaying them would carry a `deadline` stamped before the
+      // crash — already in the past on any resume later than `policy.cellWindow` — and the attempt
+      // would terminal `expired`, which carries no retryable category and so completes the
+      // evalIndex could-not-grade forever. The idempotency key is still free, so the leg must
+      // re-seal, exactly as it did before the capture existed.
+      const interruption = await driveUntilEvaluationAcceptedUnjournaled(
+        clock,
+        draftId,
+        "before-acceptance",
+      );
+      const capturedBytes = interruption.submissionBytes;
+      expect(capturedBytes, "the interruption never fired on an evaluation Submission").toBeDefined();
+      if (capturedBytes === undefined) throw new Error("unreachable");
+      const coordinate = evaluationCoordinate(capturedBytes);
+      const capturedSha256 = sha256Hex(capturedBytes);
+
+      const interrupted = readRunJournalEntries(workspaceDir, draftId);
+      expect(
+        interrupted.filter(
+          (entry): entry is Extract<RunJournalEntry, { kind: "evaluation-submission-captured" }> =>
+            entry.kind === "evaluation-submission-captured" && entry.cellKey === coordinate.cellKey,
+        ).map((entry) => entry.submissionSha256),
+        "the pre-submit capture was not journaled, so this test proves nothing",
+      ).toEqual([capturedSha256]);
+      expect(
+        interrupted.some(
+          (entry) =>
+            entry.kind === "submission-accepted"
+            && entry.leg === "evaluation"
+            && entry.cellKey === coordinate.cellKey,
+        ),
+        "the backend accepted the Submission — this is the other test's window",
+      ).toBe(false);
+
+      const resumed = await runResume(contextFor(clock), { draftId, maxConcurrentCells: 4 });
+      expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
+
+      const final = readRunJournalEntries(workspaceDir, draftId);
+      expect(
+        final.filter(
+          (entry): entry is Extract<RunJournalEntry, { kind: "evaluation" }> =>
+            entry.kind === "evaluation" && entry.evaluationTerminal === "could-not-grade",
+        ).map((entry) => `${entry.cellKey}: ${entry.detail ?? ""}`),
+      ).toEqual([]);
+
+      // The proof of re-sealing: the bytes the backend actually accepted are NOT the captured
+      // ones (they carry a resume-time deadline), and a new capture records what was offered.
+      const accepted = final.filter(
+        (entry): entry is Extract<RunJournalEntry, { kind: "submission-accepted" }> =>
+          entry.kind === "submission-accepted"
+          && entry.leg === "evaluation"
+          && entry.cellKey === coordinate.cellKey
+          && entry.dispatch === coordinate.dispatch,
+      );
+      expect(accepted).toHaveLength(1);
+      expect(accepted[0]?.submissionSha256).not.toBe(capturedSha256);
+      expect(
+        final.filter(
+          (entry): entry is Extract<RunJournalEntry, { kind: "evaluation-submission-captured" }> =>
+            entry.kind === "evaluation-submission-captured" && entry.cellKey === coordinate.cellKey,
+        ).at(-1)?.submissionSha256,
+        "the re-sealed bytes were not captured, so a further crash would replay the abandoned ones",
+      ).toBe(accepted[0]?.submissionSha256);
+
+      const crashedLeg = final.filter(
+        (entry): entry is Extract<RunJournalEntry, { kind: "evaluation" }> =>
+          entry.kind === "evaluation" && entry.cellKey === coordinate.cellKey,
+      );
+      expect(crashedLeg).toHaveLength(1);
+      expect(crashedLeg[0]?.verdictSha256).toBeDefined();
+
+      const collected = await runCollect(contextFor(clock), { draftId });
+      expect(collected.ok, JSON.stringify(collected)).toBe(true);
+      if (!collected.ok) throw new Error("unreachable");
+      const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
+      for (const cell of matrix.cells) {
+        expect(cell.outcome, cell.cellKey).toBe("judged");
+      }
     },
     240_000,
   );
