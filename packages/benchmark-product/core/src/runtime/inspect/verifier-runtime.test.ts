@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
@@ -28,6 +28,20 @@ async function waitUntil(predicate: () => boolean, description: string): Promise
   throw new Error(`timed out waiting for ${description}`);
 }
 
+/** The child creates the pid file and writes it in two steps, so existence is not readiness: a
+ * descheduled child leaves a file that reads back empty, and `Number("")` is 0 — a pid that
+ * `process.kill` routes to the whole process group instead of to a child that is already gone. */
+function readPid(pidPath: string): number | undefined {
+  let content: string;
+  try {
+    content = readFileSync(pidPath, "utf8").trim();
+  } catch {
+    return undefined;
+  }
+  const pid = Number(content);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+}
+
 function isRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -49,8 +63,8 @@ test("cancellation waits until the verifier child is terminated and reaped", asy
   ].join("\n");
   const controller = new AbortController();
   const running = spawnBounded(process.execPath, ["-e", script], { LANG: "C.UTF-8" }, controller.signal);
-  await waitUntil(() => existsSync(pidPath), "the verifier fixture process to start");
-  const pid = Number(readFileSync(pidPath, "utf8"));
+  await waitUntil(() => readPid(pidPath) !== undefined, "the verifier fixture process to report its pid");
+  const pid = readPid(pidPath) as number;
 
   const abortedAt = process.hrtime.bigint();
   controller.abort();
