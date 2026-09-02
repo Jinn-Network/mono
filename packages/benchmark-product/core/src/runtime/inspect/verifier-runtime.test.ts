@@ -17,9 +17,10 @@ afterEach(() => {
   }
 });
 
-/** Wall clock, so a descheduled worker spends the budget without doing work. 10s matches the order
- * of this suite's 30s per-test bound rather than the 1s that a loaded box can spend just getting a
- * cold Node child to its first write. */
+/** Attempt-counted rather than wall-clock, so a descheduled worker's overrunning sleeps stretch the
+ * budget instead of consuming it. 1000 attempts at 10ms is a 10s floor, matching the order of this
+ * suite's 30s per-test bound rather than the 1s that a loaded box can spend just getting a cold
+ * Node child to its first write. */
 async function waitUntil(predicate: () => boolean, description: string): Promise<void> {
   for (let attempt = 0; attempt < 1000; attempt += 1) {
     if (predicate()) return;
@@ -57,8 +58,11 @@ test("cancellation waits until the verifier child is terminated and reaped", asy
   const pidPath = join(directory, "pid");
   const script = [
     "const { writeFileSync } = require('node:fs');",
-    `writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));`,
+    // The handler is installed before the pid is written, so the parent's pid-keyed readiness gate
+    // implies it exists. Written the other way round, an abort landing in the gap would meet the
+    // default SIGTERM disposition, kill the child instantly, and fail the timing bound below.
     `process.on('SIGTERM', () => setTimeout(() => process.exit(0), ${TERMINATION_DELAY_MS}));`,
+    `writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));`,
     "setInterval(() => {}, 1000);",
   ].join("\n");
   const controller = new AbortController();
