@@ -131,6 +131,52 @@ jobs:
             '^\.github/workflows/npm-publish\.yml$'
             '^\.github/scripts/npm-publish-workflow\.test\.mjs$'
             '^\.github/scripts/operator-[^/]*\.test\.mjs$'
+            # Transitive `portal:` closure of the trees above (#3573). Every one of
+            # these is built from SOURCE into the operator workspace by `yarn install`,
+            # so a change confined to one of them changes what this lane verifies —
+            # and until #3573 none of them selected it. The list is derived from the
+            # `portal:` graph and enforced by
+            # `.github/scripts/portal-path-filters.test.mjs`; it is not hand-curated.
+            '^packages/discovery/client/'
+            '^packages/discovery/facts/offers/'
+            '^packages/discovery/facts/task-execution/'
+            '^packages/discovery/protocol/'
+            '^packages/discovery/serve/'
+            '^packages/discovery/sources/evidence-journal/'
+            '^packages/discovery/testing/'
+            '^packages/discovery/transport-http/'
+            '^packages/environments/record/'
+            '^packages/evidence/attestation-issuer/'
+            '^packages/evidence/catalog-sqlite/'
+            '^packages/evidence/discovery/'
+            '^packages/evidence/execution-evidence-builder/'
+            '^packages/evidence/execution-recorder/'
+            '^packages/evidence/local-runtime/'
+            '^packages/evidence/offer/'
+            '^packages/evidence/protocol/'
+            '^packages/evidence/repository/'
+            '^packages/layer/'
+            '^packages/marketplace/binding/'
+            '^packages/marketplace/pipeline/'
+            '^packages/marketplace/projector/'
+            '^packages/marketplace/venue-base/'
+            '^packages/policy/identity/'
+            '^packages/read-plane/'
+            '^packages/task-execution/backend/'
+            '^packages/task-execution/backend-local/assembly/'
+            '^packages/task-execution/backend-local/launchers/'
+            '^packages/task-execution/backend-local/supervisor/'
+            '^packages/task-execution/backend-local/workspace/'
+            '^packages/task-execution/evaluation-harness/'
+            '^packages/task-execution/evaluator-adapters/'
+            '^packages/task-execution/profiles/'
+            '^packages/task-execution/protocol/'
+            '^packages/task-execution/testing/'
+            '^packages/task-supply/admission/'
+            '^packages/trust/authoring/'
+            '^packages/trust/core/'
+            '^packages/trust/observation/'
+            '^packages/trust/resolve/'
           )
           printf '%s\n' "${patterns[@]}" > "${RUNNER_TEMP}/selection.ere"
           # The changed list goes to a file and grep reads the file. Piping it into
