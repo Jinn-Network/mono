@@ -42,6 +42,23 @@ import type { MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchm
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import {
   ClaimAnchorSchema,
+  ClaimDisclosureSectionSchema,
+  PROMPTED_SCREENING_PROFILE,
+  PUBLIC_BUNDLE_V8_CHECKS as READER_DISCLOSED_VERIFICATION_CHECKS,
+  SELF_RUN_TRUST_ROOT,
+  anchoredTrustRoot,
+} from "@colophon-claims/verify";
+import type { ClaimAnchor, ClaimDisclosureSection } from "@colophon-claims/verify";
+import {
+  ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
+  BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  CLAIM_PACKAGE_SCHEMA_ID,
+  LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_CHECKS as READER_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_VERIFICATION_COMMAND as READER_VERIFICATION_COMMAND,
@@ -51,36 +68,23 @@ import {
   PUBLIC_BUNDLE_V7_CHECKS as READER_ANCHORED_QUALIFICATION_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V8_CHECKS as READER_DISCLOSED_VERIFICATION_CHECKS,
-  ClaimDisclosureSectionSchema,
-  PROMPTED_SCREENING_PROFILE,
-  SELF_RUN_TRUST_ROOT,
-  anchoredTrustRoot,
-} from "@colophon-claims/verify";
-import type { ClaimAnchor, ClaimDisclosureSection } from "@colophon-claims/verify";
+} from "../legacy-closures.js";
 import { join } from "node:path";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { artifactsDir, claimPackageArtifactPath } from "../workspace/layout.js";
 import type { VenueHonesty } from "../operations/run-results.js";
 
-export const CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/1";
-export const BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/2";
-/**
- * The anchored claim package (anchor-evidence design §7.4): claim-package/1 plus the `anchors`
- * section, carried by `benchmark-product-public-bundle/6`. The allocation is the next free number
- * in the classic path; the evidence-native claim-package/3 adopts the same anchor surface in its
- * own later allocation.
- */
-export const ANCHORED_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/4";
-/**
- * The anchored binary-qualification claim package (issue #3205): claim-package/2's exact
- * qualification projection plus claim-package/4's `anchors` section, carried by
- * `benchmark-product-public-bundle/7`. This is the "later allocation" both earlier guards named:
- * /2 has no anchors slot and /4 has no qualification slot, so before this number existed an
- * anchored run of a binary-instrument benchmark could not produce a claim at all. The allocation is
- * an ADDITION — /1, /2, /3, and /4 keep their meanings and their bytes.
- */
-export const ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/5";
+export {
+  ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
+  BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  CLAIM_PACKAGE_SCHEMA_ID,
+  LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+} from "../legacy-closures.js";
 /**
  * The disclosed anchored binary-qualification claim package (issue #2839,
  * disclosure-specification-record design §6.5/§6.6): claim-package/5 exactly, plus the
@@ -92,20 +96,11 @@ export const ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-
  * packet takes the then-next free numbers if a line has advanced — this is `/6`, and it stacks on
  * the ANCHORED branch so the real flagship bundle can carry its disclosure record without giving up
  * its anchor. The allocation is an ADDITION: /1, /2, /3, /4, and /5 keep their meanings and bytes.
+ *
+ * A new (post-legacy) allocation, so unlike the four frozen closures it is declared here rather
+ * than in `../legacy-closures.ts`.
  */
 export const DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/6";
-export const BINARY_QUALIFICATION_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.1.0 <bundle-dir>" as const;
-export const BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.1 <bundle-dir>" as const;
-/** Prompted-screening v2 claims require the verifier release that carries that admission surface. */
-export const PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.2.1 <bundle-dir>" as const;
-/** Previously materialized prompted bundles remain valid under their immutable 0.2.0 claim. */
-export const LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.2.0 <bundle-dir>" as const;
-export const PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.2 <bundle-dir>" as const;
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase sha256 hex digest");
 
