@@ -1,4 +1,4 @@
-import type { Transport, TransportResponse } from "@jinn-network/record-discovery-client";
+import type { Transport, TransportFetchOptions, TransportResponse } from "@jinn-network/record-discovery-client";
 
 import type { FetchLike } from "./ports.js";
 
@@ -118,6 +118,7 @@ async function fetchWithinOrigin(
   fetchLike: FetchLike,
   target: string,
   headers: Record<string, string>,
+  signal: AbortSignal | undefined,
 ): Promise<Response> {
   // Carried as a URL, not a string: every hop needs its origin, and re-parsing
   // the spelling each time invites the two forms disagreeing. Parsing here also
@@ -133,7 +134,16 @@ async function fetchWithinOrigin(
   }
   for (let hop = 0; ; hop += 1) {
     // eslint-disable-next-line no-await-in-loop -- a redirect chain is sequential by definition.
-    const response = await fetchLike(current.toString(), { method: "GET", headers, redirect: "manual" });
+    // The signal is re-supplied on EVERY hop: a redirect chain is a fresh
+    // request each time, and a deadline that only covered the first one would
+    // let a peer stretch the read indefinitely by redirecting within its own
+    // origin.
+    const response = await fetchLike(current.toString(), {
+      method: "GET",
+      headers,
+      redirect: "manual",
+      ...(signal === undefined ? {} : { signal }),
+    });
     if (!REDIRECT_STATUSES.has(response.status)) return response;
 
     const location = response.headers.get("location");
@@ -169,7 +179,12 @@ async function fetchWithinOrigin(
  * ceiling has to hold during the read, so this cancels the stream at the
  * first chunk that crosses it rather than after the last one arrives.
  */
-async function readBounded(response: Response, url: string, maxBytes: number): Promise<Uint8Array> {
+async function readBounded(
+  response: Response,
+  url: string,
+  maxBytes: number,
+  signal: AbortSignal | undefined,
+): Promise<Uint8Array> {
   const body = response.body;
   if (!body) {
     const whole = new Uint8Array(await response.arrayBuffer());
@@ -182,6 +197,11 @@ async function readBounded(response: Response, url: string, maxBytes: number): P
   let total = 0;
   try {
     for (;;) {
+      // The body read is the second place a peer can hold the caller: headers
+      // arrive, then the stream trickles or stalls. `fetch`'s own signal
+      // aborts the underlying request, but a signal that fires between chunks
+      // is only observed if the loop looks, so it looks.
+      signal?.throwIfAborted();
       const { value, done } = await reader.read();
       if (value !== undefined) {
         total += value.length;
@@ -214,7 +234,7 @@ export function createHttpTransport(
   let revalidations = 0;
 
   return {
-    async "fetch"(url: string): Promise<TransportResponse> {
+    async "fetch"(url: string, operation?: TransportFetchOptions): Promise<TransportResponse> {
       const target = resolveUrl(baseUrl, url);
       const cached = cache.get(target);
       const headers: Record<string, string> = {
@@ -223,7 +243,7 @@ export function createHttpTransport(
       };
 
       requests += 1;
-      const response = await fetchWithinOrigin(fetchLike, target, headers);
+      const response = await fetchWithinOrigin(fetchLike, target, headers, operation?.signal);
 
       if (response.status === 304 && cached !== undefined) {
         revalidations += 1;
@@ -245,7 +265,7 @@ export function createHttpTransport(
         throw new TransportOversizeError(target, declaredLength, maxBytes);
       }
 
-      const bytes = await readBounded(response, target, maxBytes);
+      const bytes = await readBounded(response, target, maxBytes, operation?.signal);
 
       const contentType = response.headers.get("content-type") ?? undefined;
       const etag = response.headers.get("etag");
