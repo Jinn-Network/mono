@@ -14,22 +14,16 @@ import { z } from "zod";
 import { EvidenceNativeBundleManifestV5Schema } from "@jinn-network/benchmarking-protocol";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "./profile/errors.js";
+import {
+  BUNDLE_FORMAT,
+  BUNDLE_V4_FORMAT,
+  BUNDLE_V6_FORMAT,
+  BUNDLE_V7_FORMAT,
+  LegacyBundleFormatSchema,
+  type LegacyBundleFormat,
+} from "./legacy-closures.js";
 
-export const BUNDLE_FORMAT = "benchmark-product-public-bundle/2" as const;
-export const BUNDLE_V4_FORMAT = "benchmark-product-public-bundle/4" as const;
 export const BUNDLE_V5_FORMAT = "benchmark-product-public-bundle/5" as const;
-/** The anchored closure (anchor-evidence design §7.4). Additive: v2, v4, and v5 keep their check
- * lists, byte shapes, and values; the `anchors/` member and the `integrity-anchors` check exist
- * only here. */
-export const BUNDLE_V6_FORMAT = "benchmark-product-public-bundle/6" as const;
-/**
- * The anchored binary-qualification closure (issue #3205): v4's member list — `qualification.json`,
- * the v4 evidence catalog, the v4 trust document — plus v6's `anchors/` member and its
- * `integrity-anchors` check. Additive in exactly the same way v6 was: v2, v4, v5, and v6 keep their
- * member lists, check lists, and bytes, and only a run that is BOTH anchored and
- * qualification-projecting emits this one.
- */
-export const BUNDLE_V7_FORMAT = "benchmark-product-public-bundle/7" as const;
 /**
  * The disclosed anchored binary-qualification closure (issue #2839, disclosure-specification-record
  * design §6.5): v7's complete member list plus one `records/<sha256>.bin` member carrying the sealed
@@ -45,9 +39,11 @@ export const BUNDLE_V7_FORMAT = "benchmark-product-public-bundle/7" as const;
  *
  * Additive in exactly the way v6 and v7 were: v2, v4, v5, v6, and v7 keep their member lists, check
  * lists, and bytes, and only a run that is anchored AND qualification-projecting AND carrying a
- * sealed disclosure declaration emits this one.
+ * sealed disclosure declaration emits this one. A new closure rather than a frozen one, so it is
+ * declared here rather than in `legacy-closures.ts`.
  */
 export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
+/** Spans every lineage: the four frozen legacy closures, the evidence-native bundle, and `/8`. */
 export const SUPPORTED_BUNDLE_FORMATS = [
   BUNDLE_FORMAT,
   BUNDLE_V4_FORMAT,
@@ -67,13 +63,7 @@ export const BundleManifestFileSchema = z.object({
 });
 
 const LegacyBundleManifestSchema = z.object({
-  format: z.union([
-    z.literal(BUNDLE_FORMAT),
-    z.literal(BUNDLE_V4_FORMAT),
-    z.literal(BUNDLE_V6_FORMAT),
-    z.literal(BUNDLE_V7_FORMAT),
-    z.literal(BUNDLE_V8_FORMAT),
-  ]),
+  format: z.union([LegacyBundleFormatSchema, z.literal(BUNDLE_V8_FORMAT)]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
 
@@ -102,12 +92,7 @@ export interface VerifyBundleSnapshotDeps {
 
 export interface BuildBundleManifestOptions {
   /** Defaults to v2 so existing producer and golden bytes remain immutable. */
-  readonly format?:
-    | typeof BUNDLE_FORMAT
-    | typeof BUNDLE_V4_FORMAT
-    | typeof BUNDLE_V6_FORMAT
-    | typeof BUNDLE_V7_FORMAT
-    | typeof BUNDLE_V8_FORMAT;
+  readonly format?: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {

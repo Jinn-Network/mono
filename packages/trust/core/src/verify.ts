@@ -319,6 +319,19 @@ export async function verifyEnvelopeBinding(
   if (resolved === null) {
     return { ok: false, reason: "binding-not-resolved" };
   }
+  // `BindingResolver` is contracted never to resolve by key alone (interfaces.ts),
+  // so this holds for every conforming resolver -- but a key-only resolver cache is
+  // a realistic bug, and an echoed agent would let a forged envelope pass as the
+  // victim's. Asserted here so no call site has to remember to.
+  if (resolved.binding.agent !== input.agent) {
+    return {
+      ok: false,
+      resolvedBinding: resolved,
+      reason: "binding-not-resolved",
+      detail: `the resolver returned a binding for Agent IRI "${resolved.binding.agent}", `
+        + `not the claimed "${input.agent}".`,
+    };
+  }
 
   // Step 3: verify the ceremony evidence, including the mandatory content
   // match (§7.2).
