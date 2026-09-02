@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { spawnMultiOpDaemons, type MultiOpHandle } from './multi-op-daemon';
+import { allocateAnvilPort } from '@test/chain/port-allocator.js';
 
 /**
  * Source of a tiny dummy node script that satisfies the multi-op helper's
@@ -78,6 +79,27 @@ describe('spawnMultiOpDaemons', () => {
       rpcUrl: 'https://base-sepolia.example/dummy',
       pollIntervalMs: 5000,
     });
+    // Fixed on purpose, and deliberately BELOW 32768. These ports are bound by
+    // a spawned child, not by the test, so `listen(0)` is not available here —
+    // and the two remaining options are not equivalent. A port under the
+    // ephemeral band (32768-65535) is one no sibling vitest worker's `listen(0)`
+    // can ever be handed, so a fixed reservation has NO window at all;
+    // `allocateAnvilPort()` would move these into the band and open an
+    // allocate-then-rebind window that the dummy daemon — no `'error'` handler —
+    // would lose as a child crash surfacing as a 30s readiness timeout.
+    //
+    // The discriminator is WINDOW LENGTH, not the technique. Here the window
+    // would span the whole of `beforeAll` and the hook-to-test transition
+    // before the child even spawns, which is why these stay fixed; the
+    // allocator IS the right call in the second describe below, where the
+    // allocation happens inside the test body — one statement before the spawn
+    // in two of the three, a `path.join` and a `writeFile` before it in the
+    // third. Both beat the `pickPort()` blind random guess they replaced, which
+    // sat inside the band and never checked the port was free at all.
+    //
+    // Registered in the port registry in
+    // test/release/tier-1/T1.2-harness-readiness-contract.ts. See issue #1627
+    // and docs/runbooks/testing.md, "Worker parallelism and ports".
     await fs.writeFile(path.join(opAHome, '.jinn-client', 'config.json'), minimalCfg(7732));
     await fs.writeFile(path.join(opBHome, '.jinn-client', 'config.json'), minimalCfg(7733));
   });
@@ -146,13 +168,8 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
     await fs.rm(tmpRoot, { recursive: true, force: true });
   });
 
-  /** Allocate a port likely to be free. Random in the ephemeral range. */
-  function pickPort(): number {
-    return 40000 + Math.floor(Math.random() * 20000);
-  }
-
   it('streams stdout + stderr to the per-daemon log file for the full lifetime', async () => {
-    const apiPort = pickPort();
+    const apiPort = await allocateAnvilPort();
     const logDir = path.join(tmpRoot, 'logs');
     const handle = await spawnMultiOpDaemons({
       ops: [{ name: 'op-a', home: opAHome, apiPort }],
@@ -197,7 +214,7 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
   }, 30000);
 
   it('does not write a log file when logDir is omitted (back-compat)', async () => {
-    const apiPort = pickPort();
+    const apiPort = await allocateAnvilPort();
     const handle = await spawnMultiOpDaemons({
       ops: [{ name: 'op-a', home: opAHome, apiPort }],
       readyTimeoutMs: 10000,
@@ -213,7 +230,7 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
   }, 30000);
 
   it('keeps the fatal daemon envelope in the readiness error after handshake output', async () => {
-    const apiPort = pickPort();
+    const apiPort = await allocateAnvilPort();
     const fatalBinPath = path.join(tmpRoot, 'fatal-after-handshake.cjs');
     await fs.writeFile(fatalBinPath, HANDSHAKE_THEN_FATAL_SOURCE);
 
