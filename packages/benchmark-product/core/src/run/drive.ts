@@ -539,26 +539,37 @@ async function dispatchEvaluation(
     // the replayed bytes, never recomputed from the idempotency key, so a drift between the two
     // refuses here rather than reconciling nothing and silently degrading to the loss above.
     //
-    // The seam is HERE, not beside that solve loop in `runResume`: `recover` re-enters
-    // `completeAttempt` -> the evaluation provisioner's `harvest()`, whose materials registry stays
-    // empty in a fresh process until `venue.prepareEvaluationCell()` populates it, and
-    // `prepareAndDispatchEvaluation` calls that once per cell before dispatching its legs. Called
-    // any earlier, recovery throws "harvest ran before setup registered evaluation-cell materials"
-    // (`../venue/provisioner.ts`). A never-submitted leg has no attempt to reconcile, so the launch
-    // path stays byte-identically untouched.
+    // The seam is HERE, not beside that solve loop in `runResume`: `recover` can re-enter
+    // `completeAttempt` -> the evaluation provisioner's `harvest()` (it does so for every
+    // completion-capable row carrying no journaled `harvested` event -- `harvesting-resume`,
+    // `matching-late`, `recording-resume`, `corrected`; a durable delivery checkpoint returns
+    // earlier than that and never reaches harvest at all). That harvest binds its evaluator and
+    // its evaluation-cell materials from the venue registry, which recovery cannot populate:
+    // `reconstructRecoveryContext` hands `createLocalProvisioner` a FRESH contract and never
+    // re-runs its `setup`. In a fresh process the registry stays empty until
+    // `venue.prepareEvaluationCell()` fills it, and `prepareAndDispatchEvaluation` calls that once
+    // per cell before dispatching its legs -- so called any earlier, recovery of one of those rows
+    // refuses with "no registered evaluation-cell materials" (`../venue/provisioner.ts`). A
+    // never-submitted leg has no attempt to reconcile, so the launch path stays byte-identically
+    // untouched.
     //
     // Both refusals below are contained PER LEG, not run-fatal like the solve leg's:
     // `prepareAndDispatchEvaluation`'s catch encloses them, and a `BenchmarkProductError` is no
     // `TaskExecutionError`, so the leg lands a could-not-grade carrying the message as its detail
     // while the run and the other cells' legs continue.
     //
-    // Residual sub-window: a kill landing BEFORE the delivery checkpoint is durable leaves nothing
-    // recoverable — the verdict never existed. Recovery terminals that attempt `blame:
+    // Residual sub-window: a kill landing before the harness ever produced a verdict leaves
+    // nothing recoverable — the verdict never existed. Recovery terminals that attempt `blame:
     // infrastructure` / `backend-unavailable`, which IS retryable, but `journalEvaluationFailure`
     // gates the retry on `evaluationAttempt <= (deps.maxInfrastructureRetries ?? 0)`, so on the
     // legacy default of 0 the leg still terminals could-not-grade — now carrying `failureCategory`,
     // a categorized terminal rather than a silent one. Closing that window is a matter of setting
     // `policy.evaluation.maxInfrastructureRetries` to 1, not of this seam.
+    //
+    // A kill AFTER the harness exited but before the `harvested` event is journaled is no longer
+    // in that residual: the recovered harvest binds its materials lazily and re-seals the raw
+    // statement it stashed under the attempt's meta/, so the verdict survives — see
+    // `./run-resume-evaluation-harvest.integration.test.ts`.
     const replayedSubmission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
       replayed,
     )) as { readonly submission?: unknown };
