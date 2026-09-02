@@ -87,6 +87,16 @@ describe("did:key decoding (issue #2983)", () => {
     const secp = `did:key:z${base58btcEncode(Uint8Array.from([0xe7, 0x01, ...new Array<number>(33).fill(1)]))}`;
     expect(ed25519PublicKeyBytesFromDidKey(secp)).toBeUndefined();
   });
+
+  test("an over-long identifier is refused before it is decoded, not after", () => {
+    // base58 decoding is quadratic in its input, and a binding document is something a PUBLISHER
+    // hands a reader. Without a length bound a one-megabyte `did:key` spends minutes of the
+    // reader's CPU before the decoded length check would have rejected it anyway. 34 bytes never
+    // spell more than 47 base58 characters, so anything longer cannot be one of these keys.
+    const started = Date.now();
+    expect(ed25519PublicKeyBytesFromDidKey(`did:key:z${"z".repeat(200_000)}`)).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
 });
 
 describe("proof derivation (issue #2983)", () => {

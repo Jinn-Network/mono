@@ -85,7 +85,7 @@ export function publisherIdentityLines(
 
 /**
  * What the binding does and does not establish. The unbound case returns `undefined` rather than a
- * sentence: `publisherIdentityLine` has already said there is no binding, and a paragraph about the
+ * sentence: `publisherIdentityLines` has already said there is no binding, and a paragraph about the
  * limits of a thing that is not there is the helper-text cruft this repository removes on sight.
  */
 export function publisherIdentitySentence(binding: VerifiedDomainBinding | undefined): string | undefined {

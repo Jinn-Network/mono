@@ -23,6 +23,17 @@ const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvw
 
 const ED25519_MULTICODEC_PREFIX = Uint8Array.of(0xed, 0x01);
 
+/**
+ * The longest base58btc spelling the 34 payload bytes can have: 34 bytes is 272 bits, and each
+ * base58 digit carries log2(58) of them, so 47 digits is the ceiling (the prefix byte is 0xed, so
+ * there are never leading zero bytes to add `1` characters for).
+ *
+ * Checked BEFORE decoding rather than after, because base58 decoding is quadratic in its input and
+ * a binding document is something a publisher hands a reader. A megabyte-long identifier would
+ * otherwise spend minutes of the reader's CPU on its way to the same `undefined`.
+ */
+const MAX_BASE58_PAYLOAD_LENGTH = 47;
+
 function base58btcDecode(text: string): Uint8Array | undefined {
   let value = 0n;
   for (const character of text) {
@@ -43,7 +54,9 @@ function base58btcDecode(text: string): Uint8Array | undefined {
 /** The raw 32 Ed25519 public-key bytes a `did:key:z…` carries, or `undefined` for anything else. */
 export function ed25519PublicKeyBytesFromDidKey(keyId: string): Uint8Array | undefined {
   if (!keyId.startsWith("did:key:z")) return undefined;
-  const decoded = base58btcDecode(keyId.slice("did:key:z".length));
+  const payload = keyId.slice("did:key:z".length);
+  if (payload.length > MAX_BASE58_PAYLOAD_LENGTH) return undefined;
+  const decoded = base58btcDecode(payload);
   if (decoded === undefined || decoded.length !== ED25519_MULTICODEC_PREFIX.length + 32) return undefined;
   if (!ED25519_MULTICODEC_PREFIX.every((byte, index) => decoded[index] === byte)) return undefined;
   return decoded.slice(ED25519_MULTICODEC_PREFIX.length);
