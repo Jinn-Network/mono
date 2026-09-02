@@ -13,7 +13,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, type VerifiedBundleSnapshot } from "./manifest.js";
+import { type VerifiedBundleSnapshot } from "./manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT } from "./legacy-closures.js";
 import { BUNDLE_V4_EVIDENCE_ROLES } from "./schema.js";
 import {
   FREEZE_REPO_EXCLUDED_ROLES,
