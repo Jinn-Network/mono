@@ -2,7 +2,7 @@
 // that workspace builds from source through a `portal:` dependency.
 
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import {
   auditLane,
   auditLanes,
+  contains,
   describeGap,
   discoverLanes,
   erePrefix,
@@ -51,23 +52,36 @@ test('every discovered lane selects on at least one workspace', () => {
   }
 });
 
-test('lane discovery covers every pull-request path filter and no publish lane', () => {
-  const ids = discoverLanes(repoRoot).map(({ id }) => id);
-  // The four trees named in #3573, plus the lanes only visible once
-  // single-quoted `paths:` entries are read.
-  for (const id of ['operator', 'marketplace-ci', 'benchmarking-ci', 'benchmark-product-ci', 'core-ci', 'indexer-ci']) {
-    assert.ok(ids.includes(id), `${id} must be audited`);
+test('lane discovery finds every diff-selected lane and no publish lane', () => {
+  // Independent of discoverLanes: read the workflow directory directly, so a
+  // parser or dialect this module stops recognising fails here rather than
+  // dropping a lane out of the audit set unnoticed.
+  const workflows = readdirSync(join(repoRoot, '.github/workflows'))
+    .filter((file) => file.endsWith('.yml'))
+    .sort();
+  const expected = [];
+  for (const file of workflows) {
+    const source = readFileSync(join(repoRoot, '.github/workflows', file), 'utf8');
+    const shell = source.includes('patterns=(') && source.includes('selection.ere');
+    // A `paths:` key nested under `pull_request:`, in either YAML list style.
+    const pullRequest = /^ {2}pull_request:\s*$(?:\n(?: {4,}.*)?$)*?\n {4}paths:/mu.test(source);
+    if (shell || pullRequest) expected.push(file.slice(0, -'.yml'.length));
   }
+  const discovered = discoverLanes(repoRoot).map(({ id }) => id).sort();
+  assert.deepEqual(discovered, expected);
   // Release cadence is not this gate's business.
   for (const id of ['sdk-npm-publish', 'layer-npm-publish', 'operator-images']) {
-    assert.equal(ids.includes(id), false, `${id} is a publish lane and must not be audited`);
+    assert.equal(discovered.includes(id), false, `${id} is a publish lane and must not be audited`);
   }
+  // Both dialects must be represented, or one of them has silently fallen out.
+  assert.ok(discovered.includes('ci') && discovered.includes('layer-ci'));
+  assert.ok(discovered.includes('contracts-ci'), 'a flow-sequence paths: must be discovered');
 });
 
-test('the four trees named in #3573 now select on packages/trust/core', () => {
+test('the trees named in #3573 now select on packages/trust/core', () => {
   const graph = readWorkspaceGraph(repoRoot);
   const lanes = discoverLanes(repoRoot);
-  for (const id of ['operator', 'marketplace-ci', 'benchmarking-ci', 'benchmark-product-ci']) {
+  for (const id of ['ci', 'marketplace-ci', 'benchmarking-ci', 'benchmark-product-ci', 'layer-ci', 'jinn-agent-ci']) {
     const lane = lanes.find((candidate) => candidate.id === id);
     const { selected } = auditLane({ root: repoRoot, graph, lane });
     assert.ok(selected.includes('packages/trust/core'), `${id} must select on packages/trust/core`);
@@ -101,6 +115,16 @@ test('portalClosure terminates on a cycle', () => {
   assert.deepEqual([...portalClosure(graph, 'a')].sort(), ['b']);
 });
 
+test('contains requires the whole workspace tree, unlike overlaps', () => {
+  assert.equal(contains('packages/trust', 'packages/trust/core'), true);
+  assert.equal(contains('packages/trust/core', 'packages/trust/core'), true);
+  // The distinction that matters: a src-only entry leaves the manifest and
+  // tsconfig of the portal target outside the lane's selection.
+  assert.equal(overlaps('packages/trust/core/src', 'packages/trust/core'), true);
+  assert.equal(contains('packages/trust/core/src', 'packages/trust/core'), false);
+  assert.equal(contains('', 'operator'), false);
+});
+
 test('overlaps matches a tree in either direction and nothing else', () => {
   assert.equal(overlaps('packages/trust', 'packages/trust/core'), true);
   assert.equal(overlaps('operator/src', 'operator'), true);
@@ -125,6 +149,22 @@ test('erePrefix accepts an anchored directory prefix and rejects a file pattern'
   // every package look selected and silence the gate everywhere.
   assert.equal(erePrefix('^packages/.*/package\\.json$'), null);
   assert.equal(erePrefix('^\\.github/workflows/ci\\.yml$'), null);
+});
+
+test('parsePathsBlocks reads a flow sequence', () => {
+  const source = ['on:', '  pull_request:', "    paths: ['contracts/**']", '  push:', '    paths: ["a/**", \'b/**\']'].join('\n');
+  assert.deepEqual(parsePathsBlocks(source), [
+    { trigger: 'pull_request', entries: ['contracts/**'] },
+    { trigger: 'push', entries: ['a/**', 'b/**'] },
+  ]);
+});
+
+test('parsePathsBlocks fails loudly on a paths shape it cannot read', () => {
+  // Silently returning "this lane filters on nothing" would drop the lane from
+  // the audit set with no signal — the exact class of hole #3573 reports.
+  assert.throws(() => parsePathsBlocks('  pull_request:\n    paths: >-\n      a/**'), /unparseable paths/u);
+  assert.throws(() => parsePathsBlocks('  pull_request:\n    paths: []'), /unparseable flow paths/u);
+  assert.throws(() => parsePathsBlocks('  pull_request:\n    paths:\n  push:'), /yielded no entries/u);
 });
 
 test('parsePathsBlocks tags each block with its trigger', () => {

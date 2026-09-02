@@ -20,6 +20,11 @@
 // conformance test is the gate; a new portal edge that escapes a consumer's
 // filter fails it on the pull request that added the edge.
 //
+// The graph is walked from the manifests rather than read from
+// `architecture/platform-packages.v1.json`: the catalog describes the published
+// platform surface, while a `portal:` edge is declared in a manifest and nowhere
+// else, and an unpublished workspace still consumes and breaks on one.
+//
 // Deliberately check-only. Rewriting a `paths:` list or a shell array in place
 // would need a YAML/shell writer for a diff that is normally one or two lines,
 // and the failure message below names the exact entries to add.
@@ -127,6 +132,20 @@ export function overlaps(selectedPrefix, workspace) {
 }
 
 /**
+ * True when a selection entry selects the WHOLE of a workspace tree. Coverage of
+ * a portal target is judged this way rather than by `overlaps`: an entry for
+ * `packages/trust/core/src/**` overlaps `packages/trust/core` but would still
+ * let a change to that package's `package.json` or `tsconfig.json` escape.
+ *
+ * @param {string} selectedPrefix repository-relative directory prefix
+ * @param {string} workspace repository-relative workspace directory
+ */
+export function contains(selectedPrefix, workspace) {
+  if (selectedPrefix === '' || workspace === '') return false;
+  return selectedPrefix === workspace || workspace.startsWith(`${selectedPrefix}/`);
+}
+
+/**
  * Reduces one `paths:` glob to the directory prefix it selects on, or null when
  * it selects no directory tree (a bare filename glob such as `*.md`).
  *
@@ -178,6 +197,19 @@ export function parsePathsBlocks(source) {
     if (triggerKey !== null) trigger = triggerKey[1];
     // `paths-ignore:` is deliberately not matched: an ignored path is the
     // opposite of coverage, and reading one as coverage would silence the gate.
+    const flow = /^\s*paths:\s*\[(.*)\]\s*$/u.exec(line);
+    if (flow !== null) {
+      const entries = flow[1]
+        .split(',')
+        .map((entry) => entry.trim().replace(/^["']|["']$/gu, ''))
+        .filter((entry) => entry !== '');
+      // A flow sequence that yields nothing is a parse failure, not an empty
+      // filter; failing loudly is the whole point of this module.
+      if (entries.length === 0) throw new Error(`unparseable flow paths: ${line.trim()}`);
+      blocks.push({ trigger: trigger ?? 'unknown', entries });
+      blockIndent = null;
+      continue;
+    }
     const header = /^(\s*)paths:\s*$/u.exec(line);
     if (header !== null) {
       block = { trigger: trigger ?? 'unknown', entries: [] };
@@ -185,6 +217,10 @@ export function parsePathsBlocks(source) {
       blockIndent = header[1].length;
       continue;
     }
+    // Any other shape of `paths:` key is a shape this parser does not model. It
+    // must never be read as "this lane filters on nothing": that is a silent
+    // pass, which is the failure mode #3573 is about.
+    if (/^\s*paths:/u.test(line)) throw new Error(`unparseable paths: ${line.trim()}`);
     if (blockIndent === null) continue;
     // Double-quoted, single-quoted and bare entries all occur in this
     // repository. Reading only one style would make the other invisible to the
@@ -197,6 +233,9 @@ export function parsePathsBlocks(source) {
     // A comment or a blank line is part of the block, not the end of it.
     if (line.trim() === '' || line.trim().startsWith('#')) continue;
     blockIndent = null;
+  }
+  for (const { entries } of blocks) {
+    if (entries.length === 0) throw new Error('a paths: block yielded no entries');
   }
   return blocks;
 }
@@ -235,16 +274,14 @@ export function parseShellArray(source, arrayName) {
 }
 
 /**
- * The one lane that selects through an anchored extended-regular-expression
- * array in a shell step rather than a workflow-level `paths:` list.
+ * Name of the shell array that carries a lane's anchored extended regular
+ * expressions, and the file its `changes` job writes them to. Four workflows
+ * moved their workflow-level `paths:` filters into a `changes` job this way
+ * (a required merge-queue context must not sit behind a workflow-level filter),
+ * so both dialects have to be audited or the ones that migrated fall out.
  */
-const SHELL_LANE = Object.freeze({
-  id: 'operator',
-  workflow: '.github/workflows/ci.yml',
-  dialect: 'shell-ere',
-  arrayName: 'patterns',
-  required: (workspace) => `'^${workspace}/'`,
-});
+const SHELL_ARRAY_NAME = 'patterns';
+const SHELL_SELECTION_FILE = 'selection.ere';
 
 /**
  * Every lane whose selection is derived from the diff, discovered rather than
@@ -257,12 +294,24 @@ const SHELL_LANE = Object.freeze({
  */
 export function discoverLanes(root) {
   const directory = '.github/workflows';
-  const lanes = [SHELL_LANE];
+  const lanes = [];
   for (const file of readdirSync(path.join(root, directory)).sort()) {
     if (!file.endsWith('.yml')) continue;
     const workflow = `${directory}/${file}`;
-    if (workflow === SHELL_LANE.workflow) continue;
-    const blocks = parsePathsBlocks(readFileSync(path.join(root, workflow), 'utf8'));
+    const source = readFileSync(path.join(root, workflow), 'utf8');
+    if (source.includes(`${SHELL_ARRAY_NAME}=(`) && source.includes(SHELL_SELECTION_FILE)) {
+      lanes.push(
+        Object.freeze({
+          id: file.slice(0, -'.yml'.length),
+          workflow,
+          dialect: 'shell-ere',
+          arrayName: SHELL_ARRAY_NAME,
+          required: (workspace) => `'^${workspace}/'`,
+        }),
+      );
+      continue;
+    }
+    const blocks = parsePathsBlocks(source);
     // Only lanes that gate a PULL REQUEST are in scope. A `push:`-only lane
     // (`*-npm-publish`, `operator-images`) decides release cadence, not whether
     // a pull request was verified; widening one would change what publishes,
@@ -327,7 +376,7 @@ export function auditLane({ root, graph, lane }) {
   for (const workspace of selected) {
     for (const target of portalClosure(graph, workspace)) {
       for (const { prefixes } of blocks) {
-        if (!prefixes.some((prefix) => overlaps(prefix, target))) missing.add(target);
+        if (!prefixes.some((prefix) => contains(prefix, target))) missing.add(target);
       }
     }
   }

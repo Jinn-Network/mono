@@ -119,6 +119,13 @@ jobs:
           # notice, and it then ejects every candidate built on that base, not just
           # the change that caused it (#3527, and #2809 before it). Manifests only:
           # sources under an unselected package still leave this lane unselected.
+          #
+          # The trailing block is the transitive `portal:` closure of the trees above
+          # (#3573). Each of those packages is built from SOURCE into this lane's
+          # workspace by `yarn install`, so a change confined to one of them changes
+          # what this lane verifies — and until #3573 none of them selected it. The
+          # list is derived from the `portal:` graph and enforced by
+          # `.github/scripts/portal-path-filters.test.mjs`; it is not hand-curated.
           patterns=(
             '^operator/'
             '^apps/operator-console/'
@@ -131,12 +138,6 @@ jobs:
             '^\.github/workflows/npm-publish\.yml$'
             '^\.github/scripts/npm-publish-workflow\.test\.mjs$'
             '^\.github/scripts/operator-[^/]*\.test\.mjs$'
-            # Transitive `portal:` closure of the trees above (#3573). Every one of
-            # these is built from SOURCE into the operator workspace by `yarn install`,
-            # so a change confined to one of them changes what this lane verifies —
-            # and until #3573 none of them selected it. The list is derived from the
-            # `portal:` graph and enforced by
-            # `.github/scripts/portal-path-filters.test.mjs`; it is not hand-curated.
             '^packages/discovery/client/'
             '^packages/discovery/facts/offers/'
             '^packages/discovery/facts/task-execution/'
