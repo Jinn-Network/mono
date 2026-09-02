@@ -65,6 +65,7 @@
  *
  * Public command: `yarn e2e:task-creator`.
  */
+import { createHash } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -240,8 +241,18 @@ async function postMintedTask(args: {
     ...unsignedTaskDoc,
     signature: { algo: 'secp256k1' as const, signer: creator.address, hash: signed.hash, sig: signed.sig },
   };
+  // `taskCidDigest` MUST be a real sha256 digest of the exact posted bytes, not an opaque
+  // mock-gateway lookup key: the projector's TEP admission path re-derives
+  // `sha256(fetchedBytes)` and cross-checks it against this on-chain value
+  // (`resolveTaskProjection`'s digest join, `projector-enrich.ts`) before admitting the
+  // event. A keccak key made every posting drop with "on-chain anchor ... disagrees with
+  // synthesized legacy SignedTaskV1 digest", so the WorkLoop never saw a card to claim.
+  // Mirrors the identical fix already carried by `postSignedTaskOnChain`
+  // (`_daemon-harness-helpers.ts`) and real production posting (`uploadToIpfs` +
+  // `cidToDigestHex`). The CID the daemon derives from the event
+  // (`f01551220${digest.slice(2)}`) is unchanged.
   const taskJson = JSON.stringify(signedTaskDoc);
-  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
+  const taskCidDigest = `0x${createHash('sha256').update(taskJson).digest('hex')}` as `0x${string}`;
   mockIpfs.register(taskCidDigest, signedTaskDoc);
   const taskCid = `f01551220${taskCidDigest.slice(2)}`;
 

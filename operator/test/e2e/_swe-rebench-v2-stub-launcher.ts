@@ -30,15 +30,17 @@
  */
 import type { LauncherContract } from '@jinn-network/task-execution-launchers';
 
-/** Env var carrying the fixtures directory the stub reads `<instance_id>.patch` from. */
-export const STUB_FIXTURES_DIR_ENV = 'JINN_SWE_REBENCH_V2_STUB_FIXTURES_DIR' as const;
-
 export const SWE_REBENCH_V2_STUB_LAUNCHER_ID = 'swe-rebench-v2-stub' as const;
 
 /**
  * @param fixturesDir Directory holding one `<instance_id>.patch` file per instance the rig
  *   posts. Read at solve time, so a caller may rewrite the file between two postings of the
  *   same instance to serve a different patch (the gold/garbage pair this e2e needs).
+ *
+ *   Baked into the runner source rather than passed through `plan().env`: the supervisor
+ *   forwards only the fixed `JINN_ATTEMPT_*` + `TMPDIR` keys to the child, so any other env
+ *   entry a launcher declares is silently dropped (the attempt then exits 2 and the pipeline
+ *   reports `delivery-wait-failed:backend-terminal`).
  */
 export function makeSweRebenchV2StubLauncher(fixturesDir: string): LauncherContract {
   return {
@@ -60,7 +62,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const inputPath = path.join(process.env.JINN_ATTEMPT_INPUT, 'legacy-signed-task-v1.json');
 const out = process.env.JINN_ATTEMPT_OUT;
-const fixturesDir = process.env.${STUB_FIXTURES_DIR_ENV};
+const fixturesDir = ${JSON.stringify(fixturesDir)};
 let task;
 try { task = JSON.parse(fs.readFileSync(inputPath, 'utf8')); }
 catch { console.error('swe-rebench-v2-stub: missing or malformed SignedTaskV1 input'); process.exit(2); }
@@ -92,7 +94,6 @@ process.exit(0);
           JINN_ATTEMPT_OUT: paths.out,
           JINN_ATTEMPT_LOGS: paths.logs,
           JINN_ATTEMPT_META: paths.meta,
-          [STUB_FIXTURES_DIR_ENV]: fixturesDir,
           TMPDIR: paths.tmp,
         },
         validExitCodes: [0],
