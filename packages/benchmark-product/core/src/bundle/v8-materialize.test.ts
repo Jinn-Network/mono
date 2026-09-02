@@ -25,7 +25,7 @@
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   BENCHMARKING_METHOD_IDS,
   DISCLOSURE_SPECIFICATION_EXTENSION,
@@ -55,18 +55,6 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/**
- * The memoized fixture workspaces below (issues #3644, #3660). They cannot go on `roots`: each is
- * built once and read by every later test in the file, so `afterEach` would delete a tree the next
- * test still needs. They are reaped here instead, after the whole file. Empty when a filtered run
- * built no fixture, which is why this reaps a recorded list rather than a fixed pair of names.
- */
-const fixtureRoots: string[] = [];
-
-afterAll(() => {
-  for (const root of fixtureRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 let disclosedFixture: Promise<SyntheticV4BundleFixture> | undefined;
 
 /** One real anchored, qualification-projecting, DISCLOSED run, built once: lock → anchor → launch →
@@ -75,7 +63,6 @@ let disclosedFixture: Promise<SyntheticV4BundleFixture> | undefined;
 function disclosed(): Promise<SyntheticV4BundleFixture> {
   if (disclosedFixture === undefined) {
     const workspaceDir = mkdtempSync(join(tmpdir(), "disclosed-v8-"));
-    fixtureRoots.push(workspaceDir);
     disclosedFixture = createSyntheticV4BundleFixture({
       workspaceDir,
       truthAdmission: "operator-only",

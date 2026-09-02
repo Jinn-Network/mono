@@ -204,14 +204,25 @@ function boundedVisual(value: string, maximumCodePoints: number): string {
 }
 
 /*
- * The remaining bare `throw new Error` sites in this file are deliberately internal (issue #3643).
- * Every one of them asserts a shape over records the caller has ALREADY authenticated and
- * schema-validated -- the canonical sort of `recordSha256s`, the single-Matrix-subject wrapper, a
- * registered method's own results grammar, the closed `truthAdmission` set. Reaching one means this
- * package disagrees with itself about a fact it just verified, which is an internal fault and not a
- * reader-facing disagreement; `toErrorEnvelope` carries it as `execution`, which is the correct
- * code for exactly that. The mismatch in `buildPublicAssets` below is the one that is not internal:
- * it compares two independently supplied inputs, so it refuses.
+ * The remaining bare `throw new Error` sites in this file are left untyped deliberately (issue
+ * #3643), and it is worth being exact about why, because the two reasons are different.
+ *
+ * `recordPaths` and `singleSubjectResults` assert a shape the caller has already established —
+ * the canonical sort of `recordSha256s`, the single-Matrix-subject wrapper. Reaching either means
+ * this package disagrees with itself about a fact it just derived. That is an internal fault, and
+ * `toErrorEnvelope` carrying it as `execution` is the correct code for exactly that.
+ *
+ * The `methodProjection` throws are NOT protected by a schema: `MethodRefSchema.id` is a bare
+ * `z.string()` and `results` is `JsonValueSchema`, so neither the unregistered-method default nor
+ * the binary-qualification validation is unreachable on grammar grounds. What keeps them off the
+ * public reader path is that `profile/claim.ts` rebuilds the same projection for the
+ * `claim-consistency` check and throws the identical shape FIRST — so a Report sealing an
+ * unregistered method never reaches this file. Untyped throws on that earlier path are a real gap,
+ * but they are in `claim.ts` and outside this issue's scope; converting the shadowed copies here
+ * would move nothing.
+ *
+ * The mismatch in `buildPublicAssets` below is the one that is genuinely reader-facing: it compares
+ * two independently supplied inputs rather than restating a derived fact, so it refuses.
  */
 function recordPaths(input: PublicAssetInput): readonly string[] {
   const expected = [...input.recordSha256s].sort();
@@ -1178,8 +1189,8 @@ export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<stri
     // Typed, not a bare throw (issue #3643). A caller branches on `code` and `issues[].path`; this
     // is a named disagreement between the requested presentation profile and the sealed Report's
     // method, not an internal fault, so it must not reach the reader as `execution`. The verifier's
-    // qualification-axis guard (issue #3245) makes it unreachable for the format-relabelling shape,
-    // and the producer's own claim/method agreement check covers the materialize path -- so this is
+    // qualification-axis guard (issue #3245) makes it unreachable for the format-relabeling shape,
+    // and the producer's own claim/method agreement check covers the materialize path — so this is
     // a backstop on the last step of the run, and it refuses like every other step.
     refuse(
       "record-integrity",
