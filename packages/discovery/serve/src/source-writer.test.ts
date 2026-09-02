@@ -501,12 +501,22 @@ describe("durable Record Discovery source writer", () => {
     await expect(collapsed.append(command())).rejects.toThrow(/no consumer accepts/);
   });
 
-  it("refuses a timestamp whose freshness window overflows the representable range", async () => {
+  // Was "refuses a timestamp whose freshness window overflows the representable
+  // range": an extended-year spelling near the ECMAScript time-value limit used to
+  // reach the window arithmetic and needed its own guard there. Reading the §5.2
+  // grammar (#3482) refuses it one step earlier, as invalid -- a four-digit year plus
+  // the 24h `refreshWithinMs` clamp cannot overflow -- so the assertion moves to the
+  // refusal that now happens, and the refusal is still checked to land before the
+  // writer signs or persists anything.
+  it("refuses an extended-year timestamp before anything is signed or persisted", async () => {
     const harness = makeHarness();
     const extreme: AppendAnnouncementCommand = { ...command(), timestamp: "+275760-09-13T00:00:00.000Z" };
 
     await expect(writer(harness).append(extreme)).rejects.toThrow(SourceWriterIntegrityError);
-    await expect(writer(harness).append(extreme)).rejects.toThrow(/out of representable range/);
+    await expect(writer(harness).append(extreme)).rejects.toThrow(/timestamp is invalid/);
+    expect(harness.blobs.values.size).toBe(0);
+    expect(await harness.intentCas.read()).toBeUndefined();
+    expect(harness.signCount()).toBe(0);
   });
 
   it("does not re-bound an already-signed recovery intent against the clock", async () => {

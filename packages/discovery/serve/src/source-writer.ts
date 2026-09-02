@@ -34,8 +34,6 @@ import type { Clock, ReadableImmutableBlobStore, StoredBlob } from "./ports.js";
 const ARCHIVE_PAGE_CONTENT_TYPE = "application/json";
 const DEFAULT_RECORD_CONTENT_TYPE = "application/octet-stream";
 const MAX_CAS_ATTEMPTS = 32;
-/** ECMAScript's time-value limit; beyond it `new Date(ms).toISOString()` throws. */
-const MAX_TIME_VALUE_MS = 8_640_000_000_000_000;
 
 export interface CasSnapshot<T> {
   readonly revision: string;
@@ -679,14 +677,14 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     // safe act. The same reasoning exempts the operator's pre-C6 requester-source-v1
     // compatibility reader, which freezes a head the old requester already minted.
 
-    // `Number.isFinite` above admits timestamps near the ECMAScript Date limit, whose
-    // window end overflows the range and makes `toISOString()` throw a bare RangeError.
-    // Such a head is refused by the bound below anyway; refuse it in this taxonomy.
-    if (Math.abs(timestampMs + refreshWithinMs) > MAX_TIME_VALUE_MS) {
-      throw new SourceWriterIntegrityError(
-        `announcement timestamp is out of representable range: ${command.timestamp}`,
-      );
-    }
+    // No representable-range guard is needed before the arithmetic below. It used to
+    // exist because a bare `new Date(...)` admitted extended-year spellings near the
+    // ECMAScript time-value limit ("+275760-09-13T00:00:00.000Z"), whose window end
+    // overflowed and made `toISOString()` throw a bare RangeError. `parseHeadTimestamp`
+    // now reads the §5.2 grammar, whose year is four digits, so the largest value that
+    // reaches here is year 9999 (~2.54e14 ms) and `refreshWithinMs` is clamped to
+    // `MAX_REFRESH_BY_AHEAD_MS` (24h) at construction -- three orders of magnitude
+    // below the 8.64e15 limit. The extended-year spelling is refused above, as invalid.
     const refreshBy = new Date(timestampMs + refreshWithinMs).toISOString();
     const now = clock.now();
     const windowFailure = checkRefreshWindow({ issuedAt: command.timestamp, refreshBy }, now);
