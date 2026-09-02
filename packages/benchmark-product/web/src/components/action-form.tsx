@@ -20,6 +20,11 @@ export function ActionForm({ action, submitLabel, gated = false, disabled = fals
   const router = useRouter();
   const resultRef = useRef<HTMLDivElement>(null);
   const providerBoundary = ["Quote", "Lock run", "Launch", "Resume"].includes(submitLabel);
+  // The sample size the lock seals is only reviewable at the lock (issue #2978). The widths
+  // themselves are not rendered here: they are computed from the draft on the server, so the
+  // first submit is refused and the refusal detail below carries them. Checking this box before
+  // reading that refusal acknowledges nothing, which is why it is unchecked on every render.
+  const sampleSizeBoundary = submitLabel === "Lock run";
   useEffect(() => {
     if (state.status !== "idle") resultRef.current?.focus();
   }, [state]);
@@ -35,6 +40,7 @@ export function ActionForm({ action, submitLabel, gated = false, disabled = fals
     <form action={formAction} className="flex min-w-0 flex-col gap-3">
       {children}
       {providerBoundary ? <label className="flex max-w-2xl items-start gap-2 text-sm"><input className="mt-1" type="checkbox" name="ack-provider-network-costs" value="acknowledged" /> <span><strong>Provider network and possible charges.</strong> Check this before continuing when this draft uses Claude Code or Codex. The bundled sample does not require it.</span></label> : null}
+      {sampleSizeBoundary ? <label className="flex max-w-2xl items-start gap-2 text-sm"><input className="mt-1" type="checkbox" name="ack-sample-size" value="acknowledged" /> <span><strong>Sample size.</strong> Lock is irreversible. Submit once to read the interval width this run&apos;s sample size can deliver, then check this to seal at that size.</span></label> : null}
       <Button type="submit" variant={gated ? "destructive" : "default"} disabled={pending || disabled} className="h-auto max-w-full self-start whitespace-normal text-left">
         {pending ? "Working" : submitLabel}
       </Button>
@@ -43,7 +49,7 @@ export function ActionForm({ action, submitLabel, gated = false, disabled = fals
         {state.status === "error" ? (
           <div role="alert" className="min-w-0 rounded-md border border-destructive p-3 text-sm [overflow-wrap:anywhere]">
             <p className="font-semibold">{state.error.code}</p>
-            <p>{state.error.detail}</p>
+            <p className="whitespace-pre-line">{state.error.detail}</p>
             {state.error.issues?.map((issue) => <p key={`${issue.path}:${issue.message}`}>{issue.path}: {issue.message}</p>)}
             <p>Correct the named input or retry when the stated condition changes.</p>
           </div>
