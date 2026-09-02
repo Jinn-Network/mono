@@ -21,7 +21,10 @@ async function invoke(args) {
 test("usage exits 2 and states the exit contract", async () => {
   const result = await invoke([]);
   assert.equal(result.code, 2);
-  assert.match(result.stderr, /Exit 0: valid bundle; 1: invalid bundle; 2: usage or operational failure/);
+  assert.match(result.stderr, /Exit 0: valid bundle; 1: invalid bundle, or a freeze repository that drifted/);
+  // A bundle that cannot be rendered as a freeze repository is not an invalid bundle, and the
+  // usage text has to say which exit code that is.
+  assert.match(result.stderr, /could not be\n {5}rendered from the bundle/);
   assert.match(result.stderr, /spec\.jinn\.network/);
   assert.match(result.stderr, /not hosted/);
 });

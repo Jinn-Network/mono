@@ -15,9 +15,10 @@ export interface ChainVerificationInput {
 }
 
 /**
- * The head of a source that is re-serving the exact chain position this
- * mirror already holds. `entries` is deliberately absent: the caller only
- * reaches this input having established that the walk yielded nothing.
+ * The head of a source that is re-serving the chain position this mirror
+ * already holds -- byte-identical, or re-signed at a later instant (#3468).
+ * `entries` is deliberately absent: the caller only reaches this input having
+ * established that the walk yielded nothing.
  */
 export interface HeadRevalidationInput {
   readonly source: SourceIdentity;
@@ -33,11 +34,11 @@ export interface ChainVerification {
   readonly mode: "verified" | "unverified";
   verify(input: ChainVerificationInput): Promise<ChainVerificationOutcome>;
   /**
-   * `source-head-revalidation`: the same posture applied to an unchanged
-   * head. Every posture must answer it, and must answer it as strictly as it
-   * answers `verify` -- it is the one path a source can take repeatedly
-   * without appending anything, so a posture that waved it through would let
-   * a revoked key keep a mirror green indefinitely.
+   * `source-head-revalidation`: the same posture applied to a head at the
+   * position already on file. Every posture must answer it, and must answer it
+   * as strictly as it answers `verify` -- it is the one path a source can take
+   * repeatedly without appending anything, so a posture that waved it through
+   * would let a revoked key keep a mirror green indefinitely.
    */
   revalidateHead(input: HeadRevalidationInput): Promise<ChainVerificationOutcome>;
 }
@@ -135,7 +136,7 @@ export function createDriverChainVerification(driver: VerifyDriver): ChainVerifi
       const headSignature = input.headSignature;
       if (headSignature === undefined) {
         // Same fail-closed rule as `verify`: this runtime does not accept an
-        // unsigned head, and an unchanged one is no different.
+        // unsigned head, and one at the position already on file is no different.
         return { status: "rejected", reason: "head-unsigned" };
       }
       try {

@@ -204,6 +204,76 @@ describe("the verified posture over a genuinely signed archive", () => {
     expect(JSON.parse(await readFile(config.mirrorStatePath, "utf8"))).toEqual(markAfterFirst);
   });
 
+  test("a re-signed idle head at the same position is a clean no-op too, and raises the floor (#3468)", async () => {
+    const { archive, capability, config, advanceTo } = await compose();
+    expect((await capability.mirror.syncOnce()).status).toBe("synced");
+
+    // The idle re-signing §5.2 obliges a live source to perform before
+    // `refreshBy` expires (`serve`'s `maintainHead`): same `sequence`, same
+    // `entry`, a later `issuedAt` and `refreshBy`, genuinely re-signed by the
+    // archive's own key. Before #3468
+    // this reached `verifySourceChain`, whose linkage walk is fed no entries
+    // above the mark and reported `broken-chain` at `linkage` -- so a healthy
+    // archive went red the moment it re-signed.
+    // The re-sign happens at the source's own clock, and both consumers now
+    // bound the whole freshness window (#3467): `refreshBy` no further than the
+    // published-source profile's 24h ceiling ahead of `issuedAt`, and
+    // `issuedAt` no further ahead of the consumer's own clock than one window
+    // is long. So the poll moves with the re-sign, and the window it carries
+    // sits at the same ceiling the fixture's original head does.
+    advanceTo(new Date("2026-07-30T12:00:00Z"));
+    await archive.serveHead({
+      ...archive.head,
+      issuedAt: "2026-07-30T12:00:00Z",
+      refreshBy: "2026-07-31T12:00:00Z",
+    });
+    const second = await capability.mirror.syncOnce();
+
+    expect(second.status).toBe("synced");
+    expect(second.sources[0]!.failure).toBeUndefined();
+    expect(second.sources[0]!.indexed).toBe(0);
+    expect((await chainVerificationCheck(capability)).ok).toBe(true);
+
+    // The position did not move -- nothing was adopted -- but the instant did.
+    // That advanced floor is what makes the head this re-sign replaced a
+    // regression at the next poll rather than a replayable one.
+    const state = JSON.parse(await readFile(config.mirrorStatePath, "utf8")) as {
+      readonly marks: Record<string, { readonly sequence: string; readonly issuedAt: string }>;
+    };
+    expect(state.marks[`${source.agent}/${source.name}`]).toMatchObject({
+      sequence: "0000000000000001",
+      issuedAt: "2026-07-30T12:00:00Z",
+    });
+  });
+
+  test("the head a re-sign replaced is then refused as a chain regression (#3468)", async () => {
+    const { archive, capability, advanceTo } = await compose();
+    expect((await capability.mirror.syncOnce()).status).toBe("synced");
+    // The same conformant re-sign as the test above: the clock moves with the
+    // source, and the window it carries sits at the profile ceiling rather
+    // than past it (#3467). All this test needs from it is the raised floor.
+    advanceTo(new Date("2026-07-30T12:00:00Z"));
+    await archive.serveHead({
+      ...archive.head,
+      issuedAt: "2026-07-30T12:00:00Z",
+      refreshBy: "2026-07-31T12:00:00Z",
+    });
+    expect((await capability.mirror.syncOnce()).status).toBe("synced");
+
+    // Replaying the original head after the floor moved past it. It is
+    // genuinely signed and names a position this consumer holds, and it is
+    // still refused -- by §5.2's strict-increase rule on the chain path,
+    // which is where a head whose instant went backwards belongs.
+    await archive.serveHead(archive.head);
+    const replayed = await capability.mirror.syncOnce();
+
+    expect(replayed.status).toBe("failed");
+    expect(replayed.sources[0]!.failure).toEqual({
+      code: "chain-verification-rejected",
+      message: "broken-chain",
+    });
+  });
+
   test("the shared mark still governs: the driver resumes from the position the mirror stored", async () => {
     // The linkage that would break if the driver and the mirror kept separate
     // state files: the second sync can only recognize the re-served head as

@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
+import { restoredArtifactNames } from './workflow-artifact-steps.mjs';
 import { citedPrecedents } from './workflow-precedent-citations.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -26,23 +27,6 @@ function uploadedArtifactNames(source) {
   const lines = source.split('\n');
   for (let index = 0; index < lines.length; index += 1) {
     if (!lines[index].includes('uses: actions/upload-artifact')) continue;
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      const name = lines[cursor].match(/^\s+name: (\S+)$/);
-      if (name) {
-        names.push(name[1]);
-        break;
-      }
-      if (/^\s+- /.test(lines[cursor])) break;
-    }
-  }
-  return names;
-}
-
-function restoredArtifactNames(source) {
-  const names = [];
-  const lines = source.split('\n');
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].includes('uses: actions/download-artifact')) continue;
     for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
       const name = lines[cursor].match(/^\s+name: (\S+)$/);
       if (name) {

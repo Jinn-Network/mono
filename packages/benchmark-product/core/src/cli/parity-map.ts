@@ -33,6 +33,8 @@ export const EXCLUDED_FACADE_EXPORTS: readonly string[] = ["unverifiableAxisCoun
 /** Standalone filesystem helpers deliberately outside the workspace operations/audit boundary. */
 export const STANDALONE_CLI_VERBS: Readonly<Record<string, string>> = {
   "bundle verify": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal",
+  "freeze-repo export": "deterministic public-repository projection reads only the caller-selected immutable bundle and writes one local directory; no workspace, principal, or audited record is involved",
+  "freeze-repo verify": "standalone byte-for-byte comparison of a published tree against the bundle it claims to be derived from; reads only what the caller names",
   "demo1 prereg verify": "read-only post-lock/pre-dispatch gate verifies the exact local E4 witness without credentials or network access",
   "agent add": "stores a strict machine-local built-in agent profile outside every workspace",
   "agent credentials": "copies an explicitly selected API-key file into protected Colophon machine storage",

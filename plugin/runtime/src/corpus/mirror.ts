@@ -66,22 +66,40 @@ export interface CreateCorpusMirrorOptions {
 }
 
 /**
- * Whether a fetched head names EXACTLY the position and instant already on
- * file, and nothing else.
+ * How a fetched head relates to the chain position already on file, when the
+ * walk above the mark yielded nothing.
  *
- * All four facts are load-bearing, and every one of them is what keeps the
+ * `"unchanged"` is the archive re-serving the exact head this consumer already
+ * accepted; `"re-signed"` is the same chain position re-signed at a later
+ * instant. §5.2 obliges a live source to re-sign an idle head before
+ * `refreshBy` expires, and `serve` ships `maintainHead` for exactly that -- but
+ * every in-tree publisher calls it only after an append, so the shape arrives
+ * from a conformant external source rather than from anything here (#2549).
+ * Both are revalidation's to judge (#3443, #3468); `undefined` means the head
+ * is making a chain claim, which is `verifySourceChain`'s to judge and never
+ * this path's.
+ *
+ * Every fact below is load-bearing, and every one of them is what keeps the
  * revalidation path fail-closed:
  *
  * - `origin` must name the source being followed. Revalidation resolves keys
- *   from the head's own origin, so a head that claims another agent must
- *   never be measured against this source's mark.
+ *   from the head's own origin, so a head that claims another agent must never
+ *   be measured against this source's mark.
  * - `sequence` and `entry` must equal the mark. A head naming any other chain
- *   position is making a chain claim -- forward, rewound or forked -- and a
- *   chain claim is `verifySourceChain`'s to judge, not this path's.
- * - `issuedAt` must equal the mark's. A LOWER one is a rollback or a
- *   backdated re-sign and must keep meeting the strict-increase rule; a
- *   HIGHER one is a genuine re-signing at the same position, which this
- *   consumer has not accepted before.
+ *   position -- forward, rewound or forked -- is a chain claim.
+ * - `issuedAt` must not go backwards. A LOWER (or unparseable) one is a
+ *   rollback or a backdated re-sign and must keep meeting the strict-increase
+ *   rule inside `verifySourceChain`; an EQUAL one is the unchanged head; a
+ *   HIGHER one is the honest idle re-sign.
+ *
+ * ## The mark advances for a re-sign, and that is the point (#3468)
+ *
+ * `issuedAt` on the mark is the strict-increase floor. An accepted re-sign
+ * raises it, so the head it replaced -- byte-identical to one this consumer
+ * once accepted -- is a REGRESSION at the next poll and takes the chain path,
+ * where §5.2 refuses it. Leaving the floor behind would keep an
+ * indefinitely-replayable window open at that position. The mark's POSITION
+ * (`sequence`/`entry`) is untouched: nothing was adopted.
  *
  * ## Two divergences worth naming
  *
@@ -92,43 +110,40 @@ export interface CreateCorpusMirrorOptions {
  * than merely narrow: a head with the same position and `issuedAt` but a
  * stretched `refreshBy` still reaches revalidation, and `verifySourceHead`
  * refuses it there once the window breaks the published-source profile's §5.2
- * rules (#3467) -- whether the stretch arrived by re-signing or was baked into
- * the original head at adoption, which is the shape this comment previously
- * framed as needing a re-sign. Stretching `issuedAt` instead does not evade
- * it: the same check bounds `issuedAt` against the consumer's own clock, so
- * both halves of the window are bounded, not just their difference. Inside the
- * bound the divergence is a scheduling difference, not a trust one.
+ * rules (#3467) -- whether the stretch arrived by re-signing (the shape this
+ * path now admits, above) or was baked into the original head at adoption.
+ * Stretching `issuedAt` instead does not evade it: the same check bounds
+ * `issuedAt` against the consumer's own clock, so both halves of the window
+ * are bounded, not just their difference. Inside the bound the divergence is a
+ * scheduling difference, not a trust one.
  *
- * The other divergence is a gap, not a residue: a head re-signed at the SAME
- * position with a HIGHER `issuedAt` -- which `serve`'s `maintainHead` produces
- * on every idle source at least daily -- is routed to `verifySourceChain` and
- * REFUSED there today. `returningSync` feeds no entries above the mark, so the
- * linkage walk cannot find the head's own cited entry and fails `linkage`
- * before it ever consults the boundary. Both consumers refuse that shape (the
- * operator as `rewound-or-tampered-head`), so closing it is an ecosystem-wide
- * design call -- admit it onto revalidation and advance the mark, or let the
- * walk terminate when the head's entry IS the boundary -- and not one to make
- * silently inside the same-head fix. The refusal itself is pinned protocol-side
- * (`verify/source-chain.test.ts`, "re-signed idle head").
+ * The second divergence is one of shape: this consumer classifies only after
+ * the walk yielded nothing (`entries.length === 0` at the call site), while
+ * the operator classifies from the head alone and never walks. A source whose
+ * archive holds entries ABOVE its advertised head therefore fails here and
+ * reads as a clean idle poll there. Both are fail-closed; they are not
+ * identical.
  */
-function isUnchangedHead(
+function classifyIdleHead(
   head: SourceHead,
   identity: SourceIdentity,
   mark: HighWaterMark,
-): boolean {
+): "unchanged" | "re-signed" | undefined {
   let origin;
   try {
     origin = splitOrigin(head.origin);
   } catch {
-    return false;
+    return undefined;
   }
-  return (
-    origin.agent === identity.agent &&
-    origin.name === identity.name &&
-    head.sequence === mark.sequence &&
-    head.entry === mark.entry &&
-    head.issuedAt === mark.issuedAt
-  );
+  if (origin.agent !== identity.agent || origin.name !== identity.name) return undefined;
+  if (head.sequence !== mark.sequence || head.entry !== mark.entry) return undefined;
+  if (head.issuedAt === mark.issuedAt) return "unchanged";
+  // An unparseable instant on either side yields NaN, and every comparison
+  // with NaN is false -- so a malformed head takes the chain path with the
+  // rollback and the backdated re-sign, without a separate guard.
+  return new Date(head.issuedAt).getTime() > new Date(mark.issuedAt).getTime()
+    ? "re-signed"
+    : undefined;
 }
 
 interface Counters {
@@ -204,13 +219,24 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
       const firstAdoption = mark === undefined;
       const { entries, head } = await collect(source, counters, signal);
 
-      // An archive polled more often than it re-signs re-serves the head this
-      // mirror already accepted. `verifySourceChain` cannot express that: §5.2
-      // requires `issuedAt` to strictly increase on every re-signing, so an
-      // unchanged head is refused `broken-chain` -- which would sit a healthy
-      // mirror red between publishes. Revalidate instead (#3443), which is the
-      // same shape `operator/src/daemon/native-discovery.ts` takes.
-      if (mark !== undefined && entries.length === 0 && isUnchangedHead(head.head, identity, mark)) {
+      // An archive polled more often than it appends re-serves the chain
+      // position this mirror already accepted -- byte-identical if the poll
+      // outran the re-signing, re-signed at a later instant if it did not
+      // (§5.2 obliges a live source to re-sign an idle head; see
+      // `classifyIdleHead` on why nothing in this tree does it yet).
+      // `verifySourceChain` can express neither: §5.2 requires `issuedAt` to
+      // strictly increase, so the unchanged head is refused
+      // `issued-at-monotonicity`, and the re-signed one clears that only to
+      // fail `linkage` -- the walk above the mark is fed no entries, so the
+      // head's own cited entry is absent from the fed set. Either way a
+      // healthy mirror would sit red between publishes. Revalidate instead
+      // (#3443, #3468), the same shape `operator/src/daemon/native-discovery.ts`
+      // takes.
+      const idle =
+        mark === undefined || entries.length !== 0
+          ? undefined
+          : classifyIdleHead(head.head, identity, mark);
+      if (mark !== undefined && idle !== undefined) {
         const revalidation = await options.chainVerification.revalidateHead({
           source: identity,
           head: head.head,
@@ -224,12 +250,21 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
             failure: { code: "chain-verification-rejected", message: revalidation.reason },
           };
         }
-        // Nothing to adopt and nothing to advance -- and NOT advancing is the
-        // point: leaving the persisted `issuedAt` in place keeps it the
-        // monotonicity floor the next moving head has to clear.
+        if (idle === "re-signed") {
+          // Nothing is adopted, so the POSITION does not move -- but the
+          // instant does: the accepted re-sign is the new monotonicity floor,
+          // which is what makes the head it replaced a regression rather than
+          // an indefinitely replayable byte-identical head.
+          await options.highWaterMarks.put(identity, {
+            sequence: mark.sequence,
+            entry: mark.entry,
+            issuedAt: head.head.issuedAt,
+          });
+        }
         options.log.debug("corpus.mirror.head-revalidated", {
           source: `${identity.agent}/${identity.name}`,
           sequence: head.head.sequence,
+          head: idle,
         });
         return { source: identity, status: "synced", ...counters };
       }

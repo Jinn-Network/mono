@@ -754,6 +754,99 @@ That limitation stays separate from power or minimum-detectable-effect disclosur
 an interval withheld for insufficient pairs or clusters is not the same claim as a
 completed interval whose sensitivity is below a target effect.
 
+## Freeze-artifact repository
+
+A sealed bundle is digest-addressed; a human audience clones, browses, and diffs a
+repository. `colophon freeze-repo export --bundle <dir> --out <dir>` projects a
+qualification bundle's freeze artifacts into one, and
+`colophon freeze-repo verify --bundle <dir> --repo <dir>` checks a published tree
+against the bundle it claims to be derived from.
+
+The repository is a **derived artifact**, not the claim of record — the same
+doctrine the Inspect View export carries. The sealed records remain the sole
+source of truth; what the projection adds is that the derivation is a function
+rather than a hand assembly, so a published tree cannot drift from the bundle
+without the check saying so.
+
+The format is `colophon-freeze-repo/1`, and the determinism claim is stated for
+it exactly: for a given format version the rendered tree is a pure function of the
+bundle bytes. No clock, no locale, no filesystem enumeration order, and no tool
+version reaches the tree. A renderer change is therefore a format bump, not silent
+drift.
+
+The layout:
+
+- `freeze.json` — every rendered path with its byte length and SHA-256, the
+  publication's licence data, and the protocol identifier each role's records
+  declare. It does not restate the source rows: those are carried byte for byte
+  under `artifacts/source-manifest/` and rendered into `NOTICE` and
+  `metadata/spdx.json`, and re-serializing schema-parsed objects here would make
+  these bytes a function of the verifier's schema shape as well as of the bundle.
+  It does not list itself: its own digest is not knowable before it is written.
+- `bundle/` — `bundle.json`, `benchmark.json`, `evidence.json`, and
+  `qualification.json`, copied byte for byte.
+- `artifacts/<role>/<sha256>.<json|bin>` — the sealed freeze records, grouped by
+  the evidence role the bundle's own catalog assigns. The extension is `.json`
+  when the record's exact bytes parse as JSON and `.bin` when they do not; the
+  stem is the SHA-256 of those bytes, so a file's name is its own check. The freeze artifacts are the
+  admission/qualification graph: the item bank and its sources, the admission
+  decisions and their ledger, label resolutions, analysis contexts, judge
+  instruments, and the human-review and screening material including the sampling
+  script. The Run/Matrix/Report execution graph is deliberately absent: that is the
+  claim, and the claim belongs in the bundle a reader verifies.
+- `LICENSE`, `NOTICE`, `metadata/spdx.json` — generated from the bundle's licence
+  data, never hand-written. The publication licence is the SPDX identifier the
+  sealed Benchmark record declares; the per-source attribution and licence
+  descriptors come from the sealed source-manifest rows. `LICENSE` states the
+  identifier and its canonical SPDX URL rather than reproducing licence text the
+  bundle does not carry. `NOTICE` carries the modification notice, and it states the
+  fact rather than inverting it: the bundle carries no upstream source bytes at
+  all, so no member is an unmodified upstream copy. Every member under
+  `artifacts/` is a Colophon-authored or Colophon-derived sealed record over
+  sources the manifest names by URI and digest. The licence identifier must be an
+  SPDX short identifier: the export checks it against the SPDX 2.3 Annex A
+  grammar, so free text is a refusal rather than a rendered
+  `SPDX-License-Identifier:` line. The grammar is not the SPDX licence list, and
+  the export deliberately does not carry a list that would date — so `LICENSE`
+  cites the SPDX list address for the identifier and says in as many words that
+  an identifier the list does not carry will not resolve there. A `LicenseRef-`
+  identifier, which SPDX defines as off-list, gets no address at all.
+- `README.md` — the doctrine, the layout, and the check.
+
+The tree's **git commit hash is the value a freeze announcement pins**. It is
+computed in-process from the rendered tree with a fixed identity and a zero
+timestamp, so it is a function of the bundle rather than of the machine that ran
+the export. Both verbs report it, and the generated `README.md` carries the exact
+recipe that commits the tree to that oid:
+
+```sh
+export GIT_AUTHOR_NAME=Colophon GIT_AUTHOR_EMAIL=freeze@colophon.invalid
+export GIT_COMMITTER_NAME=Colophon GIT_COMMITTER_EMAIL=freeze@colophon.invalid
+export GIT_AUTHOR_DATE='@0 +0000' GIT_COMMITTER_DATE='@0 +0000'
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+git init --quiet && git add -A -f
+git commit --quiet --no-gpg-sign -m 'Colophon freeze <identity>'
+```
+
+The configuration neutralization is part of the recipe, not hygiene around it: a
+reader's own `commit.gpgsign` adds a `gpgsig` header, `core.autocrlf` rewrites the
+bytes, `init.templateDir` and `core.hooksPath` run code, and a `core.excludesFile`
+matching `*.bin` makes `git add -A` silently drop every record under `artifacts/`.
+Each yields a different oid, the last of them with nothing said. The renderer's own
+parity test neutralizes exactly these, and the published recipe states the same.
+
+Every member is mode `100644`. An executable bit, or a member replaced by a
+symlink, changes what git records and therefore the pinned commit even though the
+bytes read back identical — so `freeze-repo verify` reports both as drift, and it
+treats a nested `.git` directory as ordinary content, skipping only the root one.
+
+The standalone verifier package checks a published tree with no product install:
+`colophon-check <bundle> --freeze-repo <dir>`, exit `1` on drift.
+
+A bundle with no qualification graph has no freeze artifacts, and a Benchmark
+record that declares no licence has no licence data to generate scaffolding from.
+Both are refusals, not empty repositories.
+
 ## Trust, privacy, and limitations
 
 The public keys prove that bundle-carried signatures match the workspace-minted
