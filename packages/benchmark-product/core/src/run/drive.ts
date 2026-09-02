@@ -542,11 +542,11 @@ async function dispatchEvaluation(
     // The seam is HERE, not beside that solve loop in `runResume`: `recover` can re-enter
     // `completeAttempt` -> the evaluation provisioner's `harvest()` (it does so for every
     // completion-capable row carrying no journaled `harvested` event -- `harvesting-resume`,
-    // `matching-late`, `recording-resume`, `corrected`; a durable delivery checkpoint returns
-    // earlier than that and never reaches harvest at all). That harvest binds its evaluator and
-    // its evaluation-cell materials from the venue registry, which recovery cannot populate:
-    // `reconstructRecoveryContext` hands `createLocalProvisioner` a FRESH contract and never
-    // re-runs its `setup`. In a fresh process the registry stays empty until
+    // `matching-late`, `corrected`; `recording-resume` is classified only WITH a durable delivery
+    // checkpoint, and that returns earlier and never reaches harvest). That harvest binds its
+    // evaluator and its evaluation-cell materials from the venue registry, which recovery
+    // cannot populate: `reconstructRecoveryContext` hands `createLocalProvisioner` a FRESH
+    // contract and never re-runs its `setup`. In a fresh process the registry stays empty until
     // `venue.prepareEvaluationCell()` fills it, and `prepareAndDispatchEvaluation` calls that once
     // per cell before dispatching its legs -- so called any earlier, recovery of one of those rows
     // refuses with "no registered evaluation-cell materials" (`../venue/provisioner.ts`). A
