@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import {
+  CLAIM_PIN_SOURCES,
   COLOPHON_PUBLISH_WORKFLOW,
   FIRST_CUT_PLATFORM_PIN_PATH,
   PRODUCT_RELEASE_PLATFORM_PINS_PATH,
+  assertClaimPinsMatchPublish,
+  collectClaimVerifyPins,
+  fetchPublishedVerifyVersions,
   loadFirstCutPlatformPin,
   loadProductReleasePlatformPin,
+  registeredVerifyReleases,
   transformColophonManifestForPublish,
   validateProductReleasePlatformPin,
   validateProductReleasePlatformPins,
@@ -241,4 +246,105 @@ test('first-cut public surfaces disclose that spec.jinn.network is not hosted', 
     assert.match(text, /not hosted/iu, label);
   }
   assert.match(readme, /What this does not yet prove/u);
+});
+
+test('every claim pin in the tree names a published verifier, and the tree pins the version being published', () => {
+  const pins = collectClaimVerifyPins(repoRoot);
+  assert.ok(pins.includes('0.2.1'), 'the tree must pin the version this repository publishes');
+  assert.deepEqual(assertClaimPinsMatchPublish(pins, verifyManifest().version), pins);
+  for (const source of CLAIM_PIN_SOURCES) {
+    assert.ok(readFileSync(join(repoRoot, source), 'utf8').includes('@colophon-claims/verify@'), source);
+  }
+  assert.deepEqual(registeredVerifyReleases(), ['0.1.0', '0.2.0', '0.2.1']);
+});
+
+test('the publish guard refuses both orderings that seal an unrunnable command into a bundle', () => {
+  assert.throws(
+    () => assertClaimPinsMatchPublish(['0.1.0', '0.1', '0.2', '0.2.0', '0.2.1'], '0.2.0', ['0.1.0']),
+    /claim pins name unpublished verifier 0\.2\.1; publish those before 0\.2\.0/u,
+  );
+  assert.throws(
+    () => assertClaimPinsMatchPublish(['0.1.0', '0.1'], '0.2.1', ['0.1.0']),
+    /no claim pin names 0\.2\.1/u,
+  );
+  assert.throws(
+    () => assertClaimPinsMatchPublish(['0.2.1', '0.3'], '0.2.1', ['0.1.0']),
+    /claim compatible lines @0\.3 resolve to no published verifier/u,
+  );
+  assert.deepEqual(
+    assertClaimPinsMatchPublish(['0.1.0', '0.1', '0.2', '0.2.0', '0.2.1'], '0.2.1', ['0.1.0', '0.2.0']),
+    ['0.1.0', '0.1', '0.2', '0.2.0', '0.2.1'],
+  );
+});
+
+test('the publish workflow runs the claim-pin guard before it applies the manifest', () => {
+  const workflow = readFileSync(join(repoRoot, '.github/workflows', COLOPHON_PUBLISH_WORKFLOW), 'utf8');
+  const guard = workflow.indexOf('--check-claim-pins packages/benchmark-product/verify/package.json');
+  const apply = workflow.indexOf('--apply packages/benchmark-product/verify/package.json');
+  assert.ok(guard > 0, 'the workflow must run the claim-pin guard');
+  assert.ok(guard < apply, 'the guard must refuse before the manifest is rewritten for publish');
+});
+
+test('the guard reads what npm actually serves, and fails closed when it cannot', async () => {
+  const ok = (body) => async () => ({ ok: true, status: 200, json: async () => body });
+  assert.deepEqual(
+    await fetchPublishedVerifyVersions('@colophon-claims/verify', ok({ versions: { '0.1.0': {}, '0.2.0': {} } })),
+    ['0.1.0', '0.2.0'],
+  );
+  await assert.rejects(
+    () => fetchPublishedVerifyVersions('@colophon-claims/verify', async () => ({ ok: false, status: 503 })),
+    /cannot read published @colophon-claims\/verify versions from npm: HTTP 503/u,
+  );
+  await assert.rejects(
+    () => fetchPublishedVerifyVersions('@colophon-claims/verify', ok({ versions: {} })),
+    /npm reports no published versions/u,
+  );
+});
+
+const PRODUCT_SOURCE_DIRS = ['src', 'scripts'];
+const PRODUCT_SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mjs'];
+
+/** Every non-test source file under the product packages, so the pin scan cannot silently miss one. */
+function productSourceFiles(dir, found = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== '__fixtures__' && entry.name !== 'node_modules') productSourceFiles(path, found);
+    } else if (
+      PRODUCT_SOURCE_EXTENSIONS.some(
+        (extension) => entry.name.endsWith(extension) && !entry.name.endsWith(`.test${extension}`),
+      )
+    ) {
+      found.push(path);
+    }
+  }
+  return found;
+}
+
+test('CLAIM_PIN_SOURCES names every product source that pins a verifier version', () => {
+  const productsRoot = join(repoRoot, 'packages/benchmark-product');
+  const pinning = readdirSync(productsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) =>
+      PRODUCT_SOURCE_DIRS.flatMap((dir) => {
+        try {
+          return productSourceFiles(join(productsRoot, entry.name, dir));
+        } catch {
+          return [];
+        }
+      }),
+    )
+    .filter((path) => readFileSync(path, 'utf8').includes('@colophon-claims/verify@'))
+    .map((path) => path.slice(repoRoot.length + 1))
+    .sort();
+  assert.deepEqual(pinning, [...CLAIM_PIN_SOURCES].sort());
+});
+
+test('every CLAIM_PIN_SOURCES entry contributes at least one parsed pin', () => {
+  for (const source of CLAIM_PIN_SOURCES) {
+    assert.ok(
+      collectClaimVerifyPins(repoRoot, [source]).length > 0,
+      `${source} is listed as a claim pin source but yields no X.Y[.Z] pin`,
+    );
+  }
 });
