@@ -79,9 +79,21 @@ named so that name order is version order.
 
 The document is `config.json` inside `JINN_PLUGIN_HOME` — `~/.jinn-plugin/config.json`
 unless the environment names another home. It is optional: a default install
-has none and runs on the schema defaults, following no archives. An unreadable
-or non-JSON one is a startup failure rather than an empty document, so a corrupt
+has none and runs on the schema defaults, following no archives. An ABSENT file
+is the only thing that reads as no document — an unreadable one, a non-JSON
+one, and a file containing `null` are all startup failures, so a corrupt
 `corpus` block never degrades into silently following nothing.
+
+It must be owner-only. This document is the sole place the followed-source
+list, its signing keys, the trust policy, and the verification posture are
+declared, so a mode any other local user can write is a way to become a
+trusted publisher of everything this install injects into an agent's context.
+The runtime refuses to start on anything looser and tells you the mode it
+found:
+
+```bash
+chmod 600 "$JINN_PLUGIN_HOME/config.json"
+```
 
 The document may itself carry a `home` key, which relocates the runtime's data
 tree. It does not relocate the document: the file is always read from the home
@@ -176,28 +188,40 @@ by hand, `mirror/catalog.sqlite` above all, produces exactly that state.
 Each cycle writes one JSON line to stderr:
 
 ```json
-{"status":"synced","indexed":true,"level":"info","message":"corpus.mirror.cycle"}
+{"status":"synced","indexed":true,"freshness":"ok","level":"info","message":"corpus.mirror.cycle"}
 ```
 
 `status` is `synced`, `partial`, `failed`, or `skipped-locked`; `indexed` says
-whether an index pass followed; a cycle that threw carries `error`. The same
-facts, plus per-source timestamps, are in `mirror-sync-status.json`.
+whether an index pass followed; a cycle that threw carries `error`; a cycle
+that mirrored but whose index pass failed carries `indexError`, and keeps
+`status: "synced"` — the mirror succeeded, the pass that makes what it
+mirrored searchable did not. `freshness` is the `corpus-mirror-freshness`
+verdict for that cycle, `ok` or `stale`. The same facts, plus per-source
+timestamps, are in `mirror-sync-status.json`.
+
+A `stale` verdict is also written on its own line, at `warn`, carrying the
+row's full detail and remedy:
+
+```json
+{"detail":"1 of 1 followed archive(s) have not synced …","remedy":"…","level":"warn","message":"corpus-mirror-freshness"}
+```
 
 The health rows are contributed by the capabilities that are actually
 composed, so where you read one depends on which process holds it. The
-`mirror` process contributes all five below and exposes no surface to print
-them, which is why the status file and the cycle line are its channel. A
-`serve --role tools` process answers the `health` MCP tool with every row
-except `corpus-mirror-freshness`, which only the sync loop contributes. The
-`health` command composes neither and reports on capture alone.
+`mirror` process contributes the four rows below and exposes no surface to
+print them, which is why the status file and the cycle line are its channel. A
+`serve --role tools` process answers the `health` MCP tool with `corpus-index`
+and every row below except `corpus-mirror-freshness`, which only the sync loop
+contributes. The `health` command composes neither and reports on capture
+alone.
 
-| Row | Red means |
-|-----|-----------|
-| `corpus-mirror-freshness` | a followed archive has not synced within two intervals (or one interval plus a sync timeout, whichever is longer). The remedy points at `corpus-chain-verification`, which is the usual cause |
-| `corpus-chain-verification` | this install refused a followed archive's chain, or cannot verify one at all. It names the archive and the refusal |
-| `corpus-mirror` | archives are followed but none has a sync position, or a position survived the catalog it describes |
-| `corpus-trust-policy` | archives are followed with no trust policy configured, or the configured chain could not be read |
-| `corpus-index` | the index was written before and is now empty |
+| Row | Contributed by | Red means |
+|-----|----------------|-----------|
+| `corpus-mirror-freshness` | `mirror` | a followed archive has not synced within two intervals (or one interval plus a sync timeout, whichever is longer); or the cycle mirrored but its index pass failed. The remedy names the cause it observed — a peer holding the sync lock, a failed index pass, or `corpus-chain-verification` |
+| `corpus-chain-verification` | `mirror`, `serve` | this install refused a followed archive's chain, or cannot verify one at all. It names the archive and the refusal |
+| `corpus-mirror` | `mirror`, `serve` | archives are followed but none has a sync position, or a position survived the catalog it describes |
+| `corpus-trust-policy` | `mirror`, `serve` | archives are followed with no trust policy configured, or the configured chain could not be read |
+| `corpus-index` | `serve` only | the index was written before and is now empty |
 
 `skipped-locked` on its own is not a fault. It means another process held the
 sync lock for that cycle, which is the expected reading when a `serve` process

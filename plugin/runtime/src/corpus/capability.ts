@@ -199,7 +199,13 @@ export function createCorpusCapability(
                 ? // This one genuinely repairs the state: clearing the position
                   // makes the next sync a cold walk from genesis.
                   `Delete the mirror state file at ${state.config.mirrorStatePath} to re-sync from genesis.`
-                : "Run a mirror sync; the runtime also syncs opportunistically at session start.",
+                : // Both processes that reach this row are addressed: a `serve`
+                  // session syncs opportunistically at session start, and the
+                  // standing `mirror` service is already doing it on its own
+                  // interval — telling that one to run a sync would be telling
+                  // it to do what it does.
+                  "Run a mirror sync, or leave the `mirror` service to its next cycle; a " +
+                  "`serve` session also syncs opportunistically at session start.",
         },
         // This check measures whether THIS INSTALL is configured and composed
         // coherently. When there was no way to inject a verification driver at
