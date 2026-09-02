@@ -392,7 +392,8 @@ v0.2 mapped roles to trust-core record families alone, so the three `*-discovery
 minted with `observations` only. The Record Discovery client will not treat a key as an
 announcement signer unless its **binding** declares `jinn:discovery-announcements`
 (`packages/discovery/client/src/trust-adapter.ts`, filtering on `DISCOVERY_SIGNING_SCOPE` from
-`packages/discovery/protocol/src/identifiers.ts`; stack implementation program §7.11). No key
+`packages/discovery/protocol/src/identifiers.ts`; stack implementation program §7.11,
+[`docs/superpowers/plans/2026-07-28-stack-implementation-program.md`](../docs/superpowers/plans/2026-07-28-stack-implementation-program.md)). No key
 this ceremony minted could pass that filter, so `keys.resolve` returned an empty set and every
 native head verified as `unauthorized-signer` — at any catalog, on any host. Confirmed against
 the live DR-2026-08-05 gate catalog: all 14 bindings across both operators carried exactly one
@@ -422,8 +423,11 @@ The map is pinned on both sides of the deliberate cross-tree literal duplication
 `packages/trust/authoring/src/roles.test.ts` pins every role's scope inside the trust tree, and
 `operator/test/daemon/trust-authoring-round-trip.test.ts` imports both `DISCOVERY_SIGNING_SCOPE`
 and the requirements table, asserts they agree, and drives a head one operator signed through
-the other operator's `createTrustAdapter(...).keys.resolve` over a real authored catalog — the
-poll-time path no test in the repository reached before this amendment.
+the other operator's `createTrustAdapter(...).keys.resolve` over a real authored catalog. That
+second file is the poll-time coverage whose absence hid the conflict: the two-operator boot
+test states outright that its trust double never reaches poll-time resolution, so until the
+round-trip block was added nothing in the repository drove `keys.resolve` against a catalog
+this ceremony actually mints.
 
 ### 3.3 What the package does NOT do
 
