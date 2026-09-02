@@ -333,7 +333,16 @@ function evaluationProvisionerContract(options: EvaluationProvisionerOptions): P
       // classification with an infrastructure blame. Nothing to seal means nothing to seal.
       if (!stashed && !existsSync(verdictPath)) return workspaceHarvest(paths, declaredOutputs);
       const statementBytes = new Uint8Array(await readFile(stashed ? statementStash : verdictPath));
-      if (!stashed) await writeFile(statementStash, statementBytes, { mode: 0o600 });
+      // Staged then renamed, never written in place: a kill DURING that write would otherwise
+      // leave a truncated stash that the next harvest would prefer over the intact statement
+      // still sitting at out/verdict -- turning a recoverable interruption into a sealed-wrong or
+      // unsealable one. The rename is atomic, so `existsSync` above means "complete", never
+      // "started".
+      if (!stashed) {
+        const stashTemporary = `${statementStash}.partial`;
+        await writeFile(stashTemporary, statementBytes, { mode: 0o600 });
+        await rename(stashTemporary, statementStash);
+      }
       const envelopeBytes = await sealVerdictStatement({
         statementBytes,
         evaluatorId: boundEvaluator.id,
