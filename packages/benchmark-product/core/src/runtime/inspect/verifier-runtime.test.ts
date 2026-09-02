@@ -63,8 +63,10 @@ test("cancellation waits until the verifier child is terminated and reaped", asy
   ].join("\n");
   const controller = new AbortController();
   const running = spawnBounded(process.execPath, ["-e", script], { LANG: "C.UTF-8" }, controller.signal);
-  await waitUntil(() => readPid(pidPath) !== undefined, "the verifier fixture process to report its pid");
-  const pid = readPid(pidPath) as number;
+  let reported: number | undefined;
+  await waitUntil(() => (reported = readPid(pidPath)) !== undefined, "the verifier fixture process to report its pid");
+  if (reported === undefined) throw new Error("unreachable: waitUntil resolved without a pid");
+  const pid = reported;
 
   const abortedAt = process.hrtime.bigint();
   controller.abort();
