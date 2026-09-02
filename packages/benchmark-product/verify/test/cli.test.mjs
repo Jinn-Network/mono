@@ -25,8 +25,13 @@ test("usage exits 2 and states the exit contract", async () => {
   // A bundle that cannot be rendered as a freeze repository is not an invalid bundle, and the
   // usage text has to say which exit code that is.
   assert.match(result.stderr, /could not be\n {5}rendered from the bundle/);
-  assert.match(result.stderr, /spec\.jinn\.network/);
-  assert.match(result.stderr, /not hosted/);
+  assert.match(result.stderr, /Identifiers inside record files are internal names/);
+  // DR-2026-08-17-c Decision 5: `npx` help is a named first-cut surface and must state that
+  // protocol identifiers name `https://spec.jinn.network/…` and that origin is not hosted yet.
+  // #3022 AC-1 scopes its removal to default stdout; usage() is stderr on exit 2, so both hold.
+  assert.match(result.stderr, /https:\/\/spec\.jinn\.network\/\u2026/);
+  assert.match(result.stderr, /not hosted yet/);
+  assert.match(result.stderr, /fetches nothing from the web/);
 });
 
 test("a missing bundle exits 1 with machine-readable invalid-bundle output", async () => {
@@ -68,17 +73,114 @@ test("human success names all six checks and states the verification limit", asy
     reportSha256: "e".repeat(64),
     reportEnvelopeSha256: "f".repeat(64),
   });
-  assert.match(output, /^Verified: 6 of 6 checks passed/m);
+  assert.match(output, /^Checked: 6 of 6 checks passed/m);
   const orderedChecks = ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"];
   for (const check of orderedChecks) {
     assert.match(output, new RegExp(`${check}\\s+passed`));
   }
   assert.deepEqual(orderedChecks.map((check) => output.indexOf(check)), [...orderedChecks.map((check) => output.indexOf(check))].sort((a, b) => a - b));
   assert.match(output, /Format: benchmark-product-public-bundle\/4/);
-  assert.match(output, /does not prove that the machine that produced the/);
-  assert.match(output, /No files were uploaded/);
-  assert.match(output, /spec\.jinn\.network/);
-  assert.match(output, /not hosted/);
+  assert.match(output, /does not prove that the\s+producing machine was honest/);
+  assert.match(output, /uploads nothing/);
+});
+
+test("the verdict word does not overclaim and the caveat block carries no unhosted origin", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/4",
+    identity: "a".repeat(64),
+    checks: [
+      "manifest",
+      "evidence-closure",
+      "trust",
+      "matrix-rederivation",
+      "report-verification",
+      "claim-consistency",
+    ],
+    benchmarkSha256: "b".repeat(64),
+    runSha256: "c".repeat(64),
+    matrixSha256: "d".repeat(64),
+    reportSha256: "e".repeat(64),
+    reportEnvelopeSha256: "f".repeat(64),
+  });
+  assert.doesNotMatch(output, /Verified/);
+  assert.doesNotMatch(output, /spec\.jinn\.network/);
+  assert.doesNotMatch(output, /not hosted/);
+});
+
+test("every named check prints a plain-language gloss beside its result", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const checks = [
+    "manifest",
+    "evidence-closure",
+    "trust",
+    "matrix-rederivation",
+    "report-verification",
+    "claim-consistency",
+    "integrity-anchors",
+  ];
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/6",
+    identity: "a".repeat(64),
+    checks,
+    ...V6_IDENTITIES,
+  });
+  for (const check of checks) {
+    const line = output.split("\n").find((candidate) => candidate.startsWith(check));
+    assert.ok(line !== undefined, `${check} is missing from the human output`);
+    assert.match(line, new RegExp(`^${check}\\s+passed \\u2014 \\S`));
+  }
+  // Pinned, not merely non-empty: a gloss states what a check proved, so its wording is the
+  // claim. On the legacy formats `verifyReport` really does recompute and compare.
+  assert.match(output, /report-verification\s+passed \u2014 the report's numbers recompute from that sealed matrix$/mu);
+});
+
+test("the evidence-native v5 pair prints glosses too", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const checks = [
+    "manifest",
+    "evidence-closure",
+    "artifact-integrity",
+    "signature-validity",
+    "matrix-rederivation",
+    "report-verification",
+    "claim-consistency",
+  ];
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/5",
+    identity: "a".repeat(64),
+    checks,
+    // Required on a v5 result: full-evidence, so every check ran and every check is glossed.
+    artifactContent: { status: "verified", verified: 3, notFetched: 0, notFetchedDigests: [] },
+    ...V6_IDENTITIES,
+  });
+  for (const check of checks) {
+    const line = output.split("\n").find((candidate) => candidate.startsWith(check));
+    assert.ok(line !== undefined, `${check} is missing from the human output`);
+    assert.match(line, new RegExp(`^${check}\\s+passed \\u2014 \\S`));
+  }
+  // The v5 report path parses the DSSE envelope, checks the payload type, and asserts the report
+  // subjects the exact sealed matrix bytes. It consults no method registry and recomputes
+  // nothing, so the legacy sentence must not appear here.
+  assert.match(output, /report-verification\s+passed \u2014 the sealed report is signed and bound to that sealed matrix$/mu);
+  assert.doesNotMatch(output, /numbers recompute from that sealed matrix/u);
+  // HumanLabelResolution records are accepted on `signatures.some(Boolean)`, so the gloss states
+  // no per-signature quantifier.
+  assert.match(output, /signature-validity\s+passed \u2014 the signatures verify against the keys their records name$/mu);
+});
+
+test("an unrecognised check name still renders its result rather than failing", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/2",
+    identity: "a".repeat(64),
+    checks: ["manifest", "not-a-known-check", "toString"],
+    benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
+    reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
+  });
+  assert.match(output, /^not-a-known-check\s+passed$/m);
+  // An inherited `Object.prototype` member is a miss, not a gloss.
+  assert.match(output, /^toString\s+passed$/m);
 });
 
 test("human summary reports the actual passed count against the fixed six-check catalog", async () => {
@@ -90,7 +192,7 @@ test("human summary reports the actual passed count against the fixed six-check 
     benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
     reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
   });
-  assert.match(output, /^Verified: 1 of 6 checks passed/m);
+  assert.match(output, /^Checked: 1 of 6 checks passed/m);
   assert.match(output, /Format: benchmark-product-public-bundle\/2/);
 });
 
@@ -154,7 +256,7 @@ test("the default human surface discloses every carried anchor and every subject
       invalid: [],
     },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, /^Checked: 7 of 7 checks passed/m);
   assert.match(output, /integrity-anchors\s+passed/);
   // Each carried anchor: subject, time basis, status, and its byte-embedded time or height.
   assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
@@ -194,8 +296,29 @@ test("the default human surface names an absent and a declared-but-absent subjec
     },
   });
   assert.match(output, /no anchor records carried/);
-  assert.match(output, /lock: declared-but-absent — this run declared .*rfc3161-tsa\/v1 and the bundle carries no matching anchor/);
+  assert.match(output, /lock: declared-but-absent — this run declared rfc3161-tsa\/v1 and the bundle carries no matching anchor/);
   assert.match(output, /matrix: absent — no anchor was carried and none was declared/);
+  // This branch renders on exit 0, stdout. The profile is named, its unhosted origin is not.
+  assert.doesNotMatch(output, /spec\.jinn\.network/);
+});
+
+test("a declared profile outside the anchor-profile namespace is deferred rather than printed raw", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/6",
+    identity: "a".repeat(64),
+    checks: V6_CHECKS,
+    ...V6_IDENTITIES,
+    anchors: {
+      anchors: [],
+      subjects: [
+        { subject: "lock", outcome: "declared-but-absent", declaredProfiles: ["https://example.invalid/made-up/v1"] },
+      ],
+      invalid: [],
+    },
+  });
+  assert.match(output, /lock: declared-but-absent — this run declared <profile: see --json>/);
+  assert.doesNotMatch(output, /example\.invalid/);
 });
 
 test("a pending anchor prints its own status and reason, never a completed one's", async () => {
@@ -333,7 +456,7 @@ test("human summary names all seven evidence-native checks for bundle v5", async
     profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
     artifactContent: { status: "verified", verified: 300, notFetched: 0, notFetchedDigests: [] },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, /^Checked: 7 of 7 checks passed/m);
   assert.match(output, new RegExp(`Bundle: sha256:${"a".repeat(64)}`));
   assert.doesNotMatch(output, /sha256:sha256:/);
 });
@@ -368,7 +491,7 @@ test("the anchored qualification closure counts its seven checks, not the unanch
       invalid: [],
     },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, /^Checked: 7 of 7 checks passed/m);
   assert.match(output, /^Format: benchmark-product-public-bundle\/7$/m);
   assert.match(output, /integrity-anchors\s+passed/);
   assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
@@ -503,7 +626,7 @@ test("a full-evidence v5 bundle prints all seven checks as passed", async () => 
     profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
     artifactContent: { status: "verified", verified: 5, notFetched: 0, notFetchedDigests: [] },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed$/m);
+  assert.match(output, /^Checked: 7 of 7 checks passed$/m);
   for (const check of V5_CHECKS) assert.match(output, new RegExp(`${check}\\s+passed`));
   assert.doesNotMatch(output, /not fetched/);
   assert.doesNotMatch(output, /Artifact content/);
@@ -522,7 +645,7 @@ test("a metadata-first v5 bundle discloses artifact-integrity as not fetched", a
     },
   });
   // The deferred check is never printed as a pass and never folded into the passed total.
-  assert.match(output, /^Verified: 6 of 7 checks passed, 1 not fetched$/m);
+  assert.match(output, /^Checked: 6 of 7 checks passed, 1 not fetched$/m);
   assert.match(output, /artifact-integrity\s+not fetched/);
   for (const check of V5_CHECKS.filter((check) => check !== "artifact-integrity")) {
     assert.match(output, new RegExp(`${check}\\s+passed`));

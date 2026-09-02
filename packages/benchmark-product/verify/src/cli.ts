@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { ANCHOR_PROFILE_NAMESPACE } from "@jinn-network/benchmarking-records";
 import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 import { summarizeVerificationOutcome } from "./outcome.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult, type VerifyPublicBundleDeps } from "./verify.js";
@@ -42,7 +43,9 @@ function usage(): string {
     + "Exit 0: valid bundle; 1: invalid bundle, or a freeze repository that drifted from it;\n"
     + "     2: usage or operational failure, including a freeze repository that could not be\n"
     + "     rendered from the bundle — the bundle's own verdict is still reported.\n"
-    + "Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet. Verification uses exact platform bytes from npm.\n";
+    + "Identifiers inside record files are internal names: they name https://spec.jinn.network/\u2026,\n"
+    + "and that origin is not hosted yet. Checking uses the exact code installed from npm and\n"
+    + "fetches nothing from the web.\n";
 }
 
 // ---------------------------------------------------------------------------
@@ -93,10 +96,23 @@ function renderAnchor(entry: AnchorVerificationEntry): string {
   return `${head}\n    ${evaluationNote(entry)}\n    record ${entry.recordSha256}`;
 }
 
+/** A declared anchor profile named the way the rest of this surface names identifiers: by the part
+ * a reader can act on, never by its address. Every profile URI is namespaced under
+ * `ANCHOR_PROFILE_NAMESPACE`, so the namespace-relative name -- `rfc3161-tsa/v1` -- is the whole
+ * provider identity, and the origin it hangs off is not hosted (DR-2026-08-17-c Decision 5): printing
+ * it hands a reader a live-looking URL that resolves to nothing. A value outside the namespace cannot
+ * be shortened honestly, so it goes to `--json` whole rather than being printed raw. */
+function renderDeclaredProfile(profile: string): string {
+  return profile.startsWith(ANCHOR_PROFILE_NAMESPACE)
+    ? profile.slice(ANCHOR_PROFILE_NAMESPACE.length)
+    : "<profile: see --json>";
+}
+
 function renderSubject(subject: AnchorSubjectReport): string {
   if (subject.outcome === "declared-but-absent") {
+    const declared = subject.declaredProfiles?.map(renderDeclaredProfile).join(", ");
     return `  ${subject.subject}: declared-but-absent — this run declared `
-      + `${subject.declaredProfiles?.join(", ") ?? "an anchor provider"} and the bundle carries no matching anchor`;
+      + `${declared === undefined || declared === "" ? "an anchor provider" : declared} and the bundle carries no matching anchor`;
   }
   if (subject.outcome === "absent") return `  ${subject.subject}: absent — no anchor was carried and none was declared`;
   return `  ${subject.subject}: anchored`;
@@ -144,14 +160,66 @@ function renderSigners(signers: readonly PublicBundleSigner[]): string {
   return `\nSigned by\n${groups.map((group) => renderSignerGroup(group.role, group.custody, group.count)).join("\n")}\n`;
 }
 
+/**
+ * One plain-language line per named check, so a reader who has never read the bundle format can
+ * tell what each result covers. The names themselves stay -- they are the join key to `--json`,
+ * the report page's "Named checks" list, and every refusal message -- and the gloss is additive.
+ * The record spans both closure families: the six classic checks plus `integrity-anchors`, and
+ * the evidence-native v5 pair. A name with no entry renders bare rather than throwing: the
+ * renderer must never be the reason a valid bundle cannot be reported. A `Map` rather than an
+ * object literal so a check named `toString` or `constructor` misses instead of rendering an
+ * inherited `Object.prototype` member.
+ */
+const CHECK_GLOSSES = new Map<string, string>([
+  ["manifest", "every file the bundle lists is present and matches its recorded digest"],
+  ["evidence-closure", "every record the results depend on is carried inside the bundle"],
+  ["artifact-integrity", "each stored artifact hashes to the digest its record names"],
+  // "the signatures verify", not "each signature verifies": the result-evaluation and
+  // execution-verification families require every listed signature (`verifyDsseSignatures`), but
+  // a HumanLabelResolution record is accepted on `signatures.some(Boolean)`. A per-signature
+  // quantifier would overclaim on that third family.
+  ["signature-validity", "the signatures verify against the keys their records name"],
+  // Not "signatures verify": the `trust` check derives and cross-checks the declared key set and
+  // stops there. The verdict and report signatures are verified under `matrix-rederivation` and
+  // `report-verification`. Naming the wrong thing here would reintroduce the overclaim this
+  // surface just removed.
+  ["trust", "the declared keys are internally consistent and cover exactly the evaluators the results cite"],
+  ["matrix-rederivation", "the per-cell outcomes recompute to the sealed matrix"],
+  ["report-verification", "the report's numbers recompute from that sealed matrix"],
+  ["claim-consistency", "the published claim repeats the report without drift"],
+  ["integrity-anchors", "each carried time anchor is well-formed and covers what it names"],
+]);
+
+/**
+ * Format-specific corrections to {@link CHECK_GLOSSES}. A check name can be produced by more than
+ * one implementation, and a single format-independent sentence would then be true of only some of
+ * them. Bundle format v5 is evidence-native: `verifyEvidenceNativeReport` parses the DSSE
+ * envelope, checks the payload type, and asserts the report names the sealed matrix as its
+ * subject. It consults no method registry and recomputes nothing — `report.results` is an opaque
+ * JSON value there — so the legacy recompute sentence would state a proof this path never
+ * performed. Legacy formats keep it because `verifyReport` really does recompute and compare.
+ */
+const EVIDENCE_NATIVE_CHECK_GLOSSES = new Map<string, string>([
+  ["report-verification", "the sealed report is signed and bound to that sealed matrix"],
+]);
+
 export function renderVerifiedBundle(result: PublicBundleVerificationResult): string {
   // A metadata-first bundle carries artifact digests without their bytes. Printing "passed" for a
   // check that read nothing would be the one claim this format cannot afford, so the deferred check
   // prints as not fetched and is counted out of the passed total.
   const outcome = summarizeVerificationOutcome(result);
   const artifactContent = outcome.artifactContent;
+  const evidenceNative = result.format === "benchmark-product-public-bundle/5";
   const checks = outcome.outcomes
-    .map(({ check, state }) => `${check.padEnd(24)}${state}`)
+    .map(({ check, state }) => {
+      // A gloss states what a check proved, so only a check that ran gets one. A deferred check
+      // read nothing, and printing what it would have proved beside "not fetched" would restate
+      // the overclaim the deferred state exists to refuse.
+      if (state !== "passed") return `${check.padEnd(24)}${state}`;
+      const gloss = (evidenceNative ? EVIDENCE_NATIVE_CHECK_GLOSSES.get(check) : undefined)
+        ?? CHECK_GLOSSES.get(check);
+      return `${check.padEnd(24)}${state}${gloss === undefined ? "" : ` — ${gloss}`}`;
+    })
     .join("\n");
   const totalChecks = outcome.total;
   const identity = result.identity.startsWith("sha256:") ? result.identity : `sha256:${result.identity}`;
@@ -174,21 +242,22 @@ export function renderVerifiedBundle(result: PublicBundleVerificationResult): st
   const anchorLimits = anchors === ""
     ? ""
     : "\nAn anchor dates the bytes it covers and says nothing else about the run: not\nthat results were produced after it, and not that the anchoring authority is\nindependent of the bundle's owner.";
+  // "Checked", not "Verified" (#3022): the headline states what this tool did, and the passed
+  // count is what it found. A deferred check is disclosed beside that count, never inside it.
   const verdictLine = outcome.notFetched === 0
-    ? `Verified: ${outcome.passed} of ${totalChecks} checks passed`
-    : `Verified: ${outcome.passed} of ${totalChecks} checks passed, ${outcome.notFetched} not fetched`;
+    ? `Checked: ${outcome.passed} of ${totalChecks} checks passed`
+    : `Checked: ${outcome.passed} of ${totalChecks} checks passed, ${outcome.notFetched} not fetched`;
   return `${verdictLine}
 Bundle: ${identity}
 Format: ${result.format}
 
 ${checks}
 ${signers}${artifactContentReport}${anchors}
-This checks the bundle's integrity, evidence closure, calculations, report,
-and claim consistency. It does not prove that the machine that produced the
-bundle was honest or that the compared identities are independent parties.${artifactContentLimit}${anchorLimits}
-No files were uploaded.
-Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.
-Verification uses the exact platform bytes installed from npm.
+Checking opens no network connection, reads no account or API credential, and
+uploads nothing. It checks the bundle's integrity, evidence closure,
+calculations, report, and claim consistency. It does not prove that the
+producing machine was honest or that the compared identities are independent
+parties.${artifactContentLimit}${anchorLimits}
 `;
 }
 

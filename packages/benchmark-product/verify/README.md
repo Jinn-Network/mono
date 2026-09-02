@@ -31,7 +31,7 @@ For this release, `@jinn-network/*` is pinned to the exact
 `0.1.0-canary.sha.0533a224cf99f06d7facf0c23455f2781a5b9e62` receipt.
 It is not a floating `@canary` dependency and is not a stable stack release.
 
-Verification opens no network connection, reads no account or API credential, and uploads
+Checking opens no network connection, reads no account or API credential, and uploads
 nothing. It checks the bundle's integrity, evidence closure, calculations, report, and claim
 consistency. It does not prove that the producing machine was honest or that the compared
 identities are independent parties.
@@ -62,7 +62,8 @@ under `fixtures/public-bundle-conformance-v1/` for testing an independent verifi
 
 ## What this does not yet prove
 
-Protocol identifiers in the installed platform packages name `https://spec.jinn.network/…`.
-That origin is not hosted yet. This verifier checks the bundle against the exact
-`@jinn-network/*` bytes installed from npm. A third party who fetches those identifiers
-from the live origin will not retrieve them.
+The `https://…`-shaped protocol identifiers that appear inside record files and in `--json`
+are internal names, not addresses this tool reads. `spec.jinn.network` is one of them, and it
+is not hosted. Checking uses the exact `@jinn-network/*` bytes installed from npm and fetches
+nothing from the web, so a name that resolves to nothing changes no result here. A third party
+who treats one of those names as a live URL will not retrieve a document.
