@@ -8,13 +8,14 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import {
-  LANES,
   auditLane,
   auditLanes,
   describeGap,
+  discoverLanes,
   erePrefix,
   globPrefix,
   laneSelectedPrefixes,
+  parsePathsBlocks,
   overlaps,
   parseShellArray,
   parseWorkflowPaths,
@@ -33,20 +34,43 @@ test('every lane selects on the portal closure of the workspaces it selects on',
   );
 });
 
-test('every lane in the registry names a real workflow and selects on something', () => {
-  for (const lane of LANES) {
+test('every discovered lane names a real workflow and selects on something', () => {
+  for (const lane of discoverLanes(repoRoot)) {
     const prefixes = laneSelectedPrefixes(repoRoot, lane);
     assert.ok(prefixes.length > 0, `${lane.workflow} exposes no directory selection to audit`);
   }
 });
 
-test('every lane in the registry selects on at least one workspace', () => {
+test('every discovered lane selects on at least one workspace', () => {
   // A lane whose selection matched no workspace would pass the closure gate
   // vacuously — that is the failure this whole module exists to prevent.
   const graph = readWorkspaceGraph(repoRoot);
-  for (const lane of LANES) {
+  for (const lane of discoverLanes(repoRoot)) {
     const { selected } = auditLane({ root: repoRoot, graph, lane });
     assert.ok(selected.length > 0, `${lane.workflow} selects on no workspace`);
+  }
+});
+
+test('lane discovery covers every pull-request path filter and no publish lane', () => {
+  const ids = discoverLanes(repoRoot).map(({ id }) => id);
+  // The four trees named in #3573, plus the lanes only visible once
+  // single-quoted `paths:` entries are read.
+  for (const id of ['operator', 'marketplace-ci', 'benchmarking-ci', 'benchmark-product-ci', 'core-ci', 'indexer-ci']) {
+    assert.ok(ids.includes(id), `${id} must be audited`);
+  }
+  // Release cadence is not this gate's business.
+  for (const id of ['sdk-npm-publish', 'layer-npm-publish', 'operator-images']) {
+    assert.equal(ids.includes(id), false, `${id} is a publish lane and must not be audited`);
+  }
+});
+
+test('the four trees named in #3573 now select on packages/trust/core', () => {
+  const graph = readWorkspaceGraph(repoRoot);
+  const lanes = discoverLanes(repoRoot);
+  for (const id of ['operator', 'marketplace-ci', 'benchmarking-ci', 'benchmark-product-ci']) {
+    const lane = lanes.find((candidate) => candidate.id === id);
+    const { selected } = auditLane({ root: repoRoot, graph, lane });
+    assert.ok(selected.includes('packages/trust/core'), `${id} must select on packages/trust/core`);
   }
 });
 
@@ -101,6 +125,24 @@ test('erePrefix accepts an anchored directory prefix and rejects a file pattern'
   // every package look selected and silence the gate everywhere.
   assert.equal(erePrefix('^packages/.*/package\\.json$'), null);
   assert.equal(erePrefix('^\\.github/workflows/ci\\.yml$'), null);
+});
+
+test('parsePathsBlocks tags each block with its trigger', () => {
+  const source = [
+    'on:',
+    '  pull_request:',
+    '    paths:',
+    "      - 'a/**'",
+    '  push:',
+    '    branches: [next]',
+    '    paths:',
+    '      - "b/**"',
+    '      - c/**',
+  ].join('\n');
+  assert.deepEqual(parsePathsBlocks(source), [
+    { trigger: 'pull_request', entries: ['a/**'] },
+    { trigger: 'push', entries: ['b/**', 'c/**'] },
+  ]);
 });
 
 test('parseWorkflowPaths reads every paths block and tolerates comments', () => {
@@ -173,7 +215,7 @@ test('auditLane reports a portal target the lane does not select on', () => {
     const audit = auditLane({ root, graph, lane });
     assert.deepEqual(audit.selected, ['consumer']);
     assert.deepEqual(audit.missing, ['packages/dep']);
-    assert.match(describeGap({ ...audit, id: LANES[0].id }), /packages\/dep/u);
+    assert.match(describeGap(audit), /packages\/dep/u);
 
     // Selecting on the dependency closes the gap; nothing else changes.
     writeFileSync(
@@ -181,6 +223,24 @@ test('auditLane reports a portal target the lane does not select on', () => {
       ['on:', '  pull_request:', '    paths:', '      - "consumer/**"', '      - "packages/dep/**"', ''].join('\n'),
     );
     assert.deepEqual(auditLane({ root, graph, lane }).missing, []);
+
+    // A `push:` block that drifts from the `pull_request:` block reopens the
+    // hole on `next`, so every block must carry the closure.
+    writeFileSync(
+      join(root, '.github/workflows/stub.yml'),
+      [
+        'on:',
+        '  pull_request:',
+        '    paths:',
+        '      - "consumer/**"',
+        '      - "packages/dep/**"',
+        '  push:',
+        '    paths:',
+        '      - "consumer/**"',
+        '',
+      ].join('\n'),
+    );
+    assert.deepEqual(auditLane({ root, graph, lane }).missing, ['packages/dep']);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

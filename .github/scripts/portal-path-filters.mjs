@@ -160,32 +160,55 @@ export function erePrefix(pattern) {
 }
 
 /**
- * Every quoted entry of every `paths:` block in a workflow file.
+ * Every `paths:` block in a workflow file, tagged with the trigger it sits
+ * under. Both blocks of a lane must carry the same closure: a `push:` block
+ * that drifts from its `pull_request:` block reopens the hole on `next`.
  *
  * @param {string} source
- * @returns {string[]}
+ * @returns {{ trigger: string, entries: string[] }[]}
  */
-export function parseWorkflowPaths(source) {
-  const entries = [];
-  const lines = source.split('\n');
+export function parsePathsBlocks(source) {
+  /** @type {{ trigger: string, entries: string[] }[]} */
+  const blocks = [];
+  let trigger = null;
+  let block = null;
   let blockIndent = null;
-  for (const line of lines) {
-    const header = /^(\s*)paths(?:-ignore)?:\s*$/u.exec(line);
+  for (const line of source.split('\n')) {
+    const triggerKey = /^ {2}([a-z_]+):\s*$/u.exec(line);
+    if (triggerKey !== null) trigger = triggerKey[1];
+    // `paths-ignore:` is deliberately not matched: an ignored path is the
+    // opposite of coverage, and reading one as coverage would silence the gate.
+    const header = /^(\s*)paths:\s*$/u.exec(line);
     if (header !== null) {
+      block = { trigger: trigger ?? 'unknown', entries: [] };
+      blocks.push(block);
       blockIndent = header[1].length;
       continue;
     }
     if (blockIndent === null) continue;
-    const item = /^(\s*)-\s*"([^"]+)"\s*$/u.exec(line);
+    // Double-quoted, single-quoted and bare entries all occur in this
+    // repository. Reading only one style would make the other invisible to the
+    // gate — silently, which is the exact failure mode being fixed.
+    const item = /^(\s*)-\s*(?:"([^"]+)"|'([^']+)'|([^\s'"#][^\s#]*))\s*$/u.exec(line);
     if (item !== null && item[1].length > blockIndent) {
-      entries.push(item[2]);
+      block.entries.push(item[2] ?? item[3] ?? item[4]);
       continue;
     }
     // A comment or a blank line is part of the block, not the end of it.
     if (line.trim() === '' || line.trim().startsWith('#')) continue;
     blockIndent = null;
   }
-  return entries;
+  return blocks;
+}
+
+/**
+ * Every entry of every `paths:` block, flattened.
+ *
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function parseWorkflowPaths(source) {
+  return parsePathsBlocks(source).flatMap(({ entries }) => entries);
 }
 
 /**
@@ -212,79 +235,109 @@ export function parseShellArray(source, arrayName) {
 }
 
 /**
- * The lanes whose selection is derived from the diff and must therefore honour
- * the portal closure. A lane absent from this list runs unconditionally and
- * needs no entry.
- *
- * `dialect` picks the reader and the remediation syntax; `required(workspace)`
- * renders the entry a maintainer must add.
+ * The one lane that selects through an anchored extended-regular-expression
+ * array in a shell step rather than a workflow-level `paths:` list.
  */
-export const LANES = Object.freeze([
-  Object.freeze({
-    id: 'operator',
-    workflow: '.github/workflows/ci.yml',
-    dialect: 'shell-ere',
-    arrayName: 'patterns',
-    required: (workspace) => `'^${workspace}/'`,
-  }),
-  ...[
-    'benchmark-product-ci',
-    'benchmarking-ci',
-    'environments-ci',
-    'evidence-ci',
-    'marketplace-ci',
-    'plugin-tree-ci',
-    'policy-ci',
-    'policy-optimization-ci',
-    'read-plane-ci',
-    'record-discovery-ci',
-    'task-execution-ci',
-    'task-supply-ci',
-    'trust-ci',
-  ].map((id) =>
-    Object.freeze({
-      id,
-      workflow: `.github/workflows/${id}.yml`,
-      dialect: 'workflow-paths',
-      required: (workspace) => `"${workspace}/**"`,
-    }),
-  ),
-]);
+const SHELL_LANE = Object.freeze({
+  id: 'operator',
+  workflow: '.github/workflows/ci.yml',
+  dialect: 'shell-ere',
+  arrayName: 'patterns',
+  required: (workspace) => `'^${workspace}/'`,
+});
+
+/**
+ * Every lane whose selection is derived from the diff, discovered rather than
+ * listed: a hand-maintained roster is the same failure this module exists to
+ * prevent, one level up. A workflow with no `paths:` block runs unconditionally
+ * and needs no entry.
+ *
+ * @param {string} root
+ * @returns {{ id: string, workflow: string, dialect: string, arrayName?: string, required: (workspace: string) => string }[]}
+ */
+export function discoverLanes(root) {
+  const directory = '.github/workflows';
+  const lanes = [SHELL_LANE];
+  for (const file of readdirSync(path.join(root, directory)).sort()) {
+    if (!file.endsWith('.yml')) continue;
+    const workflow = `${directory}/${file}`;
+    if (workflow === SHELL_LANE.workflow) continue;
+    const blocks = parsePathsBlocks(readFileSync(path.join(root, workflow), 'utf8'));
+    // Only lanes that gate a PULL REQUEST are in scope. A `push:`-only lane
+    // (`*-npm-publish`, `operator-images`) decides release cadence, not whether
+    // a pull request was verified; widening one would change what publishes,
+    // which is a release-policy call and not this gate's business.
+    if (!blocks.some(({ trigger }) => trigger === 'pull_request')) continue;
+    lanes.push(
+      Object.freeze({
+        id: file.slice(0, -'.yml'.length),
+        workflow,
+        dialect: 'workflow-paths',
+        required: (workspace) => `"${workspace}/**"`,
+      }),
+    );
+  }
+  return lanes;
+}
 
 /**
  * The directory prefixes one lane selects on.
  *
  * @param {string} root
- * @param {(typeof LANES)[number]} lane
+ * @param {ReturnType<typeof discoverLanes>[number]} lane
  * @returns {string[]}
  */
 export function laneSelectedPrefixes(root, lane) {
+  return laneSelectionBlocks(root, lane).flatMap(({ prefixes }) => prefixes);
+}
+
+/**
+ * One entry per independently-evaluated selection block, each reduced to the
+ * directory prefixes it selects on.
+ *
+ * @param {string} root
+ * @param {ReturnType<typeof discoverLanes>[number]} lane
+ * @returns {{ trigger: string, prefixes: string[] }[]}
+ */
+export function laneSelectionBlocks(root, lane) {
   const source = readFileSync(path.join(root, lane.workflow), 'utf8');
-  const raw =
-    lane.dialect === 'shell-ere'
-      ? parseShellArray(source, lane.arrayName).map(erePrefix)
-      : parseWorkflowPaths(source).map(globPrefix);
-  return [...new Set(raw.filter((prefix) => prefix !== null))].sort();
+  const reduce = (raw) => [...new Set(raw.filter((prefix) => prefix !== null))].sort();
+  if (lane.dialect === 'shell-ere') {
+    return [{ trigger: 'diff', prefixes: reduce(parseShellArray(source, lane.arrayName).map(erePrefix)) }];
+  }
+  return parsePathsBlocks(source).map(({ trigger, entries }) => ({
+    trigger,
+    prefixes: reduce(entries.map(globPrefix)),
+  }));
 }
 
 /**
  * Audits one lane: the workspaces it selects on, and the portal targets of those
- * workspaces that it does not select on.
+ * workspaces that some selection block of that lane does not select on.
  *
- * @param {{ root: string, graph: Map<string, string[]>, lane: (typeof LANES)[number] }} input
- * @returns {{ id: string, workflow: string, selected: string[], missing: string[] }}
+ * @param {{ root: string, graph: Map<string, string[]>, lane: ReturnType<typeof discoverLanes>[number] }} input
+ * @returns {{ id: string, workflow: string, required: (workspace: string) => string, selected: string[], missing: string[] }}
  */
 export function auditLane({ root, graph, lane }) {
-  const prefixes = laneSelectedPrefixes(root, lane);
-  const covers = (workspace) => prefixes.some((prefix) => overlaps(prefix, workspace));
-  const selected = [...graph.keys()].filter(covers).sort();
+  const blocks = laneSelectionBlocks(root, lane);
+  const coversAnywhere = (workspace) =>
+    blocks.some(({ prefixes }) => prefixes.some((prefix) => overlaps(prefix, workspace)));
+  const selected = [...graph.keys()].filter(coversAnywhere).sort();
   const missing = new Set();
   for (const workspace of selected) {
     for (const target of portalClosure(graph, workspace)) {
-      if (!covers(target)) missing.add(target);
+      for (const { prefixes } of blocks) {
+        if (!prefixes.some((prefix) => overlaps(prefix, target))) missing.add(target);
+      }
     }
   }
-  return { id: lane.id, workflow: lane.workflow, selected, missing: [...missing].sort() };
+  return {
+    id: lane.id,
+    workflow: lane.workflow,
+    required: lane.required,
+    selected,
+    missing: [...missing].sort(),
+  };
 }
 
 /**
@@ -295,18 +348,17 @@ export function auditLane({ root, graph, lane }) {
  */
 export function auditLanes(root) {
   const graph = readWorkspaceGraph(root);
-  return LANES.map((lane) => auditLane({ root, graph, lane }));
+  return discoverLanes(root).map((lane) => auditLane({ root, graph, lane }));
 }
 
 /**
  * Human-readable remediation for one lane's gap.
  *
- * @param {ReturnType<typeof auditLane>} audit
+ * @param {ReturnType<typeof auditLane> & { required: (workspace: string) => string }} audit
  * @returns {string}
  */
 export function describeGap(audit) {
-  const lane = LANES.find(({ id }) => id === audit.id);
-  const entries = audit.missing.map((workspace) => `    ${lane.required(workspace)}`).join('\n');
+  const entries = audit.missing.map((workspace) => `    ${audit.required(workspace)}`).join('\n');
   return [
     `${audit.workflow} selects on a workspace whose portal: closure it does not select on.`,
     `A change confined to one of these trees would not schedule the ${audit.id} lane,`,
