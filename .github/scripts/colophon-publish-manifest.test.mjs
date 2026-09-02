@@ -25,8 +25,20 @@ const V2_PIN_VERSION = `0.1.0-canary.sha.${V2_PIN_SHA}`;
 const V21_PIN_SHA = '0533a224cf99f06d7facf0c23455f2781a5b9e62';
 const V21_PIN_VERSION = `0.1.0-canary.sha.${V21_PIN_SHA}`;
 
-function verifyManifest() {
-  return JSON.parse(readFileSync(join(repoRoot, 'packages/benchmark-product/verify/package.json'), 'utf8'));
+/**
+ * The checker's manifest. Issue #3023 renamed the published package to `@colophon-claims/check`
+ * and left `@colophon-claims/verify` behind as a passthrough alias, so the already-registered 0.2
+ * receipts still name `@colophon-claims/verify`: they are the receipts for releases that actually
+ * happened under that name and are frozen. A `@colophon-claims/check` release needs its own
+ * registered receipt, which is what the "no immutable platform receipt" case below asserts.
+ */
+function checkerManifest() {
+  return JSON.parse(readFileSync(join(repoRoot, 'packages/benchmark-product/check/package.json'), 'utf8'));
+}
+
+/** The historical published identity, used to exercise the frozen 0.2 receipts. */
+function legacyVerifyManifest() {
+  return { ...checkerManifest(), name: '@colophon-claims/verify' };
 }
 
 test('the first-cut pin names one exact stack-canary receipt, not a dist-tag', () => {
@@ -51,7 +63,7 @@ test('the first-cut pin names one exact stack-canary receipt, not a dist-tag', (
 });
 
 test('the verifier 0.2 patch release selects its attested parser-capable closure without changing the historical receipt', () => {
-  const manifest = verifyManifest();
+  const manifest = legacyVerifyManifest();
   const pin = loadProductReleasePlatformPin(repoRoot, manifest);
   assert.equal(pin.decision, 'operator-authorization-2026-08-26');
   assert.equal(pin.product.packageName, '@colophon-claims/verify');
@@ -75,25 +87,35 @@ test('the verifier 0.2 patch release selects its attested parser-capable closure
 });
 
 test('the shipped README states the pin the selected receipt actually applies', () => {
-  const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/README.md'), 'utf8');
+  const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/check/README.md'), 'utf8');
   assert.match(readme, new RegExp(V21_PIN_VERSION, 'u'));
   assert.doesNotMatch(readme, /e00b2fc47fc5635b007eb349fb1e41aa81bb3c50/u);
 });
 
 test('the verifier 0.2 exception cannot become an implicit product or version exception', () => {
-  const manifest = verifyManifest();
+  const manifest = legacyVerifyManifest();
   assert.throws(
     () => loadProductReleasePlatformPin(repoRoot, { ...manifest, version: '0.2.2' }),
     /no immutable platform receipt/u,
   );
   assert.throws(
     () => loadProductReleasePlatformPin(repoRoot, { ...manifest, name: '@colophon-claims/core' }),
-    /registered @colophon-claims\/verify 0\.2 patch release/u,
+    /no immutable platform receipt/u,
+  );
+});
+
+test('the renamed checker does not inherit the retired name\'s registered receipts', () => {
+  // Issue #3023. `@colophon-claims/check` carries the same bytes at the same version, but a
+  // receipt attests a publish that happened — the checker's first release under its own name
+  // needs its own registered receipt before this workflow will pin its platform closure.
+  assert.throws(
+    () => loadProductReleasePlatformPin(repoRoot, checkerManifest()),
+    /no immutable platform receipt is registered for @colophon-claims\/check@/u,
   );
 });
 
 test('the one-time receipt rejects hostile coherent rewrites and malformed registry facts', () => {
-  const manifest = verifyManifest();
+  const manifest = legacyVerifyManifest();
   const pin = loadProductReleasePlatformPin(repoRoot, manifest);
   const mutate = (apply) => {
     const copy = structuredClone(pin);
@@ -110,7 +132,7 @@ test('the one-time receipt rejects hostile coherent rewrites and malformed regis
         row.provenanceUrl = `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(row.name)}@${copy.platformVersion}`;
       }
     }), manifest),
-    /registered @colophon-claims\/verify 0\.2 patch release|immutable verifier 0\.2\.1/u,
+    /registered @colophon-claims\/verify release|immutable verifier 0\.2\.1/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPin(mutate((copy) => {
@@ -133,20 +155,20 @@ test('the one-time receipt rejects hostile coherent rewrites and malformed regis
 });
 
 test('the receipt collection refuses added or duplicate rows and root-key drift', () => {
-  const manifest = verifyManifest();
+  const manifest = legacyVerifyManifest();
   const pin = loadProductReleasePlatformPin(repoRoot, manifest);
   const receipts = JSON.parse(readFileSync(join(repoRoot, PRODUCT_RELEASE_PLATFORM_PINS_PATH), 'utf8')).receipts;
   assert.throws(
     () => validateProductReleasePlatformPins({ schemaVersion: 1, receipts: [...receipts, structuredClone(pin)] }, manifest),
-    /exact ordered immutable verifier 0\.2 receipts/u,
+    /exact ordered registered release receipts/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPins({ receipts: [pin], schemaVersion: 1 }, manifest),
-    /exact ordered immutable verifier 0\.2 receipts/u,
+    /exact ordered registered release receipts/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPins({ schemaVersion: 1, receipts: [...receipts].reverse() }, manifest),
-    /exact ordered immutable verifier 0\.2 receipts/u,
+    /exact ordered registered release receipts/u,
   );
   const duplicate = structuredClone(pin);
   duplicate.platformPackages[1] = structuredClone(duplicate.platformPackages[0]);
@@ -157,8 +179,8 @@ test('the receipt collection refuses added or duplicate rows and root-key drift'
 });
 
 test('publish transform keeps the Colophon product version and pins every Jinn runtime dep to the 0.2 receipt', () => {
-  const pin = loadProductReleasePlatformPin(repoRoot, verifyManifest());
-  const patched = transformColophonManifestForPublish(verifyManifest(), pin);
+  const pin = loadProductReleasePlatformPin(repoRoot, legacyVerifyManifest());
+  const patched = transformColophonManifestForPublish(legacyVerifyManifest(), pin);
   assert.equal(patched.name, '@colophon-claims/verify');
   assert.equal(patched.version, '0.2.1');
   const jinnDeps = Object.entries(patched.dependencies).filter(([name]) => name.startsWith('@jinn-network/'));
@@ -171,8 +193,8 @@ test('publish transform keeps the Colophon product version and pins every Jinn r
 });
 
 test('publish transform strips portal and workspace resolutions and rewrites prepack for npm', () => {
-  const pin = loadProductReleasePlatformPin(repoRoot, verifyManifest());
-  const patched = transformColophonManifestForPublish(verifyManifest(), pin);
+  const pin = loadProductReleasePlatformPin(repoRoot, legacyVerifyManifest());
+  const patched = transformColophonManifestForPublish(legacyVerifyManifest(), pin);
   const serialized = JSON.stringify(patched);
   assert.doesNotMatch(serialized, /portal:/u);
   assert.doesNotMatch(serialized, /workspace:/u);
@@ -182,12 +204,12 @@ test('publish transform strips portal and workspace resolutions and rewrites pre
 });
 
 test('publish transform refuses a floating canary dist-tag in the pin or source deps', () => {
-  const pin = loadProductReleasePlatformPin(repoRoot, verifyManifest());
+  const pin = loadProductReleasePlatformPin(repoRoot, legacyVerifyManifest());
   assert.throws(
-    () => transformColophonManifestForPublish(verifyManifest(), { ...pin, platformVersion: 'canary' }),
+    () => transformColophonManifestForPublish(legacyVerifyManifest(), { ...pin, platformVersion: 'canary' }),
     /floating canary dist-tag/u,
   );
-  const tagged = verifyManifest();
+  const tagged = legacyVerifyManifest();
   tagged.dependencies['@jinn-network/trust-core'] = 'canary';
   assert.throws(
     () => transformColophonManifestForPublish(tagged, pin),
@@ -195,12 +217,16 @@ test('publish transform refuses a floating canary dist-tag in the pin or source 
   );
 });
 
-test('Increment 1 moves only verify onto a demand-gated independent product line', () => {
+test('Increment 1 moves only the reader onto a demand-gated independent product line', () => {
   const catalog = loadPlatformCatalog(repoRoot);
+  const checker = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/check');
   const verify = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/verify');
   const core = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/core');
   const cli = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/cli');
   const web = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/web');
+  assert.equal(checker.releaseGroup, 'colophon-claims-v1');
+  assert.equal(checker.publishPolicy, 'independent');
+  // Issue #3023: the retired name publishes on the same line, as a passthrough alias.
   assert.equal(verify.releaseGroup, 'colophon-claims-v1');
   assert.equal(verify.publishPolicy, 'independent');
   assert.equal(core.releaseGroup, 'transitional-or-private');
@@ -208,7 +234,7 @@ test('Increment 1 moves only verify onto a demand-gated independent product line
   assert.equal(cli.publishPolicy, 'never');
   assert.equal(web.publishPolicy, 'never');
   const group = catalog.releaseGroups['colophon-claims-v1'];
-  assert.equal(group.expectedPackageCount, 1);
+  assert.equal(group.expectedPackageCount, 2);
   assert.deepEqual(group.publishPolicies, ['independent']);
   assert.equal(group.stackPublished, false);
   assert.equal(group.canary, false);
@@ -231,11 +257,30 @@ test('Colophon trusted publishing is a separate workflow and never joins the sta
   assert.match(workflow, /unset NODE_AUTH_TOKEN/u);
   assert.match(workflow, /npm publish --access public/u);
   assert.match(workflow, /transformColophonManifestForPublish|colophon-publish-manifest/u);
+  // Issue #3023: both published names ship from this one trusted-publisher workflow.
+  assert.match(workflow, /packages\/benchmark-product\/check/u);
+  assert.match(workflow, /packages\/benchmark-product\/verify/u);
+  // Issue #3306: the alias may not publish ahead of the checker version it pins. npm versions are
+  // immutable, so an alias released against a missing checker permanently breaks the
+  // `npx @colophon-claims/verify@<line>` command sealed into every published bundle.
+  assert.match(workflow, /npm view "@colophon-claims\/check@\$\{pinned\}" version/u);
+});
+
+test('the alias pins an exact checker version that the publish preflight can resolve', () => {
+  const alias = JSON.parse(
+    readFileSync(join(repoRoot, 'packages/benchmark-product/verify/package.json'), 'utf8'),
+  );
+  const pinned = alias.dependencies?.['@colophon-claims/check'];
+  assert.match(pinned ?? '', /^\d+\.\d+\.\d+$/u);
+  const checker = JSON.parse(
+    readFileSync(join(repoRoot, 'packages/benchmark-product/check/package.json'), 'utf8'),
+  );
+  assert.equal(pinned, checker.version);
 });
 
 test('first-cut public surfaces disclose that spec.jinn.network is not hosted', () => {
-  const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/README.md'), 'utf8');
-  const cli = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/src/cli.ts'), 'utf8');
+  const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/check/README.md'), 'utf8');
+  const cli = readFileSync(join(repoRoot, 'packages/benchmark-product/check/src/cli.ts'), 'utf8');
   for (const [label, text] of [['README', readme], ['CLI', cli]]) {
     assert.match(text, /spec\.jinn\.network/u, label);
     assert.match(text, /not hosted/iu, label);

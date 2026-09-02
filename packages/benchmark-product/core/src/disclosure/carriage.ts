@@ -9,7 +9,7 @@
  *   `getSealedBytes` re-verifies it on read, so a record edited in place surfaces as its own
  *   `record-integrity` refusal naming the store path, before anything projects it.
  * - **The projection is the shared one.** `deriveDisclosureSpecification` lives in
- *   `@colophon-claims/verify` and is the same function the portable verifier rebuilds the section
+ *   `@colophon-claims/check` and is the same function the portable verifier rebuilds the section
  *   with. Producing the section through a second local implementation would make the
  *   claim-consistency byte-compare a comparison of two guesses rather than of one function's output
  *   over two byte sets.
@@ -17,8 +17,8 @@
  *   digest no longer matches its bytes, is `record-integrity` here.
  */
 
-import { deriveDisclosureSpecification, DisclosureProjectionError } from "@colophon-claims/verify";
-import type { ClaimDisclosureSection } from "@colophon-claims/verify";
+import { deriveDisclosureSpecification, DisclosureProjectionError } from "@colophon-claims/check";
+import type { ClaimDisclosureSection } from "@colophon-claims/check";
 import { refuse } from "../errors.js";
 import type { RunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";

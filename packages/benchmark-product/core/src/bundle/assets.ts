@@ -6,5 +6,5 @@
  * Keeping this shim preserves the core import path without creating a second
  * report authority.
  */
-export { buildPublicAssets } from "@colophon-claims/verify";
-export type { PublicAssetInput } from "@colophon-claims/verify";
+export { buildPublicAssets } from "@colophon-claims/check";
+export type { PublicAssetInput } from "@colophon-claims/check";

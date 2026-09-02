@@ -220,7 +220,7 @@ npx @colophon-claims/verify@0.1 <bundle-dir>
 Supply your own trust material to reach `verified`:
 
 ```bash
-npx @colophon-claims/verify@0.1 <bundle-dir> \
+npx @colophon-claims/check@0.2 <bundle-dir> \
   --tsa-root ./authority-root.pem \
   --ots-headers ./bitcoin-headers.txt
 ```
@@ -496,7 +496,7 @@ Verification with your own tools — no Jinn code at all — is specified in
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md): the check split, the
 DSSE and digest rules, the JSON Schemas shipped under the reader package's
 `schemas/`, and the conformance kit under
-`verify/fixtures/public-bundle-conformance-v1/` whose tampered variants an
+`check/fixtures/public-bundle-conformance-v1/` whose tampered variants an
 external verifier must reject.
 
 Use the smaller reader package, without the product or source workspace. Which line reads which
@@ -528,6 +528,16 @@ rather than from the format.
 
 Every row runs as `npx @colophon-claims/verify<line> <bundle-dir>`, with the anchor flags appended
 where the row lists them.
+
+The checker was published as `@colophon-claims/verify` through 0.2.1. Every command a sealed
+bundle prints uses that name, and it stays published permanently as a passthrough alias, so those
+recorded instructions keep resolving unchanged. Only the pins quoted above are the sealed name;
+every instruction in this document that is not quoting a pin prints the current name,
+`@colophon-claims/check`:
+
+```bash
+npx @colophon-claims/check@0.2 <bundle-dir>
+```
 
 **Publication pending is not a formality.** The `0.2.1` reader that public-bundle/7,
 public-bundle/8, and every prompted bundle pin is cut by a manual, demand-gated workflow that has
@@ -831,7 +841,7 @@ bytes read back identical — so `freeze-repo verify` reports both as drift, and
 treats a nested `.git` directory as ordinary content, skipping only the root one.
 
 The standalone verifier package checks a published tree with no product install:
-`colophon-verify <bundle> --freeze-repo <dir>`, exit `1` on drift.
+`colophon-check <bundle> --freeze-repo <dir>`, exit `1` on drift.
 
 A bundle with no qualification graph has no freeze artifacts, and a Benchmark
 record that declares no licence has no licence data to generate scaffolding from.

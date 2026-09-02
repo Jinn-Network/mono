@@ -93,8 +93,8 @@ import {
 } from "../intake/external-run-records.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
-import type { BeaconReference } from "@colophon-claims/verify";
-import { exportFreezeRepo, summarizeVerificationOutcome, verifyFreezeRepo } from "@colophon-claims/verify";
+import type { BeaconReference } from "@colophon-claims/check";
+import { exportFreezeRepo, summarizeVerificationOutcome, verifyFreezeRepo } from "@colophon-claims/check";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";

@@ -89,11 +89,11 @@ function contextFor(clock: () => string, principal = "sponsor-1"): OperationCont
 }
 
 // ── packet P5 proof 1a: the shipped, packaged `external-verify.py` (spec §8.3) ────────────────
-// Invoked at the PACKAGED path (`node_modules/@colophon-claims/verify/scripts/...`), never the
+// Invoked at the PACKAGED path (`node_modules/@colophon-claims/check/scripts/...`), never the
 // repo source path — that packaged copy is the artifact a third party installs, per the verify
 // package's `files` list and `verify/scripts/pack-smoke.mjs`.
 const EXTERNAL_VERIFY_SCRIPT = fileURLToPath(
-  new URL("../../node_modules/@colophon-claims/verify/scripts/external-verify.py", import.meta.url),
+  new URL("../../node_modules/@colophon-claims/check/scripts/external-verify.py", import.meta.url),
 );
 const EXTERNAL_VERIFY_CHECKS = [
   "manifest-files", "cas-records", "sealed-bytes", "report-signature",
@@ -2401,7 +2401,7 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
               ? claim["pairwiseDisagreement"]
               : claim["pairedMajorityDelta"],
           ).toBeDefined();
-          // JS verifier is the C1 seam (`publish` / `colophon-verify` run this copy). Python is
+          // JS verifier is the C1 seam (`publish` / `colophon-check` run this copy). Python is
           // necessary and not sufficient: `claim-mirror` skips when there is no headline.
           const verified = await verifyPublicBundle(dir);
           expect(verified.identity).toBe(identity);

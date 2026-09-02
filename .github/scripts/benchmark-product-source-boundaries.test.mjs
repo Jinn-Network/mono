@@ -41,9 +41,9 @@ const VERIFY_JINN = [
 const TEST_ONLY_JINN = ['@jinn-network/trust-testing'];
 const isTestSource = (file) => /\.test\.[cm]?[jt]sx?$/.test(file) || /(?:^|\/)testing\//.test(file);
 const MEMBER_ALLOWED = new Map([
-  ['core', [...CORE_JINN, '@colophon-claims/verify']],
-  ['cli', ['@colophon-claims/core', '@colophon-claims/verify']],
-  ['verify', VERIFY_JINN],
+  ['core', [...CORE_JINN, '@colophon-claims/check']],
+  ['cli', ['@colophon-claims/core', '@colophon-claims/check']],
+  ['check', VERIFY_JINN],
   ['web', ['@colophon-claims/core']],
 ]);
 const WEB_CORE = '@colophon-claims/core';
@@ -216,6 +216,10 @@ test('Tier 1-3 packages do not normalize Colophon-private runtime interfaces', (
   for (const identifier of PRIVATE_RUNTIME_IDENTIFIERS) assert.ok(productSource.includes(identifier), `private runtime guard is vacuous for ${identifier}`);
 });
 
-test('the live sweep covers all four product members', () => {
-  assert.deepEqual(sourceRoots().map((directory) => relative(packageRoot, directory)).sort(), ['cli/src', 'core/src', 'verify/src', 'web/src']);
+test('the live sweep covers all four product members with source', () => {
+  // Issue #3023 added a fifth published member, `verify/`, the retired name's passthrough alias.
+  // It has no `src/` — three forwarding files at package root — so it is deliberately outside
+  // this sweep; `.github/scripts/benchmark-product-package-inventory.test.mjs` and the product's
+  // docs-consistency suite own its shape.
+  assert.deepEqual(sourceRoots().map((directory) => relative(packageRoot, directory)).sort(), ['check/src', 'cli/src', 'core/src', 'web/src']);
 });

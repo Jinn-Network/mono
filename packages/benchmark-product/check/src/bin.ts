@@ -5,7 +5,7 @@
 // verification dependency graph.
 const nodeMajor = Number(process.versions.node.split(".", 1)[0]);
 if (!Number.isInteger(nodeMajor) || nodeMajor < 22) {
-  process.stderr.write(`Colophon Verify requires Node 22 or newer; this machine is running Node ${process.versions.node}.\n`);
+  process.stderr.write(`Colophon Check requires Node 22 or newer; this machine is running Node ${process.versions.node}.\n`);
   process.stderr.write("Install a current Node 22 LTS release, then run the same command again.\n");
   process.exitCode = 2;
 } else {

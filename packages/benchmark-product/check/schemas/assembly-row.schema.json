@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Describes one row of verification/assembly.jsonl (format benchmark-product-assembly/2): the first row is the run header, every following row is one matrix cell. Source of truth: BundleAssemblyHeaderSchema and BundleAssemblyCellSchema in @colophon-claims/verify src/schema.ts (open objects there, so unknown members are permitted here). The verifier additionally requires each row to be canonical JSON, cellKeys to be unique, and the graph edges to close exactly against the content-addressed records, the matrix, and the verdict catalog.",
+  "$comment": "Describes one row of verification/assembly.jsonl (format benchmark-product-assembly/2): the first row is the run header, every following row is one matrix cell. Source of truth: BundleAssemblyHeaderSchema and BundleAssemblyCellSchema in @colophon-claims/check src/schema.ts (open objects there, so unknown members are permitted here). The verifier additionally requires each row to be canonical JSON, cellKeys to be unique, and the graph edges to close exactly against the content-addressed records, the matrix, and the verdict catalog.",
   "description": "One JSONL row of a benchmark-product public bundle's verification assembly.",
   "oneOf": [
     { "$ref": "#/$defs/header" },

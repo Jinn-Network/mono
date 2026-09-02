@@ -541,7 +541,7 @@ function renderReadme(
     "",
     "The record schemas are pinned by the protocol identifiers this repository's records carry",
     `(listed in \`${FREEZE_REPO_MANIFEST_FILENAME}\`) and ship with the standalone verifier package,`,
-    "`@colophon-claims/verify`. They are not copied here: a copy would make this tree a function of",
+    "`@colophon-claims/check`. They are not copied here: a copy would make this tree a function of",
     "the tool version as well as of the bundle, and the tree's whole value is that it is not.",
     "",
   );

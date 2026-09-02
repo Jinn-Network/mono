@@ -36,8 +36,8 @@ import {
   STRUCTURAL_PRE_REGISTRATION,
   anchoredPreRegistration,
   anchoredVenueLimits,
-} from "@colophon-claims/verify";
-import type { ClaimAnchor } from "@colophon-claims/verify";
+} from "@colophon-claims/check";
+import type { ClaimAnchor } from "@colophon-claims/check";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { refuse } from "../errors.js";
 import {

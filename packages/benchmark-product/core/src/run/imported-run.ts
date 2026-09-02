@@ -19,7 +19,7 @@
  *
  * It cannot be corrected inside the import feature. Both the workspace verifier
  * (`../verification/claim-consistency.ts`) and the shipped reader
- * (`@colophon-claims/verify`, `profile/claim-consistency.ts`) derive the EXPECTED disclosure from
+ * (`@colophon-claims/check`, `profile/claim-consistency.ts`) derive the EXPECTED disclosure from
  * `localVenueLimitsForRun(runRecord)` — a pure function of the Run record, which is sealed at
  * `lock`, before import exists. The two facts that DO record the import — `RunState`'s
  * `externalImportSha256` and the `external-import` run-journal entry — are workspace-local: neither

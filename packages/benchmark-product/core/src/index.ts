@@ -880,20 +880,20 @@ export { verifyPublicBundle } from "./bundle/verify.js";
 // The one derivation of what a verification result may be said to have proved. Re-exported beside
 // `verifyPublicBundle` so every consumer of that result reaches the same counts and check states
 // rather than counting `checks` for itself (issue #2986).
-export { summarizeVerificationOutcome } from "@colophon-claims/verify";
+export { summarizeVerificationOutcome } from "@colophon-claims/check";
 export type {
   VerificationCheckOutcome,
   VerificationCheckState,
   VerificationOutcome,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 export type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./bundle/verify.js";
 
 // The `beacon-binding/1` surface a caller needs to OFFER a binding (issue #2976): the admitted
 // beacon sources and the reference shape. Re-exported through this facade for the same reason the
 // verification-outcome summary is — the product's GUI may import only this package, and a second
 // copy of the source registry would be a second place the admitted beacons could drift.
-export { BEACON_SOURCES, BEACON_SOURCE_IDS, MAX_BEACON_ROUND } from "@colophon-claims/verify";
-export type { BeaconReference, BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
+export { BEACON_SOURCES, BEACON_SOURCE_IDS, MAX_BEACON_ROUND } from "@colophon-claims/check";
+export type { BeaconReference, BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/check";
 
 // PUB-13b: an additive publication-profile projection. This is intentionally not wired into the
 // v2 `publish` operation or CLI: callers opt into its accounting-first, report-optional contract.

@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { GATED_OPERATIONS } from "./authority/policy.js";
@@ -11,7 +11,7 @@ import {
   FREEZE_REPO_MANIFEST_FILENAME,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
 import {
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
@@ -70,6 +70,58 @@ function localMarkdownTargets(markdown: string): readonly string[] {
     .filter((target) => !/^(?:https?:|mailto:|#)/.test(target))
     .map((target) => target.split("#", 1)[0]!)
     .filter((target) => target.length > 0);
+}
+
+/**
+ * Every non-test TypeScript/ESM source file the four Colophon packages actually ship, so a new
+ * module that hard-codes a reader command cannot slip past the #3023 guard by living somewhere
+ * this test did not think to look. Tests are excluded on purpose: asserting a frozen sealed
+ * command is exactly what several of them are for.
+ */
+function productSourceFiles(): readonly string[] {
+  const roots = ["check", "core", "cli", "web"].flatMap((pkg) =>
+    ["src", "scripts"].map((dir) => resolve(productRoot, pkg, dir))
+  );
+  const found: string[] = [];
+  const walk = (dir: string): void => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = resolve(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name === "dist" || entry.name === "__fixtures__" || entry.name === "fixtures") continue;
+        walk(path);
+        continue;
+      }
+      if (!/\.(?:ts|tsx|mjs)$/u.test(entry.name)) continue;
+      if (/\.(?:test|spec)\.(?:ts|tsx|mjs)$/u.test(entry.name)) continue;
+      found.push(path);
+    }
+  };
+  for (const root of roots) walk(root);
+  return found.sort();
+}
+
+/**
+ * Every Markdown surface the product tree ships, so a reader instruction added to a package
+ * README or a new guide is swept the same way source is. Package fixtures are excluded: their
+ * Markdown is sealed bundle bytes, not a template.
+ */
+function productMarkdownFiles(): readonly string[] {
+  const found: string[] = [];
+  const walk = (dir: string): void => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = resolve(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (["node_modules", "dist", ".next", "__fixtures__", "fixtures"].includes(entry.name)) continue;
+        walk(path);
+        continue;
+      }
+      if (entry.name.endsWith(".md")) found.push(path);
+    }
+  };
+  walk(productRoot);
+  return found.sort();
 }
 
 describe("product documentation consistency", () => {
@@ -162,7 +214,7 @@ describe("product documentation consistency", () => {
   });
 
   it("pins the freeze-repository section to the renderer's own constants and layout", () => {
-    // The guide is where `verify/README.md` points a third party for the layout, so a claim here
+    // The guide is where `check/README.md` points a third party for the layout, so a claim here
     // that the renderer does not honour is a spec defect. This pins the two constants and the two
     // shapes that a reader writes a consumer against.
     const guide = read(bundleReadmePath);
@@ -286,5 +338,134 @@ describe("product documentation consistency", () => {
     expect(verification).toContain("NOT EXTRACTION-READY");
     expect(verification).toContain("27 generated operations");
     expect(verification).toContain("six portable checks");
+  });
+
+  /**
+   * Issue #3023. The checker publishes as `@colophon-claims/check` (binary `colophon-check`).
+   * `@colophon-claims/verify` stays published forever as a passthrough alias, because bundles
+   * sealed before the rename print that name in their own reader instructions and a sealed
+   * instruction that stops resolving is a broken claim. The old name is therefore legal in
+   * exactly two kinds of place: the frozen per-format command constants (below), and prose that
+   * explains the alias. It is never legal in a template that emits a NEW instruction — that is
+   * what this guard fails on.
+   */
+  const LEGACY_READER_COMMAND = /npx\s+@colophon-claims\/verify@/u;
+  const LEGACY_READER_NAMES = /@colophon-claims\/verify(?![-\w])|colophon-verify(?![-\w])/u;
+  /** Same alternation, global and version-capturing, for extracting every literal in a file. */
+  const LEGACY_READER_NAMES_ALL =
+    /@colophon-claims\/verify(?:@[\w.-]+)?(?![-\w])|colophon-verify(?![-\w])/gu;
+
+  /**
+   * Modules whose whole job is to state the immutable command an already-sealed bundle format
+   * pins, mapped to the exact retired-name literals each one is frozen to carry. Those strings
+   * are claim bytes: `profile/claim.ts` REJECTS a bundle whose recorded command differs, so
+   * editing one of these to the new name would fail every published bundle.
+   *
+   * The allowlist is per literal, not per file, so sealing a NEW format with the retired name —
+   * the ordinary way a regression would arrive, since a new per-format command constant is added
+   * to precisely these files — fails on an unexpected literal. Removing or rewording an existing
+   * one fails on a missing literal, so the guard cannot go vacuous either.
+   */
+  const SEALED_COMMAND_LITERALS = new Map<string, readonly string[]>([
+    [
+      resolve(productRoot, "check/src/legacy-closures.ts"),
+      [
+        "@colophon-claims/verify@0.1",
+        "@colophon-claims/verify@0.1",
+        "@colophon-claims/verify@0.1.0",
+        "@colophon-claims/verify@0.1.0",
+        "@colophon-claims/verify@0.2",
+        "@colophon-claims/verify@0.2",
+        "@colophon-claims/verify@0.2.0",
+        "@colophon-claims/verify@0.2.1",
+        "@colophon-claims/verify@0.2.1",
+      ],
+    ],
+    [
+      resolve(coreRoot, "src/legacy-closures.ts"),
+      [
+        "@colophon-claims/verify@0.1",
+        "@colophon-claims/verify@0.1.0",
+        "@colophon-claims/verify@0.2",
+        "@colophon-claims/verify@0.2.0",
+        "@colophon-claims/verify@0.2.1",
+      ],
+    ],
+  ]);
+
+  /**
+   * Code that emits a fresh instruction for a reader to run. `check/src/assets.ts` reads the
+   * command out of the claim rather than hard-coding one, so it is listed to keep a future
+   * hard-coded literal out, not because it carries one today.
+   */
+  const READER_INSTRUCTION_SOURCES = [
+    resolve(productRoot, "check/src/assets.ts"),
+    resolve(productRoot, "cli/src/main.ts"),
+    resolve(coreRoot, "scripts/demo1-export-public-bundle.mjs"),
+  ] as const;
+
+  /**
+   * Markdown allowed to print the retired command. `PUBLIC-BUNDLE.md` quotes the per-format pins
+   * a sealed bundle carries — quoting a sealed byte is not issuing an instruction — and the alias
+   * package's own README exists to tell its readers that exact command still resolves. Every
+   * other Markdown file in the product tree is swept.
+   */
+  const LEGACY_COMMAND_MARKDOWN = [
+    resolve(productRoot, "PUBLIC-BUNDLE.md"),
+    resolve(productRoot, "verify/README.md"),
+  ] as const;
+
+  it("prints only the current reader name in every freshly emitted instruction", () => {
+    for (const path of READER_INSTRUCTION_SOURCES) {
+      expect(existsSync(path), path).toBe(true);
+      expect(read(path), path).not.toMatch(LEGACY_READER_COMMAND);
+    }
+    const allowed = new Set<string>(LEGACY_COMMAND_MARKDOWN);
+    for (const path of allowed) expect(existsSync(path), path).toBe(true);
+    const offenders = productMarkdownFiles()
+      .filter((path) => !allowed.has(path))
+      .filter((path) => LEGACY_READER_COMMAND.test(read(path)));
+    expect(offenders.map((path) => relative(repoRoot, path))).toEqual([]);
+  });
+
+  it("confines the retired reader name to the frozen per-format command constants", () => {
+    for (const [path, expected] of SEALED_COMMAND_LITERALS) {
+      expect(existsSync(path), path).toBe(true);
+      const found = [...read(path).matchAll(LEGACY_READER_NAMES_ALL)]
+        .map((match) => match[0])
+        .sort();
+      expect(found, path).toEqual([...expected].sort());
+    }
+    const sealed = new Set<string>(SEALED_COMMAND_LITERALS.keys());
+    const offenders = productSourceFiles()
+      .filter((path) => !sealed.has(path))
+      .filter((path) => LEGACY_READER_NAMES.test(read(path)));
+    expect(offenders.map((path) => relative(repoRoot, path))).toEqual([]);
+  });
+
+  it("keeps the retired reader name resolving through a published passthrough alias", () => {
+    const alias = JSON.parse(read(resolve(productRoot, "verify/package.json"))) as {
+      name: string;
+      version: string;
+      bin: Record<string, string>;
+      dependencies: Record<string, string>;
+      publishConfig?: { access?: string };
+    };
+    const checker = JSON.parse(read(resolve(productRoot, "check/package.json"))) as {
+      name: string;
+      version: string;
+      bin: Record<string, string>;
+      exports: Record<string, unknown>;
+    };
+    expect(checker.name).toBe("@colophon-claims/check");
+    expect(Object.keys(checker.bin)).toEqual(["colophon-check"]);
+    expect(alias.name).toBe("@colophon-claims/verify");
+    expect(Object.keys(alias.bin)).toEqual(["colophon-verify"]);
+    expect(alias.publishConfig?.access).toBe("public");
+    // Same 0.2 line, so `npx @colophon-claims/verify@0.2` keeps resolving to a real reader.
+    expect(alias.version.startsWith("0.2.")).toBe(true);
+    expect(alias.dependencies["@colophon-claims/check"]).toBe(checker.version);
+    expect(checker.exports["./bin"]).toBe("./dist/bin.js");
+    expect(read(resolve(productRoot, "verify/README.md"))).toContain("@colophon-claims/check");
   });
 });

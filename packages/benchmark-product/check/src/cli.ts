@@ -30,8 +30,8 @@ export interface VerifierCliDeps {
 }
 
 function usage(): string {
-  return "Usage: colophon-verify <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
-    + "                        [--freeze-repo <dir>]\n"
+  return "Usage: colophon-check <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
+    + "                      [--freeze-repo <dir>]\n"
     + "  --tsa-root     RFC 3161 trust anchor, DER or PEM. Repeatable.\n"
     + "  --ots-headers  Bitcoin block headers, one \"<height>:<80-byte-hex>\" per line. Repeatable.\n"
     + "  --freeze-repo  Also check that this published freeze-artifact repository is exactly what\n"
@@ -322,7 +322,7 @@ export async function runVerifierCli(
     return {
       exitCode: 2,
       stdout: "",
-      stderr: `colophon-verify: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      stderr: `colophon-check: ${cause instanceof Error ? cause.message : String(cause)}\n`,
     };
   }
 
@@ -339,7 +339,7 @@ export async function runVerifierCli(
     const stdout = parsed.json
       ? `${JSON.stringify({ ok: false, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, code, message: error.message })}\n`
       : "";
-    const stderr = parsed.json ? "" : `colophon-verify: ${withoutRawIdentifiers(error.message)}\n`;
+    const stderr = parsed.json ? "" : `colophon-check: ${withoutRawIdentifiers(error.message)}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
 
@@ -378,7 +378,7 @@ export async function runVerifierCli(
     return {
       exitCode: 2,
       stdout,
-      stderr: parsed.json ? "" : `colophon-verify: freeze repository not checked: ${freezeRepoFailure.message}\n`,
+      stderr: parsed.json ? "" : `colophon-check: freeze repository not checked: ${freezeRepoFailure.message}\n`,
     };
   }
   return { exitCode: freezeRepo !== undefined && !freezeRepo.ok ? 1 : 0, stdout, stderr: "" };

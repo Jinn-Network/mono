@@ -15,7 +15,7 @@ import {
   exportFreezeRepo,
   runVerifierCli,
   verifyFreezeRepo,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { runCli } from "../cli/main.js";
 import { createSyntheticV4BundleFixture } from "./testing/v4-synthetic-fixture.js";
 

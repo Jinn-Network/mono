@@ -24,7 +24,7 @@
  *   The schema cannot enforce that; it is stated here because this file is where a reviewer looks.
  *
  * R4 (the verifier authenticates measurements and carries assertions) is a property of the
- * `disclosure-specification` check, not of this schema — see `@colophon-claims/verify`.
+ * `disclosure-specification` check, not of this schema — see `@colophon-claims/check`.
  */
 
 import { z } from "zod";

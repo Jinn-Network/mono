@@ -47,8 +47,8 @@ import {
   PUBLIC_BUNDLE_V8_CHECKS as READER_DISCLOSED_VERIFICATION_CHECKS,
   SELF_RUN_TRUST_ROOT,
   anchoredTrustRoot,
-} from "@colophon-claims/verify";
-import type { ClaimAnchor, ClaimDisclosureSection } from "@colophon-claims/verify";
+} from "@colophon-claims/check";
+import type { ClaimAnchor, ClaimDisclosureSection } from "@colophon-claims/check";
 import {
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,

@@ -18,13 +18,17 @@ const COLOPHON_SCOPE = '@colophon-claims/';
 const PRODUCT_PACKAGES = [
   ['core', '@colophon-claims/core', 'public'],
   ['cli', '@colophon-claims/cli', 'public'],
+  ['check', '@colophon-claims/check', 'public'],
+  // Issue #3023: the reader's retired name. It ships as a passthrough onto `check` and stays
+  // published permanently, because already-sealed bundles print it in their own instructions.
   ['verify', '@colophon-claims/verify', 'public'],
   ['web', '@colophon-claims/web', 'private'],
 ];
 const PACKAGE_VERSIONS = new Map([
   ['@colophon-claims/core', '0.1.0'],
   ['@colophon-claims/cli', '0.1.0'],
-  ['@colophon-claims/verify', '0.2.1'],
+  ['@colophon-claims/check', '0.2.1'],
+  ['@colophon-claims/verify', '0.2.2'],
   ['@colophon-claims/web', '0.1.0'],
 ]);
 
@@ -96,8 +100,8 @@ const VERIFY_PORTALS = [
 ];
 
 const APPROVED = new Map([
-  ['core', { colophon: ['@colophon-claims/verify'], jinn: CORE_JINN, portals: [
-    '@colophon-claims/verify', ...CORE_JINN, '@jinn-network/environment-record', '@jinn-network/evidence-discovery',
+  ['core', { colophon: ['@colophon-claims/check'], jinn: CORE_JINN, portals: [
+    '@colophon-claims/check', ...CORE_JINN, '@jinn-network/environment-record', '@jinn-network/evidence-discovery',
     '@jinn-network/evidence-protocol',
     '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
     '@jinn-network/record-discovery-client',
@@ -106,14 +110,17 @@ const APPROVED = new Map([
     // pointed at the live tree rather than at a registry version that does not exist.
     '@jinn-network/trust-resolve',
   ] }],
-  ['cli', { colophon: ['@colophon-claims/core', '@colophon-claims/verify'], jinn: [], portals: [
-    '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
+  ['cli', { colophon: ['@colophon-claims/check', '@colophon-claims/core'], jinn: [], portals: [
+    '@colophon-claims/check', '@colophon-claims/core', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
   ] }],
-  ['verify', { colophon: [], jinn: VERIFY_JINN, portals: VERIFY_PORTALS }],
+  ['check', { colophon: [], jinn: VERIFY_JINN, portals: VERIFY_PORTALS }],
+  // The alias carries the checker and nothing else: no Jinn closure of its own, and no portal,
+  // because it is never built from the live tree — it only forwards at the registry version it pins.
+  ['verify', { colophon: ['@colophon-claims/check'], jinn: [], portals: [] }],
   ['web', { colophon: ['@colophon-claims/core'], jinn: [], portals: [
-    // Verify is core's public runtime dependency. Web resolves it only as portal plumbing;
+    // The checker is core's public runtime dependency. Web resolves it only as portal plumbing;
     // source-boundaries still permits web to import core alone.
-    '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
+    '@colophon-claims/core', '@colophon-claims/check', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
   ] }],
 ]);
 
@@ -207,7 +214,8 @@ test('the public Colophon members and private web have the intended publication 
   const expectedBins = new Map([
     ['core', undefined],
     ['cli', { colophon: './dist/bin.js' }],
-    ['verify', { 'colophon-verify': './dist/bin.js' }],
+    ['check', { 'colophon-check': './dist/bin.js' }],
+    ['verify', { 'colophon-verify': './bin.js' }],
   ]);
   for (const [directory, name, visibility] of PRODUCT_PACKAGES) {
     const manifest = readPackage(directory);
