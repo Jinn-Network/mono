@@ -10,6 +10,7 @@ on:
       - ".github/scripts/plugin-tree-*.mjs"
       - ".github/scripts/plugin-tree-*.test.mjs"
       - ".github/workflows/plugin-tree-ci.yml"
+      - ".github/scripts/workflow-artifact-steps.mjs"
       - "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md"
       - "docs/superpowers/plans/2026-07-30-plugin-c3-product-tree.md"
       - "packages/evidence/**"
@@ -23,6 +24,7 @@ on:
       - ".github/scripts/plugin-tree-*.mjs"
       - ".github/scripts/plugin-tree-*.test.mjs"
       - ".github/workflows/plugin-tree-ci.yml"
+      - ".github/scripts/workflow-artifact-steps.mjs"
       - "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md"
       - "docs/superpowers/plans/2026-07-30-plugin-c3-product-tree.md"
       - "packages/evidence/**"
@@ -166,6 +168,7 @@ jobs:
       # the artifact count. `runtime` is this workflow's only uploader, so it
       # always matched alone. Restoring by name has no such dependency. Add one
       # named step per package when C4-C7 land further `plugin-*-dist` uploads.
+      # Precedent: lifecycle-notifications-ci.yml.
       - name: Restore Plugin Runtime distribution
         uses: actions/download-artifact@v8
         with:

@@ -35,6 +35,12 @@ const OPERATOR_CI_SELECTED_PATHS = [
   'packages/sdk/**',
   'packages/core/**',
   'packages/plugin/**',
+  // Manifests only, and for a reason unrelated to the operator surface: a
+  // `portal:` edge is declared in a package.json and nowhere else, so a manifest
+  // under any `packages/` tree can add a portal target the operator image never
+  // COPYs. Without this the Dockerfile portal guard never runs on the pull
+  // request that added the edge (#3527).
+  'packages/**/package.json',
   '.github/workflows/ci.yml',
   '.github/workflows/npm-publish.yml',
   '.github/scripts/npm-publish-workflow.test.mjs',
@@ -76,6 +82,10 @@ function selectionPatterns(path: string): RegExp[] {
 function changedPathFor(glob: string): string {
   if (glob.endsWith('/**')) {
     return `${glob.slice(0, -2)}probe/file.ts`;
+  }
+
+  if (glob.includes('/**/')) {
+    return glob.replace('/**/', '/probe/');
   }
 
   if (glob.includes('*')) {
@@ -133,6 +143,20 @@ describe('packed client workflow coverage', () => {
     const changedPaths = OPERATOR_CI_SELECTED_PATHS.map(changedPathFor);
 
     expect(patterns).toHaveLength(OPERATOR_CI_SELECTED_PATHS.length);
+    expect(selectionOf(patterns, changedPaths)).toEqual(
+      Object.fromEntries(changedPaths.map((path) => [path, true])),
+    );
+  });
+
+  it('CI selects on a portal-bearing manifest anywhere under packages/', () => {
+    const patterns = selectionPatterns('.github/workflows/ci.yml');
+    const changedPaths = [
+      // The two manifests whose portal edges ejected PR #3472 from the merge
+      // queue twice: neither tree is otherwise part of the operator lane.
+      'packages/evidence/local-runtime/package.json',
+      'packages/discovery/facts/offers/package.json',
+    ];
+
     expect(selectionOf(patterns, changedPaths)).toEqual(
       Object.fromEntries(changedPaths.map((path) => [path, true])),
     );

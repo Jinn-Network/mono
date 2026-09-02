@@ -32,8 +32,14 @@
  *   they like. So for a source whose rounds follow a published schedule this operation refuses every
  *   round but `requiredBeaconRound` -- the first the source publishes strictly after the seal, which
  *   `(source, sealedAt)` already determines, so no separate commitment record is needed. A
- *   height-indexed source has no such round, and the residue is reported rather than refused: the
- *   report face says the height was the operator's choice.
+ *   height-indexed source has no such round, and that residue is still reported rather than refused:
+ *   even with the source sealed, the report face says the height was the operator's choice.
+ * - **Bind to the source the seal names** (issue #3426). The round rule above is only as strong as
+ *   the source it applies to, and one admitted source is indexed by block height, where no round
+ *   follows from a seal at all and the postdating check is never reached. Left open, the source
+ *   selection undoes the round rule outright. So a run whose sealed record declares a beacon binds
+ *   to that beacon and this operation refuses any other; a run that declared none keeps the choice,
+ *   and the report face keeps saying so.
  * - **The beacon reference is operator-supplied, and that is sound.** This operation does no
  *   network I/O: a public beacon's `(round, value)` pair is published, so a reader checks the pair
  *   against the beacon itself and recomputes the derivation from it. Fetching the value here would
@@ -60,6 +66,7 @@ import {
   verifyRunBinding,
 } from "@colophon-claims/verify";
 import type { BeaconReference, VerifiedRunBinding } from "@colophon-claims/verify";
+import { readRunDeclaredBeaconSource } from "../binding/carriage.js";
 import { refuse } from "../errors.js";
 import { requireRunState, writeRunState } from "../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
@@ -131,6 +138,23 @@ export function runBind(context: OperationContext, input: RunBindInput): Operati
         refuse("conflict", `drafts.${input.draftId}.taskSet`, `draft ${input.draftId} has no attached benchmark`);
       }
 
+      // The source the SEAL named (#3426), read out of the sealed Run bytes rather than out of the
+      // draft: the draft is immutable after lock, but the seal is the thing a reader recomputes
+      // from, so it is the only answer that cannot disagree with theirs. Refusing here is what
+      // makes the #3322 round rule effective at all: without it an operator who disliked the round
+      // the seal named could select the height-indexed source instead, where no round follows from
+      // a seal and the postdating check is never reached, and bind any height the chain carries.
+      const declaredSource = readRunDeclaredBeaconSource(clockedContext.workspaceDir, runState.runSha256);
+      if (declaredSource !== undefined && declaredSource !== beacon.data.source) {
+        refuse(
+          "validation",
+          `runs.${input.draftId}.binding.beacon.source`,
+          `this run's sealed record names ${declaredSource} as the beacon it binds to, and this binding names `
+          + `${beacon.data.source}. The source is fixed at the seal for the same reason the round is: leaving it `
+          + "open would let an operator who disliked the round the seal named bind a different beacon instead",
+        );
+      }
+
       // Only a LATER round is refused here. An earlier one does not postdate the seal at all, and
       // `verifyRunBinding` below refuses it in those terms -- the more informative refusal for that
       // input, and the one an external reader recomputing the record would reach too.
@@ -167,6 +191,10 @@ export function runBind(context: OperationContext, input: RunBindInput): Operati
         mode: "census",
         sealDigest,
         sealedAt: runState.lockedAt,
+        // Restated from the seal, the way `sealedAt` is, so the binding record is checkable on its
+        // own; omitted entirely when the run declared nothing, so a run that predates this
+        // declaration seals byte-identical binding bytes.
+        ...(declaredSource === undefined ? {} : { declaredSource }),
         beacon: beacon.data,
         itemSha256s,
         order,

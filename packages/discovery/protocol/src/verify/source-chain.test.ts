@@ -117,21 +117,30 @@ describe("verifySourceChain: issuedAt monotonicity (§10.3 step 3, §5.2, MAJOR 
     expect(outcome).toEqual({ status: "broken-chain", at: "issued-at-monotonicity" });
   });
 
-  it("rejects a re-signed idle head at the SAME position, because the walk is fed no entries (#3443 gap)", async () => {
-    // A live source re-signs its idle head at least daily (`serve`'s
-    // `maintainHead`): same `sequence`, same `entry`, a bumped `issuedAt`.
+  it("rejects a re-signed idle head at the SAME position: that shape belongs to revalidation, not to the chain walk (#3468)", async () => {
+    // §5.2 obliges a live source to re-sign its idle head before `refreshBy`
+    // expires (`serve`'s `maintainHead`): same `sequence`, same `entry`, a
+    // bumped `issuedAt`.
     // `issuedAt` monotonicity passes -- and then the linkage walk looks the
     // head's own cited entry up in the fed set, which a returning consumer's
     // walk above its mark is legitimately empty for, and fails `linkage`
     // before it consults the boundary the entry IS.
     //
-    // So a correctly operating archive is still refused between appends. That
-    // is NOT closed by the same-head revalidation path #3443 added (which
-    // covers only a byte-identical head), and closing it is a separate
-    // decision: either admit this shape onto revalidation and advance the
-    // mark, or terminate the walk when `headEntryDigest === stopAt.digest`.
-    // Both consumers refuse it today, so this test states the current
-    // behaviour rather than blessing it.
+    // #3468 decided WHERE that shape is handled, and it is not here. Of the
+    // two candidates -- admit it onto `source-head-revalidation` and advance
+    // the consumer's instant, or terminate this walk when
+    // `headEntryDigest === stopAt.digest` -- the first was taken: the head
+    // names the position the consumer already holds, which is exactly
+    // `verifySourceHead`'s stated precondition, so nothing about the chain
+    // procedure has to move for it. Both consumers now classify it before
+    // reaching this procedure (`classifyIdleHead` in the corpus mirror,
+    // `reSignedIdleHead` in the operator's native discovery) and neither
+    // reports it as a chain-verification failure any more.
+    //
+    // This refusal is therefore deliberate and load-bearing rather than a
+    // gap: a head that reaches the CHAIN procedure at the mark's own position
+    // with nothing fed has made a chain claim its consumer did not vouch for,
+    // and it is refused.
     const entry = genesisEntry();
     const { digest } = sealJson(entry);
     const head: SourceHead = {

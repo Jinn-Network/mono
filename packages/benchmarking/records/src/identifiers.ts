@@ -55,6 +55,13 @@ export const TASK_SELECTION_EXTENSION =
   "https://spec.jinn.network/extensions/task-selection/v1";
 
 /**
+ * The beacon source a run will bind to, sealed into the Run record (issue #3426). Fixing it at seal
+ * time is what leaves `beacon-binding/1` no source to choose: with the round already determined by
+ * `(source, sealedAt)`, naming the source in the seal determines the beacon outright.
+ */
+export const BEACON_SOURCE_EXTENSION =
+  "https://spec.jinn.network/extensions/beacon-source/v1";
+/**
  * The disclosure-specification record (design `2026-08-19-disclosure-specification-record.md` §4.1,
  * issue #2839): one sealed record naming exactly one subject and exactly six variables, each
  * carrying exactly one of three statuses. The record-kind URI follows the record-discovery grammar

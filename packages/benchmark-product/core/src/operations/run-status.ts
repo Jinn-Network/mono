@@ -13,6 +13,7 @@ import {
   expectedCellSet,
   parseBenchmark,
   parseRun,
+  readBeaconSource,
 } from "@jinn-network/benchmarking-records";
 import { BEACON_SOURCE_IDS, requiredBeaconRound, runBindingClass, runBindingSentence } from "@colophon-claims/verify";
 import type { BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
@@ -130,6 +131,13 @@ export interface RunStatusResult {
     /** RFC 3339 UTC instant that round publishes, from the source's own schedule. */
     readonly publishedAt: string;
   }[];
+  /**
+   * The beacon source this run's sealed record declares (issue #3426). Absent when it declares none
+   * -- which is a fact about the run, not a default: an undeclared run leaves the beacon to the
+   * operator, and its binding says so. Present, `bind` refuses every other source, so it is what the
+   * bind form offers rather than the whole admitted set.
+   */
+  readonly declaredBeaconSource?: string;
   readonly evaluationRecovery?: {
     readonly maxInfrastructureRetries: 1;
     readonly retryableFailures: number;
@@ -289,14 +297,22 @@ export function runStatus(
 
       const binding = readRunBindingCarriage(context.workspaceDir, runState);
       const sealedAt = runState.lockedAt;
+      // Read off the Run record already parsed above rather than re-fetching and re-parsing the
+      // same bytes. Reported as the record's own string rather than narrowed to the admitted set:
+      // a declaration this product could not derive from is a fact about the run, and narrowing it
+      // away would report the run as declaring nothing while its binding list stayed empty.
+      const declaredBeaconSource = readBeaconSource(runRecord as unknown as Record<string, unknown>);
       const bindable = binding === undefined
         && document.state === "locked"
         && runState.launchedAt === undefined
         && sealedAt !== undefined
-        ? BEACON_SOURCE_IDS.flatMap((source) => {
-          const required = requiredBeaconRound(source, sealedAt);
-          return required === undefined ? [] : [{ source, round: required.round, publishedAt: required.publishedAt }];
-        })
+        // Narrowed to the declared source when the seal names one: `bind` refuses every other, so
+        // offering them would be offering rounds this run cannot bind to.
+        ? BEACON_SOURCE_IDS.filter((source) => declaredBeaconSource === undefined || source === declaredBeaconSource)
+          .flatMap((source) => {
+            const required = requiredBeaconRound(source, sealedAt);
+            return required === undefined ? [] : [{ source, round: required.round, publishedAt: required.publishedAt }];
+          })
         : [];
 
       return {
@@ -311,6 +327,7 @@ export function runStatus(
             statement: runBindingSentence(binding),
           },
         }),
+        ...(declaredBeaconSource === undefined ? {} : { declaredBeaconSource }),
         ...(bindable.length === 0 ? {} : { bindableBeaconRounds: bindable }),
         cancelRequested: cancelRequested(context.workspaceDir, input.draftId),
         ...(driver !== undefined ? { driver } : {}),

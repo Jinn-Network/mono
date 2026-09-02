@@ -24,13 +24,18 @@
  */
 
 import { SECRET_NAME_PATTERNS } from '../trajectory/secret-scrub.js';
+import { walkStructured } from '../util/structured-walk.js';
 
 /**
  * Bumped whenever the redaction logic changes in a way that affects what is
  * stripped. Recorded in `bundle-meta.json` so a bundle can be read against
  * the redaction rules that produced it.
+ *
+ * v3 (#3038): a non-plain object (`Map` / `Set` / class instance) is now an
+ * `<redacted:unserializable>` marker instead of an empty object, and a `Date`
+ * is kept as its ISO string instead of being flattened to `{}`.
  */
-export const REDACTION_VERSION = '2';
+export const REDACTION_VERSION = '3';
 
 /** The marker substituted for a redacted value. */
 function marker(label: string): string {
@@ -193,57 +198,62 @@ function isPublicIdentifierKey(key: string): boolean {
 
 // ── Deep value redaction ─────────────────────────────────────────────────────
 
+/** Leaf policy for {@link redactValue} — everything that is not a container. */
+function redactLeaf(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') return redactStringValue(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  // A Date is not a plain record, so it reaches this leaf. Its ISO form is
+  // exactly what JSON.stringify would have produced in the bundle, and it
+  // cannot carry a secret.
+  if (value instanceof Date) return value.toISOString();
+  // Functions, symbols, Maps, Sets, class instances — nothing JSON-shaped to
+  // walk. Say so rather than emitting a misleading `{}`.
+  return marker('unserializable');
+}
+
+/** Per-key policy for {@link redactValue} — secret names, RPC URLs, public ids. */
+function redactEntry(key: string, value: unknown): { value: unknown } | undefined {
+  if (isSecretName(key)) return { value: marker(key) };
+  if (isRpcUrlKey(key)) {
+    if (typeof value === 'string') return { value: redactRpcUrl(value) };
+    if (Array.isArray(value)) {
+      // Plural RPC keys (`rpcUrls`, `archiveRpcUrls`, …) hold the full
+      // fallback chain — strip credentials from each entry directly rather
+      // than relying on the free-text URL_RE pass, which misses non-http(s)
+      // schemes like `wss://`.
+      return {
+        value: value.map((el) => (typeof el === 'string' ? redactRpcUrl(el) : redactValue(el))),
+      };
+    }
+  }
+  if (typeof value === 'string' && isPublicIdentifierKey(key)) {
+    // Public on-chain identifier (request id / tx hash / ...). Kept verbatim —
+    // the string-shape hex64 pass cannot tell it from a private key, and
+    // stripping it would break event-to-chain correlation in the debug bundle.
+    return { value };
+  }
+  return undefined;
+}
+
 /**
  * Deep-clone `value` and redact every secret it contains. Pure — the input is
- * never mutated.
+ * never mutated. Traversal is the shared `walkStructured` walker (#3038);
+ * `redactLeaf` / `redactEntry` above are this module's redaction policy.
  *
  * - Object keys matching a secret-name pattern -> value replaced with a marker.
  * - Object keys holding an RPC URL -> value run through `redactRpcUrl`.
  * - Object keys holding a public on-chain identifier (request id / tx hash) ->
  *   value kept verbatim, exempt from string-shape `hex64` redaction.
  * - Any other string value -> secret-shaped substrings stripped.
- * - Arrays and nested objects are walked recursively.
+ * - Arrays and nested plain objects are walked recursively; a `Map` / `Set` /
+ *   class instance has no walkable JSON shape and becomes an
+ *   `<redacted:unserializable>` marker rather than an empty object.
  */
 export function redactValue(value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (typeof value === 'string') return redactStringValue(value);
-  if (typeof value === 'number' || typeof value === 'boolean') return value;
-  if (Array.isArray(value)) return value.map((item) => redactValue(item));
-  if (typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (isSecretName(k)) {
-        out[k] = marker(k);
-        continue;
-      }
-      if (isRpcUrlKey(k)) {
-        if (typeof v === 'string') {
-          out[k] = redactRpcUrl(v);
-          continue;
-        }
-        if (Array.isArray(v)) {
-          // Plural RPC keys (`rpcUrls`, `archiveRpcUrls`, …) hold the full
-          // fallback chain — strip credentials from each entry directly
-          // rather than relying on the free-text URL_RE pass, which misses
-          // non-http(s) schemes like `wss://`.
-          out[k] = v.map((el) => (typeof el === 'string' ? redactRpcUrl(el) : redactValue(el)));
-          continue;
-        }
-      }
-      if (typeof v === 'string' && isPublicIdentifierKey(k)) {
-        // Public on-chain identifier (request id / tx hash / ...). Kept
-        // verbatim — the string-shape hex64 pass cannot tell it from a
-        // private key, and stripping it would break event-to-chain
-        // correlation in the debug bundle.
-        out[k] = v;
-        continue;
-      }
-      out[k] = redactValue(v);
-    }
-    return out;
-  }
-  // Functions, symbols etc. — drop to a safe placeholder.
-  return marker('unserializable');
+  // No `maxDepth`: the bundle must not lose a secret nested past an arbitrary
+  // cap, and every input here is JSON-derived (finite, acyclic).
+  return walkStructured(value, { leaf: redactLeaf, entry: redactEntry });
 }
 
 /**

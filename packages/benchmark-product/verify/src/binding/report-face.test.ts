@@ -26,12 +26,14 @@ const CHOSEN_ROUND = SEAL_DERIVED_ROUND + 1_000;
 const census = (
   source: "drand/quicknet" | "bitcoin/mainnet" = "drand/quicknet",
   round = source === "drand/quicknet" ? SEAL_DERIVED_ROUND : 900_000,
+  declared = false,
 ): VerifiedRunBinding =>
   verifyRunBinding({
     procedure: "beacon-binding/1",
     mode: "census",
     sealDigest: SEAL,
     sealedAt: SEALED_AT,
+    ...(declared ? { declaredSource: source } : {}),
     beacon: { source, round, value: VALUE },
     itemSha256s: POOL,
     order: ORDER,
@@ -40,12 +42,14 @@ const census = (
 const sampled = (
   source: "drand/quicknet" | "bitcoin/mainnet" = "drand/quicknet",
   round = source === "drand/quicknet" ? SEAL_DERIVED_ROUND : 900_000,
+  declared = false,
 ): VerifiedRunBinding =>
   verifyRunBinding({
     procedure: "beacon-binding/1",
     mode: "sampled",
     sealDigest: SEAL,
     sealedAt: SEALED_AT,
+    ...(declared ? { declaredSource: source } : {}),
     beacon: { source, round, value: VALUE },
     poolItemSha256s: POOL,
     sampleSize: 2,
@@ -200,6 +204,67 @@ describe("runBindingSentence", () => {
       expect(chosen).toContain("none could be selected after the fact");
       expect(chosen).toContain("different order from the same inputs");
       expect(chosen).not.toContain("slate from the same inputs");
+    });
+  });
+
+  /**
+   * Issue #3426. The round rule of #3322 binds only the round WITHIN a source, and one admitted
+   * source has no round rule at all -- so until the seal names the beacon, the residue the
+   * seal-derived clause reported was the whole of the control on that branch.
+   */
+  describe("source choice", () => {
+    test.each(["census", "sampled"] as const)(
+      "a declared source drops the residue clause in %s mode and states the stronger property",
+      (mode) => {
+        const build = mode === "census" ? census : sampled;
+        const declared = runBindingSentence(build("drand/quicknet", SEAL_DERIVED_ROUND, true));
+        expect(declared).toContain("Nor was the source:");
+        expect(declared).toContain("the sealed record names the beacon this run binds to");
+        expect(declared).toContain("first round this source publishes after the seal");
+        // The residue paragraph is retracted, not merely joined by a stronger one.
+        expect(declared).not.toContain("What choosing remains is the source");
+        expect(declared).not.toContain("could have bound a different one");
+      },
+    );
+
+    test("an undeclared source still names the residue, and claims nothing stronger", () => {
+      expect(runBindingSentence(census())).toContain("What choosing remains is the source");
+      expect(runBindingSentence(census())).toContain("indexed by block height");
+      expect(runBindingSentence(census())).not.toContain("Nor was the source:");
+    });
+
+    // The third face branch: a scheduled source bound to a later-than-required round. `runBind`
+    // refuses it, so it is reachable only through a foreign record read by the exported face --
+    // which is exactly why it must not be the one branch that says nothing about the source.
+    test.each([true, false])("a chosen round on a scheduled source still states the source (declared=%s)", (declared) => {
+      const sentence = runBindingSentence(census("drand/quicknet", CHOSEN_ROUND, declared));
+      expect(sentence).toContain("one of several the operator could have realized");
+      expect(sentence).toContain(declared ? "Nor was the source:" : "What choosing remains is the source");
+    });
+
+    // AC3: declaring the source fixes the BEACON, not the height inside it. A face that read
+    // "not the operator's to pick" over a height nothing constrains would be the overstatement
+    // this whole line of work exists to prevent.
+    test.each(["census", "sampled"] as const)(
+      "a declared height-indexed source still reports the height as chosen in %s mode",
+      (mode) => {
+        const build = mode === "census" ? census : sampled;
+        const sentence = runBindingSentence(build("bitcoin/mainnet", 900_000, true));
+        expect(sentence).toContain("The sealed record names this source");
+        expect(sentence).toContain("this height was still the operator's choice");
+        expect(sentence).toContain("it is the chain, not this bundle, that places it after the seal");
+        // Same prohibitions the undeclared height branch carries: nothing places this value after
+        // the seal, so no clause may claim it was unpredictable.
+        expect(sentence).not.toContain("could not have been predicted");
+        expect(sentence).not.toContain("could not have predicted");
+      },
+    );
+
+    test("the declared and undeclared faces are never the same sentence", () => {
+      expect(runBindingSentence(census("drand/quicknet", SEAL_DERIVED_ROUND, true)))
+        .not.toBe(runBindingSentence(census()));
+      expect(runBindingSentence(census("bitcoin/mainnet", 900_000, true)))
+        .not.toBe(runBindingSentence(census("bitcoin/mainnet")));
     });
   });
 });
