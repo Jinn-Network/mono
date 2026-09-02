@@ -172,11 +172,14 @@ jobs:
     # product journey, and the fast PR lane moves it onto the merge group where
     # the queue runs the full battery before anything lands (DR-2026-08-18-b D3).
     # PRs targeting `main` (the hotfix lane) keep it — main has no queue to
-    # backstop what the PR lane skips. Nightly schedule, dispatch, and push
-    # lanes are unchanged.
+    # backstop what the PR lane skips. The standing release-review PR
+    # (`base:main head:next`, issue #2831) is the exception: it resynchronizes on
+    # every push to `next`, and every commit it carries already ran this journey on
+    # the merge group that landed it, so `head_ref != 'next'` excludes it. Nightly
+    # schedule, dispatch, and push lanes are unchanged.
     if: >-
       needs.changes.outputs.run == 'true' &&
-      (github.event_name == 'push' || github.event_name == 'merge_group' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main'))
+      (github.event_name == 'push' || github.event_name == 'merge_group' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref != 'next'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     defaults:
@@ -246,14 +249,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
           # Empty on every event except pull_request; the cold-stock case below
-          # mirrors the job-level main-carve-out with it.
+          # mirrors the job-level main-carve-out with them.
           BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
           SELECTED: ${{ needs.changes.outputs.run }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           COLD_STOCK_RESULT: ${{ needs.cold-stock-e2e.result }}
         run: |
           set -euo pipefail
-          echo "event=${EVENT_NAME} ref=${REF} selected=${SELECTED} changes=${CHANGES_RESULT}"
+          echo "event=${EVENT_NAME} ref=${REF} base_ref=${BASE_REF:-none} head_ref=${HEAD_REF:-none} selected=${SELECTED} changes=${CHANGES_RESULT}"
           echo "cold-stock-e2e=${COLD_STOCK_RESULT}"
           test "${CHANGES_RESULT}" = success
           # The selection is read from a job output, which is the empty string when the
@@ -270,6 +274,9 @@ jobs:
           # queue-bound pull_request, where the fast PR lane moves its 60-minute
           # journey onto the merge group (DR-2026-08-18-b D3). PRs targeting `main`
           # (the hotfix lane) keep it: main has no queue to backstop the fast lane.
+          # The standing release-review PR (`base:main head:next`, issue #2831) is
+          # excluded from that carve-out — it mirrors merge-group runs that already
+          # ran this journey. This mirrors the job-level `if:` exactly.
           # On `schedule` and `workflow_dispatch` the changes job has no diff to
           # read and selects conservatively, which is what keeps the nightly run
           # running.
@@ -281,7 +288,7 @@ jobs:
               fi
               ;;
             pull_request)
-              if [ "${SELECTED}" = true ] && [ "${BASE_REF}" = main ]; then
+              if [ "${SELECTED}" = true ] && [ "${BASE_REF}" = main ] && [ "${HEAD_REF}" != next ]; then
                 cold_expected=success
               fi
               ;;

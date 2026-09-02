@@ -192,7 +192,10 @@ jobs:
       # puts no queue, so it keeps the smoke. Push and dispatch lanes keep it
       # too. This is step-level, not job-level — the job still typechecks,
       # tests, and builds the layer on both lanes, so the PR keeps fast feedback.
-      - if: github.event_name != 'pull_request' || github.base_ref == 'main'
+      # The standing release-review PR (`base:main head:next`, issue #2831) is
+      # excluded from the hotfix carve-out: its commits already ran this smoke on
+      # the merge group that landed them.
+      - if: github.event_name != 'pull_request' || (github.base_ref == 'main' && github.head_ref != 'next')
         run: yarn pack:smoke
         working-directory: packages/layer
       - name: Test layer workflow contracts
