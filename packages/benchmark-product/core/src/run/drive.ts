@@ -230,8 +230,14 @@ export interface DriveDeps {
   /**
    * Resume's byte-exact replay seam for the EVALUATION leg, symmetric with the solve leg's
    * `acceptedSubmissions.acceptedSubmissionBytes` (`../operations/run-launch.js`'s `resumeRun`
-   * call). Returns the exact Submission bytes the backend already accepted for this leg, or
-   * `undefined` when this leg was never submitted.
+   * call). Returns the exact Submission bytes this leg previously sealed — captured below before
+   * they were offered to the backend, and journaled again on acceptance when the process survived
+   * that long — or `undefined` when this leg never reached its pre-submit capture. Capture
+   * precedes acceptance, so an accepted leg is covered even when the acceptance itself was never
+   * journaled (#3237). A capture the backend never saw is not replayed: `dispatchEvaluation`
+   * re-seals once `recover` says `absent` AND the backend retains no record of the ref
+   * (`backendRetainsSubmission`), since only a backend still holding the bytes is owed
+   * byte-exactness.
    *
    * Without it, a process killed between backend acceptance and the leg's verdict resumes by
    * sealing FRESH bytes: `dispatchEvaluation`'s deadline is `liveClock() + cellWindowMs`, so the
@@ -482,6 +488,38 @@ function requireEvaluatorCoverage(deps: DriveDeps): void {
   }
 }
 
+/**
+ * Whether the backend still retains a durable record for this Submission ref — and therefore still
+ * holds its idempotency key.
+ *
+ * `recover`'s `absent` does not answer that on its own. The local backend returns `absent` from
+ * two places: an unresolvable ref (nothing is retained, the key is free) and an attempt it fully
+ * remembers whose spawn intent left no recoverable shim or outcome (the key is HELD, and
+ * submitting different bytes under it is refused `submission-conflict`, which carries no retryable
+ * category and so completes the evalIndex could-not-grade forever).
+ *
+ * `observe` is not an exact test of that — it needs the attempt index too, which a crash can leave
+ * behind the submission-scope index that `submit`'s idempotency check actually reads. The warrant
+ * is one-sided instead, which is all this branch needs: `observe` succeeding proves the replay is
+ * viable, and `observe` failing means the replay would have died at this leg's own post-submit
+ * `observe` regardless — so re-sealing there can only help, while every genuinely retained key
+ * stays on the byte-exact replay.
+ *
+ * Fail-safe by construction: anything but `attempt-not-found` — a snapshot, or any other error —
+ * reports retained, which keeps that replay.
+ */
+async function backendRetainsSubmission(
+  backend: ProxiedBackend,
+  ref: SubmissionUri,
+): Promise<boolean> {
+  try {
+    await backend.observe(ref);
+    return true;
+  } catch (cause) {
+    return !(cause instanceof TaskExecutionError && cause.category === "attempt-not-found");
+  }
+}
+
 /** Seals + submits + watches ONE evaluation leg (`evalIndex`, 1-based) for a prepared evaluation
  * cell (module header): evaluator `deps.venue.evaluators[evalIndex - 1]`, leg-distinct
  * idempotency key/nonce `eval:<runSha256>:e<evalIndex>:<cellKey>:<dispatch>`. */
@@ -514,7 +552,7 @@ async function dispatchEvaluation(
     evalIndex,
     evaluationAttempt,
   );
-  const evalSubmissionBytes = replayed ?? sealSubmission({
+  const sealFreshSubmission = (): Uint8Array => sealSubmission({
     protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: submissionUri,
     task: { digest: { sha256: prepared.taskSha256 } },
@@ -524,6 +562,7 @@ async function dispatchEvaluation(
     deadline: new Date(Date.parse(deps.liveClock()) + deps.cellWindowMs).toISOString(),
     requirements: { harness: EVALUATION_HARNESS_PIN, [EVALUATOR_REQUIREMENT_KEY]: evaluator.id },
   });
+  let evalSubmissionBytes = replayed ?? sealFreshSubmission();
 
   if (replayed !== undefined) {
     // A resumed leg whose Submission the backend already accepted may point at an attempt the
@@ -595,6 +634,44 @@ async function dispatchEvaluation(
           }`,
       );
     }
+    if (
+      reconciliation.classification === "absent"
+      && !(await backendRetainsSubmission(deps.backend, replayedSubmission.submission as SubmissionUri))
+    ) {
+      // The backend retains no record of this Submission, so it never accepted these bytes: the
+      // capture below is written before `submit`, so a kill in that gap leaves a capture the
+      // backend never saw (#3237). The idempotency key is therefore still free, and replaying is
+      // not merely unnecessary but harmful — the captured `deadline` was stamped before the crash,
+      // so a resume later than `policy.cellWindow` submits an already-expired Submission, the
+      // attempt terminals `expired` with no retryable category, and the leg terminals
+      // could-not-grade permanently. Re-seal instead, exactly as this leg did before the capture
+      // existed. Byte-exactness is owed to a backend that HOLDS the bytes — and a retained record
+      // is better served by the replay, whose idempotent resubmission surfaces the infrastructure
+      // terminal `recover` just appended, which the retry ladder can classify.
+      evalSubmissionBytes = sealFreshSubmission();
+    }
+  }
+
+  if (evalSubmissionBytes !== replayed) {
+    // The prospective capture boundary for this leg (#3237), mirroring the solve leg's
+    // `submission-captured`. `createRecordingProxy` journals `submission-accepted` only AFTER
+    // `submit` returns, so a kill in between leaves the backend holding an accepted Submission
+    // that nothing in the journal names — and resume, finding no entry in
+    // `journaledEvaluationSubmissions`, re-mints these bytes with a later `deadline` under the
+    // same idempotency key, which the backend refuses and the leg terminals could-not-grade
+    // (permanently: could-not-grade completes the evalIndex). Writing the capture here, before
+    // the bytes are offered, makes the replay map cover backend-accepted-but-unjournaled legs.
+    // A re-seal above captures too, and the replay map is last-wins by design, so the next resume
+    // replays the bytes this call actually offered rather than the abandoned ones.
+    appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
+      kind: "evaluation-submission-captured",
+      at: deps.liveClock(),
+      cellKey,
+      dispatch,
+      evalIndex,
+      evaluationAttempt,
+      submissionSha256: putSealedBytes(deps.workspaceDir, evalSubmissionBytes),
+    });
   }
 
   const ack = await deps.backend.submit(prepared.taskBytes, evalSubmissionBytes);
