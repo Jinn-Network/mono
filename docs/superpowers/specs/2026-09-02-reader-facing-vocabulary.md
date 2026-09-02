@@ -27,8 +27,15 @@ It is deliberately narrow at three boundaries:
 - **#2983 owns identity rendering** (keys bound to domains). The signer-role names in §4.2 are
   ruled here; what a bound identity looks like is ruled there.
 
+The report page renders a different facts block per method, so the page is ruled across all of
+them: the Wilson, comparison, and paired blocks in §4.1's main table, and the
+binary-qualification block — which prints only on a binary report, and prints five sealed field
+names verbatim as row headers — in the sub-table that closes §4.1.
+
 Internal source-code identifiers, type names, and record kinds are **out of scope except where
-they surface to a reader**. A term ruled `hide` keeps its internal name unchanged.
+they surface to a reader**. A term ruled `hide` keeps its internal name unchanged — but a
+field name that is *printed* to a reader is a reader-visible term and is ruled here, whatever
+it is called in the source.
 
 ## 2. The two sides of the line
 
@@ -156,9 +163,49 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Interval withheld | rename | Range not reported | Withheld reasons kept verbatim. |
 | Confirmatory floor | rename | The minimum fixed in advance | Prose term inherited from the demo report; not a code string. |
 | Independence clusters | rename + gloss | Groups that do not share a source | The counted quantity is kept; only the noun changes. |
+| Benchmark and configuration scope | rename | What was tested, and how each configuration was pinned | The `<h2>` at `assets.ts:817`; its `Arms and pinned configuration` sub-heading becomes **Each configuration, pinned**, following the `arm` → *Configuration* rename above. |
 | Evidence signpost (social card) | rename | Benchmark report | The v4 card's phrase; the current card already says "Benchmark report". Retire the older wording with the v4 assets. |
 | Colophon · verified qualification (v4 badge) | **deferred to #2982** | — | Contains the reserved word. Not ruled here. |
 | No comparative winner stated | keep | — | Load-bearing and already plain. |
+
+#### Binary-qualification report surface (binary reports only)
+
+`binaryFactsHtml` (`assets.ts:548`), its `README.md` twin `binaryFactsMarkdown`
+(`assets.ts:916`), and the two sub-headings of `binaryAdmissionHtml` /
+`binaryAdmissionMarkdown` (`assets.ts:715`, `:720`) render only when the method is binary
+qualification, alongside the admission block already ruled above. Every row here is
+**presentation**: each string is a literal in the template or a `.map()`ed display label, never
+a sealed field read. The contract spellings named in the Note column stay verbatim.
+
+The `<h3>` printed for each arm section is the bare `armId` value, so the `arm` →
+*Configuration* rename does not reach it. The rename does reach every *label*, which is why
+`Registered configuration` is ruled away from the word "configuration" below: after the rename
+a reader would otherwise meet **Configuration** (one arm) and **Registered configuration** (the
+qualification's stratum setup) as two adjacent headings naming two different things — the same
+comprehension bug §5's law forbids, introduced by this spec's own rename.
+
+| Reader-visible term today | Ruling | Reader-facing name | Note |
+| --- | --- | --- | --- |
+| Qualification facts are presented per instrument without comparative conclusions. | rename | These facts are given per judge, with no comparison drawn. | Follows `Instrument` → *Judge* above. |
+| Registered configuration | rename | How the judges were qualified | Resolves the collision with the `arm` → *Configuration* rename; the word "configuration" leaves this heading entirely. `qualification.configuration` stays contract. |
+| `<h3>` per arm (bare `armId`) | keep | — | An identifier, not a label. |
+| Instrument `<fingerprint>` | rename | Judge `<fingerprint>` | `instrumentSha256` stays contract; the hex is relabelled per the digest → *Fingerprint* rule. |
+| Item, call, and confusion denominators | rename | What was counted | The three denominators keep their contract names (`item`, `call`, `confusion`) inside the block they head. |
+| Five registered rates with exact denominators and Wilson intervals | rename | The five judge rates, with exact counts and Wilson uncertainty ranges | Table caption. "Wilson" survives here for the same reason it survives in the arm-results caption: the caption is where a reader who wants the method looks. |
+| Rate / Registered result (column headers) | rename | Rate / Result | The preregistration fact is stated once for the section, not repeated in a column header. |
+| `agreement` | rename | Agreed with the human label | The five rate labels print today as raw camelCase field names (`assets.ts:551`) in `index.html` and as title-cased variants (`Agreement`, `False accept`, …) in `README.md`. Both become the one reader-facing set in this table; the sealed field names are untouched. |
+| `falseAccept` | rename | Wrongly accepted | |
+| `falseReject` | rename | Wrongly rejected | |
+| `instability` | rename | Answer changed on rerun | Same reader concept as the *instability* named in the per-item heading below — **one name, one place**, see §5. |
+| `parserInvalid` | rename | Answer could not be read | `parser-invalid` stays contract wherever it is a sealed value. |
+| Every candidate-class bucket | rename + gloss | Results by answer group | `byCandidateClass` stays contract; gloss the class names on first use. |
+| Buckets by stratum (…) | rename | Results by sampling group (…) | `stratumCaption` (`assets.ts:540`); the stratum names interpolated into the parentheses are data and are unchanged. |
+| Per-item decisions and instability | rename | Each item's decision, and where the answer changed on rerun | |
+| Per-item decisions, instability, and exclusions | rename | Each item's decision, where the answer changed on rerun, and what was excluded | The `README.md` variant folds the exclusions payload into the same block. Same concept plus one, not a second name for the same concept. |
+| Parser-invalid, infrastructure, and other exclusions | rename | What was excluded, and why | |
+| Human disagreement and deterministic replacements | rename | Where the human labellers disagreed, and what replaced those items | `binaryAdmissionHtml` (`assets.ts:718`) and its Markdown twin. |
+| Exact instrument and prompt-template commitments | rename | The exact judge and prompt used | Same block; follows `Instrument` → *Judge* and `Prompt-template commitment` → *The exact prompt used* above. |
+| Registered (as a bare modifier) | rename | — | Drop it wherever it modifies a rate, a result, or a configuration on this surface. It is not the same word as *Preregistered*, which §4.1 keeps and glosses; carrying both would present one idea under two spellings. |
 
 ### 4.2 Reader tool output (`colophon-verify` human-readable stdout)
 
@@ -183,7 +230,10 @@ the `--json` keys — which are ruled *keep* for that reason.
 | freeze repository | keep | — | |
 | No files were uploaded. | keep | — | |
 | `--json` keys (`ok`, `code`, `message`, `verifierVersion`, `supportedFormats`, …) | keep | — | **Contract.** Machine surface; not a reader surface. |
-| Usage text | rename where §4.1 renames | — | Follows the same glossary. |
+| `This checks the bundle's integrity, evidence closure, calculations, report, and claim consistency. It does not prove…` | keep | — | The closing paragraph at `cli.ts:186`. Already reader-shaped, and the limitation half is exemplary. "evidence closure" here is the check name, glossed by the row above rather than renamed. |
+| `Verification uses the exact platform bytes installed from npm.` | **deferred to #2982** | — | `cli.ts:191`, and the shortened form in the usage/error text at `cli.ts:45`. Carries the reserved noun; the rest of the sentence is already plain and stands. |
+| `Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.` | keep | — | `cli.ts:190`. Names a contract origin and its honest status; both halves are load-bearing. |
+| Usage text | rename where §4.1 renames | — | Follows the same glossary. Reaches the usage and error text in full, including `cli.ts:45`; the three closing-paragraph rows above are ruled explicitly so that reach is not left to inference. |
 
 ### 4.3 Docs
 
@@ -221,11 +271,19 @@ has found a different concept — or a bug.
 | Running the checks again over the bundle | *reserved — #2982* | `verify`, `verification.checks` |
 | Where and by whom the runs happened | where it ran / who ran this | `venue`, `venueHonesty` |
 | What was and was not pinned | what was pinned | `disclosure`, six-variable disclosure |
+| How a judge was qualified before it was used | how the judges were qualified | `qualification.configuration` |
+| A judge giving a different answer on rerun | answer changed on rerun | `instability` |
+| An answer that could not be parsed | answer could not be read | `parserInvalid`, `parser-invalid` |
 
 Two entries earn their place by removing a duplicate: **"runs the judges disagreed on"**
 collapses `conflicted` (Report/Claim) and *assembly dissent* (verification), which are one
 reader concept under two names on the same page today; and **"the runs"** collapses *Matrix
 accounting* and *completeness/attrition*, which a reader reads as one thing.
+
+One entry earns its place by preventing a duplicate this spec would otherwise create:
+**"how the judges were qualified"** keeps the binary report's *Registered configuration*
+heading clear of the `arm` → *configuration* rename, so **configuration** names one arm and
+nothing else on a page that carries both (§4.1, binary-qualification surface).
 
 Concepts a reader never meets by name, after this spec: Matrix, envelope, catalog, projection,
 subject, assurance preset, assurance primitive, disclosure specification, declaration, CAS.
@@ -253,6 +311,10 @@ reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in t
 2. **Report page vocabulary** — §4.1 applied to `verify/src/assets.ts` (`index.html`,
    `README.md`, `share.txt`, badge, social card); gates
    `verify/src/assets-presentation-profile.test.ts` and `assets-binary-admission.test.ts`.
+   Covers both the ordinary report surface and the binary-qualification surface ruled at the
+   end of §4.1 — `binaryFactsHtml`, `binaryFactsMarkdown`, and the two `binaryAdmission*`
+   sub-headings — whose rate labels are the clearest instance of an internal field name printed
+   verbatim to a reader.
    Sequenced *after* #2985 rules the IA, so the renames land against the surviving elements
    rather than being applied twice; #2985 closed completed on 2026-09-02, so that sequencing
    condition is already satisfied.
