@@ -4,6 +4,11 @@
  * End-to-end coverage for the freeze-repository export (issue #2870) against a real materialized
  * v4 qualification bundle: export, standalone check, byte-identical regeneration, and the three
  * ways a published tree can drift from the bundle it claims to be derived from.
+ *
+ * Plus the disclosed anchored closure (issue #3540): the export was written before
+ * `benchmark-product-public-bundle/8` existed and refused it for its version alone. A synthetic
+ * snapshot cannot prove that fix -- its format string is decoupled from its member set -- so the
+ * acceptance is proved here, against a bundle a real disclosed run actually materialized.
  */
 
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -11,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
+  BUNDLE_V8_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   exportFreezeRepo,
   runVerifierCli,
@@ -25,9 +31,10 @@ const roots: string[] = [];
 // rebuilding one, so the suite proves the export's behaviour without paying for the fixture N times.
 let licensedBundle: string;
 let unlicensedBundle: string;
+let disclosedBundle: string;
 
 beforeAll(async () => {
-  const [licensed, unlicensed] = await Promise.all([
+  const [licensed, unlicensed, disclosed] = await Promise.all([
     createSyntheticV4BundleFixture({
       workspaceDir: tempDir("workspace"),
       truthAdmission: "operator-only",
@@ -38,9 +45,20 @@ beforeAll(async () => {
       workspaceDir: tempDir("unlicensed-workspace"),
       truthAdmission: "operator-only",
     }),
+    // Anchored, qualification-projecting, and carrying a sealed disclosure declaration: the three
+    // conditions that make a run materialize `/8` rather than `/7`.
+    createSyntheticV4BundleFixture({
+      workspaceDir: tempDir("disclosed-workspace"),
+      truthAdmission: "operator-only",
+      license: "CC-BY-NC-4.0",
+      citation: "Colophon synthetic disclosed freeze, 2026.",
+      anchorLock: true,
+      declareDisclosure: true,
+    }),
   ]);
   licensedBundle = licensed.bundle.bundleDir;
   unlicensedBundle = unlicensed.bundle.bundleDir;
+  disclosedBundle = disclosed.bundle.bundleDir;
 }, 300_000);
 
 afterAll(() => {
@@ -73,6 +91,9 @@ describe("freeze-repository export against a real v4 bundle", () => {
     const checked = await verifyFreezeRepo(bundleDir, repoDir);
     expect(checked.ok).toBe(true);
     expect(checked.differences).toEqual([]);
+    // A POSIX temp directory carries the bit, so the check reports that it looked at modes
+    // rather than quietly resting on bytes alone (issue #3349).
+    expect(checked.executableBitChecked).toBe(true);
     expect(checked.commitId).toBe(exported.commitId);
   });
 
@@ -263,5 +284,30 @@ describe("freeze-repo CLI verbs", () => {
     expect(envelope.ok).toBe(false);
     expect(envelope.error.code).toBe("record-integrity");
     expect(envelope.error.issues).toEqual([{ path: "README.md", message: "changed" }]);
+  });
+});
+
+describe("freeze-repository export against a real disclosed v8 bundle", () => {
+  test("exports the disclosed closure, and the standalone check confirms the tree", async () => {
+    // The refusal this replaces named the bundle's version as the reason, for a closure whose
+    // freeze graph the renderer already handled (issue #3540).
+    expect(JSON.parse(readFileSync(join(disclosedBundle, "bundle.json"), "utf8")).format)
+      .toBe(BUNDLE_V8_FORMAT);
+
+    const repoDir = join(tempDir("disclosed-repo"), "tree");
+    const exported = await exportFreezeRepo(disclosedBundle, repoDir);
+
+    expect(exported.commitId).toMatch(/^[0-9a-f]{40}$/);
+    expect(exported.roles).toContain("item-bank");
+    // The disclosure record is claim-side: its role is not a freeze-artifact role, so it is not
+    // projected, and the generated README tells a reader of this closure where it actually is.
+    expect(exported.roles).not.toContain("disclosure-specification");
+    expect(readFileSync(join(repoDir, "README.md"), "utf8")).toContain("disclosure-specification");
+    expect(existsSync(join(repoDir, "bundle/qualification.json"))).toBe(true);
+
+    const checked = await verifyFreezeRepo(disclosedBundle, repoDir);
+    expect(checked.ok).toBe(true);
+    expect(checked.differences).toEqual([]);
+    expect(checked.commitId).toBe(exported.commitId);
   });
 });

@@ -38,7 +38,7 @@ identities are independent parties.
 
 ## Freeze-artifact repositories
 
-A qualification bundle (v4 or v7) can be projected into a public repository of its freeze
+A qualification bundle (v4, v7, or v8) can be projected into a public repository of its freeze
 artifacts — item bank, sources, admission decisions, labels, judge instruments, and the
 screening material. That repository is a **derived artifact, never the claim of record**:
 the sealed records stay the source of truth, and the tree is a pure function of the bundle,

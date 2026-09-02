@@ -40,8 +40,9 @@ import {
   DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
 } from "../report/claim.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
-import { BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, BUNDLE_V8_FORMAT, buildBundleManifest } from "./manifest.js";
-import { materializePublicBundle, PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
+import { BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, PUBLIC_BUNDLE_V4_FILES } from "../legacy-closures.js";
+import { BUNDLE_V8_FORMAT, buildBundleManifest } from "./manifest.js";
+import { materializePublicBundle } from "./materialize.js";
 import { readRunState } from "../run/state.js";
 import {
   createSyntheticV4BundleFixture,

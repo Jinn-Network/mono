@@ -29,14 +29,14 @@ import {
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
 } from "../report/claim.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
+import { buildBundleManifest } from "./manifest.js";
 import {
   BUNDLE_FORMAT,
   BUNDLE_V4_FORMAT,
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
-  buildBundleManifest,
-} from "./manifest.js";
-import { PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
+  PUBLIC_BUNDLE_V4_FILES,
+} from "../legacy-closures.js";
 import { BUNDLE_EVIDENCE_FORMAT, BUNDLE_EVIDENCE_ROLES, BUNDLE_TRUST_FORMAT } from "./schema.js";
 import {
   ANCHORED_V4_FIXTURE_GEN_TIME,

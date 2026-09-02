@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { parseDisclosureSpecification } from "@jinn-network/benchmarking-records";
 import { materializePublicBundle } from "../bundle/materialize.js";
-import { BUNDLE_V4_FORMAT } from "../bundle/manifest.js";
+import { BUNDLE_V4_FORMAT } from "../legacy-closures.js";
 import {
   createSyntheticV4BundleFixture,
   syntheticDisclosureDeclaration,
