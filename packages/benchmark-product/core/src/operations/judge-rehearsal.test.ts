@@ -22,7 +22,8 @@ import {
   verifyPublicBundle,
 } from "@colophon-claims/verify";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
-import { BUNDLE_V4_FORMAT as CORE_BUNDLE_V4_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
+import { buildBundleManifest } from "../bundle/manifest.js";
+import { BUNDLE_V4_FORMAT as CORE_BUNDLE_V4_FORMAT } from "../legacy-closures.js";
 import { findBundleLeaks } from "../bundle/testing/leak-scan.js";
 import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
 import {

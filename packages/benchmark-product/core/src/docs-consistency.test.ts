@@ -3,24 +3,22 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { GATED_OPERATIONS } from "./authority/policy.js";
-import { BUNDLE_FORMAT, BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
+import { BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
+import { BUNDLE_FORMAT, PUBLIC_BUNDLE_FILES } from "./legacy-closures.js";
 import {
   BUNDLE_V5_FORMAT,
+  FREEZE_REPO_BUNDLE_SUPPORT,
+  FREEZE_REPO_FORMAT,
+  FREEZE_REPO_MANIFEST_FILENAME,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
+  SUPPORTED_BUNDLE_FORMATS,
 } from "@colophon-claims/verify";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
 import {
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
 } from "@jinn-network/benchmarking-protocol";
-import { PUBLIC_BUNDLE_FILES } from "./bundle/materialize.js";
-import {
-  FREEZE_REPO_BUNDLE_SUPPORT,
-  FREEZE_REPO_FORMAT,
-  FREEZE_REPO_MANIFEST_FILENAME,
-  SUPPORTED_BUNDLE_FORMATS,
-} from "@colophon-claims/verify";
 import { PRODUCT_ERROR_CODES } from "./errors.js";
 import { PRODUCT_BRANDING } from "./branding.js";
 

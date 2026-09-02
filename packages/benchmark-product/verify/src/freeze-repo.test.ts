@@ -9,25 +9,25 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import {
-  BUNDLE_FORMAT,
-  BUNDLE_V4_FORMAT,
-  BUNDLE_V7_FORMAT,
   BUNDLE_V8_FORMAT,
   SUPPORTED_BUNDLE_FORMATS,
   type SupportedBundleFormat,
   type VerifiedBundleSnapshot,
 } from "./manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT } from "./legacy-closures.js";
 import {
   FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   FREEZE_REPO_ROLES,
+  execBitIsCarried,
   freezeRepoCommitId,
+  listTree,
   renderFreezeRepo,
 } from "./freeze-repo.js";
 
@@ -475,5 +475,93 @@ describe("freeze repository fail-closed rules", () => {
     // They are carried byte-for-byte under artifacts/source-manifest/; re-serializing them would
     // make these bytes a function of the verifier's schema shape as well as of the bundle.
     expect(readManifest(renderFreezeRepo(snapshotOf()))["sources"]).toBeUndefined();
+  });
+});
+
+describe("published-tree enumeration", () => {
+  const trees: string[] = [];
+
+  afterEach(() => {
+    for (const dir of trees.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function treeDir(): string {
+    const dir = mkdtempSync(join(tmpdir(), "freeze-repo-walk-"));
+    trees.push(dir);
+    return dir;
+  }
+
+  // Issue #3349: a filesystem that reports a constant mode (0777 on exFAT, on a Windows-hosted
+  // mount, on some network filesystems) must not turn a byte-perfect clone into total drift.
+  test("the executable bit is ignored where the filesystem does not carry one", () => {
+    const dir = treeDir();
+    writeFileSync(join(dir, "README.md"), "text\n");
+    chmodSync(join(dir, "README.md"), 0o777);
+
+    expect(listTree(dir, false)).toEqual([{ path: "README.md", plainFile: true, executable: false }]);
+  });
+
+  test("only the owner bit selects mode 100755, as git records it", () => {
+    const dir = treeDir();
+    writeFileSync(join(dir, "group-only"), "text\n");
+    chmodSync(join(dir, "group-only"), 0o645);
+    writeFileSync(join(dir, "owner"), "text\n");
+    chmodSync(join(dir, "owner"), 0o755);
+
+    expect(listTree(dir, true)).toEqual([
+      { path: "group-only", plainFile: true, executable: false },
+      { path: "owner", plainFile: true, executable: true },
+    ]);
+  });
+
+  // A linked worktree or a submodule checkout carries `.git` as a regular FILE, not a directory.
+  test("a root .git file is git metadata, not an unexpected member", () => {
+    const dir = treeDir();
+    writeFileSync(join(dir, ".git"), "gitdir: /elsewhere/.git/worktrees/clone\n");
+    writeFileSync(join(dir, "README.md"), "text\n");
+
+    expect(listTree(dir, false).map((entry) => entry.path)).toEqual(["README.md"]);
+  });
+
+  test("a nested .git is still ordinary content", () => {
+    const dir = treeDir();
+    mkdirSync(join(dir, "artifacts", ".git"), { recursive: true });
+    writeFileSync(join(dir, "artifacts", ".git", "payload"), "smuggled\n");
+
+    expect(listTree(dir, false).map((entry) => entry.path)).toEqual(["artifacts/.git/payload"]);
+  });
+
+  test("a symlink is reported as not a plain file", () => {
+    const dir = treeDir();
+    writeFileSync(join(dir, "payload"), "text\n");
+    symlinkSync(join(dir, "payload"), join(dir, "LICENSE"));
+
+    const entries = listTree(dir, true);
+    expect(entries.find((entry) => entry.path === "LICENSE")).toEqual({
+      path: "LICENSE",
+      plainFile: false,
+      executable: false,
+    });
+  });
+
+  test("the filesystem probe answers for a real POSIX temp directory and leaves nothing behind", () => {
+    const dir = treeDir();
+
+    expect(execBitIsCarried(dir)).toBe(true);
+    expect(listTree(dir, true)).toEqual([]);
+  });
+
+  test("the probe uses the repository's own .git and leaves neither directory changed", () => {
+    const dir = treeDir();
+    mkdirSync(join(dir, ".git"));
+    writeFileSync(join(dir, "README.md"), "text\n");
+
+    expect(execBitIsCarried(dir)).toBe(true);
+    expect(readdirSync(join(dir, ".git"))).toEqual([]);
+    expect(listTree(dir, true).map((entry) => entry.path)).toEqual(["README.md"]);
+  });
+
+  test("the probe answers no rather than throwing when it cannot write", () => {
+    expect(execBitIsCarried(join(treeDir(), "does-not-exist"))).toBe(false);
   });
 });
