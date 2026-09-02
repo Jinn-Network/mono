@@ -9,13 +9,19 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { type VerifiedBundleSnapshot } from "./manifest.js";
-import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT } from "./legacy-closures.js";
 import {
+  BUNDLE_V8_FORMAT,
+  SUPPORTED_BUNDLE_FORMATS,
+  type SupportedBundleFormat,
+  type VerifiedBundleSnapshot,
+} from "./manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT } from "./legacy-closures.js";
+import {
+  FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   FREEZE_REPO_ROLES,
@@ -65,7 +71,7 @@ const SAMPLING_SCRIPT_BYTES = encoder.encode("#!/usr/bin/env python3\nprint('sam
 
 interface SnapshotOverrides {
   readonly benchmark?: Record<string, unknown>;
-  readonly format?: typeof BUNDLE_V4_FORMAT | typeof BUNDLE_FORMAT;
+  readonly format?: SupportedBundleFormat;
   readonly records?: readonly { readonly bytes: Uint8Array; readonly roles: readonly string[] }[];
 }
 
@@ -236,6 +242,56 @@ describe("freeze repository rendering", () => {
       .toThrow(/requires a qualification bundle/);
   });
 
+  test("names every accepted format when it refuses one that is not accepted", () => {
+    // A hand-written list in the message is how this refusal came to name a stale accept set
+    // (issue #3540). It is generated from the support table, so it cannot go stale again.
+    const accepted = SUPPORTED_BUNDLE_FORMATS.filter((format) => FREEZE_REPO_BUNDLE_SUPPORT[format].qualification);
+    expect(accepted.length).toBeGreaterThan(1);
+    let message: string | undefined;
+    try {
+      renderFreezeRepo(snapshotOf({ format: BUNDLE_FORMAT }));
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message, "a bundle with no qualification graph must be refused").toBeDefined();
+    for (const format of accepted) expect(message!, format).toContain(format);
+    // Three or more accepted formats read as a list, not a chain of `or`.
+    const tail = accepted.length >= 3
+      ? `${accepted[accepted.length - 2]}, or ${accepted[accepted.length - 1]}`
+      : accepted.join(" or ");
+    expect(message!).toContain(tail);
+  });
+
+  test("renders the disclosed closure: its freeze graph is the anchored qualification graph", () => {
+    // `/8` is `/7`'s member list plus a claim-side disclosure record whose evidence role is not a
+    // freeze-artifact role, so the freeze artifacts are identical and only the recorded format
+    // differs.
+    const v7 = renderFreezeRepo(snapshotOf({ format: BUNDLE_V7_FORMAT }));
+    const v8 = renderFreezeRepo(snapshotOf({ format: BUNDLE_V8_FORMAT }));
+
+    expect(v8.bundleFormat).toBe(BUNDLE_V8_FORMAT);
+    expect(readManifest(v8)["bundle"]).toEqual({ identity: "a".repeat(64), format: BUNDLE_V8_FORMAT });
+    // Same artifacts, byte for byte: only the bytes that name the format may differ.
+    for (const [path, bytes] of v7.files) {
+      if (path.startsWith("artifacts/")) expect(v8.files.get(path), path).toEqual(bytes);
+    }
+    expect([...v8.files.keys()].sort()).toEqual([...v7.files.keys()].sort());
+  });
+
+  test("tells a disclosed-closure reader where the disclosure record is, and says nothing to others", () => {
+    // A `/8` reader has a specific reason to look for the disclosure record in the tree. Saying so
+    // unconditionally would change every already-published v4 and v7 tree, which is the silent
+    // drift `FREEZE_REPO_FORMAT` exists to prevent -- so the sentence is a function of the format.
+    const disclosed = decoder.decode(renderFreezeRepo(snapshotOf({ format: BUNDLE_V8_FORMAT })).files.get("README.md")!);
+    expect(disclosed).toContain("disclosure-specification record");
+    expect(disclosed).toContain("claim");
+
+    for (const format of [BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT] as const) {
+      const readme = decoder.decode(renderFreezeRepo(snapshotOf({ format })).files.get("README.md")!);
+      expect(readme, format).not.toContain("disclosure-specification record");
+    }
+  });
+
   test("refuses when the Benchmark record declares no licence", () => {
     const benchmark = {
       protocol: "https://spec.jinn.network/benchmarking/v1",
@@ -248,6 +304,54 @@ describe("freeze repository rendering", () => {
   test("refuses a catalog that assigns no freeze-artifact role", () => {
     expect(() => renderFreezeRepo(snapshotOf({ records: [{ bytes: canonical({ v: 1 }), roles: ["verdict"] }] })))
       .toThrow(/no freeze-artifact role/);
+  });
+});
+
+describe("freeze repository bundle-format support table", () => {
+  test("states a decision for every supported bundle format", () => {
+    // The guard used to enumerate two formats inline, so a closure version could land beside it
+    // and be refused for its version alone (issue #3540). The table is keyed by the supported
+    // union, so a new format is a type error until someone writes its row; this is the same
+    // check at runtime, for a build that widens the union without widening the type.
+    for (const format of SUPPORTED_BUNDLE_FORMATS) {
+      expect(FREEZE_REPO_BUNDLE_SUPPORT[format], format).toBeDefined();
+      expect(typeof FREEZE_REPO_BUNDLE_SUPPORT[format].qualification, format).toBe("boolean");
+      expect(typeof FREEZE_REPO_BUNDLE_SUPPORT[format].disclosure, format).toBe("boolean");
+    }
+    expect(Object.keys(FREEZE_REPO_BUNDLE_SUPPORT).sort()).toEqual([...SUPPORTED_BUNDLE_FORMATS].sort());
+  });
+
+  test("accepts exactly the qualification-carrying closures", () => {
+    expect(SUPPORTED_BUNDLE_FORMATS.filter((format) => FREEZE_REPO_BUNDLE_SUPPORT[format].qualification))
+      .toEqual([BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT, BUNDLE_V8_FORMAT]);
+    // A disclosure record is claim-side; carrying one never makes a bundle a freeze subject on
+    // its own, and every format that carries one must also carry the qualification graph.
+    for (const format of SUPPORTED_BUNDLE_FORMATS) {
+      if (FREEZE_REPO_BUNDLE_SUPPORT[format].disclosure) {
+        expect(FREEZE_REPO_BUNDLE_SUPPORT[format].qualification, format).toBe(true);
+      }
+    }
+  });
+});
+
+describe("the verifier README's accepted-format list", () => {
+  test("names exactly the closures the export accepts", () => {
+    // A third party reads this section to learn which bundles the projection takes, and it
+    // enumerated the accepted versions by hand -- the same shape that let `/8` be refused for its
+    // version alone (issue #3540). `PUBLIC-BUNDLE.md` is pinned to the support table by the
+    // product's docs-consistency suite; this pins the copy that ships in the npm tarball.
+    const readme = readFileSync(join(import.meta.dirname, "..", "README.md"), "utf8");
+    const start = readme.indexOf("\n## Freeze-artifact repositories\n");
+    expect(start, "the freeze-artifact section must exist").toBeGreaterThan(-1);
+    const rest = readme.indexOf("\n## ", start + 1);
+    const section = readme.slice(start, rest === -1 ? undefined : rest);
+
+    for (const format of SUPPORTED_BUNDLE_FORMATS) {
+      // The section speaks in short names (`v8`), not whole format strings.
+      const shortName = `v${format.slice(format.lastIndexOf("/") + 1)}`;
+      const accepted = FREEZE_REPO_BUNDLE_SUPPORT[format].qualification;
+      expect(section.includes(shortName), `${format} accepted=${accepted}`).toBe(accepted);
+    }
   });
 });
 
