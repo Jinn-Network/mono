@@ -10,6 +10,8 @@ import type {
   PublicBundleAnchorTrustMaterial,
 } from "./anchor/check.js";
 import type { PublicBundleSigner, PublicBundleSignerRole } from "./signers.js";
+import { verifyDomainBinding, type VerifiedDomainBinding } from "./identity/domain-binding.js";
+import { publisherIdentityLine, publisherIdentitySentence } from "./identity/report-face.js";
 import { VERIFIER_VERSION } from "./version.js";
 
 export { VERIFIER_VERSION } from "./version.js";
@@ -31,12 +33,15 @@ export interface VerifierCliDeps {
 
 function usage(): string {
   return "Usage: colophon-verify <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
-    + "                        [--freeze-repo <dir>]\n"
+    + "                        [--freeze-repo <dir>] [--identity-binding <file>]\n"
     + "  --tsa-root     RFC 3161 trust anchor, DER or PEM. Repeatable.\n"
     + "  --ots-headers  Bitcoin block headers, one \"<height>:<80-byte-hex>\" per line. Repeatable.\n"
     + "  --freeze-repo  Also check that this published freeze-artifact repository is exactly what\n"
     + "                 the bundle renders. The repository is a derived artifact, never the claim\n"
     + "                 of record; a drifted tree exits 1.\n"
+    + "  --identity-binding  A colophon-domain-binding/1 document binding one of this bundle's\n"
+    + "                 signing keys to a domain. Checked offline as far as the bytes allow;\n"
+    + "                 the lookup at the domain itself stays yours.\n"
     + "Trust material is yours, not the bundle's: with none supplied a well-formed anchor reports\n"
     + "present rather than verified, and none ships with this tool.\n"
     + "Exit 0: valid bundle; 1: invalid bundle, or a freeze repository that drifted from it;\n"
@@ -129,7 +134,24 @@ function renderSignerGroup(role: PublicBundleSignerRole, custody: PublicBundleSi
   return `  ${SIGNER_ROLE_NAMES[role]}${suffix} \u00b7 ${count} ${count === 1 ? "key" : "keys"}`;
 }
 
-function renderSigners(signers: readonly PublicBundleSigner[]): string {
+/**
+ * Who published, on the line under the publisher group (issue #2983). One publisher key is the only
+ * shape this names: a bundle with several would make "published by" ambiguous, and the honest answer
+ * there is the group count already printed, not a domain picked from a list.
+ */
+function renderPublisherIdentity(
+  signers: readonly PublicBundleSigner[],
+  binding: VerifiedDomainBinding | undefined,
+): string {
+  const publishers = signers.filter((signer) => signer.role === "publisher");
+  if (publishers.length !== 1) return "";
+  return `\n    ${publisherIdentityLine(binding, publishers[0]!.keyFingerprint)}`;
+}
+
+function renderSigners(
+  signers: readonly PublicBundleSigner[],
+  binding: VerifiedDomainBinding | undefined,
+): string {
   const counts = new Map<string, { role: PublicBundleSignerRole; custody: PublicBundleSigner["custody"]; count: number }>();
   for (const signer of signers) {
     const key = `${signer.role} ${signer.custody}`;
@@ -141,10 +163,17 @@ function renderSigners(signers: readonly PublicBundleSigner[]): string {
   const order = Object.keys(SIGNER_ROLE_NAMES) as PublicBundleSignerRole[];
   const groups = [...counts.values()]
     .sort((left, right) => order.indexOf(left.role) - order.indexOf(right.role));
-  return `\nSigned by\n${groups.map((group) => renderSignerGroup(group.role, group.custody, group.count)).join("\n")}\n`;
+  const identity = renderPublisherIdentity(signers, binding);
+  const lines = groups
+    .map((group) => `${renderSignerGroup(group.role, group.custody, group.count)}${group.role === "publisher" ? identity : ""}`)
+    .join("\n");
+  return `\nSigned by\n${lines}\n`;
 }
 
-export function renderVerifiedBundle(result: PublicBundleVerificationResult): string {
+export function renderVerifiedBundle(
+  result: PublicBundleVerificationResult,
+  binding?: VerifiedDomainBinding,
+): string {
   // A metadata-first bundle carries artifact digests without their bytes. Printing "passed" for a
   // check that read nothing would be the one claim this format cannot afford, so the deferred check
   // prints as not fetched and is counted out of the passed total.
@@ -160,7 +189,11 @@ export function renderVerifiedBundle(result: PublicBundleVerificationResult): st
     : "";
   const signers = result.signers === undefined || result.signers.length === 0
     ? ""
-    : renderSigners(result.signers);
+    : renderSigners(result.signers, binding);
+  // The limits of the binding, beside the other limits paragraphs rather than beside the name it
+  // qualifies: a reader who takes the name at face value is exactly the reader this paragraph is
+  // for, and it belongs where they finish reading.
+  const identityLimits = publisherIdentitySentence(binding);
   // Naming the digests is what makes the deferred check completable: they are the addresses to
   // fetch and the expectations to check the fetched bytes against. Adding a body to this directory
   // is not the completion path -- it would break the manifest closure the bundle is identified by,
@@ -185,7 +218,7 @@ ${checks}
 ${signers}${artifactContentReport}${anchors}
 This checks the bundle's integrity, evidence closure, calculations, report,
 and claim consistency. It does not prove that the machine that produced the
-bundle was honest or that the compared identities are independent parties.${artifactContentLimit}${anchorLimits}
+bundle was honest or that the compared identities are independent parties.${artifactContentLimit}${anchorLimits}${identityLimits === undefined ? "" : `\n${identityLimits}`}
 No files were uploaded.
 Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.
 Verification uses the exact platform bytes installed from npm.
@@ -244,6 +277,8 @@ interface ParsedArguments {
   readonly otsHeaders: readonly string[];
   /** Present only when `--freeze-repo` was supplied (issue #2870). */
   readonly freezeRepoDir?: string;
+  /** Present only when `--identity-binding` was supplied (issue #2983). */
+  readonly identityBindingPath?: string;
 }
 
 function parseArguments(args: readonly string[]): ParsedArguments | undefined {
@@ -252,6 +287,7 @@ function parseArguments(args: readonly string[]): ParsedArguments | undefined {
   const otsHeaders: string[] = [];
   let json = false;
   let freezeRepoDir: string | undefined;
+  let identityBindingPath: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
     if (arg === "--json") {
@@ -266,6 +302,11 @@ function parseArguments(args: readonly string[]): ParsedArguments | undefined {
       if (value === undefined || value.startsWith("--") || freezeRepoDir !== undefined) return undefined;
       freezeRepoDir = value;
       index += 1;
+    } else if (arg === "--identity-binding") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("--") || identityBindingPath !== undefined) return undefined;
+      identityBindingPath = value;
+      index += 1;
     } else if (arg.startsWith("--")) {
       return undefined;
     } else {
@@ -279,6 +320,7 @@ function parseArguments(args: readonly string[]): ParsedArguments | undefined {
     tsaRoots,
     otsHeaders,
     ...(freezeRepoDir === undefined ? {} : { freezeRepoDir }),
+    ...(identityBindingPath === undefined ? {} : { identityBindingPath }),
   };
 }
 
@@ -346,6 +388,29 @@ export async function runVerifierCli(
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
 
+  // A supplied binding is resolved only after the bundle verifies, for the same reason the freeze
+  // repository is: the check needs the signer set, and a bundle that does not verify has no signer
+  // set worth attributing. Its failures are scoped to it too -- a binding that does not check out
+  // says nothing about the bundle, whose own verdict is reported either way.
+  let identity: VerifiedDomainBinding | undefined;
+  let identityFailure: { readonly code: string; readonly message: string } | undefined;
+  if (parsed.identityBindingPath !== undefined) {
+    try {
+      identity = verifyDomainBinding(
+        (deps.readFile ?? ((path) => new Uint8Array(readFileSync(path))))(parsed.identityBindingPath),
+        (result.signers ?? []).map((signer) => signer.keyId),
+      );
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      identityFailure = {
+        code: (cause !== null && typeof cause === "object" && "code" in cause)
+          ? String((cause as { code?: unknown }).code)
+          : "environment",
+        message: withoutRawIdentifiers(error.message),
+      };
+    }
+  }
+
   // The freeze repository is checked only after the bundle itself verifies: a tree derived from
   // records that do not verify has nothing to be consistent with. Its own failures are scoped to
   // it: a bundle that cannot be RENDERED as a freeze repository — no licence declared, a licence
@@ -369,14 +434,23 @@ export async function runVerifierCli(
 
   const stdout = parsed.json
     ? `${JSON.stringify({
-      ok: freezeRepoFailure === undefined && (freezeRepo?.ok ?? true),
+      ok: freezeRepoFailure === undefined && identityFailure === undefined && (freezeRepo?.ok ?? true),
       verifierVersion: VERIFIER_VERSION,
       supportedFormats: SUPPORTED_BUNDLE_FORMATS,
       ...result,
       ...(freezeRepo === undefined ? {} : { freezeRepo }),
       ...(freezeRepoFailure === undefined ? {} : { freezeRepo: { ok: false, ...freezeRepoFailure } }),
+      ...(identity === undefined ? {} : { identity }),
+      ...(identityFailure === undefined ? {} : { identity: { ok: false, ...identityFailure } }),
     })}\n`
-    : `${renderVerifiedBundle(result)}${freezeRepo === undefined ? "" : renderFreezeRepoCheck(freezeRepo)}`;
+    : `${renderVerifiedBundle(result, identity)}${freezeRepo === undefined ? "" : renderFreezeRepoCheck(freezeRepo)}`;
+  if (identityFailure !== undefined) {
+    return {
+      exitCode: 2,
+      stdout,
+      stderr: parsed.json ? "" : `colophon-verify: domain binding not applied: ${identityFailure.message}\n`,
+    };
+  }
   if (freezeRepoFailure !== undefined) {
     return {
       exitCode: 2,

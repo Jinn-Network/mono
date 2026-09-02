@@ -196,3 +196,35 @@ export type {
 } from "./binding/beacon-binding.js";
 export { runBindingClass, runBindingSentence, runBoundVenueLimits } from "./binding/report-face.js";
 export type { RunBindingClass } from "./binding/report-face.js";
+// Reader-legible publisher identity (issue #2983): a signing key bound to a domain by a proof the
+// key holder serves themselves. The document is reader-supplied trust material, like an RFC 3161
+// root -- no bundle format carries it -- and the sentences live here so the producer that mints a
+// binding and the reader that checks one render the same words.
+export {
+  DOMAIN_BINDING_FORMAT,
+  DOMAIN_BINDING_MECHANISMS,
+  DOMAIN_BINDING_MECHANISM_NAMES,
+  DomainBindingDocumentSchema,
+  DomainBindingStatementSchema,
+  domainBindingProof,
+  domainBindingStatementBytes,
+  verifyDomainBinding,
+} from "./identity/domain-binding.js";
+export type {
+  DomainBindingDocument,
+  DomainBindingMechanism,
+  DomainBindingProof,
+  DomainBindingStatement,
+  VerifiedDomainBinding,
+} from "./identity/domain-binding.js";
+export {
+  ed25519PublicKeyBytesFromDidKey,
+  ed25519PublicKeyFromDidKey,
+  keyFingerprintFromDidKey,
+} from "./identity/did-key.js";
+export {
+  publisherIdentityClass,
+  publisherIdentityLine,
+  publisherIdentitySentence,
+} from "./identity/report-face.js";
+export type { PublisherIdentityClass } from "./identity/report-face.js";
