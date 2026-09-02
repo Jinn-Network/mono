@@ -292,7 +292,7 @@ async function submitSelfEvaluation(args: {
       publicClient,
       walletClient,
       evaluator.safeAddress as Address,
-    ) as never,
+    ),
     safeAddress: evaluator.safeAddress as Address,
     routerAddress: v3Env.routerAddress as Address,
     mechAddress: v3Env.mockMechAddress as Address, // self-eval: same mech the solver claimed with
