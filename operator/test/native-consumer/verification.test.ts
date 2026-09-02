@@ -474,6 +474,47 @@ describe('independent native vertical verification', () => {
     value.state.close();
   });
 
+  /**
+   * `requireBinding` is the last consumer of `bindingResolver`, and the only one that
+   * resolves without routing the result through `verifyEnvelopeBinding` -- it echoes the
+   * claimed `agent` into the report beside the resolved `bindingDigest`. A key-only
+   * resolver could therefore attribute another agent's binding to the claimed one.
+   * `BindingResolver` is contracted never to resolve by key alone, so the wrapper below
+   * stands in for a realistic cache bug; it turns foreign only once every earlier
+   * resolution has completed, so the failure can only come from the binding leg
+   * (issue #3629).
+   */
+  it('fails when a key-only resolver returns another agent\'s binding for the report legs', async () => {
+    const baselineValue = await fixture();
+    let calls = 0;
+    const counting = baselineValue.trust.bindingResolver;
+    await verifyNativeVertical({
+      ...baselineValue,
+      trust: { ...baselineValue.trust, bindingResolver: {
+        async resolveBinding(query, atTime) { calls += 1; return counting.resolveBinding(query, atTime); },
+      } },
+    });
+    baselineValue.state.close();
+    // The report resolves one binding per role, all after every earlier leg.
+    const beforeReportLegs = calls - 4;
+    expect(beforeReportLegs).toBeGreaterThan(0);
+
+    const value = await fixture();
+    const real = value.trust.bindingResolver;
+    let seen = 0;
+    const keyOnly = {
+      async resolveBinding(query: Parameters<typeof real.resolveBinding>[0], atTime: string) {
+        const resolved = await real.resolveBinding(query, atTime);
+        seen += 1;
+        if (resolved === null || seen <= beforeReportLegs) return resolved;
+        return { ...resolved, binding: { ...resolved.binding, agent: 'urn:jinn:agent:someone-else' } };
+      },
+    };
+    await expect(verifyNativeVertical({ ...value, trust: { ...value.trust, bindingResolver: keyOnly } }))
+      .rejects.toMatchObject({ reason: 'binding-not-resolved' });
+    value.state.close();
+  });
+
   it('fails when the signed authority-time anchor is not canonical and finalized on chain', async () => {
     const value = await fixture();
     await expect(verifyNativeVertical({

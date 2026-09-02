@@ -248,6 +248,44 @@ describe('native persistent role identities', () => {
     await expect(openAt(root, resolver)).rejects.toThrow(/no effective binding/i);
   });
 
+  /**
+   * A key-only resolver: it ignores `query.agent` and returns a binding carrying a
+   * FOREIGN Agent IRI, otherwise fully authorized. `BindingResolver` is contracted
+   * never to resolve by key alone, so this stands in for a realistic cache bug.
+   * Both boot and `resolveEffective` must refuse it as unresolved -- not as a key
+   * mismatch, which is what a check placed below the key guard would report
+   * (issue #3629).
+   */
+  const keyOnlyResolver = (): BindingResolver => ({
+    resolveBinding: vi.fn(async (query) => resolvedBinding({
+      key: query.key, agent: 'urn:jinn:agent:someone-else', scopes: ALL_NATIVE_SCOPES,
+    })),
+  });
+
+  it('rejects a role whose binding a key-only resolver returned for another agent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-foreign-agent-'));
+
+    await expect(openAt(root, keyOnlyResolver()))
+      .rejects.toThrow(/no effective binding at boot/u);
+  });
+
+  it('refuses effective authority for a binding a key-only resolver returned for another agent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-foreign-agent-effective-'));
+    let foreign = false;
+    const resolver: BindingResolver = {
+      resolveBinding: vi.fn(async (query) => resolvedBinding({
+        key: query.key,
+        agent: foreign ? 'urn:jinn:agent:someone-else' : query.agent,
+        scopes: ALL_NATIVE_SCOPES,
+      })),
+    };
+    const identities = await openAt(root, resolver);
+    foreign = true;
+
+    await expect(identities.resolveEffective('solver-delivery', '2026-08-02T12:05:00.000Z'))
+      .resolves.toEqual({ ok: false, reason: 'binding-not-resolved' });
+  });
+
   it('rejects a role whose binding is not yet effective at native boot', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-future-'));
     const resolver: BindingResolver = {

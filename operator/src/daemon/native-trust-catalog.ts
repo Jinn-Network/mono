@@ -516,8 +516,11 @@ export async function openNativeTrustCatalog(input: {
         { key: value.key, agent: value.agent },
         value.atTime,
       );
-      // Named before the ceremony guard: a binding that resolved for another
-      // agent has not "carried no ceremony evidence" (issue #3629).
+      // Named before the ceremony guard: a binding that resolved for another agent
+      // has not "carried no ceremony evidence". Defense in depth -- the resolver this
+      // catalog builds draws candidates from `listBindingsForAgent(query.agent)` and so
+      // is conforming by construction, which is also why there is no injection seam to
+      // drive a key-only resolver through here from a test (issue #3629).
       if (resolved === null) {
         throw new NativeTrustCatalogError(
           `settlement authority ${value.key} did not resolve for ${value.agent}`,
