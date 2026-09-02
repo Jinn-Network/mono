@@ -382,6 +382,13 @@ describe("a backlog larger than the per-pass entry bound (#3252)", () => {
     const check = await chainVerificationCheck(capability);
     expect(check.ok).toBe(false);
     expect(check.detail).toContain(`${source.agent}/${source.name} (sync-truncated)`);
+
+    // And the remedy sends them to the bound they set, not to the archive's
+    // head signature or entry linkage -- the phantom hunt this refusal exists
+    // to prevent (#3252).
+    expect(check.remedy).toContain("corpus.maxEntriesPerSync");
+    expect(check.remedy).not.toContain("head signature");
+    expect(check.remedy).not.toContain("entry linkage it served");
   });
 
   test("the same archive verifies once the bound covers the backlog", async () => {

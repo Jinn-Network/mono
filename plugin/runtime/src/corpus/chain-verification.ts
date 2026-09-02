@@ -43,6 +43,14 @@ export type ChainVerificationOutcome =
   | { readonly status: "ok" }
   | { readonly status: "rejected"; readonly reason: string };
 
+/**
+ * The one refusal reason in this module that is NOT the archive's doing but
+ * this runtime's own per-pass bound (#3252). Shared so the health check can
+ * branch its remedy on it without matching a bare literal that could drift
+ * away from the value emitted here.
+ */
+export const SYNC_TRUNCATED_REASON = "sync-truncated";
+
 export interface ChainVerification {
   readonly mode: "verified" | "unverified";
   verify(input: ChainVerificationInput): Promise<ChainVerificationOutcome>;
@@ -117,7 +125,7 @@ export function createDriverChainVerification(driver: VerifyDriver): ChainVerifi
         // a bound the operator set. Naming the real cause is what lets that
         // operator raise `maxEntriesPerSync` instead of hunting a phantom
         // linkage break (#3252).
-        return { status: "rejected", reason: "sync-truncated" };
+        return { status: "rejected", reason: SYNC_TRUNCATED_REASON };
       }
       const headSignature = input.headSignature;
       if (headSignature === undefined) {
