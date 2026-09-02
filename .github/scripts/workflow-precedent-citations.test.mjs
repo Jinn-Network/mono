@@ -16,19 +16,39 @@
 // citation shape itself lives in `workflow-precedent-citations.mjs`, a plain
 // module, so the per-workflow marker guards can share the parser without
 // importing this file and dragging the repository-wide gate back behind their
-// `paths:` filters.
+// `paths:` filters. The restore-name walk those citations are checked against
+// lives in `workflow-artifact-steps.mjs`, the one copy this file's first test
+// keeps unique.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
-import {
-  citedPrecedents,
-  findBrokenCitations,
-  restoredArtifactNames,
-} from './workflow-precedent-citations.mjs';
+import { restoredArtifactNames } from './workflow-artifact-steps.mjs';
+import { citedPrecedents, findBrokenCitations } from './workflow-precedent-citations.mjs';
+
+const root = resolve(import.meta.dirname, '../..');
+const workflowsDir = resolve(root, '.github/workflows');
+const scriptsDir = resolve(root, '.github/scripts');
+
+// The acceptance criterion of #3131: one behaviour of the restore-name walk in
+// `.github/scripts`. Copies drift — #3127 fixed this file's walk while the two
+// per-workflow tests kept the pre-fix one, so a `pattern:` restore at the end of
+// a job still read the next job's `name:` there.
+test('the restore-name walk is defined once, in the shared module', () => {
+  const definers = readdirSync(scriptsDir)
+    .filter((name) => name.endsWith('.mjs') && name !== 'workflow-artifact-steps.mjs')
+    .filter((name) => /(?:function\s+|const\s+|let\s+)restoredArtifacts?(?:Names)?\s*[=(]/.test(
+      readFileSync(join(scriptsDir, name), 'utf8'),
+    ));
+  assert.deepEqual(
+    definers,
+    [],
+    'import restoredArtifacts / restoredArtifactNames from workflow-artifact-steps.mjs instead of redefining the walk',
+  );
+});
 
 test('every workflow cited as by-name precedent actually restores by name', () => {
   assert.deepEqual(findBrokenCitations(), []);
@@ -284,4 +304,35 @@ test('a restore step with no opener above it stops at the first column-zero line
   const source = ['uses: actions/download-artifact@v8', 'jobs:', '  name: build', ''].join('\n');
 
   assert.deepEqual(restoredArtifactNames(source), []);
+});
+
+// #3143: the shared module is behind no workflow's `paths:` filter, so editing
+// it selects neither lane that tests it. Before the consolidation the walk lived
+// inside each lane's own test file, whose name that lane's filter matches — so
+// any edit to the walk ran the gates that read it. A filter that does not name
+// the module restores the shape this lineage exists to remove: the pull request
+// that breaks a gate merges green, and the gate fires later against whoever next
+// touches the lane. A lane with no `paths:` at all is always selected and needs
+// no entry.
+const SHARED_MODULE = '.github/scripts/workflow-artifact-steps.mjs';
+
+export function lanesMissingSharedModule(workflowsRoot = workflowsDir, scriptsRoot = scriptsDir) {
+  const importers = readdirSync(scriptsRoot)
+    .filter((name) => name.endsWith('.test.mjs'))
+    .filter((name) => readFileSync(join(scriptsRoot, name), 'utf8').includes('./workflow-artifact-steps.mjs'));
+
+  const missing = [];
+  for (const fileName of readdirSync(workflowsRoot).filter((name) => /\.ya?ml$/.test(name))) {
+    const source = readFileSync(join(workflowsRoot, fileName), 'utf8');
+    if (!importers.some((test) => source.includes(test))) continue;
+    if (!/^\s+paths:\s*$/m.test(source)) continue;
+    if (!source.includes(SHARED_MODULE)) {
+      missing.push(`${fileName} runs a test importing ${SHARED_MODULE} but its paths: filter does not name it`);
+    }
+  }
+  return missing;
+}
+
+test('every path-filtered lane that tests the shared walk names it in paths:', () => {
+  assert.deepEqual(lanesMissingSharedModule(), []);
 });
