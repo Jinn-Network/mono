@@ -261,8 +261,11 @@ interface LifecycleTaskGql {
   requiredVerdicts: number;
   createdAtBlock: string | number;
   createdAtTx?: string | null;
-  finalized: boolean;
-  refunded: boolean;
+  // Declared as the wire may deliver them, not as the schema promises: these
+  // are guarded, and a guard against a type that cannot fail is not one
+  // (#3114). Same reasoning `createdAtTx` above already carries.
+  finalized?: boolean | null;
+  refunded?: boolean | null;
 }
 
 interface LifecycleAttemptGql {
@@ -291,8 +294,10 @@ interface LifecycleVerdictGql {
 interface LifecycleAttemptMetaGql {
   requestId: string;
   chainId: number;
-  manifestCid: string;
-  publisherAgentId: string;
+  // `notNull` primary-key components, declared as the wire may deliver them for
+  // the same reason `LifecycleTaskGql.finalized` is (#3114).
+  manifestCid?: string | null;
+  publisherAgentId?: string | null;
   manifestHash: string;
   enrichedAtBlock: string | number;
   solverType?: string;
@@ -315,8 +320,10 @@ interface LifecycleAttemptMetaGql {
 interface LifecycleVerdictMetaGql {
   requestId: string;
   chainId: number;
-  manifestCid: string;
-  publisherAgentId: string;
+  // `notNull` primary-key components, declared as the wire may deliver them for
+  // the same reason `LifecycleTaskGql.finalized` is (#3114).
+  manifestCid?: string | null;
+  publisherAgentId?: string | null;
   manifestHash: string;
   enrichedAtBlock: string | number;
   solverType?: string;
