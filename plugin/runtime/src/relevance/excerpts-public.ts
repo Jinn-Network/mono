@@ -21,7 +21,7 @@ export interface PublicExcerptOptions {
    * entities are named.
    */
   readonly taskEntityId: string;
-  readonly traceEntityId?: string;
+  readonly traceEntityId: string;
   /** The record's declared native-trace format IRI, when it carries one. */
   readonly traceFormatIri?: string;
 }
@@ -43,9 +43,8 @@ function hydrated(artifact: HydratedArtifact): Uint8Array | undefined {
 
 function byEntityId(
   artifacts: ValidatedEvidenceResult["artifacts"],
-  entityId: string | undefined,
+  entityId: string,
 ): HydratedArtifact | undefined {
-  if (entityId === undefined) return undefined;
   return artifacts.find((artifact) => artifact.declaration.entityId === entityId);
 }
 
@@ -68,14 +67,21 @@ function declaredTaskStatement(
   result: ValidatedEvidenceResult,
   taskEntityId: string,
 ): string {
-  const record = result.validatedRecord;
-  if (record.family !== "execution-evidence") return "";
-  const graph = (record.value as { readonly "@graph"?: readonly Record<string, unknown>[] })["@graph"];
+  const graph = (
+    result.validatedRecord.value as {
+      readonly "@graph"?: readonly Record<string, unknown>[];
+    }
+  )["@graph"];
   const entity = graph?.find((candidate) => candidate["@id"] === taskEntityId);
   for (const field of ["name", "description"] as const) {
     const value = entity?.[field];
     if (typeof value === "string" && value.trim() !== "") {
-      return value.slice(0, MAX_SUMMARY_CHARS).trim();
+      // First line only, exactly as the hydrated path takes the artifact's
+      // first line. A `description` is free-form peer text, and a summary
+      // carrying its newlines both pollutes the index and lets a peer forge
+      // structural lines inside `renderRecord`'s header block
+      // (`projection/project.ts`).
+      return value.split("\n")[0]!.slice(0, MAX_SUMMARY_CHARS).trim();
     }
   }
   return "";
