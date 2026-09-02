@@ -190,8 +190,8 @@ result · configuration · task · venue · method
 
 Replicate is the first term the budget spends below the fold, and it is the worked example
 of the counting rule. The replicate *count* still appears above the fold, inside the result
-visual, as the per-arm `n`. Only its *name* moves down, into the accounting band where the
-reader who cares about it is already standing.
+visual, as the per-arm `n`. Only its *name* moves down, onto the closed-state label of
+Band 5's accounting fold, where the reader who cares about it is already standing.
 
 Neither ceiling is a target to hit; both are ceilings. A method whose honest claim needs
 four concepts should spend four.
@@ -258,7 +258,8 @@ refer to are in scope.
 Nothing in this band folds. A closed control here would be a caveat the page had chosen to
 hide, which is the one thing this spec forbids.
 
-Concepts permitted: disagreement, limitation. Both come out of the twelve.
+Concepts permitted: disagreement, limitation. Both are new here, and both come out of the
+twelve.
 
 ### Band 5 — Why you can believe it
 
@@ -270,15 +271,18 @@ Four folds, in this order:
 1. **The method was fixed before the run.** Opens onto method identity and version,
    preregistration, parameters, the disclosure variables, and, where the profile carries it,
    the truth admission and instrument commitments.
-2. **Every attempt is accounted for.** Opens onto completeness, attrition per arm, the
-   asymmetry flags, and the replicate accounting.
+2. **Every replicate is accounted for.** Opens onto completeness, attrition per arm, the
+   asymmetry flags, and the replicate accounting. This label is where the replicate term is
+   spent in closed state (§3.3).
 3. **The evaluators did not always agree.** Opens onto the conflicted cells, the assembly
    dissent, and the per-cell evidence.
 4. **You can recheck this yourself.** Opens onto the records, the digests, the exact and
    compatible verifier commands, the named checks, and the trust root.
 
-Concepts permitted in closed state: method, completeness, attrition, disagreement, record,
-recheck. Six, and they complete the twelve.
+Concepts permitted in closed state: method, replicate, completeness, attrition,
+disagreement, record, recheck. Method and disagreement are already spent, in Bands 1 and 4,
+and cost nothing again under §3.1's repeat rule; the other five are new, and they complete
+the twelve. The band totals therefore read 5 + 2 + 5 = 12, with Band 3 adding none.
 
 The single provenance statement — this page copies its values from authenticated records
 and does not reconcile them — is made once, as this band's own opening line, and not
@@ -359,10 +363,11 @@ jobs, and each part of them is ruled on separately. In every such case the
 disclosure-bearing part is kept or folded, and only labels, narration, and duplicate
 provenance are cut.
 
-Across the whole table, four things are cut outright — a constant hero label, a category
-eyebrow, an instruction for a self-evident control, and a duplicate attribution — plus
-three of the four provenance lines, whose one statement survives as Band 5's opening line.
-No fact, figure, caveat, limitation, digest, or command is removed by this spec.
+Across the whole table, five things are cut outright — a constant hero label, a category
+eyebrow, an instruction for a self-evident control, the "Answer first" eyebrow that Band 1
+makes untrue, and a duplicate attribution. Separately, all four provenance lines are cut and
+one new statement is added as Band 5's opening line, which nets to three provenance lines
+removed. No fact, figure, caveat, limitation, digest, or command is removed by this spec.
 
 ## 7. Enforcement
 
@@ -395,9 +400,9 @@ presentation asset against its own rebuild, so a bundle whose page differs from 
 pinned verifier renders is refused. Two consequences.
 
 **Adopting this order is a bundle-format allocation.** Allocated formats today are
-`benchmark-product-public-bundle/2`, `/4`, `/5`, `/6`, `/7`, and `/8`; the next free number
-is `/9`. The work is: allocate `/9`, render the new order behind it, release a verifier
-that understands it, and leave every earlier format rendering exactly what it renders now.
+`benchmark-product-public-bundle/2` through `/8`; the next free number is `/9`. The work
+is: allocate `/9`, render the new order behind it, release a verifier that understands it,
+and leave every earlier format rendering exactly what it renders now.
 
 **Already-published bundles never change.** A report published under `/8` keeps `/8`'s page
 forever, which is the property that makes a published claim citable. This spec is a
