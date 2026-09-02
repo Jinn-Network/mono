@@ -216,20 +216,23 @@ test('Tier 1-3 packages do not normalize Colophon-private runtime interfaces', (
   for (const identifier of PRIVATE_RUNTIME_IDENTIFIERS) assert.ok(productSource.includes(identifier), `private runtime guard is vacuous for ${identifier}`);
 });
 
-// A §9.2 registered method identifier names an implementation in
-// `packages/benchmarking/aggregate`'s registry. Shipped product source that hand-types one of
-// those strings is asserting "this is the method that ran" without going anywhere near the code
-// that would make it true -- which is exactly how Demo-1's sealed analysis plan came to cite
-// `paired-delta@1`, a clustered BCa bootstrap over binary pass rates, for numbers a local paired
-// Student-t module had computed (issue #2973). Source that genuinely delegates to a registered
-// method imports `BENCHMARKING_METHOD_IDS` from `@jinn-network/benchmarking-records` and cites the
-// constant; a product-local analysis owns its own identifier namespace. Test sources are exempt:
-// their literals are fixtures for the registry's own methods, not published citations.
+// `jinn.benchmarking.method/` is the §9.2 registry's namespace: an identifier under it names an
+// implementation in `packages/benchmarking/aggregate`. Shipped product source that hand-types one
+// of those strings asserts "this is the method that ran" without going anywhere near the code that
+// would make it true -- which is how Demo-1's sealed analysis plan came to cite `paired-delta@1`, a
+// clustered BCa bootstrap over binary pass rates, for numbers a local paired Student-t module had
+// computed, and to cite `manipulation-check` and `variance-decomposition` under a namespace that
+// registers neither (issue #2973). Source that genuinely delegates to a registered method imports
+// `BENCHMARKING_METHOD_IDS` from `@jinn-network/benchmarking-records` and cites the constant, so a
+// rename of the thing it names cannot pass silently; a product-local analysis owns its own
+// identifier namespace instead. Test sources are exempt: their literals are fixtures for the
+// registry's own methods, not published citations.
+const REGISTERED_METHOD_NAMESPACE = 'jinn.benchmarking.method/';
 const REGISTERED_METHOD_IDS_SOURCE = join(root, 'packages', 'benchmarking', 'records', 'src', 'identifiers.ts');
 function registeredMethodIds() {
   const block = readFileSync(REGISTERED_METHOD_IDS_SOURCE, 'utf8').match(/BENCHMARKING_METHOD_IDS = \{([\s\S]*?)\} as const;/);
   assert.ok(block, 'BENCHMARKING_METHOD_IDS is no longer readable from the records identifiers module');
-  const ids = [...block[1].matchAll(/["'](jinn\.benchmarking\.method\/[^"']+)["']/g)].map((match) => match[1]);
+  const ids = [...block[1].matchAll(/["']([^"']+)["']/g)].map((match) => match[1]);
   assert.ok(ids.length > 0, 'the registered method identifier list parsed empty');
   return ids;
 }
@@ -265,10 +268,11 @@ function stripComments(source) {
   }
   return out;
 }
-function hardcodedMethodIds(sourceFiles, ids) {
+function hardcodedMethodIds(sourceFiles) {
+  const pattern = new RegExp(`${REGISTERED_METHOD_NAMESPACE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[A-Za-z0-9._-]*`, 'g');
   return sourceFiles.filter((file) => !isTestSource(file)).flatMap((file) => {
     const code = stripComments(readFileSync(file, 'utf8'));
-    return ids.filter((id) => code.includes(id)).map((id) => `${relative(root, file)} -> ${id}`);
+    return [...new Set(code.match(pattern) ?? [])].map((id) => `${relative(root, file)} -> ${id}`);
   }).sort();
 }
 
@@ -280,17 +284,22 @@ test('method-identifier scanner reads code and ignores comments', () => {
     writeFileSync(join(fixture, 'src', 'described.ts'), '// not jinn.benchmarking.method/paired-delta\n/* nor jinn.benchmarking.method/wilson */\nexport const x = 1;\n');
     writeFileSync(join(fixture, 'src', 'cited.test.ts'), 'const id = "jinn.benchmarking.method/wilson";\n');
     assert.deepEqual(
-      hardcodedMethodIds(files(join(fixture, 'src')), ['jinn.benchmarking.method/paired-delta', 'jinn.benchmarking.method/wilson']),
+      hardcodedMethodIds(files(join(fixture, 'src'))),
       [`${relative(root, join(fixture, 'src', 'cited.ts'))} -> jinn.benchmarking.method/paired-delta`],
     );
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
-test('shipped product source cites a registered method identifier only through the records constant', () => {
+test('shipped product source cites a §9.2 method identifier only through the records constant', () => {
   const ids = registeredMethodIds();
-  assert.ok(ids.includes('jinn.benchmarking.method/paired-delta'), 'the identifier from issue #2973 is no longer registered');
-  const offenders = sourceRoots().flatMap((directory) => hardcodedMethodIds(files(directory), ids));
-  assert.deepEqual(offenders, [], 'shipped source hand-types a registered method identifier instead of citing the registry constant');
+  assert.ok(ids.includes(`${REGISTERED_METHOD_NAMESPACE}paired-delta`), 'the identifier from issue #2973 is no longer registered');
+  const outsideNamespace = ids.filter((id) => !id.startsWith(REGISTERED_METHOD_NAMESPACE));
+  assert.deepEqual(outsideNamespace, [], 'the registry moved off the namespace this guard polices');
+  assert.deepEqual(
+    sourceRoots().flatMap((directory) => hardcodedMethodIds(files(directory))),
+    [],
+    'shipped source hand-types a §9.2 method identifier instead of citing the registry constant',
+  );
 });
 
 test('the live sweep covers all four product members', () => {

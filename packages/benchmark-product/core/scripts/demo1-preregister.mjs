@@ -7,12 +7,21 @@
  *   cd packages/benchmark-product/core && yarn build && node scripts/demo1-preregister.mjs
  *
  * Both records are deterministic functions of the declaration, so the final report build reseals
- * byte-identical records; `yarn demo1:verify` checks that equality. Committing this file before
- * the deep run completes is what makes the analysis pre-declared rather than post hoc.
+ * byte-identical records; `yarn demo1:verify` checks that equality between the two committed
+ * files. Committing this file before the deep run completes is what makes the analysis
+ * pre-declared rather than post hoc.
+ *
+ * The committed `E1-demo1-preregistration.v1.json` is anchored and MUST NOT be regenerated. Since
+ * issue #2973 the analysis plan cites Demo-1's own `jinn.demo1.method/*` identifiers rather than
+ * the registered `jinn.benchmarking.method/*` ones the anchored file carries, so this script no
+ * longer reproduces those bytes -- re-running it against the committed path would silently replace
+ * a time-evidenced artifact with a post-hoc reseal, which is the integrity failure the erratum in
+ * `skillsbench-demo1-seal.ts` exists to avoid. It therefore refuses to overwrite an existing file
+ * unless `SKILLSBENCH_DEMO1_PREREGISTER_OUT` names somewhere else to write.
  *
  * Reads no cell and no reward.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { recordDigest } from "@jinn-network/evidence-protocol";
@@ -25,7 +34,14 @@ import {
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const REPO_ROOT = resolve(PACKAGE_ROOT, "../../..");
-const OUT = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/E1-demo1-preregistration.v1.json");
+const OUT = process.env.SKILLSBENCH_DEMO1_PREREGISTER_OUT
+  ? resolve(process.env.SKILLSBENCH_DEMO1_PREREGISTER_OUT)
+  : resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/E1-demo1-preregistration.v1.json");
+if (existsSync(OUT)) {
+  console.error(`refusing to overwrite the sealed preregistration at ${OUT}`);
+  console.error("set SKILLSBENCH_DEMO1_PREREGISTER_OUT to reseal somewhere else; see the header of this script");
+  process.exit(1);
+}
 
 const stage = process.env.SKILLSBENCH_DEMO1_STAGE === "final" ? "final" : "pilot";
 const declaration = stage === "final" ? SKILLSBENCH_DEMO1_FINAL_DECLARATION : SKILLSBENCH_DEMO1_PILOT_DECLARATION;
