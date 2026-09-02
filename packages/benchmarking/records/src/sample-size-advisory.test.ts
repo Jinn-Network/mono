@@ -68,7 +68,7 @@ describe("attaching and reading the advisory", () => {
     expect(readRunSampleSizeAdvisory(parsed)).toEqual(ADVISORY);
   });
 
-  test("an unacknowledged Run reads as undefined rather than as a synthesised advisory", () => {
+  test("an unacknowledged Run reads as undefined rather than as a synthesized advisory", () => {
     expect(readRunSampleSizeAdvisory(minimalRun())).toBeUndefined();
   });
 

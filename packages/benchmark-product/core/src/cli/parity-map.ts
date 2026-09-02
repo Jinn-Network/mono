@@ -23,12 +23,18 @@
 
 /**
  * Facade exports that are helpers, not operations a caller invokes directly — see
- * `./parity.test.ts`'s own header. Currently just one: `unverifiableAxisCounts`
+ * `./parity.test.ts`'s own header. Two of them: `unverifiableAxisCounts`
  * (`../operations/run-results.ts`) is exported so `../report/claim.ts` can reuse the same per-axis
- * tally the results document builds; it is not itself an operation with an
- * `OperationContext`/`OperationResult` shape.
+ * tally the results document builds; `draftSampleSizeAdvisory` (`../operations/run-lock.ts`) is
+ * exported so an operator surface can show the seal-time sample-size advisory BEFORE calling
+ * `runLock`, which is the whole point of an advisory. Neither has an
+ * `OperationContext`/`OperationResult` shape, and neither audits: `lock` is the operation behind
+ * the second one.
  */
-export const EXCLUDED_FACADE_EXPORTS: readonly string[] = ["unverifiableAxisCounts"];
+export const EXCLUDED_FACADE_EXPORTS: readonly string[] = [
+  "unverifiableAxisCounts",
+  "draftSampleSizeAdvisory",
+];
 
 /** Standalone filesystem helpers deliberately outside the workspace operations/audit boundary. */
 export const STANDALONE_CLI_VERBS: Readonly<Record<string, string>> = {

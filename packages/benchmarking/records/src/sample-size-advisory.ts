@@ -16,7 +16,7 @@
  * Namespaced and additive on exactly the terms `task-selection/v1` and `beacon-source/v1` are: a
  * Run that carries no acknowledgement seals byte-identical bytes to before this existed, and every
  * already-sealed Run keeps its digest. Absence reads as absence — {@link readRunSampleSizeAdvisory}
- * returns `undefined`, never a synthesised advisory for a lock nobody acknowledged.
+ * returns `undefined`, never a synthesized advisory for a lock nobody acknowledged.
  */
 
 import { z } from "zod";

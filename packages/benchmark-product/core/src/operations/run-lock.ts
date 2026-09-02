@@ -90,6 +90,7 @@ export function draftSampleSizeAdvisory(
   const document = readDraftDocument(workspaceDir, draftId);
   if (document.state !== "quoted" || document.spec.taskSet.kind !== "benchmark") return undefined;
   const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
+  if (benchmark.items.length < 1) return undefined;
   return sampleSizeAdvisory({ items: benchmark.items.length, replicates: document.spec.replicates });
 }
 
@@ -274,11 +275,16 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       // a different plan than the one being sealed. Sealed only on acknowledgement: n and the width
       // are both derivable from the plan, and the fact worth recording is that the operator saw the
       // width before the seal and locked at this n regardless.
-      const advisory = sampleSizeAdvisory({
-        items: compiled.benchmarkRecord.items.length,
-        replicates: document.spec.replicates,
-      });
-      const runWithSampleSizeAdvisory = input.acknowledgedSampleSizeAdvisory !== true
+      // An itemless benchmark has no n and therefore no width. It cannot reach a lock through any
+      // shipped path, but guarding here keeps that a missing advisory rather than an untyped throw
+      // out of the arithmetic, one line before the irreversible seal.
+      const advisory = compiled.benchmarkRecord.items.length < 1
+        ? undefined
+        : sampleSizeAdvisory({
+          items: compiled.benchmarkRecord.items.length,
+          replicates: document.spec.replicates,
+        });
+      const runWithSampleSizeAdvisory = input.acknowledgedSampleSizeAdvisory !== true || advisory === undefined
         ? runWithBeaconSource
         : withRunSampleSizeAdvisoryExtension(runWithBeaconSource, {
           n: advisory.n,
@@ -325,7 +331,9 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         runSha256,
         closeAt,
         ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
-        ...(input.acknowledgedSampleSizeAdvisory === true ? { sampleSizeAdvisory: advisory } : {}),
+        ...(input.acknowledgedSampleSizeAdvisory === true && advisory !== undefined
+          ? { sampleSizeAdvisory: advisory }
+          : {}),
       };
     },
   });

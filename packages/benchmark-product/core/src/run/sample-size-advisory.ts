@@ -14,7 +14,7 @@
  *   every per-arm interval in the sealed Report divides by, so quoting anything else would quote a
  *   width no arm will ever have.
  * - **The width is taken at p = 0.5.** Wilson width depends on the pass rate, and the pass rate is
- *   unknown at the seal. p = 0.5 maximises the width, so it is both the only p-free answer
+ *   unknown at the seal. p = 0.5 maximizes the width, so it is both the only p-free answer
  *   available and the conservative one: the printed width is a ceiling the run cannot exceed, never
  *   a promise it might miss.
  *
@@ -82,5 +82,5 @@ export function formatSampleSizeAdvisory(advisory: SampleSizeAdvisory): string {
     .map((reference) => `  n=${reference.n}: interval width ${reference.expectedIntervalWidth}`)
     .join("\n");
   return `At the declared n=${advisory.n} per arm, the widest 95% interval this run can produce is `
-    + `${advisory.expectedIntervalWidth} wide. At this and neighbouring sample sizes:\n${rows}`;
+    + `${advisory.expectedIntervalWidth} wide. At this and neighboring sample sizes:\n${rows}`;
 }

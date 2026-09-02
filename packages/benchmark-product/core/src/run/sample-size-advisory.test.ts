@@ -46,7 +46,7 @@ describe("sampleSizeAdvisory", () => {
   test("quotes the declared n first, then roughly double and roughly half it", () => {
     expect(sampleSizeAdvisory({ items: 12, replicates: 2 }).references.map((row) => row.n))
       .toEqual([24, 48, 12]);
-    // Odd n rounds rather than truncating to a size the operator would not recognise as "half".
+    // Odd n rounds rather than truncating to a size the operator would not recognize as "half".
     expect(sampleSizeAdvisory({ items: 25, replicates: 1 }).references.map((row) => row.n))
       .toEqual([25, 50, 13]);
   });

@@ -423,11 +423,11 @@ function requireSampleSizeAdvisoryAcknowledgement(
   workspaceDir: string,
   draftId: string,
   jsonMode: boolean,
-): void {
+): boolean {
   const planned = draftSampleSizeAdvisory(workspaceDir, draftId);
   // No advisory means no lock could seal this draft right now; `runLock` below says why, and
   // demanding an acknowledgement of a width that does not exist would bury that answer.
-  if (planned === undefined) return;
+  if (planned === undefined) return false;
   const advisory = formatSampleSizeAdvisory(planned);
   if (!present(args, SAMPLE_SIZE_ACK_FLAG)) {
     refuse(
@@ -438,6 +438,7 @@ function requireSampleSizeAdvisoryAcknowledgement(
     );
   }
   if (!jsonMode) context.progress?.(advisory);
+  return true;
 }
 
 function withProviderAcknowledgement<T>(
@@ -1086,9 +1087,13 @@ async function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boole
   const acknowledged = requireProviderNetworkCostAcknowledgement(
     args, context, opContext.workspaceDir, draftId, jsonMode,
   );
-  requireSampleSizeAdvisoryAcknowledgement(args, context, opContext.workspaceDir, draftId, jsonMode);
+  // Only an advisory the operator was actually shown is sealed as acknowledged; when there was
+  // none to show, the lock below refuses and nothing is sealed either way.
+  const acknowledgedSampleSizeAdvisory = requireSampleSizeAdvisoryAcknowledgement(
+    args, context, opContext.workspaceDir, draftId, jsonMode,
+  );
 
-  const locked = runLock(opContext, { draftId, acknowledgedSampleSizeAdvisory: true });
+  const locked = runLock(opContext, { draftId, acknowledgedSampleSizeAdvisory });
   const result = withProviderAcknowledgement(locked, acknowledged);
   const rendered = renderResult(
     result,
