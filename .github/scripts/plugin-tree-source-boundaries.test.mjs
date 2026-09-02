@@ -166,7 +166,7 @@ test('the AST custody scanner scans array binding patterns that elide a position
     // An elided array binding element is valid TypeScript with no `name` node.
     // The scanner must skip the hole and keep scanning; aborting here would
     // leave the rest of the file -- including the `process.env` read below --
-    // unexamined while the job reports a crash rather than a violation.
+    // unexamined, and report a crash where the violation should have been.
     const violations = scanFixtureSource(fixture, 'elision.ts', [
       'const pairs: Array<[string, string]> = [];',
       'export const first = pairs.some(([, reason]) => reason === "x");',

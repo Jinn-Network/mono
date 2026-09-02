@@ -175,10 +175,11 @@ function bindingNameText(name, ts) {
   // An array binding pattern may elide a position (`const [, second] = pair`).
   // TypeScript represents the hole as an `OmittedExpression` with no `name`,
   // so every `element.name` walk can hand us nothing. Treat that the way
-  // `literalString` treats a missing node: unnamed, hence nothing to check --
-  // a custody scanner that aborts mid-scan reads as a pass to the job that
-  // asserts on its exit code, which is strictly worse than skipping a hole
-  // that can never carry an identifier to check in the first place.
+  // `literalString` treats a missing node: unnamed, hence nothing to check.
+  // Throwing instead aborts the whole scan at the first hole, leaving every
+  // later file unexamined and reporting a crash where a real violation
+  // downstream would have been the finding -- and a hole can never carry an
+  // identifier to check in the first place.
   if (!name) return null;
   if (ts.isIdentifier(name)) return name.text;
   if (ts.isStringLiteral(name)) return name.text;
