@@ -25,12 +25,15 @@ import {
   withRunTaskSelectionExtension,
   withRunBeaconSourceExtension,
   withRunPublicationExtension,
+  withRunSampleSizeAdvisoryExtension,
+  parseBenchmark,
 } from "@jinn-network/benchmarking-records";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { compileDraft } from "../run/compile.js";
+import { sampleSizeAdvisory, type SampleSizeAdvisory } from "../run/sample-size-advisory.js";
 import {
   inspectRuntimeMethodForBinding,
   type InspectRuntimeMethodDisclosure,
@@ -54,6 +57,12 @@ import type { OperationResult } from "./result.js";
 
 export interface RunLockInput {
   readonly draftId: string;
+  /**
+   * Set when the caller has been shown the seal-time sample-size advisory (issue #2978) and locked
+   * at the declared n anyway. Optional and defaulted off: a caller that does not acknowledge seals
+   * byte-identical Run bytes to before the advisory existed, so no stored record or fixture moves.
+   */
+  readonly acknowledgedSampleSizeAdvisory?: boolean;
 }
 
 export interface RunLockResult {
@@ -61,6 +70,27 @@ export interface RunLockResult {
   readonly runSha256: string;
   readonly closeAt: string;
   readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
+  /** Present exactly when the caller acknowledged it, which is exactly when the seal carries it. */
+  readonly sampleSizeAdvisory?: SampleSizeAdvisory;
+}
+
+/**
+ * The advisory a lock of this draft would print and seal (issue #2978), so an operator surface can
+ * show the width BEFORE the irreversible seal and `runLock` can seal the same numbers afterwards.
+ *
+ * `undefined` for a draft no lock could seal right now — not quoted, or carrying no benchmark, so
+ * there is no item count and therefore no n. Returning `undefined` rather than refusing keeps this
+ * a pure advisory: the caller gating on it does not have to restate the lock's own preconditions,
+ * and `runLock` stays the one place that says why a lock cannot happen.
+ */
+export function draftSampleSizeAdvisory(
+  workspaceDir: string,
+  draftId: string,
+): SampleSizeAdvisory | undefined {
+  const document = readDraftDocument(workspaceDir, draftId);
+  if (document.state !== "quoted" || document.spec.taskSet.kind !== "benchmark") return undefined;
+  const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
+  return sampleSizeAdvisory({ items: benchmark.items.length, replicates: document.spec.replicates });
 }
 
 function computeCloseAt(at: string, closeAfterMs: number): string {
@@ -240,7 +270,21 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       // rule the cold verifier applies afterwards. Left to publish time, a contradiction would
       // surface only once the run had been locked, executed, reported, and materialized -- a
       // bundle the workspace can never verify, and no way back. Same rule, earlier and cheaper.
-      const sealed = sealRun(runWithBeaconSource);
+      // Computed from the benchmark this lock just compiled, so the sealed width can never describe
+      // a different plan than the one being sealed. Sealed only on acknowledgement: n and the width
+      // are both derivable from the plan, and the fact worth recording is that the operator saw the
+      // width before the seal and locked at this n regardless.
+      const advisory = sampleSizeAdvisory({
+        items: compiled.benchmarkRecord.items.length,
+        replicates: document.spec.replicates,
+      });
+      const runWithSampleSizeAdvisory = input.acknowledgedSampleSizeAdvisory !== true
+        ? runWithBeaconSource
+        : withRunSampleSizeAdvisoryExtension(runWithBeaconSource, {
+          n: advisory.n,
+          expectedIntervalWidth: advisory.expectedIntervalWidth,
+        });
+      const sealed = sealRun(runWithSampleSizeAdvisory);
       if (declaredTaskSelection !== undefined) {
         // Judged on the exact bytes just sealed, so the rule cannot be shown a different Run from
         // the one that gets stored. This is the only refusal after `sealRun`, and it is safe there
@@ -281,6 +325,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         runSha256,
         closeAt,
         ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
+        ...(input.acknowledgedSampleSizeAdvisory === true ? { sampleSizeAdvisory: advisory } : {}),
       };
     },
   });

@@ -108,7 +108,7 @@ export {
   type QuoteEstimatedWallTime,
   type QuotePresentation,
 } from "./run-quote.js";
-export { runLock, type RunLockInput, type RunLockResult } from "./run-lock.js";
+export { draftSampleSizeAdvisory, runLock, type RunLockInput, type RunLockResult } from "./run-lock.js";
 export {
   publicationConfigure,
   publicationRegister,

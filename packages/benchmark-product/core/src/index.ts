@@ -700,6 +700,12 @@ export type {
   PublicationArchiveServerOptions,
   PublicationWellKnownOutcome,
 } from "./run/publication-serve.js";
+export {
+  expectedIntervalWidth,
+  formatSampleSizeAdvisory,
+  sampleSizeAdvisory,
+} from "./run/sample-size-advisory.js";
+export type { SampleSizeAdvisory, SampleSizeWidth } from "./run/sample-size-advisory.js";
 export { recordPublicationOrigin } from "./run/publication-authority.js";
 export { foldRunJournalLineage } from "./run/journal.js";
 export type { DispatchLineageFold } from "./run/journal.js";
@@ -742,6 +748,7 @@ export {
   runCollect,
   runLaunch,
   runLock,
+  draftSampleSizeAdvisory,
   runAnchor,
   runBind,
   anchoringConfigure,

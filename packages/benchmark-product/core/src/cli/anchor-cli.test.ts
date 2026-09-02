@@ -181,7 +181,7 @@ describe("anchor (§7.1 through the CLI)", () => {
   test("anchors the sealed Run record with a per-invocation provider and endpoint", async () => {
     const setup = contextFor();
     await setUpQuotedDraft(setup);
-    const locked = await runCli(["lock", ...base(), "--draft", "anchor-draft", "--json"], setup);
+    const locked = await runCli(["lock", "--ack-sample-size", ...base(), "--draft", "anchor-draft", "--json"], setup);
     expect(locked.exitCode).toBe(0);
     const runSha256 = parseJson<{ runSha256: string }>(locked.stdout).result!.runSha256;
 
@@ -210,7 +210,7 @@ describe("anchor (§7.1 through the CLI)", () => {
   test("refuses venue-unavailable (exit 1) when nothing resolves, and invalid-invocation (exit 2) on a bad subject", async () => {
     const context = contextFor();
     await setUpQuotedDraft(context);
-    expect((await runCli(["lock", ...base(), "--draft", "anchor-draft", "--json"], context)).exitCode).toBe(0);
+    expect((await runCli(["lock", "--ack-sample-size", ...base(), "--draft", "anchor-draft", "--json"], context)).exitCode).toBe(0);
 
     const unconfigured = await runCli(
       ["anchor", ...base(), "--draft", "anchor-draft", "--subject", "lock", "--json"],
@@ -233,7 +233,7 @@ describe("lock chains the §7.2 anchor hook without changing what lock reports",
     // The control: a workspace with no anchoring configured at all.
     const control = contextFor();
     await setUpQuotedDraft(control);
-    const unanchored = await runCli(["lock", ...base(), "--draft", "anchor-draft", "--json"], control);
+    const unanchored = await runCli(["lock", "--ack-sample-size", ...base(), "--draft", "anchor-draft", "--json"], control);
     expect(unanchored.exitCode).toBe(0);
     const controlKeys = Object.keys(parseJson<Record<string, unknown>>(unanchored.stdout).result!).sort();
     const controlWorkspace = workspaceDir;
@@ -245,7 +245,7 @@ describe("lock chains the §7.2 anchor hook without changing what lock reports",
     await setUpQuotedDraft(failing);
     await configureAnchoring(failing);
 
-    const locked = await runCli(["lock", ...base(), "--draft", "anchor-draft", "--json"], failing);
+    const locked = await runCli(["lock", "--ack-sample-size", ...base(), "--draft", "anchor-draft", "--json"], failing);
 
     expect(locked.exitCode).toBe(0);
     // Exactly one envelope on stdout: nothing was appended, streamed, or wrapped. The note about
@@ -271,7 +271,7 @@ describe("lock chains the §7.2 anchor hook without changing what lock reports",
     await setUpQuotedDraft(context);
     await configureAnchoring(context);
 
-    const locked = await runCli(["lock", ...base(), "--draft", "anchor-draft"], context);
+    const locked = await runCli(["lock", "--ack-sample-size", ...base(), "--draft", "anchor-draft"], context);
 
     expect(locked.exitCode).toBe(0);
     expect(locked.stderr).toBe("");
@@ -287,7 +287,7 @@ describe("lock chains the §7.2 anchor hook without changing what lock reports",
     await setUpQuotedDraft(context);
     await configureAnchoring(context);
 
-    const locked = await runCli(["lock", ...base(), "--draft", "anchor-draft", "--no-anchor"], context);
+    const locked = await runCli(["lock", "--ack-sample-size", ...base(), "--draft", "anchor-draft", "--no-anchor"], context);
 
     expect(locked.exitCode).toBe(0);
     expect(locked.stdout).not.toContain("anchoring:");
@@ -327,7 +327,7 @@ describe("lock chains the §7.2 anchor hook without changing what lock reports",
       },
     };
 
-    const locked = await runCli(["lock", ...base(), "--draft", "anchor-draft"], context);
+    const locked = await runCli(["lock", "--ack-sample-size", ...base(), "--draft", "anchor-draft"], context);
 
     expect(locked.exitCode).toBe(0);
     expect(locked.stdout).toContain(`anchoring: ${RFC3161_TSA_ANCHOR_PROFILE} anchored this lock as `);
@@ -340,7 +340,7 @@ describe("lock chains the §7.2 anchor hook without changing what lock reports",
     const context = contextFor({ [RFC3161_TSA_ANCHOR_PROFILE]: explodingSource(RFC3161_TSA_ANCHOR_PROFILE) });
     await setUpQuotedDraft(context);
 
-    const unconfigured = await runCli(["lock", ...base(), "--draft", "anchor-draft"], context);
+    const unconfigured = await runCli(["lock", "--ack-sample-size", ...base(), "--draft", "anchor-draft"], context);
     expect(unconfigured.exitCode).toBe(0);
     expect(unconfigured.stdout).not.toContain("anchoring:");
     expect(readAuditEntries(workspaceDir).filter((entry) => entry.action === "anchor")).toEqual([]);
@@ -362,7 +362,7 @@ describe("lock chains the §7.2 anchor hook without changing what lock reports",
     // The patch moved the spec, so the draft is re-quoted before it can lock.
     expect((await runCli(["quote", ...base(), "--draft", "anchor-draft", "--json"], disabled)).exitCode).toBe(0);
 
-    const locked = await runCli(["lock", ...base(), "--draft", "anchor-draft"], disabled);
+    const locked = await runCli(["lock", "--ack-sample-size", ...base(), "--draft", "anchor-draft"], disabled);
     expect(locked.exitCode).toBe(0);
     expect(locked.stdout).toContain("anchoring: disabled for this draft; no anchor was attempted");
     expect(readAuditEntries(workspaceDir).filter((entry) => entry.action === "anchor")).toEqual([]);
