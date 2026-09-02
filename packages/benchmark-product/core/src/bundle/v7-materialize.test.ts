@@ -17,7 +17,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { RUN_RECORD_KIND } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, RUN_RECORD_KIND } from "@jinn-network/benchmarking-records";
 import {
   RFC3161_TSA_ANCHOR_PROFILE,
   canonicalJsonBytes,
@@ -29,8 +29,9 @@ import {
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
 } from "../report/claim.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT, buildBundleManifest } from "./manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, buildBundleManifest } from "./manifest.js";
 import { PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
+import { BUNDLE_EVIDENCE_FORMAT, BUNDLE_EVIDENCE_ROLES, BUNDLE_TRUST_FORMAT } from "./schema.js";
 import {
   ANCHORED_V4_FIXTURE_GEN_TIME,
   createSyntheticV4BundleFixture,
@@ -58,6 +59,19 @@ function anchored(): Promise<SyntheticV4BundleFixture> {
     });
   }
   return anchoredFixture;
+}
+
+let unanchoredFixture: Promise<SyntheticV4BundleFixture> | undefined;
+
+/** The same fixture without the anchor lock: one real v4 binary run, built once. Used by the
+ * qualification-axis binding cases below, which need the unanchored sibling of `anchored()` to
+ * exercise the pre-existing v4-to-v2 direction against a real bundle rather than a hand-shaped one. */
+function unanchored(): Promise<SyntheticV4BundleFixture> {
+  if (unanchoredFixture === undefined) {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "unanchored-v4-binding-"));
+    unanchoredFixture = createSyntheticV4BundleFixture({ workspaceDir, truthAdmission: "operator-only" });
+  }
+  return unanchoredFixture;
 }
 
 function json(bundleDir: string, path: string): Record<string, any> {
@@ -240,5 +254,81 @@ describe("anchored binary-qualification bundle v7 — the standalone reader", ()
     );
 
     expect(await refusalPath(copy)).toBe(anchorPath);
+  }, 600_000);
+});
+
+describe("the qualification axis is bound to the sealed Report method (issue #3245)", () => {
+  /** Relabels a copied qualifying bundle as its non-qualifying sibling — `/7` as `/6`, `/4` as
+   * `/2` — and makes the result self-consistent AT that format, so what the reader meets is a
+   * coherent bundle rather than a stale digest it would have caught anyway. The qualification
+   * document goes; every evidence record carrying a role the `/2` catalog does not define goes
+   * with its `records/` member; `evidence.json` and `trust/public-keys.json` are rewritten into
+   * their `/2` grammars; the manifest is re-signed over what survives.
+   *
+   * `claim-package.json`, the primary records, and the assets are left byte-identical on purpose.
+   * That is the finding: nothing outside the format literal and the members dropped here names the
+   * truth-admission closure, so every admission-bearing check is simply skipped. Before the
+   * binding this bundle still failed — but at the very last step, as an unstructured `Error` out
+   * of the asset projection, which dispatches on the sealed Report method for its own reasons.
+   * These cases pin the refusal to the admission axis instead, and to its first opportunity. */
+  function downgradeToNonQualifying(
+    bundleDir: string,
+    format: typeof BUNDLE_FORMAT | typeof BUNDLE_V6_FORMAT,
+  ): void {
+    const catalogRoles = new Set<string>(BUNDLE_EVIDENCE_ROLES);
+    const records = json(bundleDir, "evidence.json").records as Array<{ sha256: string; roles: string[] }>;
+    const kept = records.filter((record) => record.roles.every((role) => catalogRoles.has(role)));
+    const removed = new Set<string>([
+      "qualification.json",
+      ...records.filter((record) => !kept.includes(record)).map((record) => `records/${record.sha256}.bin`),
+    ]);
+    writeFileSync(
+      join(bundleDir, "evidence.json"),
+      canonicalJsonBytes({ format: BUNDLE_EVIDENCE_FORMAT, records: kept }),
+    );
+
+    const trust = json(bundleDir, "trust/public-keys.json");
+    delete trust.admission;
+    trust.format = BUNDLE_TRUST_FORMAT;
+    writeFileSync(join(bundleDir, "trust/public-keys.json"), canonicalJsonBytes(trust));
+
+    for (const path of removed) rmSync(join(bundleDir, path), { force: true });
+    const paths = (json(bundleDir, "bundle.json").files as Array<{ path: string }>)
+      .map((entry) => entry.path)
+      .filter((path) => !removed.has(path));
+    writeFileSync(join(bundleDir, "bundle.json"), buildBundleManifest(bundleDir, paths, { format }).bytes);
+  }
+
+  async function refusal(bundleDir: string): Promise<{ path: string; message: string }> {
+    try {
+      await verifyPublicBundle(bundleDir);
+    } catch (cause) {
+      const issue = (cause as { readonly issues?: readonly { readonly path?: string; readonly message?: string }[] })
+        .issues?.[0];
+      return { path: issue?.path ?? "", message: issue?.message ?? "" };
+    }
+    throw new Error("NOT REFUSED: the downgraded bundle verified");
+  }
+
+  test("refuses a v7 bundle relabelled to v6 with a matching member list", async () => {
+    const built = await anchored();
+    const copy = copyBundle(built.bundle.bundleDir, "downgrade-v6");
+    downgradeToNonQualifying(copy, BUNDLE_V6_FORMAT);
+
+    const refused = await refusal(copy);
+    expect(refused.path).toBe("bundle.json");
+    expect(refused.message).toContain(BUNDLE_V6_FORMAT);
+    expect(refused.message).toContain(BENCHMARKING_METHOD_IDS.binaryInstrument);
+  }, 600_000);
+
+  test("refuses the pre-existing v4-to-v2 downgrade by the same binding", async () => {
+    const built = await unanchored();
+    const copy = copyBundle(built.bundle.bundleDir, "downgrade-v2");
+    downgradeToNonQualifying(copy, BUNDLE_FORMAT);
+
+    const refused = await refusal(copy);
+    expect(refused.path).toBe("bundle.json");
+    expect(refused.message).toContain(BUNDLE_FORMAT);
+    expect(refused.message).toContain(BENCHMARKING_METHOD_IDS.binaryInstrument);
   }, 600_000);
 });

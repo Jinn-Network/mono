@@ -7,6 +7,7 @@ import {
 } from "@jinn-network/benchmarking-evidence";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import {
+  BENCHMARKING_METHOD_IDS,
   DISCLOSURE_SPECIFICATION_EXTENSION,
   cellIdempotencyKey,
   expectedCellSet,
@@ -579,6 +580,46 @@ export async function verifyPublicBundleSnapshot(
     report = parseReport(reportBytes);
   } catch (cause) {
     refuse("record-integrity", "evidence-closure", `primary benchmark record is invalid: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  // ── The qualification axis is BOUND to the sealed Report method (issue #3245) ──────────────
+  //
+  // Everything above reads the qualification axis off `bundle.json`'s format literal alone, and
+  // the whole truth-admission closure hangs off it: the mandatory member list, the evidence and
+  // trust grammars, `qualification.json`'s presence, and — downstream — the admission-manifest
+  // replay, item coverage, instrument pins, and the binary intake roots. Unbound, the literal is
+  // a self-assertion: an honest `/7` relabels to `/6` (and `/4` to `/2`) by dropping the
+  // qualification document and the admission-only evidence records, rewriting `evidence.json` and
+  // `trust/public-keys.json` into their `/2` grammars, and recomputing the manifest.
+  // `claim-package.json` survives byte-unchanged, so `claim-consistency` still passes.
+  //
+  // What that downgrade did NOT do, measured against a real anchored `/7` fixture, is verify:
+  // `buildPublicAssets` dispatches on the sealed Report's method too, so the last step of the run
+  // found a binary Report where the comparison profile was expected and threw. So the closure was
+  // never actually open — but what closed it was an unstructured `Error` from the PRESENTATION
+  // layer, raised after every admission-bearing check had already been accepted, and only because
+  // assets happen to be method-dispatched. That is an accident, not an invariant, and it is not a
+  // refusal: the reader surfaces it as a crash rather than as a named disagreement.
+  //
+  // The producer has always held the other half of this binding: `materializeBundle` refuses when
+  // its claim schema and `report.method.id` disagree about binary qualification. This is the
+  // reader's counterpart, stated against the same fact, so the two agree by construction.
+  //
+  // Read here, before the report envelope is verified, so the refusal fires before the wrong
+  // closure runs. That ordering costs nothing: `report.json` is authenticated by
+  // `report-verification` below, which byte-compares it against the payload recovered from
+  // `report-envelope.json` under the carried report key — so rewriting `method.id` to agree with
+  // a downgraded format only MOVES the refusal there, it never removes one.
+  //
+  // Bidirectional deliberately. One predicate closes the `/7`→`/6` downgrade, the pre-existing
+  // `/4`→`/2` one, and the inverse smuggle of a non-binary Report onto a qualifying format.
+  if ((report.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument) !== carriesQualification) {
+    refuse(
+      "record-integrity",
+      "bundle.json",
+      `bundle format ${checked.manifest.format} declares`
+      + ` ${carriesQualification ? "a qualifying" : "a non-qualifying"} closure, but its sealed`
+      + ` Report declares method ${report.method.id}`,
+    );
   }
   const identities = {
     benchmarkSha256: sha256(benchmarkBytes),
