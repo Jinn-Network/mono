@@ -107,6 +107,29 @@ test('a mid-block `set -o pipefail` moves the boundary, and `set +o pipefail` mo
   );
 });
 
+test('`shell:` is found on either side of the `run:` key it belongs to', () => {
+  const source = [
+    'jobs:',
+    '  a:',
+    '    steps:',
+    '      - name: declared after run',
+    '        run: |',
+    '          git tag | head -1',
+    '        shell: bash',
+    '      - shell: bash',
+    '        run: |',
+    '          git tag | head -1',
+    '      - name: none',
+    '        run: |',
+    '          git tag | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => `${finding.severity}:${finding.line}`),
+    ['error:6', 'error:10', 'warning:13'],
+  );
+});
+
 test('a job-level `defaults:` covers its own job only', () => {
   const source = [
     'defaults:',

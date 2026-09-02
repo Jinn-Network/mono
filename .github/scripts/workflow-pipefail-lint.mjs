@@ -305,54 +305,45 @@ function inheritedShell(scopes, jobs, line) {
   return scopes.findLast((scope) => scope.indent === 0)?.shell ?? null;
 }
 
-// The `shell:` declared on the step that owns the `run:` at `runLine`. Step keys share
-// the `run:` key's column; the step opens on the `- ` one level out.
-function stepShell(lines, runLine, keyIndent) {
-  const read = (line) => {
-    const match = /^\s*(?:-\s+)?shell:\s*(?<value>.+?)\s*$/u.exec(line);
-    return match === null ? null : unquote(match.groups.value);
-  };
-
-  for (let index = runLine - 1; index >= 0; index -= 1) {
-    const line = lines[index];
-    if (line.trim() === '') continue;
-    const indent = indentOf(line);
-    if (indent > keyIndent) continue;
-    if (indent === keyIndent) {
-      const shell = read(line);
-      if (shell !== null) return shell;
-      continue;
-    }
-    if (indent === keyIndent - 2 && line.trimStart().startsWith('- ')) return read(line);
-    break;
-  }
-  return null;
+// A `shell:` key, whether it opens its step (`- shell: bash`) or follows one.
+function readShellKey(line) {
+  const match = /^\s*(?:-\s+)?shell:\s*(?<value>.+?)\s*$/u.exec(line);
+  return match === null ? null : unquote(match.groups.value);
 }
 
-function stepShellForward(lines, runLine, keyIndent) {
-  for (let index = runLine + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (line.trim() === '') continue;
-    const indent = indentOf(line);
-    if (indent > keyIndent) continue;
-    if (indent < keyIndent) break;
-    if (line.trimStart().startsWith('- ')) break;
-    const shell = read(line);
-    if (shell !== null) return shell;
+// The `shell:` declared on the step that owns the `run:` at `runLine`. Step keys share
+// the `run:` key's column, and the step opens on the `- ` one level out — so the search
+// runs both ways from `run:`, since `shell:` may be declared either side of it.
+function stepShell(lines, runLine, keyIndent) {
+  for (const direction of [-1, 1]) {
+    for (let index = runLine + direction; index >= 0 && index < lines.length; index += direction) {
+      const line = lines[index];
+      if (line.trim() === '') continue;
+      const indent = indentOf(line);
+      if (indent > keyIndent) continue;
+      if (indent < keyIndent - 1) {
+        // The step opens here; its inline first key may be the `shell:` we want, and
+        // nothing beyond it belongs to this step.
+        if (direction === -1 && indent === keyIndent - 2 && line.trimStart().startsWith('- ')) {
+          const shell = readShellKey(line);
+          if (shell !== null) return shell;
+        }
+        break;
+      }
+      // Walking forward, the next step's `- ` ends this one.
+      if (direction === 1 && line.trimStart().startsWith('- ')) break;
+      const shell = readShellKey(line);
+      if (shell !== null) return shell;
+    }
   }
   return null;
-
-  function read(line) {
-    const match = /^\s*shell:\s*(?<value>.+?)\s*$/u.exec(line);
-    return match === null ? null : unquote(match.groups.value);
-  }
 }
 
 /**
  * Every `run:` block in one workflow source: its body lines with their 1-based file
  * lines, and the shell GitHub will invoke it with (`null` = the runner default).
  */
-export function collectRunBlocks(source) {
+function collectRunBlocks(source) {
   const lines = source.split('\n');
   const defaultScopes = collectDefaultShells(lines);
   const jobRanges = collectJobRanges(lines);
@@ -384,7 +375,7 @@ export function collectRunBlocks(source) {
     }
     if (body.length === 0) continue;
 
-    const declared = stepShell(lines, index, keyIndent) ?? stepShellForward(lines, index, keyIndent);
+    const declared = stepShell(lines, index, keyIndent);
     const inherited = inheritedShell(defaultScopes, jobRanges, index);
     blocks.push({ runLine: index + 1, shell: declared ?? inherited, body });
   }
@@ -432,7 +423,7 @@ function annotationReason(text) {
  * @param {{line: number, text: string}[]} body
  * @returns {{line: number, text: string, annotation: string|undefined}[]}
  */
-export function logicalLines(body) {
+function logicalLines(body) {
   const lines = [];
   let pending = null;
   let state = { quote: null, frames: [] };
