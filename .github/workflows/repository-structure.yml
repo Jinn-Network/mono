@@ -81,6 +81,8 @@ jobs:
         run: node --test .github/scripts/demo1-historical-artifacts.test.mjs
       - name: Autopilot fail-closed resolution
         run: node --test .github/scripts/resolve-autopilot.test.mjs
+      - name: Autopilot session skill contracts
+        run: node --test .github/scripts/autopilot-skill-contracts.test.mjs
       - name: Every script test is workflow-wired
         run: node --test .github/scripts/workflow-script-tests.test.mjs
       - name: Published-artifacts-smoke workflow shape
