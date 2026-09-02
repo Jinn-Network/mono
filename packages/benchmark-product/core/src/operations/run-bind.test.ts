@@ -588,10 +588,16 @@ describe("runBind against a declared beacon source", () => {
     const bound = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
     if (!bound.ok) throw new Error("bind failed");
     // Straight disagreement: the third of the check's three failing outcomes, and the one whose
-    // message names both sources.
+    // message names both sources. BOTH fields move, because `verifyRunBinding`'s own rule is that
+    // the restatement agrees with the beacon the record names -- a record declaring one source
+    // while binding another is refused before carriage ever sees it, so the only forgery that
+    // reaches this branch is one that is internally consistent about a source the Run never named.
+    // The order survives the swap: the derivation keys on the beacon VALUE, never on its source id.
     const stored = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, bound.result.recordSha256)));
+    stored.beacon.source = "drand/default";
     stored.declaredSource = "drand/default";
     const forged = putSealedBytes(workspaceDir, new TextEncoder().encode(JSON.stringify(stored)));
+    expect(verifyRunBinding(stored).sourceBasis).toBe("seal-declared");
     const state = readRunState(workspaceDir, "draft-1")!;
     expect(() => readRunBindingCarriage(workspaceDir, {
       ...state,

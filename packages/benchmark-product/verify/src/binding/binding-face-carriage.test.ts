@@ -101,8 +101,11 @@ function topLevelArguments(text: string, openParen: number): string[] | undefine
     else if (")]}".includes(character)) {
       depth -= 1;
       if (depth === 0) {
+        // A trailing comma is punctuation, not an argument: `f(a, b, c,)` passes three. Dropping
+        // the empty tail is what keeps a multi-line call from reading as one that supplies a
+        // binding it never wrote.
         const tail = text.slice(start, index).trim();
-        if (tail !== "" || args.length > 0) args.push(tail);
+        if (tail !== "") args.push(tail);
         return args;
       }
     } else if (character === "," && depth === 1) {
@@ -160,6 +163,10 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     // Omitting the argument is the compliant shape, and a nested call is one argument, not two.
     expect(emitterCallSites("runBoundVenueLimits(anchoredVenueLimits(limits, anchors));\n", "fixture.ts")[0])
       .toEqual({ site: "fixture.ts:runBoundVenueLimits", binding: undefined, justified: false });
+    // A trailing comma is not a fourth argument. The multi-line shape `core` writes is otherwise
+    // indistinguishable from one that supplies an empty binding.
+    expect(emitterCallSites("buildLocalVenueHonesty(\n  cells,\n  run,\n  anchors,\n);\n", "fixture.ts")[0]?.binding)
+      .toBeUndefined();
   });
 
   test("every in-repo emitter call either supplies no binding or names the check it satisfies", () => {
