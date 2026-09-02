@@ -30,6 +30,7 @@ import {
   type NativeDiscoveryQueuedCard,
 } from './native-discovery.js';
 import type { NativeEvaluatorOpportunitySource } from './native-evaluator-composition.js';
+import { reportRefusedRecordDestination } from './native-base-sepolia-infrastructure.js';
 import type {
   NativeAuthorityTimePrimitives,
   NativeEvaluatorReadPrimitives,
@@ -280,8 +281,12 @@ function recordFetcher(input: {
         // eslint-disable-next-line no-await-in-loop -- alternate content-addressed public replicas.
         const bytes = await input.infrastructure.records.byLocation(location);
         if (documentDigest(bytes) === expected) return bytes;
-      } catch {
-        // Continue through signed/public replicas before falling back to IPFS.
+      } catch (cause) {
+        // Continue through signed/public replicas before falling back to IPFS. A destination
+        // refusal is named first (#3431): these locators are peer-announced, so a refusal means the
+        // peer advertises an origin the operator never configured — a configuration fault the IPFS
+        // fallback would otherwise disguise as a missing block.
+        reportRefusedRecordDestination('peer-announced record location', cause);
       }
     }
     const bytes = await input.infrastructure.records.byDigest(expected);

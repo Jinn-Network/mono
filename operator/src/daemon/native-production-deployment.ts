@@ -79,6 +79,7 @@ function infrastructureInput(config: NativeProductConfig): NativeInfrastructureF
       : { marketplaceAgentAddress: native.marketplaceAgentAddress as `0x${string}` }),
     evmCustody: native.evmCustody,
     publicBaseUrl: native.publicBaseUrl,
+    recordSources: native.sources,
     publicListen: native.publicListen,
     ipfs: native.ipfs,
     chain: { chainId: native.chainId, generation: native.generation, contracts: native.contracts },

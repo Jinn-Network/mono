@@ -89,6 +89,11 @@ const portals = [
     root: join(repoRoot, "packages", "discovery", "client"),
     archive: "record-discovery-client.tgz",
   },
+  {
+    name: "@jinn-network/record-discovery-transport-http",
+    root: join(repoRoot, "packages", "discovery", "transport-http"),
+    archive: "record-discovery-transport-http.tgz",
+  },
 ];
 
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-plugin-runtime-"));

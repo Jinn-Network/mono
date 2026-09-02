@@ -105,6 +105,12 @@ export interface ConvertBinaryItemBankInput {
   readonly description: string;
   readonly version: string;
   readonly author: string;
+  /** SPDX identifier for the publication itself. Optional: omitting it seals byte-identically to
+   * every bank imported before this field existed. Present, it is the licence data a freeze
+   * repository's LICENSE, NOTICE, and SPDX metadata are generated from (issue #2870). */
+  readonly license?: string;
+  /** Free-text citation carried on the sealed Benchmark record alongside the licence. */
+  readonly citation?: string;
   readonly parserInvalidPolicy?: "reject" | "abstain";
   /** Exact record resolution plus reviewer and role-separated authority trust. */
   readonly admissionVerificationPorts: BinaryJudgmentAdmissionClosurePorts;
@@ -447,6 +453,9 @@ export function convertBinaryItemBank(input: ConvertBinaryItemBankInput): Conver
     version: input.version,
     items: converted.map((entry) => ({ task: { digest: { sha256: bare(entry.task.digest) } } })),
     reveal: { policy: "immediate" },
+    // Omitted when absent, so an unlicensed import seals exactly the bytes it always did.
+    ...(input.license === undefined ? {} : { license: input.license }),
+    ...(input.citation === undefined ? {} : { citation: input.citation }),
     [BINARY_ITEM_BANK_INTAKE_EXTENSION]: {
       profile: BINARY_JUDGMENT_PROFILE_URI,
       itemBankSha256: itemBank.digest,

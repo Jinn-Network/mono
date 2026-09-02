@@ -12,6 +12,7 @@ import {
   MEDIA_HEAD,
   RECORD_DISCOVERY_VERSION,
   archivePagePath,
+  checkRefreshWindow,
   dssePreAuthEncoding,
   formatOrigin,
   headPath,
@@ -20,17 +21,20 @@ import {
   parseSourceHead,
   recordDigest,
   recordPath,
+  refreshByWithinCeiling,
   sealJson,
 } from "@jinn-network/record-discovery-protocol";
 
 import type { ArchivePage } from "./archive.js";
 import { signAnnouncementEntry, type ScopedDiscoverySigner } from "./entry-signing.js";
 import { MAX_REFRESH_BY_AHEAD_MS, signHead, type DsseEnvelope } from "./head.js";
-import type { ReadableImmutableBlobStore, StoredBlob } from "./ports.js";
+import type { Clock, ReadableImmutableBlobStore, StoredBlob } from "./ports.js";
 
 const ARCHIVE_PAGE_CONTENT_TYPE = "application/json";
 const DEFAULT_RECORD_CONTENT_TYPE = "application/octet-stream";
 const MAX_CAS_ATTEMPTS = 32;
+/** ECMAScript's time-value limit; beyond it `new Date(ms).toISOString()` throws. */
+const MAX_TIME_VALUE_MS = 8_640_000_000_000_000;
 
 export interface CasSnapshot<T> {
   readonly revision: string;
@@ -173,6 +177,12 @@ export interface DurableSourceWriterOptions {
   readonly intents: SourceAppendIntentStore;
   readonly faults?: SourceWriterFaultInjector;
   readonly refreshWithinMs?: number;
+  /**
+   * Source of the wall-clock reading each append's head is bounded against
+   * (#3481). Defaults to real time; injected by tests and by the operator
+   * daemon, which owns the host clock it publishes under.
+   */
+  readonly clock?: Clock;
 }
 
 export class SourceAnnouncementConflictError extends Error {
@@ -475,7 +485,7 @@ async function assertIntentOwnership(
     || (intent.previousHeadIssuedAt !== null
       && new Date(head.issuedAt).getTime() <= new Date(intent.previousHeadIssuedAt).getTime())
     || new Date(head.refreshBy).getTime() <= new Date(head.issuedAt).getTime()
-    || new Date(head.refreshBy).getTime() - new Date(head.issuedAt).getTime() > MAX_REFRESH_BY_AHEAD_MS
+    || !refreshByWithinCeiling(head)
   ) {
     throw new SourceWriterIntegrityError("frozen source head does not match the intended source position");
   }
@@ -512,6 +522,7 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     throw new SourceWriterIntegrityError("refreshWithinMs must be a positive finite duration");
   }
   const refreshWithinMs = Math.min(requestedRefreshWithinMs, MAX_REFRESH_BY_AHEAD_MS);
+  const clock: Clock = options.clock ?? { now: () => new Date() };
 
   if (options.signer.keyId.length === 0) {
     throw new SourceWriterIntegrityError("durable source signer keyId must not be empty");
@@ -638,6 +649,53 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     const timestampMs = new Date(command.timestamp).getTime();
     if (!Number.isFinite(timestampMs)) {
       throw new SourceWriterIntegrityError(`announcement timestamp is invalid: ${command.timestamp}`);
+    }
+
+    // The head this append will mint takes `issuedAt` from the caller's timestamp
+    // verbatim, and §5.2 rule 3 makes that value load-bearing for acceptance: a
+    // consumer refuses a head issued further ahead than one freshness window
+    // (`head-issued-ahead`). Bound it here, against this source's own clock, with the
+    // very predicate the reading side applies -- otherwise a host with a fast clock
+    // signs and publishes a head every consumer permanently refuses and hears about it
+    // only from peer logs (#3481). Checked before the record blob is written or
+    // anything is signed, so a refused append leaves nothing behind.
+    //
+    // `checkRefreshWindow`'s default ceiling is deliberate: the writer's own
+    // `refreshWithinMs` may be far tighter than the profile bound, and the skew
+    // allowance a consumer grants is the profile's, not this writer's.
+    //
+    // Recovery does not repeat this check. `assertIntentOwnership` replays frozen,
+    // already-signed bytes, and `recover()` runs at the top of every append -- so
+    // re-bounding a head that was in-window when minted would not delay it, it would
+    // wedge the source. Once the intent is durable, finishing the commit is the only
+    // safe act. The same reasoning exempts the operator's pre-C6 requester-source-v1
+    // compatibility reader, which freezes a head the old requester already minted.
+
+    // `Number.isFinite` above admits timestamps near the ECMAScript Date limit, whose
+    // window end overflows the range and makes `toISOString()` throw a bare RangeError.
+    // Such a head is refused by the bound below anyway; refuse it in this taxonomy.
+    if (Math.abs(timestampMs + refreshWithinMs) > MAX_TIME_VALUE_MS) {
+      throw new SourceWriterIntegrityError(
+        `announcement timestamp is out of representable range: ${command.timestamp}`,
+      );
+    }
+    const refreshBy = new Date(timestampMs + refreshWithinMs).toISOString();
+    const now = clock.now();
+    const windowFailure = checkRefreshWindow({ issuedAt: command.timestamp, refreshBy }, now);
+    if (windowFailure === "head-issued-ahead") {
+      throw new SourceWriterIntegrityError(
+        "announcement timestamp is further ahead of this source's clock than the freshness window allows"
+        + ` (issuedAt ${command.timestamp}, now ${now.toISOString()},`
+        + ` ceiling ${MAX_REFRESH_BY_AHEAD_MS / 3_600_000}h); check this host's clock`,
+      );
+    }
+    // Reachable: a sub-millisecond `refreshWithinMs` truncates to an empty window, which
+    // §5.2 rule 1 refuses. Before this check such a writer minted it silently.
+    if (windowFailure !== undefined) {
+      throw new SourceWriterIntegrityError(
+        "announcement timestamp yields a head freshness window no consumer accepts"
+        + ` -- it is empty or wider than the ceiling (${windowFailure})`,
+      );
     }
 
     const announcement = freezeJson(command.announcement);
@@ -770,7 +828,7 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
         sequence,
         entry: entryDigest,
         issuedAt,
-        refreshBy: new Date(timestampMs + refreshWithinMs).toISOString(),
+        refreshBy,
       };
       const headEnvelope = await signHead(head, options.signer);
       await assertSignerEnvelope(

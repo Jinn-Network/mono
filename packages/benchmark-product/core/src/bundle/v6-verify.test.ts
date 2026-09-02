@@ -16,7 +16,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { RFC3161_TSA_ANCHOR_PROFILE, canonicalJsonBytes } from "@jinn-network/trust-core";
 import { verifyPublicBundle } from "@colophon-claims/verify";
-import { BUNDLE_V6_FORMAT, buildBundleManifest } from "./manifest.js";
+import { buildBundleManifest } from "./manifest.js";
+import { BUNDLE_V6_FORMAT } from "../legacy-closures.js";
 import { LOCAL_VENUE_LIMITS } from "../operations/run-results.js";
 import {
   V6_FIXTURE_SPLICED_GEN_TIME_DER,
@@ -35,6 +36,14 @@ async function fixture(plans?: readonly SyntheticV6AnchorPlan[]): Promise<Synthe
   const workspaceDir = mkdtempSync(join(tmpdir(), "anchored-v6-verify-"));
   roots.push(workspaceDir);
   return createSyntheticV6BundleFixture({ workspaceDir, ...(plans === undefined ? {} : { plans }) });
+}
+
+async function declaringFixture(
+  taskSelection: "claimant-chosen" | "fixed-public-set" | "drawn-post-lock",
+): Promise<SyntheticV6BundleFixture> {
+  const workspaceDir = mkdtempSync(join(tmpdir(), "anchored-v6-selection-"));
+  roots.push(workspaceDir);
+  return createSyntheticV6BundleFixture({ workspaceDir, taskSelection });
 }
 
 /** A detached copy, so every tamper case runs against bytes with no workspace behind them. */
@@ -272,4 +281,68 @@ describe("anchored public bundle v6 — portable verification", () => {
 
     await expectRefusal(bundleDir, "non-allowlisted file");
   }, 240_000);
+});
+
+/**
+ * Task-selection provenance, end to end (issue #2980).
+ *
+ * The unit tests either side of this file can both be right while the feature is still broken: the
+ * declaration is sealed at the lock and judged again by a cold reader that only has bytes, so a
+ * rule that reaches only one of the two refuses the whole bundle AFTER the irreversible lock. Only
+ * a round trip through `draft update` -> `runLock` -> `materialize` -> `verifyPublicBundle` proves
+ * the two agree. It also proves the stronger modes are reachable at all: every task-set intake in
+ * this product re-authors the Benchmark under the workspace key that is also the Run owner, so a
+ * verifier rule keyed on that relationship would make them dead letters.
+ *
+ * The face renders nothing for any of it -- that is held for issue #3416 -- and the last test here
+ * is what keeps the hold honest end to end.
+ */
+describe("task-selection provenance round trip", () => {
+  for (const mode of ["claimant-chosen", "fixed-public-set"] as const) {
+    test(`${mode} survives lock, materialization, and cold verification`, async () => {
+      const { bundle } = await declaringFixture(mode);
+      const verified = await verifyPublicBundle(detach(bundle.bundleDir));
+      expect(verified.checks).toContain("claim-consistency");
+    }, 120_000);
+  }
+
+  test("a contradicted declaration is refused at the lock, not after publication", async () => {
+    // SWE-bench intake reveals its items immediately, so `drawn-post-lock` is genuinely false for
+    // it. The claimant must learn that while the draft is still editable — refusing this at publish
+    // would strand a locked, executed, reported run in a bundle nothing can ever verify.
+    // `requireOk` prefixes the stage label, so the `lock:` prefix is what proves the refusal came
+    // from the lock rather than from materialization further downstream.
+    await expect(declaringFixture("drawn-post-lock"))
+      .rejects.toThrow(/^lock: .*reveals its items immediately/);
+  }, 120_000);
+
+  /**
+   * The reader-compatibility invariant, end to end (issue #3416).
+   *
+   * The render is held, so a declaring bundle must publish a face that a task-selection-unaware
+   * builder reproduces exactly -- which is what the pinned `@colophon-claims/verify@0.1.0` this
+   * bundle's own claim package instructs a reader to run actually does. Two things prove it here:
+   * no asset carries the held sentences, and cold verification passes, and passing IS the
+   * byte-comparison of all five assets against a rebuild.
+   */
+  test("a declaring bundle publishes a face carrying no trace of the declaration", async () => {
+    const { bundle } = await declaringFixture("claimant-chosen");
+    const held = [
+      "The claimant chose which tasks",
+      "the complete, publicly declared set",
+      "drawn by a fixed rule after the run was locked",
+    ];
+    for (const asset of ["index.html", "README.md", "share.txt", "badge.svg", "social-card.svg"]) {
+      const text = readFileSync(join(bundle.bundleDir, asset), "utf8");
+      for (const sentence of held) {
+        expect(text, `${asset} must not render task-selection provenance`).not.toContain(sentence);
+      }
+    }
+    // The claim package still points a reader at the classic pinned verifier, and that verifier
+    // rebuilds these exact assets. Byte-comparing them is what `verifyPublicBundle` does below.
+    expect(json(bundle.bundleDir, "claim-package.json").verification.command)
+      .toBe("npx @colophon-claims/verify@0.1.0 <bundle-dir>");
+    const verified = await verifyPublicBundle(detach(bundle.bundleDir));
+    expect(verified.checks).toContain("claim-consistency");
+  }, 120_000);
 });

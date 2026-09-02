@@ -309,6 +309,43 @@ else in the stack:
   goes backward, or two signed heads claiming the same sequence with different entry digests,
   is **provable equivocation** — both artifacts are signed (§5.3).
 
+**Amendment 2026-09-02 (the freshness window is checked against the verifier's clock).**
+The bound above, measured only between the head's own two timestamps, does not by itself
+bound anything a consumer cares about: both timestamps are the source's to choose, so a head
+issued in 2099 with a conformant 24-hour window passes the ceiling and stays live for
+decades — and on first adoption, or through the §13.3 cold mirror-set comparison, which
+prefers the highest `(sequence, issuedAt)`, that head also becomes the consumer's high-water
+mark and refuses every honest head after it. A verifier therefore checks the window as a
+whole, in this order, and refuses the head on the first rule it violates:
+
+1. `refreshBy` MUST be strictly after `issuedAt`. An empty or inverted window is a shape no
+   conforming source produces, and accepting one accepts a head that is expired at birth.
+2. `refreshBy` MUST be at most one profile window ahead of `issuedAt` — the ceiling above.
+3. `issuedAt` MUST be at most one profile window ahead of the verifier's own clock. A head is
+   not issued further into the future than one window is long.
+
+Rule 3 introduces no second constant and no second knob: it reuses the profile's own ceiling
+as the clock-skew allowance, which is far more tolerance than real clock disagreement needs
+and far less than an honest source would ever consume, since a live source issues at its own
+`now`. A profile that pins a tight ceiling therefore pins an equally tight skew allowance —
+one parameter, chosen once. Together the three rules bound a valid head's `refreshBy` to at
+most twice the profile window past the verifier's clock: finite, which is the property this
+section is after.
+
+**A deployment profile may only tighten.** The published-source default is the ceiling; a
+profile (the marketplace profile does) may pin a smaller window, never a larger one, and a
+verifier handed a wider value MUST clamp it back to the published-source ceiling rather than
+honor it. The clamp is normative, not advisory: it is what stops a caller re-opening the
+window by passing a bigger number.
+
+The two refusals are named once, here, and reused verbatim by both named verification
+procedures (§10.3):
+
+- **`refresh-by-ceiling`** — rules 1–2 together. It covers the *empty or inverted* window
+  as well as the too-wide one; an operator reading this slug for a collapsed window should not
+  go looking for an over-long one.
+- **`head-issued-ahead`** — rule 3.
+
 ### 5.3 Chain rules
 
 1. Entries are append-only and immutable; `previous` linkage MUST verify on sync.
@@ -734,8 +771,13 @@ Accepting a synced source means, in order:
    accountability, not the acceptance path) — this asymmetry is exactly what makes rotation
    survivable (§10.1) while denying a compromised *old* key the power to vouch a competing
    head or resurrect history;
-3. verify the head's `refreshBy` freshness and `issuedAt` monotonicity against any
-   previously seen head;
+3. verify the head's freshness window against §5.2's three rules — `refreshBy` strictly
+   after `issuedAt`, at most one profile window past it, and `issuedAt` at most one profile
+   window past the verifier's clock, with a wider supplied bound clamped back to the
+   published-source ceiling — **before** asking whether the head is fresh, since a head that
+   over-sets `refreshBy` or issues itself into the future is always fresh and the clock can
+   never catch it; then verify `refreshBy` freshness, and then `issuedAt` monotonicity
+   against any previously seen head;
 4. verify chain linkage from the head's entry digest back to the consumer's high-water mark —
    or, on first adoption of the source, to genesis (§5.3 rule 5);
 5. verify entry signatures (published-source profile) as *corroboration*: an entry
@@ -747,8 +789,14 @@ Accepting a synced source means, in order:
 7. advance the high-water mark.
 
 Failures are typed, not boolean: `stale` (refreshBy expired), `forked` (equivocation —
-evidence-bearing), `broken-chain` (linkage, contiguity, or duplicate-`announcementId`
-failure), `unauthorized-signer` (including the old-key head case).
+evidence-bearing), `broken-chain` (linkage, contiguity, duplicate-`announcementId`, or
+freshness-window failure), `unauthorized-signer` (including the old-key head case). The two
+freshness-window refusals §5.2 names — `refresh-by-ceiling` (empty, inverted, or too-wide
+window) and `head-issued-ahead` (issued too far past the verifier's clock) — surface here as
+`broken-chain` with `at` set to that slug, so they read alongside the entry ceilings the
+linkage walk enforces. A head-only revalidation procedure, which has no chain to fold them
+into, MUST surface the same two slugs as top-level statuses under the same spelling: one
+vocabulary, whichever procedure reports the defect.
 
 ### 10.4 Named verification: item verification
 
@@ -899,6 +947,48 @@ named follow-up. A profile document could name the fields ahead of the emission 
 forbids it — and that leaf chooses not to, so that its declared set and its emitted set stay in
 step. Every other profile in the tree declares its whole outbound set. A new profile is held to
 the MUST; this exception is not a precedent to copy.
+
+**Audit table.** The rule, its exclusions, its limit and its exceptions are stated above one at a
+time; this is the same tree read in one pass, so a profile author can see every kind's outbound
+set beside every other's. It is correct at this document's HEAD and describes the profiles in
+`packages/discovery/facts/*`. *Set* is what the newest facts profile registered for the kind
+declares reference-bearing; *v1 declared* is what the kind's first profile declared; *revision*
+is what the later profile did. Every earlier revision stays frozen and registered, so a consumer
+pinned to one keeps working. Like the `profiles.test.ts` pins, this table is an audit written
+from the same reading of the defining schemas as the profiles themselves — it records what was
+audited and does not independently prove any row complete.
+
+| Record kind | Leaf | Set | v1 declared | Revision (facts profile) |
+| --- | --- | --- | --- | --- |
+| `benchmark/v1` | `benchmarking` | `taskDigests`, `supersedesDigest` | _none_ | `benchmark/v2` adds both |
+| `benchmark-run/v1` | `benchmarking` | `benchmarkDigest`, `registrationArtifactDigests` | `benchmarkDigest` | `benchmark-run/v2` adds `registrationArtifactDigests` |
+| `benchmark-matrix/v1` | `benchmarking` | `runDigest`, `taskDigests`, `submissionDigests`, `deliveryDigests`, `verdictDigests`, `accountingDigest` | `runDigest` | `benchmark-matrix/v2` adds the other five |
+| `benchmark-accounting/v1` | `benchmarking` | `runDigest`, `publisherAuthorizationDigest`, `submissionDigests`, `deliveryDigests`, `evidenceDigests`, `evaluationDigests`, `observationArchiveDigests`, `correlationArtifactDigests`, `nativeArtifactDigests` | `runDigest`, `publisherAuthorizationDigest` | `benchmark-accounting/v2` adds the other seven |
+| `benchmark-report/v1`, `benchmark-report/v2` | `benchmarking` | `matrixDigests` | `matrixDigests` | none — the *record kind* was revised to v2 and `benchmark-report/v2` declares the same one edge. `reportPayloadDigest` is the record's own payload, which is identity rather than an edge |
+| `chain-environment/v1` | `chain-environments` | `runtime.image.manifestDigest`, `runtime.image.indexDigest`, `runtime.binary.digest`, `sourceAnchor.headerProofDigest`, `stateMaterialization.stateArtifactDigest`, `stateMaterialization.materializerDigest`, `stateMaterialization.sourceProofsDigest`, `stateMaterialization.fixtureCoverageManifestDigest`, `fixtureModuleDigests`, `capabilityEnvelope.toolInterfaceSchemaDigests`, `verificationContract.probeSuiteDigest`, `verificationContract.observationSchemaDigest`, `verificationContract.baselineObservationDigest`, `verificationContract.comparatorDigest`, `supersedesDigest` | `runtime.image.manifestDigest`, `stateMaterialization.stateArtifactDigest` | `chain-environment/v2` adds the other thirteen |
+| `crypto-environment/v1` | `chain-environments` | `chainWorld.digest`, `informationWorldDigests`, `serviceRuntimeImageDigests`, `composition.missPolicy.bodyDigest`, `supersedesDigest` | `chainWorld.digest` | `crypto-environment/v2` adds the other four |
+| `information-world/v1` | `chain-environments` | `capture.capturerDigest`, `supersedesDigest` | _none_ | `information-world/v2` adds both. A captured corpus's entries are the record's own enumerated content, not edges |
+| `environment/v1` | `environments` | `image.manifestDigest`, `image.indexDigest`, `parser.digest`, `build.recipeDigest` | `image.manifestDigest` | `environment/v2` adds the other three |
+| `execution-evidence/v1` | `evidence` | `taskDigest`, `runtimeDigest`, `resultDigests`, `nativeTraceDigest` — a **strict subset**, see below | `taskDigest` | `execution-evidence/v2` adds `runtimeDigest` and `resultDigests`; `.v3` adds `nativeTraceDigest` |
+| `result-evaluation/v1` | `evidence` | `taskDigest`, `resultDigests`, `supersedesDigests`, `disputesDigests` — a **strict subset**, see below | `taskDigest`, `resultDigest` | `result-evaluation/v2` widens `resultDigest` to `resultDigests`; `.v3` adds `supersedesDigests` and `disputesDigests` |
+| `execution-verification/v1` | `evidence` | `subjectDigest`, `supersedesDigests`, `disputesDigests` — a **strict subset**, see below | `subjectDigest` | `execution-verification/v2` adds the other two |
+| `offer/v1` | `offers` | `subject`, `supersedes` | `subject`, `supersedes` | none — the profile is new and declares the whole set. `gate.uri` is an address, not a digest, so it pins nothing and is not an edge |
+| `task/v1` | `task-execution` | `profileDigest`, `evaluationDigest`, `supersedesDigest`, `inputDigests`, `outputSlotSchemaDigests` | `profileDigest`, `evaluationDigest`, `supersedesDigest` | `task/v2` adds `inputDigests` and `outputSlotSchemaDigests` |
+| `submission/v1` | `task-execution` | `taskDigest` | `taskDigest` | none — audited unchanged. The harness pin lives under a namespaced key of the open `requirements` map, which is outside the rule per the limit above |
+| `delivery/v1` | `task-execution` | `taskDigest`, `resultDigests`, `evidenceDigests`, `supersedesDigest` | `taskDigest` | `delivery/v2` adds the other three |
+| `evaluation-spec/v1` | `task-execution` | `graderDigests`, `environmentRecordDigest`, `abiRefDigests`, `imageDigest`, `testMaterialDigests`, `parserDigest`, `rubricDigest`, `judgeOutputSchemaDigest`, `reviewFormDigest`, `subSpecDigests` | _none_ | `evaluation-spec/v2` adds all ten |
+| `profile-document/v1` | `task-execution` | `extendsDigest`, `outputSlotSchemaDigests` | `extendsDigest` | `profile-document/v2` adds `outputSlotSchemaDigests` |
+| `plugin/v1` | `task-execution` | _none_ | _none_ | none — no defining schema exists in-tree, so there is nothing to declare and the empty profile asserts nothing |
+| `checkpoint/v1` | `task-execution` | _none_ | _none_ | none — same reason as `plugin/v1` |
+| `authorization/v1` | `trust` | `subjectDigests`, `proofs`, `revocation` | `revocation` | `authorization/v2` adds `subjectDigests` and `proofs` |
+| `key-binding/v1` | `trust` | `ceremony.digest`, `anchorDigests`, `supersedes` | `supersedes` | `key-binding/v2` adds `ceremony.digest` and `anchorDigests` |
+| `trust-policy/v1` | `trust` | `predecessor` | `predecessor` | none — audited unchanged; `predecessor` is the whole outbound set |
+
+The three `evidence` rows are the exception recorded above. Their sets are strict subsets of
+their kinds' outbound sets, and what each still omits — predicate-block references, runtime
+components, execution inputs, derivation lineage — is tabulated with its blocker in
+`packages/discovery/facts/evidence/README.md`. Every other row declares its kind's whole
+outbound set. Each leaf README explains why a given field is or is not an edge.
 
 Requiring a card to carry every declared edge is a stronger and different rule, and is not
 adopted here: it would reinterpret
@@ -1088,8 +1178,11 @@ The kit precedes all real implementations (the CSI discipline, again):
 
 - **Golden vectors:** valid chains; forked chains (including fork-at-shared-`previous`);
   broken linkage; sequence gaps and duplicates (must reject); duplicate `announcementId`
-  (must reject); stale heads; rolled-back heads; `issuedAt` regressions; a competing head
-  signed by a rotated-out key (must reject); entries with bad facts cards; facts requiring
+  (must reject); stale heads; rolled-back heads; `issuedAt` regressions; a head issued
+  further ahead of the verifier's clock than one profile window (must reject
+  `head-issued-ahead`, §5.2 rule 3) and a head whose window is inverted (must reject
+  `refresh-by-ceiling`, §5.2 rule 1); a competing head signed by a rotated-out key (must
+  reject); entries with bad facts cards; facts requiring
   unavailable referenced bytes (must yield `indeterminate` and fail closed at decision
   grade); genesis edge cases (pinned first sequence, `previous: null` uniqueness);
   withdrawal of foreign announcements, withdrawal-of-withdrawal, and missing reason codes
@@ -1114,7 +1207,8 @@ The kit precedes all real implementations (the CSI discipline, again):
   withdrawal of a retrospective-kind item (must not prune the decision store); `reorged`
   withdrawal (must trigger recompute).
 - **Named checks in isolation:** `source-chain-verification` outcomes (`stale`, `forked`,
-  `broken-chain`, `unauthorized-signer`), `facts-consistency` (all three outcomes),
+  `broken-chain` (including `at: refresh-by-ceiling` and `at: head-issued-ahead`),
+  `unauthorized-signer`), `facts-consistency` (all three outcomes),
   `derivation-consistency` (present, fabricated, reorged-away).
 
 ## 19. Declared impact

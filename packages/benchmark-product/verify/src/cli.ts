@@ -3,6 +3,7 @@ import { ANCHOR_PROFILE_NAMESPACE } from "@jinn-network/benchmarking-records";
 import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 import { summarizeVerificationOutcome } from "./outcome.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult, type VerifyPublicBundleDeps } from "./verify.js";
+import { verifyFreezeRepo, type FreezeRepoVerificationResult } from "./freeze-repo.js";
 import type {
   AnchorSubjectReport,
   AnchorVerificationEntry,
@@ -31,11 +32,17 @@ export interface VerifierCliDeps {
 
 function usage(): string {
   return "Usage: colophon-verify <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
+    + "                        [--freeze-repo <dir>]\n"
     + "  --tsa-root     RFC 3161 trust anchor, DER or PEM. Repeatable.\n"
     + "  --ots-headers  Bitcoin block headers, one \"<height>:<80-byte-hex>\" per line. Repeatable.\n"
+    + "  --freeze-repo  Also check that this published freeze-artifact repository is exactly what\n"
+    + "                 the bundle renders. The repository is a derived artifact, never the claim\n"
+    + "                 of record; a drifted tree exits 1.\n"
     + "Trust material is yours, not the bundle's: with none supplied a well-formed anchor reports\n"
     + "present rather than verified, and none ships with this tool.\n"
-    + "Exit 0: valid bundle; 1: invalid bundle; 2: usage or operational failure.\n"
+    + "Exit 0: valid bundle; 1: invalid bundle, or a freeze repository that drifted from it;\n"
+    + "     2: usage or operational failure, including a freeze repository that could not be\n"
+    + "     rendered from the bundle — the bundle's own verdict is still reported.\n"
     + "Identifiers inside record files are internal names: they name https://spec.jinn.network/\u2026,\n"
     + "and that origin is not hosted yet. Checking uses the exact code installed from npm and\n"
     + "fetches nothing from the web.\n";
@@ -304,6 +311,8 @@ interface ParsedArguments {
   readonly json: boolean;
   readonly tsaRoots: readonly string[];
   readonly otsHeaders: readonly string[];
+  /** Present only when `--freeze-repo` was supplied (issue #2870). */
+  readonly freezeRepoDir?: string;
 }
 
 function parseArguments(args: readonly string[]): ParsedArguments | undefined {
@@ -311,6 +320,7 @@ function parseArguments(args: readonly string[]): ParsedArguments | undefined {
   const tsaRoots: string[] = [];
   const otsHeaders: string[] = [];
   let json = false;
+  let freezeRepoDir: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
     if (arg === "--json") {
@@ -320,6 +330,11 @@ function parseArguments(args: readonly string[]): ParsedArguments | undefined {
       if (value === undefined || value.startsWith("--")) return undefined;
       (arg === "--tsa-root" ? tsaRoots : otsHeaders).push(value);
       index += 1;
+    } else if (arg === "--freeze-repo") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("--") || freezeRepoDir !== undefined) return undefined;
+      freezeRepoDir = value;
+      index += 1;
     } else if (arg.startsWith("--")) {
       return undefined;
     } else {
@@ -327,7 +342,13 @@ function parseArguments(args: readonly string[]): ParsedArguments | undefined {
     }
   }
   if (positional.length !== 1) return undefined;
-  return { bundleDir: positional[0]!, json, tsaRoots, otsHeaders };
+  return {
+    bundleDir: positional[0]!,
+    json,
+    tsaRoots,
+    otsHeaders,
+    ...(freezeRepoDir === undefined ? {} : { freezeRepoDir }),
+  };
 }
 
 function buildAnchorTrust(
@@ -341,6 +362,16 @@ function buildAnchorTrust(
     ...(trustAnchorsDer.length === 0 ? {} : { rfc3161: { trustAnchorsDer } }),
     ...(blockHeaders.length === 0 ? {} : { opentimestamps: { blockHeaders } }),
   };
+}
+
+/** The freeze-repository block of the human report: the pin, then every drifted member. */
+function renderFreezeRepoCheck(check: FreezeRepoVerificationResult): string {
+  const head = check.ok
+    ? `\nfreeze repository: matches this bundle (${check.fileCount} files)`
+    : `\nfreeze repository: DOES NOT match this bundle (${check.differences.length} of ${check.fileCount} members)`;
+  const pin = `\n  commit ${check.commitId}`;
+  const drift = check.differences.map((difference) => `\n  ${difference.kind}: ${difference.path}`).join("");
+  return `${head}${pin}${drift}\n`;
 }
 
 export async function runVerifierCli(
@@ -364,15 +395,12 @@ export async function runVerifierCli(
     };
   }
 
+  let result: Awaited<ReturnType<typeof verifyPublicBundle>>;
   try {
-    const result = await (deps.verify ?? verifyPublicBundle)(
+    result = await (deps.verify ?? verifyPublicBundle)(
       parsed.bundleDir,
       anchorTrust === undefined ? {} : { anchorTrust },
     );
-    const stdout = parsed.json
-      ? `${JSON.stringify({ ok: true, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, ...result })}\n`
-      : renderVerifiedBundle(result);
-    return { exitCode: 0, stdout, stderr: "" };
   } catch (cause) {
     const error = cause instanceof Error ? cause : new Error(String(cause));
     const code = (cause !== null && typeof cause === "object" && "code" in cause)
@@ -383,4 +411,44 @@ export async function runVerifierCli(
     const stderr = parsed.json ? "" : `colophon-verify: ${withoutRawIdentifiers(error.message)}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
+
+  // The freeze repository is checked only after the bundle itself verifies: a tree derived from
+  // records that do not verify has nothing to be consistent with. Its own failures are scoped to
+  // it: a bundle that cannot be RENDERED as a freeze repository — no licence declared, a licence
+  // that is not an SPDX short identifier, an unreadable repository directory — is not thereby an
+  // invalid bundle, and the bundle verdict already computed above is reported either way.
+  let freezeRepo: FreezeRepoVerificationResult | undefined;
+  let freezeRepoFailure: { readonly code: string; readonly message: string } | undefined;
+  if (parsed.freezeRepoDir !== undefined) {
+    try {
+      freezeRepo = await verifyFreezeRepo(parsed.bundleDir, parsed.freezeRepoDir);
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      freezeRepoFailure = {
+        code: (cause !== null && typeof cause === "object" && "code" in cause)
+          ? String((cause as { code?: unknown }).code)
+          : "environment",
+        message: withoutRawIdentifiers(error.message),
+      };
+    }
+  }
+
+  const stdout = parsed.json
+    ? `${JSON.stringify({
+      ok: freezeRepoFailure === undefined && (freezeRepo?.ok ?? true),
+      verifierVersion: VERIFIER_VERSION,
+      supportedFormats: SUPPORTED_BUNDLE_FORMATS,
+      ...result,
+      ...(freezeRepo === undefined ? {} : { freezeRepo }),
+      ...(freezeRepoFailure === undefined ? {} : { freezeRepo: { ok: false, ...freezeRepoFailure } }),
+    })}\n`
+    : `${renderVerifiedBundle(result)}${freezeRepo === undefined ? "" : renderFreezeRepoCheck(freezeRepo)}`;
+  if (freezeRepoFailure !== undefined) {
+    return {
+      exitCode: 2,
+      stdout,
+      stderr: parsed.json ? "" : `colophon-verify: freeze repository not checked: ${freezeRepoFailure.message}\n`,
+    };
+  }
+  return { exitCode: freezeRepo !== undefined && !freezeRepo.ok ? 1 : 0, stdout, stderr: "" };
 }

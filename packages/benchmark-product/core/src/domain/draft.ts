@@ -21,6 +21,8 @@
  */
 
 import { z } from "zod";
+import { TASK_SELECTION_MODES } from "@jinn-network/benchmarking-records";
+import { BeaconSourceIdSchema } from "@colophon-claims/verify";
 import { refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
 import { LifecycleStateSchema } from "./lifecycle.js";
 
@@ -225,6 +227,23 @@ export type DraftAnchoring = z.infer<typeof DraftAnchoringSchema>;
  */
 export const AdditionalAnalysesSchema = z.array(AnalysisSchema).min(1);
 
+/**
+ * Declared task-selection provenance (issue #2980), sealed into the Run record's
+ * `task-selection/v1` extension at lock.
+ *
+ * Who chose the tasks changes what a headline number means as much as the number itself, and the
+ * three values are a closed vocabulary so the answer cannot be softened into prose after the
+ * results are known. It is the claimant's own statement, never derived from workspace state:
+ * deriving it would make the sealed Run bytes depend on the machine that produced them, and would
+ * also let a tool assert on the claimant's behalf a fact only the claimant knows.
+ *
+ * Optional and additive, for the same reasons `anchoring` above is: an absent field means the
+ * behavior every draft had before it existed, no entry joins `DRAFT_SPEC_DEFAULTS`, and no stored
+ * draft's `specSha256` moves. Two of the three values also carry obligations the cold verifier
+ * enforces against the sealed Benchmark and Run — declaring one is a claim, not a label.
+ */
+export const TaskSelectionSchema = z.enum(TASK_SELECTION_MODES);
+
 export const DraftSpecSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
@@ -240,6 +259,25 @@ export const DraftSpecSchema = z.object({
   analysis: AnalysisSchema.optional(),
   additionalAnalyses: AdditionalAnalysesSchema.optional(),
   anchoring: DraftAnchoringSchema.optional(),
+  taskSelection: TaskSelectionSchema.optional(),
+  /**
+   * The beacon source this run will bind to (issue #3426), sealed into the Run record's
+   * `beacon-source/v1` extension at lock.
+   *
+   * Issue #3322 fixed the ROUND a sealed run may bind to, but left the SOURCE to the operator — and
+   * that residue is larger than a swap between equally constrained beacons: one admitted source is
+   * indexed by block height, where no round follows from a seal at all and nothing in the bundle
+   * places the value after the seal. So an operator who disliked the round the seal named could select
+   * that source instead, at any height the chain carries. Declaring the source before the beacon
+   * values exist is what removes the choice; `bind` then refuses a binding naming any other source.
+   *
+   * The vocabulary is the reference verifier's own admitted-source registry rather than a second list
+   * here, so a source this product could never derive from cannot be declared. Optional and additive
+   * on the same terms as `anchoring` and `taskSelection` above: an absent field is the behavior every
+   * draft had before it existed, no entry joins `DRAFT_SPEC_DEFAULTS`, and no stored draft's
+   * `specSha256` moves.
+   */
+  beaconSource: BeaconSourceIdSchema.optional(),
 });
 
 export type DraftSpec = z.infer<typeof DraftSpecSchema>;

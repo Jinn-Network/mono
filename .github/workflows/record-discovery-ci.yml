@@ -35,7 +35,7 @@ env:
 # upload/download-artifact dist round-trips, rebuilding trust-core from source
 # in ELEVEN separate jobs. Under the merge queue's free-plan 20-slot runner
 # pool that fan-out was almost entirely queue-wait. The packages job below
-# builds the same 14 packages with the same five commands each, in dependency
+# builds every discovery package with the same five commands each, in dependency
 # order in ONE workspace: same coverage, one slot, no artifact round-trips,
 # every cross-tree portal built exactly once (in the same section order the old
 # verify job used).
@@ -181,6 +181,11 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
+      - name: Build cross-tree portal dependency from source (evidence-offer, §7.8)
+        working-directory: packages/evidence/offer
+        run: |
+          yarn install --immutable
+          yarn build
       - name: Verify Record Discovery Facts (Evidence)
         working-directory: packages/discovery/facts/evidence
         run: |
@@ -223,6 +228,14 @@ jobs:
           yarn pack:smoke
       - name: Verify Record Discovery Facts (Chain Environments)
         working-directory: packages/discovery/facts/chain-environments
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Verify Record Discovery Facts (Offers)
+        working-directory: packages/discovery/facts/offers
         run: |
           yarn install --immutable
           yarn typecheck

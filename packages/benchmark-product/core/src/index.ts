@@ -730,6 +730,7 @@ export {
   createHumanReviewPackets,
   signHumanReviewResponse,
   initWorkspace,
+  importRunRecords,
   inspectDraft,
   listDrafts,
   publicationAccounting,
@@ -742,7 +743,10 @@ export {
   runLaunch,
   runLock,
   runAnchor,
+  runBind,
   anchoringConfigure,
+  disclosureDeclare,
+  disclosureShow,
   runPreview,
   runPublish,
   runQuote,
@@ -807,12 +811,16 @@ export type {
   RunCancelResult,
   RunCollectInput,
   RunCollectResult,
+  RunImportInput,
+  RunImportResult,
   RunLaunchDeps,
   RunLaunchInput,
   RunLaunchResult,
   RunLockInput,
   RunAnchorInput,
   RunAnchorResult,
+  RunBindInput,
+  RunBindResult,
   AnchorSubject,
   AnchoringConfigureInput,
   AnchoringConfigureResult,
@@ -879,6 +887,13 @@ export type {
   VerificationOutcome,
 } from "@colophon-claims/verify";
 export type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./bundle/verify.js";
+
+// The `beacon-binding/1` surface a caller needs to OFFER a binding (issue #2976): the admitted
+// beacon sources and the reference shape. Re-exported through this facade for the same reason the
+// verification-outcome summary is — the product's GUI may import only this package, and a second
+// copy of the source registry would be a second place the admitted beacons could drift.
+export { BEACON_SOURCES, BEACON_SOURCE_IDS, MAX_BEACON_ROUND } from "@colophon-claims/verify";
+export type { BeaconReference, BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
 
 // PUB-13b: an additive publication-profile projection. This is intentionally not wired into the
 // v2 `publish` operation or CLI: callers opt into its accounting-first, report-optional contract.

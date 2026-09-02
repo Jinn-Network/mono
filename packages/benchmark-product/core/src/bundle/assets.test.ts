@@ -758,3 +758,47 @@ describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
     }
   });
 });
+
+/**
+ * Task-selection provenance is NOT projected onto the face (issues #2980, #3416).
+ *
+ * The declaration is sealed into the Run and checked under `claim-consistency`, but the render was
+ * held back: the classic and anchored allocations pin `@colophon-claims/verify@0.1.0`, whose
+ * `verifyPublicBundleSnapshot` byte-compares every presentation asset against its own rebuild. A
+ * bundle that rendered the mode would carry an instruction to run a verifier that refuses it.
+ *
+ * So the property under test is the builder's INSENSITIVITY to the declaration. That is not a
+ * weaker statement than the render tests it replaces -- it is the exact reader-compatibility
+ * invariant the hold exists to preserve, and it is what must keep holding until #3416 lands.
+ */
+describe("task-selection provenance is not projected onto the face", () => {
+  /** The three sentences the held render would have emitted. */
+  const HELD_SENTENCES = [
+    "The claimant chose which tasks",
+    "the complete, publicly declared set",
+    "drawn by a fixed rule after the run was locked",
+  ] as const;
+
+  test("no asset carries any of the held sentences", () => {
+    for (const [path, bytes] of Object.entries(buildPublicAssets(fixture()))) {
+      const text = new TextDecoder().decode(bytes);
+      for (const sentence of HELD_SENTENCES) {
+        expect(text, `${path} must not render task-selection provenance`).not.toContain(sentence);
+      }
+    }
+  });
+
+  test("a declaring input materializes assets byte-identical to a non-declaring one", () => {
+    // The hazard, in one assertion. `taskSelection` is no longer a field of `PublicAssetInput`, so
+    // a caller can smuggle it in only as a stray property -- and every asset byte is still equal to
+    // the non-declaring build, which is precisely what the pinned 0.1.0 verifier rebuilds.
+    const plain = buildPublicAssets(fixture());
+    for (const mode of ["claimant-chosen", "fixed-public-set", "drawn-post-lock"] as const) {
+      const declaring = buildPublicAssets({ ...fixture(), taskSelection: mode } as PublicAssetInput);
+      expect(Object.keys(declaring).sort()).toEqual(Object.keys(plain).sort());
+      for (const path of Object.keys(plain)) {
+        expect(declaring[path], `${path} must not depend on a declared ${mode}`).toEqual(plain[path]);
+      }
+    }
+  });
+});

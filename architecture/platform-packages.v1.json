@@ -37,9 +37,10 @@
   "manifestExclusions": [],
   "ownerGroups": {
     "architecture-control": [
-      "@oaksprout",
-      "@ritsukai"
-    ]
+        "@oaksprout",
+        "@ritsukai",
+        "@ritsuKai2000"
+      ]
   },
   "gateDefinitions": {
     "benchmarking-ci": {
@@ -273,7 +274,7 @@
       "stable": true
     },
     "implementations-v1": {
-      "expectedPackageCount": 60,
+      "expectedPackageCount": 61,
       "publishPolicies": [
         "canary-and-stable"
       ],
@@ -1407,6 +1408,49 @@
           "profiles"
         ],
         "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-facts-offers",
+      "path": "packages/discovery/facts/offers",
+      "domain": "evidence",
+      "role": "offer facts projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-and-stable",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [
+          "profiles"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
         "conformance": []
       },
       "supersedes": [],

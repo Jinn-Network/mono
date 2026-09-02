@@ -6,6 +6,7 @@ import { atomicWriteFileSync } from "../fs/atomic.js";
 import { materializePublicBundle, type MaterializeBundleDeps } from "../bundle/materialize.js";
 import { verifyPublicBundle, type PublicBundleVerificationCheck } from "../bundle/verify.js";
 import { acquirePublicationLock, type PublicationLock } from "../run/publication-lock.js";
+import { externalRunImportMarker, importedRunPublicationRefusal } from "../run/imported-run.js";
 import { readRunState, requireRunState, writeRunState, type RunState } from "../run/state.js";
 import { draftPath, publicBundlePath } from "../workspace/layout.js";
 import type { OperationContext } from "./context.js";
@@ -192,6 +193,21 @@ export function runPublish(
     run: async () => {
       const document = readDraftDocument(clockedContext.workspaceDir, input.draftId);
       const runState = requireRunState(clockedContext.workspaceDir, input.draftId);
+
+      // An IMPORTED run (`run import`, #2979) never publishes — operator ruling, issue #3417. This
+      // is the FIRST thing this operation decides, ahead of every other branch, because it is the
+      // one refusal that is true of the run itself rather than of this invocation: it does not
+      // depend on the lifecycle state, on `includeNativeArtifacts`, on the workspace skeptic's
+      // three checks, or on whether a bundle already exists. Placing it above the
+      // `published-bundle` branch is deliberate: that branch re-verifies and re-announces an
+      // existing bundle, and a run this build refuses to publish must not be handed back a
+      // success envelope for one an older build materialized. See `../run/imported-run.ts` for why
+      // the sealed disclosure cannot be made honest inside the import feature.
+      const imported = externalRunImportMarker(clockedContext.workspaceDir, input.draftId, runState);
+      if (imported !== undefined) {
+        refuse("conflict", `runs.${input.draftId}.externalImport`, importedRunPublicationRefusal(input.draftId, imported));
+      }
+
       // A published bundle is immutable but remains readable and independently reverified. A
       // second `publish` call behaves exactly as it did before additionalAnalyses existed when
       // there are none; when there are, every additional bundle is reverified alongside the

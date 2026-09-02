@@ -18,9 +18,9 @@
  * SolutionDeliveryClaimed event (the load-bearing proof this solution leg closed).
  *
  * Wave-4 D2 retired the legacy evaluator that used to extend this rig through
- * verdict settlement and activity credit. Issue #2666 owns restoring that
- * separate proof through the native evaluator; this solution-only rig must not
- * claim that verdict-owned coverage in the meantime.
+ * verdict settlement and activity credit. That proof now lives next door on the
+ * native evaluator (`native-evaluator-activity.test.ts`, issue #2666); this
+ * solution-only rig must not claim that verdict-owned coverage.
  *
  * Deterministic: the prediction-v1-baseline harness needs no key and no network;
  * the V3 stack + bootstrap run on the loaded snapshot state; only the daemon +

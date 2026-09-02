@@ -187,4 +187,32 @@ describe("resolveLiveOffers", () => {
     expect(report.live).toHaveLength(2);
     expect(report.diagnostics).toEqual([]);
   });
+
+  test("diagnostic paths index the caller's entries, not the deduplicated set", () => {
+    const original = entry("1");
+    const orphan = entry("3", { supersedes: digest("9") });
+    const report = resolveLiveOffers([original, original, orphan]);
+    expect(report.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.path])).toEqual([
+      ["DUPLICATE_OFFER", "1"],
+      ["UNKNOWN_PREDECESSOR", "2.supersedes"],
+    ]);
+  });
+
+  // Repricing is supersession rather than mutation, so an hourly repricer produces a chain
+  // thousands deep in a year, and the input is a public feed a hostile holder can seal
+  // deeply on purpose. The walk must be linear in chain depth, not cubic.
+  test("a deep supersession chain folds without walking it quadratically", () => {
+    const chainDigest = (index: number): Sha256Digest =>
+      `sha256:${index.toString(16).padStart(64, "0")}` as Sha256Digest;
+    const depth = 5000;
+    const entries: OfferEntry[] = [];
+    for (let index = 0; index < depth; index += 1) {
+      const base = entry("1", index === 0 ? {} : { supersedes: chainDigest(index - 1) });
+      entries.push({ ...base, digest: chainDigest(index) });
+    }
+    const report = resolveLiveOffers(entries);
+    expect(report.diagnostics).toEqual([]);
+    expect(report.live.map((live) => live.digest)).toEqual([chainDigest(depth - 1)]);
+    expect(report.superseded).toHaveLength(depth - 1);
+  }, 5000);
 });

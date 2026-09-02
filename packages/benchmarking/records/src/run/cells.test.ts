@@ -7,6 +7,7 @@ import {
   expectedCellCount,
   expectedCellSet,
   MAX_MATERIALIZED_CELLS,
+  orderCellsByTask,
   parseCellKey,
   submissionExtensionBlock,
 } from "./cells.js";
@@ -220,5 +221,40 @@ describe("cellIdempotencyKey", () => {
   test.each(["a".repeat(64), `sha256:${"a".repeat(63)}`, `sha256:${"A".repeat(64)}`, "sha256:not-hex"])
   ("rejects malformed run identity before deriving an idempotency key: %s", (runDigest) => {
     expect(() => cellIdempotencyKey(runDigest, cellKey(DIGEST, "armA", 1), 1)).toThrow();
+  });
+});
+
+describe("orderCellsByTask", () => {
+  const cells = [
+    { cellKey: "a1", taskDigest: "a".repeat(64) },
+    { cellKey: "a2", taskDigest: "a".repeat(64) },
+    { cellKey: "b1", taskDigest: "b".repeat(64) },
+    { cellKey: "c1", taskDigest: "c".repeat(64) },
+  ];
+
+  test("returns the input unchanged when no order is supplied", () => {
+    expect(orderCellsByTask(cells, undefined)).toBe(cells);
+    expect(orderCellsByTask(cells, [])).toBe(cells);
+  });
+
+  test("dispatches tasks in the supplied order", () => {
+    const ordered = orderCellsByTask(cells, ["c".repeat(64), "a".repeat(64), "b".repeat(64)]);
+    expect(ordered.map((cell) => cell.cellKey)).toEqual(["c1", "a1", "a2", "b1"]);
+  });
+
+  test("keeps cells of one task in their original relative order", () => {
+    const ordered = orderCellsByTask(cells, ["a".repeat(64)]);
+    expect(ordered.slice(0, 2).map((cell) => cell.cellKey)).toEqual(["a1", "a2"]);
+  });
+
+  test("never drops a task the order does not name — it runs after the named ones", () => {
+    const ordered = orderCellsByTask(cells, ["c".repeat(64)]);
+    expect(ordered.map((cell) => cell.cellKey)).toEqual(["c1", "a1", "a2", "b1"]);
+    expect(ordered).toHaveLength(cells.length);
+  });
+
+  test("ignores an order entry naming no cell", () => {
+    const ordered = orderCellsByTask(cells, ["f".repeat(64), "b".repeat(64)]);
+    expect(ordered.map((cell) => cell.cellKey)).toEqual(["b1", "a1", "a2", "c1"]);
   });
 });

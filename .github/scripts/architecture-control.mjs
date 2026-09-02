@@ -14,7 +14,11 @@ import {
 export { resolveConformanceSources } from './public-surface-assets.mjs';
 export { repositoryCandidateFiles } from './repository-candidates.mjs';
 
-export const REQUIRED_ARCHITECTURE_OWNERS = ['@oaksprout', '@ritsukai'];
+// Both operator credentials are code owners (DR-2026-08-31): they are one
+// principal split only so GitHub will record an approval, and pinning only
+// one of them deadlocked every canon PR the other authored. `@oaksprout`
+// is retained as the third, non-engine owner.
+export const REQUIRED_ARCHITECTURE_OWNERS = ['@oaksprout', '@ritsukai', '@ritsuKai2000'];
 export const ARCHITECTURE_OWNERS_PATH = '.github/architecture-owners';
 const USERNAME = /^@[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/u;
 const SURFACE_DIRECTORIES = new Set([

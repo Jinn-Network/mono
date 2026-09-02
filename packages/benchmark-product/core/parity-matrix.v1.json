@@ -113,6 +113,26 @@
       }
     },
     {
+      "operation": "disclosureDeclare",
+      "cliVerb": "disclosure declare",
+      "authorityGated": false,
+      "description": "Seals this run's six-variable disclosure-specification record over its sealed Matrix, recording which of ingestion model, retrieval config, answer model, answer prompt, judge model, and judge prompt this venue measured and which it only carries as an assertion.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires a locally composed six-variable declaration file"
+      }
+    },
+    {
+      "operation": "disclosureShow",
+      "cliVerb": "disclosure show",
+      "authorityGated": false,
+      "description": "Reads the sealed disclosure-specification record back out of the workspace's content-addressed store.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "reads a local sealed record from the workspace store"
+      }
+    },
+    {
       "operation": "exportDerivedBundle",
       "cliVerb": "export",
       "authorityGated": false,
@@ -140,6 +160,16 @@
       "gui": {
         "status": "unavailable",
         "reason": "requires local licensed item, source/license, and human-admission manifests; browser upload is intentionally unavailable"
+      }
+    },
+    {
+      "operation": "importRunRecords",
+      "cliVerb": "run import",
+      "authorityGated": true,
+      "description": "Turns a locked run into a run by importing an external harness's per-attempt results over the whole sealed slate (authority-gated as launch).",
+      "gui": {
+        "status": "unavailable",
+        "reason": "reads a local run dump and every evidence file it names by relative path; browser upload of a path-rooted evidence tree is intentionally unavailable"
       }
     },
     {
@@ -250,6 +280,16 @@
       "gui": {
         "status": "shipped",
         "action": "run.anchor"
+      }
+    },
+    {
+      "operation": "runBind",
+      "cliVerb": "bind",
+      "authorityGated": false,
+      "description": "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976).",
+      "gui": {
+        "status": "shipped",
+        "action": "run.bind"
       }
     },
     {
@@ -421,6 +461,14 @@
     {
       "name": "bundle verify",
       "reason": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal"
+    },
+    {
+      "name": "freeze-repo export",
+      "reason": "deterministic public-repository projection reads only the caller-selected immutable bundle and writes one local directory; no workspace, principal, or audited record is involved"
+    },
+    {
+      "name": "freeze-repo verify",
+      "reason": "standalone byte-for-byte comparison of a published tree against the bundle it claims to be derived from; reads only what the caller names"
     },
     {
       "name": "demo1 prereg verify",

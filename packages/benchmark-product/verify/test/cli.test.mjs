@@ -21,7 +21,10 @@ async function invoke(args) {
 test("usage exits 2 and states the exit contract", async () => {
   const result = await invoke([]);
   assert.equal(result.code, 2);
-  assert.match(result.stderr, /Exit 0: valid bundle; 1: invalid bundle; 2: usage or operational failure/);
+  assert.match(result.stderr, /Exit 0: valid bundle; 1: invalid bundle, or a freeze repository that drifted/);
+  // A bundle that cannot be rendered as a freeze repository is not an invalid bundle, and the
+  // usage text has to say which exit code that is.
+  assert.match(result.stderr, /could not be\n {5}rendered from the bundle/);
   assert.match(result.stderr, /Identifiers inside record files are internal names/);
   // DR-2026-08-17-c Decision 5: `npx` help is a named first-cut surface and must state that
   // protocol identifiers name `https://spec.jinn.network/…` and that origin is not hosted yet.
@@ -44,6 +47,7 @@ test("a missing bundle exits 1 with machine-readable invalid-bundle output", asy
       "benchmark-product-public-bundle/5",
       "benchmark-product-public-bundle/6",
       "benchmark-product-public-bundle/7",
+      "benchmark-product-public-bundle/8",
     ],
     code: "record-integrity",
     message: "bundle directory is missing",
