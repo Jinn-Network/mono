@@ -39,7 +39,7 @@
  *     verdict settlement (claimEvaluation → deliverToMarketplace →
  *     claimVerdictDelivery, Safe-mediated production `contracts.ts` calls).
  *   - FAKED (per controller resolution #3, matching task-creator-harvest-e2e.test.ts):
- *     the solver is a StubHarness returning a canned patch (no Claude); the
+ *     the solver is the launcher-shaped stub returning a canned patch (no Claude); the
  *     evaluator grade is a deterministic score chosen by this script instead
  *     of running the real Docker-backed `SweRebenchV2Evaluator` (which needs
  *     a cloned upstream repo + Docker and is not wired for injectable stubs
