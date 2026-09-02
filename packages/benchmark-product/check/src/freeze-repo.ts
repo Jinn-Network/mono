@@ -22,7 +22,8 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
-import { BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT, type VerifiedBundleSnapshot } from "./manifest.js";
+import { type VerifiedBundleSnapshot } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT } from "./legacy-closures.js";
 import { BundleV4EvidenceCatalogSchema, type BundleV4EvidenceRole } from "./schema.js";
 import { BinarySourceManifestEntrySchema, type BinarySourceManifestEntry } from "./admission/intake.js";
 import { refuse } from "./profile/errors.js";

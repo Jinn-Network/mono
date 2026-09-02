@@ -32,7 +32,8 @@ import {
   BUNDLE_V4_EVIDENCE_FORMAT,
   BUNDLE_V4_TRUST_FORMAT,
 } from "./schema.js";
-import { BUNDLE_V4_FORMAT, buildBundleManifest } from "./manifest.js";
+import { buildBundleManifest } from "./manifest.js";
+import { BUNDLE_V4_FORMAT } from "../legacy-closures.js";
 import { findLeaks } from "./testing/leak-scan.js";
 import {
   createSyntheticV4BundleFixture,

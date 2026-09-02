@@ -3,9 +3,12 @@ import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { GATED_OPERATIONS } from "./authority/policy.js";
-import { BUNDLE_FORMAT, BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
+import { BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
+import { BUNDLE_FORMAT, PUBLIC_BUNDLE_FILES } from "./legacy-closures.js";
 import {
   BUNDLE_V5_FORMAT,
+  FREEZE_REPO_FORMAT,
+  FREEZE_REPO_MANIFEST_FILENAME,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
 } from "@colophon-claims/check";
@@ -14,8 +17,6 @@ import {
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
 } from "@jinn-network/benchmarking-protocol";
-import { PUBLIC_BUNDLE_FILES } from "./bundle/materialize.js";
-import { FREEZE_REPO_FORMAT, FREEZE_REPO_MANIFEST_FILENAME } from "@colophon-claims/check";
 import { PRODUCT_ERROR_CODES } from "./errors.js";
 import { PRODUCT_BRANDING } from "./branding.js";
 
@@ -367,26 +368,21 @@ describe("product documentation consistency", () => {
    */
   const SEALED_COMMAND_LITERALS = new Map<string, readonly string[]>([
     [
-      resolve(productRoot, "check/src/reader-instructions.ts"),
+      resolve(productRoot, "check/src/legacy-closures.ts"),
       [
         "@colophon-claims/verify@0.1",
+        "@colophon-claims/verify@0.1",
+        "@colophon-claims/verify@0.1.0",
         "@colophon-claims/verify@0.1.0",
         "@colophon-claims/verify@0.2",
-        "@colophon-claims/verify@0.2.1",
-      ],
-    ],
-    [
-      resolve(productRoot, "check/src/profile/claim.ts"),
-      [
-        "@colophon-claims/verify@0.1",
-        "@colophon-claims/verify@0.1.0",
         "@colophon-claims/verify@0.2",
         "@colophon-claims/verify@0.2.0",
         "@colophon-claims/verify@0.2.1",
+        "@colophon-claims/verify@0.2.1",
       ],
     ],
     [
-      resolve(coreRoot, "src/report/claim.ts"),
+      resolve(coreRoot, "src/legacy-closures.ts"),
       [
         "@colophon-claims/verify@0.1",
         "@colophon-claims/verify@0.1.0",
