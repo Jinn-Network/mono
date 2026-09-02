@@ -82,7 +82,10 @@ async function expectNoInspectContainers(): Promise<void> {
  * prints the result -- the evidence that tells a loaded environment apart from a runtime defect.
  */
 function expectOk<T extends { ok: boolean }>(result: T, step: string): T {
-  expect(result.ok, `${step}: ${JSON.stringify(result)}`).toBe(true);
+  // The detail is built only on the failing path. `expect`'s message argument is eager, so
+  // carrying it inline would serialize every passing result in a suite that makes dozens of these
+  // calls per test -- and a serializer that threw on a success would report as the step failing.
+  if (!result.ok) expect.fail(`${step} failed: ${JSON.stringify(result)}`);
   return result;
 }
 
