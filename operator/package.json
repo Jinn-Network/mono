@@ -114,7 +114,7 @@
     "build:layer": "yarn --cwd ../packages/layer install --immutable && yarn --cwd ../packages/layer build",
     "build": "yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && tsc && chmod +x dist/bin/jinn.js && rm -rf dist/templates && cp -R templates dist/templates && rm -rf dist/plugins/learner dist/plugins/local-trace-distiller && mkdir -p dist/plugins && cp -R plugins/learner dist/plugins/learner && mkdir -p dist/scripts && cp scripts/fix-node-pty.mjs scripts/swe-rebench-v2-seed-pool.json scripts/swe-rebench-v2-known-bad.json scripts/swe-rebench-v2-pytest-missing.json scripts/swe-rebench-v2-evaluator.bundle.v1.patch dist/scripts/ && mkdir -p dist/solver-types/slates && cp src/solver-types/slates/*.json dist/solver-types/slates/ && mkdir -p dist/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches && cp src/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches/*.patch dist/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches/ && node scripts/vendor-private-packages.mjs && node scripts/vendor-sdk.mjs && node scripts/write-dist-build-meta.mjs",
     "typecheck": "yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && tsc --noEmit",
-    "typecheck:test": "node scripts/check-test-typecheck.mjs",
+    "typecheck:test": "yarn build:layer && node scripts/check-test-typecheck.mjs",
     "lint:no-late-mount": "node scripts/check-no-late-route-mount.mjs",
     "lint:no-error-leak": "node scripts/check-no-error-leak.mjs",
     "lint:no-fixed-test-port": "node scripts/check-no-fixed-test-port.mjs",

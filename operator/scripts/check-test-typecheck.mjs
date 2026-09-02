@@ -15,6 +15,12 @@
 //
 // The goal is not a clean tree; it is that the defect class above can never be introduced again
 // without turning a required check red.
+//
+// The `typecheck:test` script builds `@jinn-network/jinn-layer` before invoking this file.
+// `yarn typecheck` builds sdk/stack/plugin/core but not layer, so without that step the recorded
+// counts would depend on whether some earlier command happened to have built it -- 12 errors
+// appear and disappear with it. A ratchet whose baseline moves with the environment is worse
+// than no ratchet, so the build is part of the check.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
