@@ -439,8 +439,8 @@ export function createCorpusCapability(
       // so its remedy is emitted separately. Both can be present at once: a
       // real install can have one truncated source and one genuinely broken
       // one, and each needs its own next step.
-      const truncated = refused.some(([, reason]) => reason === SYNC_TRUNCATED_REASON);
-      const archiveFaulted = refused.some(([, reason]) => reason !== SYNC_TRUNCATED_REASON);
+      const truncated = refused.some((entry) => entry[1] === SYNC_TRUNCATED_REASON);
+      const archiveFaulted = refused.some((entry) => entry[1] !== SYNC_TRUNCATED_REASON);
       const remedies: string[] = [];
       if (truncated) {
         remedies.push(

@@ -160,6 +160,24 @@ test('the AST custody scanner catches process destructuring, module imports, ali
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('the AST custody scanner scans array binding patterns that elide a position', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-ast-elision-'));
+  try {
+    // An elided array binding element is valid TypeScript with no `name` node.
+    // The scanner must skip the hole and keep scanning; aborting here would
+    // leave the rest of the file -- including the `process.env` read below --
+    // unexamined while the job reports a crash rather than a violation.
+    const violations = scanFixtureSource(fixture, 'elision.ts', [
+      'const pairs: Array<[string, string]> = [];',
+      'export const first = pairs.some(([, reason]) => reason === "x");',
+      'const [, second] = pairs[0]!;',
+      'export const echo = second;',
+      'export const leak = process.env.SECRET;',
+    ].join('\n'));
+    assert.ok(violations.some((entry) => entry.includes('process.env')));
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('the AST custody scanner catches dynamic evaluation and nonliteral imports', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-ast-dynamic-'));
   try {
