@@ -46,14 +46,16 @@ establish, why you can believe it, everything sealed.
 
 ### 1.1 Element inventory
 
-`packages/benchmark-product/verify/src/assets.ts` `buildIndex()` renders twenty-one
-top-level elements. This is the complete list; §6 rules on every row of it.
+`packages/benchmark-product/verify/src/assets.ts` `buildIndex()` renders twenty-two
+top-level elements, one of which is never visible on the page. This is the complete list;
+§6 rules on every row of it.
 
 | # | Element | Rendered by |
 |---|---|---|
+| T1 | Document title: `<status> — Colophon report` | `buildIndex` |
 | H1 | Masthead: mark plus `PRODUCT_BRANDING.displayName` | `buildIndex` |
 | H2 | Eyebrow: `PRODUCT_BRANDING.categoryDescriptor` | `buildIndex` |
-| H3 | Status chip: `outcomeLabel(runOutcome)` | `outcomeLabel` |
+| H3 | Status chip: the run outcome, worded per profile | `outcomeLabel` / `qualificationOutcomeLabel` |
 | H4 | Hero heading, constant text "Colophon report" | `buildIndex` |
 | H5 | Lede: `<n> tasks · <n> arms · <n> replicates · <venue>` | `scopeLine` |
 | H6 | Neutral claim line, one sentence keyed on the method | `neutralClaimHtml` |
@@ -98,10 +100,10 @@ not the defect.
 The claim sentence is a paragraph of body text, three elements below it, styled only with a
 hairline rule.
 
-**Provenance is narrated three times.** M6, M7, and M8 each open with "Source:
-authenticated `<file>`; values below are copied without reconciliation." The statement is a
-real disclosure — the page does not reconcile its sources — and it is made once too many
-twice.
+**Provenance is narrated four times.** M6, M7, M8, and M9 each open with a "Source:
+authenticated `<file>`" line, and the first three of those also carry the clause "values
+below are copied without reconciliation". The statement is a real disclosure — the page does
+not reconcile its sources — and it is made once too many three times.
 
 **One number is printed twice in three shapes.** M6 prints `{completeness, attrition}` as a
 canonical dump, then the same completeness figures as a definition list, then the same
@@ -165,6 +167,14 @@ vocabulary.
 **Whole page, closed state: twelve.** The counted region is the entire document with every
 disclosure control shut.
 
+The above-the-fold region deliberately stops before Band 4, even though Band 4 begins within
+the first scroll (§4). Band 4's two concepts are counted against the twelve, not against the
+five. Counting them against the five would put the budget in direct competition with the
+caveats, and a budget that can be met by shortening a disclosure is a budget pointed at the
+wrong thing. The five is a bound on what the page must teach a reader in order to sell them
+the result; the caveats attached to that result are not a cost the reader is being asked to
+pay.
+
 ### 3.3 Where the numbers come from
 
 Twelve is the count of things a reader must be able to *reach* in closed state — one name
@@ -226,6 +236,14 @@ Concepts permitted: none new. Every column and row label must already be a conce
 Bands 1 and 2, or a number, or a subject-matter proper name. This is the constraint that
 keeps the budget honest, because a table is where unbudgeted vocabulary otherwise enters a
 page for free.
+
+It has one consequence worth naming, because it is where this ruling actually bites. Today's
+comparison matrix prints per-cell furniture beneath each summary — the cell outcome, the
+replicate index, and the score's name and direction. Four names, none of them spent, in the
+element a reader looks at first. Band 3 keeps the summary and the score value in the cell and
+moves that furniture into the cell's own disclosure, which the reader opens when they want to
+know which replicate they are looking at. Nothing is lost: the per-cell disclosure already
+exists (M2) and is already where a reader goes for a single cell's evidence.
 
 ### Band 4 — What this does not establish
 
@@ -313,6 +331,7 @@ admissible only where the element carries no disclosure.
 
 | # | Element | Ruling | Destination and note |
 |---|---|---|---|
+| T1 | Document title | keep | The one element outside the fold model, because it is never rendered on the page. It must carry the claim's subject rather than the product label, so that a browser tab, a search result, and a pasted link all say what the report found. Its exact words are #3016's. |
 | H1 | Masthead | keep | Unchanged, above Band 1. A masthead is the one place the product may name itself. |
 | H2 | Category eyebrow | cut | Product positioning, not a fact about this report. Its content moves to the imprint. No disclosure. |
 | H3 | Status chip | keep | Band 1, attached to the claim sentence rather than floating above it. Where the outcome is not complete, its content is also an adverse fact in Band 4. |
@@ -320,14 +339,14 @@ admissible only where the element carries no disclosure.
 | H5 | Lede scope line | keep | Becomes Band 2, minus the replicate term (§3.3). |
 | H6 | Neutral claim line | keep | Becomes Band 1, promoted to hero type. Its wording is #3016's business; its position is this spec's. |
 | M1 | Prominent adverse facts | keep | Becomes Band 4, restated as statements rather than as tallies of record names. Never folds. |
-| M2 | What happened, task by task | split | The descriptive sentence and the matrix become Band 3. The sample disclosure becomes Band 4, open. The per-cell disclosures fold into Band 5 fold 3. The "Open a cell to inspect its evidence" sub-heading is **cut** — narration of a self-evident control, no disclosure. The "Answer first" eyebrow is **cut**: with the claim in Band 1 it is no longer true. |
+| M2 | What happened, task by task | split | **keep** the descriptive sentence and the matrix, as Band 3. **keep** the sample disclosure, as Band 4, open. **fold** the per-cell disclosures into Band 5 fold 3. **cut** the "Open a cell to inspect its evidence" sub-heading — narration of a self-evident control, no disclosure. **cut** the "Answer first" eyebrow: with the claim in Band 1 it is no longer true. |
 | M3 | Benchmark and configuration scope | fold | Band 5 fold 1. The task count and venue are already spent in Band 2; the digest, replicates, and pinned arm configuration are what the fold adds. |
 | M4 | Truth admission and instruments | fold | Band 5 fold 1. Binary profiles only. |
 | M5 | Six-variable disclosure | fold | Band 5 fold 1. All six variables, all three statuses, and the specification and record identities, unchanged. |
 | M6 | Sealed Matrix accounting | fold | Band 5 fold 2. Its provenance line is **cut** here and stated once as Band 5's opening line. Its canonical `{completeness, attrition}` dump is retained inside the fold below the definition list and table it duplicates, not above them. |
-| M7 | Sealed Report facts | fold | Arm results are Band 3's source and are not reprinted; the rest is Band 5 fold 1 (method, preregistration, parameters) and fold 3 (conflicts). Provenance line **cut**, per M6. |
+| M7 | Sealed Report facts | split | **keep** the arm results: they are Band 3's content, rendered once there rather than twice. **fold** the rest — method, preregistration, and parameters into Band 5 fold 1, conflicts into fold 3. **cut** the provenance line, per M6. |
 | M8 | Stored Claim facts | fold | Band 5 fold 1. The mirrored arm results stay inside the fold; the *agreement* between claim and report is stated once, in Band 5's opening, and becomes a Band 4 adverse fact where they disagree. Provenance line **cut**, per M6. |
-| M9 | Verification assembly dissent | fold | Band 5 fold 3. Its count is also an adverse fact in Band 4 where it is non-zero — as it is today. |
+| M9 | Verification assembly dissent | fold | Band 5 fold 3. Its count is also an adverse fact in Band 4 where it is non-zero — as it is today. Its provenance line is **cut** here and absorbed by Band 5's single opening line, per M6. |
 | M10 | Limitations by stored source | keep | Band 4, open, in full. Both limitation lists and the local self-run trust boundary. This element never folds under any reading. |
 | M11 | Records and exact identities | fold | Band 5 fold 4. |
 | M12 | Portable verification | fold | Band 5 fold 4. Its trailing attribution is **cut**; see F3. |
@@ -335,13 +354,15 @@ admissible only where the element carries no disclosure.
 | F2 | Footer report digest | keep | Unchanged. |
 | F3 | Footer attribution | keep | The single site of `PRODUCT_BRANDING.attribution`, per the report UI kit's structural rule 5. M2's category descriptor content joins it here. |
 
-Two rows are marked `split` or carry an internal `cut`; both are cases where one rendered
-element carries several jobs. In every such case the disclosure-bearing part is kept or
-folded and only labels, narration, and duplicate provenance are cut. Across the whole
-table, four things are cut outright — a constant hero label, a category eyebrow, an
-instruction for a self-evident control, and a duplicate attribution — plus two of three
-copies of one provenance sentence. No fact, figure, caveat, limitation, digest, or command
-is removed by this spec.
+Two rows are marked `split`; both are cases where one rendered element carries several
+jobs, and each part of them is ruled on separately. In every such case the
+disclosure-bearing part is kept or folded, and only labels, narration, and duplicate
+provenance are cut.
+
+Across the whole table, four things are cut outright — a constant hero label, a category
+eyebrow, an instruction for a self-evident control, and a duplicate attribution — plus
+three of the four provenance lines, whose one statement survives as Band 5's opening line.
+No fact, figure, caveat, limitation, digest, or command is removed by this spec.
 
 ## 7. Enforcement
 
@@ -352,6 +373,11 @@ already byte-pinned and therefore already deterministic.
 from a fixture, strips the content of every closed disclosure control, and counts distinct
 controlled-vocabulary terms in the two counted regions of §3.2. It fails over either
 ceiling. It reports the terms it counted, so a failure is actionable rather than a number.
+
+The check is scoped to the format that adopts this order and to every later one. Formats
+`/2` through `/8` render what they render and are over budget by construction (§1.2); a
+check that ran against them would either fail permanently or force a change to bytes that
+must never change (§8). Scoping is therefore a correctness requirement, not a convenience.
 
 **Vocabulary source.** The controlled term list is issue #2987's glossary. Until that
 lands, the test carries a provisional list derived from §1.2 and marks it provisional in
