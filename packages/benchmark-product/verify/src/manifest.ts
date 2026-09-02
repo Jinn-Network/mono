@@ -52,6 +52,7 @@ export const SUPPORTED_BUNDLE_FORMATS = [
   BUNDLE_V7_FORMAT,
   BUNDLE_V8_FORMAT,
 ] as const;
+export type SupportedBundleFormat = (typeof SUPPORTED_BUNDLE_FORMATS)[number];
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;

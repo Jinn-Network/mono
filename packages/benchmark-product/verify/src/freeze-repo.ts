@@ -19,11 +19,22 @@
  * directory; `verifyFreezeRepo` reads one.
  */
 
-import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
-import { type VerifiedBundleSnapshot } from "./manifest.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT } from "./legacy-closures.js";
+import {
+  BUNDLE_V5_FORMAT,
+  BUNDLE_V8_FORMAT,
+  SUPPORTED_BUNDLE_FORMATS,
+  type SupportedBundleFormat,
+  type VerifiedBundleSnapshot,
+} from "./manifest.js";
+import {
+  BUNDLE_FORMAT,
+  BUNDLE_V4_FORMAT,
+  BUNDLE_V6_FORMAT,
+  BUNDLE_V7_FORMAT,
+} from "./legacy-closures.js";
 import { BundleV4EvidenceCatalogSchema, type BundleV4EvidenceRole } from "./schema.js";
 import { BinarySourceManifestEntrySchema, type BinarySourceManifestEntry } from "./admission/intake.js";
 import { refuse } from "./profile/errors.js";
@@ -31,6 +42,49 @@ import { verifyPublicBundleSnapshot } from "./verify.js";
 import type { VerifyPublicBundleDeps } from "./verify.js";
 
 export const FREEZE_REPO_FORMAT = "colophon-freeze-repo/1" as const;
+
+/**
+ * What each public-bundle closure means to this projection.
+ *
+ * `qualification` — the bundle carries the admission/qualification graph, which IS the freeze
+ * artifact set, so the export accepts it. `disclosure` — the bundle carries a sealed
+ * disclosure-specification record. That record is claim-side: it states the variables that produced
+ * the score, and its `disclosure-specification` evidence role is deliberately not in
+ * `FREEZE_REPO_ROLES`, so it stays in the bundle a reader verifies rather than entering this tree.
+ * It is recorded here only so the generated README can tell a reader of such a bundle where to
+ * look for it.
+ *
+ * A table rather than an inline list of accepted versions (issue #3540). The guard used to name
+ * v4 and v7 inline, so `benchmark-product-public-bundle/8` — v7's freeze graph exactly, plus one
+ * claim-side record — landed beside it and was refused for its version alone. Keyed by
+ * `SupportedBundleFormat`, a new closure version is a type error here until someone states what it
+ * means to the freeze projection; `freeze-repo.test.ts` makes the same omission a test failure.
+ */
+export interface FreezeRepoBundleSupport {
+  /** Whether the bundle carries the qualification graph, and therefore whether the export accepts it. */
+  readonly qualification: boolean;
+  /** Whether the bundle carries a sealed disclosure-specification record. Always claim-side. */
+  readonly disclosure: boolean;
+}
+
+export const FREEZE_REPO_BUNDLE_SUPPORT: Record<SupportedBundleFormat, FreezeRepoBundleSupport> = {
+  [BUNDLE_FORMAT]: { qualification: false, disclosure: false },
+  [BUNDLE_V4_FORMAT]: { qualification: true, disclosure: false },
+  [BUNDLE_V5_FORMAT]: { qualification: false, disclosure: false },
+  [BUNDLE_V6_FORMAT]: { qualification: false, disclosure: false },
+  [BUNDLE_V7_FORMAT]: { qualification: true, disclosure: false },
+  [BUNDLE_V8_FORMAT]: { qualification: true, disclosure: true },
+};
+
+/** The accepted formats, in the order `SUPPORTED_BUNDLE_FORMATS` declares them. */
+const FREEZE_REPO_ACCEPTED_FORMATS: readonly SupportedBundleFormat[] = SUPPORTED_BUNDLE_FORMATS
+  .filter((format) => FREEZE_REPO_BUNDLE_SUPPORT[format].qualification);
+
+/** `a or b`, `a, b, or c` — the accepted set is now long enough that a chain of `or` reads badly. */
+function listAccepted(formats: readonly string[]): string {
+  if (formats.length < 3) return formats.join(" or ");
+  return `${formats.slice(0, -1).join(", ")}, or ${formats[formats.length - 1]}`;
+}
 
 /**
  * The freeze artifacts, as evidence roles. This is the admission/qualification graph — the item
@@ -507,6 +561,7 @@ function renderReadme(
   publication: FreezeRepoPublication,
   bundleIdentity: string,
   bundleFormat: string,
+  support: FreezeRepoBundleSupport,
   roleCounts: readonly { readonly role: string; readonly files: number }[],
 ): Uint8Array {
   const lines: string[] = [
@@ -566,9 +621,27 @@ function renderReadme(
     "  file's name is its own check.",
     "- `LICENSE`, `NOTICE`, `metadata/spdx.json` — generated from the bundle's licence data.",
     "",
+  ];
+  // A reader of a disclosed closure has a specific reason to look for the disclosure record here
+  // and not find it, so that bundle's tree says where it is. Conditional, not unconditional:
+  // every already-published tree of a format that carries no such record must keep its exact
+  // bytes, and a rendered tree is a pure function of the bundle either way.
+  if (support.disclosure) {
+    lines.push(
+      "## The disclosure record",
+      "",
+      "This bundle carries a sealed disclosure-specification record — the six variables that",
+      "produced the score. It is deliberately not in this tree. That record is part of the claim,",
+      "and the claim stays in the bundle a reader verifies, where the bundle's own",
+      "`disclosure-specification` check reads it. What is projected here is the",
+      "admission/qualification graph alone.",
+      "",
+    );
+  }
+  lines.push(
     "## Roles present",
     "",
-  ];
+  );
   for (const entry of roleCounts) lines.push(`- \`${entry.role}\` — ${entry.files} ${entry.files === 1 ? "record" : "records"}`);
   lines.push(
     "",
@@ -590,13 +663,16 @@ function renderReadme(
  */
 export function renderFreezeRepo(snapshot: VerifiedBundleSnapshot): FreezeRepoTree {
   const bundleFormat = snapshot.manifest.format;
-  if (bundleFormat !== BUNDLE_V4_FORMAT && bundleFormat !== BUNDLE_V7_FORMAT) {
+  const support = FREEZE_REPO_BUNDLE_SUPPORT[bundleFormat as SupportedBundleFormat];
+  if (support?.qualification !== true) {
     // The freeze artifacts ARE the qualification graph. A bundle without one has none, and an
-    // empty repository claiming to be a freeze would be worse than a refusal.
+    // empty repository claiming to be a freeze would be worse than a refusal. The accepted list is
+    // read from the support table, so this message cannot name a stale set (issue #3540).
     refuse(
       "conflict",
       "bundle.json.format",
-      `a freeze repository requires a qualification bundle (${BUNDLE_V4_FORMAT} or ${BUNDLE_V7_FORMAT}); this bundle is ${bundleFormat}`,
+      `a freeze repository requires a qualification bundle (${listAccepted(FREEZE_REPO_ACCEPTED_FORMATS)});`
+        + ` this bundle is ${bundleFormat}`,
     );
   }
 
@@ -659,7 +735,13 @@ export function renderFreezeRepo(snapshot: VerifiedBundleSnapshot): FreezeRepoTr
   files.set("metadata/spdx.json", renderSpdxMetadata(publication, snapshot.identity, sources));
   files.set(
     "README.md",
-    renderReadme(publication, snapshot.identity, bundleFormat, roleGroups.map(({ role, files: count }) => ({ role, files: count }))),
+    renderReadme(
+      publication,
+      snapshot.identity,
+      bundleFormat,
+      support,
+      roleGroups.map(({ role, files: count }) => ({ role, files: count })),
+    ),
   );
 
   const listed = [...files.keys()].sort(compareStrings).map((path) => ({
@@ -724,7 +806,7 @@ export async function exportFreezeRepo(
   // follow a seeded symlink out of `repoDir`) while still reporting the rendered tree's oid.
   let occupied: readonly TreeEntry[] = [];
   try {
-    occupied = listTree(repoDir);
+    occupied = listTree(repoDir, false);
   } catch (cause) {
     const code = (cause !== null && typeof cause === "object" && "code" in cause)
       ? (cause as { code?: unknown }).code
@@ -765,6 +847,13 @@ export interface FreezeRepoDifference {
 
 export interface FreezeRepoVerificationResult {
   readonly ok: boolean;
+  /**
+   * False when the filesystem holding the tree does not carry an executable bit (or could not be
+   * asked), so the mode dimension was not checked and `ok` rests on bytes and entry type alone.
+   * Reported rather than assumed: a check that silently drops a dimension is the kind of quiet
+   * claim this tool exists to avoid.
+   */
+  readonly executableBitChecked: boolean;
   readonly bundleIdentity: string;
   readonly commitId: string;
   readonly fileCount: number;
@@ -776,24 +865,82 @@ interface TreeEntry {
   /** False for a symlink, device, socket, or anything else git would not record as a blob at
    * mode 100644. Such an entry is never treated as satisfying an expected member. */
   readonly plainFile: boolean;
+  /** Owner-execute bit as git would record it, and only where the filesystem carries one. */
   readonly executable: boolean;
 }
 
 /**
- * Enumerate a published tree the way git sees it. Two rules earn their place:
+ * @internal Exported for this module's own tests; not part of the package's public surface.
  *
- * - `.git` is skipped ONLY at the root. A nested `.git` directory is ordinary content to the outer
- *   repository, so skipping it at depth would let a tree carry files the check never looks at.
+ * Decide whether the filesystem under `dir` actually carries an executable bit, the way git
+ * autodetects `core.fileMode`: write a probe file, and see whether the owner-execute bit reads
+ * back the way it was set.
+ *
+ * This exists because some filesystems report a fixed mode for every file — `0777` on an exFAT
+ * or Windows-hosted mount, on some network filesystems — so reading the mode there says nothing
+ * about the published tree. Without the probe a byte-perfect clone on such a machine reports
+ * EVERY member as `changed`, which is the loudest possible false alarm for a tool whose whole
+ * claim is that the tree matches.
+ *
+ * Fails to "not carried" on any error (a read-only mount, a permission refusal). That direction
+ * is deliberate and matches git's: the byte comparison still runs on every member, so the cost is
+ * one unreported mode bit on a filesystem we could not interrogate, against a total spurious
+ * failure the other way.
+ */
+export function execBitIsCarried(dir: string): boolean {
+  // Written inside the repository's own `.git` when it has one — same filesystem, and the walk
+  // already skips root `.git`, so a probe stranded by a SIGKILL between create and unlink cannot
+  // later read back as an unexpected member of the published tree.
+  const name = `.colophon-filemode-probe-${randomBytes(8).toString("hex")}`;
+  const gitDir = join(dir, ".git");
+  let probeDir = dir;
+  try {
+    if (statSync(gitDir).isDirectory()) probeDir = gitDir;
+  } catch {
+    // no `.git`, or an unreadable one: probe the tree itself
+  }
+  const probe = join(probeDir, name);
+  try {
+    writeFileSync(probe, "", { mode: 0o644, flag: "wx" });
+    // A filesystem that reports the bit on a file created without it is reporting a constant.
+    if ((statSync(probe).mode & 0o111) !== 0) return false;
+    chmodSync(probe, 0o755);
+    return (statSync(probe).mode & 0o100) !== 0;
+  } catch {
+    return false;
+  } finally {
+    // The probe answers a question; it never raises one. A cleanup refusal (EPERM on an unusual
+    // mount) must not escape as the caller's failure — at worst it strands the file note below.
+    try {
+      rmSync(probe, { force: true });
+    } catch {
+      // deliberately ignored
+    }
+  }
+}
+
+/**
+ * @internal Exported for this module's own tests; not part of the package's public surface.
+ *
+ * Enumerate a published tree the way git sees it. Three rules earn their place:
+ *
+ * - `.git` is skipped ONLY at the root, and before the entry type is dispatched on. A nested
+ *   `.git` directory is ordinary content to the outer repository, so skipping it at depth would
+ *   let a tree carry files the check never looks at; and in a linked worktree or a submodule
+ *   checkout the root `.git` is a regular FILE, so a directory-only test reports it as an
+ *   unexpected member of an otherwise faithful clone.
  * - a symlink is not a file. Reporting it rather than skipping it is what stops
  *   `LICENSE -> /etc/passwd` from reading as a matching member.
+ * - the executable bit is read as git reads it — the OWNER bit alone, since that is what selects
+ *   mode 100755 — and only when `execBitCarried` says the filesystem records one at all.
  */
-function listTree(repoDir: string): readonly TreeEntry[] {
+export function listTree(repoDir: string, execBitCarried: boolean): readonly TreeEntry[] {
   const found: TreeEntry[] = [];
   const walk = (dir: string, atRoot: boolean): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (atRoot && entry.name === ".git") continue;
       const absolute = join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (atRoot && entry.name === ".git") continue;
         walk(absolute, false);
         continue;
       }
@@ -804,7 +951,8 @@ function listTree(repoDir: string): readonly TreeEntry[] {
       }
       // The exec bit is part of the git tree (mode 100755 rather than 100644), so it moves the
       // commit oid the announcement pins even though the bytes are untouched.
-      found.push({ path, plainFile: true, executable: (statSync(absolute).mode & 0o111) !== 0 });
+      const executable = execBitCarried && (statSync(absolute).mode & 0o100) !== 0;
+      found.push({ path, plainFile: true, executable });
     }
   };
   walk(repoDir, true);
@@ -824,9 +972,11 @@ export async function verifyFreezeRepo(
   const differences: FreezeRepoDifference[] = [];
 
   let present: readonly TreeEntry[];
+  let executableBitChecked = false;
   try {
     if (!statSync(repoDir).isDirectory()) throw new Error("not a directory");
-    present = listTree(repoDir);
+    executableBitChecked = execBitIsCarried(repoDir);
+    present = listTree(repoDir, executableBitChecked);
   } catch {
     refuse("not-found", repoDir, `"${repoDir}" is not a readable directory`);
   }
@@ -853,6 +1003,7 @@ export async function verifyFreezeRepo(
 
   return {
     ok: differences.length === 0,
+    executableBitChecked,
     bundleIdentity: tree.bundleIdentity,
     commitId: tree.commitId,
     fileCount: tree.files.size,

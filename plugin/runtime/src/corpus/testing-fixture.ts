@@ -464,6 +464,29 @@ async function signedEnvelope(
   };
 }
 
+/**
+ * A loopback `fetchLike` over a fixed URL-to-bytes map, so a suite drives the
+ * real HTTP transport without acquiring an ambient socket.
+ *
+ * The return type is written structurally rather than as
+ * `@jinn-network/record-discovery-transport-http`'s `FetchLike`: that package
+ * hands its importer the network by defaulting to the global `fetch`, so the
+ * plugin-tree custody gate confines it to the host-adapter layer, and this
+ * module is scanned as production source.
+ */
+export function loopbackFetch(
+  routes: ReadonlyMap<string, Uint8Array>,
+): (url: string) => Promise<Response> {
+  return async (url) => {
+    const bytes = routes.get(url);
+    if (bytes === undefined) return new Response(null, { status: 404 });
+    return new Response(bytes.slice().buffer as ArrayBuffer, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+}
+
 export interface SignedFixtureArchive {
   /** Absolute serving-plane URL to response bytes, for a loopback `fetchLike`. */
   readonly routes: ReadonlyMap<string, Uint8Array>;

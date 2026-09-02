@@ -199,7 +199,13 @@ export function createCorpusCapability(
                 ? // This one genuinely repairs the state: clearing the position
                   // makes the next sync a cold walk from genesis.
                   `Delete the mirror state file at ${state.config.mirrorStatePath} to re-sync from genesis.`
-                : "Run a mirror sync; the runtime also syncs opportunistically at session start.",
+                : // Both processes that reach this row are addressed: a `serve`
+                  // session syncs opportunistically at session start, and the
+                  // standing `mirror` service is already doing it on its own
+                  // interval — telling that one to run a sync would be telling
+                  // it to do what it does.
+                  "Run a mirror sync, or leave the `mirror` service to its next cycle; a " +
+                  "`serve` session also syncs opportunistically at session start.",
         },
         // This check measures whether THIS INSTALL is configured and composed
         // coherently. When there was no way to inject a verification driver at
@@ -216,12 +222,12 @@ export function createCorpusCapability(
         // Empty by configuration, exactly as `corpus-mirror` treats a
         // followed-nothing install: with no archives there is no producer to
         // admit, so an absent trust policy is not a fault. Reporting it as one
-        // made every default `serve` process red — no in-repo entry point
-        // passes a config `file`, so `corpus.trust` is `undefined` on every
-        // real launch — with a remedy naming two keys nothing reads, which is
-        // the operator-unfixable remedy spec §9.3 forbids by name. Declining a
-        // trust policy WHILE following archives is still a fault, and stays
-        // red. See Finding F-C7-1.
+        // made every default `serve` process red — an install with no
+        // `config.json` leaves `corpus.trust` `undefined` — with a remedy
+        // naming two keys that install declares nothing in. Declining a trust
+        // policy WHILE following archives is still a fault, and stays red.
+        // (F-C7-1's wider gap — that no entry point read a config file at all
+        // — is closed: `createNodeRuntimeConfigFileReader` supplies one.)
         checks.push({
           name: "corpus-trust-policy",
           ok: followed === 0,

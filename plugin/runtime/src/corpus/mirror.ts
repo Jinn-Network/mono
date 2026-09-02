@@ -179,16 +179,18 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
       servingRoot: source.servingRoot,
       archiveRootUrl: source.archiveRootUrl,
     };
-    const head = await fetchHead(endpoint, options.transport);
+    // The signal reaches the NETWORK READ, not just the loop below it. A
+    // deadline consulted only between walked entries bounds nothing: a peer
+    // that accepts the connection and never answers holds this call inside a
+    // single read forever, and `fetchHead` is the first read of the cycle --
+    // before any between-entry check exists to run (#3222).
+    const head = await fetchHead(endpoint, options.transport, signal);
     const mark = await options.highWaterMarks.get({ agent: source.agent, name: source.name });
+    const ports = { transport: options.transport, ...(signal === undefined ? {} : { signal }) };
     const walk =
       mark === undefined
-        ? coldSync(endpoint, { transport: options.transport })
-        : returningSync(
-            endpoint,
-            { sequence: mark.sequence, entry: mark.entry },
-            { transport: options.transport },
-          );
+        ? coldSync(endpoint, ports)
+        : returningSync(endpoint, { sequence: mark.sequence, entry: mark.entry }, ports);
 
     const entries: SyncedEntry[] = [];
     for await (const synced of walk) {

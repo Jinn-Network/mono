@@ -16,6 +16,11 @@
  *   time (`"task" | "infrastructure"`, absent when unobservable — never a reason to fail the
  *   write it enriches).
  * - `submission-accepted` — the exact sealed Submission bytes were stored, keyed by dispatch.
+ * - `evaluation-submission-captured` — the evaluation leg's exact sealed Submission bytes were
+ *   stored BEFORE they were offered to the backend, keyed by the full evaluation coordinate. The
+ *   evaluation leg's counterpart to the solve leg's `submission-captured` (#3237): it is what
+ *   `runResume`'s replay map reads when a kill lands between backend acceptance and the
+ *   `submission-accepted` append that would otherwise be the only record of it.
  * - `delivery` — the exact sealed Delivery bytes were stored for a dispatch's accounted attempt.
  * - `evaluation` — the evaluation leg reached a terminal (a verdict, or a could-not-grade fact).
  * - `evaluation-retryable-failure` — one typed provider/transport outage left the exact
@@ -107,6 +112,28 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     /** Public-source receipt, required only for PUB-12 prospective public runs. */
     publicationSourceSequence: z.string().regex(/^\d{16}$/).optional(),
     publicationEntrySha256: Sha256HexSchema.optional(),
+  }),
+  z.object({
+    /** Persisted before `backend.submit` on the EVALUATION leg (#3237) — the solve leg's
+     * `submission-captured`, one leg down. It carries no accounting and participates in no fold:
+     * its sole consumer is `runResume`'s `journaledEvaluationSubmissions` replay map, which
+     * without it covers only legs whose `submission-accepted` append survived the crash. A
+     * capture with no later acceptance means the crash preceded backend acceptance; the backend
+     * then retains no record of the ref and `dispatchEvaluation` re-seals rather than replaying a
+     * deadline stamped before the crash.
+     *
+     * Kept a distinct kind rather than a `leg`-marked `submission-captured` deliberately: that
+     * kind sets the cell's SOLVE `submissionSha256` and dispatch count in `foldRunJournal`,
+     * feeds `foldRunJournalLineage`, and drives PUB-12 prospective publication capture — an
+     * evaluation entry flowing into any of those is the pre-BP-21 clobber `submission-accepted`
+     * still guards against. */
+    kind: z.literal("evaluation-submission-captured"),
+    at: Rfc3339Schema,
+    cellKey: z.string(),
+    dispatch: z.number().int().positive(),
+    evalIndex: z.number().int().positive(),
+    evaluationAttempt: z.number().int().positive(),
+    submissionSha256: Sha256HexSchema,
   }),
   z.object({
     kind: z.literal("submission-accepted"),

@@ -752,6 +752,21 @@ qualification bundle's freeze artifacts into one, and
 `colophon freeze-repo verify --bundle <dir> --repo <dir>` checks a published tree
 against the bundle it claims to be derived from.
 
+The export accepts the closures that carry the qualification graph, and only those:
+`benchmark-product-public-bundle/4`, `benchmark-product-public-bundle/7`, and
+`benchmark-product-public-bundle/8`. Every other closure is refused rather than
+projected into an empty repository. The accepted set is a table keyed by every
+supported bundle format, so a new closure version cannot land without stating what
+it means to this projection.
+
+A `/8` bundle's freeze artifacts are a `/7` bundle's exactly. The sealed
+disclosure-specification record that closure adds is claim-side — it states the
+variables that produced the score, and its `disclosure-specification` evidence role
+is not a freeze-artifact role, so it stays in the bundle a reader verifies, where
+that bundle's own `disclosure-specification` check reads it. The tree rendered from
+such a bundle says so in its generated `README.md`; a tree rendered from a closure
+that carries no such record is byte-identical to what it always was.
+
 The repository is a **derived artifact**, not the claim of record — the same
 doctrine the Inspect View export carries. The sealed records remain the sole
 source of truth; what the projection adds is that the derivation is a function

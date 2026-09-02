@@ -302,7 +302,10 @@ function renderFreezeRepoCheck(check: FreezeRepoVerificationResult): string {
     : `\nfreeze repository: DOES NOT match this bundle (${check.differences.length} of ${check.fileCount} members)`;
   const pin = `\n  commit ${check.commitId}`;
   const drift = check.differences.map((difference) => `\n  ${difference.kind}: ${difference.path}`).join("");
-  return `${head}${pin}${drift}\n`;
+  const modes = check.executableBitChecked
+    ? ""
+    : "\n  note: this filesystem does not carry an executable bit, so file modes were not checked";
+  return `${head}${pin}${modes}${drift}\n`;
 }
 
 export async function runVerifierCli(
