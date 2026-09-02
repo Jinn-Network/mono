@@ -9,12 +9,13 @@
 
 This decision could not be taken before the stage-5 `client/` → `operator/` rename
 landed, because until then every F1 item still described a live `client/` tree. The
-rename landed on `next` (`e93b6487b` restoring the `packages/discovery/client` paths
-the sweep had touched). The gate is satisfied; F1 is closed by this record.
+rename landed as `5a4b537cf` (`refactor(operator): rename client/ to operator/`),
+with `e93b6487b` restoring the `packages/discovery/client` paths the sweep had
+touched. The gate is satisfied; F1 is closed by this record.
 
 ## Decision
 
-One disposition per F1 item. Three renamed and have already shipped; four are
+One disposition per F1 item. Four renamed and have already shipped; three are
 permanent keeps and are recorded as such so no future sweep reopens them.
 
 | F1 item | Disposition | State |
