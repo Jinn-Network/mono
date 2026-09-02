@@ -64,7 +64,7 @@ function warnIpfsFallThrough(subject: string, error: unknown): void {
   if (classification === 'not-found') return;
   const detail = error instanceof Error ? error.message : String(error);
   console.warn(
-    `[corpus-read] IPFS source for ${subject} was refused (${classification}), `
+    `[corpus-read] IPFS source for ${subject} could not be used (${classification}), `
       + `falling through to the next source: ${detail}`,
   );
 }

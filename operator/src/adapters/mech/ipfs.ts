@@ -346,8 +346,10 @@ export async function fetchTrajectoryFromIpfs(
   opts?: FetchFromIpfsOptions,
 ): Promise<unknown> {
   return fetchFromIpfs(gatewayUrl, cid, {
-    maxResponseBytes: MAX_TRAJECTORY_IPFS_RESPONSE_BYTES,
     ...opts,
+    // `?? ` rather than an `...opts` override, so an explicitly-undefined
+    // `maxResponseBytes` still gets the trajectory bound, not the 8 MiB default.
+    maxResponseBytes: opts?.maxResponseBytes ?? MAX_TRAJECTORY_IPFS_RESPONSE_BYTES,
   });
 }
 

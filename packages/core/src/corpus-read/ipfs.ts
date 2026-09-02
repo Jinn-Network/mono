@@ -8,7 +8,9 @@ const IPFS_FETCH_TIMEOUT_MS = 15_000;
  */
 const IPFS_TOTAL_FETCH_TIMEOUT_MS = 45_000;
 /**
- * Cap on any single gateway response, JSON or raw. Corpus manifests and
+ * Default cap on any single gateway response, JSON or raw; a caller that
+ * legitimately reads larger payloads may raise it per call through
+ * {@link FetchFromIpfsOptions.maxResponseBytes} (#3441). Corpus manifests and
  * donation artifacts are JSON envelopes orders of magnitude smaller than this
  * (#3410); the raw-bytes path added in #3438 also carries source-bundle files
  * and sealed documents, which are larger but nowhere near this. A response
@@ -349,6 +351,12 @@ function resolveFallbackGatewayBases(
  * and absolute-URL (`https://evil/`) shapes. A strict CID regex would be the
  * wrong guard: `buildIpfsFetchCidPathCandidates` documents `<cid>/path/to/file`
  * as a legitimate gateway path.
+ *
+ * `URL` does not decode percent-encoded segments, so a `%2e%2e%2f` spelling
+ * still leaves the prefix intact here and is resolved, if at all, by the
+ * gateway. That is unchanged from the pre-guard behaviour and stays bounded by
+ * the same two properties: the origin is pinned, and the bytes are sha256-gated
+ * downstream in `acquire.ts`.
  */
 function resolveGatewayCandidateUrl(
   baseUrl: string,
