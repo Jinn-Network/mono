@@ -8,7 +8,7 @@ import { describe, expect, test } from "vitest";
 import type { PublicBundleVerificationResult } from "@colophon-claims/verify";
 import { renderBundleVerifyLine } from "./main.js";
 
-const V4_RESULT = {
+const V4_RESULT: PublicBundleVerificationResult = {
   format: "benchmark-product-public-bundle/4",
   identity: "a".repeat(64),
   checks: [
@@ -20,7 +20,7 @@ const V4_RESULT = {
   matrixSha256: "d".repeat(64),
   reportSha256: "e".repeat(64),
   reportEnvelopeSha256: "f".repeat(64),
-} as unknown as PublicBundleVerificationResult;
+};
 
 describe("bundle verify human line", () => {
   test("names the operation and asserts no verified result", () => {
@@ -33,20 +33,30 @@ describe("bundle verify human line", () => {
   });
 
   test("a deferred check is still never printed as a bare check name", () => {
-    const line = renderBundleVerifyLine({
+    const metadataFirst: PublicBundleVerificationResult = {
       format: "benchmark-product-public-bundle/5",
       identity: `sha256:${"a".repeat(64)}`,
       checks: [
         "manifest", "evidence-closure", "artifact-integrity", "signature-validity",
         "matrix-rederivation", "report-verification", "claim-consistency",
       ],
+      benchmarkDigest: `sha256:${"b".repeat(64)}`,
+      manifestDigest: `sha256:${"c".repeat(64)}`,
+      cohortDigest: `sha256:${"d".repeat(64)}`,
+      matrixDigest: `sha256:${"e".repeat(64)}`,
+      reportDigest: `sha256:${"f".repeat(64)}`,
+      evidenceRecords: 12,
+      artifacts: 5,
+      verifiedSignerKeyIds: [],
+      profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
       artifactContent: {
         status: "not-fetched",
         verified: 2,
         notFetched: 1,
         notFetchedDigests: ["1".repeat(64)],
       },
-    } as unknown as PublicBundleVerificationResult);
+    };
+    const line = renderBundleVerifyLine(metadataFirst);
     expect(line).toContain("artifact-integrity (not fetched)");
     expect(line).toMatch(/^recomputed public bundle /);
   });

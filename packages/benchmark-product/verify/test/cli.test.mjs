@@ -705,13 +705,14 @@ test("every closure's checks have a caveat phrase (issue #3691)", async () => {
 });
 
 test("the usage block and the verdict agree on what this tool does to the npm bytes (issue #3675)", async () => {
-  const { PLATFORM_BYTES_SENTENCE, renderVerifiedBundle } = await import("../dist/index.js");
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const sentence = "Checks run against the exact platform bytes installed from npm.";
   const result = await invoke([]);
   assert.equal(result.code, 2);
   // The pre-#3675 usage sentence was "Verification uses exact platform bytes from npm." -- the
   // noun #2982 ruled overclaims, surviving on the one surface #2982 did not rewrite.
   assert.doesNotMatch(result.stderr, /Verification uses/);
-  assert.ok(result.stderr.includes(PLATFORM_BYTES_SENTENCE), "usage must state the platform-bytes sentence");
+  assert.ok(result.stderr.includes(sentence), "usage must state the platform-bytes sentence");
   const verdict = renderVerifiedBundle({
     format: "benchmark-product-public-bundle/4",
     identity: "a".repeat(64),
@@ -719,5 +720,5 @@ test("the usage block and the verdict agree on what this tool does to the npm by
     benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
     reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
   });
-  assert.ok(verdict.includes(PLATFORM_BYTES_SENTENCE), "the verdict must state the same sentence");
+  assert.ok(verdict.includes(sentence), "the verdict must state the same sentence");
 });

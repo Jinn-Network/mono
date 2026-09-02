@@ -34,7 +34,7 @@ export interface VerifierCliDeps {
  * surface said one thing and the usage block another -- "Verification uses …", the noun #2982 ruled
  * overclaims -- because the sentence was written twice (issue #3675).
  */
-export const PLATFORM_BYTES_SENTENCE = "Checks run against the exact platform bytes installed from npm." as const;
+const PLATFORM_BYTES_SENTENCE = "Checks run against the exact platform bytes installed from npm." as const;
 
 function usage(): string {
   return "Usage: colophon-verify <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
@@ -57,7 +57,8 @@ function usage(): string {
 // ---------------------------------------------------------------------------
 
 /** Greedy wrap at the column the surrounding fixed prose is already written to. */
-function wrap(text: string, width = 76): string {
+function wrap(text: string): string {
+  const width = 76;
   const lines: string[] = [];
   let line = "";
   for (const word of text.split(" ")) {

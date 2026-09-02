@@ -70,6 +70,7 @@ export function describeRecomputedChecks(outcome: VerificationOutcome): string {
     .map(({ check }) => CHECK_SUBJECTS[check]);
   if (subjects.length === 0) return "nothing";
   if (subjects.length === 1) return subjects[0]!;
+  if (subjects.length === 2) return `${subjects[0]!} and ${subjects[1]!}`;
   return `${subjects.slice(0, -1).join(", ")}, and ${subjects.at(-1)!}`;
 }
 

@@ -116,7 +116,7 @@ export type {
   VerificationCheckState,
   VerificationOutcome,
 } from "./outcome.js";
-export { PLATFORM_BYTES_SENTENCE, VERIFIER_VERSION, renderVerifiedBundle, runVerifierCli } from "./cli.js";
+export { VERIFIER_VERSION, renderVerifiedBundle, runVerifierCli } from "./cli.js";
 export type { VerifierCliDeps, VerifierCliResult } from "./cli.js";
 export {
   PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
