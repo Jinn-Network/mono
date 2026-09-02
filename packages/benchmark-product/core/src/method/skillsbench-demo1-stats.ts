@@ -9,6 +9,27 @@ import type { SkillsBenchDemo1AdmittedCell } from "./skillsbench-demo1-declarati
  * so a reader can replay the numbers from the sealed evidence alone.
  */
 
+/**
+ * Demo-1's own method-identifier namespace, owned by the module that computes the numbers.
+ *
+ * These analyses are demo-local, not §9.2 registered methods. `pairedMeanDelta` is the paired
+ * Student-t interval over continuous per-task reward deltas implemented by `pairedDeltaEstimate`
+ * below; it is NOT `jinn.benchmarking.method/paired-delta@1`, whose registered implementation
+ * (`packages/benchmarking/aggregate/src/registry.ts`) is a clustered BCa bootstrap over binary
+ * pass rates. Citing a `BENCHMARKING_METHOD_IDS` identifier here would send a reader who resolves
+ * it to code that did not produce the numbers (issue #2973), so Demo-1's identifiers live under
+ * `jinn.demo1.method/` and `skillsbench-demo1-seal.test.ts` fails on any collision with the
+ * shared registry.
+ */
+export const SKILLSBENCH_DEMO1_METHOD_IDS = {
+  manipulationCheck: "jinn.demo1.method/manipulation-check",
+  pairedMeanDelta: "jinn.demo1.method/paired-mean-delta",
+  varianceDecomposition: "jinn.demo1.method/variance-decomposition",
+} as const;
+
+/** The version every Demo-1 method identifier above is cited at. */
+export const SKILLSBENCH_DEMO1_METHOD_VERSION = "1" as const;
+
 /** Two-sided 97.5% Student-t quantiles by degrees of freedom; the normal value beyond the table. */
 const T_CRITICAL: Record<number, number> = {
   1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306,
