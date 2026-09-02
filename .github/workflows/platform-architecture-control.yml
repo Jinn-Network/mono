@@ -42,6 +42,7 @@ jobs:
             .github/scripts/architecture-control-workflow.test.mjs \
             .github/scripts/platform-verification-selection.test.mjs \
             .github/scripts/hermetic-selection.test.mjs \
+            .github/scripts/portal-path-filters.test.mjs \
             .github/scripts/required-check-set.test.mjs \
             .github/scripts/stack-package-graph.test.mjs
           node .github/scripts/architecture-control.mjs \
