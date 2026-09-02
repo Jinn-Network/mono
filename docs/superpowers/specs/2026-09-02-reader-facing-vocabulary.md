@@ -88,7 +88,8 @@ a tooltip, never as the heading.
 
 ### 4.1 Report page (`index.html`, `README.md`, badge, social card)
 
-Presentation, all of it, unless a row says otherwise.
+Every row in this table is **presentation**. Where a row also names a contract spelling, that
+spelling is the untouched other side of the line (§2), not a second ruling.
 
 | Reader-visible term today | Ruling | Reader-facing name | Note |
 | --- | --- | --- | --- |
@@ -161,7 +162,8 @@ Presentation, all of it, unless a row says otherwise.
 
 ### 4.2 Reader tool output (`colophon-verify` human-readable stdout)
 
-Presentation, except the check names and `--json` keys.
+Every row is **presentation** except the two marked **Contract** — the check-name strings and
+the `--json` keys — which are ruled *keep* for that reason.
 
 | Reader-visible term today | Ruling | Reader-facing name | Note |
 | --- | --- | --- | --- |
@@ -184,6 +186,8 @@ Presentation, except the check names and `--json` keys.
 | Usage text | rename where §4.1 renames | — | Follows the same glossary. |
 
 ### 4.3 Docs
+
+Docs prose is **presentation**; the contract spellings quoted inside it are not.
 
 `PUBLIC-BUNDLE.md` and `EXTERNAL-VERIFICATION.md` are **format references** aimed at an
 implementer, not a cold reader. They keep the contract spellings verbatim — that is their job —
@@ -223,10 +227,10 @@ collapses `conflicted` (Report/Claim) and *assembly dissent* (verification), whi
 reader concept under two names on the same page today; and **"the runs"** collapses *Matrix
 accounting* and *completeness/attrition*, which a reader reads as one thing.
 
-Concepts a reader never meets by name, after this spec: envelope, catalog, projection, subject,
-assurance preset, assurance primitive, disclosure specification, declaration, static bundle,
-CAS. That is **10 nouns removed from the reader's vocabulary by hiding alone**, before #2985
-folds anything.
+Concepts a reader never meets by name, after this spec: Matrix, envelope, catalog, projection,
+subject, assurance preset, assurance primitive, disclosure specification, declaration, CAS.
+That is **10 nouns removed from the reader's vocabulary by hiding alone** — before a single
+rename, and before #2985 folds anything.
 
 ## 6. What this spec does not decide
 
@@ -240,19 +244,26 @@ folds anything.
 ## 7. Follow-on work
 
 **Presentation renames — ordinary changes, landable now.** No format revision, no bundle
-reissue, guarded by the existing asset and CLI output tests. Filed as:
+reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in this order:
 
-1. **Reader tool check-name glosses** — §4.2's gloss column. Highest value, smallest diff,
-   zero contract exposure. Do this first.
+1. **Reader tool check-name glosses** — §4.2's gloss column, in
+   `verify/src/cli.ts` `renderVerifiedBundle`; gate `verify/test/cli.test.mjs`. Highest value,
+   smallest diff, zero contract exposure. Do this first, independently of everything else.
 2. **Report page vocabulary** — §4.1 applied to `verify/src/assets.ts` (`index.html`,
-   `README.md`, `share.txt`, badge, social card). Sequence after #2985 rules the IA, so the
-   renames land against the surviving elements rather than being applied twice.
-3. **Reader tool prose vocabulary** — §4.2's non-check rows, including usage text.
-4. **Docs reader-vocabulary tables** — §4.3, in `PUBLIC-BUNDLE.md` and
-   `EXTERNAL-VERIFICATION.md`.
+   `README.md`, `share.txt`, badge, social card); gates
+   `verify/src/assets-presentation-profile.test.ts` and `assets-binary-admission.test.ts`.
+   Sequence *after* #2985 rules the IA, so the renames land against the surviving elements
+   rather than being applied twice.
+3. **Reader tool prose vocabulary** — §4.2's remaining rows, including the usage text; same
+   gate as (1).
+4. **Docs reader-vocabulary tables** — §4.3: one table each in `PUBLIC-BUNDLE.md` and
+   `EXTERNAL-VERIFICATION.md`, no prose rename.
 5. **Glossary conformance test** — an asset/CLI test asserting that no hidden term from §5
-   appears in any reader-facing generated string, and that no concept in §5 is presented under
-   two names. Without it this spec decays on the next feature.
+   appears in any reader-facing generated string, and that no §5 concept is presented under two
+   names. Without it this spec decays on the next feature that adds a surface.
+
+Items (1), (3), (4), and (5) are unblocked today; (2) waits on #2985. All five must adopt
+#2982's verdict verb rather than minting one.
 
 **Contract renames — queued to a bundle-format revision, not scheduled here.** Nothing in §4
 requires one; every ruling above is reachable through presentation. The queue exists so the
