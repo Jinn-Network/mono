@@ -97,6 +97,11 @@ function listAccepted(formats: readonly string[]): string {
  *
  * Order is frozen and mirrors `BUNDLE_V4_EVIDENCE_ROLES`; it is the order `freeze.json` renders
  * role groups in. Appending a role changes the rendered tree and therefore requires a format bump.
+ *
+ * This list is an order-preserving subsequence of `BUNDLE_V4_EVIDENCE_ROLES` whose complement is
+ * `FREEZE_REPO_EXCLUDED_ROLES` below. That relation is asserted against the catalog itself, so a
+ * role appended there fails the suite until it is placed in one list or the other — rather than
+ * being dropped from every published tree with nothing saying so.
  */
 export const FREEZE_REPO_ROLES: readonly BundleV4EvidenceRole[] = [
   "item-bank",
@@ -127,6 +132,36 @@ export const FREEZE_REPO_ROLES: readonly BundleV4EvidenceRole[] = [
   "screening-pool",
   "screening-sample-commitment",
   "screening-transcript",
+] as const;
+
+/**
+ * The catalog roles this projection deliberately does NOT carry — the exact complement of
+ * `FREEZE_REPO_ROLES` within `BUNDLE_V4_EVIDENCE_ROLES`. Naming them, rather than leaving the
+ * exclusion implicit in what the other list happens to omit, is what lets an appended catalog role
+ * fail a test instead of vanishing from every published tree.
+ *
+ * Every entry is excluded for one reason: it belongs to the claim, not to the qualification graph
+ * a reader browses. `task` through `verdict` are the Run/Matrix/Report execution graph.
+ * `snapshot-probe` is the pre-run snapshot-serving probe sealed alongside the runtime-selection
+ * manifest (spec 1.5 rule 5) — it evidences how the Run's arms were served, so it is execution
+ * evidence that merely arrives later in the catalog's frozen order. `disclosure-specification`
+ * hangs off the Report extension (issue #2839) and is likewise part of the claim.
+ */
+export const FREEZE_REPO_EXCLUDED_ROLES: readonly BundleV4EvidenceRole[] = [
+  "task",
+  "runtime-selection",
+  "evaluation-spec",
+  "admission-receipt",
+  "solve-submission",
+  "run-pinning-evidence",
+  "evaluation-submission",
+  "solve-delivery",
+  "solve-output",
+  "evaluation-task",
+  "evaluation-delivery",
+  "verdict",
+  "snapshot-probe",
+  "disclosure-specification",
 ] as const;
 
 /**

@@ -20,8 +20,10 @@ import {
   type VerifiedBundleSnapshot,
 } from "./manifest.js";
 import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT } from "./legacy-closures.js";
+import { BUNDLE_V4_EVIDENCE_ROLES } from "./schema.js";
 import {
   FREEZE_REPO_BUNDLE_SUPPORT,
+  FREEZE_REPO_EXCLUDED_ROLES,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   FREEZE_REPO_ROLES,
@@ -304,6 +306,33 @@ describe("freeze repository rendering", () => {
   test("refuses a catalog that assigns no freeze-artifact role", () => {
     expect(() => renderFreezeRepo(snapshotOf({ records: [{ bytes: canonical({ v: 1 }), roles: ["verdict"] }] })))
       .toThrow(/no freeze-artifact role/);
+  });
+});
+
+/**
+ * The rendered bytes, pinned. `snapshotOf()` takes nothing from the clock, the locale, the
+ * filesystem, or a tool version, so the tree it renders has exactly one commit oid — which makes
+ * a literal the only assertion in this file that a renderer change cannot satisfy by construction.
+ * Reflowing one NOTICE line, adding an SPDX field, or reordering `freeze.json` all move it.
+ *
+ * When it fails, that is the design working. Read the diff, decide whether the change is intended,
+ * and if it is, bump `FREEZE_REPO_FORMAT` — every already-published tree stops verifying against
+ * its bundle otherwise — then update this literal in the same change.
+ */
+const GOLDEN_COMMIT_ID = "65bfe7cc80f038772fcd5fb9b5f75b91e66bc7fc";
+
+describe("freeze repository rendered bytes", () => {
+  test("renders to the pinned commit id, so a renderer change is a format bump and not silent drift", () => {
+    expect(renderFreezeRepo(snapshotOf()).commitId).toBe(GOLDEN_COMMIT_ID);
+  });
+
+  test("carries exactly the catalog roles that are not named as excluded", () => {
+    // Both lists are literal, so this is not the tautology of checking a constant against itself:
+    // a role appended to BUNDLE_V4_EVIDENCE_ROLES appears in neither, and the projection would
+    // otherwise omit its evidence from every published tree while still reporting ok.
+    const excluded = new Set<string>(FREEZE_REPO_EXCLUDED_ROLES);
+    expect([...FREEZE_REPO_ROLES])
+      .toEqual(BUNDLE_V4_EVIDENCE_ROLES.filter((role) => !excluded.has(role)));
   });
 });
 

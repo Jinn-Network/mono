@@ -798,7 +798,14 @@ The layout:
   decisions and their ledger, label resolutions, analysis contexts, judge
   instruments, and the human-review and screening material including the sampling
   script. The Run/Matrix/Report execution graph is deliberately absent: that is the
-  claim, and the claim belongs in the bundle a reader verifies.
+  claim, and the claim belongs in the bundle a reader verifies. Two later catalog
+  roles are absent for the same reason rather than by oversight: `snapshot-probe`
+  is the pre-run snapshot-serving probe sealed alongside the runtime-selection
+  manifest, which evidences how the Run's arms were served, and
+  `disclosure-specification` hangs off the Report extension. Both are execution
+  evidence that merely arrives later in the catalog's frozen append order. The
+  carried and excluded role lists are asserted to partition the catalog, so a role
+  appended there fails the suite until it is placed in one of them.
 - `LICENSE`, `NOTICE`, `metadata/spdx.json` — generated from the bundle's licence
   data, never hand-written. The publication licence is the SPDX identifier the
   sealed Benchmark record declares; the per-source attribution and licence
