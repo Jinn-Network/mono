@@ -80,12 +80,10 @@ export type {
 export {
   BUNDLE_FORMAT,
   BUNDLE_V4_FORMAT,
-  BUNDLE_V5_FORMAT,
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
-  BUNDLE_V8_FORMAT,
-  SUPPORTED_BUNDLE_FORMATS,
-} from "./manifest.js";
+} from "./legacy-closures.js";
+export { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 // The disclosed-closure projection and check (disclosure-specification-record design §6.4/§6.6/§7,
 // issue #2839). Single-sourced here for exactly the reason the anchored projection above is: the
 // product core imports this package, so the producer's claim section and the verifier's rebuild of
@@ -125,20 +123,22 @@ export {
   PUBLIC_BUNDLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_CHECKS,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_VERIFIER_MAJOR,
+  PUBLIC_BUNDLE_V4_VERIFIER_MAJOR,
+} from "./legacy-closures.js";
+export {
+  PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_CHECKS,
   PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
-  PUBLIC_BUNDLE_VERIFIER_MAJOR,
-  PUBLIC_BUNDLE_V4_VERIFIER_MAJOR,
 } from "./reader-instructions.js";
 // The deterministic public-repository projection of a bundle's freeze artifacts (issue #2870).
 // It lives in the standalone verifier because a third party holding only this package and a
@@ -146,6 +146,7 @@ export {
 // implementation for the producer to drift from.
 export {
   FREEZE_REPO_BUNDLE_MEMBERS,
+  FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   FREEZE_REPO_ROLES,
@@ -155,6 +156,7 @@ export {
   verifyFreezeRepo,
 } from "./freeze-repo.js";
 export type {
+  FreezeRepoBundleSupport,
   FreezeRepoDifference,
   FreezeRepoDifferenceKind,
   FreezeRepoExportResult,

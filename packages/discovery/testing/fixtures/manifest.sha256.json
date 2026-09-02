@@ -86,6 +86,10 @@
       "sha256": "5dc156f400efb40c596d37dfacdb1d903083210ce2d8a8dce6da9e8be5b8ad5f"
     },
     {
+      "id": "vectors/head-issued-ahead/vector.json",
+      "sha256": "9c684945334c9d082ed1d974524de1290ddf2796443a37f756d41aa4fbb132c1"
+    },
+    {
       "id": "vectors/issued-at-regression-v2/vector.json",
       "sha256": "ffdc63f2d676ec65e79756e4c23c6bb8304f2b33da77e0aacc4f75cdf3004a78"
     },
@@ -148,6 +152,10 @@
     {
       "id": "vectors/re-announce-after-withdrawal/vector.json",
       "sha256": "3bb795d4dd4301e876a9ff268902f9a9f8602a701485371671dd5db465151b45"
+    },
+    {
+      "id": "vectors/refresh-by-ceiling-inverted-window/vector.json",
+      "sha256": "c6b973f99a6f1a3f8d0067c30ab11ae3a228cf357c520edfb02b6bca76281c18"
     },
     {
       "id": "vectors/rolled-back-head/vector.json",

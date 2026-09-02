@@ -74,4 +74,30 @@ describe("resolveCorpusBinIoFields", () => {
     // here must not pre-empt it with a different failure at import time.
     expect(resolveCorpusBinIoFields({ env: {}, homeDirectory: "relative/home" })).toEqual({});
   });
+
+  test("resolves over the configuration document the entry point supplies", () => {
+    // The document is what names the archives, so a corpus block that parses
+    // must still compose the ports rather than being read as absent.
+    const fields = resolveCorpusBinIoFields({
+      env: {},
+      homeDirectory: home,
+      readConfigFile: () => ({ corpus: { syncIntervalMs: 60_000 } }),
+    });
+    expect(Object.keys(fields)).toContain("corpusVerifyDriver");
+  });
+
+  test("yields no fields when the configuration document cannot be read", () => {
+    // Same reason as above: an unreadable or malformed file is `main`'s to
+    // report, and this composition must not turn it into an unhandled
+    // rejection at the entry point's argument-evaluation time.
+    expect(
+      resolveCorpusBinIoFields({
+        env: {},
+        homeDirectory: home,
+        readConfigFile: () => {
+          throw new Error("unreadable");
+        },
+      }),
+    ).toEqual({});
+  });
 });

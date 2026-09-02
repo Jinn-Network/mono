@@ -54,8 +54,12 @@ export function createServingPlaneRepository(
       operation?: RepositoryOperationOptions,
     ): Promise<Uint8Array | null> {
       operation?.signal?.throwIfAborted();
+      // Checked before AND handed down: the pre-check only catches a deadline
+      // that had already expired, and the record read is the other place a
+      // peer can hold a sync cycle open indefinitely (#3222).
       const response = await options.transport.fetch(
         options.servingRoot + recordPath(reference.digest),
+        operation?.signal === undefined ? undefined : { signal: operation.signal },
       );
       if (response.status >= 400) return null;
       if (recordDigest(response.bytes) !== reference.digest) {

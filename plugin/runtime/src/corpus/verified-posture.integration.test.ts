@@ -17,14 +17,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { DsseSigner } from "@jinn-network/trust-core";
-import type { FetchLike } from "@jinn-network/record-discovery-transport-http";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { resolveRuntimeConfig, type MirrorSourceConfig } from "../config.js";
 import { didKeyFromEd25519PublicKey } from "../session-host-crypto.js";
 import { createLocalCorpusPorts } from "../session-host-corpus.js";
 import { createCorpusCapability } from "./capability.js";
-import { buildSignedFixtureArchive } from "./testing-fixture.js";
+import { buildSignedFixtureArchive, loopbackFetch } from "./testing-fixture.js";
 
 const NOW = new Date("2026-07-30T00:00:00Z");
 
@@ -51,7 +50,14 @@ function log() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-/** A real Ed25519 signer whose keyid is the did:key its own public half encodes. */
+/**
+ * A real Ed25519 signer whose keyid is the did:key its own public half encodes.
+ *
+ * It stays in the test files that use it rather than moving beside
+ * `loopbackFetch` in `testing-fixture.js`: that module is scanned as
+ * production source, and the custody gate's key-material canary refuses a
+ * private key there. Test files are exempt.
+ */
 function archiveSigner(): { readonly didKey: string; readonly signer: DsseSigner } {
   const pair = generateKeyPairSync("ed25519");
   const didKey = didKeyFromEd25519PublicKey(pair.publicKey);
@@ -60,17 +66,6 @@ function archiveSigner(): { readonly didKey: string; readonly signer: DsseSigner
     signer: async (request) => [
       { signature: new Uint8Array(sign(null, request.preAuthEncoding, pair.privateKey)), keyid: didKey },
     ],
-  };
-}
-
-function loopback(routes: ReadonlyMap<string, Uint8Array>): FetchLike {
-  return async (url) => {
-    const bytes = routes.get(url);
-    if (bytes === undefined) return new Response(null, { status: 404 });
-    return new Response(bytes.slice().buffer as ArrayBuffer, {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
   };
 }
 
@@ -122,7 +117,7 @@ async function compose(options: {
   let clock = NOW;
   const ports = createLocalCorpusPorts({
     config,
-    fetchLike: loopback(archive.routes),
+    fetchLike: loopbackFetch(archive.routes),
     now: () => clock,
   });
   const capability = createCorpusCapability({
