@@ -37,12 +37,15 @@ export interface ArmDenominators {
    */
   readonly allSlots: number | undefined;
   /**
-   * `allSlots − declared`: the planned slots the declared denominator leaves out. Zero is a result,
-   * not an absence, and is rendered. A negative value is rendered too: a declared denominator
-   * larger than the run's own planned slots is a disagreement between two sealed records, and
-   * hiding it would be the flattering direction.
+   * `allSlots − declared`: the planned slots the declared denominator leaves out. Named for the
+   * denominator rather than for an outcome, because the Matrix's own attrition already has an
+   * `excluded` count meaning one specific outcome, and this number is the sum of several of them
+   * (unjudged, unscorable, expired, invalidated, excluded, and the judged cells a conflicting
+   * verdict dropped). Zero is a result, not an absence, and is stated. A negative value is stated
+   * too: a declared denominator larger than the run's own planned slots is a disagreement between
+   * two sealed records, and hiding it would be the flattering direction.
    */
-  readonly excluded: number | undefined;
+  readonly excludedFromDeclared: number | undefined;
 }
 
 /**
@@ -62,7 +65,7 @@ export function armDenominators(
       armId,
       declared: n,
       allSlots,
-      excluded: allSlots === undefined ? undefined : allSlots - n,
+      excludedFromDeclared: allSlots === undefined ? undefined : allSlots - n,
     };
   });
 }

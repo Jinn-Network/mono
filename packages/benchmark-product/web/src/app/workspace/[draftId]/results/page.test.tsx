@@ -376,7 +376,7 @@ describe("declared and all-slots denominators", () => {
     for (const caption of ["Headline results by arm", "Stored Report headline by arm"]) {
       const table = tableFrom(markup, caption);
       expect(table).toContain("All planned slots");
-      expect(table).toContain("Excluded from denominator");
+      expect(table).toContain("Not in the denominator");
       // baseline: declared 1, planned 1, nothing excluded.
       expect(table).toContain("<td>1</td><td>1</td><td>0</td>");
     }

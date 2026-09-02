@@ -14,14 +14,14 @@ import { armDenominators } from "./denominators.js";
 function accounting(expectedByArm: Readonly<Record<string, number>>) {
   const perArm = Object.create(null) as Record<string, {
     expected: number; judged: number; unjudged: number; unscorable: number;
-    expired: number; invalidated: number; excluded: number; replacements: number;
+    expired: number; invalidated: number; excludedFromDeclared: number; replacements: number;
   }>;
   for (const [armId, expected] of Object.entries(expectedByArm)) {
     Object.defineProperty(perArm, armId, {
       enumerable: true,
       configurable: true,
       writable: true,
-      value: { expected, judged: expected, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 0, replacements: 0 },
+      value: { expected, judged: expected, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excludedFromDeclared: 0, replacements: 0 },
     });
   }
   return { perArm, asymmetryFlags: [] as readonly string[] };
@@ -30,12 +30,12 @@ function accounting(expectedByArm: Readonly<Record<string, number>>) {
 describe("armDenominators", () => {
   test("carries both numbers and a zero delta when the declared denominator kept every planned slot", () => {
     expect(armDenominators([{ armId: "baseline", n: 3 }], accounting({ baseline: 3 })))
-      .toEqual([{ armId: "baseline", declared: 3, allSlots: 3, excluded: 0 }]);
+      .toEqual([{ armId: "baseline", declared: 3, allSlots: 3, excludedFromDeclared: 0 }]);
   });
 
   test("states the delta when the declared denominator drops planned slots", () => {
     expect(armDenominators([{ armId: "candidate", n: 7 }], accounting({ candidate: 10 })))
-      .toEqual([{ armId: "candidate", declared: 7, allSlots: 10, excluded: 3 }]);
+      .toEqual([{ armId: "candidate", declared: 7, allSlots: 10, excludedFromDeclared: 3 }]);
   });
 
   test("keeps every arm in the order the report states them", () => {
@@ -45,7 +45,7 @@ describe("armDenominators", () => {
 
   test("withholds the all-slots number for an arm the Matrix carries no accounting for", () => {
     expect(armDenominators([{ armId: "baseline", n: 3 }], accounting({})))
-      .toEqual([{ armId: "baseline", declared: 3, allSlots: undefined, excluded: undefined }]);
+      .toEqual([{ armId: "baseline", declared: 3, allSlots: undefined, excludedFromDeclared: undefined }]);
   });
 
   test("reads an arm named after an inherited object member from the record's own keys only", () => {
@@ -53,13 +53,13 @@ describe("armDenominators", () => {
       [{ armId: "constructor", n: 4 }, { armId: "toString", n: 1 }],
       accounting({ constructor: 5 }),
     )).toEqual([
-      { armId: "constructor", declared: 4, allSlots: 5, excluded: 1 },
-      { armId: "toString", declared: 1, allSlots: undefined, excluded: undefined },
+      { armId: "constructor", declared: 4, allSlots: 5, excludedFromDeclared: 1 },
+      { armId: "toString", declared: 1, allSlots: undefined, excludedFromDeclared: undefined },
     ]);
   });
 
   test("states a negative delta rather than hiding a declared denominator larger than the planned slots", () => {
     expect(armDenominators([{ armId: "baseline", n: 4 }], accounting({ baseline: 3 })))
-      .toEqual([{ armId: "baseline", declared: 4, allSlots: 3, excluded: -1 }]);
+      .toEqual([{ armId: "baseline", declared: 4, allSlots: 3, excludedFromDeclared: -1 }]);
   });
 });
