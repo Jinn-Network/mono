@@ -41,7 +41,7 @@ D), and sequence execution.
 
 | File | Lines | Production callers | Tests |
 |---|---|---|---|
-| `operator/src/cli/hook-installers/common.ts` | 48 | `commands/integrations.ts:10` | indirect |
+| `operator/src/cli/hook-installers/common.ts` | 48 (24 after Wave 0) | `commands/integrations.ts:10` | indirect |
 | `operator/src/cli/hook-installers/claude-code.ts` | 74 | `commands/integrations.ts:11` | `test/scripts/install-hooks.test.ts`, `test/cli/commands/integrations-hook-install.test.ts` |
 | `operator/src/cli/hook-installers/codex.ts` | 33 | **none** | `test/scripts/install-hooks.test.ts:3` |
 | `operator/src/cli/hook-installers/cursor.ts` | 25 | **none** | `test/scripts/install-hooks.test.ts:5` |
@@ -55,7 +55,7 @@ third-party schemas that nothing calls.
 
 ### 2.2 Surface B — `jinn integrations`
 
-`operator/src/cli/commands/integrations.ts` (1323 lines), registered at
+`operator/src/cli/commands/integrations.ts` (1318 lines), registered at
 `operator/src/cli/index.ts:48,97`. Three subverbs: `install`, `remove`, `doctor`
 (`:1258-1264`; the `doctor` handler is confusingly named `runList` and there is no `list` subverb).
 
@@ -68,13 +68,23 @@ Seven host targets (`TARGETS`, `:371-716`): `claude-code`, `claude-desktop`, `cu
 
 Callers and references:
 
-- **Runtime:** none. No CI workflow, no `quickstart`/`init`/`doctor`/`wiring`/`onboarding-complete`
-  path, and no operator-console code invokes it. The only in-repo *invocation prompts* are two
-  human/agent-facing strings: `operator/src/mcp/operator-server.ts:649` (the `jinn_update` tool
-  description) and `operator/src/cli/commands/update.ts:370`.
-- **Tests:** `test/cli/commands/integrations-hook-install.test.ts` (the only importer of the
-  command module) and `test/scripts/install-hooks.test.ts`. **No test covers `runInstall`,
-  `runRemove`, or `runList` end-to-end, and none covers any of the six non-`claude-code` targets.**
+- **Runtime: one live caller, and it is a published CLI verb.** `jinn update` imports the command
+  module (`operator/src/cli/commands/update.ts:18`), binds it as an injected dep
+  (`:99`, `:107`), and **executes `integrations install --json`** as its step 3
+  (`:449-472`), gated only by `--skip-plugins`. `update.ts:64-94` even carries a bespoke
+  `parseIntegrationsOutput` that tolerates pre-stop-hook installer output shapes. This is the
+  estate's only non-documentation runtime edge, and it is easy to miss: the import is
+  same-directory relative, so a repo-wide grep for `commands/integrations` does not find it.
+  Nothing else invokes it — no CI workflow, no
+  `quickstart`/`init`/`doctor`/`wiring`/`onboarding-complete` path, no operator-console code. The
+  remaining references are two human/agent-facing *prompts*:
+  `operator/src/mcp/operator-server.ts:649` (the `jinn_update` tool description) and
+  `operator/src/cli/commands/update.ts:370` (post-update guidance text).
+- **Tests:** `test/cli/commands/update.test.ts:41,117-180` covers the `jinn update` step-3 path;
+  `test/cli/commands/integrations-hook-install.test.ts` imports the command module directly; and
+  `test/scripts/install-hooks.test.ts` covers the claude-code patcher. **No test covers
+  `runInstall`, `runRemove`, or `runList` end-to-end, and none covers any of the six
+  non-`claude-code` targets.**
 - **Published docs:** `operator/README.md:140,144,146,278`, `operator/ARCHITECTURE.md:30,46,91,278`,
   `docs/operator-testnet.md:74`.
 - **Published skill:** `operator/skills/jinn-operator/SKILL.md:88,102,147` instruct agents to run
@@ -167,6 +177,10 @@ Kept separate, as #2930 requires.
 - `operator/README.md` — ships in the tarball and documents `jinn integrations install|doctor` and
   `jinn mcp`.
 - Any host config a user already has, pointing at `jinn mcp`.
+- **`jinn update` re-installs host integrations on every run** (§2.2). This is a live behavior, not
+  merely stranded state: until Wave 1 lands, every `jinn update` without `--skip-plugins` rewrites
+  the user's host MCP entries, skill copies and claude-code stop-hook line. Wave 1 therefore
+  changes what a published verb does, and must say so in its CHANGELOG entry.
 
 Counter-weight, recorded rather than argued: the 2026-08-04 spec §7 already ruled compatibility
 **"None"** for surface B — install, remove and doctor are sunset together, and the cleanup step
@@ -188,7 +202,11 @@ wave removes the last caller of something a later wave still needs.
 ### Wave 0 — unwired hook patchers *(no dependencies; ready now)*
 
 Delete `operator/src/cli/hook-installers/{codex,cursor,gemini-cli}.ts` and their blocks in
-`operator/test/scripts/install-hooks.test.ts`. Retain `common.ts` and `claude-code.ts` (both wired).
+`operator/test/scripts/install-hooks.test.ts`. Retain `claude-code.ts` and `common.ts`, but drop
+`common.ts`'s `appendUniqueString`, `removeString`, `appendUniqueCommandObject` and
+`removeCommandObject` — those four helpers existed solely for the deleted patchers
+(`claude-code.ts` imports only `DEFAULT_STOP_HOOK_COMMAND`, `parseJsonObject`, `stableJson`), so
+leaving them behind would leave exactly the unwired bloat this wave removes.
 
 *Validation:* `yarn typecheck` + `yarn test` in `operator/`; confirm
 `test/cli/commands/integrations-hook-install.test.ts` still passes (it exercises the claude-code
@@ -198,10 +216,21 @@ path only). *Migration/communication:* none — zero callers, nothing published 
 ### Wave 1 — execute B3: sunset `jinn integrations` whole *(gated)*
 
 Per the ratified spec §8 B3: delete the command and its seven adapters, deregister it from
-`operator/src/cli/index.ts`, remove the two dangling invocation prompts
-(`operator/src/mcp/operator-server.ts:649`, `operator/src/cli/commands/update.ts:370`), update
-`operator/README.md`, `operator/ARCHITECTURE.md` and `docs/operator-testnet.md`, and land the
-transition-manifest entry plus its guard test under `architecture/transitions/`.
+`operator/src/cli/index.ts`, update `operator/README.md`, `operator/ARCHITECTURE.md` and
+`docs/operator-testnet.md`, and land the transition-manifest entry plus its guard test under
+`architecture/transitions/`.
+
+**Wider than the spec's B3 line implies**, because of §2.2's live caller. Deleting the command
+alone will not compile: `jinn update` imports and runs it. Wave 1 must also remove, in the same
+change, `update.ts`'s step-3 block (`:449-472`), the `integrationsRun` member of `UpdateDeps`
+(`:99`) and its production binding (`:107`), `parseIntegrationsOutput`/`summarizeIntegrationInstall`
+(`:64-94`), the now-meaningless `--skip-plugins` flag and its help text, the
+`integrations-install` step in the emitted step list, and the corresponding cases in
+`test/cli/commands/update.test.ts:117-180`. It must also remove the two prompt strings
+(`operator/src/mcp/operator-server.ts:649`, `operator/src/cli/commands/update.ts:370`).
+Removing the command while leaving `jinn update` compiling but stepless would silently drop the
+skill-refresh with no replacement — the replacement is the skill-embedded cleanup step below, and
+it must exist first.
 
 *Blocking prerequisite (spec's own):* B2 — the replacement path (published host skills at
 `spec.jinn.network` carrying the cleanup step) must exist first. **It does not yet: no integrations

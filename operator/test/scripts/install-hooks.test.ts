@@ -54,5 +54,4 @@ describe('stop-hook installers', () => {
     const removed = JSON.parse(removeClaudeCodeHookJson(withHook)) as ClaudeCodeSettings;
     expect(removed.hooks.Stop).toEqual([]);
   });
-
 });
