@@ -1179,7 +1179,7 @@ function handleAnchoringConfigure(args: ParsedArgs, context: CliContext, jsonMod
 function handleIdentityBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
   assertKnownFlags(args, IDENTITY_BIND_FLAGS);
   const opContext = buildOperationContext(args, context);
-  const mechanism = args.flags.mechanism;
+  const mechanism = optional(args, "mechanism");
   const result = identityBind(opContext, {
     domain: required(args, "domain"),
     ...(mechanism === undefined ? {} : { mechanism: mechanism as DomainBindingMechanism }),
