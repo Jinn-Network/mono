@@ -23,9 +23,11 @@ import {
 import { createGitRepositoryMirror } from "./repository-mirror.js";
 import { readVerdictEnvelope } from "./signing.js";
 import {
+  DEMO1_CLAUDE_HARNESS_ID,
   DEMO1_CLAUDE_MD_PATH,
   DEMO1_SKILL_PATH,
   generateDemo1InstructionArtifacts,
+  type Demo1InstructionArtifacts,
 } from "./demo1-claude.js";
 
 const EVALUATOR_1 = "urn:jinn:benchmark-product:local-venue:evaluator-1";
@@ -617,5 +619,185 @@ describe("createLocalProvisioner — repository-work cells", () => {
     const mirrorDir = await mirror.ensure({ uri: upstream.uri, oid: upstream.oid });
     const worktreeList = gitIn(mirrorDir, "worktree", "list");
     expect(worktreeList).not.toContain(paths.work);
+  });
+  /**
+   * Issue #3615: the recovery path re-enters `harvest` on a contract minted fresh by
+   * `createLocalProvisioner` -- `reconstructRecoveryContext`
+   * (`packages/task-execution/backend-local/assembly/src/backend.ts`) never re-runs `setup`, so
+   * every closure variable `setup` would have assigned is empty. `completeAttempt` calls
+   * `provisioner.harvest` for every completion-capable row carrying no journaled `harvested`
+   * event (`harvesting-resume`, `matching-late`, `corrected`), which is exactly the row a kill in
+   * the harvest window leaves. These cases mint the second contract the same way recovery does --
+   * same options, same replayed Task and Submission -- and harvest with it.
+   */
+  describe("recovery re-enters harvest on a contract whose setup never ran", () => {
+    function provisionerFor(
+      task: TaskSpecification,
+      mirror: ReturnType<typeof createGitRepositoryMirror>,
+      requirements: Record<string, unknown>,
+      demo1Instructions?: Demo1InstructionArtifacts,
+    ) {
+      return createLocalProvisioner({
+        registry: createEvaluationCellRegistry(),
+        evaluators: [],
+        repositoryMirror: mirror,
+        ...(demo1Instructions === undefined ? {} : { demo1Instructions }),
+      })({
+        task,
+        sealedTaskBytes: new TextEncoder().encode("{}"),
+        dispatchContextBytes: new TextEncoder().encode("{}"),
+        submission: { requirements },
+        attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+      } as never);
+    }
+
+    it("harvests the declared outputs instead of throwing before-setup", async () => {
+      const upstream = makeUpstreamRepository();
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-"));
+      const paths = workspacePathsUnder(root);
+      const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+      const task = repositoryWorkTask(upstream.uri, upstream.oid);
+
+      await provisionerFor(task, mirror, {}).contract.setup({ task } as never, paths, []);
+      // The harness ran and wrote its result; the kill lands before `harvested` is journaled.
+      writeFileSync(join(paths.out, "patch.diff"), "--- a/x\n+++ b/x\n");
+      writeFileSync(join(paths.out, "structured-output.json"), "{}");
+
+      const recovered = provisionerFor(task, mirror, {});
+      const result = await recovered.contract.harvest(paths, [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+        { name: "summary", mediaType: "text/markdown", required: false },
+      ] as never);
+
+      expect(result.manifest.map((entry) => entry.path)).toEqual(["patch"]);
+      expect(result.manifest[0]!.mediaType).toBe("text/x-diff");
+      expect(result.omissions).toEqual(["summary"]);
+      expect(existsSync(join(paths.meta, "structured-output.json"))).toBe(true);
+      // The teardown the recovered harvest owns still deregisters the worktree.
+      expect(existsSync(paths.work)).toBe(false);
+      const mirrorDir = await mirror.ensure({ uri: upstream.uri, oid: upstream.oid });
+      expect(gitIn(mirrorDir, "worktree", "list")).not.toContain(paths.work);
+    });
+
+    it.each(["claude-code", "codex"])(
+      "extracts the %s arm's repository edits, which live only in the checkout",
+      async (harness) => {
+        const upstream = makeUpstreamRepository();
+        const root = mkdtempSync(join(tmpdir(), `provisioner-repository-work-recovery-${harness}-`));
+        const paths = workspacePathsUnder(root);
+        const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+        const task = repositoryWorkTask(upstream.uri, upstream.oid);
+        const requirements = {
+          harness: { id: harness, version: "2.1.222", digest: "a".repeat(64) },
+          model: { id: "claude-haiku-4-5-20251001" },
+          effort: "low",
+          isolationPolicy: "unrestricted",
+        };
+
+        await provisionerFor(task, mirror, requirements)
+          .contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+        // This profile's result IS the working tree: nothing under out/ yet, so a recovered
+        // harvest that fails to re-derive the harness role loses the work permanently.
+        writeFileSync(join(paths.work, "README.md"), "upstream\nrecovered change\n");
+
+        const recovered = provisionerFor(task, mirror, requirements);
+        const result = await recovered.contract.harvest(paths, [
+          { name: "patch", mediaType: "text/x-diff", required: true },
+        ] as never);
+
+        expect(result.manifest.map((entry) => entry.path)).toEqual(["patch"]);
+        expect(readFileSync(join(paths.out, "patch"), "utf8")).toContain("+recovered change");
+      },
+    );
+
+    it("harvests a Demo-1 arm's edits and still strips the instruction inventory", async () => {
+      const upstream = makeUpstreamRepository();
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-demo1-"));
+      const paths = workspacePathsUnder(root);
+      const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+      const task = repositoryWorkTask(upstream.uri, upstream.oid);
+      const artifacts = generateDemo1InstructionArtifacts(
+        new TextEncoder().encode("# Frozen source\n\nApply the procedure.\n"),
+        { name: "demo1", description: "Use for repository implementation tasks." },
+      );
+      const requirements = {
+        harness: { id: DEMO1_CLAUDE_HARNESS_ID, version: "2.1.222", digest: "a".repeat(64) },
+        model: { id: "claude-haiku-4-5-20251001" },
+        effort: "low",
+        isolationPolicy: "unrestricted",
+        loadout: { kind: "skill", name: "demo1" },
+      };
+
+      await provisionerFor(task, mirror, requirements, artifacts)
+        .contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+      expect(existsSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toBe(true);
+      writeFileSync(join(paths.work, "README.md"), "upstream\nrecovered demo1 change\n");
+
+      const recovered = provisionerFor(task, mirror, requirements, artifacts);
+      const result = await recovered.contract.harvest(paths, [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+      ] as never);
+
+      expect(result.manifest.map((entry) => entry.path)).toEqual(["patch"]);
+      const patch = readFileSync(join(paths.out, "patch"), "utf8");
+      expect(patch).toContain("+recovered demo1 change");
+      expect(patch).not.toContain(DEMO1_CLAUDE_MD_PATH);
+      expect(patch).not.toContain(DEMO1_SKILL_PATH);
+    });
+
+    it("reports a recovery-time rebind failure as an executed-attempt failure, not neverExecuted", async () => {
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-nomirror-"));
+      const selected = createLocalProvisioner({
+        registry: createEvaluationCellRegistry(),
+        evaluators: [],
+      })({
+        task: repositoryWorkTask("file:///upstream", "a".repeat(40)),
+        sealedTaskBytes: new TextEncoder().encode("{}"),
+        dispatchContextBytes: new TextEncoder().encode("{}"),
+        submission: { requirements: {} },
+        attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+      } as never);
+
+      const failure = await selected.contract
+        .harvest(workspacePathsUnder(root), [
+          { name: "patch", mediaType: "text/x-diff", required: true },
+        ] as never)
+        .catch((error: unknown) => error);
+
+      // The harness already ran; `neverExecuted` would be a lie about this attempt's lineage.
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).not.toBeInstanceOf(ProvisioningRejectedError);
+      expect((failure as Error).message).toMatch(/could not rebind its checkout/u);
+      expect((failure as Error).message).toMatch(/no repository mirror is configured/u);
+    });
+
+    it("harvests what out/ holds when a predecessor's teardown already removed the checkout", async () => {
+      const upstream = makeUpstreamRepository();
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-torndown-"));
+      const paths = workspacePathsUnder(root);
+      const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+      const task = repositoryWorkTask(upstream.uri, upstream.oid);
+      const requirements = {
+        harness: { id: "claude-code", version: "2.1.222", digest: "a".repeat(64) },
+        isolationPolicy: "unrestricted",
+      };
+
+      await provisionerFor(task, mirror, requirements)
+        .contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+      writeFileSync(join(paths.work, "README.md"), "upstream\nfirst pass\n");
+      // The interrupted harvest got as far as its own `finally`, so out/ carries its patch and
+      // the checkout is gone. Re-extraction is impossible; re-collection must still succeed.
+      await provisionerFor(task, mirror, requirements).contract.harvest(paths, [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+      ] as never);
+      expect(existsSync(paths.work)).toBe(false);
+
+      const result = await provisionerFor(task, mirror, requirements).contract.harvest(paths, [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+      ] as never);
+
+      expect(result.manifest.map((entry) => entry.path)).toEqual(["patch"]);
+      expect(readFileSync(join(paths.out, "patch"), "utf8")).toContain("+first pass");
+    });
   });
 });
