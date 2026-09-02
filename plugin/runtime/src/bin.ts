@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import type { Transport as McpTransport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { DsseChainVerifier, DsseSigner } from "@jinn-network/trust-core";
 import type { Transport, VerifyDriver } from "@jinn-network/record-discovery-client";
 import { createEvidenceRetrievalFailure } from "@jinn-network/evidence-retrieval";
@@ -143,6 +144,17 @@ export interface BinIo {
    * Absent means no document, which is exactly a default install.
    */
   readonly readConfigFile?: () => unknown;
+  /**
+   * Test seam for the MCP transport, forwarded verbatim to the MCP capability.
+   * Absent — every production path — binds stdio, exactly as before.
+   *
+   * It exists so a test can drive the REAL `buildServeCapabilities` over a
+   * linked in-memory pair instead of hand-assembling a parallel composition.
+   * A hand-built one drifts silently, and the half that drifted first was the
+   * search-time sensitivity gate: the parallel client stubbed the classifier
+   * out entirely (Finding 10).
+   */
+  readonly mcpTransport?: McpTransport;
 }
 
 /** `serve [--role tools|session]`. Default `tools`: read-only MCP without capture signer. */
@@ -219,6 +231,7 @@ export function buildServeCapabilities(
   const mcp = createMcpCapability({
     role,
     version: RUNTIME_VERSION,
+    ...(io.mcpTransport === undefined ? {} : { transport: io.mcpTransport }),
     resolve: async (context) => {
       if (!hasCorpusPorts(io) && !corpusResidualLogged) {
         corpusResidualLogged = true;
