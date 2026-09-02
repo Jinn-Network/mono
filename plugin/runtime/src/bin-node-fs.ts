@@ -4,8 +4,12 @@
  * Library modules must not import `node:fs*`; this file is imported solely from `bin.ts`.
  */
 
-import { constants, readFileSync } from "node:fs";
+import { constants, readFileSync, statSync } from "node:fs";
 import { lstat, mkdir, open, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+// `os.platform()` rather than `process.platform`: identical value, and the
+// plugin tree's custody guard reserves `process.*` for the bin entry point and
+// the capture tree. This module is neither.
+import { platform } from "node:os";
 import { join } from "node:path";
 
 import { ensureOwnerOnlyDirectory, ensureOwnerOnlyFile } from "./capture/paths.js";
@@ -57,7 +61,7 @@ export function createNodeCorpusFilesystem(): CorpusFilesystem {
  * context is a written, reviewable decision, never an ambient one (custody law
  * C2, and `CorpusConfigSchema` in `config.ts`).
  */
-export const RUNTIME_CONFIG_FILE_NAME = "config.json";
+const RUNTIME_CONFIG_FILE_NAME = "config.json";
 
 type ConfigFileOutcome = { readonly value: unknown } | { readonly error: unknown };
 
@@ -70,31 +74,63 @@ type ConfigFileOutcome = { readonly value: unknown } | { readonly error: unknown
  * while the operator who wrote it believes their sources are live — the
  * fail-open direction custody law C2 forbids.
  */
+function invalidConfigFile(path: string, detail: string, cause?: unknown): ConfigFileOutcome {
+  return {
+    error: new PluginRuntimeError(
+      RUNTIME_ERROR_CODES.configInvalid,
+      `configuration file ${path} ${detail}`,
+      cause === undefined ? {} : { cause },
+    ),
+  };
+}
+
 function readRuntimeConfigFile(path: string): ConfigFileOutcome {
   let text: string;
   try {
+    // This document is AUTHORITY, not preference: the followed-source list,
+    // the per-agent signing keys, the trust policy directory, and the
+    // chain-verification posture are all declared here and nowhere else
+    // (custody law C2). A group- or world-writable one lets any local user add
+    // a source plus a `did:key` and become a trusted publisher of everything
+    // this install injects into an agent's context. Every other file in this
+    // tree is held owner-only by `ensureOwnerOnlyFile` /
+    // `ensureOwnerOnlyDirectory`; a document with more authority than any of
+    // them gets the same doctrine, refused rather than tightened because a
+    // permission this process did not choose is a decision its owner has to
+    // make. Skipped on Windows, where the POSIX mode bits carry no such
+    // meaning — exactly where `capture/paths.ts` skips its own chmod.
+    if (platform() !== "win32") {
+      const mode = statSync(path).mode;
+      if ((mode & 0o077) !== 0) {
+        return invalidConfigFile(
+          path,
+          `is accessible to users other than its owner (mode ${(mode & 0o777).toString(8).padStart(3, "0")}); ` +
+            "run `chmod 600` on it",
+        );
+      }
+    }
     text = readFileSync(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { value: undefined };
-    return {
-      error: new PluginRuntimeError(
-        RUNTIME_ERROR_CODES.configInvalid,
-        `configuration file ${path} could not be read`,
-        { cause: error },
-      ),
-    };
+    return invalidConfigFile(path, "could not be read", error);
   }
+
+  let value: unknown;
   try {
-    return { value: JSON.parse(text) };
+    value = JSON.parse(text);
   } catch (error) {
-    return {
-      error: new PluginRuntimeError(
-        RUNTIME_ERROR_CODES.configInvalid,
-        `configuration file ${path} is not valid JSON`,
-        { cause: error },
-      ),
-    };
+    return invalidConfigFile(path, "is not valid JSON", error);
   }
+
+  // `null` is valid JSON and the one malformation that used to read as an
+  // absent document — following zero archives while the operator who wrote the
+  // file believes their sources are live, which is precisely the fail-open
+  // direction the paragraph above forbids. ABSENCE of the file is the only
+  // legitimate no-document answer.
+  if (value === null) {
+    return invalidConfigFile(path, "contains `null` rather than a configuration document");
+  }
+  return { value };
 }
 
 /**

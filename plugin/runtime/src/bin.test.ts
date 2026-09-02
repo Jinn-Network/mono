@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -288,6 +288,19 @@ describe("the runtime configuration file", () => {
     return { code, err: err.join("\n") };
   }
 
+  /**
+   * Owner-only, because the reader refuses anything looser: this document is
+   * the only place the followed-source list and its signing keys are declared,
+   * so a mode any other local user can write is a path to becoming a trusted
+   * publisher (custody law C2).
+   */
+  async function writeConfigFile(home: string, body: string): Promise<string> {
+    const path = join(home, "config.json");
+    await writeFile(path, body);
+    await chmod(path, 0o600);
+    return path;
+  }
+
   test("an absent file reads as no document at all, not as a failure", async () => {
     // A default install has none, and the defaults are the whole configuration.
     expect(createNodeRuntimeConfigFileReader(await writableHome())()).toBeUndefined();
@@ -298,7 +311,7 @@ describe("the runtime configuration file", () => {
     // home, so a `home` key inside it moves the data tree and not the file.
     const home = await writableHome();
     const relocated = await writableHome();
-    await writeFile(join(home, "config.json"), JSON.stringify({ home: relocated }));
+    await writeConfigFile(home, JSON.stringify({ home: relocated }));
     const { code, err } = await serveWithConfigFile(home);
     expect(code).toBe(0);
     expect(err).toContain(relocated);
@@ -308,7 +321,7 @@ describe("the runtime configuration file", () => {
     // Swallowing this would follow no archives while the operator who wrote
     // the corpus block believes their sources are live.
     const home = await writableHome();
-    await writeFile(join(home, "config.json"), "{ not json");
+    await writeConfigFile(home, "{ not json");
     const { code, err } = await serveWithConfigFile(home);
     expect(code).toBe(2);
     expect(err).toContain("configuration failed");
@@ -317,9 +330,45 @@ describe("the runtime configuration file", () => {
 
   test("a schema-invalid corpus block still reaches the operator", async () => {
     const home = await writableHome();
-    await writeFile(join(home, "config.json"), JSON.stringify({ corpus: { sources: [{ agent: "a" }] } }));
+    await writeConfigFile(home, JSON.stringify({ corpus: { sources: [{ agent: "a" }] } }));
     const { code, err } = await serveWithConfigFile(home);
     expect(code).toBe(2);
     expect(err).toContain("corpus configuration is invalid");
   });
+
+  test("a `null` document fails loud rather than reading as an absent one", async () => {
+    // The one malformation that used to fail OPEN: valid JSON, so it parsed,
+    // and `parseFile` maps `null` to `{}` — an install following no archives
+    // while the operator believes their sources are live.
+    const home = await writableHome();
+    await writeConfigFile(home, "null");
+    const { code, err } = await serveWithConfigFile(home);
+    expect(code).toBe(2);
+    expect(err).toContain("configuration failed");
+    expect(err).toContain("contains `null`");
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "a config file other local users can write is refused, not read",
+    async () => {
+      const home = await writableHome();
+      const path = await writeConfigFile(home, JSON.stringify({ home }));
+      await chmod(path, 0o666);
+      const { code, err } = await serveWithConfigFile(home);
+      expect(code).toBe(2);
+      expect(err).toContain("accessible to users other than its owner");
+      expect(err).toContain("chmod 600");
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "a group-readable config file is refused too — the mode bits are all checked",
+    async () => {
+      const home = await writableHome();
+      const path = await writeConfigFile(home, JSON.stringify({ home }));
+      await chmod(path, 0o640);
+      const { code } = await serveWithConfigFile(home);
+      expect(code).toBe(2);
+    },
+  );
 });
