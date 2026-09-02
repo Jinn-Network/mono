@@ -71,7 +71,15 @@ describe('direct Safe broadcaster', () => {
       readContract: vi.fn()
         .mockResolvedValueOnce(0n) // nonce
         .mockResolvedValueOnce(`0x${'55'.repeat(32)}`), // safeTxHash
-      waitForTransactionReceipt: vi.fn(),
+      // `execute` reads block identity and logs off the receipt (#2665), so the double must
+      // return one rather than `undefined`.
+      waitForTransactionReceipt: vi.fn().mockResolvedValue({
+        transactionHash: `0x${'77'.repeat(32)}`,
+        blockNumber: 1n,
+        blockHash: `0x${'99'.repeat(32)}`,
+        status: 'success',
+        logs: [],
+      }),
     };
     const walletClient = {
       account: { address: OWNER },

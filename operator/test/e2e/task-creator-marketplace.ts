@@ -286,13 +286,18 @@ async function submitSelfEvaluation(args: {
   const evaluationTaskCidDigest = keccak256(
     toBytes(`evaluation:${posted.taskCid}:${posted.taskId}:${args.attemptIndex}`),
   ) as Hex;
+  // One broadcaster per Safe (finding E5 / composition design §6.1): the verdict port and both
+  // legacy Safe writes below share it, so they never open independent nonce stacks against the
+  // evaluator Safe. Issue #2665: those two writes previously omitted `broadcaster` entirely,
+  // which is the 3rd of 7-9 positional parameters -- every later argument was shifted one place.
+  const evaluatorBroadcaster = createDirectSafeBroadcaster(
+    publicClient,
+    walletClient,
+    evaluator.safeAddress as Address,
+  );
   const claimEvalResult = await createVerdictPorts({
     publicClient,
-    broadcaster: createDirectSafeBroadcaster(
-      publicClient,
-      walletClient,
-      evaluator.safeAddress as Address,
-    ),
+    broadcaster: evaluatorBroadcaster,
     safeAddress: evaluator.safeAddress as Address,
     routerAddress: v3Env.routerAddress as Address,
     mechAddress: v3Env.mockMechAddress as Address, // self-eval: same mech the solver claimed with
@@ -326,6 +331,7 @@ async function submitSelfEvaluation(args: {
   await callDeliverToMarketplace(
     publicClient,
     walletClient,
+    evaluatorBroadcaster,
     evaluator.safeAddress as Address,
     v3Env.mockMechAddress as Address,
     [claimEvalResult.requestId as Hex],
@@ -336,6 +342,7 @@ async function submitSelfEvaluation(args: {
   const verdictTxHash = await claimDelivery(
     publicClient,
     walletClient,
+    evaluatorBroadcaster,
     evaluator.safeAddress as Address,
     v3Env.routerAddress as Address,
     claimEvalResult.requestId as Hex,
