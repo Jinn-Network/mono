@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
@@ -299,4 +299,35 @@ test('the guard reads what npm actually serves, and fails closed when it cannot'
     () => fetchPublishedVerifyVersions('@colophon-claims/verify', ok({ versions: {} })),
     /npm reports no published versions/u,
   );
+});
+
+/** Every non-test source file under the product packages, so the pin scan cannot silently miss one. */
+function productSourceFiles(dir, found = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== '__fixtures__' && entry.name !== 'node_modules') productSourceFiles(path, found);
+    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+      found.push(path);
+    }
+  }
+  return found;
+}
+
+test('CLAIM_PIN_SOURCES names every product source that pins a verifier version', () => {
+  const productsRoot = join(repoRoot, 'packages/benchmark-product');
+  const pinning = readdirSync(productsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => {
+      const src = join(productsRoot, entry.name, 'src');
+      try {
+        return productSourceFiles(src);
+      } catch {
+        return [];
+      }
+    })
+    .filter((path) => readFileSync(path, 'utf8').includes('@colophon-claims/verify@'))
+    .map((path) => path.slice(repoRoot.length + 1))
+    .sort();
+  assert.deepEqual(pinning, [...CLAIM_PIN_SOURCES].sort());
 });
