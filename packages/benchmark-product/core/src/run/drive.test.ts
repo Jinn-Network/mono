@@ -1046,6 +1046,109 @@ describe("driveCellEvents — minVerdicts > 1 dispatches one evaluation leg per 
   });
 });
 
+describe("dispatchEvaluation — a replayed capture is re-sealed only when the key is free (#3237)", () => {
+  /**
+   * `recover` answers `absent` from two different states: a ref the backend cannot resolve at all
+   * (nothing retained, the idempotency key is free) and an attempt it fully remembers whose spawn
+   * intent left no recoverable shim or outcome (the key is HELD). Re-sealing under a held key is
+   * refused `submission-conflict`, which carries no retryable category and so completes the
+   * evalIndex could-not-grade forever — the very loss #3237 exists to close. The discriminator is
+   * `observe`, which resolves through the same durable ref index `submit`'s idempotency check
+   * reads.
+   */
+  function replayBackend(options: {
+    readonly retained: boolean;
+    readonly calls: { submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] };
+  }): ProxiedBackend {
+    let observes = 0;
+    return {
+      async capabilities() {
+        throw new Error("not used");
+      },
+      async submit(taskBytes, submissionBytes) {
+        options.calls.submits.push({ taskBytes, submissionBytes });
+        return {
+          accepted: true,
+          submission: "urn:uuid:00000000-0000-4000-8000-000000000099" as SubmissionUri,
+          digest: `sha256:${"9".repeat(64)}`,
+        };
+      },
+      async observe() {
+        observes += 1;
+        // The FIRST observe is the discriminator's; later ones are the ordinary post-submit read.
+        if (observes === 1 && !options.retained) {
+          throw new TaskExecutionError("attempt-not-found", { detail: "no Attempt or Submission" });
+        }
+        return fakeSnapshot("att-eval-1", "failed");
+      },
+      async recover() {
+        return { classification: "absent", detail: "absent-never-executed" };
+      },
+      async deliveries() {
+        return [];
+      },
+      async fetchDelivery() {
+        throw new Error("not reached");
+      },
+      async drain() {},
+    };
+  }
+
+  function replayedBytes(): Uint8Array {
+    // Only the `submission` URI is read off the replayed bytes before `recover`; the deadline is
+    // what makes them distinguishable from a fresh seal.
+    return utf8({
+      submission: "urn:uuid:00000000-0000-4000-8000-0000000000aa",
+      deadline: "2020-01-01T00:00:00.000Z",
+    });
+  }
+
+  async function driveOneLeg(retained: boolean): Promise<{
+    readonly submitted: Uint8Array;
+    readonly replayed: Uint8Array;
+  }> {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const solveDeliveryBytes = utf8({ outputs: [{ name: "prediction", digest: { sha256: "e".repeat(64) } }] });
+    const deliverySha256 = putSealedBytes(workspaceDir, solveDeliveryBytes);
+    const predictionSha256 = putSealedBytes(workspaceDir, utf8({ probabilityYes: "0.5" }));
+    const replayed = replayedBytes();
+    const calls = { submits: [] as { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] };
+
+    await driveEvaluationCatchUp(
+      {
+        workspaceDir,
+        draftId: "draft-1",
+        venue: fakeVenue({ taskBytes: new Uint8Array([4, 5]), taskSha256: "4".repeat(64) }),
+        backend: replayBackend({ retained, calls }),
+        runSha256: "r".repeat(64),
+        owner: "urn:uuid:owner",
+        cellWindowMs: 3_600_000,
+        minVerdicts: 1,
+        liveClock: clock,
+        acceptedEvaluationSubmissionBytes: () => replayed,
+      },
+      [{ cellKey, lastDispatch: 1, deliverySha256, deliveryOutputs: [{ name: "prediction", sha256: predictionSha256 }], missingEvalIndexes: [1] }],
+    );
+
+    expect(calls.submits).toHaveLength(1);
+    return { submitted: calls.submits[0]!.submissionBytes, replayed };
+  }
+
+  test("a retained record keeps the byte-exact replay, so the held key is never re-minted", async () => {
+    const { submitted, replayed } = await driveOneLeg(true);
+    expect(submitted).toEqual(replayed);
+  });
+
+  test("an unresolvable ref proves the key is free, so the stale-deadline capture is re-sealed", async () => {
+    const { submitted, replayed } = await driveOneLeg(false);
+    expect(submitted).not.toEqual(replayed);
+    const doc = JSON.parse(new TextDecoder().decode(submitted)) as { readonly deadline?: string };
+    expect(Date.parse(doc.deadline ?? "")).toBeGreaterThan(Date.parse("2020-01-01T00:00:00.000Z"));
+  });
+});
+
 describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored delivery bytes", () => {
   test("re-derives and dispatches evaluation from an already-journaled delivery, no backend delivery re-fetch", async () => {
     const clock = makeClock();

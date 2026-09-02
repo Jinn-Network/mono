@@ -234,8 +234,9 @@ export interface DriveDeps {
    * they were offered to the backend, and journaled again on acceptance when the process survived
    * that long — or `undefined` when this leg never reached its pre-submit capture. Capture
    * precedes acceptance, so an accepted leg is covered even when the acceptance itself was never
-   * journaled (#3237). A capture the backend never saw is not replayed: `recover` classifies it
-   * `absent` and `dispatchEvaluation` re-seals, since only a backend holding the bytes is owed
+   * journaled (#3237). A capture the backend never saw is not replayed: `dispatchEvaluation`
+   * re-seals once `recover` says `absent` AND the backend retains no record of the ref
+   * (`backendRetainsSubmission`), since only a backend still holding the bytes is owed
    * byte-exactness.
    *
    * Without it, a process killed between backend acceptance and the leg's verdict resumes by
@@ -487,6 +488,33 @@ function requireEvaluatorCoverage(deps: DriveDeps): void {
   }
 }
 
+/**
+ * Whether the backend still retains a durable record for this Submission ref — and therefore still
+ * holds its idempotency key.
+ *
+ * `recover`'s `absent` does not answer that on its own. The local backend returns `absent` from
+ * two places: an unresolvable ref (nothing is retained, the key is free) and an attempt it fully
+ * remembers whose spawn intent left no recoverable shim or outcome (the key is HELD, and
+ * submitting different bytes under it is refused `submission-conflict`, which carries no retryable
+ * category and so completes the evalIndex could-not-grade forever). `observe` resolves through the
+ * same durable ref index `submit`'s idempotency check reads, so its `attempt-not-found` is the one
+ * signal that the key is genuinely free.
+ *
+ * Fail-safe by construction: anything else — a snapshot, or any other error — reports retained,
+ * which keeps the byte-exact replay.
+ */
+async function backendRetainsSubmission(
+  backend: ProxiedBackend,
+  ref: SubmissionUri,
+): Promise<boolean> {
+  try {
+    await backend.observe(ref);
+    return true;
+  } catch (cause) {
+    return !(cause instanceof TaskExecutionError && cause.category === "attempt-not-found");
+  }
+}
+
 /** Seals + submits + watches ONE evaluation leg (`evalIndex`, 1-based) for a prepared evaluation
  * cell (module header): evaluator `deps.venue.evaluators[evalIndex - 1]`, leg-distinct
  * idempotency key/nonce `eval:<runSha256>:e<evalIndex>:<cellKey>:<dispatch>`. */
@@ -590,16 +618,20 @@ async function dispatchEvaluation(
           }`,
       );
     }
-    if (reconciliation.classification === "absent") {
-      // The backend holds no durable record of this Submission, so it never accepted these bytes:
-      // the pre-submit capture below is reached before `submit`, so a kill in that gap leaves a
-      // capture the backend never saw (#3237). The idempotency key is therefore still FREE, and
-      // replaying is not merely unnecessary but harmful — the captured `deadline` was stamped
-      // before the crash, so a resume later than `policy.cellWindow` submits an already-expired
-      // Submission, the attempt terminals `expired` with no retryable category, and the leg
-      // terminals could-not-grade permanently. Re-seal instead, which is exactly what this leg did
-      // before the capture existed. (Byte-exactness is owed to a backend that HOLDS the bytes;
-      // `absent` says it does not.)
+    if (
+      reconciliation.classification === "absent"
+      && !(await backendRetainsSubmission(deps.backend, replayedSubmission.submission as SubmissionUri))
+    ) {
+      // The backend retains no record of this Submission, so it never accepted these bytes: the
+      // capture below is written before `submit`, so a kill in that gap leaves a capture the
+      // backend never saw (#3237). The idempotency key is therefore still free, and replaying is
+      // not merely unnecessary but harmful — the captured `deadline` was stamped before the crash,
+      // so a resume later than `policy.cellWindow` submits an already-expired Submission, the
+      // attempt terminals `expired` with no retryable category, and the leg terminals
+      // could-not-grade permanently. Re-seal instead, exactly as this leg did before the capture
+      // existed. Byte-exactness is owed to a backend that HOLDS the bytes — and a retained record
+      // is better served by the replay, whose idempotent resubmission surfaces the infrastructure
+      // terminal `recover` just appended, which the retry ladder can classify.
       evalSubmissionBytes = sealFreshSubmission();
     }
   }
