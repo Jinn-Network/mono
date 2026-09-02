@@ -21,11 +21,11 @@ afterEach(() => {
  */
 async function waitUntil(predicate: () => boolean, what: string): Promise<void> {
   const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
+  for (;;) {
     if (predicate()) return;
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for verifier fixture process: ${what}`);
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error(`timed out waiting for verifier fixture process: ${what}`);
 }
 
 test("cancellation waits until the verifier child is terminated and reaped", async () => {

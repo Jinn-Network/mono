@@ -616,8 +616,8 @@ describe("derived Inspect View export wiring for the judge lane (§8.2)", () => 
   // createSyntheticV4BundleFixture does real signing/sealing (~5.2s on a quiet runner,
   // 2026-08-20 at next c49ed2cdd). Sibling tests in this file are sub-second and inherit the
   // suite's bound, which `vitest.config.ts` raised off Vitest's 5s default to 30s (#2766).
-  // Other fixture callers set an explicit bound above that (v6-materialize 300s,
-  // T1 cold-lifecycle 180s, v4-materialize up to 120s).
+  // Other fixture callers set an explicit bound above that (v4-materialize 120s,
+  // v6-materialize 120s-300s, T1 cold-lifecycle 180s).
   test("a judge draft exports through exportDerivedBundle as shape inspect-view, mode inspection-upload, with the forked sentence and the scoreless-transcripts caveat", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "colophon-inspect-binary-judge-export-"));
     roots.push(workspaceDir);

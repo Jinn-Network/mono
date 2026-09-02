@@ -547,11 +547,12 @@ describe("the acquisition bound covers the whole operation", () => {
       endpoint: `${KIT_CALENDAR_URI},${KIT_SECOND_CALENDAR_URI},https://third-calendar.invalid`,
     })).rejects.toMatchObject({ code: "venue-unavailable" });
 
+    const distinct = new Set(signals);
     expect(signals).toHaveLength(3);
     expect(signals.every((signal) => signal instanceof AbortSignal), "a calendar request carried no signal at all").toBe(true);
     expect(
-      new Set(signals).size,
-      `each calendar got its own deadline: ${signals.length} requests, ${new Set(signals).size} distinct signals`,
+      distinct.size,
+      `each calendar got its own deadline: ${signals.length} requests, ${distinct.size} distinct signals`,
     ).toBe(1);
   });
 

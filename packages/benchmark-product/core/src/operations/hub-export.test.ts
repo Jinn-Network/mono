@@ -56,9 +56,20 @@ let materialPath: string;
  * These calls drive real subprocesses, so a bare `expect(result.ok).toBe(true)` that loses a race
  * under load reports `expected false to be true` — a message that names neither the operation nor
  * the refusal it carried, which is indistinguishable from a real regression (#3355).
+ *
+ * Vitest evaluates the message eagerly, so the refusal is only rendered on the failing path.
  */
 function expectOk(operation: string, result: { readonly ok: boolean }): void {
-  expect(result.ok, `${operation} refused: ${JSON.stringify(result)}`).toBe(true);
+  expect(result.ok, result.ok ? operation : `${operation} refused: ${JSON.stringify(result)}`).toBe(true);
+}
+
+/** A directory listing for a failure message, which must never throw in place of the assertion. */
+function listing(directory: string): string {
+  try {
+    return `it holds ${readdirSync(directory).join(", ") || "(nothing)"}`;
+  } catch (cause) {
+    return `it could not be listed: ${String(cause)}`;
+  }
 }
 
 function writeFakeHarbor(): string {
@@ -194,8 +205,8 @@ async function prepareDraft(draftId: string) {
   const context = { workspaceDir, principal: "sponsor-1", clock: clock() };
   expectOk("initWorkspace", initWorkspace(context));
   expectOk("createDraft", createDraft(context, { draftId, name: draftId }));
-  expectOk("armAdd", armAdd(context, { draftId, armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }));
-  expectOk("armAdd", armAdd(context, { draftId, armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }));
+  expectOk("armAdd one", armAdd(context, { draftId, armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }));
+  expectOk("armAdd two", armAdd(context, { draftId, armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }));
   return context;
 }
 
@@ -263,9 +274,10 @@ describe("Harbor Hub export", () => {
     expect(exported.result.mode).toBe("inspection-upload");
     expect(exported.result.jobDir).toBe(jobDir);
     expect(existsSync(join(jobDir, "result.json")), `the native job directory lost ${join(jobDir, "result.json")}`).toBe(true);
+    const exportedJobResult = join(exported.result.exportDir, "job", "result.json");
     expect(
-      existsSync(join(exported.result.exportDir, "job", "result.json")),
-      `the export omitted ${join(exported.result.exportDir, "job", "result.json")}; it holds ${readdirSync(exported.result.exportDir).join(", ")}`,
+      existsSync(exportedJobResult),
+      `the export omitted ${exportedJobResult}; ${listing(join(exported.result.exportDir, "job"))}`,
     ).toBe(true);
     expect(exported.result.instructions.split("\n")[0]).toBe(certificationFor("one"));
     expect(exported.result.instructions).toContain("Do not run `uv run lb submit`");
