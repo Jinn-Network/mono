@@ -198,3 +198,8 @@ export type {
 } from "./binding/beacon-binding.js";
 export { runBindingClass, runBindingSentence, runBoundVenueLimits } from "./binding/report-face.js";
 export type { RunBindingClass } from "./binding/report-face.js";
+// The declared denominator beside the strict all-slots one (issue #2977). Exported for the same
+// single-sourcing reason as the binding report face above: the product core depends on this
+// package, so every surface that shows the pair derives it from one function.
+export { armDenominators } from "./denominators.js";
+export type { ArmDenominators, PlannedSlotAccounting } from "./denominators.js";
