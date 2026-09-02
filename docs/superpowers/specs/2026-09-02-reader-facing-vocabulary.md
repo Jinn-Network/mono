@@ -54,7 +54,7 @@ belongs to a bundle-format revision and to nothing smaller:
   `venueHonesty`, `rehearsal`, `records.*`, `verification.*`;
 - the check-name strings (`manifest`, `evidence-closure`, `trust`, `matrix-rederivation`,
   `report-verification`, `claim-consistency`, `integrity-anchors`,
-  `disclosure-specification`, `artifact-integrity`) — sealed into
+  `disclosure-specification`, `artifact-integrity`, `signature-validity`) — sealed into
   `claim-package.json`'s `verification.checks`, asserted by the external verification path,
   *and* printed to the reader, which is why §4.2 rules them **keep + gloss** rather than
   rename;
@@ -106,11 +106,11 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Open a cell to inspect its evidence | rename | Open a run to see its evidence | Follows the cell→run rename. |
 | Sealed Matrix accounting | rename | What was run, and what came back | "Matrix" is hidden from readers (below). |
 | Matrix (the record) | hide | — | Internal and contract name unchanged; the reader meets "the runs", never "the Matrix". The file link stays `matrix.json`. |
-| Matrix expected / judged / floor | rename | Runs planned / runs scored / minimum required | |
-| Completeness | rename | How much was scored | |
+| Matrix expected / judged / floor | rename | Runs planned / runs judged / minimum required | |
+| Completeness | rename | How much was judged | |
 | Attrition | rename | Runs that did not count | |
-| Unjudged | rename | Not scored | |
-| Unscorable | rename | Could not be scored | |
+| Unjudged | rename | Not judged | |
+| Unscorable | rename | Could not be judged | |
 | Expired / Invalidated / Excluded / Replacements | keep | — | Already plain. |
 | Matrix asymmetry flags | rename | Where the configurations were not treated alike | |
 | Sealed Report facts | rename | The result | "Sealed" is machinery; the reader wants the number. |
@@ -119,7 +119,7 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Report preregistered / Claim preregistered | keep | Preregistered | A real term readers know from science; renaming it would cost meaning. Gloss on first use: "the method was fixed before the runs". |
 | Report method / Claim method | rename | Method | Drop the record prefix; the section already says which record it came from. |
 | Method parameters | keep | — | |
-| Report conflicts / Claim conflicts (`conflicted`) | rename | Runs the scorers disagreed on | |
+| Report conflicts / Claim conflicts (`conflicted`) | rename | Runs the judges disagreed on | |
 | Stored Claim facts / Claim package | rename | The claim | Drop "package" and "stored". `claim-package.json` unchanged. |
 | Assurance preset / Resolved assurance primitives | hide | — | Replaced on the page by one plain sentence naming what was enforced. Fields stay contract. |
 | Rehearsal / rehearsal disclosure | rename | Practice run | |
@@ -134,11 +134,11 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Publication grade | rename | Meets the publication bar | |
 | Source manifest / Admission manifest | rename | Where the items came from / How they were admitted | |
 | Pre-run exclusions | keep | — | |
-| Verification assembly dissent / Dissenting cells | rename | Runs the scorers disagreed on | Same reader concept as `conflicted`; **one name, one place** — see §5. The `verification/assembly.jsonl` link is retained under "how each score was decided". |
+| Verification assembly dissent / Dissenting cells | rename | Runs the judges disagreed on | Same reader concept as `conflicted`; **one name, one place** — see §5. The `verification/assembly.jsonl` link is retained under "how each run was judged". |
 | Limitations by stored source | rename | Limitations | The per-source split is IA (#2985), not naming. |
 | Records and exact identities | rename | Every file in this bundle | |
 | CAS record | rename | Evidence file | |
-| Evidence catalog / Verdict catalog | hide | — | The reader gets "evidence files" and "scores"; the catalogs are the index, not a concept. |
+| Evidence catalog / Verdict catalog | hide | — | The reader gets "evidence files" and "how each run was judged"; the catalogs are the index, not a concept. |
 | Static-bundle projection | hide | — | |
 | Benchmark record / Run record | rename | What was tested / What was run | |
 | Public trust material | rename | The public keys | |
@@ -170,7 +170,7 @@ the `--json` keys — which are ruled *keep* for that reason.
 | `Verified: N of N checks passed` | **deferred to #2982** | — | Reserved. Whatever verb #2982 picks becomes the canonical verb for this act everywhere, including the page's "Recheck this yourself" — §5. |
 | Bundle / bundle | keep | Bundle | One of the converged plain words. |
 | Format: `benchmark-product-public-bundle/N` | keep | Format | The identifier itself is **contract**. |
-| `manifest`, `evidence-closure`, `trust`, `matrix-rederivation`, `report-verification`, `claim-consistency`, `integrity-anchors`, `disclosure-specification`, `artifact-integrity` | **keep + gloss** | unchanged | **Contract.** These strings are sealed into `verification.checks` and asserted by the external verification path; renaming them is a format revision. The presentation fix is a plain-language gloss on the same line — e.g. `matrix-rederivation   passed   the run tally was recomputed from the evidence`. This is the single highest-value change in this document: it fixes reader comprehension at zero contract cost. |
+| `manifest`, `evidence-closure`, `trust`, `matrix-rederivation`, `report-verification`, `claim-consistency`, `integrity-anchors`, `disclosure-specification`, `artifact-integrity`, `signature-validity` | **keep + gloss** | unchanged | **Contract.** These strings are sealed into `verification.checks` and asserted by the external verification path; renaming them is a format revision. The presentation fix is a plain-language gloss on the same line — e.g. `matrix-rederivation   passed   the run tally was recomputed from the evidence`. This is the single highest-value change in this document: it fixes reader comprehension at zero contract cost. |
 | `not fetched` | keep | — | Already exact. |
 | Signed by: publisher / automated grader / human reviewer / label admission | keep | — | Already plain. The `urn:`/`did:key` forms correctly stay in `--json`. |
 | same operator / custody not declared | keep | — | |
@@ -215,22 +215,23 @@ has found a different concept — or a bug.
 | Method fixed before the runs | preregistered | `preregistered` |
 | A single stored piece of authenticated evidence | evidence file | `records/<sha256>.bin` |
 | Who decided a run's outcome | judge | `instrument`, evaluator |
-| Runs the judges disagreed on | runs the scorers disagreed on | `conflicted`, assembly dissent |
+| Runs the judges disagreed on | runs the judges disagreed on | `conflicted`, assembly dissent |
 | The content hash naming a thing | fingerprint | `sha256`, digest |
 | Proof that bytes existed by a time | timestamp proof | `anchor` |
 | Running the checks again over the bundle | *reserved — #2982* | `verify`, `verification.checks` |
 | Where and by whom the runs happened | where it ran / who ran this | `venue`, `venueHonesty` |
 | What was and was not pinned | what was pinned | `disclosure`, six-variable disclosure |
 
-Two entries earn their place by removing a duplicate: **"runs the scorers disagreed on"**
+Two entries earn their place by removing a duplicate: **"runs the judges disagreed on"**
 collapses `conflicted` (Report/Claim) and *assembly dissent* (verification), which are one
 reader concept under two names on the same page today; and **"the runs"** collapses *Matrix
 accounting* and *completeness/attrition*, which a reader reads as one thing.
 
 Concepts a reader never meets by name, after this spec: Matrix, envelope, catalog, projection,
 subject, assurance preset, assurance primitive, disclosure specification, declaration, CAS.
-That is **10 nouns removed from the reader's vocabulary by hiding alone** — before a single
-rename, and before #2985 folds anything.
+That is **nine nouns removed from the reader's vocabulary by hiding alone** — before a single
+rename, and before #2985 folds anything. `CAS` is the tenth noun a reader stops meeting, but it
+leaves by rename (§4.1: `CAS record` → *Evidence file*), not by hiding.
 
 ## 6. What this spec does not decide
 
@@ -252,8 +253,9 @@ reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in t
 2. **Report page vocabulary** — §4.1 applied to `verify/src/assets.ts` (`index.html`,
    `README.md`, `share.txt`, badge, social card); gates
    `verify/src/assets-presentation-profile.test.ts` and `assets-binary-admission.test.ts`.
-   Sequence *after* #2985 rules the IA, so the renames land against the surviving elements
-   rather than being applied twice.
+   Sequenced *after* #2985 rules the IA, so the renames land against the surviving elements
+   rather than being applied twice; #2985 closed completed on 2026-09-02, so that sequencing
+   condition is already satisfied.
 3. **Reader tool prose vocabulary** — §4.2's remaining rows, including the usage text; same
    gate as (1).
 4. **Docs reader-vocabulary tables** — §4.3: one table each in `PUBLIC-BUNDLE.md` and
@@ -262,8 +264,8 @@ reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in t
    appears in any reader-facing generated string, and that no §5 concept is presented under two
    names. Without it this spec decays on the next feature that adds a surface.
 
-Items (1), (3), (4), and (5) are unblocked today; (2) waits on #2985. All five adopt the
-verdict verb ruled by #2982 rather than minting one.
+All five items are unblocked today — (2)'s only sequencing condition, #2985, has closed. All
+five adopt the verdict verb ruled by #2982 rather than minting one.
 
 **Contract renames — queued to a bundle-format revision, not scheduled here.** Nothing in §4
 requires one; every ruling above is reachable through presentation. The queue exists so the
