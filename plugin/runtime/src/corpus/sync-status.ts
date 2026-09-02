@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { dirname } from "node:path";
-
 import { z } from "zod";
 
 import type { RuntimeLogger } from "../logger.js";
+import { writeFileAtomically } from "./atomic-write.js";
 import { describeError, nodeErrorCode } from "./errors.js";
 import type { CorpusFilesystem } from "./fs.js";
 import { compareCodeUnitStrings } from "./order.js";
@@ -12,9 +11,20 @@ import { compareCodeUnitStrings } from "./order.js";
 export const MIRROR_SYNC_STATUS_FORMAT = "jinn-corpus-mirror-sync-status/1" as const;
 export const MIRROR_SYNC_STATUS_FILENAME = "mirror-sync-status.json";
 
+/** The ceiling on each half of a recorded failure, shared by the writer and the schema. */
+export const MAX_FAILURE_CHARS = 512;
+
+/**
+ * `code` and `message` are PEER-INFLUENCED: `message` is `describeError` over
+ * a transport error, and `TransportRedirectError` embeds the peer-supplied
+ * `Location` header verbatim. They reach a durable file and, through the
+ * freshness row, an operator's console — so they are bounded here the way
+ * every other untrusted-text egress in this package is bounded, and stripped
+ * of control characters at the point they are recorded (`recordOutcome`).
+ */
 const FailureSchema = z.strictObject({
-  code: z.string().min(1),
-  message: z.string().min(1),
+  code: z.string().min(1).max(MAX_FAILURE_CHARS),
+  message: z.string().min(1).max(MAX_FAILURE_CHARS),
   at: z.string().min(1),
 });
 
@@ -29,12 +39,19 @@ const StatusFileSchema = z.strictObject({
     .strictObject({
       completedAt: z.string().min(1),
       status: z.enum(["synced", "partial", "failed", "skipped-locked"]),
+      /**
+       * Set when the mirror synced but the public-plane index pass that
+       * follows it threw. Recorded apart from `status` because the two report
+       * different subsystems: the mirror really did sync, and folding an
+       * index fault into `status` would send an operator looking at their
+       * feed while `corpus_search` quietly answers over a stale index.
+       */
+      indexError: z.string().min(1).max(MAX_FAILURE_CHARS).optional(),
     })
     .optional(),
   sources: z.record(z.string(), SourceStatusSchema),
 });
 
-export type MirrorSyncFailure = z.infer<typeof FailureSchema>;
 export type MirrorSourceSyncStatus = z.infer<typeof SourceStatusSchema>;
 export type MirrorSyncStatusRecord = z.infer<typeof StatusFileSchema>;
 
@@ -100,22 +117,7 @@ export function createFileMirrorSyncStatusStore(options: {
       }
       const body = `${JSON.stringify({ ...value, sources }, null, 2)}\n`;
 
-      const temporaryPath = `${options.filePath}.${tempNonce()}.tmp`;
-      try {
-        await options.fs.mkdir(dirname(options.filePath), { recursive: true, mode: 0o700 });
-        await options.fs.unlink(temporaryPath).catch(() => undefined);
-        const handle = await options.fs.open(temporaryPath, "wx", 0o600);
-        try {
-          await handle.writeFile(body, "utf8");
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
-        await options.fs.rename(temporaryPath, options.filePath);
-      } catch (error) {
-        await options.fs.unlink(temporaryPath).catch(() => undefined);
-        throw error;
-      }
+      await writeFileAtomically({ fs: options.fs, filePath: options.filePath, body, tempNonce });
     },
   };
 }
