@@ -416,18 +416,23 @@ function requireProviderNetworkCostAcknowledgement(
  * the provider-cost gate above, and for the same reason: this CLI is non-interactive, so a flag is
  * the only honest way to ask a question and get an answer. The refusal detail carries the whole
  * advisory, so the first refused invocation is where the operator reads the width.
+ *
+ * Returns the acknowledged advisory line, or `undefined` when there is none to acknowledge. The
+ * caller prints it on the success path rather than this gate streaming it: `--json` already
+ * carries the advisory in the lock envelope, and stdout — beside the `locked draft ...` receipt —
+ * is that field's human analogue. `context.progress` is the launch verb's channel (nothing else
+ * streams before launch), and the width an operator sealed belongs in the same captured output as
+ * the digest they sealed it into.
  */
 function requireSampleSizeAdvisoryAcknowledgement(
   args: ParsedArgs,
-  context: CliContext,
   workspaceDir: string,
   draftId: string,
-  jsonMode: boolean,
-): boolean {
+): string | undefined {
   const planned = draftSampleSizeAdvisory(workspaceDir, draftId);
   // No advisory means no lock could seal this draft right now; `runLock` below says why, and
   // demanding an acknowledgement of a width that does not exist would bury that answer.
-  if (planned === undefined) return false;
+  if (planned === undefined) return undefined;
   const advisory = formatSampleSizeAdvisory(planned);
   if (!present(args, SAMPLE_SIZE_ACK_FLAG)) {
     refuse(
@@ -437,8 +442,7 @@ function requireSampleSizeAdvisoryAcknowledgement(
         + `--${SAMPLE_SIZE_ACK_FLAG} to seal at this n.`,
     );
   }
-  if (!jsonMode) context.progress?.(advisory);
-  return true;
+  return advisory;
 }
 
 function withProviderAcknowledgement<T>(
@@ -1089,16 +1093,22 @@ async function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boole
   );
   // Only an advisory the operator was actually shown is sealed as acknowledged; when there was
   // none to show, the lock below refuses and nothing is sealed either way.
-  const acknowledgedSampleSizeAdvisory = requireSampleSizeAdvisoryAcknowledgement(
-    args, context, opContext.workspaceDir, draftId, jsonMode,
+  const sampleSizeAdvisory = requireSampleSizeAdvisoryAcknowledgement(
+    args, opContext.workspaceDir, draftId,
   );
 
-  const locked = runLock(opContext, { draftId, acknowledgedSampleSizeAdvisory });
+  const locked = runLock(opContext, {
+    draftId,
+    acknowledgedSampleSizeAdvisory: sampleSizeAdvisory !== undefined,
+  });
   const result = withProviderAcknowledgement(locked, acknowledged);
   const rendered = renderResult(
     result,
     jsonMode,
-    (value) => `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
+    // The acknowledged width prints above the receipt, so human-mode stdout says at what n the
+    // digest below it was sealed. `--json` carries the same pair in the envelope.
+    (value) => (sampleSizeAdvisory === undefined ? "" : `${sampleSizeAdvisory}\n`)
+      + `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
   );
   if (!locked.ok || present(args, NO_ANCHOR_FLAG)) return rendered;
 

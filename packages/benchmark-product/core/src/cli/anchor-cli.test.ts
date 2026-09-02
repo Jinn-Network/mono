@@ -275,7 +275,8 @@ describe("lock chains the §7.2 anchor hook without changing what lock reports",
 
     expect(locked.exitCode).toBe(0);
     expect(locked.stderr).toBe("");
-    expect(locked.stdout).toMatch(/^locked draft anchor-draft: run [0-9a-f]{64}, closes /);
+    // Multiline: the acknowledged sample-size advisory prints above the receipt (issue #2978).
+    expect(locked.stdout).toMatch(/^locked draft anchor-draft: run [0-9a-f]{64}, closes /m);
     expect(locked.stdout).toContain("anchoring: no anchor was obtained (execution)");
     expect(locked.stdout).toContain(
       `retry before launch with "${PRODUCT_BRANDING.commandName} anchor --draft anchor-draft --subject lock"`,

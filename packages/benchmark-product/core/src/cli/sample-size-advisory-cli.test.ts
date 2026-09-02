@@ -106,7 +106,11 @@ describe("lock — the sample-size advisory gate", () => {
 
     const locked = await runCli(["lock", "--ack-sample-size", ...base(), "--draft", "advisory-draft"], context);
     expect(locked.exitCode, locked.stderr).toBe(0);
-    expect(progress.join("\n")).toContain(`n=${SAMPLED_TASKS}: interval width ${expectedIntervalWidth(SAMPLED_TASKS)}`);
+    // The width prints on stdout beside the digest it was sealed into, not on the progress
+    // channel: `lock` streams nothing, which is what `cli-lifecycle.integration.test.ts` pins.
+    expect(locked.stdout).toContain(`n=${SAMPLED_TASKS}: interval width ${expectedIntervalWidth(SAMPLED_TASKS)}`);
+    expect(locked.stdout).toContain("locked draft advisory-draft");
+    expect(progress).toEqual([]);
 
     const runSha256 = readRunState(workspaceDir, "advisory-draft")?.runSha256;
     expect(runSha256).toBeDefined();
