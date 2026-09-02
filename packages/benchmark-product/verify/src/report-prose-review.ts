@@ -200,7 +200,9 @@ export const FROZEN_REPORT_PROSE_FINDINGS: readonly FrozenReportProseFinding[] =
     ruling:
       "The claim line in the header is the page's single statement of it. The bundled-sample note "
       + "ends at \"derived from the sample consensus inputs.\" and the descriptive line ends at "
-      + "\"Lower is better.\"; neither restates the header.",
+      + "\"Lower is better.\"; neither restates the header. The binary profile carries the same "
+      + "repetition off this page -- `binaryFactsHtml` opens with the tail of the claim line "
+      + "`neutralClaimHtml` already rendered -- and drops it in the same revision.",
   },
   {
     rule: "repeated-statement",
