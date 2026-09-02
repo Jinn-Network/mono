@@ -87,6 +87,13 @@ export interface DomainBindingProof {
 /** A binding whose offline half checked out. */
 export interface VerifiedDomainBinding extends DomainBindingStatement {
   readonly proof: DomainBindingProof;
+  /**
+   * What was actually established, in the type system, so no surface can render this value while
+   * implying more. There is exactly one member and there may never be a second one produced by this
+   * function: confirming the domain needs a DNS or HTTPS lookup, which happens on the reader's side
+   * and is not something `verifyDomainBinding` can do or report.
+   */
+  readonly confirmation: "key-signature-only";
 }
 
 /** The label prefix on the published record, and the DNS name it lives under. */
@@ -163,5 +170,9 @@ export function verifyDomainBinding(
       "the domain binding names a key that did not sign this bundle",
     );
   }
-  return { ...statement, proof: domainBindingProof(statement.domain, statement.keyId, statement.mechanism) };
+  return {
+    ...statement,
+    proof: domainBindingProof(statement.domain, statement.keyId, statement.mechanism),
+    confirmation: "key-signature-only",
+  };
 }

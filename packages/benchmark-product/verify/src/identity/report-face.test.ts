@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import { domainBindingProof, DOMAIN_BINDING_FORMAT, type VerifiedDomainBinding } from "./domain-binding.js";
 import {
   publisherIdentityClass,
-  publisherIdentityLine,
+  publisherIdentityLines,
   publisherIdentitySentence,
 } from "./report-face.js";
 
@@ -18,6 +18,7 @@ function binding(mechanism: VerifiedDomainBinding["mechanism"]): VerifiedDomainB
     mechanism,
     statedAt: "2026-09-02T00:00:00.000Z",
     proof: domainBindingProof("example.com", KEY_ID, mechanism),
+    confirmation: "key-signature-only",
   };
 }
 
@@ -27,31 +28,43 @@ describe("publisher identity report face (issue #2983)", () => {
     expect(publisherIdentityClass(binding("dns-txt"))).toBe("domain-bound");
   });
 
-  test("renders the domain with the proof mechanism named plainly", () => {
-    expect(publisherIdentityLine(binding("dns-txt"), "sha256:aa"))
-      .toBe("published by example.com — DNS TXT record at _colophon.example.com");
-    expect(publisherIdentityLine(binding("well-known-url"), "sha256:aa"))
-      .toBe("published by example.com — well-known URL at https://example.com/.well-known/colophon-domain-binding.txt");
+  test("renders the domain with the proof mechanism named plainly, and attributively", () => {
+    expect(publisherIdentityLines(binding("dns-txt"), "sha256:aa")).toEqual([
+      "key sha256:aa",
+      "claims publication by example.com — unconfirmed here; check the DNS TXT record at _colophon.example.com",
+      `expect: colophon-domain-binding=1; key=${KEY_ID}`,
+    ]);
+    expect(publisherIdentityLines(binding("well-known-url"), "sha256:aa")[1])
+      .toBe("claims publication by example.com — unconfirmed here; check the well-known URL at https://example.com/.well-known/colophon-domain-binding.txt");
+  });
+
+  test("never asserts the domain published anything: only the key signature was checked", () => {
+    for (const mechanism of ["dns-txt", "well-known-url"] as const) {
+      const [, claim] = publisherIdentityLines(binding(mechanism), "sha256:aa");
+      expect(claim).not.toMatch(/^published by/);
+      expect(claim).toContain("unconfirmed here");
+    }
   });
 
   test("renders the bare key fingerprint when nothing is bound", () => {
-    expect(publisherIdentityLine(undefined, "sha256:aa")).toBe("no domain bound; key sha256:aa");
+    expect(publisherIdentityLines(undefined, "sha256:aa")).toEqual(["key sha256:aa — no domain bound"]);
   });
 
   test("says so plainly when there is not even a fingerprint to render", () => {
-    expect(publisherIdentityLine(undefined, undefined))
-      .toBe("no domain bound; this key carries no fingerprint this reader can compute");
+    expect(publisherIdentityLines(undefined, undefined))
+      .toEqual(["this key carries no fingerprint this reader can compute — no domain bound"]);
   });
 
   test("states exactly what trusting the binding rests on: DNS, the zone holder, and the registrar", () => {
     const sentence = publisherIdentitySentence(binding("dns-txt"))!;
     expect(sentence).toContain("checked that signature offline");
     expect(sentence).toContain("derived from that key, not taken from");
-    expect(sentence).toContain("_colophon.example.com");
-    expect(sentence).toContain("colophon-domain-binding=1; key=");
+    expect(sentence).toContain("actually publishes the record named above");
     expect(sentence).toContain("DNS resolution");
     expect(sentence).toContain("registrar");
-    expect(sentence).toContain("says nothing about what the zone held when this bundle was made");
+    expect(sentence).toContain("says nothing about what the zone held on 2026-09-02T00:00:00.000Z");
+    // The stated date is surfaced, so "what the zone held then" names an instant a reader can use.
+    expect(sentence).toContain("naming example.com on 2026-09-02T00:00:00.000Z");
   });
 
   test("adds no paragraph about the limits of a binding that is not there", () => {

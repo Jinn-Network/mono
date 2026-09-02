@@ -257,8 +257,25 @@ it, and a lookup made now says nothing about what the zone held when the bundle
 was made. The verifier says exactly this on its own report face rather than
 leaving you to infer it.
 
-With no binding supplied, the publisher is named by its bare key fingerprint:
-`sha256:` over the raw Ed25519 public key the `did:key` carries.
+Because only that first half was checked, the report face is **attributive**,
+never assertive, and always shows the key's own fingerprint beside the claim:
+
+```
+Signed by
+  publisher · 1 key
+    key sha256:fbf961e0…
+    claims publication by example.com — unconfirmed here; check the DNS TXT record at _colophon.example.com
+    expect: colophon-domain-binding=1; key=did:key:z6MknAAT…
+```
+
+With no binding supplied the second and third lines are replaced by
+`— no domain bound` on the fingerprint line. The `--json` surface carries the
+binding under `identityBinding` (never `identity`, which is the bundle's own
+digest) with `confirmation: "key-signature-only"` naming what was established.
+
+A binding is only ever read against the bundle's single publisher key. One
+naming a grader or reviewer key is refused, as is any bundle without exactly one
+publisher: there is no "published by" for such a binding to qualify.
 
 A binding that does not check out exits 2 and is not rendered; the bundle's own
 verdict is still reported, because a bad binding says nothing about the bundle.

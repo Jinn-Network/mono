@@ -443,7 +443,7 @@ test("the golden bundle's default output carries no identifier while --json carr
   // that digest is the only name this key has, and printing nothing would read as nothing to say.
   assert.match(
     human.stdout,
-    /\nSigned by\n {2}publisher · 1 key\n {4}no domain bound; key sha256:[a-f0-9]{64}\n {2}automated grader — same operator · 1 key\n/,
+    /\nSigned by\n {2}publisher · 1 key\n {4}key sha256:[a-f0-9]{64} — no domain bound\n {2}automated grader — same operator · 1 key\n/,
   );
 
   const json = await invoke([golden, "--json"]);
@@ -640,7 +640,12 @@ test("a verified binding renders the domain and names the proof mechanism plainl
     verify: async () => publisherResult(keyId),
   });
   assert.equal(result.exitCode, 0);
-  assert.match(result.stdout, /published by example\.com — DNS TXT record at _colophon\.example\.com/);
+  // Attributive, not assertive: only the key's signature was checked, so the line says so where a
+  // reader sees it rather than four lines below in the limits paragraph.
+  assert.match(result.stdout, /claims publication by example\.com — unconfirmed here; check the DNS TXT record at _colophon\.example\.com/);
+  assert.doesNotMatch(result.stdout, /published by example\.com/);
+  // The key's own established name is still there for a reader who declines to make the lookup.
+  assert.match(result.stdout, /key sha256:[a-f0-9]{64}/);
   // The limits paragraph names the remaining step and what trusting its answer rests on.
   assert.match(result.stdout, /DNS resolution/);
   assert.match(result.stdout, /registrar/);
@@ -648,7 +653,8 @@ test("a verified binding renders the domain and names the proof mechanism plainl
   // Here the identifier is the literal string to look for in the record, so it earns its place --
   // and only there: it appears exactly once, inside the value to publish.
   assert.equal(result.stdout.match(/did:key:/g).length, 1);
-  assert.match(result.stdout, new RegExp(`colophon-domain-binding=1; key=${keyId}`));
+  // Unwrapped and on its own line, because a reader compares it byte for byte.
+  assert.match(result.stdout, new RegExp(`\n {4}expect: colophon-domain-binding=1; key=${keyId}\n`));
 });
 
 test("without a binding the publisher is named by its bare key fingerprint", async () => {
@@ -656,8 +662,8 @@ test("without a binding the publisher is named by its bare key fingerprint", asy
   const { keyId } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle"], { verify: async () => publisherResult(keyId) });
   assert.equal(result.exitCode, 0);
-  assert.match(result.stdout, /no domain bound; key sha256:[a-f0-9]{64}/);
-  assert.doesNotMatch(result.stdout, /published by/);
+  assert.match(result.stdout, /key sha256:[a-f0-9]{64} — no domain bound/);
+  assert.doesNotMatch(result.stdout, /claims publication/);
   // No binding, no paragraph about what a binding would mean.
   assert.doesNotMatch(result.stdout, /registrar/);
 });
@@ -687,8 +693,12 @@ test("--json carries the verified binding, and the failure in its place", async 
   });
   const parsed = JSON.parse(ok.stdout);
   assert.equal(parsed.ok, true);
-  assert.equal(parsed.identity.domain, "example.org");
-  assert.equal(parsed.identity.proof.location, "https://example.org/.well-known/colophon-domain-binding.txt");
+  assert.equal(parsed.identityBinding.ok, true);
+  assert.equal(parsed.identityBinding.domain, "example.org");
+  assert.equal(parsed.identityBinding.confirmation, "key-signature-only");
+  assert.equal(parsed.identityBinding.proof.location, "https://example.org/.well-known/colophon-domain-binding.txt");
+  // The bundle's own digest is untouched: a binding must never shadow the value a consumer pins by.
+  assert.equal(parsed.identity, "a".repeat(64));
 
   const bad = await runVerifierCli(["bundle", "--json", "--identity-binding", "b.json"], {
     readFile: () => new TextEncoder().encode("{"),
@@ -696,8 +706,9 @@ test("--json carries the verified binding, and the failure in its place", async 
   });
   const parsedBad = JSON.parse(bad.stdout);
   assert.equal(parsedBad.ok, false);
-  assert.equal(parsedBad.identity.ok, false);
-  assert.equal(parsedBad.identity.code, "validation");
+  assert.equal(parsedBad.identityBinding.ok, false);
+  assert.equal(parsedBad.identityBinding.code, "validation");
+  assert.equal(parsedBad.identity, "a".repeat(64));
 });
 
 test("--identity-binding requires a value and may be supplied only once", async () => {
@@ -729,7 +740,7 @@ test("a binding for a grader key never becomes the publisher's identity", async 
   assert.equal(result.exitCode, 2);
   assert.doesNotMatch(result.stdout, /grader\.example/);
   // The real publisher is still named by its own fingerprint rather than suppressed.
-  assert.match(result.stdout, new RegExp(`no domain bound; key ${keyFingerprintFromDidKey(publisher.keyId)}`));
+  assert.match(result.stdout, new RegExp(`key ${keyFingerprintFromDidKey(publisher.keyId)} — no domain bound`));
 });
 
 test("with no single publisher there is no identity to qualify, so neither line nor paragraph prints", async () => {
@@ -751,7 +762,7 @@ test("with no single publisher there is no identity to qualify, so neither line 
   });
   assert.equal(result.exitCode, 2);
   assert.match(result.stderr, /2 publisher keys/);
-  assert.doesNotMatch(result.stdout, /published by/);
+  assert.doesNotMatch(result.stdout, /claims publication/);
   // The limits paragraph must not qualify a name the report never showed.
   assert.doesNotMatch(result.stdout, /registrar/);
 });

@@ -121,6 +121,9 @@ describe("verifyDomainBinding (issue #2983)", () => {
       mechanism: "dns-txt",
       statedAt: "2026-09-02T00:00:00.000Z",
       proof: domainBindingProof("example.com", keyId, "dns-txt"),
+      // Naming what was established, so no surface can render this while implying the domain was
+      // reached. Confirming it needs a lookup this function does not and cannot make.
+      confirmation: "key-signature-only",
     });
   });
 

@@ -224,7 +224,7 @@ export {
 } from "./identity/did-key.js";
 export {
   publisherIdentityClass,
-  publisherIdentityLine,
+  publisherIdentityLines,
   publisherIdentitySentence,
 } from "./identity/report-face.js";
 export type { PublisherIdentityClass } from "./identity/report-face.js";

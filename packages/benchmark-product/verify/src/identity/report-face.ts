@@ -41,23 +41,41 @@ export function publisherIdentityClass(binding: VerifiedDomainBinding | undefine
 }
 
 /**
- * The one line that names the publisher. Bound, it is the domain with the proof mechanism named
- * plainly beside it; unbound, it is the bare key fingerprint, which is the only honest name a key
- * with no binding has.
+ * The lines that name the publisher: the key it actually is, then what it claims to be.
+ *
+ * The claim line is deliberately ATTRIBUTIVE. Anyone holding a key can sign a statement naming a
+ * domain they do not control, and this reader checked only that the key made the statement — so
+ * `published by example.com` would assert, at the top of the report and past a paragraph break from
+ * its own qualification, the one thing the check did not establish. `renderAnchor` puts `present`
+ * beside `verified` on its own head line for exactly this reason, and the sibling
+ * `../binding/report-face.ts` was revised three times (#3322, #3425, #3426) on the rule that a
+ * weaker basis changes the OPENING rather than leaning harder on a trailing paragraph. `unconfirmed
+ * here` is that word, and it names where the confirmation is missing rather than declaring the claim
+ * false, because a published record would make it true.
+ *
+ * The fingerprint is printed either way. Under an unconfirmed claim it is still the only name of
+ * this key that this reader established, so removing it would leave a reader who declines to make
+ * the lookup with no identity at all.
  */
-export function publisherIdentityLine(
+export function publisherIdentityLines(
   binding: VerifiedDomainBinding | undefined,
   keyFingerprint: string | undefined,
-): string {
-  if (binding !== undefined) {
-    return `published by ${binding.domain} — ${DOMAIN_BINDING_MECHANISM_NAMES[binding.mechanism]} `
-      + `at ${binding.proof.location}`;
-  }
+): readonly string[] {
   // A key whose identifier is not a did:key yields no fingerprint. Saying so beats printing nothing,
   // which a reader would read as "there was nothing to say about this key".
-  return keyFingerprint === undefined
-    ? "no domain bound; this key carries no fingerprint this reader can compute"
-    : `no domain bound; key ${keyFingerprint}`;
+  const key = keyFingerprint === undefined
+    ? "this key carries no fingerprint this reader can compute"
+    : `key ${keyFingerprint}`;
+  if (binding === undefined) return [`${key} — no domain bound`];
+  binding.confirmation satisfies "key-signature-only";
+  return [
+    key,
+    `claims publication by ${binding.domain} — unconfirmed here; `
+    + `check the ${DOMAIN_BINDING_MECHANISM_NAMES[binding.mechanism]} at ${binding.proof.location}`,
+    // The record's own line, unwrapped and unquoted, because a reader compares it byte for byte --
+    // the same reason `renderAnchor` gives the record digest a line of its own.
+    `expect: ${binding.proof.expectedValue}`,
+  ];
 }
 
 /**
@@ -68,11 +86,11 @@ export function publisherIdentityLine(
 export function publisherIdentitySentence(binding: VerifiedDomainBinding | undefined): string | undefined {
   if (binding === undefined) return undefined;
   const mechanism = DOMAIN_BINDING_MECHANISM_NAMES[binding.mechanism];
-  return `The key that signed this bundle also signed a statement naming ${binding.domain}, and this reader `
-    + `checked that signature offline. The ${mechanism} to look up was derived from that key, not taken from `
-    + `the statement. What is left is the half no bundle can carry: whether ${binding.domain} publishes `
-    + `"${binding.proof.expectedValue}" at ${binding.proof.location}. Checking it is a lookup on your side, and `
-    + `trusting the answer means trusting DNS resolution, whoever controls the domain's zone, and its registrar `
-    + `— anyone who can change that zone can create this binding or remove it, and an answer obtained now says `
-    + `nothing about what the zone held when this bundle was made.`;
+  return `The key that signed this bundle also signed a statement naming ${binding.domain} on `
+    + `${binding.statedAt}, and this reader checked that signature offline. The ${mechanism} to look up was `
+    + `derived from that key, not taken from the statement. What is left is the half no bundle can carry: `
+    + `whether ${binding.domain} actually publishes the record named above. `
+    + `Checking it is a lookup on your side, and trusting the answer means trusting DNS resolution, whoever `
+    + `controls the domain's zone, and its registrar — anyone who can change that zone can create this binding `
+    + `or remove it, and an answer obtained now says nothing about what the zone held on ${binding.statedAt}.`;
 }

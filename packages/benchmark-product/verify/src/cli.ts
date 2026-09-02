@@ -12,7 +12,7 @@ import type {
 import type { PublicBundleSigner, PublicBundleSignerRole } from "./signers.js";
 import { refuse } from "./profile/errors.js";
 import { verifyDomainBinding, type VerifiedDomainBinding } from "./identity/domain-binding.js";
-import { publisherIdentityLine, publisherIdentitySentence } from "./identity/report-face.js";
+import { publisherIdentityLines, publisherIdentitySentence } from "./identity/report-face.js";
 import { VERIFIER_VERSION } from "./version.js";
 
 export { VERIFIER_VERSION } from "./version.js";
@@ -148,7 +148,9 @@ function renderPublisherIdentity(
 ): string {
   const publishers = signers.filter((signer) => signer.role === "publisher");
   if (publishers.length !== 1) return "";
-  return `\n    ${publisherIdentityLine(binding, publishers[0]!.keyFingerprint)}`;
+  return publisherIdentityLines(binding, publishers[0]!.keyFingerprint)
+    .map((line) => `\n    ${line}`)
+    .join("");
 }
 
 function renderSigners(
@@ -171,6 +173,27 @@ function renderSigners(
     .map((group) => `${renderSignerGroup(group.role, group.custody, group.count)}${group.role === "publisher" ? identity : ""}`)
     .join("\n");
   return `\nSigned by\n${lines}\n`;
+}
+
+/**
+ * The neighbouring limits paragraphs are hard-wrapped literals at 76 columns. This one is generated,
+ * so it is wrapped here rather than in the shared sentence -- the words are the shared module's, the
+ * column width is this surface's.
+ */
+function wrapParagraph(text: string | undefined, width = 76): string | undefined {
+  if (text === undefined) return undefined;
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    if (line === "") line = word;
+    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
+    else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line !== "") lines.push(line);
+  return lines.join("\n");
 }
 
 export function renderVerifiedBundle(
@@ -196,7 +219,7 @@ export function renderVerifiedBundle(
   // The limits of the binding, beside the other limits paragraphs rather than beside the name it
   // qualifies: a reader who takes the name at face value is exactly the reader this paragraph is
   // for, and it belongs where they finish reading.
-  const identityLimits = publisherIdentitySentence(binding);
+  const identityLimits = wrapParagraph(publisherIdentitySentence(binding));
   // Naming the digests is what makes the deferred check completable: they are the addresses to
   // fetch and the expectations to check the fetched bytes against. Adding a body to this directory
   // is not the completion path -- it would break the manifest closure the bundle is identified by,
@@ -360,12 +383,10 @@ export async function runVerifierCli(
   const parsed = parseArguments(args);
   if (parsed === undefined) return { exitCode: 2, stdout: "", stderr: usage() };
 
+  const readFile = deps.readFile ?? ((path: string) => new Uint8Array(readFileSync(path)));
   let anchorTrust: PublicBundleAnchorTrustMaterial | undefined;
   try {
-    anchorTrust = buildAnchorTrust(
-      parsed,
-      deps.readFile ?? ((path) => new Uint8Array(readFileSync(path))),
-    );
+    anchorTrust = buildAnchorTrust(parsed, readFile);
   } catch (cause) {
     return {
       exitCode: 2,
@@ -415,7 +436,7 @@ export async function runVerifierCli(
         );
       }
       identity = verifyDomainBinding(
-        (deps.readFile ?? ((path) => new Uint8Array(readFileSync(path))))(parsed.identityBindingPath),
+        readFile(parsed.identityBindingPath),
         [publishers[0]!.keyId],
       );
     } catch (cause) {
@@ -458,8 +479,10 @@ export async function runVerifierCli(
       ...result,
       ...(freezeRepo === undefined ? {} : { freezeRepo }),
       ...(freezeRepoFailure === undefined ? {} : { freezeRepo: { ok: false, ...freezeRepoFailure } }),
-      ...(identity === undefined ? {} : { identity }),
-      ...(identityFailure === undefined ? {} : { identity: { ok: false, ...identityFailure } }),
+      // NOT `identity`: `result.identity` is the bundle's own SHA-256, and a key that shadowed it
+      // would hand a pinning consumer a binding object where it expected a digest.
+      ...(identity === undefined ? {} : { identityBinding: { ok: true, ...identity } }),
+      ...(identityFailure === undefined ? {} : { identityBinding: { ok: false, ...identityFailure } }),
     })}\n`
     : `${renderVerifiedBundle(result, identity)}${freezeRepo === undefined ? "" : renderFreezeRepoCheck(freezeRepo)}`;
   // Both notes are emitted, because a reader who supplied two flags is owed the outcome of both.
