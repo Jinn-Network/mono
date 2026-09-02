@@ -255,6 +255,11 @@ describe("freeze repository rendering", () => {
     }
     expect(message, "a bundle with no qualification graph must be refused").toBeDefined();
     for (const format of accepted) expect(message!, format).toContain(format);
+    // Three or more accepted formats read as a list, not a chain of `or`.
+    const tail = accepted.length >= 3
+      ? `${accepted[accepted.length - 2]}, or ${accepted[accepted.length - 1]}`
+      : accepted.join(" or ");
+    expect(message!).toContain(tail);
   });
 
   test("renders the disclosed closure: its freeze graph is the anchored qualification graph", () => {

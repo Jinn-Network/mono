@@ -78,6 +78,12 @@ export const FREEZE_REPO_BUNDLE_SUPPORT: Record<SupportedBundleFormat, FreezeRep
 const FREEZE_REPO_ACCEPTED_FORMATS: readonly SupportedBundleFormat[] = SUPPORTED_BUNDLE_FORMATS
   .filter((format) => FREEZE_REPO_BUNDLE_SUPPORT[format].qualification);
 
+/** `a or b`, `a, b, or c` — the accepted set is now long enough that a chain of `or` reads badly. */
+function listAccepted(formats: readonly string[]): string {
+  if (formats.length < 3) return formats.join(" or ");
+  return `${formats.slice(0, -1).join(", ")}, or ${formats[formats.length - 1]}`;
+}
+
 /**
  * The freeze artifacts, as evidence roles. This is the admission/qualification graph — the item
  * bank and its sources, the admission decisions and their ledger, the label resolutions and
@@ -628,7 +634,7 @@ export function renderFreezeRepo(snapshot: VerifiedBundleSnapshot): FreezeRepoTr
     refuse(
       "conflict",
       "bundle.json.format",
-      `a freeze repository requires a qualification bundle (${FREEZE_REPO_ACCEPTED_FORMATS.join(" or ")});`
+      `a freeze repository requires a qualification bundle (${listAccepted(FREEZE_REPO_ACCEPTED_FORMATS)});`
         + ` this bundle is ${bundleFormat}`,
     );
   }
