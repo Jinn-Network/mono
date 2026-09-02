@@ -29,26 +29,24 @@ export interface VerifierCliDeps {
   readonly readFile?: (path: string) => Uint8Array;
 }
 
-/** The identifier body, stopping at whitespace and at the punctuation a sentence wraps an
- * identifier in. A trailing `.` is left outside the match: it is sentence punctuation far more
- * often than part of the identifier. */
-const IDENTIFIER_TAIL = String.raw`(?:[^\s,;)"']*[^\s,;)"'.])?`;
-
 /**
- * Every internal protocol identifier a reader cannot act on: the record/profile `$id` URLs, `urn:`
- * names, `did:key` keys, and the bare `jinn.network` / `jinn.benchmarking` namespaces that appear
- * as extension keys and named-method ids. The base58btc class stops a `did:key` match before a
- * trailing `:reason` suffix a refusal appended.
+ * Anything shaped like an identifier on the human surface: a URL, a `urn:` name, a `did:key` key,
+ * or a bare `jinn.network` / `jinn.benchmarking` namespace (the extension keys and named-method
+ * ids). Whether a URL is actually ours is decided in the replacer, not here.
+ *
+ * Every alternative is a literal prefix followed by ONE greedy character class, so a match attempt
+ * is linear and cannot backtrack. That shape is deliberate: a refusal message interpolates
+ * identifiers read out of the bundle under inspection, so its length is chosen by whoever produced
+ * the bundle. The base58btc class stops a `did:key` match before a trailing `:reason` suffix a
+ * refusal appended.
  */
-const INTERNAL_IDENTIFIER = new RegExp(
-  [
-    String.raw`https?://[^\s,;)"']*jinn\.network${IDENTIFIER_TAIL}`,
-    String.raw`urn:${IDENTIFIER_TAIL}`,
-    String.raw`did:key:z[1-9A-HJ-NP-Za-km-z]+`,
-    String.raw`jinn\.(?:network|benchmarking)${IDENTIFIER_TAIL}`,
-  ].join("|"),
-  "gu",
-);
+const IDENTIFIER_CANDIDATE =
+  /https?:\/\/[^\s,;)"']*|urn:[^\s,;)"']*|did:key:z[1-9A-HJ-NP-Za-km-z]+|jinn\.(?:network|benchmarking)[^\s,;)"']*/gu;
+
+/** The unresolvable protocol origins: the record/profile `$id` host and its product siblings. */
+const INTERNAL_ORIGIN = /jinn\.network/u;
+
+const IDENTIFIER_ALIAS = "<identifier: see --json>";
 
 /**
  * A refusal names the identifier it refused, and on the machine surface that identifier is the
@@ -61,7 +59,13 @@ const INTERNAL_IDENTIFIER = new RegExp(
  * leak by forgetting the call.
  */
 function withoutInternalIdentifiers(message: string): string {
-  return message.replace(INTERNAL_IDENTIFIER, "<identifier: see --json>");
+  return message.replace(IDENTIFIER_CANDIDATE, (match) => {
+    // A URL a reader can actually open is left alone; only our own unresolvable origins are aliased.
+    if (match.startsWith("http") && !INTERNAL_ORIGIN.test(match)) return match;
+    // A trailing `.` is sentence punctuation far more often than part of the identifier, so it is
+    // handed back rather than swallowed.
+    return match.endsWith(".") ? `${IDENTIFIER_ALIAS}.` : IDENTIFIER_ALIAS;
+  });
 }
 
 /**
@@ -71,8 +75,9 @@ function withoutInternalIdentifiers(message: string): string {
  * handed an address to try.
  */
 const IDENTIFIER_DISCLOSURE =
-  "Protocol identifiers are names, not addresses -- nothing here is fetched from them.\n"
-  + "Verification uses the exact platform bytes installed from npm.";
+  "Protocol identifiers are names, not addresses \u2014 nothing is fetched from\n"
+  + "them, by this verifier or by anyone else. Verification uses the exact\n"
+  + "platform bytes installed from npm.";
 
 function usage(): string {
   return "Usage: colophon-verify <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"

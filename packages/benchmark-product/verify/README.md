@@ -62,7 +62,7 @@ under `fixtures/public-bundle-conformance-v1/` for testing an independent verifi
 
 ## What this does not yet prove
 
-Protocol identifiers in the installed platform packages are names, not addresses: nothing
-is fetched from them, and nothing retrieves them. This verifier checks the bundle against
-the exact `@jinn-network/*` bytes installed from npm, and those bytes are the whole basis
-of every check it reports.
+Protocol identifiers in the installed platform packages are names, not addresses. This
+verifier fetches nothing from them, and a third party who tries will retrieve nothing. It
+checks the bundle against the exact `@jinn-network/*` bytes installed from npm, and those
+bytes are the whole basis of every check it reports.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -28,7 +28,7 @@ test("usage exits 2 and states the exit contract", async () => {
   // Issue #2981: the disclosure survives, the unresolvable origin does not. A reader is still
   // told the identifiers are not fetched, without being handed a host to try.
   assert.match(result.stderr, /Protocol identifiers are names, not addresses/);
-  assert.match(result.stderr, /exact platform bytes installed from npm/);
+  assert.match(result.stderr, /platform bytes installed from npm/);
   assert.doesNotMatch(result.stderr, /jinn\.network/);
   assert.doesNotMatch(result.stderr, /not hosted/);
 });
@@ -82,7 +82,7 @@ test("human success names all six checks and states the verification limit", asy
   assert.match(output, /does not prove that the machine that produced the/);
   assert.match(output, /No files were uploaded/);
   assert.match(output, /Protocol identifiers are names, not addresses/);
-  assert.match(output, /exact platform bytes installed from npm/);
+  assert.match(output, /platform bytes installed from npm/);
   assert.doesNotMatch(output, /jinn\.network/);
   assert.doesNotMatch(output, /not hosted/);
 });
@@ -574,6 +574,21 @@ test("the golden bundle's human surface names no internal protocol namespace", a
   assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
 });
 
+test("no tampered variant's refusal names an internal protocol namespace", async () => {
+  // The injected refusal below proves the alias; this proves the coverage. Every refusal the
+  // conformance corpus can actually produce goes through the human surface, so a message that
+  // starts naming a `$id`, a `urn:`, or a method id fails here rather than in a reader's terminal.
+  const tamperedDir = fileURLToPath(new URL("../fixtures/public-bundle-conformance-v1/tampered", import.meta.url));
+  const variants = (await readdir(tamperedDir)).sort();
+  assert.ok(variants.length > 0, "the tampered corpus is empty");
+  for (const variant of variants) {
+    const refused = await invoke([join(tamperedDir, variant)]);
+    assert.notEqual(refused.code, undefined, `${variant} was not refused`);
+    assert.doesNotMatch(refused.stderr, INTERNAL_NAMESPACE, `${variant} stderr`);
+    assert.doesNotMatch(refused.stdout, INTERNAL_NAMESPACE, `${variant} stdout`);
+  }
+});
+
 test("a refusal naming a record kind aliases it on the human surface and keeps it in --json", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   // The real shape of `profile/disclosure.ts` and `anchor/check.ts` refusals: the message names the
@@ -597,4 +612,21 @@ test("a refusal naming a record kind aliases it on the human surface and keeps i
   const json = await runVerifierCli(["bundle", "--json"], deps);
   assert.equal(json.exitCode, 1);
   assert.equal(JSON.parse(json.stdout).message, `disclosure-specification: the record's subject kind must be ${kind}`);
+});
+
+test("a URL a reader can actually open survives the human surface", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  // Only our own unresolvable origins are aliased. An anchoring calendar or a licence URL is
+  // something a reader can act on, so aliasing it would remove the only actionable thing in the line.
+  const calendar = "https://alice.btc.calendar.opentimestamps.org/";
+  const human = await runVerifierCli(["bundle"], {
+    verify: () => {
+      const error = new Error(`integrity-anchors: the calendar at ${calendar} did not answer`);
+      error.code = "environment";
+      return Promise.reject(error);
+    },
+  });
+  assert.equal(human.exitCode, 2);
+  assert.match(human.stderr, new RegExp(calendar.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));
+  assert.doesNotMatch(human.stderr, /<identifier: see --json>/);
 });
