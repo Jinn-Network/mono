@@ -117,7 +117,8 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
     // rule exists to make impossible. Reading a DISCLOSED bundle on the web is packet R1's.
     expect(gui.filter((entry) => entry.gui.status === "unavailable").map((entry) => entry.operation).sort()).toEqual([
       "admitHumanTruth", "createHumanReviewPackets", "disclosureDeclare", "disclosureShow",
-      "exportDerivedBundle", "importBinaryItemBank", "importRunRecords", "migrateTerminalBenchLegacyTask",
+      "exportDerivedBundle", "identityBind", "importBinaryItemBank", "importRunRecords",
+      "migrateTerminalBenchLegacyTask",
       "signHumanReviewResponse",
     ]);
   });

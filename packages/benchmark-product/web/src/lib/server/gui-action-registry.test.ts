@@ -30,6 +30,8 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires server-configured migration input paths; browser-supplied paths are forbidden",
   exportDerivedBundle:
     "copies a machine-local job or log directory; browser path-based export is forbidden",
+  identityBind:
+    "the operator publishes the proof at their own domain, outside any Colophon surface",
   disclosureDeclare:
     "requires a locally composed six-variable declaration file",
   disclosureShow:
