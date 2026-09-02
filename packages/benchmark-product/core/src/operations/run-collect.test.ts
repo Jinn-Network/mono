@@ -223,7 +223,7 @@ describe("runCollect — guards", () => {
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("conflict");
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
-  }, 30_000);
+  });
 
   test("refuses conflict when cells remain outstanding and closeAt has not passed", async () => {
     const clock = makeClock();
@@ -249,7 +249,7 @@ describe("runCollect — guards", () => {
 
     // The draft was NOT advanced to closed by a refused collect attempt.
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
-  }, 30_000);
+  });
 
   test("refuses conflict when solve delivery is terminal but an evaluation leg is still in flight", async () => {
     const clock = makeClock();
@@ -275,7 +275,7 @@ describe("runCollect — guards", () => {
     expect(outcome.error).toMatchObject({ code: "conflict" });
     expect(outcome.error.detail).toMatch(/evaluation/u);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
-  }, 30_000);
+  });
 
   test("succeeds despite an outstanding cell once closeAt has passed", async () => {
     const clock = makeClock();
@@ -313,7 +313,7 @@ describe("runCollect — guards", () => {
     const judgedCount = matrix.cells.filter((cell) => cell.outcome === "judged").length;
     expect(judgedCount).toBe(5);
     expect(matrix.completeness.runOutcome).toBe("partial");
-  }, 30_000);
+  });
 });
 
 describe("runCollect — full assembly (fake backend, driven run)", () => {
@@ -355,7 +355,7 @@ describe("runCollect — full assembly (fake backend, driven run)", () => {
 
     const closedEntry = readRunJournalEntries(workspaceDir, "draft-1").find((entry) => entry.kind === "closed");
     expect(closedEntry).toMatchObject({ matrixSha256: outcome.result.matrixSha256 });
-  }, 30_000);
+  });
 
   test("collecting an already-closed draft refuses illegal-transition (never double-seals)", async () => {
     const clock = makeClock();
@@ -367,5 +367,5 @@ describe("runCollect — full assembly (fake backend, driven run)", () => {
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.error.code).toBe("illegal-transition");
-  }, 30_000);
+  });
 });

@@ -81,7 +81,7 @@ describe("runLock — lifecycle transition", () => {
 
     const entries = readAuditEntries(workspaceDir);
     expect(entries[entries.length - 1]).toMatchObject({ action: "lock", subject: "draft-1", outcome: "ok" });
-  }, 30_000);
+  });
 
   test("retains an exact registration closure ordered Task material -> Tasks -> Benchmark -> Run", async () => {
     const clock = makeClock();
@@ -120,7 +120,7 @@ describe("runLock — lifecycle transition", () => {
       locked.result.runSha256,
       "2026-08-13T12:00:00Z",
     )).toThrow(/missing/);
-  }, 30_000);
+  });
 
   test("refuses illegal-transition when the draft is not 'quoted' (e.g. still 'draft')", async () => {
     const clock = makeClock();
@@ -143,7 +143,7 @@ describe("runLock — lifecycle transition", () => {
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.error.code).toBe("illegal-transition");
-  }, 30_000);
+  });
 });
 
 describe("runLock — A2 quote invalidation", () => {
@@ -173,7 +173,7 @@ describe("runLock — A2 quote invalidation", () => {
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("conflict");
     expect(outcome.error.detail).toMatch(/re-quote/);
-  }, 30_000);
+  });
 
   test("refuses not-found when locking a quoted draft with no RunState at all (should not happen via the public API, but the check is defensive)", async () => {
     const clock = makeClock();
@@ -208,7 +208,7 @@ describe("runLock — gating (authority-denied / grant)", () => {
     authorityGrant(contextFor(clock), { principalId: "agent-1", operations: ["lock"] });
     const allowed = runLock(contextFor(clock, "agent-1"), { draftId: "draft-1" });
     expect(allowed.ok).toBe(true);
-  }, 30_000);
+  });
 });
 
 describe("runLock — draft immutability after lock", () => {
@@ -222,7 +222,7 @@ describe("runLock — draft immutability after lock", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("illegal-transition");
-  }, 30_000);
+  });
 
   test("armAdd refuses illegal-transition on a locked draft", async () => {
     const clock = makeClock();
@@ -234,7 +234,7 @@ describe("runLock — draft immutability after lock", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("illegal-transition");
-  }, 30_000);
+  });
 });
 
 describe("declared anchoring intent (anchor-evidence design §7.3)", () => {

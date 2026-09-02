@@ -13,12 +13,19 @@ afterEach(() => {
   }
 });
 
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+/**
+ * Waits for a fixture-process side effect. The bound is scaffolding, not the subject: it was 100
+ * attempts at 10ms, an effective 1s ceiling that a descheduled worker can spend without the
+ * fixture getting any CPU (#3354). A wall-clock deadline of 20s leaves room under Vitest's 30s
+ * bound for this error — which names what it was waiting for — to be the one that surfaces.
+ */
+async function waitUntil(predicate: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error("timed out waiting for verifier fixture process");
+  throw new Error(`timed out waiting for verifier fixture process: ${what}`);
 }
 
 test("cancellation waits until the verifier child is terminated and reaped", async () => {
@@ -33,7 +40,7 @@ test("cancellation waits until the verifier child is terminated and reaped", asy
   ].join("\n");
   const controller = new AbortController();
   const running = spawnBounded(process.execPath, ["-e", script], { LANG: "C.UTF-8" }, controller.signal);
-  await waitUntil(() => existsSync(pidPath));
+  await waitUntil(() => existsSync(pidPath), `the fixture never wrote its pid file at ${pidPath}`);
   const pid = Number(readFileSync(pidPath, "utf8"));
 
   controller.abort();

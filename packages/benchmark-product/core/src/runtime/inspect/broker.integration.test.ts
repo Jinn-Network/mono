@@ -248,7 +248,7 @@ describe.skipIf(imageDigest === undefined)("trusted broker contract", () => {
       "--entrypoint=python", imageDigest!, "-c", contractProbe,
     ], { encoding: "utf8" });
     expect(output.trim()).toBe("broker-v1-conformance-ok");
-  }, 30_000);
+  });
 
   test("accepts the dated-snapshot-sampling profile and refuses cross-profile generation blocks", () => {
     const output = execFileSync(dockerPath, [
@@ -257,7 +257,7 @@ describe.skipIf(imageDigest === undefined)("trusted broker contract", () => {
       "--entrypoint=python", imageDigest!, "-c", datedSnapshotProbe,
     ], { encoding: "utf8" });
     expect(output.trim()).toBe("dated-snapshot-conformance-ok");
-  }, 30_000);
+  });
 
   test("runs verifier operations without a broker, credential descriptor, or network", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "jinn-inspect-verify-boundary-")));
@@ -284,7 +284,7 @@ describe.skipIf(imageDigest === undefined)("trusted broker contract", () => {
       spawnSync(dockerPath, ["rm", "--force", name], { stdio: "ignore" });
       rmSync(root, { recursive: true, force: true });
     }
-  }, 30_000);
+  });
 
   test("cancellation reaps the worker, broker, private network, and secret volumes", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "jinn-broker-cancel-")));
