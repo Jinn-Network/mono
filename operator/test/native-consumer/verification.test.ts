@@ -512,6 +512,9 @@ describe('independent native vertical verification', () => {
     };
     await expect(verifyNativeVertical({ ...value, trust: { ...value.trust, bindingResolver: keyOnly } }))
       .rejects.toMatchObject({ reason: 'binding-not-resolved' });
+    // Fails loudly if a future leg adds or removes a resolution after the gate, rather
+    // than silently foreign-izing an earlier leg and passing for the wrong reason.
+    expect(seen - beforeReportLegs).toBe(4);
     value.state.close();
   });
 
