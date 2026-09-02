@@ -26,7 +26,8 @@ import type { SourceHeadOutcome } from "./outcomes.js";
 //     re-signing.
 //   - the same position RE-SIGNED at a later instant, which §5.2 obliges a
 //     live source to do before `refreshBy` expires (`serve` ships
-//     `maintainHead` for it, though no in-tree publisher calls it while idle).
+//     `maintainHead` for it; the operator's projector loop calls it while idle
+//     for the source it serves, #2549).
 //     `issuedAt` monotonicity passes, and then the linkage walk fails:
 //     a returning consumer is fed only entries ABOVE its mark, so the head's
 //     own cited entry -- the boundary itself -- is absent from the fed set

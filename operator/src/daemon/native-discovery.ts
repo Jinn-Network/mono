@@ -385,8 +385,10 @@ function sameHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): bool
  * `entry`, a bumped `issuedAt` and `refreshBy`. That is not `sameHead`, and before this
  * predicate it fell through to the sequence guard as `rewound-or-tampered-head`, so a
  * conformant archive would go red the moment it re-signed and stay red until its next
- * append (#2549). Nothing in this tree re-signs while idle yet — every in-tree publisher
- * calls `maintainHead` only after an append — so the shape arrives from an external source.
+ * append (#2549). The operator's projector loop now re-signs the requester source it serves
+ * while idle (`projector-loop.ts`, `HEAD_REFRESH_ELAPSED_FRACTION`), so this shape arrives from
+ * in-tree publishers as well as external ones; the solver/evaluator sources written through
+ * `serve`'s durable source writer still re-sign only on append.
  * This is the same shape the plugin runtime's corpus mirror admits (`classifyIdleHead`,
  * `plugin/runtime/src/corpus/mirror.ts`), with one difference: that consumer classifies only
  * after its walk yielded nothing, this one from the head alone.
@@ -768,13 +770,15 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         // `publicBaseUrl` (`buildNativeDiscoverySources`). Delete it and the peer path degrades too,
         // which the peer-refusal test forbids.
         //
-        // (Refreshing the served head at boot instead — "make the head current" — was not available
-        // when this degrade was written: a re-signed head at the SAME sequence is not `sameHead` and
+        // (Refreshing the served head instead — "make the head current" — was not available when
+        // this degrade was written: a re-signed head at the SAME sequence is not `sameHead` and
         // tripped the `rewound-or-tampered-head` guard below for every consumer already checkpointed
-        // at that sequence, self AND peer (#2549). #3468 admits that shape onto revalidation, so it
-        // is now a real option — but it is the SERVING side's change, and nothing in this tree
-        // re-signs an idle head yet, so this degrade still covers the operator that has not, which
-        // is the condition #2547 actually hit.)
+        // at that sequence, self AND peer (#2549). #3468 admits that shape onto revalidation, and
+        // the serving side now does it: the projector loop re-signs the idle requester head it
+        // serves (#2549). This degrade STAYS regardless — it still covers an operator running an
+        // older build, one whose projector loop is not running or has not yet ticked, and every
+        // source this operator serves through `serve`'s durable source writer, which still re-signs
+        // only on append. It is the condition #2547 actually hit.)
         if (configured.selfServed === true) {
           return {
             reason: 'self-source-stale',
