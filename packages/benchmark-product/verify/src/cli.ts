@@ -29,6 +29,51 @@ export interface VerifierCliDeps {
   readonly readFile?: (path: string) => Uint8Array;
 }
 
+/** The identifier body, stopping at whitespace and at the punctuation a sentence wraps an
+ * identifier in. A trailing `.` is left outside the match: it is sentence punctuation far more
+ * often than part of the identifier. */
+const IDENTIFIER_TAIL = String.raw`(?:[^\s,;)"']*[^\s,;)"'.])?`;
+
+/**
+ * Every internal protocol identifier a reader cannot act on: the record/profile `$id` URLs, `urn:`
+ * names, `did:key` keys, and the bare `jinn.network` / `jinn.benchmarking` namespaces that appear
+ * as extension keys and named-method ids. The base58btc class stops a `did:key` match before a
+ * trailing `:reason` suffix a refusal appended.
+ */
+const INTERNAL_IDENTIFIER = new RegExp(
+  [
+    String.raw`https?://[^\s,;)"']*jinn\.network${IDENTIFIER_TAIL}`,
+    String.raw`urn:${IDENTIFIER_TAIL}`,
+    String.raw`did:key:z[1-9A-HJ-NP-Za-km-z]+`,
+    String.raw`jinn\.(?:network|benchmarking)${IDENTIFIER_TAIL}`,
+  ].join("|"),
+  "gu",
+);
+
+/**
+ * A refusal names the identifier it refused, and on the machine surface that identifier is the
+ * whole point. On the human surface it is a string a reader cannot act on -- and, for the `$id`
+ * namespaces, one that names an origin a stranger cannot resolve -- so the identifier lives in
+ * `--json` (issue #3024, widened to the protocol namespaces by issue #2981). What failed, and
+ * where, is untouched.
+ *
+ * Applied to whole rendered strings rather than per-message, so a future line cannot reintroduce a
+ * leak by forgetting the call.
+ */
+function withoutInternalIdentifiers(message: string): string {
+  return message.replace(INTERNAL_IDENTIFIER, "<identifier: see --json>");
+}
+
+/**
+ * DR-2026-08-17-c Decision 5 requires the reader to disclose that protocol identifiers do not
+ * dereference. Issue #2981 requires it to do so without naming the origin that does not resolve,
+ * so the gap is stated and the host is not: a reader learns nothing here is fetched, and is not
+ * handed an address to try.
+ */
+const IDENTIFIER_DISCLOSURE =
+  "Protocol identifiers are names, not addresses -- nothing here is fetched from them.\n"
+  + "Verification uses the exact platform bytes installed from npm.";
+
 function usage(): string {
   return "Usage: colophon-verify <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
     + "                        [--freeze-repo <dir>]\n"
@@ -42,7 +87,7 @@ function usage(): string {
     + "Exit 0: valid bundle; 1: invalid bundle, or a freeze repository that drifted from it;\n"
     + "     2: usage or operational failure, including a freeze repository that could not be\n"
     + "     rendered from the bundle — the bundle's own verdict is still reported.\n"
-    + "Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet. Verification uses exact platform bytes from npm.\n";
+    + `${IDENTIFIER_DISCLOSURE}\n`;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,10 +138,21 @@ function renderAnchor(entry: AnchorVerificationEntry): string {
   return `${head}\n    ${evaluationNote(entry)}\n    record ${entry.recordSha256}`;
 }
 
+/**
+ * An anchor profile named the way a reader can read it: the profile's own path, without the
+ * namespace host it is registered under. Which provider was declared is the point of this line, so
+ * the name is kept and only the origin is dropped -- the generic alias would suppress the one fact
+ * the sentence carries (issue #2981). A profile in an unrecognized shape falls through unchanged
+ * and is then handled by `withoutInternalIdentifiers` like any other identifier.
+ */
+function anchorProfileName(profile: string): string {
+  return /^https?:\/\/[^/]+\/(?:[^/]+\/)*anchor-profiles\/(.+)$/u.exec(profile)?.[1] ?? profile;
+}
+
 function renderSubject(subject: AnchorSubjectReport): string {
   if (subject.outcome === "declared-but-absent") {
     return `  ${subject.subject}: declared-but-absent — this run declared `
-      + `${subject.declaredProfiles?.join(", ") ?? "an anchor provider"} and the bundle carries no matching anchor`;
+      + `${subject.declaredProfiles?.map(anchorProfileName).join(", ") ?? "an anchor provider"} and the bundle carries no matching anchor`;
   }
   if (subject.outcome === "absent") return `  ${subject.subject}: absent — no anchor was carried and none was declared`;
   return `  ${subject.subject}: anchored`;
@@ -177,7 +233,7 @@ export function renderVerifiedBundle(result: PublicBundleVerificationResult): st
   const verdictLine = outcome.notFetched === 0
     ? `Verified: ${outcome.passed} of ${totalChecks} checks passed`
     : `Verified: ${outcome.passed} of ${totalChecks} checks passed, ${outcome.notFetched} not fetched`;
-  return `${verdictLine}
+  return withoutInternalIdentifiers(`${verdictLine}
 Bundle: ${identity}
 Format: ${result.format}
 
@@ -187,9 +243,8 @@ This checks the bundle's integrity, evidence closure, calculations, report,
 and claim consistency. It does not prove that the machine that produced the
 bundle was honest or that the compared identities are independent parties.${artifactContentLimit}${anchorLimits}
 No files were uploaded.
-Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.
-Verification uses the exact platform bytes installed from npm.
-`;
+${IDENTIFIER_DISCLOSURE}
+`);
 }
 
 // ---------------------------------------------------------------------------
@@ -223,18 +278,6 @@ function readBlockHeaders(bytes: Uint8Array, path: string): readonly { height: n
       header: new Uint8Array(Buffer.from(match[2]!.toLowerCase(), "hex")),
     };
   });
-}
-
-/** `urn:…` and `did:key:z…` as they appear inside a refusal message. The base58btc class stops a
- * `did:key` match before a trailing `:reason` suffix the message appended. */
-const RAW_IDENTIFIER = /urn:[^\s,;)"']+|did:key:z[1-9A-HJ-NP-Za-km-z]+/gu;
-
-/** A refusal names the signer it refused, and on the machine surface that identifier is the whole
- * point. On the human surface it is a string a reader cannot act on, so the same rule as the
- * verified report applies: the identifier lives in `--json` (issue #3024). What failed, and where,
- * is untouched. */
-function withoutRawIdentifiers(message: string): string {
-  return message.replace(RAW_IDENTIFIER, "<identifier: see --json>");
 }
 
 interface ParsedArguments {
@@ -305,7 +348,7 @@ function renderFreezeRepoCheck(check: FreezeRepoVerificationResult): string {
   const modes = check.executableBitChecked
     ? ""
     : "\n  note: this filesystem does not carry an executable bit, so file modes were not checked";
-  return `${head}${pin}${modes}${drift}\n`;
+  return withoutInternalIdentifiers(`${head}${pin}${modes}${drift}\n`);
 }
 
 export async function runVerifierCli(
@@ -313,7 +356,7 @@ export async function runVerifierCli(
   deps: VerifierCliDeps = {},
 ): Promise<VerifierCliResult> {
   const parsed = parseArguments(args);
-  if (parsed === undefined) return { exitCode: 2, stdout: "", stderr: usage() };
+  if (parsed === undefined) return { exitCode: 2, stdout: "", stderr: withoutInternalIdentifiers(usage()) };
 
   let anchorTrust: PublicBundleAnchorTrustMaterial | undefined;
   try {
@@ -342,7 +385,7 @@ export async function runVerifierCli(
     const stdout = parsed.json
       ? `${JSON.stringify({ ok: false, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, code, message: error.message })}\n`
       : "";
-    const stderr = parsed.json ? "" : `colophon-verify: ${withoutRawIdentifiers(error.message)}\n`;
+    const stderr = parsed.json ? "" : `colophon-verify: ${withoutInternalIdentifiers(error.message)}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
 
@@ -362,7 +405,7 @@ export async function runVerifierCli(
         code: (cause !== null && typeof cause === "object" && "code" in cause)
           ? String((cause as { code?: unknown }).code)
           : "environment",
-        message: withoutRawIdentifiers(error.message),
+        message: withoutInternalIdentifiers(error.message),
       };
     }
   }

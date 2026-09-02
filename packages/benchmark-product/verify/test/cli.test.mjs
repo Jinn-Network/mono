@@ -25,8 +25,12 @@ test("usage exits 2 and states the exit contract", async () => {
   // A bundle that cannot be rendered as a freeze repository is not an invalid bundle, and the
   // usage text has to say which exit code that is.
   assert.match(result.stderr, /could not be\n {5}rendered from the bundle/);
-  assert.match(result.stderr, /spec\.jinn\.network/);
-  assert.match(result.stderr, /not hosted/);
+  // Issue #2981: the disclosure survives, the unresolvable origin does not. A reader is still
+  // told the identifiers are not fetched, without being handed a host to try.
+  assert.match(result.stderr, /Protocol identifiers are names, not addresses/);
+  assert.match(result.stderr, /exact platform bytes installed from npm/);
+  assert.doesNotMatch(result.stderr, /jinn\.network/);
+  assert.doesNotMatch(result.stderr, /not hosted/);
 });
 
 test("a missing bundle exits 1 with machine-readable invalid-bundle output", async () => {
@@ -77,8 +81,10 @@ test("human success names all six checks and states the verification limit", asy
   assert.match(output, /Format: benchmark-product-public-bundle\/4/);
   assert.match(output, /does not prove that the machine that produced the/);
   assert.match(output, /No files were uploaded/);
-  assert.match(output, /spec\.jinn\.network/);
-  assert.match(output, /not hosted/);
+  assert.match(output, /Protocol identifiers are names, not addresses/);
+  assert.match(output, /exact platform bytes installed from npm/);
+  assert.doesNotMatch(output, /jinn\.network/);
+  assert.doesNotMatch(output, /not hosted/);
 });
 
 test("human summary reports the actual passed count against the fixed six-check catalog", async () => {
@@ -551,4 +557,44 @@ test("a metadata-first bundle with one deferred body says body, not bodies", asy
     },
   });
   assert.match(output, /1 artifact body was not fetched/);
+});
+
+/**
+ * Issue #2981. The internal protocol namespaces a reader cannot resolve: the record/profile `$id`
+ * host, the named-method registry, and the extension-key namespace. Kept here rather than imported
+ * so the guard is written from the reader's side and cannot drift with the constant it guards.
+ */
+const INTERNAL_NAMESPACE = /jinn\.network|jinn\.benchmarking\.|urn:|did:key/;
+
+test("the golden bundle's human surface names no internal protocol namespace", async () => {
+  const golden = fileURLToPath(new URL("../fixtures/public-bundle-conformance-v1/golden", import.meta.url));
+  const human = await invoke([golden]);
+  assert.equal(human.code, undefined);
+  assert.doesNotMatch(human.stdout, INTERNAL_NAMESPACE);
+  assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
+});
+
+test("a refusal naming a record kind aliases it on the human surface and keeps it in --json", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  // The real shape of `profile/disclosure.ts` and `anchor/check.ts` refusals: the message names the
+  // record kind, which is a `spec.jinn.network` URI. Injected through the CLI's own verify seam so
+  // the assertion runs over the string the reader actually receives.
+  const kind = "https://spec.jinn.network/records/benchmark-matrix/v1";
+  const deps = {
+    verify: () => {
+      const error = new Error(`disclosure-specification: the record's subject kind must be ${kind}`);
+      error.code = "record-integrity";
+      return Promise.reject(error);
+    },
+  };
+
+  const human = await runVerifierCli(["bundle"], deps);
+  assert.equal(human.exitCode, 1);
+  assert.match(human.stderr, /the record's subject kind must be/);
+  assert.match(human.stderr, /<identifier: see --json>/);
+  assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
+
+  const json = await runVerifierCli(["bundle", "--json"], deps);
+  assert.equal(json.exitCode, 1);
+  assert.equal(JSON.parse(json.stdout).message, `disclosure-specification: the record's subject kind must be ${kind}`);
 });

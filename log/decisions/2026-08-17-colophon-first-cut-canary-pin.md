@@ -68,6 +68,18 @@ not flip them.
    those identifiers from the live origin will not retrieve them. That is the
    named gap, not a defect to paper over.
 
+   *Amended 2026-09-02 (issue #2981).* The reader surfaces discharge this
+   decision without naming the origin. Naming an unresolvable host on the
+   reader's own output invites a stranger to visit it, which is the leak the
+   issue closes, so `npx` help, the verified report, and the reader's npm
+   `README` now say that protocol identifiers are names rather than addresses,
+   that nothing is fetched from them, and that verification uses the exact
+   platform bytes installed from npm. The disclosed fact is unchanged; only the
+   host is dropped. Surfaces that are not the reader's own output — this record,
+   `PUBLIC-BUNDLE.md`, `EXTERNAL-VERIFICATION.md`, and the raw records inside a
+   bundle — keep the identifiers verbatim, because there the identifier is the
+   subject matter rather than a reader-facing rendering.
+
 6. **Do not vendor the platform.** Colophon still imports `@jinn-network/*`. It
    does not copy, fork, or relabel tier-1–3 schemas, fixtures, or source as
    Colophon-owned. The reader may keep those installed bytes for offline use
