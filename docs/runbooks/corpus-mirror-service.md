@@ -77,6 +77,17 @@ named so that name order is version order.
 
 ## 4. Configure the `corpus` block
 
+The document is `config.json` inside `JINN_PLUGIN_HOME` — `~/.jinn-plugin/config.json`
+unless the environment names another home. It is optional: a default install
+has none and runs on the schema defaults, following no archives. An unreadable
+or non-JSON one is a startup failure rather than an empty document, so a corrupt
+`corpus` block never degrades into silently following nothing.
+
+The document may itself carry a `home` key, which relocates the runtime's data
+tree. It does not relocate the document: the file is always read from the home
+the environment names, because finding it any other way would mean reading it
+to learn where to read it from.
+
 ```json
 {
   "corpus": {
@@ -116,14 +127,6 @@ acquired ambiently. The reasoning is recorded in
 [`docs/superpowers/plans/2026-07-30-plugin-c5-mirror-and-retrieval.md`](../superpowers/plans/2026-07-30-plugin-c5-mirror-and-retrieval.md)
 and restated at the schema in `plugin/runtime/src/config.ts`.
 
-> **Not yet wired.** No process entry point reads this file today:
-> `bin.ts` calls `resolveRuntimeConfig` with `env` and `homeDirectory` and
-> never a `file`, so a CLI-launched `mirror` follows zero archives and reports
-> `corpus-mirror` green as "following no archives". The same gap is recorded in
-> `plugin/runtime/src/corpus/capability.ts` as Finding F-C7-1. Until a
-> configuration reader lands, the block above is reachable only by a host that
-> composes the runtime as a library and passes it as `file`.
-
 ## 5. Run
 
 ```bash
@@ -161,6 +164,7 @@ Everything is under `JINN_PLUGIN_HOME`:
 | `mirror/objects/` | the mirrored record bytes, addressed by digest |
 | `mirror-sync.lock` | the exclusive sync lock |
 | `index.sqlite` | the relevance index `corpus_search` reads |
+| `config.json` | this install's configuration document, including the `corpus` block above |
 
 One destructive act is supported: **delete `mirror-state.json` to cold-sync from
 genesis.** That is the repair for a position that has outlived its data — the
