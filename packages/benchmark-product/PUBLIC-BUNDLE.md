@@ -531,17 +531,25 @@ where the row lists them.
 
 The qualification axis, unlike prompted screening, is not left to the format string's word. Across
 the legacy lineage and v8 — every row above but `.../5`, whose evidence-native closure is read by a
-different path — a verifier binds that axis to the sealed Report: the Report's method is
+different path — a reader binds that axis to the sealed Report: the Report's method is
 `binary-instrument@1` exactly when the format literal is a qualifying one (`.../4`, `.../7`,
 `.../8`), and any disagreement refuses under `record-integrity` at path `bundle.json`. The binding
 runs in both directions, so it closes the relabeling of a qualifying bundle down to its
-non-qualifying sibling — `.../7` presented as `.../6`, `.../4` as `.../2`, which otherwise survives
-because dropping `qualification.json` and the admission-only evidence records leaves
-`claim-package.json` byte-unchanged and `claim-consistency` still passing — and the inverse smuggle
-of a non-binary Report onto a qualifying format. What it establishes is agreement, not truth: it
-says the format literal describes the Report the bundle actually seals, never that the Report's own
-method claim is correct. That remains what the Report's signature and the `report-verification`
-check are for.
+non-qualifying sibling — `.../7` presented as `.../6`, `.../4` as `.../2`, which otherwise passes
+every admission-bearing check, because dropping `qualification.json` and the admission-only evidence
+records leaves `claim-package.json` byte-unchanged and `claim-consistency` still passing — and the
+inverse smuggle of a non-binary Report onto a qualifying format. What it establishes is agreement,
+not truth: it says the format literal describes the Report the bundle actually seals, never that the
+Report's own method claim is correct. That remains what the Report's signature and the
+`report-verification` check are for.
+
+**This binding is a `0.2.1` guarantee**, and `0.2.1` is not published — see the note below. An
+earlier reader does not make the relabeled bundle verify: `0.1.0` and `0.2.0` still stop the `.../7`
+and `.../4` downgrades, because their presentation projection dispatches on the sealed Report's
+method too and finds a binary Report where the comparison profile was expected. But they stop it as
+an untyped crash from the last step of the run rather than as this named refusal, so do not read a
+missing `record-integrity`-at-`bundle.json` signature on an older line as the check not having
+fired.
 
 **Publication pending is not a formality.** The `0.2.1` reader that public-bundle/7,
 public-bundle/8, and every prompted bundle pin is cut by a manual, demand-gated workflow that has

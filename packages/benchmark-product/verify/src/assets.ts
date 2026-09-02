@@ -208,18 +208,23 @@ function boundedVisual(value: string, maximumCodePoints: number): string {
  * #3643), and it is worth being exact about why, because the two reasons are different.
  *
  * `recordPaths` and `singleSubjectResults` assert a shape the caller has already established —
- * the canonical sort of `recordSha256s`, the single-Matrix-subject wrapper. Reaching either means
+ * the canonical sort of `recordSha256s`, the single-Matrix-subject wrapper — and the
+ * `truthAdmission` default is guarded by a `const exhaustive: never` binding, so the compiler
+ * refuses a new member of that closed set before the throw can run. Reaching any of the three means
  * this package disagrees with itself about a fact it just derived. That is an internal fault, and
  * `toErrorEnvelope` carrying it as `execution` is the correct code for exactly that.
  *
- * The `methodProjection` throws are NOT protected by a schema: `MethodRefSchema.id` is a bare
+ * The two `methodProjection` throws are NOT protected by a schema: `MethodRefSchema.id` is a bare
  * `z.string()` and `results` is `JsonValueSchema`, so neither the unregistered-method default nor
  * the binary-qualification validation is unreachable on grammar grounds. What keeps them off the
- * public reader path is that `profile/claim.ts` rebuilds the same projection for the
- * `claim-consistency` check and throws the identical shape FIRST — so a Report sealing an
- * unregistered method never reaches this file. Untyped throws on that earlier path are a real gap,
- * but they are in `claim.ts` and outside this issue's scope; converting the shadowed copies here
- * would move nothing.
+ * public reader path is that `profile/claim.ts` reaches the same facts FIRST, and the two are
+ * shadowed differently. The unregistered-method default is shadowed by the identical bare throw in
+ * that file's own projection rebuild for `claim-consistency`. The binary-qualification one is
+ * shadowed by something stronger: `ClaimPackageSchema`'s `superRefine` runs the same
+ * `validateBinaryInstrumentQualificationProjection` while parsing `claim-package.json`, and emits a
+ * typed Zod refusal rather than a throw. So a Report this file would reject never reaches it. The
+ * remaining untyped throw on that earlier path is a real gap, but it is in `claim.ts` and outside
+ * this issue's scope; converting the shadowed copy here would move nothing.
  *
  * The mismatch in `buildPublicAssets` below is the one that is genuinely reader-facing: it compares
  * two independently supplied inputs rather than restating a derived fact, so it refuses.
