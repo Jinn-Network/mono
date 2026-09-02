@@ -230,8 +230,13 @@ export interface DriveDeps {
   /**
    * Resume's byte-exact replay seam for the EVALUATION leg, symmetric with the solve leg's
    * `acceptedSubmissions.acceptedSubmissionBytes` (`../operations/run-launch.js`'s `resumeRun`
-   * call). Returns the exact Submission bytes the backend already accepted for this leg, or
-   * `undefined` when this leg was never submitted.
+   * call). Returns the exact Submission bytes this leg previously sealed — captured below before
+   * they were offered to the backend, and journaled again on acceptance when the process survived
+   * that long — or `undefined` when this leg never reached its pre-submit capture. Capture
+   * precedes acceptance, so an accepted leg is covered even when the acceptance itself was never
+   * journaled (#3237); conversely a captured leg the backend never saw replays those bytes
+   * harmlessly, since `recover` classifies an unknown Submission `absent` and `submit` then
+   * accepts them — the solve leg's own semantics.
    *
    * Without it, a process killed between backend acceptance and the leg's verdict resumes by
    * sealing FRESH bytes: `dispatchEvaluation`'s deadline is `liveClock() + cellWindowMs`, so the
@@ -573,6 +578,11 @@ async function dispatchEvaluation(
           + `attempt ${evaluationAttempt})`,
       );
     }
+    //
+    // A replay whose bytes the backend never actually saw (captured, then killed before submit —
+    // the #3237 capture makes that reachable) is not a special case here: `recover` finds no
+    // durable record and classifies it `absent`, which is not `contradictory`, so the leg falls
+    // through to an ordinary first submission of those same bytes.
     const reconciliation = await deps.backend.recover(replayedSubmission.submission as SubmissionUri);
     if (reconciliation.classification === "contradictory") {
       refuse(
@@ -584,6 +594,26 @@ async function dispatchEvaluation(
           }`,
       );
     }
+  }
+
+  if (replayed === undefined) {
+    // The prospective capture boundary for this leg (#3237), mirroring the solve leg's
+    // `submission-captured`. `createRecordingProxy` journals `submission-accepted` only AFTER
+    // `submit` returns, so a kill in between leaves the backend holding an accepted Submission
+    // that nothing in the journal names — and resume, finding no entry in
+    // `journaledEvaluationSubmissions`, re-mints these bytes with a later `deadline` under the
+    // same idempotency key, which the backend refuses and the leg terminals could-not-grade
+    // (permanently: could-not-grade completes the evalIndex). Writing the capture here, before
+    // the bytes are offered, makes the replay map cover backend-accepted-but-unjournaled legs.
+    appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
+      kind: "evaluation-submission-captured",
+      at: deps.liveClock(),
+      cellKey,
+      dispatch,
+      evalIndex,
+      evaluationAttempt,
+      submissionSha256: putSealedBytes(deps.workspaceDir, evalSubmissionBytes),
+    });
   }
 
   const ack = await deps.backend.submit(prepared.taskBytes, evalSubmissionBytes);
