@@ -314,8 +314,13 @@ function readShellKey(line) {
 // The `shell:` declared on the step that owns the `run:` at `runLine`. Step keys share
 // the `run:` key's column, and the step opens on the `- ` one level out — so the search
 // runs both ways from `run:`, since `shell:` may be declared either side of it.
-function stepShell(lines, runLine, keyIndent) {
-  for (const direction of [-1, 1]) {
+//
+// `opensStep` is set when `run:` is written on the dash (`- run: …`). Such a step has no
+// lines above the `run:` key at all, and walking backward would cross the *previous*
+// step's `run:` body — whose lines all sit at `indent > keyIndent` and are skipped —
+// and return that step's `shell:`. So the backward arm is skipped entirely there.
+function stepShell(lines, runLine, keyIndent, opensStep) {
+  for (const direction of opensStep ? [1] : [-1, 1]) {
     for (let index = runLine + direction; index >= 0 && index < lines.length; index += direction) {
       const line = lines[index];
       if (line.trim() === '') continue;
@@ -341,9 +346,10 @@ function stepShell(lines, runLine, keyIndent) {
 
 /**
  * Every `run:` block in one workflow source: its body lines with their 1-based file
- * lines, and the shell GitHub will invoke it with (`null` = the runner default).
+ * lines, the shell its own step declares (`declared`, `null` when it declares none), and
+ * the shell GitHub will invoke it with (`null` = the runner default).
  */
-function collectRunBlocks(source) {
+export function collectRunBlocks(source) {
   const lines = source.split('\n');
   const defaultScopes = collectDefaultShells(lines);
   const jobRanges = collectJobRanges(lines);
@@ -375,9 +381,9 @@ function collectRunBlocks(source) {
     }
     if (body.length === 0) continue;
 
-    const declared = stepShell(lines, index, keyIndent);
+    const declared = stepShell(lines, index, keyIndent, match.groups.dash !== undefined);
     const inherited = inheritedShell(defaultScopes, jobRanges, index);
-    blocks.push({ runLine: index + 1, shell: declared ?? inherited, body });
+    blocks.push({ runLine: index + 1, declared, shell: declared ?? inherited, body });
   }
   return blocks;
 }

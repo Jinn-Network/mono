@@ -11,7 +11,12 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { analyzeWorkflow, earlyExitConsumer, lintWorkflows } from './workflow-pipefail-lint.mjs';
+import {
+  analyzeWorkflow,
+  collectRunBlocks,
+  earlyExitConsumer,
+  lintWorkflows,
+} from './workflow-pipefail-lint.mjs';
 
 const workflowsDir = resolve(import.meta.dirname, '../workflows');
 
@@ -127,6 +132,51 @@ test('`shell:` is found on either side of the `run:` key it belongs to', () => {
   assert.deepEqual(
     analyzeWorkflow('sample.yml', source).map((finding) => `${finding.severity}:${finding.line}`),
     ['error:6', 'error:10', 'warning:13'],
+  );
+});
+
+test('a `- run:` step does not inherit the preceding step\'s `shell:`', () => {
+  // `- run:` opens its own step, so nothing above the `run:` key belongs to it. A
+  // backward search would cross the previous step's `run:` body — every line of which
+  // sits at `indent > keyIndent` — and read that step's `shell:` instead.
+  const declaresBash = [
+    'jobs:',
+    '  a:',
+    '    steps:',
+    '      - name: patch',
+    '        shell: bash',
+    '        run: |',
+    '          git tag | head -1',
+    '      - run: git tag | head -1',
+    '',
+  ].join('\n');
+  // The second block runs under the runner default, not the first step's `bash`.
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', declaresBash).map((finding) => `${finding.severity}:${finding.line}`),
+    ['error:7', 'warning:8'],
+  );
+
+  const declaresPython = [
+    'jobs:',
+    '  a:',
+    '    steps:',
+    '      - name: py',
+    '        shell: python',
+    '        run: |',
+    '          print(1)',
+    '      - run: git tag | head -1',
+    '',
+  ].join('\n');
+  // A non-pipeline shell leaking forward would drop the following block from the scan
+  // entirely — the invisible-surface failure this lint exists to close.
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', declaresPython).map((finding) => `${finding.severity}:${finding.line}`),
+    ['warning:8'],
+  );
+
+  assert.deepEqual(
+    collectRunBlocks(declaresBash).map((block) => block.declared),
+    ['bash', null],
   );
 });
 
@@ -251,12 +301,23 @@ test('the lint gates an always-on lane', () => {
   assert.match(source, /test "\$\{WORKFLOW_PIPEFAIL_RESULT\}" = "\$\{expected\}"/u);
 });
 
-test('every workflow source is reachable by the lint', () => {
+test('every workflow source is reachable by the lint, with its shells resolved to its own steps', () => {
   // A `run:` block the block reader cannot see is a silent hole in the gate, so assert
-  // the reader finds at least one block in every workflow that declares one.
+  // the reader finds at least one block in every workflow that declares one. Reachability
+  // is one half; the half that bites is resolution — a block may only claim a
+  // step-declared shell when the file declares one for it, so the count of blocks
+  // resolving to a declared shell can never exceed the file's `shell:` declarations.
   for (const name of readdirSync(workflowsDir).filter((file) => file.endsWith('.yml'))) {
     const source = readFileSync(join(workflowsDir, name), 'utf8');
     if (!/^\s+(?:-\s+)?run:/mu.test(source)) continue;
     assert.doesNotThrow(() => analyzeWorkflow(name, source), `${name}: analysis threw`);
+    const blocks = collectRunBlocks(source);
+    assert.ok(blocks.length > 0, `${name}: the reader found no run block`);
+    const declarations = source.split('\n').filter((line) => /^\s*(?:-\s+)?shell:\s*\S/u.test(line)).length;
+    const resolved = blocks.filter((block) => block.declared !== null).length;
+    assert.ok(
+      resolved <= declarations,
+      `${name}: ${resolved} blocks resolved to a step-declared shell, but only ${declarations} are declared`,
+    );
   }
 });
