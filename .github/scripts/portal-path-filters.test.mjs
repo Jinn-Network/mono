@@ -14,6 +14,7 @@ import {
   describeGap,
   discoverLanes,
   erePrefix,
+  globCoveragePrefix,
   globPrefix,
   laneSelectedPrefixes,
   parsePathsBlocks,
@@ -134,6 +135,17 @@ test('overlaps matches a tree in either direction and nothing else', () => {
   assert.equal(overlaps('', 'operator'), false);
 });
 
+test('globCoveragePrefix refuses a glob with an interior wildcard', () => {
+  assert.equal(globCoveragePrefix('packages/trust/**'), 'packages/trust');
+  assert.equal(globCoveragePrefix('operator/**'), 'operator');
+  // The truncated head would otherwise be credited as covering every workspace
+  // beneath it, including manifests the glob does not match.
+  assert.equal(globPrefix('packages/*/src/**'), 'packages');
+  assert.equal(globCoveragePrefix('packages/*/src/**'), null);
+  assert.equal(globCoveragePrefix('packages/trust/*/src/**'), null);
+  assert.equal(globCoveragePrefix('*.md'), null);
+});
+
 test('globPrefix keeps the literal head of a glob', () => {
   assert.equal(globPrefix('packages/trust/**'), 'packages/trust');
   assert.equal(globPrefix('.github/workflows/trust-ci.yml'), '.github/workflows/trust-ci.yml');
@@ -153,24 +165,43 @@ test('erePrefix accepts an anchored directory prefix and rejects a file pattern'
 
 test('parsePathsBlocks reads a flow sequence', () => {
   const source = ['on:', '  pull_request:', "    paths: ['contracts/**']", '  push:', '    paths: ["a/**", \'b/**\']'].join('\n');
-  assert.deepEqual(parsePathsBlocks(source), [
-    { trigger: 'pull_request', entries: ['contracts/**'] },
-    { trigger: 'push', entries: ['a/**', 'b/**'] },
-  ]);
+  assert.deepEqual(
+    parsePathsBlocks(source).map(({ trigger, entries }) => ({ trigger, entries })),
+    [
+      { trigger: 'pull_request', entries: ['contracts/**'] },
+      { trigger: 'push', entries: ['a/**', 'b/**'] },
+    ],
+  );
+});
+
+test('a workflow that selects from the diff must match a dialect or be exempt', () => {
+  const root = mkdtempSync(join(tmpdir(), 'portal-path-filters-'));
+  try {
+    mkdirSync(join(root, '.github/workflows'), { recursive: true });
+    writeFileSync(
+      join(root, '.github/workflows/novel.yml'),
+      ['on:', '  pull_request:', 'jobs:', '  changes:', '    steps:', '      - run: git diff --name-only'].join('\n'),
+    );
+    assert.throws(() => discoverLanes(root), /does not\s+model|does not model/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('parsePathsBlocks fails loudly on a paths shape it cannot read', () => {
   // Silently returning "this lane filters on nothing" would drop the lane from
   // the audit set with no signal — the exact class of hole #3573 reports.
   assert.throws(() => parsePathsBlocks('  pull_request:\n    paths: >-\n      a/**'), /unparseable paths/u);
+  // A step input called `paths:` is not a trigger filter and must not throw.
+  assert.deepEqual(parsePathsBlocks('jobs:\n  a:\n    steps:\n      - with:\n          paths: src/**'), []);
   assert.throws(() => parsePathsBlocks('  pull_request:\n    paths: []'), /unparseable flow paths/u);
   assert.throws(() => parsePathsBlocks('  pull_request:\n    paths:\n  push:'), /yielded no entries/u);
 });
 
-test('parsePathsBlocks tags each block with its trigger', () => {
+test('parsePathsBlocks tags each block with its trigger, comment and all', () => {
   const source = [
     'on:',
-    '  pull_request:',
+    '  pull_request:  # a trailing comment must not lose the trigger name',
     '    paths:',
     "      - 'a/**'",
     '  push:',
@@ -179,10 +210,13 @@ test('parsePathsBlocks tags each block with its trigger', () => {
     '      - "b/**"',
     '      - c/**',
   ].join('\n');
-  assert.deepEqual(parsePathsBlocks(source), [
-    { trigger: 'pull_request', entries: ['a/**'] },
-    { trigger: 'push', entries: ['b/**', 'c/**'] },
-  ]);
+  assert.deepEqual(
+    parsePathsBlocks(source).map(({ trigger, entries }) => ({ trigger, entries })),
+    [
+      { trigger: 'pull_request', entries: ['a/**'] },
+      { trigger: 'push', entries: ['b/**', 'c/**'] },
+    ],
+  );
 });
 
 test('parseWorkflowPaths reads every paths block and tolerates comments', () => {

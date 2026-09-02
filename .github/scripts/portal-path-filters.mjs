@@ -146,8 +146,9 @@ export function contains(selectedPrefix, workspace) {
 }
 
 /**
- * Reduces one `paths:` glob to the directory prefix it selects on, or null when
- * it selects no directory tree (a bare filename glob such as `*.md`).
+ * Reduces one `paths:` glob to the directory prefix a change must sit under for
+ * the glob to match, or null when it selects no directory tree (a bare filename
+ * glob such as `*.md`).
  *
  * @param {string} glob
  * @returns {string | null}
@@ -160,6 +161,28 @@ export function globPrefix(glob) {
   }
   const prefix = segments.join('/');
   return prefix === '' ? null : prefix;
+}
+
+/**
+ * The prefix a glob covers ENTIRELY, or null when it covers no whole tree.
+ *
+ * `globPrefix` truncates at the first wildcard, so a glob with an interior `*`
+ * segment reduces to the literal head above it — a fine answer for "could a
+ * change here select this lane", and a wrong one for "is this tree covered":
+ * such a glob matches no manifest or tsconfig directly under that head.
+ * Crediting the truncation as coverage would reopen, through the prefix
+ * reduction, the same leak `contains` closes.
+ *
+ * @param {string} glob
+ * @returns {string | null}
+ */
+export function globCoveragePrefix(glob) {
+  const segments = glob.split('/');
+  const wildcard = segments.findIndex((segment) => segment.includes('*'));
+  // A wildcard is only harmless as the trailing `**`: anything after it means
+  // the glob skips part of the tree its literal head names.
+  if (wildcard !== -1 && !(wildcard === segments.length - 1 && segments[wildcard] === '**')) return null;
+  return globPrefix(glob);
 }
 
 /**
@@ -193,11 +216,11 @@ export function parsePathsBlocks(source) {
   let block = null;
   let blockIndent = null;
   for (const line of source.split('\n')) {
-    const triggerKey = /^ {2}([a-z_]+):\s*$/u.exec(line);
+    const triggerKey = /^ {2}([a-z_]+):\s*(?:#.*)?$/u.exec(line);
     if (triggerKey !== null) trigger = triggerKey[1];
     // `paths-ignore:` is deliberately not matched: an ignored path is the
     // opposite of coverage, and reading one as coverage would silence the gate.
-    const flow = /^\s*paths:\s*\[(.*)\]\s*$/u.exec(line);
+    const flow = /^ {4}paths:\s*\[(.*)\]\s*$/u.exec(line);
     if (flow !== null) {
       const entries = flow[1]
         .split(',')
@@ -210,17 +233,18 @@ export function parsePathsBlocks(source) {
       blockIndent = null;
       continue;
     }
-    const header = /^(\s*)paths:\s*$/u.exec(line);
+    const header = /^( {4})paths:\s*$/u.exec(line);
     if (header !== null) {
       block = { trigger: trigger ?? 'unknown', entries: [] };
       blocks.push(block);
       blockIndent = header[1].length;
       continue;
     }
-    // Any other shape of `paths:` key is a shape this parser does not model. It
-    // must never be read as "this lane filters on nothing": that is a silent
-    // pass, which is the failure mode #3573 is about.
-    if (/^\s*paths:/u.test(line)) throw new Error(`unparseable paths: ${line.trim()}`);
+    // Any other shape of a TRIGGER-LEVEL `paths:` key is a shape this parser does
+    // not model. It must never be read as "this lane filters on nothing": that is
+    // a silent pass, the failure mode #3573 is about. The indent bound keeps a
+    // step input that happens to be called `paths:` out of it.
+    if (/^ {4}paths:/u.test(line)) throw new Error(`unparseable paths: ${line.trim()}`);
     if (blockIndent === null) continue;
     // Double-quoted, single-quoted and bare entries all occur in this
     // repository. Reading only one style would make the other invisible to the
@@ -284,6 +308,27 @@ const SHELL_ARRAY_NAME = 'patterns';
 const SHELL_SELECTION_FILE = 'selection.ere';
 
 /**
+ * Marker of a workflow that decides what to run from the changed-file list.
+ */
+const DIFF_SELECTION_MARKER = '--name-only';
+
+/**
+ * Workflows that select from the diff but need no portal audit, each with the
+ * reason. This roster is deliberately loud: a workflow that grows diff selection
+ * without matching a known dialect fails the gate until it is either audited or
+ * listed here, rather than dropping out of the audit set unnoticed.
+ */
+const DIFF_SELECTION_EXEMPT = Object.freeze({
+  'hermetic-gate.yml':
+    'opt-out selection (hermetic-selection.mjs): every unlisted path selects the lane ON, ' +
+    'so a portal target already schedules it.',
+  'canonical-docs-check.yml': 'selects on canonical documents, which are in no workspace.',
+  'platform-architecture-control.yml':
+    'the workflow that hosts this gate; its jobs select from the changed-package closure, ' +
+    'not from a path filter.',
+});
+
+/**
  * Every lane whose selection is derived from the diff, discovered rather than
  * listed: a hand-maintained roster is the same failure this module exists to
  * prevent, one level up. A workflow with no `paths:` block runs unconditionally
@@ -312,6 +357,16 @@ export function discoverLanes(root) {
       continue;
     }
     const blocks = parsePathsBlocks(source);
+    if (
+      blocks.length === 0 &&
+      source.includes(DIFF_SELECTION_MARKER) &&
+      !Object.hasOwn(DIFF_SELECTION_EXEMPT, file)
+    ) {
+      throw new Error(
+        `${workflow} selects from the changed-file list through a mechanism this gate does not ` +
+          'model. Teach discoverLanes its dialect, or add it to DIFF_SELECTION_EXEMPT with a reason.',
+      );
+    }
     // Only lanes that gate a PULL REQUEST are in scope. A `push:`-only lane
     // (`*-npm-publish`, `operator-images`) decides release cadence, not whether
     // a pull request was verified; widening one would change what publishes,
@@ -346,17 +401,20 @@ export function laneSelectedPrefixes(root, lane) {
  *
  * @param {string} root
  * @param {ReturnType<typeof discoverLanes>[number]} lane
- * @returns {{ trigger: string, prefixes: string[] }[]}
+ * @returns {{ trigger: string, prefixes: string[], coveragePrefixes: string[] }[]}
  */
 export function laneSelectionBlocks(root, lane) {
   const source = readFileSync(path.join(root, lane.workflow), 'utf8');
   const reduce = (raw) => [...new Set(raw.filter((prefix) => prefix !== null))].sort();
   if (lane.dialect === 'shell-ere') {
-    return [{ trigger: 'diff', prefixes: reduce(parseShellArray(source, lane.arrayName).map(erePrefix)) }];
+    const prefixes = reduce(parseShellArray(source, lane.arrayName).map(erePrefix));
+    // An anchored `^dir/` names a whole tree, so selection and coverage coincide.
+    return [{ trigger: 'diff', prefixes, coveragePrefixes: prefixes }];
   }
   return parsePathsBlocks(source).map(({ trigger, entries }) => ({
     trigger,
     prefixes: reduce(entries.map(globPrefix)),
+    coveragePrefixes: reduce(entries.map(globCoveragePrefix)),
   }));
 }
 
@@ -375,8 +433,8 @@ export function auditLane({ root, graph, lane }) {
   const missing = new Set();
   for (const workspace of selected) {
     for (const target of portalClosure(graph, workspace)) {
-      for (const { prefixes } of blocks) {
-        if (!prefixes.some((prefix) => contains(prefix, target))) missing.add(target);
+      for (const { coveragePrefixes } of blocks) {
+        if (!coveragePrefixes.some((prefix) => contains(prefix, target))) missing.add(target);
       }
     }
   }
