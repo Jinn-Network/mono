@@ -10,6 +10,7 @@ import type {
   PublicBundleAnchorTrustMaterial,
 } from "./anchor/check.js";
 import type { PublicBundleSigner, PublicBundleSignerRole } from "./signers.js";
+import { refuse } from "./profile/errors.js";
 import { verifyDomainBinding, type VerifiedDomainBinding } from "./identity/domain-binding.js";
 import { publisherIdentityLine, publisherIdentitySentence } from "./identity/report-face.js";
 import { VERIFIER_VERSION } from "./version.js";
@@ -29,6 +30,8 @@ export interface VerifierCliDeps {
   ) => Promise<PublicBundleVerificationResult>;
   /** Test seam for the trust-material files the flags name. Defaults to the real filesystem. */
   readonly readFile?: (path: string) => Uint8Array;
+  /** Test seam for the freeze-repository comparison. Defaults to the real one. */
+  readonly freezeRepo?: (bundleDir: string, repoDir: string) => Promise<FreezeRepoVerificationResult>;
 }
 
 function usage(): string {
@@ -396,9 +399,24 @@ export async function runVerifierCli(
   let identityFailure: { readonly code: string; readonly message: string } | undefined;
   if (parsed.identityBindingPath !== undefined) {
     try {
+      // Only the publisher's key, and only when there is exactly one. A binding answers "who
+      // published this", so a binding for a grader or reviewer key names a party the reader is
+      // MEASURING, not the one publishing -- and accepting it would caption the bundle with that
+      // party's domain while suppressing the real publisher's fingerprint. A bundle with no single
+      // publisher has no "published by" to render at all, so there is nothing for a binding to
+      // qualify. Both cases refuse here, which is also what keeps the limits paragraph and the
+      // identity line inseparable: neither exists without a resolved `identity`.
+      const publishers = (result.signers ?? []).filter((signer) => signer.role === "publisher");
+      if (publishers.length !== 1) {
+        refuse(
+          "conflict",
+          "domain-binding",
+          `this bundle names ${publishers.length} publisher keys, so it has no single published-by identity a binding can qualify`,
+        );
+      }
       identity = verifyDomainBinding(
         (deps.readFile ?? ((path) => new Uint8Array(readFileSync(path))))(parsed.identityBindingPath),
-        (result.signers ?? []).map((signer) => signer.keyId),
+        [publishers[0]!.keyId],
       );
     } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause));
@@ -420,7 +438,7 @@ export async function runVerifierCli(
   let freezeRepoFailure: { readonly code: string; readonly message: string } | undefined;
   if (parsed.freezeRepoDir !== undefined) {
     try {
-      freezeRepo = await verifyFreezeRepo(parsed.bundleDir, parsed.freezeRepoDir);
+      freezeRepo = await (deps.freezeRepo ?? verifyFreezeRepo)(parsed.bundleDir, parsed.freezeRepoDir);
     } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause));
       freezeRepoFailure = {
@@ -444,19 +462,19 @@ export async function runVerifierCli(
       ...(identityFailure === undefined ? {} : { identity: { ok: false, ...identityFailure } }),
     })}\n`
     : `${renderVerifiedBundle(result, identity)}${freezeRepo === undefined ? "" : renderFreezeRepoCheck(freezeRepo)}`;
-  if (identityFailure !== undefined) {
-    return {
-      exitCode: 2,
-      stdout,
-      stderr: parsed.json ? "" : `colophon-verify: domain binding not applied: ${identityFailure.message}\n`,
-    };
+  // Both notes are emitted, because a reader who supplied two flags is owed the outcome of both.
+  const notes = parsed.json
+    ? ""
+    : [
+      ...(freezeRepoFailure === undefined ? [] : [`freeze repository not checked: ${freezeRepoFailure.message}`]),
+      ...(identityFailure === undefined ? [] : [`domain binding not applied: ${identityFailure.message}`]),
+    ].map((note) => `colophon-verify: ${note}\n`).join("");
+  // A drifted freeze repository is a verdict about the artifact and takes precedence: exit 1 is
+  // what the usage text promises for it, and an operational failure on a different flag must not
+  // silently re-code that verdict as 2.
+  if (freezeRepo !== undefined && !freezeRepo.ok) return { exitCode: 1, stdout, stderr: notes };
+  if (freezeRepoFailure !== undefined || identityFailure !== undefined) {
+    return { exitCode: 2, stdout, stderr: notes };
   }
-  if (freezeRepoFailure !== undefined) {
-    return {
-      exitCode: 2,
-      stdout,
-      stderr: parsed.json ? "" : `colophon-verify: freeze repository not checked: ${freezeRepoFailure.message}\n`,
-    };
-  }
-  return { exitCode: freezeRepo !== undefined && !freezeRepo.ok ? 1 : 0, stdout, stderr: "" };
+  return { exitCode: 0, stdout, stderr: "" };
 }

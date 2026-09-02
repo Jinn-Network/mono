@@ -708,3 +708,67 @@ test("--identity-binding requires a value and may be supplied only once", async 
     assert.match(result.stderr, /Usage: colophon-verify/);
   }
 });
+
+test("a binding for a grader key never becomes the publisher's identity", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const publisher = await mintDomainBinding();
+  const grader = await mintDomainBinding("grader.example");
+  const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
+    readFile: () => grader.bytes,
+    verify: async () => ({
+      format: "benchmark-product-public-bundle/6",
+      identity: "a".repeat(64),
+      checks: V6_CHECKS,
+      ...V6_IDENTITIES,
+      signers: [
+        { role: "publisher", identity: "urn:jinn:agent:alpha", keyId: publisher.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(publisher.keyId) },
+        { role: "automated-grader", identity: "urn:jinn:agent:beta", keyId: grader.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(grader.keyId) },
+      ],
+    }),
+  });
+  assert.equal(result.exitCode, 2);
+  assert.doesNotMatch(result.stdout, /grader\.example/);
+  // The real publisher is still named by its own fingerprint rather than suppressed.
+  assert.match(result.stdout, new RegExp(`no domain bound; key ${keyFingerprintFromDidKey(publisher.keyId)}`));
+});
+
+test("with no single publisher there is no identity to qualify, so neither line nor paragraph prints", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId, bytes } = await mintDomainBinding();
+  const second = await mintDomainBinding();
+  const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
+    readFile: () => bytes,
+    verify: async () => ({
+      format: "benchmark-product-public-bundle/6",
+      identity: "a".repeat(64),
+      checks: V6_CHECKS,
+      ...V6_IDENTITIES,
+      signers: [
+        { role: "publisher", identity: "urn:jinn:agent:alpha", keyId, custody: "same-operator" },
+        { role: "publisher", identity: "urn:jinn:agent:beta", keyId: second.keyId, custody: "same-operator" },
+      ],
+    }),
+  });
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /2 publisher keys/);
+  assert.doesNotMatch(result.stdout, /published by/);
+  // The limits paragraph must not qualify a name the report never showed.
+  assert.doesNotMatch(result.stdout, /registrar/);
+});
+
+test("a drifted freeze repository still exits 1 when an unrelated binding also failed", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const result = await runVerifierCli(
+    ["bundle", "--freeze-repo", "repo", "--identity-binding", "binding.json"],
+    {
+      readFile: () => new TextEncoder().encode("{"),
+      verify: async () => publisherResult(keyId),
+      freezeRepo: async () => ({ ok: false, commitId: "c".repeat(40), fileCount: 3, executableBitChecked: true, differences: [{ kind: "changed", path: "README.md" }] }),
+    },
+  );
+  assert.equal(result.exitCode, 1);
+  // Both flags reported, neither swallowed.
+  assert.match(result.stdout, /freeze repository: DOES NOT match this bundle/);
+  assert.match(result.stderr, /domain binding not applied/);
+});
