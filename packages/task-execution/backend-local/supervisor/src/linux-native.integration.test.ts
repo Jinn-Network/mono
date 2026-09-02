@@ -40,7 +40,13 @@ const waitFor = async <T>(fn: () => T | undefined, label: string): Promise<T> =>
 // an entry created after that readdir is never unlinked and every retry fails on it. At
 // `maxRetries: 60, retryDelay: 50` a 300ms writer produced a throw after 92 seconds of retrying --
 // slower and no more correct. Re-entering `rmSync` from the top is what re-reads the directory.
-const REMOVE_DEADLINE_MS = 2_000;
+//
+// One budget for the WHOLE hook, not one per directory. The hostile-documents case registers
+// eight trees, so a per-directory budget multiplies by eight and a hook that overruns Vitest's
+// 10s default hook timeout is the same false red this change exists to remove. Every tree still
+// gets at least one attempt whatever the clock says, because the deadline is only consulted after
+// a failure.
+const REMOVE_BUDGET_MS = 4_000;
 const REMOVE_POLL_MS = 20;
 
 // `afterEach` is synchronous, and a worker may block: a bounded synchronous wait keeps the
@@ -52,7 +58,7 @@ const sleepSync = (ms: number): void => {
 };
 
 /**
- * Removes one attempt tree, re-entering `rmSync` until it succeeds or the deadline passes.
+ * Removes one attempt tree, re-entering `rmSync` until it succeeds or `deadline` passes.
  *
  * Never throws: the assertions have already passed by the time this runs, so failing the file here
  * reports a defect the test did not find. It is warned about instead -- and nothing leaks either
@@ -60,8 +66,7 @@ const sleepSync = (ms: number): void => {
  * ends. Same contract as `sweepManagedTree` in that seam, which this file cannot import: every
  * package tsconfig here sets `rootDir: "src"`.
  */
-const removeAttemptTree = (dir: string): void => {
-  const deadline = Date.now() + REMOVE_DEADLINE_MS;
+const removeAttemptTree = (dir: string, deadline = Date.now() + REMOVE_BUDGET_MS): void => {
   for (;;) {
     try {
       rmSync(dir, { recursive: true, force: true });
@@ -78,7 +83,8 @@ const removeAttemptTree = (dir: string): void => {
 
 afterEach(() => {
   for (const pid of residualPids.splice(0)) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
-  for (const dir of dirs.splice(0)) removeAttemptTree(dir);
+  const deadline = Date.now() + REMOVE_BUDGET_MS;
+  for (const dir of dirs.splice(0)) removeAttemptTree(dir, deadline);
 });
 
 describe.runIf(linux)("Linux native custody shim", () => {
