@@ -21,6 +21,7 @@ import {
   NOT_FOUND_BODY,
   applyFault,
   assertKnownFault,
+  derInteger,
   documentHeaders,
   loadBundleRoutes,
   parseArgs,
@@ -268,6 +269,27 @@ test('parseArgs takes a bundle, an optional port and a known fault', () => {
   assert.throws(() => parseArgs(['--bundle', 'out', '--port', 'x']), /--port/u);
   assert.throws(() => parseArgs(['--bundle', 'out', '--fault', 'x']), /unknown fault/u);
   assert.throws(() => parseArgs(['--nope', 'x']), /unknown argument/u);
+});
+
+test('derInteger encodes minimally in both directions', () => {
+  // A redundant leading 0x00 (next byte below 0x80) is illegal DER padding.
+  assert.deepEqual(derInteger(Buffer.from([0x00, 0x7f, 0x11])), Buffer.from([0x02, 0x02, 0x7f, 0x11]));
+  assert.deepEqual(derInteger(Buffer.from([0x00, 0x00, 0x00, 0x01])), Buffer.from([0x02, 0x01, 0x01]));
+  // A leading 0x00 before a high-bit byte is required, so it must survive.
+  assert.deepEqual(derInteger(Buffer.from([0x00, 0x80])), Buffer.from([0x02, 0x02, 0x00, 0x80]));
+  // A high-bit value gains the positive-sign pad.
+  assert.deepEqual(derInteger(Buffer.from([0x80, 0x01])), Buffer.from([0x02, 0x03, 0x00, 0x80, 0x01]));
+  // Zero stays a single content byte rather than trimming away entirely.
+  assert.deepEqual(derInteger(Buffer.from([0x00, 0x00])), Buffer.from([0x02, 0x01, 0x00]));
+  // Ordinary values are untouched.
+  assert.deepEqual(derInteger(Buffer.from([0x02])), Buffer.from([0x02, 0x01, 0x02]));
+});
+
+test('selfSignedLoopbackCertificate survives serials that start with a redundant zero', () => {
+  for (let index = 0; index < 2000; index += 1) {
+    const { cert } = selfSignedLoopbackCertificate();
+    new X509Certificate(cert);
+  }
 });
 
 test('selfSignedLoopbackCertificate assembles a parseable loopback trust anchor', () => {
