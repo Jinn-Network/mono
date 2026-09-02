@@ -68,14 +68,14 @@ test("human success names all six checks and states the verification limit", asy
     reportSha256: "e".repeat(64),
     reportEnvelopeSha256: "f".repeat(64),
   });
-  assert.match(output, /^Verified: 6 of 6 checks passed/m);
+  assert.match(output, /^Recomputed: 6 of 6 checks passed/m);
   const orderedChecks = ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"];
   for (const check of orderedChecks) {
     assert.match(output, new RegExp(`${check}\\s+passed`));
   }
   assert.deepEqual(orderedChecks.map((check) => output.indexOf(check)), [...orderedChecks.map((check) => output.indexOf(check))].sort((a, b) => a - b));
   assert.match(output, /Format: benchmark-product-public-bundle\/4/);
-  assert.match(output, /does not prove that the machine that produced the/);
+  assert.match(output, /Not checked by this tool: whether the machine that produced this bundle was/);
   assert.match(output, /No files were uploaded/);
   assert.match(output, /spec\.jinn\.network/);
   assert.match(output, /not hosted/);
@@ -90,8 +90,32 @@ test("human summary reports the actual passed count against the fixed six-check 
     benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
     reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
   });
-  assert.match(output, /^Verified: 1 of 6 checks passed/m);
+  assert.match(output, /^Recomputed: 1 of 6 checks passed/m);
   assert.match(output, /Format: benchmark-product-public-bundle\/2/);
+});
+
+test("the verdict names the operation and its limits print directly under it (issue #2982)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  // Both the complete and the deferred-check shape: the caveats are unconditional, so neither
+  // bundle shape may render a verdict without them immediately beneath it.
+  for (const checks of [["manifest"], ["manifest", "evidence-closure"]]) {
+    const output = renderVerifiedBundle({
+      format: "benchmark-product-public-bundle/4",
+      identity: "a".repeat(64),
+      checks,
+      benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
+      reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
+    });
+    const [verdict, ...rest] = output.split("\n");
+    assert.match(verdict, /^Recomputed: \d+ of \d+ checks passed/);
+    assert.doesNotMatch(verdict, /verified|certified|validated|audited/i);
+    // Directly under the verdict: only the bundle identity header separates them, and the caveats
+    // precede the per-check list rather than trailing it.
+    const caveatIndex = output.indexOf("Not checked by this tool:");
+    assert.ok(caveatIndex > 0, "caveats must render");
+    assert.ok(caveatIndex < output.indexOf("manifest"), "caveats must precede the check list");
+    assert.equal(rest.slice(0, 2).filter((line) => line.startsWith("Bundle:") || line.startsWith("Format:")).length, 2);
+  }
 });
 
 const V6_IDENTITIES = {
@@ -154,7 +178,7 @@ test("the default human surface discloses every carried anchor and every subject
       invalid: [],
     },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, /^Recomputed: 7 of 7 checks passed/m);
   assert.match(output, /integrity-anchors\s+passed/);
   // Each carried anchor: subject, time basis, status, and its byte-embedded time or height.
   assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
@@ -333,7 +357,7 @@ test("human summary names all seven evidence-native checks for bundle v5", async
     profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
     artifactContent: { status: "verified", verified: 300, notFetched: 0, notFetchedDigests: [] },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, /^Recomputed: 7 of 7 checks passed/m);
   assert.match(output, new RegExp(`Bundle: sha256:${"a".repeat(64)}`));
   assert.doesNotMatch(output, /sha256:sha256:/);
 });
@@ -368,7 +392,7 @@ test("the anchored qualification closure counts its seven checks, not the unanch
       invalid: [],
     },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, /^Recomputed: 7 of 7 checks passed/m);
   assert.match(output, /^Format: benchmark-product-public-bundle\/7$/m);
   assert.match(output, /integrity-anchors\s+passed/);
   assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
@@ -513,7 +537,7 @@ test("a full-evidence v5 bundle prints all seven checks as passed", async () => 
     profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
     artifactContent: { status: "verified", verified: 5, notFetched: 0, notFetchedDigests: [] },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed$/m);
+  assert.match(output, /^Recomputed: 7 of 7 checks passed$/m);
   for (const check of V5_CHECKS) assert.match(output, new RegExp(`${check}\\s+passed`));
   assert.doesNotMatch(output, /not fetched/);
   assert.doesNotMatch(output, /Artifact content/);
@@ -532,7 +556,7 @@ test("a metadata-first v5 bundle discloses artifact-integrity as not fetched", a
     },
   });
   // The deferred check is never printed as a pass and never folded into the passed total.
-  assert.match(output, /^Verified: 6 of 7 checks passed, 1 not fetched$/m);
+  assert.match(output, /^Recomputed: 6 of 7 checks passed, 1 not fetched$/m);
   assert.match(output, /artifact-integrity\s+not fetched/);
   for (const check of V5_CHECKS.filter((check) => check !== "artifact-integrity")) {
     assert.match(output, new RegExp(`${check}\\s+passed`));
@@ -680,7 +704,7 @@ test("a binding for a key that did not sign the bundle exits 2 and is not render
   assert.match(result.stderr, /domain binding not applied/);
   assert.match(result.stderr, /did not sign this bundle/);
   // The bundle's own verdict is still reported, exactly as it is for a freeze-repo failure.
-  assert.match(result.stdout, /Verified: /);
+  assert.match(result.stdout, /Recomputed: /);
   assert.doesNotMatch(result.stdout, /published by/);
 });
 

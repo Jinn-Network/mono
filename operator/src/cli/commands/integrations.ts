@@ -9,13 +9,12 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { DEFAULT_STOP_HOOK_COMMAND, fileContainsHookCommand } from '../hook-installers/common.js';
 import { patchClaudeCodeSettingsJson, removeClaudeCodeHookJson } from '../hook-installers/claude-code.js';
-// codex/cursor/gemini-cli hook wiring is deliberately NOT imported here —
-// their file formats are not independently verified against those tools'
-// real hook schemas (claude-code's WAS wrong before verification caught it;
-// see the follow-up issue). The pure patch/remove functions still exist in
-// `../hook-installers/{codex,cursor,gemini-cli}.js` with test coverage in
-// `test/scripts/install-hooks.test.ts` — only the `jinn integrations
-// install` wiring is scoped down to claude-code.
+// Stop-hook wiring is claude-code only. The unwired codex/cursor/gemini-cli
+// patchers were removed by the #2930 audit
+// (`docs/superpowers/audits/2026-09-02-legacy-mcp-integration-estate.md`
+// Wave 0): their file formats were never verified against those tools' real
+// hook schemas, and #2417 — which proposed verifying and wiring them — is
+// superseded by that audit's deletion boundary.
 
 // ---------------------------------------------------------------------------
 // Skill content resolution
@@ -139,10 +138,8 @@ function removeTomlMcpServer(filePath: string): { ok: boolean; detail: string } 
 // is confirmed against Claude Code's documented Stop-hook example and the
 // operator's live settings file. codex/cursor/gemini-cli's hook file
 // formats were NOT independently verified (a real wrong-schema bug was
-// caught here in review before this scope-down) — their pure patch/remove
-// functions still exist in `../hook-installers/{codex,cursor,gemini-cli}.js`
-// with coverage in `test/scripts/install-hooks.test.ts`, but are not wired
-// here. See the follow-up issue for verifying + wiring them.
+// caught here in review before this scope-down); their unwired patchers were
+// deleted by the #2930 audit rather than verified.
 // ---------------------------------------------------------------------------
 
 export function claudeCodeHookFilePath(scope: 'user' | 'project'): string {
@@ -352,9 +349,8 @@ export interface PluginTarget {
   removeSkill(scope: 'user' | 'project'): Promise<TargetResult>;
   /**
    * §14.1 stop-hook wiring. Optional — only defined for targets whose real
-   * hook file format has been independently verified (currently
-   * claude-code only; codex/cursor/gemini-cli are pending a follow-up
-   * issue). `hookFilePath` powers the `--dry-run` plan preview.
+   * hook file format has been independently verified — claude-code only.
+   * `hookFilePath` powers the `--dry-run` plan preview.
    */
   hookFilePath?(scope: 'user' | 'project'): string | null;
   isHookConfigured?(scope: 'user' | 'project'): boolean;
@@ -512,7 +508,7 @@ const TARGETS: PluginTarget[] = [
       return removeCursorRule(rulePath);
     },
     // No stop-hook wiring — cursor's real hook file format is not
-    // independently verified. See the follow-up issue.
+    // independently verified.
   },
 
   // ---- vscode ----
@@ -620,7 +616,7 @@ const TARGETS: PluginTarget[] = [
       return removeSkillBlock(instrPath);
     },
     // No stop-hook wiring — gemini-cli's real hook file format is not
-    // independently verified. See the follow-up issue.
+    // independently verified.
   },
 
   // ---- antigravity ----
@@ -709,8 +705,7 @@ const TARGETS: PluginTarget[] = [
     },
     // No stop-hook wiring — codex's real hook file format is not
     // independently verified (its MCP config is TOML; the pre-existing
-    // patcher assumed JSON, which can't live in `config.toml`). See the
-    // follow-up issue.
+    // patcher assumed JSON, which can't live in `config.toml`).
   },
 ];
 

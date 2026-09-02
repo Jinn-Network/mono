@@ -685,6 +685,16 @@ export function runResume(
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
         } else if (entry.kind === "submission-accepted" && entry.leg !== "evaluation") {
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
+        } else if (entry.kind === "evaluation-submission-captured") {
+          // Pre-submit capture, one leg down (#3237). `submission-accepted` alone is written
+          // AFTER the backend has accepted, so a kill in that gap leaves the acceptance durable
+          // in the backend and invisible here — and re-minting under the same idempotency key
+          // loses the verdict permanently. This entry is written before the bytes are offered,
+          // so the map covers that gap the way `submission-captured` covers the solve leg's.
+          journaledEvaluationSubmissions.set(
+            `${entry.cellKey}::${entry.dispatch}::e${entry.evalIndex}::a${entry.evaluationAttempt}`,
+            entry.submissionSha256,
+          );
         } else if (entry.kind === "submission-accepted" && entry.evalIndex !== undefined) {
           journaledEvaluationSubmissions.set(
             `${entry.cellKey}::${entry.dispatch}::e${entry.evalIndex}::a${entry.evaluationAttempt ?? 1}`,

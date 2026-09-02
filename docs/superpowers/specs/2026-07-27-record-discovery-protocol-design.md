@@ -776,8 +776,9 @@ Accepting a synced source means, in order:
    window past the verifier's clock, with a wider supplied bound clamped back to the
    published-source ceiling — **before** asking whether the head is fresh, since a head that
    over-sets `refreshBy` or issues itself into the future is always fresh and the clock can
-   never catch it; then verify `refreshBy` freshness, and then `issuedAt` monotonicity
-   against any previously seen head;
+   never catch it. The window is also checked before the high-water mark is read or
+   advanced, so a head that breaks it can never become the monotonicity floor. Then verify
+   `refreshBy` freshness, and then `issuedAt` monotonicity against any previously seen head;
 4. verify chain linkage from the head's entry digest back to the consumer's high-water mark —
    or, on first adoption of the source, to genesis (§5.3 rule 5);
 5. verify entry signatures (published-source profile) as *corroboration*: an entry
@@ -787,6 +788,14 @@ Accepting a synced source means, in order:
    agent is `unauthorized-signer`;
 6. check sequence contiguity (increment-by-one, §5.1) and fork-absence;
 7. advance the high-water mark.
+
+Step 7 is the *only* step that writes it. A verification that ends in any of the typed
+failures below leaves the stored mark exactly as it found it — a refusal never advances
+the anti-rollback floor, whatever the reason for the refusal, and the §18 kit asserts this
+of every non-`ok` source-chain vector rather than of the future-dated one alone. The rule
+matters most where the refusal is *about* the floor (a future-dated head, §5.2 rule 3), but
+it is general: a mark advanced on the way to a refusal is a mark advanced on evidence the
+consumer went on to reject.
 
 Failures are typed, not boolean: `stale` (refreshBy expired), `forked` (equivocation —
 evidence-bearing), `broken-chain` (linkage, contiguity, duplicate-`announcementId`, or
@@ -1180,9 +1189,9 @@ The kit precedes all real implementations (the CSI discipline, again):
   broken linkage; sequence gaps and duplicates (must reject); duplicate `announcementId`
   (must reject); stale heads; rolled-back heads; `issuedAt` regressions; a head issued
   further ahead of the verifier's clock than one profile window (must reject
-  `head-issued-ahead`, §5.2 rule 3) and a head whose window is inverted (must reject
-  `refresh-by-ceiling`, §5.2 rule 1); a competing head signed by a rotated-out key (must
-  reject); entries with bad facts cards; facts requiring
+  `head-issued-ahead`, §5.2 rule 3, and persist no high-water mark) and a head whose window
+  is inverted (must reject `refresh-by-ceiling`, §5.2 rule 1); a competing head signed by a
+  rotated-out key (must reject); entries with bad facts cards; facts requiring
   unavailable referenced bytes (must yield `indeterminate` and fail closed at decision
   grade); genesis edge cases (pinned first sequence, `previous: null` uniqueness);
   withdrawal of foreign announcements, withdrawal-of-withdrawal, and missing reason codes

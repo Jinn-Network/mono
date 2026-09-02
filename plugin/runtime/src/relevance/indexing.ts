@@ -30,6 +30,18 @@ export interface IndexingDeps {
   readonly openLocalRuntime: () => Promise<LocalEvidenceRuntime>;
   readonly corpusReader?: CorpusReader;
   readonly corpusRetrieval?: CorpusRetrieval;
+  /**
+   * A deadline for the public-plane pass, honored at the page and per-candidate
+   * boundaries.
+   *
+   * A paged walk with a network retrieval per record is unbounded in the
+   * length of the mirror, so a caller with a deadline that cannot reach in
+   * here has no deadline at all: the standing sync loop's `stop` would block
+   * for a whole pass after the cycle it is trying to end was abandoned
+   * (#3222). Cooperative on purpose — a pass aborted between records leaves
+   * the index consistent, because each `put` is its own write.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface IndexingReport {
@@ -199,6 +211,7 @@ export async function indexPublicPlane(deps: IndexingDeps): Promise<IndexingRepo
   let report = EMPTY_REPORT;
   let cursor: string | undefined;
   do {
+    deps.signal?.throwIfAborted();
     const page = await reader.listRecords({
       family: "execution-evidence",
       limit: PAGE_SIZE,
@@ -207,12 +220,24 @@ export async function indexPublicPlane(deps: IndexingDeps): Promise<IndexingRepo
     report = merge(report, { excludedByTrust: page.excludedByTrust });
 
     for (const candidate of page.items) {
+      deps.signal?.throwIfAborted();
+      const projection = candidate.projection as ExecutionEvidenceProjection;
+      // The task and the native trace are selected by entity id, not by role:
+      // `execution-evidence` declares its artifacts under the RO-Crate property
+      // names (`object`, `result`, `subjectOf`, ...), so there is no `task` or
+      // `native-trace` role to ask for. The projection names both entities.
       const outcome = await retrieval.fetchRecord(candidate.reference, {
         artifacts: {
           selections: [
-            { selector: { kind: "role", role: "task" }, requirement: "optional" },
+            {
+              selector: { kind: "entity-id", entityId: projection.task.entityId },
+              requirement: "optional",
+            },
             { selector: { kind: "role", role: "result" }, requirement: "optional" },
-            { selector: { kind: "role", role: "native-trace" }, requirement: "optional" },
+            {
+              selector: { kind: "entity-id", entityId: projection.nativeTrace.entityId },
+              requirement: "optional",
+            },
           ],
         },
       });
@@ -221,9 +246,10 @@ export async function indexPublicPlane(deps: IndexingDeps): Promise<IndexingRepo
         continue;
       }
 
-      const projection = candidate.projection as ExecutionEvidenceProjection;
       const extracted = excerptsFromRetrieval(outcome.result, {
         spanSource: deps.spanSource,
+        taskEntityId: projection.task.entityId,
+        traceEntityId: projection.nativeTrace.entityId,
       });
       if (extracted.summary.length === 0) {
         report = merge(report, { skipped: 1 });

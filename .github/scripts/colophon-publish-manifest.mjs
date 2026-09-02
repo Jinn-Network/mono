@@ -9,6 +9,20 @@ export const COLOPHON_PUBLISH_WORKFLOW = 'colophon-npm-publish.yml';
 export const FIRST_CUT_PLATFORM_PIN_PATH = 'packages/benchmark-product/first-cut-platform-pin.json';
 export const PRODUCT_RELEASE_PLATFORM_PINS_PATH = 'packages/benchmark-product/product-release-platform-pins.json';
 
+/**
+ * Every source file that pins a `@colophon-claims/verify` version into a claim, a bundle asset, or
+ * a reader instruction. A pin here is sealed immutably into every bundle built from this tree and
+ * cannot be corrected after the bundle ships, so the publish workflow refuses whenever the set of
+ * pins and the version it is about to publish disagree (issue #3244).
+ */
+export const CLAIM_PIN_SOURCES = [
+  'packages/benchmark-product/core/scripts/demo1-export-public-bundle.mjs',
+  'packages/benchmark-product/core/src/legacy-closures.ts',
+  'packages/benchmark-product/verify/src/assets.ts',
+  'packages/benchmark-product/verify/src/legacy-closures.ts',
+  'packages/benchmark-product/cli/src/main.ts',
+];
+
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
 const EXACT_CANARY_PIN = /^0\.1\.0-canary\.sha\.[0-9a-f]{40}$/u;
 const VERIFY_RELEASES = {
@@ -261,21 +275,111 @@ export function applyColophonPublishManifest(manifestPath, pin, options = {}) {
   };
 }
 
-function parseArgs(argv) {
-  if (argv[0] !== '--apply' || !argv[1]) {
-    throw new Error('usage: node .github/scripts/colophon-publish-manifest.mjs --apply <package.json>');
+/**
+ * Every published `@colophon-claims/verify` release this repository holds a receipt for. This is the
+ * offline floor, not the authority: a receipt is added in the same change that bumps the version, so
+ * the ledger names a release before the registry does. `fetchPublishedVerifyVersions` is what the
+ * workflow actually asks.
+ */
+export function registeredVerifyReleases() {
+  return ['0.1.0', ...VERIFY_RELEASE_VERSIONS];
+}
+
+/**
+ * The versions npm actually serves. Fails closed: a registry that cannot be read leaves the guard
+ * unable to tell a pin that resolves from one that 404s, and guessing in that state is the exact
+ * failure the guard exists to prevent.
+ */
+export async function fetchPublishedVerifyVersions(
+  packageName = '@colophon-claims/verify',
+  fetchImpl = fetch,
+) {
+  const response = await fetchImpl(`https://registry.npmjs.org/${packageName.replace('/', '%2f')}`);
+  if (!response.ok) {
+    throw new Error(`cannot read published ${packageName} versions from npm: HTTP ${response.status}`);
   }
-  return { manifestPath: argv[1] };
+  const versions = Object.keys((await response.json()).versions ?? {});
+  if (versions.length === 0) throw new Error(`npm reports no published versions of ${packageName}`);
+  return versions;
+}
+
+/**
+ * Every `@colophon-claims/verify` specifier pinned by `CLAIM_PIN_SOURCES`, deduplicated and
+ * sorted. Both forms are collected: the exact `X.Y.Z` command and the compatible `X.Y` line.
+ */
+export function collectClaimVerifyPins(repoRoot, sources = CLAIM_PIN_SOURCES) {
+  const pins = new Set();
+  for (const source of sources) {
+    const text = readFileSync(resolve(repoRoot, ...source.split('/')), 'utf8');
+    for (const match of text.matchAll(/@colophon-claims\/verify@([0-9]+\.[0-9]+(?:\.[0-9]+)?)/gu)) {
+      pins.add(match[1]);
+    }
+  }
+  return [...pins].sort();
+}
+
+/**
+ * Refuses a publish whose version and whose in-tree claim pins disagree, in either direction.
+ *
+ * The workflow is a manual dispatch against whatever the default branch's HEAD is at the moment it
+ * runs, so nothing but this check couples the reader being published to the bundles this tree
+ * builds. Publishing a version no pin names ships a reader no bundle asks for; leaving a pin on a
+ * version that is neither published nor about to be published ships bundles whose sealed command
+ * 404s, or whose compatible line resolves to a reader that refuses their format.
+ */
+export function assertClaimPinsMatchPublish(pins, publishVersion, published = registeredVerifyReleases()) {
+  const resolvable = new Set([...published, publishVersion]);
+  const exact = pins.filter((pin) => pin.split('.').length === 3);
+  const unresolvable = exact.filter((pin) => !resolvable.has(pin));
+  if (unresolvable.length > 0) {
+    throw new Error(
+      `claim pins name unpublished verifier ${unresolvable.join(', ')}; publish those before ${publishVersion}`,
+    );
+  }
+  const unsatisfied = pins
+    .filter((pin) => pin.split('.').length === 2)
+    .filter((line) => ![...resolvable].some((version) => version.startsWith(`${line}.`)));
+  if (unsatisfied.length > 0) {
+    throw new Error(`claim compatible lines @${unsatisfied.join(', @')} resolve to no published verifier`);
+  }
+  if (!exact.includes(publishVersion)) {
+    throw new Error(
+      `no claim pin names ${publishVersion}; publishing it would ship a reader no bundle in this tree asks for`,
+    );
+  }
+  return pins;
+}
+
+export async function checkClaimPins(repoRoot, manifest, published) {
+  return assertClaimPinsMatchPublish(
+    collectClaimVerifyPins(repoRoot),
+    manifest.version,
+    published ?? await fetchPublishedVerifyVersions(manifest.name),
+  );
+}
+
+const MODES = ['--apply', '--check-claim-pins'];
+
+function parseArgs(argv) {
+  if (!MODES.includes(argv[0]) || !argv[1]) {
+    throw new Error(`usage: node .github/scripts/colophon-publish-manifest.mjs ${MODES.join('|')} <package.json>`);
+  }
+  return { mode: argv[0], manifestPath: argv[1] };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    const { manifestPath } = parseArgs(process.argv.slice(2));
+    const { mode, manifestPath } = parseArgs(process.argv.slice(2));
     const manifest = JSON.parse(readFileSync(resolve(repoRoot, manifestPath), 'utf8'));
-    const pin = loadProductReleasePlatformPin(repoRoot, manifest);
-    const gitHead = COMMIT_SHA.test(process.env.GITHUB_SHA ?? '') ? process.env.GITHUB_SHA : undefined;
-    applyColophonPublishManifest(resolve(repoRoot, manifestPath), pin, { gitHead });
+    if (mode === '--check-claim-pins') {
+      await checkClaimPins(repoRoot, manifest);
+      process.stdout.write(`claim pins agree with ${manifest.name}@${manifest.version}\n`);
+    } else {
+      const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+      const gitHead = COMMIT_SHA.test(process.env.GITHUB_SHA ?? '') ? process.env.GITHUB_SHA : undefined;
+      applyColophonPublishManifest(resolve(repoRoot, manifestPath), pin, { gitHead });
+    }
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

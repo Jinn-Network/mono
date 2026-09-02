@@ -164,6 +164,32 @@ async function verifyCeremonyLeg(
   return { verified: true };
 }
 
+/**
+ * `BindingResolver.resolveBinding` narrowed to the agent it was asked for.
+ * The interface is contracted never to resolve by key alone (interfaces.ts),
+ * so this is redundant against a conforming resolver -- but a key-only
+ * resolver cache is a realistic bug, and every guard downstream of a
+ * resolution reasons about scope and relationship only, so a foreign
+ * binding would otherwise stand in for the claimed agent's. Narrowing at
+ * the call rather than after it also fixes placement: the pair check
+ * necessarily precedes each site's scope guard, so a foreign binding is
+ * refused as unresolved rather than reported as some later leg's failure
+ * (issue #3572).
+ *
+ * `verifyEnvelopeBinding`'s step 2 asserts the same pair inline instead,
+ * where it can name the mismatch in its own `detail` and still return the
+ * offending `resolvedBinding` (issue #3385).
+ */
+async function resolveBindingForAgent(
+  resolver: BindingResolver,
+  query: { readonly key: string; readonly agent: string },
+  atTime: string,
+): Promise<ResolvedBinding | null> {
+  const resolved = await resolver.resolveBinding(query, atTime);
+  if (resolved === null || resolved.binding.agent !== query.agent) return null;
+  return resolved;
+}
+
 async function checkConsentChain(
   resolved: ResolvedBinding,
   atTime: string,
@@ -198,7 +224,8 @@ async function checkConsentChain(
     if (!validSignerKeyids.includes(binding.consent.keyid)) {
       return { ok: false, detail: "consent countersignature does not validate against its declared keyid." };
     }
-    const consentingBinding = await deps.bindingResolver.resolveBinding(
+    const consentingBinding = await resolveBindingForAgent(
+      deps.bindingResolver,
       { key: binding.consent.keyid, agent: binding.agent },
       atTime,
     );
@@ -233,7 +260,8 @@ async function isRevocationAuthorized(
     return resolved.binding.voucher.kind === "account" && resolved.binding.voucher.did === revokedBy;
   }
   // A currently-valid working key of the same Agent with scope: bindings.
-  const revokerBinding = await deps.bindingResolver.resolveBinding(
+  const revokerBinding = await resolveBindingForAgent(
+    deps.bindingResolver,
     { key: revokedBy, agent: resolved.binding.agent },
     entry.effectiveTime,
   );
@@ -463,7 +491,8 @@ export async function settlementJoinCheck(
   input: SettlementJoinInput,
   deps: { readonly bindingResolver: BindingResolver },
 ): Promise<SettlementJoinOutcome> {
-  const verdictLeg = await deps.bindingResolver.resolveBinding(
+  const verdictLeg = await resolveBindingForAgent(
+    deps.bindingResolver,
     { key: input.verdictKey, agent: input.claimedEvaluatorAgent },
     input.envelopeEffectiveTime,
   );
@@ -483,7 +512,8 @@ export async function settlementJoinCheck(
     };
   }
 
-  const settlementLegAtEnvelopeTime = await deps.bindingResolver.resolveBinding(
+  const settlementLegAtEnvelopeTime = await resolveBindingForAgent(
+    deps.bindingResolver,
     { key: input.settlementDeclarationKey, agent: input.claimedEvaluatorAgent },
     input.envelopeEffectiveTime,
   );
@@ -496,7 +526,8 @@ export async function settlementJoinCheck(
 
   // "not revoked at claim time" -- a distinct, later check from the
   // envelope-time resolution above (divergent-times protection).
-  const settlementLegAtClaimTime = await deps.bindingResolver.resolveBinding(
+  const settlementLegAtClaimTime = await resolveBindingForAgent(
+    deps.bindingResolver,
     { key: input.settlementDeclarationKey, agent: input.claimedEvaluatorAgent },
     input.claimTime,
   );
@@ -507,7 +538,10 @@ export async function settlementJoinCheck(
     return { ok: false, reason: "settlement leg lost scope:settlements at claim time." };
   }
 
-  return { ok: true, agent: input.claimedEvaluatorAgent };
+  // The agent this join PROVED, not the one it was handed -- equal by
+  // construction now that both legs assert the pair, and the fact the
+  // `ok: true` is entitled to carry.
+  return { ok: true, agent: verdictLeg.binding.agent };
 }
 
 // ---------------------------------------------------------------------------

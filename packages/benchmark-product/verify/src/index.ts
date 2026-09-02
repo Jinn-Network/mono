@@ -146,6 +146,7 @@ export {
 // implementation for the producer to drift from.
 export {
   FREEZE_REPO_BUNDLE_MEMBERS,
+  FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   FREEZE_REPO_ROLES,
@@ -155,6 +156,7 @@ export {
   verifyFreezeRepo,
 } from "./freeze-repo.js";
 export type {
+  FreezeRepoBundleSupport,
   FreezeRepoDifference,
   FreezeRepoDifferenceKind,
   FreezeRepoExportResult,
@@ -228,3 +230,8 @@ export {
   publisherIdentitySentence,
 } from "./identity/report-face.js";
 export type { PublisherIdentityClass } from "./identity/report-face.js";
+// The declared denominator beside the strict all-slots one (issue #2977). Exported for the same
+// single-sourcing reason as the binding report face above: the product core depends on this
+// package, so every surface that shows the pair derives it from one function.
+export { armDenominators } from "./denominators.js";
+export type { ArmDenominators, PlannedSlotAccounting } from "./denominators.js";
