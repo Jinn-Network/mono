@@ -5,6 +5,7 @@ import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { Buffer } from "node:buffer";
+import { refuse } from "./profile/errors.js";
 import { PRODUCT_BRANDING } from "./profile/branding.js";
 import { COLOPHON_MARK_SVG } from "./profile/branding-assets.js";
 import type { ClaimPackage } from "./profile/claim.js";
@@ -202,6 +203,16 @@ function boundedVisual(value: string, maximumCodePoints: number): string {
   return points.length <= maximumCodePoints ? points.join("") : `${points.slice(0, maximumCodePoints - 1).join("")}…`;
 }
 
+/*
+ * The remaining bare `throw new Error` sites in this file are deliberately internal (issue #3643).
+ * Every one of them asserts a shape over records the caller has ALREADY authenticated and
+ * schema-validated -- the canonical sort of `recordSha256s`, the single-Matrix-subject wrapper, a
+ * registered method's own results grammar, the closed `truthAdmission` set. Reaching one means this
+ * package disagrees with itself about a fact it just verified, which is an internal fault and not a
+ * reader-facing disagreement; `toErrorEnvelope` carries it as `execution`, which is the correct
+ * code for exactly that. The mismatch in `buildPublicAssets` below is the one that is not internal:
+ * it compares two independently supplied inputs, so it refuses.
+ */
 function recordPaths(input: PublicAssetInput): readonly string[] {
   const expected = [...input.recordSha256s].sort();
   if (
@@ -1164,7 +1175,17 @@ export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<stri
   const reportFacts = methodProjection(input.report.results, input.report.method, "sealed Report");
   const claimFacts = methodProjection(input.claim.results, input.claim.method, "stored claim package");
   if ((reportFacts.kind === "binary") !== (input.binaryQualification !== undefined)) {
-    throw new Error("binary public assets require exactly one producer-verified admission/instrument projection");
+    // Typed, not a bare throw (issue #3643). A caller branches on `code` and `issues[].path`; this
+    // is a named disagreement between the requested presentation profile and the sealed Report's
+    // method, not an internal fault, so it must not reach the reader as `execution`. The verifier's
+    // qualification-axis guard (issue #3245) makes it unreachable for the format-relabelling shape,
+    // and the producer's own claim/method agreement check covers the materialize path -- so this is
+    // a backstop on the last step of the run, and it refuses like every other step.
+    refuse(
+      "record-integrity",
+      "bundle.presentation",
+      "binary public assets require exactly one producer-verified admission/instrument projection",
+    );
   }
   return {
     "index.html": encoder.encode(buildIndex(input, reportFacts, claimFacts)),

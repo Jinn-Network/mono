@@ -564,6 +564,24 @@ describe("binary qualification public assets", () => {
     expect(() => buildPublicAssets({ ...binary, binaryQualification: undefined })).toThrow(/require exactly one/u);
     expect(() => buildPublicAssets({ ...fixture(), binaryQualification: binary.binaryQualification })).toThrow(/require exactly one/u);
   });
+
+  // Issue #3643: the mismatch above refuses with the package's typed error, so a caller can branch
+  // on `code` and `issues[].path` -- the stated contract -- rather than on the prose message. Pinned
+  // structurally: this suite lives in `core` and the thrown class is `verify`'s, so `instanceof`
+  // would compare two different classes even when the shape is exactly right.
+  test("the admission/instrument mismatch refuses with a typed code and path", () => {
+    const binary = binaryAssetFixture();
+    for (const input of [
+      { ...binary, binaryQualification: undefined },
+      { ...fixture(), binaryQualification: binary.binaryQualification },
+    ]) {
+      expect(() => buildPublicAssets(input)).toThrow(expect.objectContaining({
+        name: "BenchmarkProductError",
+        code: "record-integrity",
+        issues: [expect.objectContaining({ path: "bundle.presentation" })],
+      }));
+    }
+  });
 });
 
 /**

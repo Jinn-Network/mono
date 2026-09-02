@@ -16,7 +16,7 @@
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test } from "vitest";
 import { BENCHMARKING_METHOD_IDS, RUN_RECORD_KIND } from "@jinn-network/benchmarking-records";
 import {
   RFC3161_TSA_ANCHOR_PROFILE,
@@ -50,6 +50,18 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+/**
+ * The memoized fixture workspaces below (issues #3644, #3660). They cannot go on `roots`: each is
+ * built once and read by every later test in the file, so `afterEach` would delete a tree the next
+ * test still needs. They are reaped here instead, after the whole file. Empty when a filtered run
+ * built no fixture, which is why this reaps a recorded list rather than a fixed pair of names.
+ */
+const fixtureRoots: string[] = [];
+
+afterAll(() => {
+  for (const root of fixtureRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
 let anchoredFixture: Promise<SyntheticV4BundleFixture> | undefined;
 
 /** One real anchored binary run, built once: the fixture drives lock → anchor → launch → collect →
@@ -58,6 +70,7 @@ let anchoredFixture: Promise<SyntheticV4BundleFixture> | undefined;
 function anchored(): Promise<SyntheticV4BundleFixture> {
   if (anchoredFixture === undefined) {
     const workspaceDir = mkdtempSync(join(tmpdir(), "anchored-v7-"));
+    fixtureRoots.push(workspaceDir);
     anchoredFixture = createSyntheticV4BundleFixture({
       workspaceDir,
       truthAdmission: "operator-only",
@@ -75,6 +88,7 @@ let unanchoredFixture: Promise<SyntheticV4BundleFixture> | undefined;
 function unanchored(): Promise<SyntheticV4BundleFixture> {
   if (unanchoredFixture === undefined) {
     const workspaceDir = mkdtempSync(join(tmpdir(), "unanchored-v4-binding-"));
+    fixtureRoots.push(workspaceDir);
     unanchoredFixture = createSyntheticV4BundleFixture({ workspaceDir, truthAdmission: "operator-only" });
   }
   return unanchoredFixture;

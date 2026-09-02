@@ -526,6 +526,18 @@ reader. What distinguishes it is inside the claim package: its
 bundle and absent otherwise. That is the second reason to take the line from the claim package
 rather than from the format.
 
+The qualification axis, unlike prompted screening, is not left to the format string's word. A
+verifier binds it to the sealed Report: the Report's method is `binary-instrument@1` exactly when
+the format literal is a qualifying one (`.../4`, `.../7`, `.../8`), and any disagreement refuses
+under `record-integrity` at path `bundle.json`. The binding runs in both directions, so it closes the
+relabelling of a qualifying bundle down to its non-qualifying sibling — `.../7` presented as
+`.../6`, `.../4` as `.../2`, which otherwise survives because dropping `qualification.json` and the
+admission-only evidence records leaves `claim-package.json` byte-unchanged and `claim-consistency`
+still passing — and the inverse smuggle of a non-binary Report onto a qualifying format. What it
+establishes is agreement, not truth: it says the format literal describes the Report the bundle
+actually seals, never that the Report's own method claim is correct. That remains what the Report's
+signature and the `report-verification` check are for.
+
 Every row runs as `npx @colophon-claims/verify<line> <bundle-dir>`, with the anchor flags appended
 where the row lists them.
 
