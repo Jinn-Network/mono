@@ -9,15 +9,17 @@ import type { CorpusConfig, RuntimeConfig } from "../config.js";
 import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "../errors.js";
 import type { HealthCheck } from "../health.js";
 import type { RuntimeLogger } from "../logger.js";
+import { sanitizeUntrustedText } from "../mcp/untrusted.js";
 import { indexPublicPlane } from "../relevance/indexing.js";
 import type { RelevanceIndex } from "../relevance/index-store.js";
 import type { TraceSpanSource } from "../relevance/trace-decode-adapter.js";
 import { describeError } from "./errors.js";
 import type { CorpusFilesystem } from "./fs.js";
-import type { CorpusMirror, MirrorSyncOutcome } from "./mirror.js";
+import type { CorpusMirror, MirrorSyncOutcome, MirrorSyncStatus } from "./mirror.js";
 import type { CorpusReader } from "./read.js";
 import type { CorpusRetrieval } from "./retrieve.js";
 import {
+  MAX_FAILURE_CHARS,
   MIRROR_SYNC_STATUS_FILENAME,
   MIRROR_SYNC_STATUS_FORMAT,
   createFileMirrorSyncStatusStore,
@@ -27,6 +29,22 @@ import {
 } from "./sync-status.js";
 
 const HEALTH_CHECK_NAME = "corpus-mirror-freshness";
+
+/**
+ * How long `stop` waits for the cycle in flight before abandoning it. Short,
+ * because this is the fallback for a cycle the deadline failed to bound, and a
+ * shutdown that hangs is the fault being guarded against.
+ */
+const STOP_GRACE_MS = 5_000;
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, milliseconds);
+    // The grace timer must not be the reason the process stays alive: if the
+    // cycle finishes first, nothing should wait out the remainder.
+    timer.unref?.();
+  });
+}
 
 export interface CreateCorpusSyncCapabilityOptions {
   /**
@@ -66,6 +84,17 @@ interface Started {
   /** The cycle in flight. Retained rather than discarded so `stop` can await it. */
   current: Promise<void>;
   indexedOnce: boolean;
+  /**
+   * Whether the MOST RECENT cycle skipped because a peer held the sync lock.
+   *
+   * Tracked here rather than read off `lastCycle.status` because a skip
+   * deliberately does not overwrite `lastCycle` — it observed nothing — and
+   * `lastCycle` is also seeded from disk. Keying the lock remedy on
+   * `lastCycle` therefore made it unreachable across a restart, and worse,
+   * showed the chain-verification remedy in its place: a cause that is not
+   * operating (Finding F9 / F-C7-1 restated).
+   */
+  skippedLocked: boolean;
 }
 
 /**
@@ -122,6 +151,9 @@ export function createCorpusSyncCapability(
         lifetime: new AbortController(),
         current: Promise.resolve(),
         indexedOnce: false,
+        // Nothing has been observed yet, and a seeded `lastCycle` says nothing
+        // about whether a peer holds the lock NOW.
+        skippedLocked: false,
       };
       started = state;
 
@@ -129,7 +161,7 @@ export function createCorpusSyncCapability(
       // rest of the runtime composes and the process reaches its shutdown
       // wait. The promise is retained rather than dropped so `stop` can join
       // the cycle in flight instead of tearing the index out from under it.
-      state.current = runCycle(state);
+      state.current = runCycle(state).catch(() => undefined);
     },
 
     async stop(): Promise<void> {
@@ -138,7 +170,13 @@ export function createCorpusSyncCapability(
       started = undefined;
       state.lifetime.abort();
       if (state.timer !== undefined) clearTimeout(state.timer);
-      await state.current;
+      // Belt and braces over the cycle deadline. The deadline bounds the work
+      // a cycle DOES; this bounds how long shutdown waits for it, so a cycle
+      // wedged somewhere no signal reaches cannot hang the process (#3222).
+      // Abandoning the cycle is safe: it holds no handle this capability owns
+      // except the index, and it can only reschedule while the lifetime signal
+      // is unaborted — which it no longer is.
+      await Promise.race([state.current, delay(STOP_GRACE_MS)]);
       state.index.close();
     },
 
@@ -149,9 +187,9 @@ export function createCorpusSyncCapability(
 
   /**
    * One cycle. It never rejects: every failure is folded into the status
-   * record and the cycle log line, because the only caller is a timer, and a
-   * rejection there is an unhandled rejection that kills the process rather
-   * than a fault anyone can act on.
+   * record and the cycle log line, because its callers are `start` and a
+   * timer, and a rejection in a timer is an unhandled rejection that kills the
+   * process rather than a fault anyone can act on.
    */
   async function runCycle(state: Started): Promise<void> {
     // An explicit deadline timer rather than `AbortSignal.timeout`, so a test
@@ -160,12 +198,14 @@ export function createCorpusSyncCapability(
     const timer = setTimeout(() => deadline.abort(), state.corpus.syncTimeoutMs);
     const signal = AbortSignal.any([state.lifetime.signal, deadline.signal]);
 
-    let status = "failed";
+    let status: MirrorSyncStatus = "failed";
     let indexed = false;
     let error: string | undefined;
+    let indexError: string | undefined;
     try {
       const outcome = await options.mirror().syncOnce({ signal });
       status = outcome.status;
+      state.skippedLocked = outcome.status === "skipped-locked";
       if (outcome.status === "skipped-locked") {
         // Neither a success nor a fault: another process holds the sync lock,
         // so this cycle observed nothing about any source and must leave the
@@ -174,15 +214,31 @@ export function createCorpusSyncCapability(
       } else {
         recordOutcome(state, outcome);
         if (outcome.status !== "failed" && shouldIndex(state, outcome)) {
-          await indexPublicPlane({
-            index: state.index,
-            spanSource: options.spanSource,
-            openLocalRuntime: () => options.openLocalRuntime(state.config),
-            corpusReader: options.reader(),
-            corpusRetrieval: options.retrieval(),
-          });
-          state.indexedOnce = true;
-          indexed = true;
+          // Recorded SEPARATELY from the mirror's own status. The mirror
+          // really did sync, and saying otherwise would send an operator
+          // looking at their feed; but a failed index pass means
+          // `corpus_search` answers over an index this cycle did not update,
+          // so a cycle that reports nothing but `"synced"` is a mirror that
+          // looks green forever while the search surface silently rots.
+          try {
+            await indexPublicPlane({
+              index: state.index,
+              spanSource: options.spanSource,
+              openLocalRuntime: () => options.openLocalRuntime(state.config),
+              corpusReader: options.reader(),
+              corpusRetrieval: options.retrieval(),
+              signal,
+            });
+            state.indexedOnce = true;
+            indexed = true;
+          } catch (caught) {
+            // A pass abandoned because the runtime is SHUTTING DOWN is not an
+            // index fault and must not be recorded as one: it would leave a
+            // red freshness row on disk that the next process seeds and shows
+            // until its own first cycle completes. A pass abandoned by the
+            // cycle DEADLINE is a real fault and is recorded.
+            if (!state.lifetime.signal.aborted) indexError = describeError(caught);
+          }
         }
       }
     } catch (caught) {
@@ -190,19 +246,64 @@ export function createCorpusSyncCapability(
     } finally {
       clearTimeout(timer);
       if (status !== "skipped-locked" || state.lastCycle === undefined) {
-        state.lastCycle = { completedAt: now().toISOString(), status: status as "synced" };
+        state.lastCycle = {
+          completedAt: now().toISOString(),
+          status,
+          ...(indexError === undefined ? {} : { indexError }),
+        };
       }
       await writeStatus(state);
-      state.log.info("corpus.mirror.cycle", {
-        status,
-        indexed,
-        ...(error === undefined ? {} : { error }),
-      });
+      await reportCycle(state, { status, indexed, error, indexError });
       if (!state.lifetime.signal.aborted) {
         state.timer = setTimeout(() => {
-          state.current = runCycle(state);
+          // Guarded because everything below the `try` in this function --
+          // the injected logger, the injected clock -- can still throw, and a
+          // rejection escaping a timer callback takes the process down.
+          state.current = runCycle(state).catch(() => undefined);
         }, state.corpus.syncIntervalMs);
       }
+    }
+  }
+
+  /**
+   * The cycle line, plus the freshness verdict beside it.
+   *
+   * `healthChecks()` is reachable only through `runtime.health()`, which the
+   * `mirror` command never calls — it starts, waits for shutdown, and stops,
+   * rendering no report. Emitting the computed row here is what gives it a
+   * channel on the process that owns it: green folds into the cycle line as
+   * one field, and red gets its own `warn` carrying the detail and the remedy,
+   * because a red row an operator cannot see is not a health check.
+   */
+  async function reportCycle(
+    state: Started,
+    cycle: {
+      readonly status: MirrorSyncStatus;
+      readonly indexed: boolean;
+      readonly error?: string;
+      readonly indexError?: string;
+    },
+  ): Promise<void> {
+    let freshness: HealthCheck | undefined;
+    try {
+      freshness = await freshnessCheck(state);
+    } catch (caught) {
+      // Supplementary. A verdict this cycle could not compute must not cost
+      // the cycle line that reports what the cycle did.
+      state.log.debug("corpus.mirror.freshness.unavailable", { reason: describeError(caught) });
+    }
+    state.log.info("corpus.mirror.cycle", {
+      status: cycle.status,
+      indexed: cycle.indexed,
+      ...(cycle.error === undefined ? {} : { error: cycle.error }),
+      ...(cycle.indexError === undefined ? {} : { indexError: cycle.indexError }),
+      ...(freshness === undefined ? {} : { freshness: freshness.ok ? "ok" : "stale" }),
+    });
+    if (freshness !== undefined && !freshness.ok) {
+      state.log.warn(HEALTH_CHECK_NAME, {
+        detail: freshness.detail,
+        ...(freshness.remedy === null ? {} : { remedy: freshness.remedy }),
+      });
     }
   }
 
@@ -230,8 +331,16 @@ export function createCorpusSyncCapability(
         state.sources[key] = {
           ...state.sources[key],
           lastFailure: {
-            code: report.failure?.code ?? "UNKNOWN",
-            message: report.failure?.message ?? "the mirror reported a failure with no detail",
+            // Peer-influenced text, bounded and stripped of terminal-control
+            // sequences at the point it enters a durable file and an
+            // operator-facing row: `describeError` over a transport failure
+            // carries whatever the peer put in it, and
+            // `TransportRedirectError` embeds the `Location` header verbatim.
+            code: sanitizeUntrustedText(report.failure?.code ?? "UNKNOWN", MAX_FAILURE_CHARS).text,
+            message: sanitizeUntrustedText(
+              report.failure?.message ?? "the mirror reported a failure with no detail",
+              MAX_FAILURE_CHARS,
+            ).text,
             at,
           },
         };
@@ -307,6 +416,23 @@ export function createCorpusSyncCapability(
       };
     }
 
+    if (lastCycle.indexError !== undefined) {
+      // The mirror is not the fault here and must not be named as one: it
+      // synced. What failed is the pass that makes what it synced searchable,
+      // so `corpus_search` is answering over an index that cycle left behind.
+      return {
+        name: HEALTH_CHECK_NAME,
+        ok: false,
+        detail:
+          `The sync cycle that completed at ${lastCycle.completedAt} mirrored successfully but ` +
+          `its public-plane index pass failed: ${lastCycle.indexError}. Mirrored records are on ` +
+          `disk; corpus_search answers over an index this cycle did not update.${heads}`,
+        remedy:
+          "Read the most recent `corpus.mirror.cycle` log line's `indexError`, then check the " +
+          "`corpus-index` row on a `serve` process for what the index currently holds.",
+      };
+    }
+
     // Two intervals of slack, or one interval plus a whole sync timeout,
     // whichever is longer: a cycle that runs to its deadline still finishes
     // inside the window, so an install with a slow feed does not flap red
@@ -345,14 +471,13 @@ export function createCorpusSyncCapability(
       detail:
         `${String(stale.length)} of ${String(followed.length)} followed archive(s) have not ` +
         `synced within the last ${describeAge(threshold)}: ${stale.join(", ")}.${heads}`,
-      remedy:
-        lastCycle.status === "skipped-locked"
-          ? `Every recent cycle skipped because another process holds the mirror sync lock at ` +
-            `${state.config.mirrorLockPath}. Stop the other instance, or delete that file if it ` +
-            `is a stale lock left behind by a killed process.`
-          : "Check the `corpus-chain-verification` row: it reports this runtime's verification " +
-            "posture and names any archive whose chain it refused, which is the usual reason a " +
-            "followed archive stops advancing.",
+      remedy: state.skippedLocked
+        ? `The most recent cycle skipped because another process holds the mirror sync lock at ` +
+          `${state.config.mirrorLockPath}. Stop the other instance, or delete that file if it ` +
+          `is a stale lock left behind by a killed process.`
+        : "Check the `corpus-chain-verification` row: it reports this runtime's verification " +
+          "posture and names any archive whose chain it refused, which is the usual reason a " +
+          "followed archive stops advancing.",
     };
   }
 

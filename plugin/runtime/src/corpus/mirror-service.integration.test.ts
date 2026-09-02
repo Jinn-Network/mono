@@ -14,31 +14,24 @@
  */
 
 import { generateKeyPairSync, sign } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { openLocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
 import { headPath } from "@jinn-network/record-discovery-protocol";
 import type { FetchLike } from "@jinn-network/record-discovery-transport-http";
+import type { VerifyDriver } from "@jinn-network/record-discovery-client";
 import type { DsseSigner } from "@jinn-network/trust-core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { buildMirrorCapabilities, type BinIo } from "../bin.js";
-import {
-  createNodeRuntimeConfigFileReader,
-  nodeIndexDatabaseIo,
-  nodeSensitivityNonceIo,
-} from "../bin-node-fs.js";
+import { buildMirrorCapabilities, buildServeCapabilities, type BinIo } from "../bin.js";
+import { createNodeRuntimeConfigFileReader } from "../bin-node-fs.js";
 import { resolveRuntimeConfig, type MirrorSourceConfig, type RuntimeConfig } from "../config.js";
 import type { HealthCheck } from "../health.js";
 import type { RuntimeLogger } from "../logger.js";
-import { createMcpCapability } from "../mcp/capability.js";
 import { TOOL_NAMES } from "../mcp/identifiers.js";
-import { createCorpusAdmissionFilter } from "../relevance/admission.js";
-import { createSensitivityClassifier, openRelevanceIndex } from "../relevance/index.js";
 import { createPluginRuntime, type PluginRuntime } from "../runtime.js";
 import {
   createLocalCorpusPorts,
@@ -46,8 +39,7 @@ import {
   type LocalCorpusPorts,
 } from "../session-host-corpus.js";
 import { didKeyFromEd25519PublicKey } from "../session-host-crypto.js";
-import { RUNTIME_VERSION } from "../version.js";
-import { createCorpusCapability, type CorpusCapability } from "./capability.js";
+import type { CorpusCapability } from "./capability.js";
 import { buildSignedFixtureArchive, loopbackFetch } from "./testing-fixture.js";
 
 const NOW = new Date("2026-07-30T00:00:00Z");
@@ -152,6 +144,7 @@ function resolveConfig(options: {
   readonly didKey: string;
   readonly genesisDigest: string;
   readonly syncIntervalMs?: number;
+  readonly syncTimeoutMs?: number;
 }): RuntimeConfig {
   return resolveRuntimeConfig({
     env: {},
@@ -167,19 +160,58 @@ function resolveConfig(options: {
         chainVerification: "verified",
         trust: { genesisDigest: options.genesisDigest, policyDirectory: "policy" },
         ...(options.syncIntervalMs === undefined ? {} : { syncIntervalMs: options.syncIntervalMs }),
+        ...(options.syncTimeoutMs === undefined ? {} : { syncTimeoutMs: options.syncTimeoutMs }),
       },
     },
   });
 }
 
 /** Exactly the `BinIo` the `mirror` command hands `buildMirrorCapabilities`. */
-function binIo(config: RuntimeConfig, fetchLike: FetchLike): BinIo {
+function binIo(
+  config: RuntimeConfig,
+  fetchLike: FetchLike,
+  overrides: Partial<LocalCorpusPorts> = {},
+): BinIo {
   return {
     writeOut: () => {},
     writeErr: () => {},
     homeDirectory: home,
     untilShutdown: () => new Promise<void>(() => {}),
     ...createLocalCorpusPorts({ config, fetchLike }),
+    ...overrides,
+  };
+}
+
+/**
+ * Counts which of the verification driver's two source-level entry points the
+ * mirror reached.
+ *
+ * This is the discriminator between a COLD source and a RESUMED one, and there
+ * is no other: a resumed source whose head sits at the position already on
+ * file revalidates (`verifyHead`), a cold one walks and verifies the chain
+ * (`verifySource`). Everything else a restart can be measured on is blind for
+ * structural reasons — the fixture archive is a single page with
+ * `prevArchive: null`, so a genesis re-walk fetches only the head and the
+ * archive root, and record BYTES come from the local mirror store either way.
+ */
+function countingDriver(driver: VerifyDriver): {
+  readonly driver: VerifyDriver;
+  readonly calls: { verifySource: number; verifyHead: number };
+} {
+  const calls = { verifySource: 0, verifyHead: 0 };
+  return {
+    calls,
+    driver: {
+      ...driver,
+      verifySource: (...args: Parameters<VerifyDriver["verifySource"]>) => {
+        calls.verifySource += 1;
+        return driver.verifySource(...args);
+      },
+      verifyHead: (...args: Parameters<VerifyDriver["verifyHead"]>) => {
+        calls.verifyHead += 1;
+        return driver.verifyHead(...args);
+      },
+    },
   };
 }
 
@@ -187,9 +219,13 @@ function binIo(config: RuntimeConfig, fetchLike: FetchLike): BinIo {
  * One standing mirror service, started and run through its first cycle — the
  * production composition, not a hand-built stand-in.
  */
-async function startMirrorService(config: RuntimeConfig, fetchLike: FetchLike) {
+async function startMirrorService(
+  config: RuntimeConfig,
+  fetchLike: FetchLike,
+  overrides: Partial<LocalCorpusPorts> = {},
+) {
   const recorder = cycleRecorder();
-  const capabilities = buildMirrorCapabilities(binIo(config, fetchLike));
+  const capabilities = buildMirrorCapabilities(binIo(config, fetchLike, overrides));
   const runtime = createPluginRuntime({ config, log: recorder.log, capabilities });
   await runtime.start();
   return {
@@ -203,53 +239,28 @@ async function startMirrorService(config: RuntimeConfig, fetchLike: FetchLike) {
 }
 
 /**
- * A second, independent runtime over the SAME home, composed the way
- * `bin.buildServeCapabilities("tools", io, …)` composes one — the corpus
- * capability plus the MCP capability, whose transport seam is bound to a
- * linked in-memory pair instead of stdio.
+ * A second, independent runtime over the SAME home, composed by the REAL
+ * `bin.buildServeCapabilities("tools", …)` — the same call `main` makes on the
+ * serve path, with only the MCP transport swapped for a linked in-memory pair.
+ *
+ * Deliberately not a hand-assembled equivalent. One of those drifted from
+ * production the moment it was written: it stubbed the search-time sensitivity
+ * classifier out (`{ classify: async () => ({ excluded: false }) }`) and
+ * re-implemented the admission filter inline, so the test claiming a
+ * production-shaped client was exercising neither gate.
  */
 async function connectToolsClient(config: RuntimeConfig, fetchLike: FetchLike) {
-  const ports = createLocalCorpusPorts({ config, fetchLike });
-  const corpus = createCorpusCapability({
-    transport: ports.corpusTransport,
-    fs: ports.corpusFs,
-    dsseVerifier: ports.dsseVerifier,
-    readPolicyVersions: ports.readPolicyVersions,
-    verifyDriver: ports.corpusVerifyDriver,
-  });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   let runtime: PluginRuntime;
-  const mcp = createMcpCapability({
-    role: "tools",
-    version: RUNTIME_VERSION,
-    transport: serverTransport,
-    resolve: async (context) => ({
-      index: await openRelevanceIndex({
-        databasePath: context.config.indexPath,
-        classifier: await createSensitivityClassifier({
-          noncePath: context.config.sensitivity.noncePath,
-          knownIdentities: context.config.sensitivity.knownIdentities,
-          nonceIo: nodeSensitivityNonceIo,
-        }),
-        indexIo: nodeIndexDatabaseIo,
-      }),
-      retrieval: corpus.retrieval,
-      classifier: { classify: async () => ({ excluded: false }) },
-      admission: createCorpusAdmissionFilter({
-        admitProducer: async (producerId) => ({
-          admitted: corpus.admission.admitProducer(producerId).status === "admitted",
-        }),
-      }),
-      archiveDirectory: context.config.archiveDirectory,
-      openLocalRuntime: () => openLocalEvidenceRuntime({ rootDir: context.config.archiveDirectory }),
-      mirror: corpus.mirror,
-      health: () => runtime.health(),
-    }),
-  });
+  const capabilities = buildServeCapabilities(
+    "tools",
+    { ...binIo(config, fetchLike), mcpTransport: serverTransport },
+    () => runtime.health(),
+  );
   runtime = createPluginRuntime({
     config,
     log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
-    capabilities: [corpus, mcp],
+    capabilities,
   });
   const client = new Client({ name: "mirror-service-test", version: "0.0.0" });
   await Promise.all([runtime.start(), client.connect(clientTransport)]);
@@ -320,29 +331,42 @@ describe("the mirror as a standing service", () => {
       return inner(url);
     };
 
-    const first = await startMirrorService(config, counting);
+    const coldSpy = countingDriver(createLocalCorpusPorts({ config }).corpusVerifyDriver);
+    const first = await startMirrorService(config, counting, {
+      corpusVerifyDriver: coldSpy.driver,
+    });
     await first.recorder.waitFor(1);
     const recordsAfterFirst = (await first.corpus.reader.listRecords({ limit: 50 })).items.length;
     const recordFetchesAfterFirst = recordFetches(served);
     const markAfterFirst = await readMark(config);
     await first.runtime.stop();
 
+    // The cold service walked and verified the chain, and never revalidated.
+    // The contrast is the whole assertion below.
+    expect(coldSpy.calls).toEqual({ verifySource: 1, verifyHead: 0 });
+
     // A genuinely fresh service over the same home: new capabilities, new
     // stores, new index handle. Everything it knows about where it left off
     // comes off disk.
-    const second = await startMirrorService(config, counting);
+    const resumedSpy = countingDriver(createLocalCorpusPorts({ config }).corpusVerifyDriver);
+    const second = await startMirrorService(config, counting, {
+      corpusVerifyDriver: resumedSpy.driver,
+    });
     await second.recorder.waitFor(1);
-
-    // Nothing above the mark to walk, so nothing was walked. The loop reports
-    // only its cycle status, so the walk itself is read off the mirror the
-    // restarted service is driving.
-    const resumed = await second.corpus.mirror.syncOnce();
-    expect(resumed.status).toBe("synced");
-    expect(resumed.sources[0]!.entriesWalked).toBe(0);
-    expect(resumed.sources[0]!.indexed).toBe(0);
-
     const recordsAfterSecond = (await second.corpus.reader.listRecords({ limit: 50 })).items.length;
     await second.runtime.stop();
+
+    // The restarted service's OWN FIRST cycle, which is the only cycle that
+    // can distinguish a resume from a re-adoption: by cycle two the service
+    // has re-established the mark itself, and every later measurement is
+    // identical whether or not the mark survived the restart.
+    //
+    // A resumed source finds its head at the position already on file and
+    // REVALIDATES it; a cold one walks from genesis and verifies the chain.
+    // Delete `config.mirrorStatePath` between the two services and this
+    // flips to `{ verifySource: 1, verifyHead: 0 }` — which is what makes it
+    // an assertion about the feature rather than about the fixture.
+    expect(resumedSpy.calls).toEqual({ verifySource: 0, verifyHead: 1 });
 
     expect(recordsAfterSecond).toBe(recordsAfterFirst);
     expect(await readMark(config)).toEqual(markAfterFirst);
@@ -426,13 +450,50 @@ describe("the mirror as a standing service", () => {
     }
   });
 
+  test("a peer that accepts the connection and never answers cannot wedge the service", async () => {
+    // The failure this bounds, reproduced against the real composition: with
+    // no signal on `Transport.fetch`, `fetchHead` sat inside a single network
+    // read forever. `runCycle`'s `finally` never ran, so the loop never
+    // rescheduled — a standing mirror that stops permanently and silently,
+    // holding an O_EXCL lock a SIGKILL does not release.
+    const { archive, didKey } = await buildArchive();
+    const config = resolveConfig({
+      didKey,
+      genesisDigest: archive.genesisDigest,
+      syncIntervalMs: 1_000,
+      syncTimeoutMs: 1_000,
+    });
+
+    // The black hole: never resolves on its own, and ends only when the
+    // caller's signal says so — which is what a real `fetch` does, and what
+    // this transport had no way to ask for.
+    const blackHole: FetchLike = (_url, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("The operation was aborted.", "AbortError")),
+        );
+      });
+
+    const service = await startMirrorService(config, blackHole);
+    try {
+      // Two cycles, so this is the loop still running rather than one cycle
+      // that happened to end.
+      await service.recorder.waitFor(2);
+      expect(service.recorder.cycles[0]).toMatchObject({ status: "failed" });
+      expect(service.recorder.cycles[1]).toMatchObject({ status: "failed" });
+    } finally {
+      await service.runtime.stop();
+    }
+  }, 20_000);
+
   test("the service follows the archives the home's configuration file declares", async () => {
     // The last link in the chain. Everything above resolves its configuration
     // in the test; a CLI-launched `mirror` resolves its own, and until the
     // entry points read a document it followed nothing at all (F-C7-1).
     const { archive, didKey } = await buildArchive();
+    const configPath = join(home, "config.json");
     await writeFile(
-      join(home, "config.json"),
+      configPath,
       JSON.stringify({
         corpus: {
           sources: [
@@ -446,6 +507,9 @@ describe("the mirror as a standing service", () => {
         },
       }),
     );
+    // The reader refuses a config file other local users can write: it is the
+    // only place the followed sources and their signing keys are declared.
+    await chmod(configPath, 0o600);
 
     // The one document both entry-point paths resolve over, read exactly as
     // `bin.ts` reads it.
