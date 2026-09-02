@@ -10,13 +10,20 @@
  *
  * Two choices make the number honest before any result exists:
  *
- * - **n is the per-arm scorable trial count**, `items x replicates`. That is the exact denominator
- *   every per-arm interval in the sealed Report divides by, so quoting anything else would quote a
- *   width no arm will ever have.
+ * - **n is the per-arm scorable trial count the plan commits to**, `items x replicates`. That is
+ *   the denominator `wilson@1` divides by, so quoting anything else would quote a width no arm
+ *   could have.
  * - **The width is taken at p = 0.5.** Wilson width depends on the pass rate, and the pass rate is
- *   unknown at the seal. p = 0.5 maximizes the width, so it is both the only p-free answer
- *   available and the conservative one: the printed width is a ceiling the run cannot exceed, never
- *   a promise it might miss.
+ *   unknown at the seal. p = 0.5 maximizes the width over p, so it is both the only p-free answer
+ *   available and the conservative one: no pass rate this run turns out to have will widen the
+ *   interval past the printed number.
+ *
+ * That bound is over the pass rate, and only over the pass rate. `wilson@1` divides by the cells
+ * that actually score, and a cell can fail to score — excluded, or its replicates reduce to a
+ * conflicted verdict — so a run that loses cells reports an interval wider than this one. The
+ * printed width is therefore what the declared n buys if the plan is delivered whole, not a
+ * guarantee about a run that comes back short. Saying so is the point: an advisory against
+ * self-deception cannot itself promise more than it can keep.
  *
  * The interval itself is the shipped `wilsonInterval` — the same function `wilson@1` reports
  * through — so the advisory cannot drift from the method it is advising about.
@@ -24,7 +31,7 @@
 
 import { wilsonInterval } from "@jinn-network/benchmarking-aggregate";
 
-/** One row of the advisory: a sample size and the widest 95% interval it can produce. */
+/** One row of the advisory: a sample size and the widest 95% interval that many scored trials give. */
 export interface SampleSizeWidth {
   readonly n: number;
   /** Canonical 4-decimal spelling, as every other interval in a sealed record is spelled. */
@@ -76,11 +83,19 @@ export function sampleSizeAdvisory(input: {
   };
 }
 
-/** The operator-facing advisory text: one line naming the declared n, then one line per reference. */
+/**
+ * The operator-facing advisory text: one line naming the declared n, then one line per reference.
+ *
+ * The lead line is scoped to the pass rate on purpose. Whatever this run's pass rate turns out to
+ * be, the interval at n scored trials is no wider than this — but cells that never score narrow
+ * the denominator, and the operator is told so rather than left to discover it in the Report.
+ */
 export function formatSampleSizeAdvisory(advisory: SampleSizeAdvisory): string {
   const rows = advisory.references
     .map((reference) => `  n=${reference.n}: interval width ${reference.expectedIntervalWidth}`)
     .join("\n");
-  return `At the declared n=${advisory.n} per arm, the widest 95% interval this run can produce is `
-    + `${advisory.expectedIntervalWidth} wide. At this and neighboring sample sizes:\n${rows}`;
+  return `At the declared n=${advisory.n} per arm, no pass rate this run can have gives a 95% `
+    + `interval wider than ${advisory.expectedIntervalWidth}. At this and neighboring sample sizes:`
+    + `\n${rows}\nCells that do not score (excluded, or conflicted across replicates) lower the `
+    + `denominator and widen the interval past this.`;
 }

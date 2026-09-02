@@ -73,4 +73,12 @@ describe("formatSampleSizeAdvisory", () => {
       expect(text).toContain(`  n=${row.n}: interval width ${row.expectedIntervalWidth}`);
     }
   });
+
+  test("bounds the width over the pass rate only, and says what can still widen it", () => {
+    const text = formatSampleSizeAdvisory(sampleSizeAdvisory({ items: 12, replicates: 2 }));
+    // wilson@1 divides by the cells that score, not by the cells the plan named, so an advisory
+    // that promised a flat ceiling would be the exact self-deception this gate exists to prevent.
+    expect(text).toContain("no pass rate this run can have");
+    expect(text).toContain("Cells that do not score");
+  });
 });
