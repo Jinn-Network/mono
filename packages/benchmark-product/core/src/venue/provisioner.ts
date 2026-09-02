@@ -245,37 +245,51 @@ interface EvaluationProvisionerOptions {
   readonly contextVariation?: (evaluatorId: string, contextBytes: Uint8Array) => Uint8Array;
 }
 
+/**
+ * Resolves the attempt's evaluator identity from the dispatching Submission. A missing or unknown
+ * evaluator requirement is a caller bug, never silently defaulted (BP-21).
+ */
+function resolveEvaluationEvaluator(options: EvaluationProvisionerOptions): VenueEvaluatorSigner {
+  const requested = options.requestedEvaluator;
+  if (typeof requested !== "string") {
+    throw new Error(
+      `benchmark-product local venue evaluation Submission carries no "${EVALUATOR_REQUIREMENT_KEY}" `
+      + "requirement -- every evaluation attempt must name the venue evaluator identity it runs under",
+    );
+  }
+  const evaluator = options.evaluators.find((candidate) => candidate.id === requested);
+  if (evaluator === undefined) {
+    throw new Error(
+      `benchmark-product local venue evaluation Submission names unknown evaluator "${requested}" -- `
+      + `known evaluator identities: ${options.evaluators.map((candidate) => candidate.id).join(", ")}`,
+    );
+  }
+  return evaluator;
+}
+
+/** Resolves this evaluation cell's staged materials from the venue's registry. */
+function resolveEvaluationMaterials(options: EvaluationProvisionerOptions): EvaluationCellMaterials {
+  const materials = options.registry.get(options.taskSha256);
+  if (materials === undefined) {
+    throw new Error(
+      `benchmark-product local venue has no registered evaluation-cell materials for evaluation `
+      + `Task sha256:${options.taskSha256} -- prepareEvaluationCell() must be called, and its `
+      + "returned taskBytes submitted, before this evaluation Task is dispatched",
+    );
+  }
+  return materials;
+}
+
 function evaluationProvisionerContract(options: EvaluationProvisionerOptions): ProvisionerContract {
   let materials: EvaluationCellMaterials | undefined;
   let evaluator: VenueEvaluatorSigner | undefined;
   return {
     workspaceKind: (): WorkspaceKind => "dir",
     async setup(_view, paths) {
-      // Resolve the attempt's evaluator BEFORE anything is written: a missing or unknown
-      // evaluator requirement is a caller bug, never silently defaulted (BP-21).
-      const requested = options.requestedEvaluator;
-      if (typeof requested !== "string") {
-        throw new Error(
-          `benchmark-product local venue evaluation Submission carries no "${EVALUATOR_REQUIREMENT_KEY}" `
-          + "requirement -- every evaluation attempt must name the venue evaluator identity it runs under",
-        );
-      }
-      evaluator = options.evaluators.find((candidate) => candidate.id === requested);
-      if (evaluator === undefined) {
-        throw new Error(
-          `benchmark-product local venue evaluation Submission names unknown evaluator "${requested}" -- `
-          + `known evaluator identities: ${options.evaluators.map((candidate) => candidate.id).join(", ")}`,
-        );
-      }
+      // Resolve the attempt's evaluator BEFORE anything is written (see the helper's BP-21 note).
+      evaluator = resolveEvaluationEvaluator(options);
       await ensureWorkspaceDirectories(paths);
-      materials = options.registry.get(options.taskSha256);
-      if (materials === undefined) {
-        throw new Error(
-          `benchmark-product local venue has no registered evaluation-cell materials for evaluation `
-          + `Task sha256:${options.taskSha256} -- prepareEvaluationCell() must be called, and its `
-          + "returned taskBytes submitted, before this evaluation Task is dispatched",
-        );
-      }
+      materials = resolveEvaluationMaterials(options);
       const evaluationContextBytes = options.contextVariation === undefined
         ? materials.evaluationContextBytes
         : options.contextVariation(evaluator.id, materials.evaluationContextBytes);
@@ -291,23 +305,55 @@ function evaluationProvisionerContract(options: EvaluationProvisionerOptions): P
     },
     executionEnv: ({ env }) => ({ ...env }),
     async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {
-      if (materials === undefined || evaluator === undefined) {
-        throw new Error("benchmark-product local venue harvest ran before setup registered evaluation-cell materials");
-      }
+      // Bind lazily, because harvest is NOT reached only through this process's own `setup`. The
+      // backend's recovery path (`recoverRef` -> `completeAttempt` in
+      // `@jinn-network/task-execution-backend-local`) re-enters harvest for every
+      // completion-capable row that carries no journaled `harvested` event -- and it does so with
+      // a contract minted fresh by `createLocalProvisioner`, whose `setup` recovery never runs.
+      // Reading the closure state that `setup` would have assigned therefore threw on exactly the
+      // rows recovery exists to complete (`harvesting-resume`, `matching-late`), turning a verdict
+      // the harness had already produced into a permanent could-not-grade. The registry is a live
+      // process object, so this resolves from the same materials `prepareEvaluationCell()`
+      // registered before dispatch; when `setup` did run, the closure values are reused verbatim.
+      const boundEvaluator = evaluator ?? resolveEvaluationEvaluator(options);
+      const boundMaterials = materials ?? resolveEvaluationMaterials(options);
       const verdictPath = join(paths.out, "verdict");
+      // The interrupted harvest's own raw statement. Sealing replaces out/verdict IN PLACE, so a
+      // kill after that rename leaves an envelope where a re-run harvest would look for the
+      // statement -- and `sealVerdictStatement` refuses an envelope, since it is not a verdict
+      // statement. Detecting "already sealed" by parsing out/verdict is not an option: the bytes
+      // there are harness-written, so an envelope shape proves nothing about who signed it. The
+      // statement is stashed under meta/ (never delivered, never wiped by `wipeScratch`) BEFORE
+      // the rename instead, so a resumed harvest re-seals the exact bytes the harness produced.
+      const statementStash = join(paths.meta, "verdict.statement");
+      const stashed = existsSync(statementStash);
       // #39b(b): the same unconditional read the daemon's evaluator provisioner carried. A harness
       // that refused its subject exits 65 having written no verdict, and that exit code already
       // classifies the failure; letting the read's ENOENT escape harvest replaces that
       // classification with an infrastructure blame. Nothing to seal means nothing to seal.
-      if (!existsSync(verdictPath)) return workspaceHarvest(paths, declaredOutputs);
-      const statementBytes = new Uint8Array(await readFile(verdictPath));
+      if (!stashed && !existsSync(verdictPath)) return workspaceHarvest(paths, declaredOutputs);
+      const statementBytes = new Uint8Array(await readFile(stashed ? statementStash : verdictPath));
+      // Staged then renamed, never written in place: a kill DURING that write would otherwise
+      // leave a truncated stash that the next harvest would prefer over the intact statement
+      // still sitting at out/verdict -- turning a recoverable interruption into a sealed-wrong or
+      // unsealable one. The rename is atomic, so `existsSync` above means "complete", never
+      // "started".
+      if (!stashed) {
+        const stashTemporary = `${statementStash}.partial`;
+        await writeFile(stashTemporary, statementBytes, { mode: 0o600 });
+        await rename(stashTemporary, statementStash);
+      }
       const envelopeBytes = await sealVerdictStatement({
         statementBytes,
-        evaluatorId: evaluator.id,
-        expectedEvaluationSpecificationSha256: sha256Hex(materials.evaluationSpecBytes),
-        signer: evaluator.signer,
+        evaluatorId: boundEvaluator.id,
+        expectedEvaluationSpecificationSha256: sha256Hex(boundMaterials.evaluationSpecBytes),
+        signer: boundEvaluator.signer,
       });
       const temporary = `${verdictPath}.sealed`;
+      // `wx` keeps a first harvest from clobbering anything it did not write. Only a RESUMED
+      // harvest may legitimately find a temporary already here -- its predecessor's, killed
+      // between this write and the rename below -- so only a resumed harvest clears one.
+      if (stashed) await rm(temporary, { force: true });
       await writeFile(temporary, envelopeBytes, { mode: 0o600, flag: "wx" });
       await rename(temporary, verdictPath);
 

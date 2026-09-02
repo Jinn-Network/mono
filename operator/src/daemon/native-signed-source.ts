@@ -946,6 +946,13 @@ export async function openNativeSignedSource(input: {
   readonly faults?: NativeSignedSourceFaults;
   /** Bounded SSE replay window for live tail consumers (§9.3). Defaults to 256 entries. */
   readonly replayWindow?: number;
+  /**
+   * This host's clock. Bounds the `issuedAt` of every head this source mints as well as
+   * the owner lease (#3481): a fast clock otherwise publishes heads every consumer
+   * refuses `head-issued-ahead`, and the publisher learns of it only from peer logs.
+   * Defaults to `owner.now` when only that seam is supplied, then to wall time.
+   */
+  readonly now?: () => Date;
   readonly owner?: {
     readonly now?: () => Date;
     readonly ttlMs?: number;
@@ -954,7 +961,7 @@ export async function openNativeSignedSource(input: {
 }): Promise<NativeSignedSourcePublisher> {
   const baseUrl = input.publicBaseUrl.replace(/\/+$/u, '');
   if (baseUrl.length === 0) throw new Error('native signed source publicBaseUrl is required');
-  const now = input.owner?.now ?? (() => new Date());
+  const now = input.now ?? input.owner?.now ?? (() => new Date());
   const owner = await acquireOwner({
     rootDir: input.rootDir,
     ownerFile: input.ownerFile,
@@ -1020,6 +1027,7 @@ export async function openNativeSignedSource(input: {
       blobs: createNativeBlobStore(store),
       states,
       intents,
+      clock: { now },
       ...(durableFaults === undefined ? {} : { faults: durableFaults }),
     });
 

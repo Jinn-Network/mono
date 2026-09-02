@@ -8590,6 +8590,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/record-discovery-testing",
         "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/refresh-by-ceiling-inverted-window/vector.json",
+        "relativeSource": "fixtures/vectors/refresh-by-ceiling-inverted-window/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/rolled-back-head/vector.json",
         "relativeSource": "fixtures/vectors/rolled-back-head/vector.json"
       },
