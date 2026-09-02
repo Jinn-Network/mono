@@ -200,7 +200,10 @@ test("the default human surface names an absent and a declared-but-absent subjec
     },
   });
   assert.match(output, /no anchor records carried/);
-  assert.match(output, /lock: declared-but-absent — this run declared .*rfc3161-tsa\/v1 and the bundle carries no matching anchor/);
+  // Exact, not `.*`-absorbed: the profile is rendered by its own path with the namespace host
+  // dropped, so a regression in `anchorProfileName` has to fail here (issue #3723).
+  assert.match(output, /lock: declared-but-absent — this run declared rfc3161-tsa\/v1 and the bundle carries no matching anchor/);
+  assert.doesNotMatch(output, /jinn\.network/);
   assert.match(output, /matrix: absent — no anchor was carried and none was declared/);
 });
 
@@ -579,7 +582,12 @@ test("no tampered variant's refusal names an internal protocol namespace", async
   // conformance corpus can actually produce goes through the human surface, so a message that
   // starts naming a `$id`, a `urn:`, or a method id fails here rather than in a reader's terminal.
   const tamperedDir = fileURLToPath(new URL("../fixtures/public-bundle-conformance-v1/tampered", import.meta.url));
-  const variants = (await readdir(tamperedDir)).sort();
+  // Directories only: a stray file dropped into the corpus is not a variant, and walking it would
+  // satisfy the refusal assertion without covering anything (issue #3723).
+  const variants = (await readdir(tamperedDir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
   assert.ok(variants.length > 0, "the tampered corpus is empty");
   for (const variant of variants) {
     const refused = await invoke([join(tamperedDir, variant)]);
@@ -612,6 +620,66 @@ test("a refusal naming a record kind aliases it on the human surface and keeps i
   const json = await runVerifierCli(["bundle", "--json"], deps);
   assert.equal(json.exitCode, 1);
   assert.equal(JSON.parse(json.stdout).message, `disclosure-specification: the record's subject kind must be ${kind}`);
+});
+
+test("a kind-mismatch refusal still reads as a contrast after aliasing", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  // `anchor/check.ts`'s kind-mismatch refusal is the one message whose whole content is the
+  // CONTRAST between two values. Rendering both as `spec.jinn.network` kinds made the human
+  // surface print the same alias twice and assert that they differ (issue #3723), so the resolved
+  // side is a plain noun the sanitizer never touches.
+  const declared = "https://spec.jinn.network/records/benchmark-matrix/v1";
+  const deps = {
+    verify: () => {
+      const error = new Error(
+        "carried anchor is invalid: subject.kind is "
+        + `${declared}, but its digest resolves to this bundle's sealed Run`,
+      );
+      error.code = "record-integrity";
+      return Promise.reject(error);
+    },
+  };
+
+  const human = await runVerifierCli(["bundle"], deps);
+  assert.equal(human.exitCode, 1);
+  assert.match(human.stderr, /but its digest resolves to this bundle's sealed Run/);
+  assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
+  // Exactly one alias: the refused value. A second one would mean the contrast was erased.
+  assert.equal(human.stderr.match(/<identifier: see --json>/gu)?.length, 1);
+
+  const json = await runVerifierCli(["bundle", "--json"], deps);
+  assert.match(JSON.parse(json.stdout).message, new RegExp(declared.replaceAll(".", "\\.")));
+});
+
+test("a freeze-repo failure keeps its message verbatim in --json and aliases it on stderr", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  // The alias exists so a reader is not handed an address; inside `--json` it would be
+  // self-referential, and the identifier would be recoverable from no surface at all (issue #3723).
+  const kind = "https://spec.jinn.network/records/benchmark-matrix/v1";
+  const deps = {
+    verify: () => Promise.resolve({
+      format: "benchmark-product-public-bundle/2",
+      identity: "a".repeat(64),
+      checks: ["manifest"],
+    }),
+    verifyFreezeRepo: () => {
+      const error = new Error(`freeze-repo-render: no licence declared for ${kind}`);
+      error.code = "freeze-repo-render";
+      return Promise.reject(error);
+    },
+  };
+
+  const json = await runVerifierCli(["bundle", "--json", "--freeze-repo", "repo"], deps);
+  assert.equal(json.exitCode, 2);
+  const payload = JSON.parse(json.stdout);
+  assert.equal(payload.freezeRepo.ok, false);
+  assert.equal(payload.freezeRepo.message, `freeze-repo-render: no licence declared for ${kind}`);
+
+  const human = await runVerifierCli(["bundle", "--freeze-repo", "repo"], deps);
+  assert.equal(human.exitCode, 2);
+  assert.match(human.stderr, /freeze repository not checked: /);
+  assert.match(human.stderr, /<identifier: see --json>/);
+  assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
 });
 
 test("a URL a reader can actually open survives the human surface", async () => {

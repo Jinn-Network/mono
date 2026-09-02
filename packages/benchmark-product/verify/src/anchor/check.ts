@@ -125,6 +125,19 @@ const SUBJECT_KINDS: ReadonlyMap<ClaimAnchorSubject, string> = new Map([
   ["matrix", MATRIX_RECORD_KIND],
 ]);
 
+/**
+ * What a subject is called in a sentence a reader reads, rather than by its `$id`. A refusal that
+ * contrasts a declared kind with the resolved one must not state both sides as protocol
+ * identifiers: on the human surface those are aliased to one token, and the sentence would then
+ * assert that two identical strings differ (issue #3723). The declared side stays verbatim -- it is
+ * the value being refused, and `--json` carries it -- while this side is a plain noun that no
+ * sanitizer touches.
+ */
+const SUBJECT_NAMES: ReadonlyMap<ClaimAnchorSubject, string> = new Map([
+  ["lock", "Run"],
+  ["matrix", "Matrix"],
+]);
+
 function compareCodeUnits(left: string, right: string): -1 | 0 | 1 {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -175,7 +188,7 @@ export function evaluateIntegrityAnchors(input: EvaluateIntegrityAnchorsInput): 
       if (record.subject.kind !== resolvedKind) {
         return invalidEntry(
           carried.recordSha256,
-          `subject.kind is ${record.subject.kind}, but the record its digest resolves to is ${resolvedKind}`,
+          `subject.kind is ${record.subject.kind}, but its digest resolves to this bundle's sealed ${SUBJECT_NAMES.get(subject)!}`,
           { provider: record.provider, subject },
         );
       }

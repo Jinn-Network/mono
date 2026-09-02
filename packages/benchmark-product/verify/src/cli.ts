@@ -27,6 +27,11 @@ export interface VerifierCliDeps {
   ) => Promise<PublicBundleVerificationResult>;
   /** Test seam for the trust-material files the flags name. Defaults to the real filesystem. */
   readonly readFile?: (path: string) => Uint8Array;
+  /** Test seam for the freeze-repository check, whose failure path has its own surface contract. */
+  readonly verifyFreezeRepo?: (
+    bundleDir: string,
+    freezeRepoDir: string,
+  ) => Promise<FreezeRepoVerificationResult>;
 }
 
 /**
@@ -373,7 +378,9 @@ export async function runVerifierCli(
     return {
       exitCode: 2,
       stdout: "",
-      stderr: `colophon-verify: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      stderr: withoutInternalIdentifiers(
+        `colophon-verify: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      ),
     };
   }
 
@@ -403,14 +410,17 @@ export async function runVerifierCli(
   let freezeRepoFailure: { readonly code: string; readonly message: string } | undefined;
   if (parsed.freezeRepoDir !== undefined) {
     try {
-      freezeRepo = await verifyFreezeRepo(parsed.bundleDir, parsed.freezeRepoDir);
+      freezeRepo = await (deps.verifyFreezeRepo ?? verifyFreezeRepo)(parsed.bundleDir, parsed.freezeRepoDir);
     } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause));
       freezeRepoFailure = {
         code: (cause !== null && typeof cause === "object" && "code" in cause)
           ? String((cause as { code?: unknown }).code)
           : "environment",
-        message: withoutInternalIdentifiers(error.message),
+        // Verbatim: this object is spread into `--json`, where the identifier is the whole point
+        // and the alias would be self-referential. The human surface aliases it at the point of
+        // rendering below, exactly as the verify-failure branch above does (issue #3723).
+        message: error.message,
       };
     }
   }
@@ -429,7 +439,9 @@ export async function runVerifierCli(
     return {
       exitCode: 2,
       stdout,
-      stderr: parsed.json ? "" : `colophon-verify: freeze repository not checked: ${freezeRepoFailure.message}\n`,
+      stderr: parsed.json
+        ? ""
+        : withoutInternalIdentifiers(`colophon-verify: freeze repository not checked: ${freezeRepoFailure.message}\n`),
     };
   }
   return { exitCode: freezeRepo !== undefined && !freezeRepo.ok ? 1 : 0, stdout, stderr: "" };

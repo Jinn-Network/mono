@@ -139,7 +139,12 @@ describe("integrity-anchors — subject recomputation (families 3 and 4)", () =>
     }));
     const report = evaluate([record]);
     expect(report.anchors[0]!.status).toBe("invalid");
-    expect(report.anchors[0]!.reason).toContain(RUN_RECORD_KIND);
+    // The refused value stays verbatim; the side it is contrasted against is a plain noun, never a
+    // second protocol identifier. Both rendered as identifiers, the human surface aliases them to
+    // one token and the sentence asserts that two identical strings differ (issue #3723).
+    expect(report.anchors[0]!.reason).toContain(MATRIX_RECORD_KIND);
+    expect(report.anchors[0]!.reason).toContain("this bundle's sealed Run");
+    expect(report.anchors[0]!.reason).not.toContain(RUN_RECORD_KIND);
     // Selection was digest-keyed, so the label never routed it onto the Matrix claim.
     expect(report.anchors[0]!.subject).toBe("lock");
   });
