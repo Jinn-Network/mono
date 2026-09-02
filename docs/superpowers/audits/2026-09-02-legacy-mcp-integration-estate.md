@@ -71,8 +71,8 @@ Callers and references:
 - **Runtime: one live caller, and it is a published CLI verb.** `jinn update` imports the command
   module (`operator/src/cli/commands/update.ts:18`), binds it as an injected dep
   (`:99`, `:107`), and **executes `integrations install --json`** as its step 3
-  (`:449-472`), gated only by `--skip-plugins`. `update.ts:64-94` even carries a bespoke
-  `parseIntegrationsOutput` that tolerates pre-stop-hook installer output shapes. This is the
+  (`:449-472`), gated only by `--skip-plugins`. `update.ts:60-95` even carries a bespoke
+  `summarizeIntegrationInstall` that tolerates pre-stop-hook installer output shapes. This is the
   estate's only non-documentation runtime edge, and it is easy to miss: the import is
   same-directory relative, so a repo-wide grep for `commands/integrations` does not find it.
   Nothing else invokes it — no CI workflow, no
@@ -222,12 +222,25 @@ Per the ratified spec §8 B3: delete the command and its seven adapters, deregis
 
 **Wider than the spec's B3 line implies**, because of §2.2's live caller. Deleting the command
 alone will not compile: `jinn update` imports and runs it. Wave 1 must also remove, in the same
-change, `update.ts`'s step-3 block (`:449-472`), the `integrationsRun` member of `UpdateDeps`
-(`:99`) and its production binding (`:107`), `parseIntegrationsOutput`/`summarizeIntegrationInstall`
-(`:64-94`), the now-meaningless `--skip-plugins` flag and its help text, the
-`integrations-install` step in the emitted step list, and the corresponding cases in
-`test/cli/commands/update.test.ts:117-180`. It must also remove the two prompt strings
-(`operator/src/mcp/operator-server.ts:649`, `operator/src/cli/commands/update.ts:370`).
+change:
+
+- `update.ts`'s step-3 block (`:449-472`), the `integrationsRun` member of `UpdateDeps` (`:99`)
+  and its production binding (`:107`), `summarizeIntegrationInstall` and its result type
+  (`:60-95`), the now-meaningless `--skip-plugins` flag and its help text, and the
+  `integrations-install` entry in the emitted step list;
+- **the whole `skip_plugins` parameter of the `jinn_update` MCP tool** —
+  `operator/src/mcp/operator-server.ts:654` (schema), `:656` (destructure), `:659` (argv push),
+  not just its description line at `:649`. `update.ts` parses with `parseArgs` in strict mode
+  (`:390-399`) and its catch emits `invalid_invocation` (`:401-412`), so a `jinn_update` that
+  still pushes a deleted flag hard-fails. Surface C outlives Wave 1 (it is Wave 2's job), so
+  Wave 1 must not leave it passing an argument Wave 1 removed;
+- `test/cli/commands/update.test.ts`: delete the two integrations-specific cases
+  (`:117-180`) **and strip `--skip-plugins` from the ten other invocations that pass it merely to
+  skip step 3** (`:196, :262, :348, :387, :425, :459, :487, :504, :540, :566`) — under strict
+  `parseArgs` every one of them would otherwise start emitting `invalid_invocation` for reasons
+  unrelated to integrations;
+- the post-update guidance string at `operator/src/cli/commands/update.ts:370`.
+
 Removing the command while leaving `jinn update` compiling but stepless would silently drop the
 skill-refresh with no replacement — the replacement is the skill-embedded cleanup step below, and
 it must exist first.
