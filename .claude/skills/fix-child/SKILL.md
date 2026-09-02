@@ -51,12 +51,12 @@ autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
 
 ## Surfaces you cannot mutate
 
-Your three verbs write commits on the parent branch and close the child. They
-write nothing else. In particular you have **no verb that mutates the parent
-pull request body**, and therefore none that amends the implementation summary
-inside it. That summary was written once by `session implementation-complete`
-in the parent's implementation session, and the lifecycle never returns a
-delivered PR to that session.
+Your three verbs write commits on the parent branch, close the child, and park
+the attempt. They write nothing else. In particular you have **no verb that
+mutates the parent pull request body**, and therefore none that amends the
+implementation summary inside it. That summary was written once by `session
+implementation-complete` in the parent's implementation session, and the
+lifecycle never returns a delivered PR to that session.
 
 So a fix can falsify a claim the summary makes, and you cannot repair it.
 
