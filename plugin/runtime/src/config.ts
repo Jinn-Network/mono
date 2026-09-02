@@ -241,6 +241,15 @@ const CorpusConfigSchema = z.strictObject({
   sources: z.array(MirrorSourceConfigSchema).default([]),
   maxEntriesPerSync: z.number().int().positive().max(10_000).default(500),
   syncTimeoutMs: z.number().int().positive().max(600_000).default(30_000),
+  /**
+   * How long the standing mirror service waits between sync cycles.
+   * File-only, with no environment override, for the same custody-law-C2
+   * reason the source list is: what this runtime syncs, and how hard it
+   * leans on a followed archive, is a written configuration decision, not
+   * something an ambient environment variable can retune under an
+   * operator who never edited a file.
+   */
+  syncIntervalMs: z.number().int().min(1_000).max(86_400_000).default(300_000),
   /** Absent means `verified`, unless `acknowledgeUnverifiedChain` says otherwise. */
   chainVerification: CorpusChainVerificationSchema.optional(),
   /**
