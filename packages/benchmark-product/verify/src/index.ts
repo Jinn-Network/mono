@@ -109,13 +109,14 @@ export * from "./profile/binary-qualification.js";
 export { ClaimPackageSchema, DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID } from "./profile/claim.js";
 export type { ClaimPackage } from "./profile/claim.js";
 export { firstDifference } from "./profile/claim-consistency.js";
-export { NOT_FETCHED_CHECK, summarizeVerificationOutcome } from "./outcome.js";
+export { NOT_FETCHED_CHECK, describeRecomputedChecks, summarizeVerificationOutcome } from "./outcome.js";
 export type {
+  VerificationCheckName,
   VerificationCheckOutcome,
   VerificationCheckState,
   VerificationOutcome,
 } from "./outcome.js";
-export { VERIFIER_VERSION, renderVerifiedBundle, runVerifierCli } from "./cli.js";
+export { PLATFORM_BYTES_SENTENCE, VERIFIER_VERSION, renderVerifiedBundle, runVerifierCli } from "./cli.js";
 export type { VerifierCliDeps, VerifierCliResult } from "./cli.js";
 export {
   PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
