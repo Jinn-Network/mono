@@ -29,7 +29,13 @@ import {
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
 } from "../report/claim.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
-import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, buildBundleManifest } from "./manifest.js";
+import {
+  BUNDLE_FORMAT,
+  BUNDLE_V4_FORMAT,
+  BUNDLE_V6_FORMAT,
+  BUNDLE_V7_FORMAT,
+  buildBundleManifest,
+} from "./manifest.js";
 import { PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
 import { BUNDLE_EVIDENCE_FORMAT, BUNDLE_EVIDENCE_ROLES, BUNDLE_TRUST_FORMAT } from "./schema.js";
 import {
@@ -278,9 +284,12 @@ describe("the qualification axis is bound to the sealed Report method (issue #32
     const catalogRoles = new Set<string>(BUNDLE_EVIDENCE_ROLES);
     const records = json(bundleDir, "evidence.json").records as Array<{ sha256: string; roles: string[] }>;
     const kept = records.filter((record) => record.roles.every((role) => catalogRoles.has(role)));
+    const keptDigests = new Set(kept.map((record) => record.sha256));
     const removed = new Set<string>([
       "qualification.json",
-      ...records.filter((record) => !kept.includes(record)).map((record) => `records/${record.sha256}.bin`),
+      ...records
+        .filter((record) => !keptDigests.has(record.sha256))
+        .map((record) => `records/${record.sha256}.bin`),
     ]);
     writeFileSync(
       join(bundleDir, "evidence.json"),
