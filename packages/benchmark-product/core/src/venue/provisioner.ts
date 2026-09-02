@@ -424,6 +424,14 @@ interface RepositoryWorkProvisionerOptions {
   readonly dispatchContextBytes: Uint8Array;
   readonly task: TaskSpecification;
   readonly mirror: RepositoryMirrorPort | undefined;
+  /**
+   * The dispatching requirements, Submission over Task -- the same precedence the platform's
+   * `mergeRequirements` gives the `TaskView.effectiveRequirements` that `setup` reads. Carried on
+   * the options because `harvest` receives no view, and the recovery path re-enters harvest
+   * without ever running `setup` (see the lazy binding there). Recovery replays the exact
+   * persisted Task and Submission, so this resolves to the harness the attempt actually ran.
+   */
+  readonly requirements: Readonly<Record<string, unknown>>;
   readonly demo1Instructions?: Demo1InstructionArtifacts;
 }
 
@@ -551,69 +559,95 @@ function repositoryStateDescriptor(task: TaskSpecification): { uri: string; oid:
 }
 
 /**
+ * Derives the two harness-shaped harvest roles from a requirements view. Factored out of `setup`
+ * because `harvest` must reach the same conclusion on the recovery path, where no `TaskView` is
+ * handed to the contract at all -- see the lazy binding in `repositoryWorkProvisionerContract`.
+ */
+function repositoryWorkHarnessRoles(
+  view: { readonly effectiveRequirements?: Readonly<Record<string, unknown>> },
+  demo1Instructions: Demo1InstructionArtifacts | undefined,
+): { readonly demo1Claude: boolean; readonly repositoryEditingHarness: boolean } {
+  const selectedHarness = harnessId(view);
+  return {
+    // A normal profile-backed Claude Code arm shares the same public harness id as Demo-1. The
+    // frozen instruction inventory is the product-owned discriminator: venue.ts refuses
+    // configuring a Demo-1 runtime and a general Claude profile together, so its presence means
+    // this is the experiment-specific launcher/provisioner pair. Without it, preserve the
+    // ordinary repository-work path and never demand or remove Demo-1 artifacts.
+    demo1Claude: demo1Instructions !== undefined && selectedHarness === DEMO1_CLAUDE_HARNESS_ID,
+    repositoryEditingHarness: selectedHarness === "claude-code" || selectedHarness === "codex",
+  };
+}
+
+/**
  * Delegates the checkout itself to the platform's `makeWorktreeProvisioner` (design-approved;
  * see `packages/policy-optimization/src/host-local/live-swe-rebench-runner.ts`'s
  * `solverProvisioner` for the shape this mirrors). `referenceRepository` is only known after
- * `mirror.ensure(...)` resolves, so unlike that model the base provisioner is built INSIDE
- * `setup`, once the mirror path is in hand, and retained in this closure for `harvest`'s teardown.
+ * `mirror.ensure(...)` resolves, so unlike that model the base provisioner is built where that
+ * mirror path is in hand -- in `setup`, and again in `harvest` when `setup` never ran in this
+ * process (see `bind` below).
  */
 function repositoryWorkProvisionerContract(
   options: RepositoryWorkProvisionerOptions,
 ): ProvisionerContract {
   let resolved: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
-  let demo1Claude = false;
-  let repositoryEditingHarness = false;
+  let roles: { readonly demo1Claude: boolean; readonly repositoryEditingHarness: boolean } | undefined;
+
+  /**
+   * Resolves the mirror and builds the platform base provisioner. Called by `setup` before the
+   * checkout, and by `harvest` when the closure is empty. `mirror.ensure` is idempotent and, for
+   * a mirror this attempt already provisioned against, purely local: two `git` reads that confirm
+   * the bare repository exists and still contains the oid.
+   */
+  async function bind(): Promise<{ readonly base: ProvisionerContract; readonly mirrorDir: string }> {
+    const { uri, oid } = repositoryStateDescriptor(options.task);
+    if (options.mirror === undefined) {
+      throw new ProvisioningRejectedError(
+        "benchmark-product local venue cannot provision a repository-work cell: no repository mirror is configured",
+      );
+    }
+    let mirrorDir: string;
+    try {
+      mirrorDir = await options.mirror.ensure({ uri, oid });
+    } catch (error) {
+      throw new ProvisioningRejectedError(
+        error instanceof Error ? error.message : "repository mirror resolution failed",
+        error,
+      );
+    }
+    const base = makeWorktreeProvisioner({
+      sealedTaskBytes: options.sealedTaskBytes,
+      dispatchContextBytes: options.dispatchContextBytes,
+      referenceRepository: mirrorDir,
+      oid,
+      runtime: { assertHarnessGroupEmpty: () => undefined, ensureMetaReserve: () => undefined },
+      fetchInput: async (descriptor) => {
+        // The Task's "repository-state" input has no bytes of its own to materialize verbatim
+        // -- it is a pointer to the mirror-resolved checkout. The checkout itself lands at
+        // paths.work via the worktree the platform cuts below; this canonical JSON pointer is
+        // what lands under input/ for the descriptor.
+        if (descriptor.name === "repository-state") {
+          return canonicalJsonBytes({ oid, repository: mirrorDir });
+        }
+        throw new Error(
+          `benchmark-product local venue repository-work provisioner refused unknown input "${descriptor.name ?? descriptor.uri ?? "<unnamed>"}"`,
+        );
+      },
+    });
+    return { base, mirrorDir };
+  }
+
   return {
     workspaceKind: (): WorkspaceKind => "worktree",
     async setup(view, paths, grants) {
-      const { uri, oid } = repositoryStateDescriptor(options.task);
-      if (options.mirror === undefined) {
-        throw new ProvisioningRejectedError(
-          "benchmark-product local venue cannot provision a repository-work cell: no repository mirror is configured",
-        );
-      }
-      let mirrorDir: string;
-      try {
-        mirrorDir = await options.mirror.ensure({ uri, oid });
-      } catch (error) {
-        throw new ProvisioningRejectedError(
-          error instanceof Error ? error.message : "repository mirror resolution failed",
-          error,
-        );
-      }
-      const base = makeWorktreeProvisioner({
-        sealedTaskBytes: options.sealedTaskBytes,
-        dispatchContextBytes: options.dispatchContextBytes,
-        referenceRepository: mirrorDir,
-        oid,
-        runtime: { assertHarnessGroupEmpty: () => undefined, ensureMetaReserve: () => undefined },
-        fetchInput: async (descriptor) => {
-          // The Task's "repository-state" input has no bytes of its own to materialize verbatim
-          // -- it is a pointer to the mirror-resolved checkout. The checkout itself lands at
-          // paths.work via the worktree the platform cuts below; this canonical JSON pointer is
-          // what lands under input/ for the descriptor.
-          if (descriptor.name === "repository-state") {
-            return canonicalJsonBytes({ oid, repository: mirrorDir });
-          }
-          throw new Error(
-            `benchmark-product local venue repository-work provisioner refused unknown input "${descriptor.name ?? descriptor.uri ?? "<unnamed>"}"`,
-          );
-        },
-      });
+      const bound = await bind();
+      const { base, mirrorDir } = bound;
       await base.setup(view, paths, grants);
       try {
-        // A normal profile-backed Claude Code arm shares the same public harness id as Demo-1.
-        // The frozen instruction inventory is the product-owned discriminator: venue.ts refuses
-        // configuring a Demo-1 runtime and a general Claude profile together, so its presence
-        // means this is the experiment-specific launcher/provisioner pair. Without it, preserve
-        // the ordinary repository-work path and never demand or remove Demo-1 artifacts.
-        const demo1Instructions = options.demo1Instructions;
-        const selectedHarness = harnessId(view);
-        repositoryEditingHarness = selectedHarness === "claude-code" || selectedHarness === "codex";
-        demo1Claude = demo1Instructions !== undefined
-          && selectedHarness === DEMO1_CLAUDE_HARNESS_ID;
-        if (demo1Claude && demo1Instructions !== undefined) {
-          await installDemo1Instructions(view, paths, demo1Instructions);
+        const selectedRoles = repositoryWorkHarnessRoles(view, options.demo1Instructions);
+        roles = selectedRoles;
+        if (selectedRoles.demo1Claude && options.demo1Instructions !== undefined) {
+          await installDemo1Instructions(view, paths, options.demo1Instructions);
         }
       } catch (error) {
         // A product placement refusal happens after the platform has cut the worktree. Clean up
@@ -624,19 +658,49 @@ function repositoryWorkProvisionerContract(
         await runGit(["-C", mirrorDir, "worktree", "prune"]).catch(() => undefined);
         throw error;
       }
-      resolved = { base, mirrorDir };
+      resolved = bound;
     },
     executionEnv: ({ env }) => ({ ...env }),
     async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {
-      if (resolved === undefined) {
-        throw new Error("benchmark-product local venue repository-work harvest ran before setup");
-      }
-      const { base, mirrorDir } = resolved;
+      // Bind lazily, for the same reason the evaluation contract above does (issue #3197, and
+      // #3615 for this profile): harvest is NOT reached only through this process's own `setup`.
+      // The backend's recovery path (`recoverRef` -> `completeAttempt` in
+      // `@jinn-network/task-execution-backend-local`) re-enters harvest for every
+      // completion-capable row that carries no journaled `harvested` event -- `harvesting-resume`,
+      // `matching-late`, `corrected` -- and it does so with a contract minted fresh by
+      // `createLocalProvisioner`, whose `setup` recovery never runs. Reading the closure state
+      // that `setup` would have assigned therefore threw on exactly the rows recovery exists to
+      // complete, turning repository edits the harness had already written into a permanent
+      // `blame: infrastructure` loss. Everything `setup` assigned is re-derivable from the sealed
+      // Task and the Submission requirements that `reconstructRecoveryContext` replays verbatim,
+      // so recovery rebuilds it; when `setup` did run, the closure values are reused unchanged.
+      let bound: { readonly base: ProvisionerContract; readonly mirrorDir: string };
       try {
+        bound = resolved ?? await bind();
+      } catch (error) {
+        // `bind` raises `ProvisioningRejectedError`, whose `neverExecuted` is true by
+        // construction -- correct at setup, false here: harvest runs only after the harness has
+        // executed. Re-raise as an ordinary failure so a recovery-time mirror problem is not
+        // classified as an attempt that never ran.
+        throw new Error(
+          `benchmark-product local venue repository-work harvest could not rebind its checkout: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      }
+      const { base, mirrorDir } = bound;
+      const { demo1Claude, repositoryEditingHarness } = roles
+        ?? repositoryWorkHarnessRoles({ effectiveRequirements: options.requirements }, options.demo1Instructions);
+      try {
+        // A resumed harvest can land after a predecessor's `finally` already tore the worktree
+        // down. `out/` survives that teardown, so the patch extraction is skipped rather than
+        // allowed to fail on a missing checkout: whatever the interrupted run collected is
+        // harvested, and a genuinely absent required slot becomes a declared omission -- a
+        // categorized outcome -- instead of an infrastructure throw.
+        const checkoutPresent = existsSync(paths.work);
         if (demo1Claude) {
           await removeDemo1Instructions(paths);
-          await extractRepositoryPatch(paths, true);
-        } else if (repositoryEditingHarness && !existsSync(join(paths.out, "patch"))) {
+          if (checkoutPresent) await extractRepositoryPatch(paths, true);
+        } else if (repositoryEditingHarness && checkoutPresent && !existsSync(join(paths.out, "patch"))) {
           // Claude Code and Codex express their result by editing the checked-out repository.
           // Turn those exact bytes into the profile's required patch output before the generic
           // harvester runs. A launcher-supplied patch remains authoritative when one exists.
@@ -1482,6 +1546,7 @@ export function createLocalProvisioner(
           dispatchContextBytes: input.dispatchContextBytes,
           task: input.task,
           mirror: options.repositoryMirror,
+          requirements: { ...(input.task.requirements ?? {}), ...(input.submission.requirements ?? {}) },
           ...(options.demo1Instructions === undefined
             ? {}
             : { demo1Instructions: options.demo1Instructions }),
