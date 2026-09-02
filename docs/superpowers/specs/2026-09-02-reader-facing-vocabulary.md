@@ -262,8 +262,8 @@ reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in t
    appears in any reader-facing generated string, and that no §5 concept is presented under two
    names. Without it this spec decays on the next feature that adds a surface.
 
-Items (1), (3), (4), and (5) are unblocked today; (2) waits on #2985. All five must adopt
-#2982's verdict verb rather than minting one.
+Items (1), (3), (4), and (5) are unblocked today; (2) waits on #2985. All five adopt the
+verdict verb ruled by #2982 rather than minting one.
 
 **Contract renames — queued to a bundle-format revision, not scheduled here.** Nothing in §4
 requires one; every ruling above is reachable through presentation. The queue exists so the
