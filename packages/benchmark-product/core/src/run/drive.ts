@@ -496,12 +496,17 @@ function requireEvaluatorCoverage(deps: DriveDeps): void {
  * two places: an unresolvable ref (nothing is retained, the key is free) and an attempt it fully
  * remembers whose spawn intent left no recoverable shim or outcome (the key is HELD, and
  * submitting different bytes under it is refused `submission-conflict`, which carries no retryable
- * category and so completes the evalIndex could-not-grade forever). `observe` resolves through the
- * same durable ref index `submit`'s idempotency check reads, so its `attempt-not-found` is the one
- * signal that the key is genuinely free.
+ * category and so completes the evalIndex could-not-grade forever).
  *
- * Fail-safe by construction: anything else — a snapshot, or any other error — reports retained,
- * which keeps the byte-exact replay.
+ * `observe` is not an exact test of that — it needs the attempt index too, which a crash can leave
+ * behind the submission-scope index that `submit`'s idempotency check actually reads. The warrant
+ * is one-sided instead, which is all this branch needs: `observe` succeeding proves the replay is
+ * viable, and `observe` failing means the replay would have died at this leg's own post-submit
+ * `observe` regardless — so re-sealing there can only help, while every genuinely retained key
+ * stays on the byte-exact replay.
+ *
+ * Fail-safe by construction: anything but `attempt-not-found` — a snapshot, or any other error —
+ * reports retained, which keeps that replay.
  */
 async function backendRetainsSubmission(
   backend: ProxiedBackend,

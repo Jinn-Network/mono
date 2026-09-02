@@ -1057,7 +1057,7 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
    * reads.
    */
   function replayBackend(options: {
-    readonly retained: boolean;
+    readonly retained: boolean | "unknown-error";
     readonly calls: { submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] };
   }): ProxiedBackend {
     let observes = 0;
@@ -1076,8 +1076,10 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
       async observe() {
         observes += 1;
         // The FIRST observe is the discriminator's; later ones are the ordinary post-submit read.
-        if (observes === 1 && !options.retained) {
-          throw new TaskExecutionError("attempt-not-found", { detail: "no Attempt or Submission" });
+        if (observes === 1 && options.retained !== true) {
+          throw options.retained === "unknown-error"
+            ? new TaskExecutionError("backend-unavailable", { detail: "probe failed" })
+            : new TaskExecutionError("attempt-not-found", { detail: "no Attempt or Submission" });
         }
         return fakeSnapshot("att-eval-1", "failed");
       },
@@ -1103,7 +1105,7 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
     });
   }
 
-  async function driveOneLeg(retained: boolean): Promise<{
+  async function driveOneLeg(retained: boolean | "unknown-error"): Promise<{
     readonly submitted: Uint8Array;
     readonly replayed: Uint8Array;
   }> {
@@ -1138,6 +1140,13 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
 
   test("a retained record keeps the byte-exact replay, so the held key is never re-minted", async () => {
     const { submitted, replayed } = await driveOneLeg(true);
+    expect(submitted).toEqual(replayed);
+  });
+
+  test("a probe that fails for any other reason reports retained, so the replay is kept", async () => {
+    // Fail-safe direction: only `attempt-not-found` proves the key free. Anything else must not
+    // re-mint bytes under a key the backend may still hold.
+    const { submitted, replayed } = await driveOneLeg("unknown-error");
     expect(submitted).toEqual(replayed);
   });
 
