@@ -13,6 +13,7 @@ import {
   IpfsResponseTooLargeError,
 } from '@jinn-network/core/corpus-read';
 
+const TRAJECTORY_CID = 'bafy-test-trajectory-001';
 const fetchTrajectoryFromIpfs = vi.fn();
 
 vi.mock('../../src/adapters/mech/ipfs.js', () => ({
@@ -30,8 +31,36 @@ vi.mock('../../src/adapters/mech/ipfs.js', () => ({
 const { runConformance } = await import('../../src/conformance/harness.js');
 const { buildGoodRestorationFixture } = await import('./fixtures/good-envelope.js');
 
-async function runWithTrajectoryFailure(cause: unknown): Promise<string[]> {
+/**
+ * Reach step 4's IPFS read.
+ *
+ * `TrajectoryRefSchema` has no `cid` member, so zod strips one from any
+ * schema-valid envelope and `envelope.trajectory?.cid` is undefined. The read
+ * is therefore reachable only through the harness's raw-envelope fallback,
+ * where a strict-parse failure leaves the unstripped object on `ctx`. This
+ * builds exactly that shape: a `trajectory.cid` plus a missing required field.
+ * That is the same path a real envelope would take, not a test-only one.
+ */
+async function envelopeBytesWithTrajectoryCid(): Promise<{
+  envelopeCid: string;
+  envelopeBytes: Uint8Array;
+  task: unknown;
+}> {
   const fx = await buildGoodRestorationFixture();
+  const envelope = JSON.parse(new TextDecoder().decode(fx.envelopeBytes)) as {
+    trajectory: Record<string, unknown>;
+  };
+  envelope.trajectory['cid'] = TRAJECTORY_CID;
+  delete (envelope as Record<string, unknown>)['payload'];
+  return {
+    envelopeCid: fx.envelopeCid,
+    envelopeBytes: new TextEncoder().encode(JSON.stringify(envelope)),
+    task: fx.task,
+  };
+}
+
+async function runWithTrajectoryFailure(cause: unknown): Promise<string[]> {
+  const fx = await envelopeBytesWithTrajectoryCid();
   fetchTrajectoryFromIpfs.mockRejectedValueOnce(
     new IpfsFetchFailedError('IPFS JSON fetch failed after all candidates', [cause]),
   );
@@ -39,11 +68,12 @@ async function runWithTrajectoryFailure(cause: unknown): Promise<string[]> {
   try {
     const report = await runConformance({
       envelopeCid: fx.envelopeCid,
-      options: { envelopeBytes: fx.envelopeBytes, task: fx.task },
+      options: { envelopeBytes: fx.envelopeBytes, task: fx.task as never },
     });
     // Control flow is unchanged: the read stays opportunistic and the run
     // still produces a report.
     expect(report).toBeDefined();
+    expect(fetchTrajectoryFromIpfs).toHaveBeenCalledTimes(1);
     return warn.mock.calls.map((call) => String(call[0]));
   } finally {
     warn.mockRestore();
