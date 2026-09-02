@@ -880,3 +880,35 @@ test("peer-supplied failure text is bounded and stripped before it is durable", 
   expect(failure?.message).toBe("a".repeat(512));
   await built.capability.stop!();
 });
+
+test("a failure half that sanitizes to nothing is still readable back", async () => {
+  // Sanitization strips, so a peer half made only of terminal-control
+  // sequences reduces to `""` -- and both halves are `min(1)` on the read
+  // schema. Writing an empty half produced a document the very next read
+  // rejected as unrecognized, discarding the freshness history the file
+  // exists to keep, every cycle, silently.
+  const built = harness({
+    outcomes: [
+      {
+        status: "failed",
+        sources: [
+          report(ALICE, {
+            status: "failed",
+            failure: { code: "\u0007", message: "\u001b\u0000" },
+          }),
+        ],
+      },
+    ],
+    sources: [source(ALICE.agent)],
+  });
+  await built.start();
+  await settle();
+
+  const status = await statusOf(built);
+  expect(status).toBeDefined();
+  expect(status?.sources[key(ALICE)]?.lastFailure).toMatchObject({
+    code: "UNKNOWN",
+    message: "the mirror reported a failure with no detail",
+  });
+  await built.capability.stop!();
+});

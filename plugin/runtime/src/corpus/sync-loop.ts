@@ -336,16 +336,32 @@ export function createCorpusSyncCapability(
             // operator-facing row: `describeError` over a transport failure
             // carries whatever the peer put in it, and
             // `TransportRedirectError` embeds the `Location` header verbatim.
-            code: sanitizeUntrustedText(report.failure?.code ?? "UNKNOWN", MAX_FAILURE_CHARS).text,
-            message: sanitizeUntrustedText(
-              report.failure?.message ?? "the mirror reported a failure with no detail",
-              MAX_FAILURE_CHARS,
-            ).text,
+            code: recordable(report.failure?.code, "UNKNOWN"),
+            message: recordable(
+              report.failure?.message,
+              "the mirror reported a failure with no detail",
+            ),
             at,
           },
         };
       }
     }
+  }
+
+  /**
+   * One half of a recorded failure, fit to be written.
+   *
+   * The fallback covers two ways the peer half can arrive with nothing in it:
+   * ABSENT, and present but reduced to nothing by sanitization — a string of
+   * terminal-control sequences alone strips to `""`. Both halves are declared
+   * `min(1)` on the read schema, so an empty one would write a document the
+   * next read rejects as unrecognized, quietly costing the freshness history
+   * that document exists to keep.
+   */
+  function recordable(value: string | undefined, fallback: string): string {
+    const sanitized =
+      value === undefined ? "" : sanitizeUntrustedText(value, MAX_FAILURE_CHARS).text;
+    return sanitized === "" ? fallback : sanitized;
   }
 
   async function writeStatus(state: Started): Promise<void> {
