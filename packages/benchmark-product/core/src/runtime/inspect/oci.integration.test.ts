@@ -75,6 +75,18 @@ async function expectNoInspectContainers(): Promise<void> {
 }
 
 /**
+ * Every lifecycle operation returns a typed result whose failure carries a code and a detail. A
+ * bare `expect(result.ok).toBe(true)` discards both and reports only `expected false to be true`,
+ * which is what #2832's first observation left behind: a `runQuote` refusal in CI with nothing
+ * naming what refused or why. Assert through this helper instead, so a failure names the step and
+ * prints the result -- the evidence that tells a loaded environment apart from a runtime defect.
+ */
+function expectOk<T extends { ok: boolean }>(result: T, step: string): T {
+  expect(result.ok, `${step}: ${JSON.stringify(result)}`).toBe(true);
+  return result;
+}
+
+/**
  * A container one test leaks is visible to every later test's global assertion, which reports the
  * leak against whichever test happens to run next. Sweep after each test so a single reap failure
  * fails the test that caused it and no other. The assertions above have already run, so detection
@@ -121,12 +133,12 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       principal: "sponsor-1",
       clock: () => new Date().toISOString(),
     };
-    expect(initWorkspace(context).ok).toBe(true);
-    expect(createDraft(context, { draftId: "inspect-sandbox", name: "OCI Inspect sandbox fixture" }).ok).toBe(true);
-    expect(updateDraft(context, {
+    expectOk(initWorkspace(context), "init");
+    expectOk(createDraft(context, { draftId: "inspect-sandbox", name: "OCI Inspect sandbox fixture" }), "create-draft");
+    expectOk(updateDraft(context, {
       draftId: "inspect-sandbox",
       patch: { assurance: { preset: "separate-evaluator" } },
-    }).ok).toBe(true);
+    }), "update-draft");
     const selected = await selectInspectEvaluation(context, {
       draftId: "inspect-sandbox",
       execution: "oci",
@@ -158,10 +170,10 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) throw new Error("unreachable");
     expect(selected.result.draft.spec.evaluationRuntime?.isolationPolicy).toBe("oci-container");
-    expect((await runPreview(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
-    expect((await runQuote(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
-    expect(runLock(context, { draftId: "inspect-sandbox" }).ok).toBe(true);
-    expect((await runLaunch(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
+    expectOk(await runPreview(context, { draftId: "inspect-sandbox" }), "preview");
+    expectOk(await runQuote(context, { draftId: "inspect-sandbox" }), "quote");
+    expectOk(runLock(context, { draftId: "inspect-sandbox" }), "lock");
+    expectOk(await runLaunch(context, { draftId: "inspect-sandbox" }), "launch");
     const collected = await runCollect(context, { draftId: "inspect-sandbox" });
     expect(collected.ok, JSON.stringify(collected)).toBe(true);
     if (!collected.ok) throw new Error("unreachable");
@@ -208,7 +220,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       && entry.evalAttempt !== undefined
       && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer"
     )).toBe(true);
-    expect((await runReport(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
+    expectOk(await runReport(context, { draftId: "inspect-sandbox" }), "report");
     const verified = await runVerify(context, { draftId: "inspect-sandbox" });
     expect(verified.ok, JSON.stringify(verified)).toBe(true);
     const published = await runPublish(context, { draftId: "inspect-sandbox", includeNativeArtifacts: true });
@@ -252,8 +264,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       principal: "sponsor-1",
       clock: () => new Date().toISOString(),
     };
-    expect(initWorkspace(context).ok).toBe(true);
-    expect(createDraft(context, { draftId: "inspect-humaneval", name: "Inspect Evals HumanEval sandbox proof" }).ok).toBe(true);
+    expectOk(initWorkspace(context), "init");
+    expectOk(createDraft(context, { draftId: "inspect-humaneval", name: "Inspect Evals HumanEval sandbox proof" }), "create-draft");
     const selected = await selectInspectEvaluation(context, {
       draftId: "inspect-humaneval",
       execution: "oci",
@@ -272,18 +284,18 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) throw new Error("unreachable");
-    expect((await runPreview(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
-    expect((await runQuote(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
-    expect(runLock(context, { draftId: "inspect-humaneval" }).ok).toBe(true);
-    expect((await runLaunch(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
+    expectOk(await runPreview(context, { draftId: "inspect-humaneval" }), "preview");
+    expectOk(await runQuote(context, { draftId: "inspect-humaneval" }), "quote");
+    expectOk(runLock(context, { draftId: "inspect-humaneval" }), "lock");
+    expectOk(await runLaunch(context, { draftId: "inspect-humaneval" }), "launch");
     const collected = await runCollect(context, { draftId: "inspect-humaneval" });
     expect(collected.ok, JSON.stringify(collected)).toBe(true);
     if (!collected.ok) throw new Error("unreachable");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     expect(matrix.completeness).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
     expect(matrix.cells.every((cell) => cell.outcome === "judged" && cell.verification.isolation === "unverifiable")).toBe(true);
-    expect((await runReport(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
-    expect((await runVerify(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
+    expectOk(await runReport(context, { draftId: "inspect-humaneval" }), "report");
+    expectOk(await runVerify(context, { draftId: "inspect-humaneval" }), "verify");
     const published = await runPublish(context, { draftId: "inspect-humaneval", includeNativeArtifacts: true });
     expect(published.ok, JSON.stringify(published)).toBe(true);
     if (!published.ok) throw new Error("unreachable");
@@ -325,8 +337,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       principal: "sponsor-1",
       clock: () => new Date().toISOString(),
     };
-    expect(initWorkspace(context).ok).toBe(true);
-    expect(createDraft(context, { draftId: "inspect-oci", name: "OCI Inspect fixture" }).ok).toBe(true);
+    expectOk(initWorkspace(context), "init");
+    expectOk(createDraft(context, { draftId: "inspect-oci", name: "OCI Inspect fixture" }), "create-draft");
     const selected = await selectInspectEvaluation(context, {
       draftId: "inspect-oci",
       execution: "oci",
@@ -355,10 +367,10 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     } finally {
       await venue.shutdown();
     }
-    expect((await runPreview(context, { draftId: "inspect-oci" })).ok).toBe(true);
-    expect((await runQuote(context, { draftId: "inspect-oci" })).ok).toBe(true);
-    expect(runLock(context, { draftId: "inspect-oci" }).ok).toBe(true);
-    expect((await runLaunch(context, { draftId: "inspect-oci" })).ok).toBe(true);
+    expectOk(await runPreview(context, { draftId: "inspect-oci" }), "preview");
+    expectOk(await runQuote(context, { draftId: "inspect-oci" }), "quote");
+    expectOk(runLock(context, { draftId: "inspect-oci" }), "lock");
+    expectOk(await runLaunch(context, { draftId: "inspect-oci" }), "launch");
     const collected = await runCollect(context, { draftId: "inspect-oci" });
     expect(collected.ok, JSON.stringify(collected)).toBe(true);
     if (!collected.ok) throw new Error("unreachable");
@@ -399,8 +411,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       principal: "sponsor-1",
       clock: () => new Date().toISOString(),
     };
-    expect(initWorkspace(context).ok).toBe(true);
-    expect(createDraft(context, { draftId: "inspect-oci-cancel", name: "OCI cancellation fixture" }).ok).toBe(true);
+    expectOk(initWorkspace(context), "init");
+    expectOk(createDraft(context, { draftId: "inspect-oci-cancel", name: "OCI cancellation fixture" }), "create-draft");
     const selected = await selectInspectEvaluation(context, {
       draftId: "inspect-oci-cancel",
       execution: "oci",
@@ -418,8 +430,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       runOptions: { sampleId: "alpha", maxSamples: 1, retryOnError: 0 },
     });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
-    expect((await runQuote(context, { draftId: "inspect-oci-cancel" })).ok).toBe(true);
-    expect(runLock(context, { draftId: "inspect-oci-cancel" }).ok).toBe(true);
+    expectOk(await runQuote(context, { draftId: "inspect-oci-cancel" }), "quote");
+    expectOk(runLock(context, { draftId: "inspect-oci-cancel" }), "lock");
     let cancellation: ReturnType<typeof runCancel> | undefined;
     const launched = await runLaunch(context, { draftId: "inspect-oci-cancel" }, {
       onSolveAttemptNonterminal() {
@@ -429,7 +441,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     expect(launched.ok, JSON.stringify(launched)).toBe(true);
     expect(cancellation).toBeDefined();
     if (cancellation === undefined) throw new Error("unreachable");
-    expect((await cancellation).ok).toBe(true);
+    expectOk(await cancellation, "cancel");
     await expectNoInspectContainers();
   }, 180_000);
 
@@ -492,8 +504,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       clock: () => new Date().toISOString(),
       runtimeHost,
     };
-    expect(initWorkspace(context).ok).toBe(true);
-    expect(createDraft(context, { draftId: "inspect-broker", name: "OCI Inspect broker fixture" }).ok).toBe(true);
+    expectOk(initWorkspace(context), "init");
+    expectOk(createDraft(context, { draftId: "inspect-broker", name: "OCI Inspect broker fixture" }), "create-draft");
     const provider = {
       surface: "openai-responses" as const,
       upstreamModel: "gpt-5.6-luna" as const,
@@ -533,8 +545,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     expect(preview.ok, JSON.stringify(preview)).toBe(true);
     const quote = await runQuote(context, { draftId: "inspect-broker" });
     expect(quote.ok, JSON.stringify(quote)).toBe(true);
-    expect(runLock(context, { draftId: "inspect-broker" }).ok).toBe(true);
-    expect((await runLaunch(context, { draftId: "inspect-broker" })).ok).toBe(true);
+    expectOk(runLock(context, { draftId: "inspect-broker" }), "lock");
+    expectOk(await runLaunch(context, { draftId: "inspect-broker" }), "launch");
     const collected = await runCollect(context, { draftId: "inspect-broker" });
     expect(collected.ok, JSON.stringify(collected)).toBe(true);
     if (!collected.ok) throw new Error("unreachable");
@@ -587,7 +599,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     expect(reported.result.claimPackage.limitations).toContainEqual(expect.stringContaining(
       "admits both unrestricted and OCI-container execution",
     ));
-    expect((await runVerify(context, { draftId: "inspect-broker" })).ok).toBe(true);
+    expectOk(await runVerify(context, { draftId: "inspect-broker" }), "verify");
     const published = await runPublish(context, { draftId: "inspect-broker", includeNativeArtifacts: true });
     expect(published.ok, JSON.stringify(published)).toBe(true);
     if (!published.ok) throw new Error("unreachable");
