@@ -16,6 +16,7 @@ export const PRODUCT_RELEASE_PLATFORM_PINS_PATH = 'packages/benchmark-product/pr
  * pins and the version it is about to publish disagree (issue #3244).
  */
 export const CLAIM_PIN_SOURCES = [
+  'packages/benchmark-product/core/scripts/demo1-export-public-bundle.mjs',
   'packages/benchmark-product/core/src/report/claim.ts',
   'packages/benchmark-product/verify/src/assets.ts',
   'packages/benchmark-product/verify/src/profile/claim.ts',
@@ -375,11 +376,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (mode === '--check-claim-pins') {
       await checkClaimPins(repoRoot, manifest);
       process.stdout.write(`claim pins agree with ${manifest.name}@${manifest.version}\n`);
-      process.exit(0);
+    } else {
+      const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+      const gitHead = COMMIT_SHA.test(process.env.GITHUB_SHA ?? '') ? process.env.GITHUB_SHA : undefined;
+      applyColophonPublishManifest(resolve(repoRoot, manifestPath), pin, { gitHead });
     }
-    const pin = loadProductReleasePlatformPin(repoRoot, manifest);
-    const gitHead = COMMIT_SHA.test(process.env.GITHUB_SHA ?? '') ? process.env.GITHUB_SHA : undefined;
-    applyColophonPublishManifest(resolve(repoRoot, manifestPath), pin, { gitHead });
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

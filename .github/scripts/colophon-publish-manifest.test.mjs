@@ -301,13 +301,20 @@ test('the guard reads what npm actually serves, and fails closed when it cannot'
   );
 });
 
+const PRODUCT_SOURCE_DIRS = ['src', 'scripts'];
+const PRODUCT_SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mjs'];
+
 /** Every non-test source file under the product packages, so the pin scan cannot silently miss one. */
 function productSourceFiles(dir, found = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name !== '__fixtures__' && entry.name !== 'node_modules') productSourceFiles(path, found);
-    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+    } else if (
+      PRODUCT_SOURCE_EXTENSIONS.some(
+        (extension) => entry.name.endsWith(extension) && !entry.name.endsWith(`.test${extension}`),
+      )
+    ) {
       found.push(path);
     }
   }
@@ -318,16 +325,26 @@ test('CLAIM_PIN_SOURCES names every product source that pins a verifier version'
   const productsRoot = join(repoRoot, 'packages/benchmark-product');
   const pinning = readdirSync(productsRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .flatMap((entry) => {
-      const src = join(productsRoot, entry.name, 'src');
-      try {
-        return productSourceFiles(src);
-      } catch {
-        return [];
-      }
-    })
+    .flatMap((entry) =>
+      PRODUCT_SOURCE_DIRS.flatMap((dir) => {
+        try {
+          return productSourceFiles(join(productsRoot, entry.name, dir));
+        } catch {
+          return [];
+        }
+      }),
+    )
     .filter((path) => readFileSync(path, 'utf8').includes('@colophon-claims/verify@'))
     .map((path) => path.slice(repoRoot.length + 1))
     .sort();
   assert.deepEqual(pinning, [...CLAIM_PIN_SOURCES].sort());
+});
+
+test('every CLAIM_PIN_SOURCES entry contributes at least one parsed pin', () => {
+  for (const source of CLAIM_PIN_SOURCES) {
+    assert.ok(
+      collectClaimVerifyPins(repoRoot, [source]).length > 0,
+      `${source} is listed as a claim pin source but yields no X.Y[.Z] pin`,
+    );
+  }
 });
