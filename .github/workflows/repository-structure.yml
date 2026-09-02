@@ -150,7 +150,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: node --test .github/scripts/workflow-selection-shell.test.mjs
+      - run: |
+          node --test \
+            .github/scripts/workflow-selection-shell.test.mjs \
+            .github/scripts/heavy-lane-gate-mirror.test.mjs
   skills-mirror:
     name: Skills mirror
     # Behind the same push-lane dedup probe as every other worker: the gate
