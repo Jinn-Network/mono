@@ -771,6 +771,14 @@ Accepting a synced source means, in order:
 6. check sequence contiguity (increment-by-one, §5.1) and fork-absence;
 7. advance the high-water mark.
 
+Step 7 is the *only* step that writes it. A verification that ends in any of the typed
+failures below leaves the stored mark exactly as it found it — a refusal never advances
+the anti-rollback floor, whatever the reason for the refusal, and the §18 kit asserts this
+of every non-`ok` source-chain vector rather than of the future-dated one alone. The rule
+matters most where the refusal is *about* the floor (a future-dated head, §5.2 rule 3), but
+it is general: a mark advanced on the way to a refusal is a mark advanced on evidence the
+consumer went on to reject.
+
 Failures are typed, not boolean: `stale` (refreshBy expired), `forked` (equivocation —
 evidence-bearing), `broken-chain` (linkage, contiguity, or duplicate-`announcementId`
 failure), `unauthorized-signer` (including the old-key head case).

@@ -89,6 +89,17 @@ function makeHwmStore(seed?: { mark: HighWaterMark }): HighWaterMarkStore {
   };
 }
 
+function futureHead(entryDigest: `sha256:${string}`, issuedAt: string, refreshBy: string): SourceHead {
+  return {
+    protocol: RECORD_DISCOVERY_VERSION,
+    origin: `${AGENT}/feed`,
+    sequence: GENESIS_SEQUENCE,
+    entry: entryDigest,
+    issuedAt,
+    refreshBy,
+  };
+}
+
 async function* oneEntry(entry: AnnouncementEntry): AsyncIterable<{ entry: AnnouncementEntry; signature: DsseEnvelope }> {
   yield { entry, signature: signedEntry(entry) };
 }
@@ -432,17 +443,6 @@ describe("verifySourceChain: the published-profile refreshBy ceiling (#3467, §5
 });
 
 describe("verifySourceChain: the future-issued head the ceiling alone cannot see (#3467, §5.2)", () => {
-  function futureHead(entryDigest: `sha256:${string}`, issuedAt: string, refreshBy: string): SourceHead {
-    return {
-      protocol: RECORD_DISCOVERY_VERSION,
-      origin: `${AGENT}/feed`,
-      sequence: GENESIS_SEQUENCE,
-      entry: entryDigest,
-      issuedAt,
-      refreshBy,
-    };
-  }
-
   it("rejects a head issued further into the future than one freshness window, even with a conformant window", async () => {
     // Left open by a refreshBy-vs-issuedAt ceiling alone, and worse here than
     // on the revalidation path: on first adoption this head also becomes the
@@ -507,52 +507,22 @@ describe("verifySourceChain: a refused future-dated head writes no monotonicity 
   // a floor in 2099 refuses every honest head after it, forever. These two
   // pin the property the outcome assertions above cannot see: the store is
   // never written on the way to the refusal.
-  function recordingHwmStore(seed?: HighWaterMark): {
-    store: HighWaterMarkStore;
-    puts: HighWaterMark[];
-  } {
-    const puts: HighWaterMark[] = [];
-    let held = seed;
-    return {
-      puts,
-      store: {
-        async get(): Promise<HighWaterMark | undefined> {
-          return held;
-        },
-        async put(_source, mark): Promise<void> {
-          puts.push(mark);
-          held = mark;
-        },
-      },
-    };
-  }
-
-  function futureHead(entryDigest: `sha256:${string}`): SourceHead {
-    return {
-      protocol: RECORD_DISCOVERY_VERSION,
-      origin: `${AGENT}/feed`,
-      sequence: GENESIS_SEQUENCE,
-      entry: entryDigest,
-      issuedAt: "2099-01-01T00:00:00.000Z",
-      refreshBy: "2099-01-02T00:00:00.000Z",
-    };
-  }
+  const FUTURE = ["2099-01-01T00:00:00.000Z", "2099-01-02T00:00:00.000Z"] as const;
 
   it("creates no mark on first adoption", async () => {
     const entry = genesisEntry();
-    const hwm = recordingHwmStore();
-    const head = futureHead(sealJson(entry).digest);
+    const hwm = makeHwmStore();
+    const head = futureHead(sealJson(entry).digest, ...FUTURE);
 
     const outcome = await verifySourceChain({
       head,
       headSignature: signedHead(head),
       entries: oneEntry(entry),
-      ports: { keys, sigs, fresh, hwm: hwm.store, now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: true },
+      ports: { keys, sigs, fresh, hwm, now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: true },
     });
 
     expect(outcome).toEqual({ status: "broken-chain", at: "head-issued-ahead" });
-    expect(hwm.puts).toEqual([]);
-    await expect(hwm.store.get(SOURCE)).resolves.toBeUndefined();
+    await expect(hwm.get(SOURCE)).resolves.toBeUndefined();
   });
 
   it("leaves a returning consumer's honest mark exactly where it was", async () => {
@@ -562,18 +532,17 @@ describe("verifySourceChain: a refused future-dated head writes no monotonicity 
       entry: sealJson(entry).digest,
       issuedAt: "2026-07-27T12:00:00.000Z",
     };
-    const hwm = recordingHwmStore(mark);
-    const head = futureHead(sealJson(entry).digest);
+    const hwm = makeHwmStore({ mark });
+    const head = futureHead(sealJson(entry).digest, ...FUTURE);
 
     const outcome = await verifySourceChain({
       head,
       headSignature: signedHead(head),
       entries: oneEntry(entry),
-      ports: { keys, sigs, fresh, hwm: hwm.store, now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: false },
+      ports: { keys, sigs, fresh, hwm, now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: false },
     });
 
     expect(outcome).toEqual({ status: "broken-chain", at: "head-issued-ahead" });
-    expect(hwm.puts).toEqual([]);
-    await expect(hwm.store.get(SOURCE)).resolves.toEqual(mark);
+    await expect(hwm.get(SOURCE)).resolves.toEqual(mark);
   });
 });
