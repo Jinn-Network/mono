@@ -7,6 +7,7 @@ import {
   recordDigest,
   recoverEip191Address,
   validateKeyBinding,
+  resolveBindingForAgent,
   validateRevocation,
   verifyEnvelopeBinding,
   verifyPolicyChain,
@@ -510,11 +511,19 @@ export async function openNativeTrustCatalog(input: {
         atTime: value.atTime,
       });
       // 2. Resolve at `atTime`; ceremony evidence is mandatory for a settlement-scoped binding.
-      const resolved = await bindingResolver.resolveBinding(
+      const resolved = await resolveBindingForAgent(
+        bindingResolver,
         { key: value.key, agent: value.agent },
         value.atTime,
       );
-      const ceremonyEvidence = resolved?.ceremonyEvidence;
+      // Named before the ceremony guard: a binding that resolved for another
+      // agent has not "carried no ceremony evidence" (issue #3629).
+      if (resolved === null) {
+        throw new NativeTrustCatalogError(
+          `settlement authority ${value.key} did not resolve for ${value.agent}`,
+        );
+      }
+      const ceremonyEvidence = resolved.ceremonyEvidence;
       if (ceremonyEvidence === undefined) {
         throw new NativeTrustCatalogError(
           `settlement authority ${value.key} carries no ceremony evidence`,

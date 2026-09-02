@@ -179,8 +179,11 @@ async function verifyCeremonyLeg(
  * `verifyEnvelopeBinding`'s step 2 asserts the same pair inline instead,
  * where it can name the mismatch in its own `detail` and still return the
  * offending `resolvedBinding` (issue #3385).
+ *
+ * Exported for the direct `resolveBinding` consumers outside this package,
+ * which have the same shape and the same exposure (issue #3629).
  */
-async function resolveBindingForAgent(
+export async function resolveBindingForAgent(
   resolver: BindingResolver,
   query: { readonly key: string; readonly agent: string },
   atTime: string,
