@@ -253,9 +253,11 @@ key* named the domain.
 record or fetch the URL and compare it to the derived value above. Trusting the
 answer means trusting DNS resolution, whoever controls that domain's zone, and
 its registrar — anyone who can change the zone can create the binding or remove
-it, and a lookup made now says nothing about what the zone held when the bundle
-was made. The verifier says exactly this on its own report face rather than
-leaving you to infer it.
+it, and a lookup made now says nothing about what the zone held on the date the
+statement carries. That date is the statement's own field: the check establishes
+that the key signed a statement bearing it, not that it signed at it. The
+verifier says exactly this on its own report face rather than leaving you to
+infer it.
 
 Because only that first half was checked, the report face is **attributive**,
 never assertive, and always shows the key's own fingerprint beside the claim:

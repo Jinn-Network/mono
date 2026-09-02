@@ -33,11 +33,16 @@ import {
 /**
  * How a bundle's publisher is identified to a reader. `bare-key` is the historical state and stays
  * the default: the absence of a binding is a fact about the publication, and is reported as one.
+ *
+ * `domain-claimed`, never `domain-bound`. The member names what was established, the way
+ * `RunBindingClass`'s members do, and what was established is a claim: the key named the domain.
+ * A downstream surface branching on `domain-bound` would reasonably render "domain bound", which is
+ * the very assertion `VerifiedDomainBinding.confirmation` exists to withhold.
  */
-export type PublisherIdentityClass = "bare-key" | "domain-bound";
+export type PublisherIdentityClass = "bare-key" | "domain-claimed";
 
 export function publisherIdentityClass(binding: VerifiedDomainBinding | undefined): PublisherIdentityClass {
-  return binding === undefined ? "bare-key" : "domain-bound";
+  return binding === undefined ? "bare-key" : "domain-claimed";
 }
 
 /**
@@ -86,11 +91,13 @@ export function publisherIdentityLines(
 export function publisherIdentitySentence(binding: VerifiedDomainBinding | undefined): string | undefined {
   if (binding === undefined) return undefined;
   const mechanism = DOMAIN_BINDING_MECHANISM_NAMES[binding.mechanism];
-  return `The key that signed this bundle also signed a statement naming ${binding.domain} on `
-    + `${binding.statedAt}, and this reader checked that signature offline. The ${mechanism} to look up was `
+  return `The key that signed this bundle also signed a statement naming ${binding.domain}, dated `
+    + `${binding.statedAt}, and this reader checked that signature offline. The date is the statement's own; `
+    + `nothing here places the signature at it. The ${mechanism} to look up was `
     + `derived from that key, not taken from the statement. What is left is the half no bundle can carry: `
     + `whether ${binding.domain} actually publishes the record named above. `
     + `Checking it is a lookup on your side, and trusting the answer means trusting DNS resolution, whoever `
     + `controls the domain's zone, and its registrar — anyone who can change that zone can create this binding `
-    + `or remove it, and an answer obtained now says nothing about what the zone held on ${binding.statedAt}.`;
+    + `or remove it, and an answer obtained now says nothing about what the zone held on the date the `
+    + `statement carries.`;
 }

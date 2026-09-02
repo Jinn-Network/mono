@@ -25,7 +25,8 @@ function binding(mechanism: VerifiedDomainBinding["mechanism"]): VerifiedDomainB
 describe("publisher identity report face (issue #2983)", () => {
   test("classifies bound and unbound publication", () => {
     expect(publisherIdentityClass(undefined)).toBe("bare-key");
-    expect(publisherIdentityClass(binding("dns-txt"))).toBe("domain-bound");
+    // Never "domain-bound": what was established is that the key CLAIMED the domain.
+    expect(publisherIdentityClass(binding("dns-txt"))).toBe("domain-claimed");
   });
 
   test("renders the domain with the proof mechanism named plainly, and attributively", () => {
@@ -62,9 +63,11 @@ describe("publisher identity report face (issue #2983)", () => {
     expect(sentence).toContain("actually publishes the record named above");
     expect(sentence).toContain("DNS resolution");
     expect(sentence).toContain("registrar");
-    expect(sentence).toContain("says nothing about what the zone held on 2026-09-02T00:00:00.000Z");
-    // The stated date is surfaced, so "what the zone held then" names an instant a reader can use.
-    expect(sentence).toContain("naming example.com on 2026-09-02T00:00:00.000Z");
+    expect(sentence).toContain("says nothing about what the zone held on the date the statement carries");
+    // The stated date is surfaced attributively: it is the statement's own field, and the check
+    // establishes that the key signed a statement BEARING it, not that it signed AT it.
+    expect(sentence).toContain("naming example.com, dated 2026-09-02T00:00:00.000Z");
+    expect(sentence).toContain("nothing here places the signature at it");
   });
 
   test("adds no paragraph about the limits of a binding that is not there", () => {
