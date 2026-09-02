@@ -434,10 +434,21 @@ function logicalLines(body) {
   let pending = null;
   let state = { quote: null, frames: [] };
   let heredoc = null;
+  // Whether the heredoc's opener line left its statement genuinely open. `cat <<EOF` is
+  // structurally complete at the opener, so the line after the terminator starts a new
+  // statement; `cat <<EOF |` ends on a pipe and must keep spanning the body to stay one
+  // pipeline. Carrying the opener's own answer across the skipped body is what keeps the
+  // terminator from swallowing the next statement — which mis-attributed the finding to
+  // the opener's line and ate any allow annotation written above the real site.
+  let heredocOpenerOpen = false;
 
   for (const entry of body) {
     if (heredoc !== null) {
-      if (entry.text.trim() === heredoc) heredoc = null;
+      if (entry.text.trim() !== heredoc) continue;
+      heredoc = null;
+      if (heredocOpenerOpen || pending === null) continue;
+      lines.push(pending);
+      pending = null;
       continue;
     }
     const scanned = scanLine(entry.text, state);
@@ -448,7 +459,11 @@ function logicalLines(body) {
     pending.text += (pending.text === '' ? '' : ' ') + scanned.code.replace(/\\$/u, '').trim();
     pending.annotation ??= annotationReason(entry.text);
 
-    if (heredoc !== null || statementIsOpen(scanned.code, state)) continue;
+    if (heredoc !== null) {
+      heredocOpenerOpen = statementIsOpen(scanned.code, state);
+      continue;
+    }
+    if (statementIsOpen(scanned.code, state)) continue;
     lines.push(pending);
     pending = null;
   }

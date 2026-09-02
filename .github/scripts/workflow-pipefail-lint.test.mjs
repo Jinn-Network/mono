@@ -220,6 +220,47 @@ test('heredoc bodies are data, not shell', () => {
   );
 });
 
+test('a heredoc terminator closes its statement: the next line stands on its own', () => {
+  // The finding must land on the offending line, not on the heredoc opener that
+  // preceded it — for a lint whose whole output is "the site is here", the line is the
+  // product.
+  const result = findings(
+    ["node <<'NODE'", "console.log('hi')", 'NODE', 'SHA="$(git tag | head -1)"'].join('\n'),
+    { shell: 'bash' },
+  );
+  assert.equal(result.length, 1);
+  assert.equal(result[0].severity, 'error');
+  assert.equal(result[0].statement, 'SHA="$(git tag | head -1)"');
+  // Body lines start at file line 7 in the `findings` scaffold, so the heredoc opens on
+  // 7 and the offending statement is on 10.
+  assert.equal(result[0].line, 10);
+});
+
+test('an allow annotation after a heredoc reaches the statement it is written above', () => {
+  // Comment-above is the documented placement, so it must survive a preceding heredoc:
+  // otherwise the escape hatch fails closed on a required gate.
+  assert.deepEqual(
+    severities(
+      [
+        "node <<'NODE'",
+        "console.log('hi')",
+        'NODE',
+        '# pipefail-lint: allow -- ls-remote asks for one exact ref',
+        'SHA="$(git ls-remote origin refs/tags/v1 | head -1)"',
+      ].join('\n'),
+      { shell: 'bash' },
+    ),
+    [],
+  );
+});
+
+test('a heredoc opener ending on a pipe still spans its body as one pipeline', () => {
+  assert.deepEqual(
+    severities(['cat <<EOF |', 'one', 'two', 'EOF', 'head -1'].join('\n'), { shell: 'bash' }),
+    ['error:head'],
+  );
+});
+
 test('a pipeline spanning body lines is still one pipeline', () => {
   assert.deepEqual(severities(['git tag --list \\', '  | grep -q v1'].join('\n'), { shell: 'bash' }), [
     'error:grep -q/-m',
