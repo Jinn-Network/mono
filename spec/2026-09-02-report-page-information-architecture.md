@@ -352,7 +352,7 @@ admissible only where the element carries no disclosure.
 | M12 | Portable verification | fold | Band 5 fold 4. Its trailing attribution is **cut**; see F3. |
 | F1 | Footer navigation | keep | Retained and extended to the six bands. A page this long earns in-page navigation, and the navigation is how a reader who folded everything gets back to a specific fold. |
 | F2 | Footer report digest | keep | Unchanged. |
-| F3 | Footer attribution | keep | The single site of `PRODUCT_BRANDING.attribution`, per the report UI kit's structural rule 5. M2's category descriptor content joins it here. |
+| F3 | Footer attribution | keep | The single site of `PRODUCT_BRANDING.attribution`, per the report UI kit's structural rule 5. H2's category descriptor content joins it here. |
 
 Two rows are marked `split`; both are cases where one rendered element carries several
 jobs, and each part of them is ruled on separately. In every such case the
