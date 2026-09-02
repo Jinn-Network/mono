@@ -30,5 +30,9 @@ export function buildLocalVenueHonesty(
 ) {
   const counts = { harness: 0, model: 0, loadout: 0, isolation: 0 };
   for (const cell of cells) for (const axis of Object.keys(counts) as Array<keyof typeof counts>) if (cell.verification[axis] === "unverifiable") counts[axis] += 1;
+  // binding-carriage: forwards this function's own `binding` parameter rather than originating one,
+  // so the obligation stays with whoever supplies it -- `readRunBindingCarriage` workspace-side,
+  // step 2c of EXTERNAL-VERIFICATION.md for a reader. `binding-face-carriage.test.ts` pins that
+  // this is the only such site.
   return { venue: "self-run" as const, preRegistration: anchoredPreRegistration(anchors), limits: runBoundVenueLimits(anchoredVenueLimits(localVenueLimitsForRun(run), anchors), binding), unverifiableAxisCounts: counts };
 }

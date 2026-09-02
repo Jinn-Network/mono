@@ -562,6 +562,45 @@ describe("runBind against a declared beacon source", () => {
     })).toThrow(/binding declares no beacon source, but its sealed Run declares drand\/quicknet/u);
   });
 
+  test("carriage refuses a binding that declares a source its sealed Run does not", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const bound = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
+    if (!bound.ok) throw new Error("bind failed");
+    // The escalation direction of the same check. `verifyRunBinding`'s only rule is that the
+    // restatement agrees with the beacon the binding itself names, so a record forged to declare
+    // the source it already binds to verifies clean and derives `seal-declared` -- printing "the
+    // sealed record names the beacon this run binds to" over a run that named none.
+    const stored = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, bound.result.recordSha256)));
+    stored.declaredSource = "drand/quicknet";
+    const forged = putSealedBytes(workspaceDir, new TextEncoder().encode(JSON.stringify(stored)));
+    expect(verifyRunBinding(stored).sourceBasis).toBe("seal-declared");
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(() => readRunBindingCarriage(workspaceDir, {
+      ...state,
+      binding: { recordSha256: forged, boundAt: state.binding!.boundAt },
+    })).toThrow(/binding names drand\/quicknet as this run's declared beacon source, but its sealed Run declares none/u);
+  });
+
+  test("carriage refuses a binding that names a different source than its sealed Run", async () => {
+    const clock = makeClock();
+    await setUpLockedDraftDeclaring(clock, "drand/quicknet");
+    const bound = runBind(contextFor(clock), { draftId: "draft-1", beacon: beacon() });
+    if (!bound.ok) throw new Error("bind failed");
+    // Straight disagreement: the third of the check's three failing outcomes, and the one whose
+    // message names both sources.
+    const stored = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, bound.result.recordSha256)));
+    stored.declaredSource = "drand/default";
+    const forged = putSealedBytes(workspaceDir, new TextEncoder().encode(JSON.stringify(stored)));
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(() => readRunBindingCarriage(workspaceDir, {
+      ...state,
+      binding: { recordSha256: forged, boundAt: state.binding!.boundAt },
+    })).toThrow(
+      /binding names drand\/default as this run's declared beacon source, but its sealed Run declares drand\/quicknet/u,
+    );
+  });
+
   test("status names the declared source and offers only its bindable round", async () => {
     const clock = makeClock();
     await setUpLockedDraftDeclaring(clock, "drand/quicknet");
@@ -569,6 +608,18 @@ describe("runBind against a declared beacon source", () => {
     if (!status.ok) throw new Error("status failed");
     expect(status.result.declaredBeaconSource).toBe("drand/quicknet");
     expect(status.result.bindableBeaconRounds?.map((entry) => entry.source)).toEqual(["drand/quicknet"]);
+  });
+
+  test("status names a declared height-indexed source and offers no bindable round for it", async () => {
+    const clock = makeClock();
+    await setUpLockedDraftDeclaring(clock, "bitcoin/mainnet");
+    const status = runStatus(contextFor(clock), { draftId: "draft-1" });
+    if (!status.ok) throw new Error("status failed");
+    // The declaration is a fact about the run and is reported. The round list is not the same
+    // question: `requiredBeaconRound` derives nothing from a seal on a height-indexed source, so
+    // there is no round to offer and the field is omitted rather than emitted empty.
+    expect(status.result.declaredBeaconSource).toBe("bitcoin/mainnet");
+    expect(status.result.bindableBeaconRounds).toBeUndefined();
   });
 
   test("status omits the declared source, and offers every scheduled one, for an undeclared run", async () => {

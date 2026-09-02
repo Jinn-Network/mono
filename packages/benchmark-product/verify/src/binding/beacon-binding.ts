@@ -147,13 +147,20 @@ const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/, "must match ^sha2
 const InstantSchema = z.string().datetime({ offset: true });
 
 /**
- * A public beacon reference: which beacon, which round or height, and the value it published
- * there. `round` is the source's own index -- a drand round number, a Bitcoin block height.
+ * The admitted-source registry as a schema: exactly the ids of `BEACON_SOURCES`, nothing wider.
+ * Exported on its own because the source is named in two places that are not this record -- the
+ * draft spec that declares it before the lock and the sealed Run extension that carries it -- and
+ * both validate against this one enum rather than against a second list free to drift from the
+ * registry the derivation actually reads.
  */
 export const BeaconSourceIdSchema = z.enum(
   Object.keys(BEACON_SOURCES) as [BeaconSourceId, ...BeaconSourceId[]],
 );
 
+/**
+ * A public beacon reference: which beacon, which round or height, and the value it published
+ * there. `round` is the source's own index -- a drand round number, a Bitcoin block height.
+ */
 export const BeaconReferenceSchema = z.strictObject({
   source: BeaconSourceIdSchema,
   round: z.number().int().positive().max(MAX_BEACON_ROUND),
