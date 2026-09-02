@@ -43,10 +43,12 @@ const waitFor = async <T>(fn: () => T | undefined, label: string): Promise<T> =>
 const REMOVE_DEADLINE_MS = 2_000;
 const REMOVE_POLL_MS = 20;
 
-// `afterEach` is synchronous, and a worker thread may block: a bounded synchronous wait keeps the
-// teardown one statement instead of making every caller async.
+// `afterEach` is synchronous, and a worker may block: a bounded synchronous wait keeps the
+// teardown one statement instead of making every caller async. One buffer, since nothing ever
+// stores into it and the wait therefore always runs to its timeout.
+const waitCell = new Int32Array(new SharedArrayBuffer(4));
 const sleepSync = (ms: number): void => {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  Atomics.wait(waitCell, 0, 0, ms);
 };
 
 /**
@@ -337,6 +339,8 @@ describe("attempt tree teardown", () => {
   // (a bare recursive `rmSync`) it raises ENOTEMPTY on `meta` in most trials.
   const WRITER_WINDOW_MS = 300;
   const PRE_EXISTING_ENTRIES = 400;
+  const CONSECUTIVE_CYCLES = 25;
+  const RACE_TRIALS = 5;
   const writerProgram = [
     "const {writeFileSync}=require('node:fs');const {join}=require('node:path');",
     "const dir=process.argv[1];let index=0;",
@@ -344,9 +348,10 @@ describe("attempt tree teardown", () => {
     "while(Date.now()<deadline){index+=1;try{writeFileSync(join(dir,`late-${index}.json`),'{}');}catch{}}",
   ].join("");
 
-  it("removes the tree on every one of N consecutive cycles", () => {
-    for (let cycle = 0; cycle < 25; cycle += 1) {
+  it(`removes the tree on every one of ${CONSECUTIVE_CYCLES} consecutive cycles`, () => {
+    for (let cycle = 0; cycle < CONSECUTIVE_CYCLES; cycle += 1) {
       const root = mkdtempSync(join(tmpdir(), "jinn-teardown-cycle-"));
+      dirs.push(root);
       const meta = join(root, "meta");
       mkdirSync(meta, { recursive: true });
       writeFileSync(join(meta, "outcome.json"), "{}");
@@ -356,8 +361,11 @@ describe("attempt tree teardown", () => {
   });
 
   it("removes the tree without throwing while another process is still writing into it", async () => {
-    for (let trial = 0; trial < 5; trial += 1) {
+    for (let trial = 0; trial < RACE_TRIALS; trial += 1) {
       const root = mkdtempSync(join(tmpdir(), "jinn-teardown-race-"));
+      // Registered like every other case: an assertion that fails below leaves the tree to the
+      // shared teardown rather than to the end-of-run sweep.
+      dirs.push(root);
       const meta = join(root, "meta");
       mkdirSync(meta, { recursive: true });
       for (let entry = 0; entry < PRE_EXISTING_ENTRIES; entry += 1) {
@@ -371,8 +379,11 @@ describe("attempt tree teardown", () => {
       // window, so the second claim does not race the first.
       expect(() => removeAttemptTree(root)).not.toThrow();
       expect(existsSync(root)).toBe(false);
+      // `once` never resolves for a child that has already exited, and this one exits on its own
+      // deadline -- usually before the removal returns. Check before awaiting, as
+      // `shim.integration.test.ts` does.
       writer.kill("SIGKILL");
-      await once(writer, "exit");
+      if (writer.exitCode === null && writer.signalCode === null) await once(writer, "exit");
     }
   }, 30_000);
 });
