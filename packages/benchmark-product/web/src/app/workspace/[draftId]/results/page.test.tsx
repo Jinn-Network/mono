@@ -352,3 +352,54 @@ describe("semantic results and report surface", () => {
     expect(markup).toContain("Verify published bundle");
   });
 });
+
+/** Issue #2977: both headline tables state the declared denominator, the strict all-slots one, and
+ * the planned slots the declared one leaves out. */
+describe("declared and all-slots denominators", () => {
+  beforeEach(() => loadResultsViewMock.mockReset());
+
+  function tableFrom(markup: string, caption: string): string {
+    const start = markup.indexOf(caption);
+    expect(start).toBeGreaterThan(0);
+    const end = markup.indexOf("</table>", start);
+    expect(end).toBeGreaterThan(start);
+    return markup.slice(start, end);
+  }
+
+  async function render(view: ReturnType<typeof reportedView>): Promise<string> {
+    loadResultsViewMock.mockReturnValue(view);
+    return renderToStaticMarkup(await ResultsPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+  }
+
+  test("prints both numbers and a zero delta when the declared denominator kept every planned slot", async () => {
+    const markup = await render(reportedView());
+    for (const caption of ["Headline results by arm", "Stored Report headline by arm"]) {
+      const table = tableFrom(markup, caption);
+      expect(table).toContain("All planned slots");
+      expect(table).toContain("Excluded from denominator");
+      // baseline: declared 1, planned 1, nothing excluded.
+      expect(table).toContain("<td>1</td><td>1</td><td>0</td>");
+    }
+  });
+
+  test("prints the delta when the declared denominator drops planned slots", async () => {
+    const view = reportedView();
+    Object.assign(view.results.result.attrition.perArm, {
+      baseline: { expected: 4, judged: 1, unjudged: 0, unscorable: 0, expired: 3, invalidated: 0, excluded: 0, replacements: 0 },
+    });
+    const markup = await render(view);
+    for (const caption of ["Headline results by arm", "Stored Report headline by arm"]) {
+      // baseline: declared 1, planned 4, three planned slots outside the headline denominator.
+      expect(tableFrom(markup, caption)).toContain("<td>1</td><td>4</td><td>3</td>");
+    }
+  });
+
+  test("withholds both numbers for an arm the sealed Matrix carries no accounting for", async () => {
+    const view = reportedView();
+    Object.assign(view.results.result.report.claimPackage.headline, {
+      ghost: { n: 2, passRate: "0.5000", wilsonInterval: { low: "0.0947", high: "0.9053" } },
+    });
+    const markup = await render(view);
+    expect(tableFrom(markup, "Headline results by arm")).toContain("<td>2</td><td>Not stated</td><td>Not stated</td>");
+  });
+});

@@ -1,6 +1,7 @@
 import "server-only";
 
 import Link from "next/link";
+import { armDenominators } from "@colophon-claims/core";
 import type { RunResultsCell, RunResultsDocument, RunResultsReport } from "@colophon-claims/core";
 import { ActionForm } from "@/components/action-form";
 import { LifecycleRail } from "@/components/lifecycle-rail";
@@ -174,7 +175,44 @@ function ComparisonBlock({
   </div>;
 }
 
-function Claim({ report }: { readonly report: RunResultsReport }) {
+/** One arm's row in a wilson@1 headline table, in the order its source states the arms. */
+interface HeadlineArmRow {
+  readonly armId: string;
+  readonly n: number;
+  readonly passRate: string;
+  readonly low: string;
+  readonly high: string;
+}
+
+/**
+ * The stored Claim's headline and the sealed Report's are the same table over two sources, and
+ * issue #2977 changes both the same way, so they render through one component rather than two
+ * copies that could show a different pair of denominators.
+ *
+ * The declared denominator is the arm's own `n`. Beside it sits the strict all-slots one -- every
+ * slot the run planned for that arm, from the sealed Matrix's per-arm accounting -- and the count
+ * of planned slots the declared denominator leaves out. All three render always, including when
+ * nothing was excluded: a reader who never sees the pair cannot learn what the pair means.
+ */
+function HeadlineByArm({
+  caption,
+  ariaLabel,
+  arms,
+  attrition,
+}: {
+  readonly caption: string;
+  readonly ariaLabel: string;
+  readonly arms: readonly HeadlineArmRow[];
+  readonly attrition: RunResultsDocument["attrition"];
+}) {
+  const denominators = armDenominators(arms, attrition);
+  return <div tabIndex={0} aria-label={ariaLabel} className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">{caption}</caption><thead><tr><th scope="col">Arm</th><th scope="col">Judged n</th><th scope="col">All planned slots</th><th scope="col">Excluded from denominator</th><th scope="col">Pass rate</th><th scope="col">Wilson interval</th></tr></thead><tbody>{arms.map((arm, index) => {
+    const pair = denominators[index]!;
+    return <tr key={arm.armId} className="border-t"><th scope="row" className="py-2 pr-4">{arm.armId}</th><td>{pair.declared}</td><td>{pair.allSlots ?? "Not stated"}</td><td>{pair.excluded ?? "Not stated"}</td><td>{arm.passRate}</td><td>{arm.low} to {arm.high}</td></tr>;
+  })}</tbody></table></div>;
+}
+
+function Claim({ report, attrition }: { readonly report: RunResultsReport; readonly attrition: RunResultsDocument["attrition"] }) {
   const claim = report.claimPackage;
   const pairedParameters = claim.comparison === undefined
     ? undefined
@@ -185,7 +223,7 @@ function Claim({ report }: { readonly report: RunResultsReport }) {
       <p>{claim.assurance.disclosure}</p>
       <div tabIndex={0} aria-label="Claim scope arms and pinning table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Claim scope arms and pinning</caption><thead><tr><th scope="col">Arm</th><th scope="col">Stored pinning</th></tr></thead><tbody>{claim.scope.arms.map((arm: PresentedClaimArm) => <tr key={arm.armId} className="border-t"><th scope="row" className="py-2 pr-4">{arm.armId}</th><td>{formatFact(arm.pinning)}</td></tr>)}</tbody></table></div>
       <div tabIndex={0} aria-label="Claim record links table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Claim record links</caption><tbody>{Object.entries(claim.records).map(([name, digest]) => <tr key={name} className="border-t"><th scope="row" className="py-2 pr-4">{name}</th><td><Digest>{String(digest)}</Digest></td></tr>)}</tbody></table></div>
-      {claim.headline ? <div tabIndex={0} aria-label="Headline results by arm table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Headline results by arm</caption><thead><tr><th scope="col">Arm</th><th scope="col">Judged n</th><th scope="col">Pass rate</th><th scope="col">Wilson interval</th></tr></thead><tbody>{Object.entries(claim.headline).map(([arm, headlineValue]) => { const headline = headlineValue as PresentedClaimHeadline; return <tr key={arm} className="border-t"><th scope="row" className="py-2 pr-4">{arm}</th><td>{headline.n}</td><td>{headline.passRate}</td><td>{headline.wilsonInterval.low} to {headline.wilsonInterval.high}</td></tr>; })}</tbody></table></div> : claim.comparison && pairedParameters ? <ComparisonBlock comparison={claim.comparison} parameters={pairedParameters} /> : claim.comparison ? <p role="alert">Paired comparison parameters cannot be presented. Run verification.</p> : null}
+      {claim.headline ? <HeadlineByArm caption="Headline results by arm" ariaLabel="Headline results by arm table" attrition={attrition} arms={Object.entries(claim.headline).map(([armId, headlineValue]) => { const headline = headlineValue as PresentedClaimHeadline; return { armId, n: headline.n, passRate: headline.passRate, low: headline.wilsonInterval.low, high: headline.wilsonInterval.high }; })} /> : claim.comparison && pairedParameters ? <ComparisonBlock comparison={claim.comparison} parameters={pairedParameters} /> : claim.comparison ? <p role="alert">Paired comparison parameters cannot be presented. Run verification.</p> : null}
       <div><h3 className="font-semibold">Stored claim completeness</h3><p>{formatFact(claim.completeness)}</p></div>
       <div><h3 className="font-semibold">Stored claim attrition</h3><p>{formatFact(claim.attrition)}</p></div>
       <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="font-medium">Conflicted cells</dt><dd>{claim.conflicted.count}: {claim.conflicted.cellKeys.join(", ") || "none"}</dd></div><div><dt className="font-medium">Integrity tiers</dt><dd>{formatFact(claim.disclosures.integrityTierCounts)}</dd></div><div><dt className="font-medium">Pinning unverifiable counts</dt><dd>{formatFact(claim.disclosures.pinningUnverifiableCounts)}</dd></div><div><dt className="font-medium">Assurance primitives</dt><dd>{formatFact(claim.assurance.resolved)}</dd></div></dl>
@@ -197,17 +235,9 @@ function Claim({ report }: { readonly report: RunResultsReport }) {
   </section>;
 }
 
-interface StoredReportArm {
-  readonly armId: string;
-  readonly n: number;
-  readonly passRate: string;
-  readonly low: string;
-  readonly high: string;
-}
-
 interface StoredReportSubject {
   readonly subjectSha256: string;
-  readonly arms: readonly StoredReportArm[];
+  readonly arms: readonly HeadlineArmRow[];
   readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
 }
 
@@ -236,7 +266,7 @@ function storedReportSubjects(value: unknown): readonly StoredReportSubject[] | 
       || !Array.isArray(cellKeys)
       || !cellKeys.every((cellKey) => typeof cellKey === "string")
     ) return undefined;
-    const presentedArms: StoredReportArm[] = [];
+    const presentedArms: HeadlineArmRow[] = [];
     for (const [armId, armValue] of Object.entries(arms)) {
       const arm = recordOf(armValue);
       const interval = recordOf(arm?.["wilsonInterval"]);
@@ -257,28 +287,28 @@ function storedReportSubjects(value: unknown): readonly StoredReportSubject[] | 
   return subjects;
 }
 
-function StoredReportResults({ report }: { readonly report: RunResultsReport }) {
+function StoredReportResults({ report, attrition }: { readonly report: RunResultsReport; readonly attrition: RunResultsDocument["attrition"] }) {
   const subjects = storedReportSubjects(report.record.results);
   return <div className="min-w-0 space-y-4">
     <h3 className="font-semibold">Stored Report results</h3>
     {subjects === undefined ? <p role="alert">Stored Report results cannot be presented as the shipped wilson@1 shape. Run verification.</p> : subjects.map((subject) => <section key={subject.subjectSha256} aria-label={`Report subject ${subject.subjectSha256}`} className="min-w-0 space-y-3">
       <p><span className="font-medium">Report subject: </span><Digest>{subject.subjectSha256}</Digest></p>
-      <div tabIndex={0} aria-label="Stored report headline by arm table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Stored Report headline by arm</caption><thead><tr><th scope="col">Arm</th><th scope="col">Judged n</th><th scope="col">Pass rate</th><th scope="col">Wilson interval</th></tr></thead><tbody>{subject.arms.map((arm) => <tr key={arm.armId} className="border-t"><th scope="row" className="py-2 pr-4">{arm.armId}</th><td>{arm.n}</td><td>{arm.passRate}</td><td>{arm.low} to {arm.high}</td></tr>)}</tbody></table></div>
+      <HeadlineByArm caption="Stored Report headline by arm" ariaLabel="Stored report headline by arm table" attrition={attrition} arms={subject.arms} />
       <div className="min-w-0 [overflow-wrap:anywhere]"><h4 className="font-semibold">Stored Report conflicted cells</h4><p>{subject.conflicted.count}: {subject.conflicted.cellKeys.join(", ") || "none"}</p></div>
     </section>)}
   </div>;
 }
 
-function Report({ report }: { readonly report: RunResultsReport }) {
+function Report({ report, attrition }: { readonly report: RunResultsReport; readonly attrition: RunResultsDocument["attrition"] }) {
   return <section aria-labelledby="report-heading" className="min-w-0 space-y-6">
     <Card className="min-w-0 overflow-hidden"><CardHeader><h2 id="report-heading" className="text-xl font-semibold">Sealed report</h2></CardHeader><CardContent className="min-w-0 space-y-5 [overflow-wrap:anywhere]">
       <dl className="grid min-w-0 gap-3 sm:grid-cols-2"><div><dt className="font-medium">Report digest</dt><dd><Digest>{report.reportSha256}</Digest></dd></div><div><dt className="font-medium">Envelope digest</dt><dd><Digest>{report.reportEnvelopeSha256}</Digest></dd></div><div><dt className="font-medium">Method</dt><dd>{report.record.method.id} version {report.record.method.version}</dd></div><div><dt className="font-medium">Method parameters</dt><dd>{formatFact(report.record.method.parameters)}</dd></div><div><dt className="font-medium">Preregistered</dt><dd>{report.record.preregistered === true ? "Yes" : "No"}</dd></div><div><dt className="font-medium">Report disclosures</dt><dd>{report.record.disclosures.perSubject.length} subject disclosure block(s)</dd></div></dl>
-      <StoredReportResults report={report} />
+      <StoredReportResults report={report} attrition={attrition} />
       <div className="min-w-0"><h3 className="font-semibold">Stored report per-subject disclosures</h3><ol className="min-w-0 list-decimal pl-5 [overflow-wrap:anywhere]">{report.record.disclosures.perSubject.map((disclosure: unknown, index: number) => <li className="min-w-0 break-words" key={index}>{formatFact(disclosure)}</li>)}</ol></div>
       <div role="status" className="rounded-md border p-3"><p className="font-semibold">Signature / verification status: {report.verification.status}</p><p>{report.verification.detail}</p></div>
       <div><h3 className="font-semibold">Report limitations</h3><ul className="list-disc pl-5">{(report.record.limitations ?? []).map((limit: string) => <li key={limit}>{limit}</li>)}</ul></div>
     </CardContent></Card>
-    <Claim report={report} />
+    <Claim report={report} attrition={attrition} />
   </section>;
 }
 
@@ -306,7 +336,7 @@ export default async function ResultsPage({ params }: { readonly params: Promise
         <ActionForm action={GUI_SERVER_ACTIONS["run.report"]} submitLabel="Seal report" successMessage="Report and claim package sealed. Reloaded facts are shown on this route." gated disabled={draftState !== "closed"}><HiddenDraft draftId={draftId} /></ActionForm>
         <ActionForm action={GUI_SERVER_ACTIONS["run.publish"]} submitLabel={draftState === "published-bundle" ? "Verify published bundle" : "Publish public bundle"} successMessage="The fixed draft-owned public bundle passed portable verification." gated disabled={draftState !== "reported" && draftState !== "published-bundle"}><HiddenDraft draftId={draftId} /><label className="flex items-start gap-2 text-sm"><input type="checkbox" name="includeNativeArtifacts" disabled={draftState !== "reported"} /><span>Include complete native runtime logs and transcripts in this non-confidential public bundle.</span></label></ActionForm>
       </CardContent></Card>
-      {results.report ? <Report report={results.report} /> : <Card><CardHeader><h2 className="text-xl font-semibold">Report not sealed</h2></CardHeader><CardContent><p>A gated report can be sealed once the draft is closed.</p></CardContent></Card>}
+      {results.report ? <Report report={results.report} attrition={results.attrition} /> : <Card><CardHeader><h2 className="text-xl font-semibold">Report not sealed</h2></CardHeader><CardContent><p>A gated report can be sealed once the draft is closed.</p></CardContent></Card>}
       <section aria-labelledby="verification-heading">
         <Card className="min-w-0"><CardHeader><h2 id="verification-heading" className="text-xl font-semibold">Independent verification</h2></CardHeader><CardContent className="min-w-0 space-y-5"><p>{PRODUCT_BRANDING.attribution}</p>{results.report ? <><dl className="grid gap-3 sm:grid-cols-2"><div><dt className="font-medium">Exact reader command</dt><dd className="break-all font-mono text-xs">{results.report.claimPackage.verification.command}</dd></div><div><dt className="font-medium">Compatible reader command</dt><dd className="break-all font-mono text-xs">{results.report.claimPackage.verification.compatibleCommand}</dd></div><div><dt className="font-medium">Workspace verification command</dt><dd className="break-all font-mono text-xs">{PRODUCT_BRANDING.commandName} verify --workspace &lt;workspace-dir&gt; --draft {draftId} --json</dd></div><div><dt className="font-medium">Trust root</dt><dd>{results.report.claimPackage.verification.trustRoot}</dd></div></dl><div><h3 className="font-semibold">Declared checks</h3><ul className="list-disc pl-5">{results.report.claimPackage.verification.checks.map((check) => <li key={check}>{check}</li>)}</ul></div></> : null}<VerificationForm action={GUI_SERVER_ACTIONS["run.verify"]} draftId={draftId} /></CardContent></Card>
       </section>
