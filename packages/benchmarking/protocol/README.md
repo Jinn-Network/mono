@@ -12,10 +12,12 @@ Matrix, sign a Report, or decide consumer trust.
 `fixtures/` holds exact-byte golden records, one directory per record kind, in the same shape
 `packages/benchmarking/records` uses: `valid.json` carries the canonical bytes and `valid.sha256`
 carries the pinned digest. `fixtures/manifest.sha256.json` is the repo-wide drift guard
-(`.github/scripts/fixture-manifest.mjs`), and `fixtures/golden-lifecycle/digests.json` pins the
-tier-2 artifact digests that `packages/benchmarking/evidence/src/golden-lifecycle.test.ts` asserts
-against, so a serialization change applied uniformly across that test's A/B/C build and its D
-append cannot pass unnoticed.
+(`.github/scripts/fixture-manifest.mjs`).
+
+The fixtures are read only by this package's own test suite -- they are not published, and the
+readers live in `src/fixtures.test.ts` because production sources here import no node builtin.
+`packages/benchmarking/evidence/fixtures/golden-lifecycle/digests.json` pins the same way, for the
+tier-2 artifact digests that package's golden lifecycle test produces.
 
 Regenerate the per-kind fixtures after changing `src/golden-documents.ts`:
 

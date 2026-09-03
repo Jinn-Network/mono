@@ -2,6 +2,9 @@
 
 import {
   BENCHMARKING_PROTOCOL_V2,
+  EXECUTION_COMMISSIONING_LINK_RECORD_KIND,
+  parseExecutionBatchCapture,
+  parseExecutionCommissioningLink,
   type DigestBearingResourceDescriptor,
   type EvidenceRecordReference,
   type SealedRecord,
@@ -16,7 +19,9 @@ import { describe, expect, test } from "vitest";
 
 import {
   NativeCaptureCoordinator,
+  backfillExecutionCommissioningLinks,
   type FixedNativeInvocation,
+  type NativeCommissioningLineage,
   type NativeAdapterProbe,
   type NativeCaptureSession,
   type NativeCaptureStore,
@@ -130,6 +135,7 @@ class Store implements NativeCaptureStore {
   readonly evidenceByKey = new Map<string, { digest: string; bytes: Uint8Array; reference: EvidenceRecordReference }>();
   readonly evidenceByDigest = new Map<string, Uint8Array>();
   readonly artifacts = new Map<string, Uint8Array>();
+  readonly records: { recordKind: string; name: string; record: SealedRecord }[] = [];
 
   loadSession(sessionId: string): NativeCaptureSession | undefined {
     return this.sessions.get(sessionId);
@@ -144,6 +150,7 @@ class Store implements NativeCaptureStore {
 
   putRecord(recordKind: string, name: string, record: SealedRecord): TypedRecordReference {
     this.events.push(`record:${recordKind.split("/").at(-2)}`);
+    this.records.push({ recordKind, name, record });
     return { recordKind, record: { name, digest: { sha256: record.digest.slice(7) } } };
   }
 
@@ -343,5 +350,144 @@ describe("NativeCaptureCoordinator", () => {
     value.snapshots.changed.add("job.toml-snapshot");
     expect(() => value.coordinator.capture("mutated")).toThrow("immutable snapshot changed");
     expect(value.launcher.starts.size).toBe(0);
+  });
+});
+
+const LINEAGE: NativeCommissioningLineage = {
+  publisher: "urn:publisher:colophon",
+  submission: {
+    recordKind: "https://spec.jinn.network/records/task-execution-submission/v1",
+    record: descriptor("submission.json", "a"),
+  },
+  attempts: ["urn:uuid:70000000-0000-4000-8000-000000000003"],
+  deliveries: [{
+    recordKind: "https://spec.jinn.network/records/task-execution-delivery/v1",
+    record: descriptor("delivery.json", "b"),
+  }],
+};
+
+/** The base adapter, plus commissioning lineage on the units the caller names. */
+function commissioningAdapter(commissioned: ReadonlySet<string>): NativeExecutionAdapter {
+  return {
+    ...adapter,
+    atomize: (snapshot, unit, context) => ({
+      ...adapter.atomize(snapshot, unit, context),
+      ...(commissioned.has(unit.unitKey) ? { commissioning: LINEAGE } : {}),
+    }),
+  };
+}
+
+function commissioningHarness(commissioned: ReadonlySet<string>) {
+  const store = new Store();
+  const snapshots = new Snapshots();
+  const launcher = new Launcher(store.events);
+  const coordinator = new NativeCaptureCoordinator(
+    { harbor: commissioningAdapter(commissioned) },
+    snapshots,
+    launcher,
+    store,
+    { now: () => "2026-08-16T10:00:00Z" },
+  );
+  return { coordinator, store };
+}
+
+function importAll(coordinator: NativeCaptureCoordinator, sessionId: string) {
+  return coordinator.import({
+    sessionId,
+    owner: "urn:agent:owner",
+    adapterId: "harbor",
+    source: { kind: "directory", locator: "archive" },
+    policy: POLICY,
+  });
+}
+
+function commissioningLinks(store: Store): SealedRecord[] {
+  return store.records.filter(({ recordKind }) => recordKind === EXECUTION_COMMISSIONING_LINK_RECORD_KIND)
+    .map(({ record }) => record);
+}
+
+describe("commissioning dual-write and backfill (#3339)", () => {
+  test("dual-write records commissioning lineage without changing any evidence byte", () => {
+    const uncommissioned = commissioningHarness(new Set());
+    importAll(uncommissioned.coordinator, "plain");
+
+    const commissioned = commissioningHarness(new Set(["trial-1", "trial-2"]));
+    importAll(commissioned.coordinator, "commissioned");
+
+    // The evidence-side proof: identical bytes under identical digests, with and without a link.
+    expect([...commissioned.store.evidenceByDigest.keys()].sort())
+      .toEqual([...uncommissioned.store.evidenceByDigest.keys()].sort());
+    for (const [digest, bytes] of commissioned.store.evidenceByDigest) {
+      expect(bytes).toEqual(uncommissioned.store.evidenceByDigest.get(digest));
+    }
+
+    // The capture record is likewise untouched: the link is a separate record, not a field.
+    expect(commissioned.coordinator.verify("commissioned").capture)
+      .toEqual(uncommissioned.coordinator.verify("plain").capture);
+    expect(commissioned.coordinator.verify("commissioned")).toMatchObject({ conforms: true, diagnostics: [] });
+
+    // The links exist, one per commissioned unit, each subjecting its own execution.
+    expect(commissioningLinks(uncommissioned.store)).toHaveLength(0);
+    const links = commissioningLinks(commissioned.store);
+    expect(links).toHaveLength(2);
+    const subjects = links.map((link) => parseExecutionCommissioningLink(link.bytes));
+    expect(subjects.map(({ execution }) => execution.record.digest.sha256).sort())
+      .toEqual([...commissioned.store.evidenceByDigest.keys()].sort());
+    for (const subject of subjects) {
+      expect(subject.attempts).toEqual(LINEAGE.attempts);
+      expect(subject.publisher).toBe(LINEAGE.publisher);
+      expect(subject.execution.family).toBe("execution-evidence");
+    }
+  });
+
+  test("dual-write covers only the units whose lineage the adapter supplied", () => {
+    const value = commissioningHarness(new Set(["trial-2"]));
+    importAll(value.coordinator, "partial");
+    const links = commissioningLinks(value.store);
+    expect(links).toHaveLength(1);
+    const only = parseExecutionCommissioningLink(links[0]!.bytes);
+    const trial2 = value.store.evidenceByKey.get(
+      [...value.store.evidenceByKey.keys()].find((key) => key.endsWith("trial-2"))!,
+    )!;
+    expect(only.execution.record.digest.sha256).toBe(trial2.digest.slice(7));
+  });
+
+  test("backfill links already-sealed evidence after the fact, still without moving a byte", () => {
+    const value = commissioningHarness(new Set());
+    const completed = importAll(value.coordinator, "historical");
+    const capture = parseExecutionBatchCapture(completed.capture.bytes);
+    const before = new Map([...value.store.evidenceByDigest].map(([digest, bytes]) => [digest, Uint8Array.from(bytes)]));
+
+    const written = backfillExecutionCommissioningLinks({
+      store: value.store,
+      clock: { now: () => "2026-08-16T18:00:00Z" },
+      capture,
+      lineage: new Map(capture.units.map(({ unitKey }) => [unitKey, LINEAGE])),
+    });
+
+    expect(written.map(({ unitKey }) => unitKey)).toEqual(["trial-1", "trial-2"]);
+    expect(commissioningLinks(value.store)).toHaveLength(2);
+    // The evidence the links subject is byte-identical to what was sealed before the backfill.
+    expect([...value.store.evidenceByDigest].map(([digest, bytes]) => [digest, Uint8Array.from(bytes)]))
+      .toEqual([...before]);
+    expect(value.coordinator.verify("historical")).toMatchObject({ conforms: true, diagnostics: [] });
+    // The capture record still reads exactly as it was sealed.
+    expect(parseExecutionBatchCapture(completed.capture.bytes)).toEqual(capture);
+    for (const { unitKey, link } of written) {
+      expect(parseExecutionCommissioningLink(link.bytes).linkedAt).toBe("2026-08-16T18:00:00Z");
+      expect(unitKey.startsWith("trial-")).toBe(true);
+    }
+  });
+
+  test("backfill refuses a unit key the capture does not carry rather than skipping it", () => {
+    const value = commissioningHarness(new Set());
+    const completed = importAll(value.coordinator, "historical");
+    expect(() => backfillExecutionCommissioningLinks({
+      store: value.store,
+      clock: { now: () => "2026-08-16T18:00:00Z" },
+      capture: parseExecutionBatchCapture(completed.capture.bytes),
+      lineage: new Map([["trial-404", LINEAGE]]),
+    })).toThrow(/trial-404/u);
+    expect(commissioningLinks(value.store)).toHaveLength(0);
   });
 });

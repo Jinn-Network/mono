@@ -66,10 +66,6 @@
       "sha256": "1f3201d18e077981d1b02eccdc3f0a203c84b6e861e2af61871a5b60fc3f5bad"
     },
     {
-      "id": "golden-lifecycle/digests.json",
-      "sha256": "c3972d9d1dbb4898a9d17eaee0eda65aa71b3852f26de2e9dc9253b6572766c3"
-    },
-    {
       "id": "human-label-resolution/valid.json",
       "sha256": "7023729d6d963b31e49a19b0c2940347292ba514389b086754e82f06bb87d1ed"
     },

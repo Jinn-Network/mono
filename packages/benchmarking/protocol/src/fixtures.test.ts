@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, test } from "vitest";
 
 import {
@@ -7,11 +9,6 @@ import {
   GOLDEN_RECORD_KINDS,
   type GoldenRecordKind,
 } from "./golden-documents.js";
-import {
-  loadGoldenRecordBytes,
-  loadGoldenRecordDigest,
-  loadGoldenRecordJson,
-} from "./fixtures.js";
 import { documentDigest } from "./hashing.js";
 import { parseExecutionBatchCapture, parseExecutionBatchIntent } from "./batch.js";
 import { parseBenchmarkDefinitionV2 } from "./benchmark.js";
@@ -25,6 +22,27 @@ import {
   parseEvidenceNativeBundleManifestV5,
   parseEvidenceNativeClaimPackageV3,
 } from "./portable.js";
+
+/**
+ * The fixture readers live in the test rather than in `src/`: this package is tier 2 and its
+ * production sources import no node builtin (`.github/scripts/benchmarking-source-boundaries`).
+ * Nothing outside this suite reads these files -- consumers get the builder, not the bytes.
+ */
+function fixtureUrl(relativePath: string): URL {
+  return new URL(`../fixtures/${relativePath}`, import.meta.url);
+}
+
+async function loadGoldenRecordBytes(kind: GoldenRecordKind): Promise<Uint8Array> {
+  return new Uint8Array(await readFile(fixtureUrl(`${kind}/valid.json`)));
+}
+
+async function loadGoldenRecordJson(kind: GoldenRecordKind): Promise<unknown> {
+  return JSON.parse(await readFile(fixtureUrl(`${kind}/valid.json`), "utf8"));
+}
+
+async function loadGoldenRecordDigest(kind: GoldenRecordKind): Promise<`sha256:${string}`> {
+  return (await readFile(fixtureUrl(`${kind}/valid.sha256`), "utf8")).trim() as `sha256:${string}`;
+}
 
 const PARSERS: Record<GoldenRecordKind, (bytes: Uint8Array) => unknown> = {
   "execution-batch-intent": parseExecutionBatchIntent,

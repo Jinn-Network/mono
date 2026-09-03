@@ -2,10 +2,18 @@
 
 import {
   BENCHMARKING_PROTOCOL_V2,
+  EXECUTION_COMMISSIONING_LINK_RECORD_KIND,
   documentDigest,
   parseExecutionCommissioningLink,
   sealExecutionCommissioningLink,
+  type EvidenceRecordReference,
+  type SealedRecord,
 } from "@jinn-network/benchmarking-protocol";
+import {
+  backfillExecutionCommissioningLinks,
+  type NativeCaptureStore,
+  type NativeCommissioningLineage,
+} from "@jinn-network/benchmarking-native-capture";
 import { recordDigest, validateExecutionEvidence } from "@jinn-network/evidence-protocol";
 import { buildExecutionEvidence, type ExecutionEvidenceArtifactSource } from "@jinn-network/execution-evidence-builder";
 import {
@@ -29,8 +37,12 @@ function descriptor(name: string, digest: `sha256:${string}`, mediaType?: string
   return { name, digest: { sha256: digest.slice(7) }, ...(mediaType === undefined ? {} : { mediaType }) };
 }
 
-describe("optional TEP commissioning parity", () => {
-  test("a real Submission/Attempt/Delivery link does not change evaluator-D evidence identity", () => {
+/**
+ * One evaluator-D execution plus its real TEP commissioning records. Shared by the hand-sealed
+ * parity case below and by the dual-write/backfill case that followed it (issue #3339), so both
+ * make their claim about the same bytes.
+ */
+function commissionedEvaluatorD() {
     const taskBytes = encoder.encode('{"candidate":"answer-1","instruction":"apply instrument D","question":"memory-1"}');
     const resultBytes = encoder.encode('{"observation":"supported","opinion":"ACCEPT"}');
     const runtimeBytes = encoder.encode('{"inspect":"0.3.255","instrument":"D"}');
@@ -119,11 +131,87 @@ describe("optional TEP commissioning parity", () => {
       linkedAt: "2026-08-16T17:00:03.000Z",
     });
 
+    return {
+      evidenceBytes,
+      evidenceDigestBeforeCommissioning,
+      attempt,
+      submissionBytes,
+      deliveryBytes,
+      link,
+      lineage: {
+        publisher: "urn:publisher:colophon",
+        submission: {
+          recordKind: "https://spec.jinn.network/records/task-execution-submission/v1",
+          record: descriptor("submission.json", recordDigest(submissionBytes), SUBMISSION_MEDIA_TYPE),
+        },
+        attempts: [attempt],
+        deliveries: [{
+          recordKind: "https://spec.jinn.network/records/task-execution-delivery/v1",
+          record: descriptor("delivery.json", recordDigest(deliveryBytes), DELIVERY_MEDIA_TYPE),
+        }],
+      } satisfies NativeCommissioningLineage,
+    };
+}
+
+/** The minimum `NativeCaptureStore` the commissioning paths touch: evidence in, records out. */
+function commissioningStore(evidenceBytes: Uint8Array) {
+  const evidence = new Map([[recordDigest(evidenceBytes).slice(7), evidenceBytes]]);
+  const written: { recordKind: string; record: SealedRecord }[] = [];
+  const store = {
+    loadSession: () => undefined,
+    saveSession: () => {},
+    putRecord: (recordKind: string, name: string, record: SealedRecord) => {
+      written.push({ recordKind, record });
+      return { recordKind, record: { name, digest: { sha256: record.digest.slice(7) } } };
+    },
+    putExecution: () => { throw new Error("unused"); },
+    putArtifact: () => {},
+    resolveEvidence: (reference: EvidenceRecordReference) => {
+      const bytes = evidence.get(reference.record.digest.sha256);
+      if (bytes === undefined) throw new Error("missing execution evidence");
+      return bytes;
+    },
+  } as unknown as NativeCaptureStore;
+  return { store, written, evidence };
+}
+
+describe("optional TEP commissioning parity", () => {
+  test("a real Submission/Attempt/Delivery link does not change evaluator-D evidence identity", () => {
+    const { evidenceBytes, evidenceDigestBeforeCommissioning, attempt, link } = commissionedEvaluatorD();
+
     const parsed = parseExecutionCommissioningLink(link.bytes);
     expect(parsed.execution.record.digest.sha256).toBe(evidenceDigestBeforeCommissioning.slice(7));
     expect(parsed.attempts).toEqual([attempt]);
     expect(parsed.deliveries).toHaveLength(1);
     expect(recordDigest(evidenceBytes)).toBe(evidenceDigestBeforeCommissioning);
     expect(documentDigest(link.bytes)).not.toBe(evidenceDigestBeforeCommissioning);
+  });
+
+  test("the operational backfill path reaches the same conclusion over the same TEP records", () => {
+    const { evidenceBytes, evidenceDigestBeforeCommissioning, attempt, lineage } = commissionedEvaluatorD();
+    const { store, written, evidence } = commissioningStore(evidenceBytes);
+    const execution: EvidenceRecordReference = {
+      family: "execution-evidence",
+      record: descriptor("ro-crate-metadata.json", evidenceDigestBeforeCommissioning, "application/ld+json"),
+    };
+
+    const [result] = backfillExecutionCommissioningLinks({
+      store,
+      clock: { now: () => "2026-08-16T17:00:03.000Z" },
+      capture: { units: [{ unitKey: "instrument-D/call-4", executionEvidence: execution }] },
+      lineage: new Map([["instrument-D/call-4", lineage]]),
+    });
+
+    // The link is a record of its own, written beside the evidence and never into it.
+    expect(written).toHaveLength(1);
+    expect(written[0]!.recordKind).toBe(EXECUTION_COMMISSIONING_LINK_RECORD_KIND);
+    const parsed = parseExecutionCommissioningLink(result!.link.bytes);
+    expect(parsed.execution.record.digest.sha256).toBe(evidenceDigestBeforeCommissioning.slice(7));
+    expect(parsed.attempts).toEqual([attempt]);
+    expect(parsed.deliveries).toHaveLength(1);
+
+    // The evidence the store holds is byte-identical to what it held before the backfill ran.
+    expect(evidence.get(evidenceDigestBeforeCommissioning.slice(7))).toEqual(evidenceBytes);
+    expect(recordDigest(evidenceBytes)).toBe(evidenceDigestBeforeCommissioning);
   });
 });

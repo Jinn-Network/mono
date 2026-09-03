@@ -17,13 +17,6 @@ export * from "./portable.js";
 export * from "./report.js";
 export * from "./sealing.js";
 export {
-  loadGoldenLifecycleDigests,
-  loadGoldenRecordBytes,
-  loadGoldenRecordDigest,
-  loadGoldenRecordJson,
-} from "./fixtures.js";
-export type { GoldenLifecycleDigests } from "./fixtures.js";
-export {
   buildGoldenDocuments,
   GOLDEN_RECORD_KINDS,
 } from "./golden-documents.js";

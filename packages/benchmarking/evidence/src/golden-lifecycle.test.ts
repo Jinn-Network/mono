@@ -7,13 +7,13 @@ import {
   verify as verifyEd25519,
   type KeyObject,
 } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   BENCHMARKING_PROTOCOL_V2,
   EXECUTION_BATCH_CAPTURE_RECORD_KIND,
   REPORT_V2_MEDIA_TYPE,
   documentDigest,
   evidenceReferenceKey,
-  loadGoldenLifecycleDigests,
   parseEvidenceCohort,
   sealBenchmarkDefinitionV2,
   sealBenchmarkAnalysisManifest,
@@ -1000,9 +1000,21 @@ describe("Harbor → Inspect → human evidence-first golden lifecycle", () => {
       claimPackage: claim.digest,
       bundleManifest: documentDigest(bundleFiles.get("bundle.json")!),
       metadataFirstBundleManifest: documentDigest(metadataFirstFiles.get("bundle.json")!),
-    }).toEqual(await loadGoldenLifecycleDigests());
+    }).toEqual(loadGoldenLifecycleDigests());
   });
 });
+
+/**
+ * The pinned tier-2 digests of this lifecycle, read from `fixtures/` rather than recomputed. The
+ * file is covered by the repo-wide fixture drift and immutability guards, so changing a pinned
+ * value takes a dated erratum, not an edit.
+ */
+function loadGoldenLifecycleDigests(): Record<string, string> {
+  const { digests } = JSON.parse(
+    readFileSync(new URL("../fixtures/golden-lifecycle/digests.json", import.meta.url), "utf8"),
+  ) as { digests: Record<string, string> };
+  return digests;
+}
 
 function claimRecordsArtifactDigests(claimBytes: Uint8Array): readonly string[] {
   const document = JSON.parse(new TextDecoder().decode(claimBytes)) as {
