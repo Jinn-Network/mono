@@ -582,7 +582,36 @@ describe("binary qualification public assets", () => {
       }));
     }
   });
+
+  // Issue #3754: the projection's per-element checks refuse too, at the source that carries the
+  // malformed fact. These are the checks nothing earlier settles -- `profile/claim.ts` carries
+  // `arms` through verbatim into the claim it rebuilds, so a bundle whose claim mirrors its Report
+  // byte for byte passes `claim-consistency` and arrives here intact. Same structural pinning as
+  // the test above, and for the same reason.
+  test("a malformed per-arm fact refuses at the source that carries it", () => {
+    const cases = [
+      { path: "report.json", mutate: (input: PublicAssetInput) => ({ ...input, report: withMalformedArmN(input.report) }) },
+      { path: "claim-package.json", mutate: (input: PublicAssetInput) => ({ ...input, claim: withMalformedArmN(input.claim) }) },
+    ];
+    for (const { path, mutate } of cases) {
+      expect(() => buildPublicAssets(mutate(fixture()))).toThrow(expect.objectContaining({
+        name: "BenchmarkProductError",
+        code: "record-integrity",
+        issues: [expect.objectContaining({ path })],
+      }));
+    }
+  });
 });
+
+/** Replaces the first arm's `n` with a string -- wilson@1's shape with one exact fact off-type. */
+function withMalformedArmN<T extends { readonly results: unknown }>(record: T): T {
+  const clone = structuredClone(record) as {
+    results: { perSubject: { results: { arms: Record<string, { n: unknown }> } }[] };
+  };
+  const arms = clone.results.perSubject[0]!.results.arms;
+  arms[Object.keys(arms)[0]!]!.n = "3";
+  return clone as unknown as T;
+}
 
 /**
  * P4b Task 6 (`docs/superpowers/plans/demo-report-1/2026-08-12-P4b-implementation-plan.md`):
