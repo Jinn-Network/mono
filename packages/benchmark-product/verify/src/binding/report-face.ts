@@ -136,7 +136,8 @@ function roundChoiceClause(binding: VerifiedRunBinding): string {
         + "choice"
       : "No round follows from a seal on a height-indexed source, so this height was the operator's choice";
     return `${declared} — and on the reader's side it is the chain, not this bundle, that places it after the `
-      + `seal at all. Any other height would have derived a possibly different ${derived} from the same inputs.`;
+      + `seal at all. Any other height the chain carries was an available alternative deriving a possibly `
+      + `different ${derived} from the same inputs.`;
   }
   // A chosen round on a scheduled source. The source clause still applies here -- a declared source
   // narrows what could have been chosen even when the round was -- and omitting it would leave this

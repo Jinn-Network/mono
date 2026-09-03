@@ -320,7 +320,7 @@ describe("runBindingSentence", () => {
           ? runBindingSentence(census("bitcoin/mainnet"))
           : runBindingSentence(sampled("bitcoin/mainnet"));
         expect(sentence).toContain(`possibly different ${derived} from the same inputs`);
-        expect(sentence).not.toContain(`would have derived a different ${derived}`);
+        expect(sentence).not.toContain(`alternative deriving a different ${derived}`);
       },
     );
 

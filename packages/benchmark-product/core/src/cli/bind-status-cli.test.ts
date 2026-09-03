@@ -57,6 +57,11 @@ async function setUpLockedDraft(clock: () => string): Promise<number> {
     armId: "baseline",
     pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } },
   });
+  armAdd(opContext(clock), {
+    draftId: "draft-1",
+    armId: "sample",
+    pinning: { harness: { id: "sample-uniform", version: "0.1.0" } },
+  });
   expect((await runQuote(opContext(clock), { draftId: "draft-1" })).ok).toBe(true);
   const locked = runLock(opContext(clock), { draftId: "draft-1" });
   if (!locked.ok) throw new Error("lock failed");

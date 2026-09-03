@@ -286,7 +286,7 @@
       "operation": "runBind",
       "cliVerb": "bind",
       "authorityGated": false,
-      "description": "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976).",
+      "description": "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976). On a scheduled source the seal names exactly one admissible round -- the first published strictly after it -- and every other round is refused (issue #3322).",
       "gui": {
         "status": "shipped",
         "action": "run.bind"
