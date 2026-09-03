@@ -254,9 +254,10 @@ export function isSpdxLicenseExpression(value: string): boolean {
 }
 
 /**
- * C0 control characters (tab excepted where a field may carry one) and DEL, plus any line that
- * would read as an SPDX tag. `citation` and `name` are spliced verbatim into `LICENSE` and the
- * README heading, so a citation carrying a newline followed by `SPDX-License-Identifier: MIT`
+ * C0 control characters other than tab (and newline, in the one field that may carry one) and DEL,
+ * plus any line that would read as an SPDX tag. `citation` and `name` are spliced verbatim into
+ * `LICENSE` and the README heading, so a citation carrying a newline followed by
+ * `SPDX-License-Identifier: MIT`
  * would put a second licence tag into a machine-scanned licence file. Self-inflicted rather than
  * an outside attack — the field is the publication's own sealed record — but a generated licence
  * file must not be writable from a free-text field, and refusing is cheaper than escaping.
@@ -264,8 +265,8 @@ export function isSpdxLicenseExpression(value: string): boolean {
 const SPDX_TAG_LINE = /^[ \t]*SPDX-[A-Za-z][A-Za-z0-9-]*[ \t]*:/u;
 
 function assertRenderableFreeText(field: string, value: string, multiline: boolean): void {
-  // eslint-disable-next-line no-control-regex
-  const forbidden = multiline ? /[\u0000-\u0008\u000B-\u001F\u007F]/u : /[\u0000-\u001F\u007F]/u;
+  // Tab is carried in both cases; newline only where the field is documented as multi-line.
+  const forbidden = multiline ? /[\u0000-\u0008\u000B-\u001F\u007F]/u : /[\u0000-\u0008\u000A-\u001F\u007F]/u;
   if (forbidden.test(value)) {
     refuse(
       "record-integrity",
@@ -300,7 +301,10 @@ function spdxDownloadLocation(uri: string): string {
  * reports `NOASSERTION` rather than being given a role it does not have.
  */
 function spdxSupplier(author: string): string {
-  return /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(author) ? "NOASSERTION" : `Organization: ${author}`;
+  // Scheme-qualified AND whitespace-free: a supplier name almost always carries a space, a machine
+  // identifier never does, so "Colophon: Research" is still stated as the supplier it is.
+  const machineIdentifier = !/\s/u.test(author) && /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(author);
+  return machineIdentifier ? "NOASSERTION" : `Organization: ${author}`;
 }
 
 export interface FreezeRepoSourceLicence {
@@ -507,6 +511,9 @@ function readPublication(snapshot: VerifiedBundleSnapshot): FreezeRepoPublicatio
   }
   const record = benchmark as Record<string, unknown>;
   const license = record["license"];
+  // The expression grammar tokenizes on whitespace, so a licence carrying a newline could satisfy
+  // it and then render as two lines under one `SPDX-License-Identifier:` tag. Checked first.
+  if (typeof license === "string" && license.length > 0) assertRenderableFreeText("license", license, false);
   if (typeof license === "string" && license.length > 0 && !isSpdxLicenseExpression(license)) {
     refuse(
       "record-integrity",
