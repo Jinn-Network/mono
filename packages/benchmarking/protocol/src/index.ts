@@ -16,8 +16,3 @@ export * from "./order.js";
 export * from "./portable.js";
 export * from "./report.js";
 export * from "./sealing.js";
-export {
-  buildGoldenDocuments,
-  GOLDEN_RECORD_KINDS,
-} from "./golden-documents.js";
-export type { GoldenRecordKind } from "./golden-documents.js";

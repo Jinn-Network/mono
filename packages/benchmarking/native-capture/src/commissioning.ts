@@ -17,6 +17,7 @@ import {
   BENCHMARKING_PROTOCOL_V2,
   EXECUTION_COMMISSIONING_LINK_RECORD_KIND,
   sealExecutionCommissioningLink,
+  typedReferenceKey,
   type DigestBearingResourceDescriptor,
   type EvidenceRecordReference,
   type SealedRecord,
@@ -55,10 +56,6 @@ function sortedUnique<T>(values: readonly T[], key: (value: T) => string, what: 
   return sorted;
 }
 
-function typedKey(reference: TypedRecordReference): string {
-  return `${reference.recordKind} ${reference.record.digest.sha256}`;
-}
-
 /**
  * Seals one commissioning link over an already-stored execution-evidence record, writes it to the
  * store, then re-resolves the evidence to prove the write moved no evidence byte.
@@ -75,8 +72,7 @@ export function writeExecutionCommissioningLink(input: {
 }): WrittenCommissioningLink {
   const { store, clock, unitKey, execution, lineage } = input;
 
-  const before = store.resolveEvidence(execution);
-  const beforeDigest = recordDigest(before);
+  const beforeDigest = recordDigest(store.resolveEvidence(execution));
   if (beforeDigest.slice(7) !== execution.record.digest.sha256) {
     throw new NativeCaptureError(
       "CAPTURE_NONCONFORMING",
@@ -89,7 +85,7 @@ export function writeExecutionCommissioningLink(input: {
     execution,
     submission: lineage.submission,
     attempts: sortedUnique(lineage.attempts, (value) => value, "attempts"),
-    deliveries: sortedUnique(lineage.deliveries, typedKey, "deliveries"),
+    deliveries: sortedUnique(lineage.deliveries, typedReferenceKey, "deliveries"),
     ...(lineage.observations === undefined ? {} : { observations: lineage.observations }),
     ...(lineage.accounting === undefined ? {} : { accounting: lineage.accounting }),
     publisher: lineage.publisher,

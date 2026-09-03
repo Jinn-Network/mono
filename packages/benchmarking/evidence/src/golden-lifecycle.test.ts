@@ -71,6 +71,10 @@ interface GoldenSigningKey {
  * signature below -- and therefore every cohort, matrix, and report digest -- is byte-stable
  * across machines and runs. That is what lets `fixtures/golden-lifecycle/digests.json` pin them
  * as literals fixed outside the run that produces them (issue #3341).
+ *
+ * These seeds are counters. The keys are therefore public knowledge and are test material only:
+ * they must never sign anything outside this file, and nothing outside this file may treat a
+ * signature they produce as evidence of anything.
  */
 const PKCS8_ED25519_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 
