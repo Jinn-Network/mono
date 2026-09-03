@@ -689,6 +689,7 @@ export {
   normalizePublicArchiveBaseUrl,
   publicArchiveUrl,
   refreshWorkspacePublicationWellKnown,
+  resolveWorkspacePublicationSourceName,
 } from "./run/publication-source.js";
 export {
   DEFAULT_PUBLICATION_SERVE_HOST,

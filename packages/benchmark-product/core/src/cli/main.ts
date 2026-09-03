@@ -99,7 +99,8 @@ import { DOMAIN_BINDING_MECHANISM_NAMES, exportFreezeRepo, summarizeVerification
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";
-import { DEFAULT_PUBLICATION_SOURCE_NAME, requireRunState } from "../run/state.js";
+import { requireRunState } from "../run/state.js";
+import { resolveWorkspacePublicationSourceName } from "../run/publication-source.js";
 import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
 import { readDraftDocument } from "../operations/drafts.js";
 import { listMethodCatalog } from "../operations/method-catalog.js";
@@ -1299,16 +1300,23 @@ async function handlePublicationServe(args: ParsedArgs, context: CliContext, jso
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
     refuse("invalid-invocation", "--port", "--port must be an integer from 0 to 65535");
   }
-  // Present-but-empty is a typo, not an omission, so it falls back to the default exactly as an
-  // absent flag does rather than binding to the empty string.
+  // Present-but-empty is a typo, not an omission, so it is resolved from the workspace exactly as
+  // an absent flag is rather than binding to the empty string. An explicit name always wins:
+  // `resolveWorkspacePublicationSourceName` refuses a workspace whose runs disagree, and passing
+  // the name is how an operator settles that.
   const sourceName = optional(args, "source");
   const host = optional(args, "host");
   const server = await startPublicationArchiveServer({
     workspaceDir,
-    sourceName: sourceName === undefined || sourceName === "" ? DEFAULT_PUBLICATION_SOURCE_NAME : sourceName,
+    sourceName: sourceName === undefined || sourceName === ""
+      ? resolveWorkspacePublicationSourceName(workspaceDir)
+      : sourceName,
     ...(host === undefined || host === "" ? {} : { host }),
     port,
-    ...(context.progress === undefined ? {} : { onError: (cause: unknown) => context.progress?.(`server error: ${cause instanceof Error ? cause.message : String(cause)}`) }),
+    ...(context.progress === undefined ? {} : {
+      onError: (cause: unknown) => context.progress?.(`server error: ${cause instanceof Error ? cause.message : String(cause)}`),
+      onProgress: (line: string) => context.progress?.(line),
+    }),
   });
   try {
     // Taken after the bind so a failure to serve is not preceded by hijacking the process's
