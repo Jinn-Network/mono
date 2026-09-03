@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { QUALIFIED_HARNESS_LOGIN_ARTIFACTS } from "@colophon-claims/core";
 import { describe, expect, test } from "vitest";
 import { BUILD_METADATA_KIND, DEFAULT_QUALIFIED_TARGETS, type ColophonBuildMetadata } from "./build-metadata.js";
-import { browserCommand, runColophonCli, writeQuickstartCompanions } from "./main.js";
+import { browserCommand, localPublishAnswer, runColophonCli, writeQuickstartCompanions } from "./main.js";
 
 const TEST_BUILD: ColophonBuildMetadata = {
   kind: BUILD_METADATA_KIND,
@@ -196,5 +196,36 @@ describe("Colophon install surface", () => {
     const refused = await runColophonCli(argv, { ...context, cwd: workspaceDir });
     expect(refused.exitCode).not.toBe(0);
     expect(refused.stderr).toMatch(/signal shutdown/);
+  });
+});
+
+describe("local-publish answer", () => {
+  const published = {
+    bundle: "/tmp/colophon-sample/bundle",
+    receipt: "/tmp/colophon-sample/quickstart-receipt.json",
+    identity: "a".repeat(64),
+    checksPassed: 6,
+  };
+
+  // Issue #2982 ruled the verb for the standalone reader; #3674 is the same overclaim surviving on
+  // the surface a claim's own author reads first.
+  test("the check line names the operation rather than asserting a verified result", () => {
+    const answer = localPublishAnswer(published);
+    expect(answer).toContain("Recomputed: 6 of 6 checks passed\n");
+    const checkLine = answer.split("\n").find((line) => line.includes("checks passed"));
+    expect(checkLine).toBeDefined();
+    expect(checkLine).not.toMatch(/verified|certified|validated|audited/i);
+  });
+
+  test("the answer still reports what was written and makes no comparative claim", () => {
+    const answer = localPublishAnswer(published);
+    expect(answer).toBe(
+      "Published locally; nothing was uploaded.\n"
+      + `Bundle: ${published.bundle}\n`
+      + `Receipt: ${published.receipt}\n`
+      + `Identity: sha256:${published.identity}\n`
+      + "Recomputed: 6 of 6 checks passed\n"
+      + "Complete comparison; no comparative winner stated.\n",
+    );
   });
 });

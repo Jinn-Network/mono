@@ -93,7 +93,7 @@ import {
 } from "../intake/external-run-records.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
-import type { BeaconReference } from "@colophon-claims/verify";
+import type { BeaconReference, PublicBundleVerificationResult } from "@colophon-claims/verify";
 import { exportFreezeRepo, summarizeVerificationOutcome, verifyFreezeRepo } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
@@ -1595,15 +1595,22 @@ async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMod
   assertKnownFlags(args, BUNDLE_VERIFY_FLAGS);
   const bundleDir = pathFrom(context.cwd, required(args, "bundle"));
   const result = await verifyPublicBundle(bundleDir);
-  return renderResult(
-    { ok: true, result },
-    jsonMode,
-    // A deferred check is never printed as a bare check name: a metadata-first bundle carries its
-    // artifact digests without their bytes (issue #2986).
-    (value) => `verified public bundle ${value.identity}: ${summarizeVerificationOutcome(value).outcomes
-      .map(({ check, state }) => (state === "passed" ? check : `${check} (${state})`))
-      .join(", ")}\n`,
-  );
+  return renderResult({ ok: true, result }, jsonMode, renderBundleVerifyLine);
+}
+
+/**
+ * The human line for `bundle verify`. It names the operation rather than asserting a verified
+ * result: "verified" claims more than this does, which is to recompute the arithmetic, closure, and
+ * consistency of bytes it was handed (issue #2982, ruled for the standalone reader; issue #3689 for
+ * this third reader surface). `--json` is untouched -- it carries the checks, not a verb.
+ *
+ * A deferred check is never printed as a bare check name: a metadata-first bundle carries its
+ * artifact digests without their bytes (issue #2986).
+ */
+export function renderBundleVerifyLine(value: PublicBundleVerificationResult): string {
+  return `recomputed public bundle ${value.identity}: ${summarizeVerificationOutcome(value).outcomes
+    .map(({ check, state }) => (state === "passed" ? check : `${check} (${state})`))
+    .join(", ")}\n`;
 }
 
 async function handleFreezeRepoExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
