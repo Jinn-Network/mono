@@ -654,22 +654,42 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     // The head this append will mint takes `issuedAt` from the caller's timestamp
     // verbatim, and §5.2 rule 3 makes that value load-bearing for acceptance: a
     // consumer refuses a head issued further ahead than one freshness window
-    // (`head-issued-ahead`). Bound it here, against this source's own clock, with the
-    // very predicate the reading side applies -- otherwise a host with a fast clock
-    // signs and publishes a head every consumer permanently refuses and hears about it
-    // only from peer logs (#3481). Checked before the record blob is written or
-    // anything is signed, so a refused append leaves nothing behind.
+    // (`head-issued-ahead`). Bound it here, with the very predicate the reading side
+    // applies, so the source does not sign and publish a head every consumer
+    // permanently refuses and hear about it only from peer logs (#3481).
+    //
+    // Be precise about what this compares (#3571): the *caller's* timestamp against
+    // *this host's* clock. Where the caller derives its timestamp from that same clock,
+    // a uniformly fast host is not caught -- `issuedAt` and `now` move together, the
+    // difference is ~0, and the head is still issued past every correctly-clocked
+    // consumer's window. That case is caught on the read side instead, by the
+    // `self-source-future-head` boot degrade in `operator/src/daemon/native-discovery.ts`
+    // (#3467/#3473). What this bound genuinely catches is a caller timestamp that
+    // *disagrees* with the host clock: a `createdAt` frozen while the clock was fast and
+    // published after a correction (`native-signed-source` passes it straight through),
+    // the head-monotonicity bump in `operator/src/native-requester/requester.ts`
+    // (`max(now, prevIssuedAt + 1)`) forcing a timestamp past an already poisoned head,
+    // an injected or misconfigured clock, and the empty-window and out-of-range shapes.
     //
     // `checkRefreshWindow`'s default ceiling is deliberate: the writer's own
     // `refreshWithinMs` may be far tighter than the profile bound, and the skew
     // allowance a consumer grants is the profile's, not this writer's.
     //
-    // Recovery does not repeat this check. `assertIntentOwnership` replays frozen,
-    // already-signed bytes, and `recover()` runs at the top of every append -- so
-    // re-bounding a head that was in-window when minted would not delay it, it would
-    // wedge the source. Once the intent is durable, finishing the commit is the only
-    // safe act. The same reasoning exempts the operator's pre-C6 requester-source-v1
-    // compatibility reader, which freezes a head the old requester already minted.
+    // Two carve-outs, both for heads that already exist rather than heads being minted:
+    //
+    // - Recovery does not repeat this check. `assertIntentOwnership` replays frozen,
+    //   already-signed bytes, and `recover()` runs at the top of every append -- so
+    //   re-bounding a head that was in-window when minted would not delay it, it would
+    //   wedge the source. Once the intent is durable, finishing the commit is the only
+    //   safe act. The same reasoning exempts the operator's pre-C6 requester-source-v1
+    //   compatibility reader, which freezes a head the old requester already minted.
+    // - An idempotent replay of an already-committed announcement returns its receipt
+    //   unconditionally (#3569). The window verdict is computed here but raised inside
+    //   the CAS loop, *after* the committed-announcement short-circuit and still before
+    //   the first write -- so a refused append leaves no blob, no intent, no state
+    //   revision and no signature, while a backwards clock correction of more than one
+    //   window (an NTP fix on a badly fast host, exactly the population this bound
+    //   exists for) cannot make a published announcement stop being acknowledgeable.
 
     // `Number.isFinite` above admits timestamps near the ECMAScript Date limit, whose
     // window end overflows the range and makes `toISOString()` throw a bare RangeError.
@@ -682,21 +702,21 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     const refreshBy = new Date(timestampMs + refreshWithinMs).toISOString();
     const now = clock.now();
     const windowFailure = checkRefreshWindow({ issuedAt: command.timestamp, refreshBy }, now);
-    if (windowFailure === "head-issued-ahead") {
-      throw new SourceWriterIntegrityError(
-        "announcement timestamp is further ahead of this source's clock than the freshness window allows"
-        + ` (issuedAt ${command.timestamp}, now ${now.toISOString()},`
-        + ` ceiling ${MAX_REFRESH_BY_AHEAD_MS / 3_600_000}h); check this host's clock`,
-      );
-    }
-    // Reachable: a sub-millisecond `refreshWithinMs` truncates to an empty window, which
-    // §5.2 rule 1 refuses. Before this check such a writer minted it silently.
-    if (windowFailure !== undefined) {
+    const refuseMintedWindow = (): never => {
+      if (windowFailure === "head-issued-ahead") {
+        throw new SourceWriterIntegrityError(
+          "announcement timestamp is further ahead of this source's clock than the freshness window allows"
+          + ` (issuedAt ${command.timestamp}, now ${now.toISOString()},`
+          + ` ceiling ${MAX_REFRESH_BY_AHEAD_MS / 3_600_000}h); check this host's clock`,
+        );
+      }
+      // Reachable: a sub-millisecond `refreshWithinMs` truncates to an empty window, which
+      // §5.2 rule 1 refuses. Before this check such a writer minted it silently.
       throw new SourceWriterIntegrityError(
         "announcement timestamp yields a head freshness window no consumer accepts"
         + ` -- it is empty or wider than the ceiling (${windowFailure})`,
       );
-    }
+    };
 
     const announcement = freezeJson(command.announcement);
     if (
@@ -749,6 +769,9 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
         }
         return existing.receipt;
       }
+
+      // Past the idempotent-replay short-circuit and still before the first write.
+      if (windowFailure !== undefined) refuseMintedWindow();
 
       if (announcement.action === "withdrawn") {
         const target = state.value.announcements[announcement.retracts];
