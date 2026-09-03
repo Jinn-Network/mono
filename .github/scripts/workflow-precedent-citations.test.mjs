@@ -26,27 +26,44 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { restoredArtifactNames } from './workflow-artifact-steps.mjs';
+import { restoredArtifactNames, uploadedArtifactNames } from './workflow-artifact-steps.mjs';
 import { citedPrecedents, findBrokenCitations } from './workflow-precedent-citations.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const workflowsDir = resolve(root, '.github/workflows');
 const scriptsDir = resolve(root, '.github/scripts');
 
-// The acceptance criterion of #3131: one behaviour of the restore-name walk in
-// `.github/scripts`. Copies drift — #3127 fixed this file's walk while the two
-// per-workflow tests kept the pre-fix one, so a `pattern:` restore at the end of
-// a job still read the next job's `name:` there.
-test('the restore-name walk is defined once, in the shared module', () => {
-  const definers = readdirSync(scriptsDir)
-    .filter((name) => name.endsWith('.mjs') && name !== 'workflow-artifact-steps.mjs')
-    .filter((name) => /(?:function\s+|const\s+|let\s+)restoredArtifacts?(?:Names)?\s*[=(]/.test(
-      readFileSync(join(scriptsDir, name), 'utf8'),
-    ));
+// The acceptance criterion of #3131: one behaviour of the artifact-name walks in
+// `.github/scripts`. Copies drift — #3127 fixed this file's restore walk while
+// the two per-workflow tests kept the pre-fix one, so a `pattern:` restore at the
+// end of a job still read the next job's `name:` there; and the *upload* walk
+// beside it stayed copied and divergent until #3503. Both directions are guarded
+// here, so neither can be reintroduced under its own local definition.
+//
+// `var` is in the alternation for the same reason `let` is: no script uses it
+// today, so this is prevention, not a live miss. The scan is recursive because
+// `readdirSync` alone stops at the top level, and a copy one directory down is
+// exactly as divergent as a copy beside it (#3528).
+const WALK_REDEFINITION = /(?:function\s+|const\s+|let\s+|var\s+)(?:restored|uploaded)Artifacts?(?:Names)?\s*[=(]/;
+
+function scriptModules(dir, prefix = '') {
+  const modules = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) modules.push(...scriptModules(join(dir, entry.name), relative));
+    else if (entry.name.endsWith('.mjs')) modules.push(relative);
+  }
+  return modules;
+}
+
+test('the artifact-name walks are defined once, in the shared module', () => {
+  const definers = scriptModules(scriptsDir)
+    .filter((name) => name !== 'workflow-artifact-steps.mjs')
+    .filter((name) => WALK_REDEFINITION.test(readFileSync(join(scriptsDir, name), 'utf8')));
   assert.deepEqual(
     definers,
     [],
-    'import restoredArtifacts / restoredArtifactNames from workflow-artifact-steps.mjs instead of redefining the walk',
+    'import the restored* / uploaded* walks from workflow-artifact-steps.mjs instead of redefining them',
   );
 });
 
@@ -306,6 +323,55 @@ test('a restore step with no opener above it stops at the first column-zero line
   assert.deepEqual(restoredArtifactNames(source), []);
 });
 
+// The upload walk's own two blind spots, the ones the pre-#3503 copy in
+// `plugin-tree-ci-workflow.test.mjs` still had: `/^\s+name: (\S+)$/` keeps a
+// quoted name's quotes, so a consistently quoted artifact read as unrestored,
+// and it skips an expression-bearing name outright, so the by-name assertion
+// never saw that uploader at all.
+test('an uploaded name is read through its quotes', () => {
+  const source = [
+    'jobs:',
+    '  a:',
+    '    steps:',
+    '      - uses: actions/upload-artifact@v4',
+    '        with:',
+    "          name: 'some-dist'",
+    '',
+  ].join('\n');
+
+  assert.deepEqual(uploadedArtifactNames(source), ['some-dist']);
+});
+
+test('an uploaded name carrying an expression is read, not skipped', () => {
+  const source = [
+    'jobs:',
+    '  a:',
+    '    steps:',
+    '      - uses: actions/upload-artifact@v4',
+    '        with:',
+    '          name: dist-${{ matrix.package }}',
+    '',
+  ].join('\n');
+
+  assert.deepEqual(uploadedArtifactNames(source), ['dist-${{ matrix.package }}']);
+});
+
+test('an upload step at the end of a job does not read the next job\'s name', () => {
+  const source = [
+    'jobs:',
+    '  a:',
+    '    steps:',
+    '      - uses: actions/upload-artifact@v4',
+    '        with:',
+    '          path: some/dist',
+    '  b:',
+    '    name: build',
+    '',
+  ].join('\n');
+
+  assert.deepEqual(uploadedArtifactNames(source), []);
+});
+
 // #3143: the shared module is behind no workflow's `paths:` filter, so editing
 // it selects neither lane that tests it. Before the consolidation the walk lived
 // inside each lane's own test file, whose name that lane's filter matches — so
@@ -316,6 +382,22 @@ test('a restore step with no opener above it stops at the first column-zero line
 // no entry.
 const SHARED_MODULE = '.github/scripts/workflow-artifact-steps.mjs';
 
+// Every test file a lane names, literally or by glob. Matching an importer's
+// literal spelling alone skipped a lane that selects its tests by glob and never
+// writes the importing file's name anywhere in its YAML — such a lane could run
+// a shared-walk importer while its `paths:` filter never named the module, and
+// the gate stayed green (#3538). A selector is a bare basename here because the
+// directory prefix a lane writes (`.github/scripts/…`, or `mono/.github/…` in a
+// subtree lane) says nothing about which file it resolves to.
+function testSelectors(source) {
+  return [...source.matchAll(/[\w.*-]+\.test\.mjs/g)].map((match) => match[0]);
+}
+
+function selects(selector, fileName) {
+  const pattern = selector.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*');
+  return new RegExp(`^${pattern}$`).test(fileName);
+}
+
 export function lanesMissingSharedModule(workflowsRoot = workflowsDir, scriptsRoot = scriptsDir) {
   const importers = readdirSync(scriptsRoot)
     .filter((name) => name.endsWith('.test.mjs'))
@@ -324,7 +406,8 @@ export function lanesMissingSharedModule(workflowsRoot = workflowsDir, scriptsRo
   const missing = [];
   for (const fileName of readdirSync(workflowsRoot).filter((name) => /\.ya?ml$/.test(name))) {
     const source = readFileSync(join(workflowsRoot, fileName), 'utf8');
-    if (!importers.some((test) => source.includes(test))) continue;
+    const selectors = testSelectors(source);
+    if (!importers.some((test) => selectors.some((selector) => selects(selector, test)))) continue;
     if (!/^\s+paths:\s*$/m.test(source)) continue;
     if (!source.includes(SHARED_MODULE)) {
       missing.push(`${fileName} runs a test importing ${SHARED_MODULE} but its paths: filter does not name it`);
@@ -335,4 +418,79 @@ export function lanesMissingSharedModule(workflowsRoot = workflowsDir, scriptsRo
 
 test('every path-filtered lane that tests the shared walk names it in paths:', () => {
   assert.deepEqual(lanesMissingSharedModule(), []);
+});
+
+// A scripts directory holding exactly the given files, so a lane's test
+// selection can be resolved against real importers without depending on the
+// repository's own scripts.
+function fixtureScripts(files) {
+  const scriptsRoot = mkdtempSync(join(tmpdir(), 'jinn-shared-walk-scripts-'));
+  for (const [name, contents] of Object.entries(files)) {
+    writeFileSync(join(scriptsRoot, name), contents);
+  }
+  return scriptsRoot;
+}
+
+const IMPORTER = "import { restoredArtifactNames, uploadedArtifactNames } from './workflow-artifact-steps.mjs';\n";
+
+function laneWorkflow(runLine, { namesSharedModule }) {
+  return [
+    'on:',
+    '  pull_request:',
+    '    paths:',
+    '      - "lane/**"',
+    ...(namesSharedModule ? [`      - "${SHARED_MODULE}"`] : []),
+    'jobs:',
+    '  a:',
+    '    steps:',
+    `      - run: ${runLine}`,
+    '',
+  ].join('\n');
+}
+
+function withLaneFixture(runLine, options, assertOn) {
+  const scriptsRoot = fixtureScripts({ 'lane-ci-workflow.test.mjs': IMPORTER });
+  const workflowsRoot = fixtureWorkflows({ 'lane-ci.yml': laneWorkflow(runLine, options) });
+  try {
+    assertOn(workflowsRoot, scriptsRoot);
+  } finally {
+    rmSync(workflowsRoot, { recursive: true, force: true });
+    rmSync(scriptsRoot, { recursive: true, force: true });
+  }
+}
+
+const GLOB_RUN = 'node --test .github/scripts/lane-*.test.mjs';
+const LITERAL_RUN = 'node --test .github/scripts/lane-ci-workflow.test.mjs';
+const MISSING_ENTRY =
+  `lane-ci.yml runs a test importing ${SHARED_MODULE} but its paths: filter does not name it`;
+
+test('a lane that runs a shared-walk importer by glob is caught by the gate', () => {
+  withLaneFixture(GLOB_RUN, { namesSharedModule: false }, (workflowsRoot, scriptsRoot) => {
+    assert.deepEqual(lanesMissingSharedModule(workflowsRoot, scriptsRoot), [MISSING_ENTRY]);
+  });
+});
+
+test('a glob-invoked lane that does name the shared module is not reported', () => {
+  withLaneFixture(GLOB_RUN, { namesSharedModule: true }, (workflowsRoot, scriptsRoot) => {
+    assert.deepEqual(lanesMissingSharedModule(workflowsRoot, scriptsRoot), []);
+  });
+});
+
+// The literal spelling is the form both live lanes use; without this the glob
+// support could be written in a way that stops resolving it.
+test('a lane that names its shared-walk importer literally is still caught', () => {
+  withLaneFixture(LITERAL_RUN, { namesSharedModule: false }, (workflowsRoot, scriptsRoot) => {
+    assert.deepEqual(lanesMissingSharedModule(workflowsRoot, scriptsRoot), [MISSING_ENTRY]);
+  });
+});
+
+// A glob that does not resolve to the importer must not drag the lane in: the
+// gate would then demand a `paths:` entry from a lane that never runs the walk.
+test('a lane whose glob resolves to no shared-walk importer is not reported', () => {
+  withLaneFixture('node --test .github/scripts/other-*.test.mjs', { namesSharedModule: false }, (
+    workflowsRoot,
+    scriptsRoot,
+  ) => {
+    assert.deepEqual(lanesMissingSharedModule(workflowsRoot, scriptsRoot), []);
+  });
 });
