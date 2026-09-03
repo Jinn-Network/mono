@@ -77,6 +77,7 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   runAnchor: "anchor",
   runBind: "bind",
   anchoringConfigure: "anchoring configure",
+  identityBind: "identity bind",
   disclosureDeclare: "disclosure declare",
   disclosureShow: "disclosure show",
   publicationConfigure: "publication configure",
@@ -128,6 +129,7 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   runAnchor: "anchor",
   runBind: "bind",
   anchoringConfigure: "anchoring.configure",
+  identityBind: "identity.bind",
   disclosureDeclare: "disclosure.declare",
   disclosureShow: "disclosure.show",
   publicationConfigure: "publication.configure",
@@ -182,6 +184,8 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
     "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976).",
   anchoringConfigure:
     "Replaces or clears the workspace's ordered anchor provider and endpoint configuration, which is what makes later locks anchor automatically (authority-gated).",
+  identityBind:
+    "Binds the workspace's report-signing key to a domain the operator controls, minting the colophon-domain-binding/1 document a reader supplies to the verifier and naming the exact record to publish at that domain (issue #2983).",
   disclosureDeclare:
     "Seals this run's six-variable disclosure-specification record over its sealed Matrix, recording which of ingestion model, retrieval config, answer model, answer prompt, judge model, and judge prompt this venue measured and which it only carries as an assertion.",
   disclosureShow:
@@ -246,6 +250,10 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   // does for `publication.configure`. A browser-supplied anchor endpoint would make this action an
   // outbound-request primitive pointed wherever a form said.
   anchoringConfigure: { status: "shipped", action: "anchoring.configure" },
+  // Binding names the operator's own organization, and the step that makes it true is publishing a
+  // record at their own DNS or web host. A browser form would collect the claim without being able
+  // to help with the only part that carries weight.
+  identityBind: { status: "unavailable", reason: "the operator publishes the proof at their own domain, outside any Colophon surface" },
   // The six statements are the venue's own prose about its own experiment, composed offline and
   // handed over as a file. A browser form for them would invite the half-filled declaration the
   // record's all-six-required rule exists to make impossible; the web surface for READING a

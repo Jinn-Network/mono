@@ -745,6 +745,7 @@ export {
   runAnchor,
   runBind,
   anchoringConfigure,
+  identityBind,
   disclosureDeclare,
   disclosureShow,
   runPreview,
@@ -956,3 +957,5 @@ export type { CliContext, CliResult } from "./cli/result.js";
 
 /** The product core's own version, mirrored from package.json. */
 export const PRODUCT_VERSION = "0.1.0";
+// Reader-legible publisher identity (issue #2983).
+export type { IdentityBindInput, IdentityBindResult } from "./operations/index.js";

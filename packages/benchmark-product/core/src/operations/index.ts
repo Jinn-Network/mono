@@ -185,3 +185,10 @@ export {
   type AnchoringConfigureResult,
 } from "./anchoring-configure.js";
 
+// Reader-legible publisher identity (issue #2983): the workspace's report-signing key bound to a
+// domain by a proof the operator serves themselves.
+export {
+  identityBind,
+  type IdentityBindInput,
+  type IdentityBindResult,
+} from "./identity-bind.js";
