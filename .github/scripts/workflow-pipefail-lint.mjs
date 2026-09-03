@@ -128,6 +128,105 @@ function splitUnquoted(text, separators) {
   return parts;
 }
 
+// Reserved words that open a compound command, and the words that close them. A `||`
+// written after the closer guards everything inside, so the separators nested in the
+// compound are not top-level separators at all — reading them as such is what lost the
+// guard in `{ producer | head -1; } || true`.
+const COMPOUND_OPENERS = new Set(['if', 'for', 'while', 'until', 'case', 'select', '{']);
+const COMPOUND_CLOSERS = new Set(['fi', 'done', 'esac', '}']);
+// Keywords that separate the parts of a compound command's body.
+const BODY_SEPARATORS = new Set(['then', 'do', 'else', 'elif']);
+const LIST_OPERATORS = new Set([';', ';;', '&&', '||', '&']);
+
+// Shell-syntax words and control operators of `text`, with the character range each
+// covers so a unit can be sliced back out of the original source. `{` is a word here,
+// which is exactly the rule bash uses: it opens a group only when it stands alone, so
+// `a{b,c}` and `${VAR}` are left as the single words they are.
+function shellTokens(text) {
+  const { mask } = syntaxMask(text);
+  // `2>&1` and `cmd &> log` carry an `&` that is part of a redirection, not the
+  // background operator — reading it as a list separator would cut a pipeline in two and
+  // lose the pipe entirely.
+  const isRedirectAmpersand = (index) =>
+    text[index] === '&' && ('<>'.includes(text[index - 1] ?? '') || text[index + 1] === '>');
+  const isOperator = (index) =>
+    mask[index] === true && '&|;()'.includes(text[index]) && !isRedirectAmpersand(index);
+  const isBreak = (index) => (mask[index] === true && /\s/u.test(text[index])) || isOperator(index);
+  const tokens = [];
+
+  for (let index = 0; index < text.length; ) {
+    if (mask[index] === true && /\s/u.test(text[index])) {
+      index += 1;
+      continue;
+    }
+    if (isOperator(index)) {
+      const pair = text.slice(index, index + 2);
+      const value = ['&&', '||', ';;', '|&'].includes(pair) ? pair : text[index];
+      tokens.push({ operator: true, value, start: index, end: index + value.length });
+      index += value.length;
+      continue;
+    }
+    let end = index;
+    while (end < text.length && !isBreak(end)) end += 1;
+    tokens.push({ operator: false, value: text.slice(index, end), start: index, end });
+    index = end;
+  }
+  return tokens;
+}
+
+/**
+ * `tokens` split into the units of one shell list, at the separators that sit outside
+ * every compound command. Each unit carries the operator that follows it, which is what
+ * decides whether it is guarded.
+ *
+ * @returns {{tokens: object[], terminator: string|null}[]}
+ */
+function splitStatementUnits(tokens) {
+  const units = [];
+  let current = [];
+  let depth = 0;
+
+  const flush = (terminator) => {
+    units.push({ tokens: current, terminator });
+    current = [];
+  };
+
+  for (const token of tokens) {
+    const separates =
+      depth === 0 &&
+      ((token.operator && LIST_OPERATORS.has(token.value)) ||
+        (!token.operator && BODY_SEPARATORS.has(token.value)));
+    if (separates) {
+      flush(token.operator ? token.value : ';');
+      continue;
+    }
+    if (token.operator) {
+      if (token.value === '(') depth += 1;
+      if (token.value === ')') depth = Math.max(0, depth - 1);
+    } else if (COMPOUND_OPENERS.has(token.value)) {
+      depth += 1;
+    } else if (COMPOUND_CLOSERS.has(token.value)) {
+      depth = Math.max(0, depth - 1);
+    }
+    current.push(token);
+  }
+  flush(null);
+  return units;
+}
+
+// Whether the operator following each unit guards it. `||` guards the unit to its left,
+// and `&&` passes that guard further left because `a && b || true` is `(a && b) || true`
+// — so a failing `a` short-circuits into the same `|| true`.
+function guardFlags(units) {
+  const guarded = new Array(units.length).fill(false);
+  for (let index = units.length - 1; index >= 0; index -= 1) {
+    const terminator = units[index].terminator;
+    guarded[index] =
+      terminator === '||' || (terminator === '&&' && (guarded[index + 1] ?? false));
+  }
+  return guarded;
+}
+
 // One physical body line read in the quoting state its predecessors left behind: its
 // code (everything before a shell-syntax `#` that starts a word — `${VAR#prefix}` is
 // untouched, since its `#` follows `{` rather than whitespace), the heredoc delimiter it
@@ -175,13 +274,29 @@ function unquote(token) {
   return token.replaceAll(/['"]/gu, '');
 }
 
+// Split on whitespace the shell would act on, so a quoted argument stays one word.
+// Tearing `sed 's/ q / /'` apart on raw whitespace left a bare `q` that looked exactly
+// like the `q` command.
+function shellWords(segment) {
+  const { mask } = syntaxMask(segment);
+  const words = [];
+  let current = '';
+  for (let index = 0; index < segment.length; index += 1) {
+    if (mask[index] === true && /\s/u.test(segment[index])) {
+      if (current !== '') words.push(current);
+      current = '';
+      continue;
+    }
+    current += segment[index];
+  }
+  if (current !== '') words.push(current);
+  return words;
+}
+
 // Words of one pipe segment, with a leading `env VAR=x`-style prefix, `sudo`, `command`,
 // and `time` skipped so the real command name is what gets classified.
 function commandWords(segment) {
-  const words = segment
-    .trim()
-    .split(/\s+/u)
-    .filter((word) => word !== '');
+  const words = shellWords(segment.trim());
   while (words.length > 0) {
     const first = words[0];
     if (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(first) || ['sudo', 'command', 'env', 'time', 'exec'].includes(first)) {
@@ -214,12 +329,14 @@ function grepStopsEarly(words) {
 }
 
 // A `q` used as a sed command — `sed -n '1p;q'`, `sed 2q` — rather than a `q` inside a
-// pattern or replacement, where it is preceded by `/` or a word character.
+// pattern or replacement. sed separates its commands with `;`, a newline, or a `{`
+// block, never with a space, so only those may introduce the `q`; an address is allowed
+// to sit apart from it (`sed '2 q'`).
 function sedStopsEarly(words) {
   for (let index = 1; index < words.length; index += 1) {
     const word = words[index];
     if (word.startsWith('-') && word !== '--') continue;
-    if (/(?:^|[;{}\s])[0-9,$~+]*q(?:[;}\s]|$)/u.test(unquote(word))) return true;
+    if (/(?:^|[;{}\n])\s*[0-9,$~+]*\s*q(?:[;}\s]|$)/u.test(unquote(word))) return true;
   }
   return false;
 }
@@ -247,24 +364,41 @@ function indentOf(line) {
   return line.length - line.trimStart().length;
 }
 
+// A structural line without its YAML comment. The structure readers anchor on the end of
+// the line (`^jobs:\s*$`), so a comment there hid the key from them entirely — and with
+// `jobs:` unseen, every job-level `defaults:` went unresolved and a real error was
+// reported as an advisory. `scanLine` already drops a `#` that starts a word without
+// touching one inside quotes, which is exactly the YAML rule too.
+function withoutComment(line) {
+  return scanLine(line, { quote: null, frames: [] }).code;
+}
+
 // `defaults: { run: { shell: … } }` at workflow scope (column 0) and job scope
 // (column 4, under `jobs:` > `<job>:`). Returned as a list of scopes ordered by the
 // line they open on, so a run block resolves against the last one that encloses it.
 function collectDefaultShells(lines) {
   const scopes = [];
   for (let index = 0; index < lines.length; index += 1) {
-    const match = /^(?<indent>\s*)defaults:\s*$/u.exec(lines[index]);
+    const match = /^(?<indent>\s*)defaults:(?<rest>.*)$/u.exec(withoutComment(lines[index]));
     if (match === null) continue;
     const indent = match.groups.indent.length;
+    const rest = match.groups.rest.trim();
     let shell = null;
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      const line = lines[cursor];
-      if (line.trim() === '') continue;
-      if (indentOf(line) <= indent) break;
-      const shellMatch = /^\s*shell:\s*(?<value>.+?)\s*$/u.exec(line);
-      if (shellMatch !== null) {
-        shell = unquote(shellMatch.groups.value);
-        break;
+    if (rest !== '') {
+      // Flow style: `defaults: { run: { shell: bash } }` is the same mapping written on
+      // one line, and GitHub reads it identically.
+      const flow = /\brun:\s*\{[^}]*\bshell:\s*(?<value>[^,}]+)/u.exec(rest);
+      if (flow !== null) shell = unquote(flow.groups.value.trim());
+    } else {
+      for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+        const line = withoutComment(lines[cursor]);
+        if (line.trim() === '') continue;
+        if (indentOf(line) <= indent) break;
+        const shellMatch = /^\s*shell:\s*(?<value>.+?)\s*$/u.exec(line);
+        if (shellMatch !== null) {
+          shell = unquote(shellMatch.groups.value);
+          break;
+        }
       }
     }
     if (shell !== null) scopes.push({ indent, line: index, shell });
@@ -278,8 +412,8 @@ function collectJobRanges(lines) {
   const starts = [];
   let inJobs = false;
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    const line = withoutComment(lines[index]);
+    if (line.trim() === '') continue;
     if (/^jobs:\s*$/u.test(line)) {
       inJobs = true;
       continue;
@@ -307,7 +441,7 @@ function inheritedShell(scopes, jobs, line) {
 
 // A `shell:` key, whether it opens its step (`- shell: bash`) or follows one.
 function readShellKey(line) {
-  const match = /^\s*(?:-\s+)?shell:\s*(?<value>.+?)\s*$/u.exec(line);
+  const match = /^\s*(?:-\s+)?shell:\s*(?<value>.+?)\s*$/u.exec(withoutComment(line));
   return match === null ? null : unquote(match.groups.value);
 }
 
@@ -319,6 +453,11 @@ function readShellKey(line) {
 // lines above the `run:` key at all, and walking backward would cross the *previous*
 // step's `run:` body — whose lines all sit at `indent > keyIndent` and are skipped —
 // and return that step's `shell:`. So the backward arm is skipped entirely there.
+//
+// The dash line is recognised by where it puts its first key rather than by a fixed
+// two-character `- ` prefix: `-   shell: bash` is legal YAML that opens its step four
+// columns out, and reading only the `- ` shape lost its `shell:` and downgraded the
+// finding.
 function stepShell(lines, runLine, keyIndent, opensStep) {
   for (const direction of opensStep ? [1] : [-1, 1]) {
     for (let index = runLine + direction; index >= 0 && index < lines.length; index += direction) {
@@ -329,7 +468,8 @@ function stepShell(lines, runLine, keyIndent, opensStep) {
       if (indent < keyIndent - 1) {
         // The step opens here; its inline first key may be the `shell:` we want, and
         // nothing beyond it belongs to this step.
-        if (direction === -1 && indent === keyIndent - 2 && line.trimStart().startsWith('- ')) {
+        const dash = /^\s*-\s+/u.exec(line);
+        if (direction === -1 && dash !== null && dash[0].length === keyIndent) {
           const shell = readShellKey(line);
           if (shell !== null) return shell;
         }
@@ -406,6 +546,14 @@ function shellSetsPipefail(shell) {
   return trimmed === 'bash' || /\bpipefail\b/u.test(trimmed);
 }
 
+// How GitHub invokes the shell, for the advisory that reports a laundered producer. A
+// bare shell name is run `<name> -e {0}`; a custom string is run as written.
+function invokedShell(shell) {
+  if (shell === null) return 'default shell (`bash -e`)';
+  const trimmed = shell.trim();
+  return /\s/u.test(trimmed) ? `custom shell (\`${trimmed}\`)` : `\`${trimmed} -e {0}\``;
+}
+
 function pipefailToggle(statement) {
   const match = /^\s*set\s+(?<args>[^;]*)$/u.exec(statement);
   if (match === null) return null;
@@ -471,6 +619,56 @@ function logicalLines(body) {
   return lines;
 }
 
+// The body of a compound command, or null when the unit is a simple pipeline. The
+// closer is dropped when the unit actually reaches it: a folded `if producer | head -1;
+// then` is a real statement the lint must still read, and it has no `fi` on its line.
+function compoundBody(tokens) {
+  const [first] = tokens;
+  const opens = first.operator ? first.value === '(' : COMPOUND_OPENERS.has(first.value);
+  if (!opens) return null;
+  const last = tokens.at(-1);
+  const closes =
+    last !== first && (last.operator ? last.value === ')' : COMPOUND_CLOSERS.has(last.value));
+  return tokens.slice(1, closes ? -1 : undefined);
+}
+
+/**
+ * One shell list walked unit by unit. A guarded unit is skipped whole — the guard covers
+ * everything the compound contains — and an unguarded compound is unwrapped and walked
+ * again, so a guard written inside it applies to the inside only.
+ *
+ * @param {string} text the logical line the tokens were read from
+ * @param {object[]} tokens the tokens of this list
+ * @param {{pipefail: boolean, report: (statement: string, consumer: string) => void}} context
+ */
+function walkStatement(text, tokens, context) {
+  const units = splitStatementUnits(tokens);
+  const guarded = guardFlags(units);
+
+  for (const [index, unit] of units.entries()) {
+    if (unit.tokens.length === 0) continue;
+    const statement = text.slice(unit.tokens[0].start, unit.tokens.at(-1).end);
+
+    const toggle = pipefailToggle(statement);
+    if (toggle !== null) {
+      context.pipefail = toggle;
+      continue;
+    }
+    if (guarded[index]) continue;
+
+    const body = compoundBody(unit.tokens);
+    if (body !== null) {
+      walkStatement(text, body, context);
+      continue;
+    }
+
+    for (const segment of splitUnquoted(statement, ['|&', '|']).slice(1)) {
+      const consumer = earlyExitConsumer(segment);
+      if (consumer !== null) context.report(statement.trim(), consumer);
+    }
+  }
+}
+
 /**
  * Findings for one workflow source.
  *
@@ -494,50 +692,39 @@ export function analyzeWorkflow(file, source) {
     for (const entry of logical) {
       if (entry.annotation !== undefined) carried = entry.annotation;
       if (entry.text.trim() === '') continue;
-      const statements = splitUnquoted(entry.text, [';', '&&']);
       const allowReason = carried;
       carried = undefined;
 
-      for (const statement of statements) {
-        const toggle = pipefailToggle(statement);
-        if (toggle !== null) {
-          pipefail = toggle;
-          continue;
-        }
-        const orParts = splitUnquoted(statement, ['||']);
-        for (const [orIndex, orPart] of orParts.entries()) {
-          const guarded = orIndex < orParts.length - 1;
-          const segments = splitUnquoted(orPart, ['|&', '|']);
-          for (const segment of segments.slice(1)) {
-            const consumer = earlyExitConsumer(segment);
-            if (consumer === null) continue;
-            if (guarded) continue;
-            if (allowReason !== undefined) {
-              if (allowReason === '') {
-                findings.push({
-                  file,
-                  line: entry.line,
-                  severity: 'error',
-                  consumer,
-                  statement: statement.trim(),
-                  detail: 'pipefail-lint: allow annotation carries no reasoning',
-                });
-              }
-              continue;
+      const context = {
+        pipefail,
+        report(statement, consumer) {
+          if (allowReason !== undefined) {
+            if (allowReason === '') {
+              findings.push({
+                file,
+                line: entry.line,
+                severity: 'error',
+                consumer,
+                statement,
+                detail: 'pipefail-lint: allow annotation carries no reasoning',
+              });
             }
-            findings.push({
-              file,
-              line: entry.line,
-              severity: pipefail ? 'error' : 'warning',
-              consumer,
-              statement: statement.trim(),
-              detail: pipefail
-                ? 'pipefail is in scope: the producer takes SIGPIPE once its output outruns the pipe buffer, and the pipeline reports 141'
-                : 'default shell (`bash -e`): the pipeline reports only the consumer, so a failed producer is laundered',
-            });
+            return;
           }
-        }
-      }
+          findings.push({
+            file,
+            line: entry.line,
+            severity: context.pipefail ? 'error' : 'warning',
+            consumer,
+            statement,
+            detail: context.pipefail
+              ? 'pipefail is in scope: the producer takes SIGPIPE once its output outruns the pipe buffer, and the pipeline reports 141'
+              : `${invokedShell(block.shell)}: the pipeline reports only the consumer, so a failed producer is laundered`,
+          });
+        },
+      };
+      walkStatement(entry.text, shellTokens(entry.text), context);
+      pipefail = context.pipefail;
     }
   }
   return findings;

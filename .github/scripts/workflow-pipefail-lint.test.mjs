@@ -60,6 +60,44 @@ test('a trailing `|| true` guards the pipeline, inside a command substitution to
   assert.deepEqual(severities("TAG=\"$(git tag | head -1 || echo '')\"", { shell: 'bash' }), []);
 });
 
+test('a `||` guard outside a compound command still guards what is inside it', () => {
+  // The guard is a top-level operator applied to the whole group, so the `;` inside the
+  // group is not a statement boundary the guard can fall the wrong side of. Reporting
+  // these was the reverse of the lint's contract: a red required gate on an idiom whose
+  // only escape is an allow annotation whose stated reason would not be true.
+  assert.deepEqual(severities('{ producer | head -1; } || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('for f in a b; do producer | head -1; done || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('if producer | head -1; then echo y; fi || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('( producer | head -1 ) || true', { shell: 'bash' }), []);
+  // `||` binds the whole `&&` list to its left: `(a && b) || true`.
+  assert.deepEqual(severities('producer | head -1 && echo hit || true', { shell: 'bash' }), []);
+});
+
+test('an unguarded compound is still read through, and only the guarded part of it is spared', () => {
+  assert.deepEqual(severities('{ producer | head -1; }', { shell: 'bash' }), ['error:head']);
+  assert.deepEqual(severities('for f in a b; do producer | head -1; done', { shell: 'bash' }), [
+    'error:head',
+  ]);
+  assert.deepEqual(severities('if producer | head -1; then echo y; fi', { shell: 'bash' }), [
+    'error:head',
+  ]);
+  // The inner guard covers the inner pipeline only; the second one is still reported.
+  assert.deepEqual(
+    severities('if { producer | head -1; } || true; then git tag | head -1; fi', { shell: 'bash' }),
+    ['error:head'],
+  );
+  // A `;` does not carry a later guard leftward.
+  assert.deepEqual(severities('producer | head -1; echo done || true', { shell: 'bash' }), [
+    'error:head',
+  ]);
+});
+
+test('the finding names the offending pipeline, not the compound wrapper around it', () => {
+  const result = findings('{ producer | head -1; echo done; }', { shell: 'bash' });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].statement, 'producer | head -1');
+});
+
 test('a pipe inside a command substitution is still a pipe', () => {
   // The outer double quotes must not hide it: this is `release-notes-scaffold.yml`'s
   // own shape, and reading `$( … )` as literal text would blind the lint to it.
@@ -87,6 +125,10 @@ test('the early-exit consumer set', () => {
   assert.equal(earlyExitConsumer('grep -E needle'), null);
   assert.equal(earlyExitConsumer('grep -e -q'), null, 'a pattern that looks like a flag is not one');
   assert.equal(earlyExitConsumer("sed 's/q/x/'"), null, 'a q inside a substitution is not the q command');
+  assert.equal(earlyExitConsumer("sed 's/ q / /'"), null, 'a space-delimited q inside a script is not the q command');
+  assert.equal(earlyExitConsumer("sed -e 's/a/b/' -e 's/ q /x/'"), null);
+  assert.equal(earlyExitConsumer("sed -n '/needle/{p;q}'"), 'sed …q');
+  assert.equal(earlyExitConsumer("sed '2 q'"), 'sed …q', 'an address may be spaced off its command');
   assert.equal(earlyExitConsumer('awk "{print \\$1}"'), null);
   assert.equal(earlyExitConsumer('sort -u'), null);
 });
@@ -204,6 +246,70 @@ test('a job-level `defaults:` covers its own job only', () => {
     ['error', 'warning'],
     "the second job inherits the workflow's `sh`, not the first job's `bash`",
   );
+});
+
+test('a trailing comment does not hide `jobs:` from the job-range reader', () => {
+  // `collectJobRanges` anchors on `jobs:`; a comment on that line used to leave every
+  // job-level `defaults:` unresolved, silently downgrading a real error to an advisory.
+  const source = [
+    'jobs: # all lanes',
+    '  a:',
+    '    defaults:',
+    '      run:',
+    '        shell: bash # the lane needs pipefail',
+    '    steps:',
+    '      - run: |',
+    '          git tag | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => finding.severity),
+    ['error'],
+  );
+});
+
+test('a flow-style `defaults: { run: { shell: bash } }` resolves like the block form', () => {
+  const source = [
+    'jobs:',
+    '  a:',
+    '    defaults: { run: { shell: bash } }',
+    '    steps:',
+    '      - run: |',
+    '          git tag | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => finding.severity),
+    ['error'],
+  );
+});
+
+test('a step key column is the dash prefix, not a hard-coded two spaces', () => {
+  // `-   shell: bash` is legal YAML and puts the step's keys at column dash+4.
+  const source = [
+    'jobs:',
+    '  a:',
+    '    steps:',
+    '      -   shell: bash',
+    '          run: |',
+    '            git tag | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    collectRunBlocks(source).map((block) => block.declared),
+    ['bash'],
+  );
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => finding.severity),
+    ['error'],
+  );
+});
+
+test('the advisory names the shell GitHub actually invokes', () => {
+  assert.match(findings('git tag | head -1')[0].detail, /default shell \(`bash -e`\)/u);
+  assert.match(findings('git tag | head -1', { shell: 'sh' })[0].detail, /`sh -e \{0\}`/u);
+  assert.doesNotMatch(findings('git tag | head -1', { shell: 'sh' })[0].detail, /bash/u);
+  assert.match(findings('git tag | head -1', { shell: 'zsh -e {0}' })[0].detail, /`zsh -e \{0\}`/u);
 });
 
 test('a non-shell `shell:` is skipped whole', () => {
