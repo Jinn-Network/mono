@@ -8,6 +8,7 @@ import {
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
+  bundleIdentityLabel,
   isMetadataFirstBundle,
   summarizeVerificationOutcome,
   verifyPublicBundleSnapshot,
@@ -120,7 +121,7 @@ function viewerHtml(
   const workspaceAction = canStartWorkspace
     ? '<form method="post" action="/use-my-work"><button class="primary" type="submit">Use my work</button></form>'
     : '<p><strong>Use my work:</strong> run <code>colophon open</code> from a terminal with the full product installed.</p>';
-  const identity = verification.identity.startsWith("sha256:") ? verification.identity : `sha256:${verification.identity}`;
+  const identity = bundleIdentityLabel(verification);
   const evidencePath = availablePaths.has("evidence.json") ? "evidence.json" : "claim-package.json";
   const reportSection = availablePaths.has("index.html")
     ? '<section><h2>Published report</h2><p>This script-free report is inside the immutable bundle. The live result above was computed from the exact authenticated bytes when this local viewer started.</p><iframe title="Published Colophon benchmark report" src="/bundle/index.html"></iframe></section>'

@@ -1,3 +1,7 @@
+import {
+  BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
+  BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
+} from "@jinn-network/benchmarking-protocol";
 import { describe, expect, test } from "vitest";
 import { bundleIdentityLabel, isMetadataFirstBundle } from "./outcome.js";
 import type { PublicBundleVerificationResult } from "./verify.js";
@@ -37,14 +41,14 @@ function evidenceNative(profile: string, status: "verified" | "not-fetched"): Pu
 
 describe("isMetadataFirstBundle", () => {
   test("keys on the declared profile, not on whether a body happened to be deferred", () => {
-    const profile = "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first";
+    const profile = BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE;
     // Zero declared artifacts means nothing was deferred, so `artifactContent.status` reads
     // `verified` -- the observed side effect the declared profile must not be inferred from.
     expect(isMetadataFirstBundle(evidenceNative(profile, "verified"))).toBe(true);
   });
 
   test("is false for the full-evidence profile", () => {
-    const profile = "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5";
+    const profile = BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE;
     expect(isMetadataFirstBundle(evidenceNative(profile, "verified"))).toBe(false);
   });
 
