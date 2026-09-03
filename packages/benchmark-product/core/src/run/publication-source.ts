@@ -209,8 +209,12 @@ async function writeSourceWellKnown(
     .filter((existing) => existing.agent !== entry.agent || existing.name !== entry.name);
   await writeWellKnownDocument(blobs, {
     protocol: RECORD_DISCOVERY_VERSION,
-    sources: [...others, entry].sort((left, right) =>
-      left.agent === right.agent ? left.name.localeCompare(right.name) : left.agent.localeCompare(right.agent)),
+    // Ordered by code unit, never `localeCompare`: the document is sealed, so the same set of
+    // sources must produce the same bytes on every host regardless of its locale.
+    sources: [...others, entry].sort((left, right) => {
+      const key = (value: WellKnownSourceEntry): string => `${value.agent}\u001f${value.name}`;
+      return key(left) < key(right) ? -1 : key(left) > key(right) ? 1 : 0;
+    }),
   });
   return true;
 }
@@ -343,7 +347,7 @@ export async function withWorkspacePublicationSourceLock<T>(
   /** Fired once if the acquire has to wait; see `acquirePublicationLock`. */
   onContended?: () => void,
 ): Promise<T> {
-  const lock = await acquirePublicationLock(workspaceDir, "__record-discovery-source__", undefined, undefined, onContended);
+  const lock = await acquirePublicationLock(workspaceDir, "__record-discovery-source__", undefined, { ...(onContended === undefined ? {} : { onContended }) });
   try { return await run(); } finally { lock.release(); }
 }
 
