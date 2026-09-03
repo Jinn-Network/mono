@@ -400,6 +400,14 @@ describe("createHttpTransport same-host TLS upgrade (#3433)", () => {
     });
   }
 
+  it("treats an explicitly written default port as the default it is", async () => {
+    const stub = stubFetch((url) => (url === "http://peer.example/archive/0001.json"
+      ? new Response(null, { status: 301, headers: { location: "https://peer.example:443/archive/0001.json" } })
+      : new Response(encoder.encode("page"), { status: 200 })));
+    const transport = createHttpTransport("", stub.fetchLike);
+    expect((await transport.fetch("http://peer.example:80/archive/0001.json")).status).toBe(200);
+  });
+
   it("refuses an upgrade from an explicit non-default http port", async () => {
     const stub = stubFetch((url) => (url === "http://peer.example:8080/archive/0001.json"
       ? new Response(null, { status: 301, headers: { location: "https://peer.example/archive/0001.json" } })

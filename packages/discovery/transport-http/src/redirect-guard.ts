@@ -31,9 +31,6 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 /** Enough hops for a peer normalizing its own paths; far short of undici's 20. */
 const MAX_REDIRECTS = 5;
 
-/** The port a scheme uses when the URL names none. */
-const DEFAULT_PORTS: Record<string, string> = { "http:": "80", "https:": "443" };
-
 /**
  * Is this hop the one origin change that strictly increases assurance -- a
  * same-host plain-to-TLS upgrade (#3433)?
@@ -55,9 +52,9 @@ const DEFAULT_PORTS: Record<string, string> = { "http:": "80", "https:": "443" }
 function isSameHostTlsUpgrade(current: URL, next: URL): boolean {
   if (current.protocol !== "http:" || next.protocol !== "https:") return false;
   if (current.hostname !== next.hostname) return false;
-  const currentPort = current.port === "" ? DEFAULT_PORTS["http:"] : current.port;
-  const nextPort = next.port === "" ? DEFAULT_PORTS["https:"] : next.port;
-  return currentPort === DEFAULT_PORTS["http:"] && nextPort === DEFAULT_PORTS["https:"];
+  // `URL.port` is "" exactly when the URL names its scheme's default, so an empty port on both
+  // sides IS 80 -> 443. Anything explicit is a port the peer chose, and outside the carve-out.
+  return current.port === "" && next.port === "";
 }
 
 /**

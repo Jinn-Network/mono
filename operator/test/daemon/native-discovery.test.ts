@@ -1537,6 +1537,25 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
       await expect(synced.sync()).rejects.toThrow(/not uniquely introduced/u);
     });
 
+    // The #3433 chain walk is what makes the WRAPPED containment refusal reachable, so it is also
+    // what could make this mistake reachable: a genuine refusal that happens to carry a
+    // destination error somewhere under it must still propagate, not degrade.
+    it('refuses a local-authority failure that wraps a destination refusal', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const routes = routesFor([first]);
+      const synced = consumer({
+        store: new Store(':memory:'),
+        routes,
+        verify: chainVerified,
+        decode: async () => {
+          throw new NativeDiscoveryLocalAuthorityError({
+            cause: Object.assign(new Error('not contained'), { name: 'ContainedOriginError' }),
+          });
+        },
+      });
+      await expect(synced.sync()).rejects.toThrow(NativeDiscoveryLocalAuthorityError);
+    });
+
     it("refuses a decode failure that reports THIS operator's own trust catalog", async () => {
       const first = entry('0000000000000001', null, DIGEST_A);
       const routes = routesFor([first]);

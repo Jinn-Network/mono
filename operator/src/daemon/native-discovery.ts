@@ -532,7 +532,16 @@ function degradedReason(cause: unknown): NativeDiscoveryDegradedReason | undefin
   // it is written against injected ports and must not import a transport implementation's types,
   // and the containment refusal arrives WRAPPED — `native-discovery-trust.ts` re-throws it as a
   // `NativeDiscoverySourceResolutionError` so the failure names agent/name/baseUrl.
-  if (namedInCauseChain(cause, DESTINATION_REFUSAL_ERROR_NAMES)) return 'refused-destination';
+  // The two classes that MEAN "refused" are excluded first, exactly as the status-less-transport
+  // branch above excludes them. Without that, a genuine trust or local-authority refusal that
+  // happened to wrap a destination error anywhere in its `cause` chain would degrade instead of
+  // propagating — the chain walk is what makes the wrapped containment refusal reachable, and it
+  // is also what would make that mistake reachable.
+  if (
+    !(cause instanceof NativeDiscoverySyncError)
+    && !(cause instanceof NativeDiscoveryLocalAuthorityError)
+    && namedInCauseChain(cause, DESTINATION_REFUSAL_ERROR_NAMES)
+  ) return 'refused-destination';
   return undefined;
 }
 
