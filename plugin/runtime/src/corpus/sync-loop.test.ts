@@ -10,6 +10,7 @@ import type { CorpusReader, MirrorSourceStatus } from "./read.js";
 import type { CorpusRetrieval } from "./retrieve.js";
 import { createCorpusSyncCapability } from "./sync-loop.js";
 import {
+  MAX_FAILURE_CHARS,
   MIRROR_SYNC_STATUS_FILENAME,
   MIRROR_SYNC_STATUS_FORMAT,
   createFileMirrorSyncStatusStore,
@@ -128,6 +129,8 @@ function harness(options: {
   readonly sources?: readonly Record<string, unknown>[];
   readonly seed?: MirrorSyncStatusRecord;
   readonly listRecordsThrows?: boolean;
+  /** The error the index pass throws when `listRecordsThrows` is set. */
+  readonly listRecordsError?: Error;
   /** Parks the index pass inside `listRecords` until `releaseIndexPass` is called. */
   readonly indexPassBlocks?: boolean;
   readonly timeoutMs?: number;
@@ -178,7 +181,9 @@ function harness(options: {
   const reader: CorpusReader = {
     async listRecords() {
       listCalls += 1;
-      if (options.listRecordsThrows === true) throw new Error("the index pass exploded");
+      if (options.listRecordsThrows === true) {
+        throw options.listRecordsError ?? new Error("the index pass exploded");
+      }
       if (indexPassParked !== undefined) {
         await indexPassParked;
         // A SECOND page, so the pass has a page boundary left to observe the
@@ -428,6 +433,7 @@ describe("the corpus-sync capability", () => {
   test("a skipped-locked cycle is neither success nor fault, logs at debug, and does not index", async () => {
     const built = harness({
       outcomes: [{ status: "skipped-locked", sources: [] }],
+      sources: [source(ALICE.agent)],
       seed: {
         format: MIRROR_SYNC_STATUS_FORMAT,
         sources: { [key(ALICE)]: { lastSyncedAt: "2026-08-31T00:00:00.000Z" } },
@@ -527,6 +533,7 @@ describe("the corpus-sync capability", () => {
   test("every cycle writes the status file and start seeds from an existing one", async () => {
     const built = harness({
       outcomes: [{ status: "synced", sources: [report(BOB)] }],
+      sources: [source(ALICE.agent)],
       seed: {
         format: MIRROR_SYNC_STATUS_FORMAT,
         lastCycle: { completedAt: "2026-08-31T00:00:00.000Z", status: "synced" },
@@ -544,6 +551,70 @@ describe("the corpus-sync capability", () => {
         [key(BOB)]: { lastSyncedAt: START.toISOString() },
       },
     });
+    await built.capability.stop!();
+  });
+
+  test("an oversized index error is bounded, so the document it is written into still reads back", async () => {
+    const built = harness({
+      outcomes: [{ status: "synced", sources: [report(ALICE, { indexed: 1 })] }],
+      sources: [source(ALICE.agent)],
+      listRecordsThrows: true,
+      // Longer than the ceiling the read schema declares for the field, and
+      // carrying a terminal-control sequence: `indexError` is `describeError`
+      // over whatever the index pass threw, and it lands in a durable file
+      // and an operator-facing row exactly as the failure halves beside it do.
+      listRecordsError: new Error(`\u001b[31m${"boom ".repeat(200)}`),
+    });
+    await built.start();
+    await settle();
+
+    // Written unbounded, this document is the one the very next `read()`
+    // rejects as unrecognized — silently discarding the seeded `lastCycle`,
+    // including the `indexError` that explains the red freshness row.
+    const status = await statusOf(built);
+    expect(status?.lastCycle?.status).toBe("synced");
+    expect(status?.lastCycle?.indexError).toHaveLength(MAX_FAILURE_CHARS);
+    expect(status?.lastCycle?.indexError).not.toContain("\u001b");
+    await built.capability.stop!();
+  });
+
+  test("the next cycle is still scheduled when the cycle's own reporting throws", async () => {
+    const built = harness();
+    // Whatever writes the cycle line can fail — a stderr EPIPE is the
+    // realistic one. A throw there must not cost the reschedule: the process
+    // would stay alive holding the exclusive sync lock and never sync again.
+    built.log.info.mockImplementationOnce(() => {
+      throw new Error("EPIPE: broken pipe");
+    });
+    await built.start();
+    await settle();
+    expect(built.syncCalls()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    expect(built.syncCalls()).toBe(2);
+    await built.capability.stop!();
+  });
+
+  test("start drops seeded entries for sources this install no longer follows", async () => {
+    const built = harness({
+      outcomes: [{ status: "synced", sources: [report(ALICE)] }],
+      sources: [source(ALICE.agent)],
+      seed: {
+        format: MIRROR_SYNC_STATUS_FORMAT,
+        lastCycle: { completedAt: "2026-08-31T00:00:00.000Z", status: "synced" },
+        sources: {
+          [key(ALICE)]: { lastSyncedAt: "2026-08-31T00:00:00.000Z" },
+          [key(BOB)]: { lastSyncedAt: "2026-08-31T00:00:00.000Z" },
+        },
+      },
+    });
+    await built.start();
+    await settle();
+
+    // Dropping a source from `corpus.sources` is the documented way to stop
+    // following an archive, and the runbook points operators at this file.
+    // Its key must not outlive the config entry that put it there.
+    expect(Object.keys((await statusOf(built))?.sources ?? {})).toEqual([key(ALICE)]);
     await built.capability.stop!();
   });
 
