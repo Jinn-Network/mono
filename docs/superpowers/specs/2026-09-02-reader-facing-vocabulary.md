@@ -1,12 +1,20 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.0
-- **Date:** 2026-09-02
+- **Version:** 1.1
+- **Date:** 2026-09-02 (v1.1: 2026-09-03)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
 - **Status:** Ruled. Every reader-visible term below carries a disposition and a
   presentation-vs-contract classification. Implementation is follow-on work, split per §7.
+- **v1.1** (#3794, sweeping the review follow-ups on this spec's PR): rules the
+  pairwise-disagreement report surface, the last method block without a sub-table of its own
+  (§4.1), and separates its *decided differently* concept from **runs the judges disagreed
+  on**, which the page prints beside it; moves the `wilson@1`-style method spellings from the
+  contract side to the presentation side and gives §2 the sealed `jinn.benchmarking.method/…`
+  spelling they were standing in for; adds §5's headings rule and splits its venue row;
+  corrects three source pointers, one prescribed reader name, and one word of prose. No v1.0
+  disposition is reversed.
 
 ## 1. Scope
 
@@ -27,10 +35,12 @@ It is deliberately narrow at three boundaries:
 - **#2983 owns identity rendering** (keys bound to domains). The signer-role names in §4.2 are
   ruled here; what a bound identity looks like is ruled there.
 
-The report page renders a different facts block per method, so the page is ruled across all of
-them: the Wilson, comparison, and paired blocks in §4.1's main table, and the
-binary-qualification block — which prints only on a binary report, and prints five sealed field
-names verbatim as row headers — in the sub-table that closes §4.1.
+The report page renders a different facts block per method, so the page is ruled across all
+five of them: the Wilson, comparison, and paired-majority-delta blocks in §4.1's main table,
+and two method-specific blocks in the sub-tables that close §4.1 — the binary-qualification
+block, which prints only on a binary report and prints five sealed field names verbatim as row
+headers, and the pairwise-disagreement block, the last method block to get a sub-table of its
+own.
 
 Internal source-code identifiers, type names, and record kinds are **out of scope except where
 they surface to a reader**. A term ruled `hide` keeps its internal name unchanged — but a
@@ -65,11 +75,21 @@ belongs to a bundle-format revision and to nothing smaller:
   `claim-package.json`'s `verification.checks`, asserted by the external verification path,
   *and* printed to the reader, which is why §4.2 rules them **keep + gloss** rather than
   rename;
-- method identifiers (`wilson@1`, `paired-delta@1`, `pairwise-disagreement@1`,
-  `paired-majority-delta@1`) and enum values (`two-human-unanimous`, `operator-only`,
-  `screened-operator-sampled`, `complete`/`partial`/`cancelled`);
+- method identifiers — the `jinn.benchmarking.method/…` registry URIs (`/wilson`,
+  `/paired-delta`, `/binary-instrument`, `/pairwise-disagreement`, `/paired-majority-delta`;
+  `BENCHMARKING_METHOD_IDS`, `packages/benchmarking/records/src/identifiers.ts:99`), sealed as
+  `method.id` alongside `method.version` — and enum values (`two-human-unanimous`,
+  `operator-only`, `screened-operator-sampled`, `complete`/`partial`/`cancelled`);
 - `--json` output keys, the package name `@colophon-claims/verify`, and the command name
   `colophon-verify`.
+
+The `wilson@1`-style spellings are **not** on this side. They are a presentation composition of
+`method.id` and `method.version`, and they appear in **zero** sealed records —
+`claim-package.json` carries `jinn.benchmarking.method/wilson` and `"1"` in two separate
+fields. Every reader-facing `@1` in `verify/src/` is one of four hard-coded literals: the two
+table captions at `assets.ts:829` and `:531`, and the two neutral-verdict sentences at `:744`
+and `:753`. §4.1 rules all four. The remaining occurrences are code comments and internal
+`Error`/validation messages, which no reader meets.
 
 **The load-bearing rule:** a term may be *presented* under a reader-facing name while its
 contract spelling is unchanged. That is the normal case here, and it is what makes almost all
@@ -111,7 +131,7 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Prominent adverse facts | keep | Prominent adverse facts | Plain, and deliberately unsoftened. |
 | Answer first / What happened, task by task | keep | — | Already reader-shaped. |
 | Open a cell to inspect its evidence | rename | Open a run to see its evidence | Follows the cell→run rename. |
-| Sealed Matrix accounting | rename | What was run, and what came back | "Matrix" is hidden from readers (below). |
+| Sealed Matrix accounting | rename | What was run, and what came back | A **section heading**, not a second name: §5 names this concept *the runs*, and the heading is its sentence-shaped form under §5's headings rule. "Matrix" is hidden from readers (below). |
 | Matrix (the record) | hide | — | Internal and contract name unchanged; the reader meets "the runs", never "the Matrix". The file link stays `matrix.json`. |
 | Matrix expected / judged / floor | rename | Runs planned / runs judged / minimum required | |
 | Completeness | rename | How much was judged | |
@@ -154,6 +174,7 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Trust root | rename | Whose keys these are | |
 | Exact verifier / compatible major line | rename | Exact version / compatible version | |
 | Wilson interval, interval low/high | rename + gloss | Uncertainty range | The method's own name stays in the table caption, which is where a reader who wants it will look. |
+| Table caption `Exact wilson@1 values from the sealed Report` | keep | — | **Presentation, not contract.** `wilson@1` is a hard-coded literal (`assets.ts:829`) that appears in no sealed record; the sealed spelling is `method.id` plus `method.version` (§2). Kept for the reason the row above gives, and free to change in an ordinary change if a later comprehension probe wants it plainer — not a contract-rename candidate (§7). The same ruling covers the `wilson@1` and `pairwise-disagreement@1` mentions inside the neutral-verdict sentences at `assets.ts:744` and `:753`, which `No comparative winner stated` keeps. |
 | Alpha | rename + gloss | Confidence level | |
 | n | rename | Runs | |
 | Pass rate | keep | — | |
@@ -163,7 +184,7 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Interval withheld | rename | Range not reported | Withheld reasons kept verbatim. |
 | Confirmatory floor | rename | The minimum fixed in advance | Prose term inherited from the demo report; not a code string. |
 | Independence clusters | rename + gloss | Groups that do not share a source | The counted quantity is kept; only the noun changes. |
-| Benchmark and configuration scope | rename | What was tested, and how each configuration was pinned | The `<h2>` at `assets.ts:817`; its `Arms and pinned configuration` sub-heading becomes **Each configuration, pinned**, following the `arm` → *Configuration* rename above. |
+| Benchmark and configuration scope | rename | What was tested, and how each configuration was pinned | The `<h2>` at `assets.ts:827`; its `Arms and pinned configuration` sub-heading becomes **Each configuration, pinned**, following the `arm` → *Configuration* rename above. |
 | Evidence signpost (social card) | rename | Benchmark report | The v4 card's phrase; the current card already says "Benchmark report". Retire the older wording with the v4 assets. |
 | Colophon · verified qualification (v4 badge) | **deferred to #2982** | — | Contains the reserved word. Not ruled here. |
 | No comparative winner stated | keep | — | Load-bearing and already plain. |
@@ -171,11 +192,14 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 #### Binary-qualification report surface (binary reports only)
 
 `binaryFactsHtml` (`assets.ts:548`), its `README.md` twin `binaryFactsMarkdown`
-(`assets.ts:916`), and the two sub-headings of `binaryAdmissionHtml` /
-`binaryAdmissionMarkdown` (`assets.ts:715`, `:720`) render only when the method is binary
-qualification, alongside the admission block already ruled above. Every row here is
-**presentation**: each string is a literal in the template or a `.map()`ed display label, never
-a sealed field read. The contract spellings named in the Note column stay verbatim.
+(`assets.ts:926`), and the two sub-headings of `binaryAdmissionHtml` /
+`binaryAdmissionMarkdown` (`assets.ts:715`, `:721`) render only when the method is binary
+qualification, alongside the admission block already ruled above. Every row here rules a
+**label** — a literal in the template or a `.map()`ed display label — and every label is
+**presentation**. Two rows also carry a sealed value inside the string they head: the `<h3>`
+per arm *is* the bare `armId`, and the stratum caption interpolates `configuration["strata"]`.
+Those values are data and are unchanged; a ruling here reaches the label around a value, never
+the value itself. The contract spellings named in the Note column stay verbatim.
 
 The `<h3>` printed for each arm section is the bare `armId` value, so the `arm` →
 *Configuration* rename does not reach it. The rename does reach every *label*, which is why
@@ -189,7 +213,7 @@ comprehension bug §5's law forbids, introduced by this spec's own rename.
 | Qualification facts are presented per instrument without comparative conclusions. | rename | These facts are given per judge, with no comparison drawn. | Follows `Instrument` → *Judge* above. |
 | Registered configuration | rename | How the judges were qualified | Resolves the collision with the `arm` → *Configuration* rename; the word "configuration" leaves this heading entirely. `qualification.configuration` stays contract. |
 | `<h3>` per arm (bare `armId`) | keep | — | An identifier, not a label. |
-| Instrument `<fingerprint>` | rename | Judge `<fingerprint>` | `instrumentSha256` stays contract; the hex is relabelled per the digest → *Fingerprint* rule. |
+| Instrument `<fingerprint>` | rename | Judge `<fingerprint>` | `instrumentSha256` stays contract; the hex is relabeled per the digest → *Fingerprint* rule. |
 | Item, call, and confusion denominators | rename | What was counted | The three denominators keep their contract names (`item`, `call`, `confusion`) inside the block they head. |
 | Five registered rates with exact denominators and Wilson intervals | rename | The five judge rates, with exact counts and Wilson uncertainty ranges | Table caption. "Wilson" survives here for the same reason it survives in the arm-results caption: the caption is where a reader who wants the method looks. |
 | Rate / Registered result (column headers) | rename | Rate / Result | The preregistration fact is stated once for the section, not repeated in a column header. |
@@ -203,9 +227,35 @@ comprehension bug §5's law forbids, introduced by this spec's own rename.
 | Per-item decisions and instability | rename | Each item's decision, and where the answer changed on rerun | |
 | Per-item decisions, instability, and exclusions | rename | Each item's decision, where the answer changed on rerun, and what was excluded | The `README.md` variant folds the exclusions payload into the same block. Same concept plus one, not a second name for the same concept. |
 | Parser-invalid, infrastructure, and other exclusions | rename | What was excluded, and why | |
-| Human disagreement and deterministic replacements | rename | Where the human labellers disagreed, and what replaced those items | `binaryAdmissionHtml` (`assets.ts:718`) and its Markdown twin. |
+| Human disagreement and deterministic replacements | rename | Where the human labelers disagreed, and what replaced those items | `binaryAdmissionHtml` (`assets.ts:718`) and its Markdown twin. |
 | Exact instrument and prompt-template commitments | rename | The exact judge and prompt used | Same block; follows `Instrument` → *Judge* and `Prompt-template commitment` → *The exact prompt used* above. |
 | Registered (as a bare modifier) | rename | — | Drop it wherever it modifies a rate, a result, or a configuration on this surface. It is not the same word as *Preregistered*, which §4.1 keeps and glosses; carrying both would present one idea under two spellings. |
+
+#### Pairwise-disagreement report surface (pairwise-disagreement reports only)
+
+`pairwiseDisagreementFactsHtml` (`assets.ts:526`) and its `README.md` twin
+`pairwiseDisagreementFactsMarkdown` (`assets.ts:968`) render only when the method is
+`jinn.benchmarking.method/pairwise-disagreement`. The block is a panel readout over every
+unordered pair of configurations, so it has no baseline and no candidate, and its caption, its
+`Arm pair` and `Disagreements` headers, and its empty state print on no other block. It is the
+last method block to get a sub-table of its own; the wilson, comparison, and
+paired-majority-delta blocks are ruled in the main table and the binary block in the sub-table
+above.
+
+Every row here rules a **label**, and every label is **presentation**, exactly as in the binary
+sub-table. The one row that heads a sealed value — the row header, which *is* two bare `armId`s
+— is ruled the same way that surface's `<h3>` per arm is.
+
+| Reader-visible term today | Ruling | Reader-facing name | Note |
+| --- | --- | --- | --- |
+| Table caption `Exact pairwise-disagreement@1 values from the sealed Report` | keep | — | **Presentation, not contract**, on the same ground as the `wilson@1` caption ruled in the main table: the string is a literal at `assets.ts:531` and appears in no sealed record (§2). |
+| `Arm pair` (column header) | rename | Configuration pair | Follows `Arm / arm ID` → *Configuration*. |
+| `n` (column header) | rename | Tasks both faced | **Not** the main table's `n` → *Runs*. This is `commonTaskDigests.length` (`pairwise-disagreement-method.ts:273`) — the tasks both configurations faced after majority reduction — which is the quantity §4.1 already names *Tasks both faced* under `Paired task count`. |
+| `Disagreements` (column header) | rename | Decided differently | **Not** §5's *runs the judges disagreed on*, and the word must not be shared with it. This counts the tasks on which the row's two configurations reached different decisions (`disagreesOn`, `packages/benchmarking/aggregate/src/pairwise-disagreement-method.ts:238`); `conflicted` counts runs whose judges disagreed. The block carries both — `PairwiseDisagreementFacts` has `pairs[].disagreements` *and* its own `conflicted` (`assets.ts:95`) — and `Report conflicts` prints on the same page, so §7 item 5's test must read them as two concepts. |
+| `Rate` (column header) | keep | Rate | Already plain; the caption says which quantity it is a rate of. The binary surface arrives at the same word by rename (`Rate / Registered result` → *Rate / Result*) — same header, different disposition. The `—` printed when no rate was computed (`assets.ts:528`) is a null marker, not a name. |
+| `Interval` (column header) | rename | Uncertainty range | Follows `Wilson interval` → *Uncertainty range*. The `withheld` cell value follows the main table's `Interval withheld` → *Range not reported*. |
+| `<th scope="row">` per pair (`armA` vs `armB`) | keep | — | Two bare `armId` values joined by "vs" — identifiers, not labels, exactly as the binary surface's `<h3>` per arm. |
+| `No arm pairs were computed.` (empty state) | rename | No configuration pairs were computed. | `assets.ts:527` and its markdown twin at `:969`; follows the `arm` → *Configuration* rename. |
 
 ### 4.2 Reader tool output (`colophon-verify` human-readable stdout)
 
@@ -261,15 +311,17 @@ has found a different concept — or a bug.
 | The tally of what was run and what came back | the runs | `Matrix`, `matrix.json` |
 | The statistics computed from the runs | the result | `Report`, `report.json` |
 | The signed, self-describing summary a publisher stands behind | the claim | `claim-package.json` |
-| The fixed statistical procedure | method | `method.id`, `wilson@1`, … |
+| The fixed statistical procedure | method | `method.id` (`jinn.benchmarking.method/…`), `method.version` |
 | Method fixed before the runs | preregistered | `preregistered` |
 | A single stored piece of authenticated evidence | evidence file | `records/<sha256>.bin` |
 | Who decided a run's outcome | judge | `instrument`, evaluator |
 | Runs the judges disagreed on | runs the judges disagreed on | `conflicted`, assembly dissent |
+| Tasks two configurations decided differently | decided differently | `disagreements` (pairwise-disagreement) |
 | The content hash naming a thing | fingerprint | `sha256`, digest |
 | Proof that bytes existed by a time | timestamp proof | `anchor` |
 | Running the checks again over the bundle | *reserved — #2982* | `verify`, `verification.checks` |
-| Where and by whom the runs happened | where it ran / who ran this | `venue`, `venueHonesty` |
+| Where the runs physically happened | where it ran | `venue` |
+| Who operated the runs | who ran this | `venueHonesty` |
 | What was and was not pinned | what was pinned | `disclosure`, six-variable disclosure |
 | How a judge was qualified before it was used | how the judges were qualified | `qualification.configuration` |
 | A judge giving a different answer on rerun | answer changed on rerun | `instability` |
@@ -284,6 +336,24 @@ One entry earns its place by preventing a duplicate this spec would otherwise cr
 **"how the judges were qualified"** keeps the binary report's *Registered configuration*
 heading clear of the `arm` → *configuration* rename, so **configuration** names one arm and
 nothing else on a page that carries both (§4.1, binary-qualification surface).
+
+**Headings and column headers.** A section heading and a table column header are
+length-constrained surfaces: the first wants a sentence, the second wants one or two words, and
+neither can carry a nine-word canonical name. A heading or column header may therefore be a
+sentence-shaped or column-width form of a concept named above **without being a second name for
+it**, on one condition: the §4 row that rules it says so and points back to the concept's row
+here. One row meets that condition today: §4.1's *What was run, and what came back*, whose
+concept is **the runs**. A heading that *contains* a canonical name rather than substituting
+for it — the binary surface's *Each item's decision, and where the answer changed on rerun* —
+is not in this class and needs no exception; its own row already says why. Everything else is a
+name, and the law above applies to it in full.
+
+This is what §7 item 5's conformance test asserts over: the **Reader-facing name** column, with
+the §4 rows marked heading or column header as its exception set. The distinction is necessary
+— without it the page's legitimate heading forms read as violations — but not sufficient on its
+own. **The runs** is still presented under four names in §4.1 (*What was run, and what came
+back*, *Runs planned / runs judged / minimum required*, *How much was judged*, *Runs that did
+not count*), which the collapse above licenses and the test will have to encode.
 
 Concepts a reader never meets by name, after this spec: Matrix, envelope, catalog, projection,
 subject, assurance preset, assurance primitive, disclosure specification, declaration, CAS.
@@ -311,10 +381,12 @@ reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in t
 2. **Report page vocabulary** — §4.1 applied to `verify/src/assets.ts` (`index.html`,
    `README.md`, `share.txt`, badge, social card); gates
    `verify/src/assets-presentation-profile.test.ts` and `assets-binary-admission.test.ts`.
-   Covers both the ordinary report surface and the binary-qualification surface ruled at the
-   end of §4.1 — `binaryFactsHtml`, `binaryFactsMarkdown`, and the two `binaryAdmission*`
-   sub-headings — whose rate labels are the clearest instance of an internal field name printed
-   verbatim to a reader.
+   Covers the ordinary report surface and both method-specific surfaces ruled at the end of
+   §4.1: the binary-qualification surface — `binaryFactsHtml`, `binaryFactsMarkdown`, and the
+   two `binaryAdmission*` sub-headings — whose rate labels are the clearest instance of an
+   internal field name printed verbatim to a reader; and the pairwise-disagreement surface —
+   `pairwiseDisagreementFactsHtml` and `pairwiseDisagreementFactsMarkdown` — whose caption,
+   column headers, and empty state are ruled in their own sub-table.
    Sequenced *after* #2985 rules the IA, so the renames land against the surviving elements
    rather than being applied twice; #2985 closed completed on 2026-09-02, so that sequencing
    condition is already satisfied.
@@ -323,8 +395,11 @@ reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in t
 4. **Docs reader-vocabulary tables** — §4.3: one table each in `PUBLIC-BUNDLE.md` and
    `EXTERNAL-VERIFICATION.md`, no prose rename.
 5. **Glossary conformance test** — an asset/CLI test asserting that no hidden term from §5
-   appears in any reader-facing generated string, and that no §5 concept is presented under two
-   names. Without it this spec decays on the next feature that adds a surface.
+   appears in any reader-facing generated string, and that no §5 concept is presented under
+   two names. It asserts over §4's **Reader-facing name** column, with the rows §5's
+   headings rule marks as headings or column headers as its exception set; §5 states that
+   boundary, and states what it does not settle. Without it this spec decays on the next
+   feature that adds a surface.
 
 All five items are unblocked today — (2)'s only sequencing condition, #2985, has closed. All
 five adopt the verdict verb ruled by #2982 rather than minting one.
