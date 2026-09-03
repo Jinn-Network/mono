@@ -197,7 +197,9 @@ that mirrored but whose index pass failed carries `indexError`, and keeps
 `status: "synced"` — the mirror succeeded, the pass that makes what it
 mirrored searchable did not. `freshness` is the `corpus-mirror-freshness`
 verdict for that cycle, `ok` or `stale`. The same facts, plus per-source
-timestamps, are in `mirror-sync-status.json`.
+timestamps, are in `mirror-sync-status.json`. That file lists only the sources
+this install currently follows: drop a source from `corpus.sources` and its
+entry goes with it at the next start.
 
 A `stale` verdict is also written on its own line, at `warn`, carrying the
 row's full detail and remedy:
