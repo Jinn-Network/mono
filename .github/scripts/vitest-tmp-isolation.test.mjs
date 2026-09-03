@@ -485,10 +485,10 @@ function stringLiterals(text) {
  * The quoted paths of the array literal `literal`, resolved against `configDir` and made
  * repo-relative, each with the source offset it was read from so the caller can scope it.
  *
- * Read one element at a time, and only where the element holds exactly one string literal. The
- * shape every config in the tree writes is a single-argument call — `fileURLToPath(new
- * URL('../../../', import.meta.url))` — so the one string is the path and the wrapper is noise.
- * A multi-argument path helper is a different matter: `path.join(process.cwd(), '..', 'shared')`
+ * Read one element at a time, and only where the element holds EXACTLY ONE string literal. Every
+ * config in the tree wraps its one quoted path in a call — `fileURLToPath(new URL('../../../',
+ * import.meta.url))` — so the single string is the path and the wrapper is noise. A path helper
+ * taking several quoted arguments is a different matter: `path.join(process.cwd(), '..', 'shared')`
  * holds two, neither of which resolves against `configDir` to what the config allows, and reading
  * both credited two paths that were never there. In `fsAllowPaths` that is over-permissive
  * coverage, and coverage is what turns the reachability finding OFF, so it fails open on exactly
@@ -498,6 +498,15 @@ function stringLiterals(text) {
  *
  * An element holding no string literal at all — a bare identifier, or a path built entirely from
  * `import.meta.dirname` — is unreadable for the same reason and drops the same way.
+ *
+ * The rule is one STRING, not one ARGUMENT, and the gap between them is the residual limit. The
+ * tree's own shape proves the two cannot be merged: `new URL('../..', import.meta.url)` takes a
+ * second argument, so rejecting a call with more than one argument would read every config in the
+ * repository as unwired. So `path.join(SOME_BASE, '../..')` still resolves its one string against
+ * `configDir` and credits a path the config may not name — the #3090 fail-open, one argument
+ * narrower. Closing it needs the base the helper was handed, which is a value, not text, and this
+ * gate reads a checkout with no dependencies installed. Nothing in the tree writes that shape; a
+ * config that does is over-credited, and the limit is stated here rather than guessed at.
  */
 function resolveQuoted(literal, configDir, base, literalStart) {
   const paths = [];
@@ -614,21 +623,26 @@ export function declaredEnvironments(source) {
  * the reachability check below skipped the config entirely: the one branch that turns the check
  * OFF, reached by a suite that needs it most (issue #3091).
  *
- * Anchored to a `browser:` block inside an enclosing `test:` block, the way `fsAllowPaths` anchors
- * `allow:` inside `fs:`, so a plugin option named `browser` is not credited. Only the literal
- * `true` counts; a computed `enabled` is not read as browser mode, which matches how
- * `declaredEnvironments` treats a value it cannot see — there the caller fails closed on the
+ * Deliberately NOT anchored to an enclosing `test:` block, which is the opposite choice from
+ * `fsAllowPaths` anchoring `allow:` inside `fs:` — because the two anchors point opposite ways.
+ * There, crediting an unrelated `allow:` grants coverage and turns the reachability finding off,
+ * so narrowing fails closed. Here, crediting an unrelated `browser: { enabled: true }` turns the
+ * check ON, so narrowing is what fails open: a config that hoists its block — `const test = {
+ * browser: { enabled: true } }` — has no literal `test: {` to anchor to and would be skipped, the
+ * very branch this reader exists to close. An over-credited plugin option costs a reachability
+ * check on a suite that did not need one, which reds only a config whose seam path really is
+ * outside its Vite root and uncovered. Noise, against a fail-open.
+ *
+ * Only the literal `true` counts; a computed `enabled` is not read as browser mode, which matches
+ * how `declaredEnvironments` treats a value it cannot see — there the caller fails closed on the
  * `'<computed>'` marker, and here a config it cannot read keeps whatever its `environment`
- * declarations already say.
+ * declarations already say. Browser mode turned on from the command line (`--browser.enabled`) is
+ * invisible to any reader of the config text, and so is out of reach here.
  */
 export function browserModeEnabled(source) {
-  const stripped = stripComments(source);
-  for (const test of enclosedLiterals(stripped, 'test', '{', '}')) {
-    for (const browser of enclosedLiterals(test.inner, 'browser', '{', '}')) {
-      if (/\benabled\s*:\s*true\b/u.test(browser.inner)) return true;
-    }
-  }
-  return false;
+  return enclosedLiterals(stripComments(source), 'browser', '{', '}').some((browser) =>
+    /\benabled\s*:\s*true\b/u.test(browser.inner),
+  );
 }
 
 /**
@@ -858,8 +872,19 @@ test('a list element holding more than one string is unreadable, not two paths',
   // An element with no string at all is unreadable the same way, rather than resolving to the
   // config directory itself and covering everything under it.
   assert.deepEqual(allowed(`fs: { allow: [ROOT] }`), []);
-  // A comma inside a quoted path belongs to that path, not to the list.
+  // The same drop in the `globalSetup` half, which reds the wiring gate rather than this one.
+  assert.deepEqual(wired(`globalSetup: [path.join(dir, '..', 'g.ts'), './h.ts']`), [
+    'packages/x/h.ts',
+  ]);
+  // A comma inside a quoted path, a regex literal, or a nested array belongs to its element rather
+  // than splitting the list — the three shapes `arrayElements` tracks besides call parentheses.
   assert.deepEqual(allowed(`fs: { allow: ['../a,b'] }`), ['packages/a,b']);
+  assert.deepEqual(allowed(`fs: { allow: [pick(/a,b/u, '../..')] }`), ['']);
+  assert.deepEqual(allowed(`fs: { allow: [['../..'], '..'] }`), ['', 'packages']);
+  // The rule is one string, not one argument. A helper handed a base it cannot see still credits
+  // its single quoted argument — the residual limit stated on `resolveQuoted`, pinned so a reader
+  // does not mistake it for a shape this gate closes.
+  assert.deepEqual(allowed(`fs: { allow: [path.join(SOME_BASE, '../..')] }`), ['']);
   // A backtick-quoted path is read; an interpolated one is not a path this reader can resolve.
   assert.deepEqual(allowed('fs: { allow: [`../..`] }'), ['']);
   assert.deepEqual(allowed('fs: { allow: [`${root}/shared`] }'), []);
@@ -873,8 +898,15 @@ test('a list element holding more than one string is unreadable, not two paths',
 test('browser mode is web-shaped even though it declares no environment', () => {
   assert.equal(browserModeEnabled(`test: { browser: { enabled: true } }`), true);
   assert.equal(webTransformShaped(`test: { browser: { enabled: true } }`), true);
-  // Anchored to a `browser:` block under `test:`, so a plugin option of the same name is not it.
-  assert.equal(browserModeEnabled(`plugins: [vue({ browser: { enabled: true } })]`), false);
+  // Written without spaces, and under a `projects` entry, are the same declaration.
+  assert.equal(browserModeEnabled(`test:{browser:{enabled:true}}`), true);
+  assert.equal(browserModeEnabled(`projects: [{ test: { browser: { enabled: true } } }]`), true);
+  // A hoisted block has no `test: {` to anchor to, which is why this reader does not anchor: it
+  // reads as browser mode all the same, where an anchored one would skip the config outright.
+  assert.equal(browserModeEnabled(`const test = { browser: { enabled: true } };`), true);
+  // The cost of not anchoring is an unrelated option of the same name reading as browser mode.
+  // That only turns the reachability check ON, so it is noise rather than the fail-open above.
+  assert.equal(browserModeEnabled(`plugins: [vue({ browser: { enabled: true } })]`), true);
   // Off, absent, or computed leaves the environment declarations to speak for themselves.
   assert.equal(webTransformShaped(`test: { browser: { enabled: false } }`), false);
   assert.equal(webTransformShaped(`test: { browser: { enabled: opts.browser } }`), false);
