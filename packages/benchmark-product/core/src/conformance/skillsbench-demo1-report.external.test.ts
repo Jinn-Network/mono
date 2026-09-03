@@ -67,8 +67,8 @@ import {
  *
  * `yarn demo1:report` sets `SKILLSBENCH_DEMO1_REPORT=1` for you; set `SKILLSBENCH_DEMO1_STAGE=final`
  * once the final declaration replaces the pilot. The variable is still what gates the suite,
- * because this file sits in the default `src/**/*.test.ts` include set and must skip under an
- * ordinary `yarn test`.
+ * because this file sits in the default test include set of `vitest.config.ts` and must skip
+ * under an ordinary `yarn test`.
  *
  * Sealing is refused over an output that already exists, for the same reason
  * `scripts/demo1-preregister.mjs` refuses: the committed bundle and report carry published digests
