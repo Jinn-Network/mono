@@ -9,10 +9,11 @@
   presentation-vs-contract classification. Implementation is follow-on work, split per §7.
 - **v1.1** (#3794, sweeping the review follow-ups on this spec's PR): rules the
   pairwise-disagreement report surface, the last method block left unruled (§4.1); moves the
-  `wilson@1`-style method spellings from the contract side to the presentation side and gives §2
-  the sealed `jinn.benchmarking.method/…` spelling they were standing in for; adds §5's headings
-  rule and splits its venue row, so §7 item 5's conformance test has one target; corrects two
-  source pointers and the spelling of two prescribed reader names. No v1.0 ruling is reversed.
+  `wilson@1`-style method spellings from the contract side to the presentation side and gives
+  §2 the sealed `jinn.benchmarking.method/…` spelling they were standing in for; adds §5's
+  headings rule and splits its venue row, so §7 item 5's conformance test has one target;
+  corrects three source pointers, one prescribed reader name, and one word of prose. No v1.0
+  ruling is reversed.
 
 ## 1. Scope
 
@@ -33,12 +34,12 @@ It is deliberately narrow at three boundaries:
 - **#2983 owns identity rendering** (keys bound to domains). The signer-role names in §4.2 are
   ruled here; what a bound identity looks like is ruled there.
 
-The report page renders a different facts block per method, so the page is ruled across all five
-of them: the Wilson, comparison, and paired-majority-delta blocks in §4.1's main table, and two
-method-specific blocks in the sub-tables that close §4.1 — the binary-qualification block, which
-prints only on a binary report and prints five sealed field names verbatim as row headers, and the
-pairwise-disagreement block, whose table prints a caption, five column headers, and an empty state
-that appear on no other block.
+The report page renders a different facts block per method, so the page is ruled across all
+five of them: the Wilson, comparison, and paired-majority-delta blocks in §4.1's main table,
+and two method-specific blocks in the sub-tables that close §4.1 — the binary-qualification
+block, which prints only on a binary report and prints five sealed field names verbatim as row
+headers, and the pairwise-disagreement block, whose caption, column headers, and empty state
+were the last method strings left unruled.
 
 Internal source-code identifiers, type names, and record kinds are **out of scope except where
 they surface to a reader**. A term ruled `hide` keeps its internal name unchanged — but a
@@ -82,11 +83,11 @@ belongs to a bundle-format revision and to nothing smaller:
   `colophon-verify`.
 
 The `wilson@1`-style spellings are **not** on this side. They are a presentation composition of
-`method.id` and `method.version`, and they appear in **zero** sealed records — `claim-package.json`
-carries `jinn.benchmarking.method/wilson` and `"1"` in two separate fields. Every `@1` occurrence
-in `verify/src/` is either a code comment or one of four hard-coded literals: the two table
-captions at `assets.ts:829` and `:531`, and the two neutral-verdict sentences at `:744` and `:753`.
-§4.1 rules all four.
+`method.id` and `method.version`, and they appear in **zero** sealed records —
+`claim-package.json` carries `jinn.benchmarking.method/wilson` and `"1"` in two separate
+fields. Every `@1` occurrence in `verify/src/` is either a code comment or one of four
+hard-coded literals: the two table captions at `assets.ts:829` and `:531`, and the two
+neutral-verdict sentences at `:744` and `:753`. §4.1 rules all four.
 
 **The load-bearing rule:** a term may be *presented* under a reader-facing name while its
 contract spelling is unchanged. That is the normal case here, and it is what makes almost all
@@ -193,10 +194,10 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 `binaryAdmissionMarkdown` (`assets.ts:715`, `:721`) render only when the method is binary
 qualification, alongside the admission block already ruled above. Every row here rules a
 **label** — a literal in the template or a `.map()`ed display label — and every label is
-**presentation**. Two rows also carry a sealed value inside the string they head: the `<h3>` per
-arm *is* the bare `armId`, and the stratum caption interpolates `configuration["strata"]`. Those
-values are data and are unchanged; a ruling here reaches the label around a value, never the value
-itself. The contract spellings named in the Note column stay verbatim.
+**presentation**. Two rows also carry a sealed value inside the string they head: the `<h3>`
+per arm *is* the bare `armId`, and the stratum caption interpolates `configuration["strata"]`.
+Those values are data and are unchanged; a ruling here reaches the label around a value, never
+the value itself. The contract spellings named in the Note column stay verbatim.
 
 The `<h3>` printed for each arm section is the bare `armId` value, so the `arm` →
 *Configuration* rename does not reach it. The rename does reach every *label*, which is why
@@ -232,13 +233,14 @@ comprehension bug §5's law forbids, introduced by this spec's own rename.
 
 `pairwiseDisagreementFactsHtml` (`assets.ts:526`) and its `README.md` twin
 `pairwiseDisagreementFactsMarkdown` (`assets.ts:968`) render only when the method is
-`jinn.benchmarking.method/pairwise-disagreement`. The block is a panel readout over every unordered
-pair of configurations, so it has no baseline and no candidate, and it prints a caption, five
-column headers, and an empty state that appear nowhere else on the page. This is the last method
-block whose strings were not ruled; every other kind's are in the main table above.
+`jinn.benchmarking.method/pairwise-disagreement`. The block is a panel readout over every
+unordered pair of configurations, so it has no baseline and no candidate, and its caption, its
+`Arm pair` and `Disagreements` headers, and its empty state print on no other block. It is the
+last method block whose strings were unruled; every other kind's are in the main table above.
 
-Every row here is **presentation**, and — as in the binary sub-table — the ruling reaches the label,
-never a sealed value printed under it.
+Every row here rules a **label**, and every label is **presentation**, exactly as in the binary
+sub-table. The one row that heads a sealed value — the row header, which *is* two bare `armId`s
+— is ruled the same way that surface's `<h3>` per arm is.
 
 | Reader-visible term today | Ruling | Reader-facing name | Note |
 | --- | --- | --- | --- |
@@ -246,7 +248,7 @@ never a sealed value printed under it.
 | `Arm pair` (column header) | rename | Configuration pair | Follows `Arm / arm ID` → *Configuration*. |
 | `n` (column header) | rename | Runs | Same ruling as the main table's `n`. |
 | `Disagreements` (column header) | keep | Disagreements | A **column header**, not a second name: §5 names this concept *runs the judges disagreed on*, and a column cannot carry nine words. Under §5's headings rule this is that name's column-width form, in a table whose rows are already runs — so §7 item 5's conformance test reads it as the same concept, not as a competing one. |
-| `Rate` (column header) | keep | Rate | Matches the main table's `Pass rate` and the binary surface's `Rate`. |
+| `Rate` (column header) | keep | Rate | Already plain, and the binary surface rules the same header the same way. |
 | `Interval` (column header) | rename | Uncertainty range | Follows `Wilson interval` → *Uncertainty range*. The `withheld` and `—` cell values follow the main table's `Interval withheld` → *Range not reported*. |
 | `<th scope="row">` per pair (`armA` vs `armB`) | keep | — | Two bare `armId` values joined by "vs" — identifiers, not labels, exactly as the binary surface's `<h3>` per arm. |
 | `No arm pairs were computed.` (empty state) | rename | No configuration pairs were computed. | `assets.ts:527` and its markdown twin at `:969`; follows the `arm` → *Configuration* rename. |
@@ -329,17 +331,17 @@ accounting* and *completeness/attrition*, which a reader reads as one thing.
 length-constrained surfaces: the first wants a sentence, the second wants one or two words, and
 neither can carry a nine-word canonical name. A heading or column header may therefore be a
 sentence-shaped or column-width form of a concept named above **without being a second name for
-it**, on one condition: the §4 row that rules it says so and points back to the concept's row here.
-Two rows meet that condition today: §4.1's *What was run, and what came back* (the concept is
-**the runs**) and the pairwise-disagreement surface's *Disagreements* (**runs the judges disagreed
-on**). A heading that *contains* a canonical name rather than substituting for it — the binary
-surface's *Each item's decision, and where the answer changed on rerun* — is not in this class and
-needs no exception; its own row already says why. Everything else is a name, and the law above
-applies to it in full.
+it**, on one condition: the §4 row that rules it says so and points back to the concept's row
+here. Two rows meet that condition today: §4.1's *What was run, and what came back* (the
+concept is **the runs**) and the pairwise-disagreement surface's *Disagreements* (**runs the
+judges disagreed on**). A heading that *contains* a canonical name rather than substituting for
+it — the binary surface's *Each item's decision, and where the answer changed on rerun* — is
+not in this class and needs no exception; its own row already says why. Everything else is a
+name, and the law above applies to it in full.
 
-This is what §7 item 5's conformance test asserts over: the **Reader-facing name** column, with the
-§4 rows marked heading or column header as the enumerated exception set. Without the distinction
-the test cannot be written, because the page legitimately carries both forms.
+This is what §7 item 5's conformance test asserts over: the **Reader-facing name** column, with
+the §4 rows marked heading or column header as the enumerated exception set. Without the
+distinction the test cannot be written, because the page legitimately carries both forms.
 
 One entry earns its place by preventing a duplicate this spec would otherwise create:
 **"how the judges were qualified"** keeps the binary report's *Registered configuration*
@@ -373,11 +375,11 @@ reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in t
    `README.md`, `share.txt`, badge, social card); gates
    `verify/src/assets-presentation-profile.test.ts` and `assets-binary-admission.test.ts`.
    Covers the ordinary report surface and both method-specific surfaces ruled at the end of
-   §4.1: the binary-qualification surface — `binaryFactsHtml`, `binaryFactsMarkdown`, and the two
-   `binaryAdmission*` sub-headings — whose rate labels are the clearest instance of an internal
-   field name printed verbatim to a reader; and the pairwise-disagreement surface —
-   `pairwiseDisagreementFactsHtml` and `pairwiseDisagreementFactsMarkdown` — whose caption, five
-   column headers, and empty state print nowhere else.
+   §4.1: the binary-qualification surface — `binaryFactsHtml`, `binaryFactsMarkdown`, and the
+   two `binaryAdmission*` sub-headings — whose rate labels are the clearest instance of an
+   internal field name printed verbatim to a reader; and the pairwise-disagreement surface —
+   `pairwiseDisagreementFactsHtml` and `pairwiseDisagreementFactsMarkdown` — whose caption,
+   column headers, and empty state are ruled in their own sub-table.
    Sequenced *after* #2985 rules the IA, so the renames land against the surviving elements
    rather than being applied twice; #2985 closed completed on 2026-09-02, so that sequencing
    condition is already satisfied.
@@ -386,11 +388,11 @@ reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in t
 4. **Docs reader-vocabulary tables** — §4.3: one table each in `PUBLIC-BUNDLE.md` and
    `EXTERNAL-VERIFICATION.md`, no prose rename.
 5. **Glossary conformance test** — an asset/CLI test asserting that no hidden term from §5
-   appears in any reader-facing generated string, and that no §5 concept is presented under two
-   names. It asserts over §4's **Reader-facing name** column, with the rows §5's headings rule
-   marks as headings or column headers as its enumerated exception set; §5 states that boundary so
-   the test has one target rather than a judgment call per row. Without it this spec decays on the
-   next feature that adds a surface.
+appears in any reader-facing generated string, and that no §5 concept is presented under two
+names. It asserts over §4's **Reader-facing name** column, with the rows §5's headings rule
+marks as headings or column headers as its enumerated exception set; §5 states that boundary so
+the test has one target rather than a judgment call per row. Without it this spec decays on the
+next feature that adds a surface.
 
 All five items are unblocked today — (2)'s only sequencing condition, #2985, has closed. All
 five adopt the verdict verb ruled by #2982 rather than minting one.
