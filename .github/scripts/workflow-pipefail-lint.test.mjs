@@ -92,6 +92,31 @@ test('an unguarded compound is still read through, and only the guarded part of 
   ]);
 });
 
+test('a function definition is a group too, so a guard written inside its body counts', () => {
+  // The group opener sits behind the definition prefix (`f` `(` `)` `{`), so reading only
+  // the first token left the definition unwrapped and split its raw text on `|` — cutting
+  // the inner `||` in half and losing the guard. Every spelling bash accepts is pinned,
+  // because the multi-line ones stay clean only by accident of the logical-line split.
+  assert.deepEqual(severities('f() { producer | head -1 || true; }; f', { shell: 'bash' }), []);
+  assert.deepEqual(severities('f () { producer | head -1 || true; }', { shell: 'bash' }), []);
+  assert.deepEqual(severities('function f { producer | head -1 || true; }', { shell: 'bash' }), []);
+  assert.deepEqual(severities('function f() { producer | head -1 || true; }', { shell: 'bash' }), []);
+  assert.deepEqual(severities('f() (producer | head -1 || true)', { shell: 'bash' }), []);
+  assert.deepEqual(severities('f() { producer | grep -q x || true; }', { shell: 'bash' }), []);
+  assert.deepEqual(severities('echo a; f() { producer | head -1 || true; }', { shell: 'bash' }), []);
+  // Unwrapping is not silencing: an unguarded body is still an error, and the finding
+  // names the pipeline rather than the fragment the definition was cut at.
+  const unguarded = findings('f() { producer | head -1; }', { shell: 'bash' });
+  assert.deepEqual(
+    unguarded.map((finding) => `${finding.severity}:${finding.consumer}`),
+    ['error:head'],
+  );
+  assert.equal(unguarded[0].statement, 'producer | head -1');
+  // A brace group passed as an argument is not a definition — the parentheses are what
+  // make one, unless `function` is written.
+  assert.deepEqual(severities('f { producer | head -1; }', { shell: 'bash' }), ['error:head']);
+});
+
 test('a redirection is not a list separator: the pipe on its right is still a pipe', () => {
   // `2>&1` and `&>` carry an `&` that only looks like the background operator. Reading it
   // as one would cut the pipeline in two and lose the producer entirely — a silent hole

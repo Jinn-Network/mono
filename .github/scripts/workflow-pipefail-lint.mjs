@@ -619,17 +619,45 @@ function logicalLines(body) {
   return lines;
 }
 
+// How many leading tokens of a function definition stand before the group that holds its
+// body: `f () { … }`, `function f { … }`, `function f() ( … )`. Skipping them lets
+// `compoundBody` unwrap the group, so a guard written inside the body is read as the guard
+// it is instead of the definition falling through to the simple-pipeline branch, where
+// splitting the raw text on `|` cuts the `||` in half and loses it. The parentheses are
+// required unless `function` is: `f { …; }` is a command with a brace-group argument,
+// not a definition.
+function definitionPrefixLength(tokens) {
+  let index = 0;
+  const keyword = tokens[0] !== undefined && !tokens[0].operator && tokens[0].value === 'function';
+  if (keyword) index += 1;
+
+  const name = tokens[index];
+  if (name === undefined || name.operator) return 0;
+  if (COMPOUND_OPENERS.has(name.value) || COMPOUND_CLOSERS.has(name.value)) return 0;
+  index += 1;
+
+  const parens =
+    tokens[index]?.operator === true &&
+    tokens[index].value === '(' &&
+    tokens[index + 1]?.operator === true &&
+    tokens[index + 1].value === ')';
+  if (parens) return index + 2;
+  return keyword ? index : 0;
+}
+
 // The body of a compound command, or null when the unit is a simple pipeline. The
 // closer is dropped when the unit actually reaches it: a folded `if producer | head -1;
 // then` is a real statement the lint must still read, and it has no `fi` on its line.
 function compoundBody(tokens) {
-  const [first] = tokens;
+  const skip = definitionPrefixLength(tokens);
+  const first = tokens[skip];
+  if (first === undefined) return null;
   const opens = first.operator ? first.value === '(' : COMPOUND_OPENERS.has(first.value);
   if (!opens) return null;
   const last = tokens.at(-1);
   const closes =
     last !== first && (last.operator ? last.value === ')' : COMPOUND_CLOSERS.has(last.value));
-  return tokens.slice(1, closes ? -1 : undefined);
+  return tokens.slice(skip + 1, closes ? -1 : undefined);
 }
 
 /**
