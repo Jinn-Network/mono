@@ -1294,6 +1294,130 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
     warn.mockRestore();
   });
 
+  /**
+   * #3433. A destination refusal is a statement about where ONE peer's archive lives, so it must
+   * refuse that peer and only that peer. Before this, the refusal threw out of `sync()`, escaping
+   * the loop over sources: one https-upgrading or hostile peer denied discovery to every peer
+   * after it in the list, and on the startup path failed the boot.
+   *
+   * `refused-destination` is still a refusal — no checkpoint, no card, a loud log. Only the blast
+   * radius changed.
+   */
+  describe('a destination refusal isolates to its own source (#3433)', () => {
+    /** The shape `native-discovery-trust.ts` throws when `resolveContainedUrl` refuses. */
+    function outsideServingRoot(identity: SourceIdentity): NativeDiscoverySource {
+      return peerSource(identity, {
+        resolveEndpoint: async () => {
+          const contained = Object.assign(
+            new Error('introduced URL "https://cdn.example/a" is not contained by serving root '
+              + `${ROOT}: origin https://cdn.example is not ${ROOT}`),
+            { name: 'ContainedOriginError' },
+          );
+          throw Object.assign(
+            new Error(`native discovery source ${identity.agent}/${identity.name} at ${ROOT} `
+              + 'could not be resolved: introduced URL is not contained'),
+            { name: 'NativeDiscoverySourceResolutionError', kind: 'unintroduced', cause: contained },
+          );
+        },
+      });
+    }
+
+    it('degrades a peer whose archiveRoot leaves the serving root, and syncs the rest', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const routes = routesFor([first]);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const synced = createNativeDiscoveryConsumer({
+        store: new Store(':memory:'),
+        // The refused peer is FIRST: the ordering IS the bug. A `throw` here never reached the
+        // second source at all.
+        sources: [outsideServingRoot(PEER), source(routes, async () => ({ status: 'ok' }))],
+        transport: silentTransport(routes),
+        decode: async (input) => cardFor(input.entry.sequence),
+        now: () => FRESH_FIXTURE_TIME,
+      });
+
+      await expect(synced.sync()).resolves.toMatchObject({
+        accepted: 1,
+        verifiedSources: 1,
+        degraded: [{ source: PEER, reason: 'refused-destination' }],
+      });
+      expect(synced.checkpoint(PEER)).toBeUndefined();
+      expect(synced.takePending()).toHaveLength(1);
+      const logged = warn.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(logged).toContain('refused-destination');
+      expect(logged).toContain(PEER.agent);
+      warn.mockRestore();
+    });
+
+    it('degrades a peer whose serving plane redirects the request off-origin', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const synced = createNativeDiscoveryConsumer({
+        store: new Store(':memory:'),
+        sources: [peerSource(PEER)],
+        transport: {
+          'fetch': async (url: string) => {
+            throw Object.assign(
+              new Error(`GET ${url} was redirected to http://127.0.0.1:8545/: `
+                + 'origin http://127.0.0.1:8545 is not https://peer.example'),
+              { name: 'TransportRedirectError', url, location: 'http://127.0.0.1:8545/' },
+            );
+          },
+        },
+        decode: async () => undefined,
+        now: () => FRESH_FIXTURE_TIME,
+      });
+
+      await expect(synced.sync()).resolves.toMatchObject({
+        accepted: 0,
+        verifiedSources: 0,
+        degraded: [{ source: PEER, reason: 'refused-destination' }],
+      });
+      expect(synced.checkpoint(PEER)).toBeUndefined();
+      warn.mockRestore();
+    });
+
+    it('recovers the refused peer once it advertises a contained archiveRoot', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const routes = routesFor([first]);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      let contained = false;
+      const synced = createNativeDiscoveryConsumer({
+        store: new Store(':memory:'),
+        sources: [{
+          ...source(routes, async () => ({ status: 'ok' })),
+          resolveEndpoint: async () => {
+            if (!contained) {
+              throw Object.assign(
+                new Error('could not be resolved: introduced URL is not contained'),
+                {
+                  name: 'NativeDiscoverySourceResolutionError',
+                  kind: 'unintroduced',
+                  cause: Object.assign(new Error('not contained'), { name: 'ContainedOriginError' }),
+                },
+              );
+            }
+            return {
+              agent: AGENT,
+              name: SOURCE_NAME,
+              servingRoot: ROOT,
+              archiveRootUrl: `${ROOT}${archivePagePath(SOURCE_NAME, String(routes.size - 1).padStart(16, '0'))}`,
+            };
+          },
+        }],
+        transport: silentTransport(routes),
+        decode: async (input) => cardFor(input.entry.sequence),
+        now: () => FRESH_FIXTURE_TIME,
+      });
+
+      await expect(synced.sync()).resolves.toMatchObject({
+        degraded: [{ reason: 'refused-destination' }],
+      });
+      contained = true;
+      await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+      warn.mockRestore();
+    });
+  });
+
   it('logs a degraded source once, not once per poll', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const synced = createNativeDiscoveryConsumer({

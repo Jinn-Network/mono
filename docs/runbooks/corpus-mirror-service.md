@@ -66,7 +66,19 @@ refused `unauthorized-signer`.
 
 Two further values are yours to choose rather than to read: `servingRoot` is the
 base URL you fetched the two documents from, and `repositoryId` is a stable
-identifier for this archive within this install. It must be unique across the
+identifier for this archive within this install.
+
+Write the `servingRoot` with the scheme and port the archive actually answers
+on. Everything the source introduces — its `archiveRoot`, and every redirect it
+posts — is held inside the origin of this value, because that origin is the one
+thing about the destination that you chose rather than the peer. A scheme or
+port that differs from where the archive really lives is therefore a refusal,
+not a redirect the client will chase. The single exception is the shape a real
+host almost always presents: a plain `http://<host>` that answers `301` up to
+`https://<host>`, both on their default ports, resolves — the hostname is
+unchanged and the peer picks neither host nor port, so the upgrade can only
+increase assurance. An explicit non-default port on either side is outside that
+exception; name the final origin and you never meet it. It must be unique across the
 followed sources, and it is what orders retrieval fallback after the local
 mirror.
 

@@ -237,13 +237,32 @@ export interface NativeDiscoveryDecodeInput {
  *   the operator's OWN source that would abort `WorkLoop.initialize` over its own clock error, so
  *   it degrades on exactly the #2547 reasoning: a self-hosted source cannot equivocate against
  *   itself. A PEER's future-dated head still refuses, fail-closed.
+ * - `refused-destination` — the source named a destination outside the serving root the operator
+ *   configured, or moved a request off that origin with a redirect (#3433). This one is NOT a
+ *   softening: the source is refused exactly as before — it yields nothing, advances no
+ *   checkpoint, queues no card, and is reported loudly. What changes is only the blast radius.
+ *
+ *   The #2529 discriminator below draws its line at "did the source make a statement that failed a
+ *   check?", and a destination refusal plainly did. But the MECHANISM that implemented "refuse"
+ *   was `throw` out of `sync()`, which escapes the `for...of` over sources and so also refuses
+ *   every source AFTER this one in the list — and on the startup path
+ *   (`native-operator-host.ts`) fails the boot. That conflated "this source is not to be trusted"
+ *   with "no source is to be polled", which was never the intent: a statement about where THIS
+ *   peer's archive lives is a statement about this peer alone. One hostile — or merely
+ *   https-upgrading — peer must not deny discovery to every other peer configured.
+ *
+ *   Scoped to destination refusals only, and by construction: exactly two error shapes qualify
+ *   (`ContainedOriginError`, `TransportRedirectError`). Every trust, identity, freshness and
+ *   ordering refusal still propagates out of `sync()` untouched, so the fail-closed default is
+ *   unchanged for every shape nobody anticipated.
  */
 export type NativeDiscoveryDegradedReason =
   | 'unpublished'
   | 'unreachable'
   | 'undecodable'
   | 'self-source-stale'
-  | 'self-source-future-head';
+  | 'self-source-future-head'
+  | 'refused-destination';
 
 export interface NativeDiscoveryDegradedSource {
   readonly source: SourceIdentity;
@@ -508,7 +527,42 @@ function degradedReason(cause: unknown): NativeDiscoveryDegradedReason | undefin
     && (cause as { readonly name?: unknown }).name !== 'NativeDiscoverySourceResolutionError'
     && isTransportSilence(cause)
   ) return 'unreachable';
+  // A destination refusal isolates to its own source rather than aborting the pass (#3433). Named
+  // by `name` along the `cause` chain, for the two reasons this module duck-types everything else:
+  // it is written against injected ports and must not import a transport implementation's types,
+  // and the containment refusal arrives WRAPPED — `native-discovery-trust.ts` re-throws it as a
+  // `NativeDiscoverySourceResolutionError` so the failure names agent/name/baseUrl.
+  if (namedInCauseChain(cause, DESTINATION_REFUSAL_ERROR_NAMES)) return 'refused-destination';
   return undefined;
+}
+
+/**
+ * The two error names that mean "the source named a destination the operator did not choose".
+ *
+ * - `ContainedOriginError` — a peer-introduced `archiveRoot` (or locator) that does not resolve
+ *   inside the configured serving root (`discovery/client`'s `origin-policy`).
+ * - `TransportRedirectError` — a redirect hop that leaves the origin the request started on
+ *   (`transport-http`'s per-hop guard).
+ */
+const DESTINATION_REFUSAL_ERROR_NAMES: readonly string[] = [
+  'ContainedOriginError',
+  'TransportRedirectError',
+];
+
+/** Does `cause`, or anything it wraps, carry one of `names` as its `name`? */
+function namedInCauseChain(cause: unknown, names: readonly string[]): boolean {
+  // Bounded rather than merely cycle-guarded: a `cause` chain is built by the throwers in this
+  // repository and is a handful of links deep, so a depth ceiling is both sufficient and cheaper
+  // than tracking visited objects.
+  for (let current = cause, depth = 0; depth < 8; depth += 1) {
+    if (typeof current !== 'object' || current === null) return false;
+    const name = (current as { readonly name?: unknown }).name;
+    if (typeof name === 'string' && names.includes(name)) return true;
+    const inner: unknown = (current as { readonly cause?: unknown }).cause;
+    if (inner === current) return false;
+    current = inner;
+  }
+  return false;
 }
 
 /**
