@@ -312,40 +312,30 @@ test('a `run:` written inside a block scalar mints no run block', () => {
   );
 });
 
-test('a `shell:` written inside a block scalar is not adopted by the step around it', () => {
+test('a phantom scope hides a real error as readily as it invents one', () => {
+  // The escalation direction is the one the issue reported, but the same phantom read
+  // the other way round is worse: the embedded `shell: sh` shadowed the real
+  // workflow-level `bash`, and a genuinely pipefail-exposed site downgraded itself to an
+  // advisory warning the gate does not fail on.
   const source = [
-    'jobs:',
-    '  sample:',
-    '    steps:',
-    '      - name: write a step fixture',
-    '        run: |',
-    "          cat > step.yml <<'YAML'",
-    '          shell: bash',
-    '          YAML',
-    '          producer | head -1',
-    '',
-  ].join('\n');
-  assert.deepEqual(
-    analyzeWorkflow('sample.yml', source).map((finding) => `${finding.severity}:${finding.line}`),
-    ['warning:9'],
-  );
-});
-
-test('a real key beside a block scalar is still structure', () => {
-  // The mask is bounded by the block scalar key's own column, not the dash it opens on,
-  // so a sibling key of a `- run: |` step stays visible.
-  const source = [
+    'defaults:',
+    '  run:',
+    '    shell: bash',
     'jobs:',
     '  sample:',
     '    steps:',
     '      - run: |',
-    '          producer | head -1',
-    '        shell: bash',
+    "          cat > wf.yml <<'YAML'",
+    '          defaults:',
+    '            run:',
+    '              shell: sh',
+    '          YAML',
+    '      - run: git tag | head -1',
     '',
   ].join('\n');
   assert.deepEqual(
-    analyzeWorkflow('sample.yml', source).map((finding) => finding.severity),
-    ['error'],
+    analyzeWorkflow('sample.yml', source).map((finding) => `${finding.severity}:${finding.line}`),
+    ['error:13'],
   );
 });
 

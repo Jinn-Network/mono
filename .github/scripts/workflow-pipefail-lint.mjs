@@ -266,6 +266,11 @@ const BLOCK_SCALAR_KEY =
 // same rule one level up. Masking the whole body rather than tracking heredocs again here
 // covers every shape that can carry phantom structure, not only the heredoc-shaped one,
 // and keeps the shell scanner the only place that knows what a heredoc is.
+//
+// Only the two readers that match at any indent — `collectDefaultShells` and the `run:`
+// key scan — consult it. `collectJobRanges` wants a key at exactly column 2 and
+// `stepShell` skips anything indented past the `run:` key it started from, and a body
+// line is by definition indented past its own key, so neither can see one.
 function blockScalarBodies(lines) {
   const inside = new Array(lines.length).fill(false);
   for (let index = 0; index < lines.length; index += 1) {
@@ -275,7 +280,8 @@ function blockScalarBodies(lines) {
     const match = BLOCK_SCALAR_KEY.exec(lines[index]);
     if (match === null) continue;
     // The body is indented past the key's own column, which for `- run: |` is the key
-    // rather than the dash — so a sibling key of that step stays visible.
+    // rather than the dash — the same measurement `collectRunBlocks` makes of its own
+    // `run:` key, so the mask ends exactly where that reader's body does.
     const keyIndent = match.groups.indent.length + (match.groups.dash?.length ?? 0);
     for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
       const line = lines[cursor];
@@ -314,12 +320,12 @@ function collectDefaultShells(lines, inBlockScalar) {
 
 // The lines each top-level job spans, so a job-level `defaults:` is resolved against the
 // steps it actually covers rather than leaking into the next job.
-function collectJobRanges(lines, inBlockScalar) {
+function collectJobRanges(lines) {
   const starts = [];
   let inJobs = false;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (line.trim() === '' || line.trimStart().startsWith('#') || inBlockScalar[index]) continue;
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
     if (/^jobs:\s*$/u.test(line)) {
       inJobs = true;
       continue;
@@ -359,11 +365,11 @@ function readShellKey(line) {
 // lines above the `run:` key at all, and walking backward would cross the *previous*
 // step's `run:` body — whose lines all sit at `indent > keyIndent` and are skipped —
 // and return that step's `shell:`. So the backward arm is skipped entirely there.
-function stepShell(lines, runLine, keyIndent, opensStep, inBlockScalar) {
+function stepShell(lines, runLine, keyIndent, opensStep) {
   for (const direction of opensStep ? [1] : [-1, 1]) {
     for (let index = runLine + direction; index >= 0 && index < lines.length; index += direction) {
       const line = lines[index];
-      if (line.trim() === '' || inBlockScalar[index]) continue;
+      if (line.trim() === '') continue;
       const indent = indentOf(line);
       if (indent > keyIndent) continue;
       if (indent < keyIndent - 1) {
@@ -393,7 +399,7 @@ export function collectRunBlocks(source) {
   const lines = source.split('\n');
   const inBlockScalar = blockScalarBodies(lines);
   const defaultScopes = collectDefaultShells(lines, inBlockScalar);
-  const jobRanges = collectJobRanges(lines, inBlockScalar);
+  const jobRanges = collectJobRanges(lines);
   const blocks = [];
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -423,7 +429,7 @@ export function collectRunBlocks(source) {
     }
     if (body.length === 0) continue;
 
-    const declared = stepShell(lines, index, keyIndent, match.groups.dash !== undefined, inBlockScalar);
+    const declared = stepShell(lines, index, keyIndent, match.groups.dash !== undefined);
     const inherited = inheritedShell(defaultScopes, jobRanges, index);
     blocks.push({ runLine: index + 1, declared, shell: declared ?? inherited, body });
   }
