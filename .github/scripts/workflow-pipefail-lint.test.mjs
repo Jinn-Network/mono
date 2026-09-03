@@ -261,6 +261,94 @@ test('a heredoc opener ending on a pipe still spans its body as one pipeline', (
   );
 });
 
+test('a workflow written through a heredoc contributes no `defaults:` to the enclosing file', () => {
+  // The block scalar holding the heredoc is a string, so the `defaults:` inside it is
+  // text. Read as structure it becomes a job-level scope and escalates the *next*,
+  // entirely unrelated step from `warning` to `error` — and there is no honest place to
+  // write the allow annotation, since the real site is safe for the reason the lint
+  // already models.
+  const source = [
+    'jobs:',
+    '  sample:',
+    '    steps:',
+    '      - name: write a workflow fixture',
+    '        run: |',
+    "          cat > wf.yml <<'YAML'",
+    '          defaults:',
+    '            run:',
+    '              shell: bash',
+    '          YAML',
+    '      - name: real step, no shell declared',
+    '        run: |',
+    '          producer | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => `${finding.severity}:${finding.line}`),
+    ['warning:13'],
+  );
+});
+
+test('a `run:` written inside a block scalar mints no run block', () => {
+  // The same class one key over: an embedded `- run: |` read as structure gives the lint
+  // a step that does not exist, with a body it invents by indentation.
+  const source = [
+    'jobs:',
+    '  sample:',
+    '    steps:',
+    '      - name: write a workflow fixture',
+    '        shell: bash',
+    '        run: |',
+    "          cat > wf.yml <<'YAML'",
+    '          - run: |',
+    '              git tag | head -1',
+    '          YAML',
+    '',
+  ].join('\n');
+  assert.deepEqual(analyzeWorkflow('sample.yml', source), []);
+  assert.deepEqual(
+    collectRunBlocks(source).map((block) => block.runLine),
+    [6],
+  );
+});
+
+test('a `shell:` written inside a block scalar is not adopted by the step around it', () => {
+  const source = [
+    'jobs:',
+    '  sample:',
+    '    steps:',
+    '      - name: write a step fixture',
+    '        run: |',
+    "          cat > step.yml <<'YAML'",
+    '          shell: bash',
+    '          YAML',
+    '          producer | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => `${finding.severity}:${finding.line}`),
+    ['warning:9'],
+  );
+});
+
+test('a real key beside a block scalar is still structure', () => {
+  // The mask is bounded by the block scalar key's own column, not the dash it opens on,
+  // so a sibling key of a `- run: |` step stays visible.
+  const source = [
+    'jobs:',
+    '  sample:',
+    '    steps:',
+    '      - run: |',
+    '          producer | head -1',
+    '        shell: bash',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => finding.severity),
+    ['error'],
+  );
+});
+
 test('a pipeline spanning body lines is still one pipeline', () => {
   assert.deepEqual(severities(['git tag --list \\', '  | grep -q v1'].join('\n'), { shell: 'bash' }), [
     'error:grep -q/-m',
