@@ -92,6 +92,17 @@ test('an unguarded compound is still read through, and only the guarded part of 
   ]);
 });
 
+test('a redirection is not a list separator: the pipe on its right is still a pipe', () => {
+  // `2>&1` and `&>` carry an `&` that only looks like the background operator. Reading it
+  // as one would cut the pipeline in two and lose the producer entirely — a silent hole
+  // in the gate, which is the failure mode this lint exists to close.
+  assert.deepEqual(severities('producer 2>&1 | grep -q needle', { shell: 'bash' }), [
+    'error:grep -q/-m',
+  ]);
+  assert.deepEqual(severities('producer |& grep -q needle', { shell: 'bash' }), ['error:grep -q/-m']);
+  assert.deepEqual(severities('producer 2>&1 | grep -q needle || true', { shell: 'bash' }), []);
+});
+
 test('the finding names the offending pipeline, not the compound wrapper around it', () => {
   const result = findings('{ producer | head -1; echo done; }', { shell: 'bash' });
   assert.equal(result.length, 1);

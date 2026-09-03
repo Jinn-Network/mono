@@ -148,7 +148,7 @@ function shellTokens(text) {
   // background operator — reading it as a list separator would cut a pipeline in two and
   // lose the pipe entirely.
   const isRedirectAmpersand = (index) =>
-    text[index] === '&' && ('<>'.includes(text[index - 1] ?? '') || text[index + 1] === '>');
+    text[index] === '&' && ((index > 0 && '<>'.includes(text[index - 1])) || text[index + 1] === '>');
   const isOperator = (index) =>
     mask[index] === true && '&|;()'.includes(text[index]) && !isRedirectAmpersand(index);
   const isBreak = (index) => (mask[index] === true && /\s/u.test(text[index])) || isOperator(index);
@@ -336,7 +336,7 @@ function sedStopsEarly(words) {
   for (let index = 1; index < words.length; index += 1) {
     const word = words[index];
     if (word.startsWith('-') && word !== '--') continue;
-    if (/(?:^|[;{}\n])\s*[0-9,$~+]*\s*q(?:[;}\s]|$)/u.test(unquote(word))) return true;
+    if (/(?:^|[;{}\n])\s*(?:[0-9,$~+]+\s*)?q(?:[;}\s]|$)/u.test(unquote(word))) return true;
   }
   return false;
 }
