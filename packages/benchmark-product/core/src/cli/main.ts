@@ -54,6 +54,7 @@ import {
   runCancel,
   runLaunch,
   runLock,
+  draftSampleSizeAdvisory,
   publicationAccounting,
   publicationConfigure,
   publicationRegister,
@@ -98,6 +99,7 @@ import type { BeaconReference, DomainBindingMechanism, PublicBundleVerificationR
 import { DOMAIN_BINDING_MECHANISM_NAMES, exportFreezeRepo, summarizeVerificationOutcome, verifyFreezeRepo } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
+import { formatSampleSizeAdvisory } from "../run/sample-size-advisory.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { DEFAULT_PUBLICATION_SOURCE_NAME, requireRunState } from "../run/state.js";
 import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
@@ -159,7 +161,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   quote            --workspace <dir> --principal <id> --draft <draftId>
                    [--ack-provider-network-costs]
   lock             --workspace <dir> --principal <id> --draft <draftId>
-                   [--ack-provider-network-costs] [--no-anchor]
+                   --ack-sample-size [--ack-provider-network-costs] [--no-anchor]
   anchor           --workspace <dir> --principal <id> --draft <draftId>
                    --subject lock|matrix [--provider <profileUri>] [--endpoint <url>]
   bind             --workspace <dir> --principal <id> --draft <draftId>
@@ -282,7 +284,10 @@ const PREVIEW_FLAGS = ["workspace", "principal", "json", "draft", "items"] as co
 const PROVIDER_ACK_FLAG = "ack-provider-network-costs" as const;
 const QUOTE_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
 const NO_ANCHOR_FLAG = "no-anchor" as const;
-const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG, NO_ANCHOR_FLAG] as const;
+const SAMPLE_SIZE_ACK_FLAG = "ack-sample-size" as const;
+const LOCK_FLAGS = [
+  "workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG, NO_ANCHOR_FLAG, SAMPLE_SIZE_ACK_FLAG,
+] as const;
 const ANCHOR_FLAGS = ["workspace", "principal", "json", "draft", "subject", "provider", "endpoint"] as const;
 const BIND_FLAGS = ["workspace", "principal", "json", "draft", "beacon-source", "beacon-round", "beacon-value"] as const;
 const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider", "endpoint", "file", "clear"] as const;
@@ -404,6 +409,44 @@ function requireProviderNetworkCostAcknowledgement(
   }
   if (!jsonMode) context.progress?.(PROVIDER_NETWORK_COST_DISCLOSURE);
   return true;
+}
+
+/**
+ * The seal-time sample-size advisory gate (issue #2978).
+ *
+ * The lock is irreversible and, until this gate, accepted any replicate and item count without
+ * comment — while the interval those counts imply was computable before a single cell was
+ * dispatched. Refusing until the operator repeats the command with the flag is the same shape as
+ * the provider-cost gate above, and for the same reason: this CLI is non-interactive, so a flag is
+ * the only honest way to ask a question and get an answer. The refusal detail carries the whole
+ * advisory, so the first refused invocation is where the operator reads the width.
+ *
+ * Returns the acknowledged advisory line, or `undefined` when there is none to acknowledge. The
+ * caller prints it on the success path rather than this gate streaming it: `--json` already
+ * carries the advisory in the lock envelope, and stdout — beside the `locked draft ...` receipt —
+ * is that field's human analogue. `context.progress` is the launch verb's channel (nothing else
+ * streams before launch), and the width an operator sealed belongs in the same captured output as
+ * the digest they sealed it into.
+ */
+function requireSampleSizeAdvisoryAcknowledgement(
+  args: ParsedArgs,
+  workspaceDir: string,
+  draftId: string,
+): string | undefined {
+  const planned = draftSampleSizeAdvisory(workspaceDir, draftId);
+  // No advisory means no lock could seal this draft right now; `runLock` below says why, and
+  // demanding an acknowledgement of a width that does not exist would bury that answer.
+  if (planned === undefined) return undefined;
+  const advisory = formatSampleSizeAdvisory(planned);
+  if (!present(args, SAMPLE_SIZE_ACK_FLAG)) {
+    refuse(
+      "invalid-invocation",
+      `--${SAMPLE_SIZE_ACK_FLAG}`,
+      `${advisory}\nThe lock is irreversible. Change the sample size now, or repeat the command with `
+        + `--${SAMPLE_SIZE_ACK_FLAG} to seal at this n.`,
+    );
+  }
+  return advisory;
 }
 
 function withProviderAcknowledgement<T>(
@@ -1052,13 +1095,24 @@ async function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boole
   const acknowledged = requireProviderNetworkCostAcknowledgement(
     args, context, opContext.workspaceDir, draftId, jsonMode,
   );
+  // Only an advisory the operator was actually shown is sealed as acknowledged; when there was
+  // none to show, the lock below refuses and nothing is sealed either way.
+  const sampleSizeAdvisory = requireSampleSizeAdvisoryAcknowledgement(
+    args, opContext.workspaceDir, draftId,
+  );
 
-  const locked = runLock(opContext, { draftId });
+  const locked = runLock(opContext, {
+    draftId,
+    acknowledgedSampleSizeAdvisory: sampleSizeAdvisory !== undefined,
+  });
   const result = withProviderAcknowledgement(locked, acknowledged);
   const rendered = renderResult(
     result,
     jsonMode,
-    (value) => `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
+    // The acknowledged width prints above the receipt, so human-mode stdout says at what n the
+    // digest below it was sealed. `--json` carries the same pair in the envelope.
+    (value) => (sampleSizeAdvisory === undefined ? "" : `${sampleSizeAdvisory}\n`)
+      + `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
   );
   if (!locked.ok || present(args, NO_ANCHOR_FLAG)) return rendered;
 
