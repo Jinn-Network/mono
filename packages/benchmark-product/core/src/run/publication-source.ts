@@ -42,6 +42,7 @@ import { createArchiveHttpHandler, createFsBlobStore, IMMUTABLE_CACHE_CONTROL } 
 import { sha256 as publicationSha256, type CasResult, type PublicationJournal, type PublicationJournalStore } from "@jinn-network/record-publication";
 import { atomicWriteFileSync, fsyncDirectorySync, readFileIfExistsSync } from "../fs/atomic.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
+import { assertWorkspace } from "../workspace/workspace.js";
 import { refuse } from "../errors.js";
 import { publicationJournalPath, publicationServeRoot, publicationStatePath, runsDir, runStatePath } from "../workspace/layout.js";
 import { acquirePublicationLock } from "./publication-lock.js";
@@ -184,6 +185,10 @@ async function readWellKnownSources(
  * root; only this writer used to assume there was one, which silently made every source but the
  * last-written undiscoverable. Entries are sorted so the same set of sources always seals to the
  * same bytes.
+ *
+ * The merge is a read-modify-write, so unlike the blind overwrite it replaces it is NOT idempotent
+ * under concurrency: every caller must already hold `withWorkspacePublicationSourceLock`, which is
+ * workspace-wide rather than per-source and so serializes writers of different source names too.
  *
  * `undefined` position means the source has never appended: there is no archive root to point a
  * consumer at, and no document is written -- including no rewrite that would touch other sources.
@@ -388,6 +393,10 @@ export async function refreshWorkspacePublicationWellKnown(
  * verb that owns that draft, and serving the rest of the workspace must not be blocked by it.
  */
 export function resolveWorkspacePublicationSourceName(workspaceDir: string): string {
+  // Asserted here too, not only by the serve path that calls this first: a directory that is not
+  // a workspace has no runs to read, and "your runs disagree" would be the wrong thing to tell an
+  // operator who mistyped the path.
+  assertWorkspace(workspaceDir);
   const directory = runsDir(workspaceDir);
   let files: readonly string[];
   try { files = readdirSync(directory); } catch { return DEFAULT_PUBLICATION_SOURCE_NAME; }
