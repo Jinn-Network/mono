@@ -143,7 +143,7 @@ test("the local home runs the zero-key sample to a verified report and verifies 
 
   await auditedGoto(page, "/");
   await typeByKeyboard(page, page.getByLabel("Bundle directory on this machine"), bundle);
-  await submitAction(page, "Run all six checks", /6 of 6 checks passed/u);
+  await submitAction(page, "Run the bundle checks", /6 of 6 checks passed/u);
   await expect(page.getByText("claim-consistency", { exact: false })).toBeVisible();
   await auditState(page, "reader-only bundle verification");
 });
