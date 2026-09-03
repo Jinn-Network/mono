@@ -121,9 +121,19 @@ export interface VerdictPorts {
   }) => Promise<CanonicalVerdictDelivery | undefined>;
 }
 
+/**
+ * The exact broadcaster surface this port consumes: `execute`, nothing else. It never calls
+ * `classify()` and never calls `SafeBroadcastPort.broadcastCreateTask()`, so demanding the whole
+ * `BaseVenueSafeBroadcaster` only excluded working broadcasters that carry a complete receipt but
+ * no posting leg -- operator's `createDirectSafeBroadcaster`, which the e2e verdict legs use
+ * (issue #2665). Widening the accepted input this way is source-compatible: every existing caller
+ * passes a full `BaseVenueSafeBroadcaster`, which still satisfies it.
+ */
+export type VerdictSafeBroadcaster = Pick<BaseVenueSafeBroadcaster, "execute">;
+
 export interface VerdictPortDeps {
   readonly publicClient: PublicClient;
-  readonly broadcaster: BaseVenueSafeBroadcaster;
+  readonly broadcaster: VerdictSafeBroadcaster;
   readonly safeAddress: Address;
   readonly routerAddress: Address;
   readonly mechAddress: Address;

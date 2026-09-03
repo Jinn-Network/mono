@@ -258,6 +258,14 @@ jobs:
         with:
           version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
       - run: yarn typecheck
+      # Typecheck the test tree too (issue #2665). `yarn typecheck` compiles
+      # tsconfig.json, which excludes `test/`, so nothing type-checked the
+      # fixtures, helpers and e2e rigs: an `as never` cast papering over a
+      # broken port contract, and a call passing 8 positional arguments to a
+      # 9-required-argument function, both survived a green required gate.
+      # This reuses the portal `dist/` trees `yarn typecheck` just built, so
+      # it costs one extra `tsc` pass rather than a second stack build.
+      - run: yarn typecheck:test
       # Late-mount lint: blocks app.METHOD(...) outside the startApiServer
       # call graph. Catches the Hono "matcher is already built" crash class
       # at code-review time. See jinn-mono-u34i.
