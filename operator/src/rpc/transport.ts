@@ -315,6 +315,11 @@ function sanitizeStructuredLeaf(value: unknown): unknown {
   // walk. Say so rather than emitting a misleading `{}`.
   if (typeof value === 'object' && value !== null) return UNSERIALIZABLE_MARKER;
   if (typeof value === 'function' || typeof value === 'symbol') return UNSERIALIZABLE_MARKER;
+  // A bigint is the one remaining primitive `JSON.stringify` throws on, and
+  // the event ring is JSON-serialized on the way out of the notifications
+  // endpoint. Marker it, matching `redactLeaf`'s treatment of the same value
+  // in the debug bundle (#3120).
+  if (typeof value === 'bigint') return UNSERIALIZABLE_MARKER;
   return value;
 }
 
