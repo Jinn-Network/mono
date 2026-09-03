@@ -430,6 +430,15 @@ function arrayLiterals(source, key) {
  * Quote-, regex- and bracket-aware for the same reason `balancedEnd` is: a comma inside a quoted
  * path, a regex literal, or a nested call or array belongs to that element, not to the list. Empty
  * elements — the text after a trailing comma — are dropped rather than returned blank.
+ *
+ * Only part of that walk has an observable witness below, and this says which rather than implying
+ * all of it does. Call parentheses do: without them a multi-argument path helper splits into
+ * several single-string elements and every one of them is credited, which is the #3090 fail-open
+ * itself. The quote and regex walks, the `[`/`]` pair and the `{`/`}` pair are the defensive
+ * convention every scanner in this file follows and are unwitnessable in this reader's output —
+ * `stringLiterals` skips a regex literal itself and `resolveQuoted` reads through a nested array,
+ * so splitting differently there changes which elements come back without changing the paths read
+ * out of them. They are kept because the next shape added here should not have to rediscover them.
  */
 function arrayElements(inner) {
   const elements = [];
@@ -511,6 +520,17 @@ function stringLiterals(text) {
 function resolveQuoted(literal, configDir, base, literalStart) {
   const paths = [];
   for (const element of arrayElements(literal)) {
+    const lead = element.text.length - element.text.trimStart().length;
+    const text = element.text.trim();
+    // A nested array is a list of elements, not an element: read through it rather than reading
+    // its entries as one unreadable element. `[['..'], '../..']` is a shape this gate already
+    // pinned before the one-string rule arrived, and a nested array of several entries has to keep
+    // reading as several.
+    if (text.startsWith('[') && balancedEnd(text, 1, '[', ']') === text.length - 1) {
+      const at = literalStart + element.start + lead + 1;
+      paths.push(...resolveQuoted(text.slice(1, -1), configDir, base, at));
+      continue;
+    }
     const quoted = stringLiterals(element.text);
     if (quoted.length !== 1) continue;
     paths.push({
@@ -876,11 +896,22 @@ test('a list element holding more than one string is unreadable, not two paths',
   assert.deepEqual(wired(`globalSetup: [path.join(dir, '..', 'g.ts'), './h.ts']`), [
     'packages/x/h.ts',
   ]);
-  // A comma inside a quoted path, a regex literal, or a nested array belongs to its element rather
-  // than splitting the list — the three shapes `arrayElements` tracks besides call parentheses.
+  // A comma inside a quoted path belongs to that path, not to the list.
   assert.deepEqual(allowed(`fs: { allow: ['../a,b'] }`), ['packages/a,b']);
-  assert.deepEqual(allowed(`fs: { allow: [pick(/a,b/u, '../..')] }`), ['']);
+  // A nested array is read THROUGH, so its entries stay separate elements rather than collapsing
+  // into one unreadable multi-string element. Without that read-through the second line below
+  // drops both of its paths.
   assert.deepEqual(allowed(`fs: { allow: [['../..'], '..'] }`), ['', 'packages']);
+  assert.deepEqual(allowed(`fs: { allow: [['../a', '../b'], '..'] }`), [
+    'packages/a',
+    'packages/b',
+    'packages',
+  ]);
+  // …and the one-string rule still applies inside it.
+  assert.deepEqual(allowed(`fs: { allow: [[path.join(a, '..', 'b')], '..'] }`), ['packages']);
+  // A regex literal is skipped rather than read for paths — the `/['"]/u` shape this file's other
+  // readers already have to survive. Read as text it yields the quoted fragment after it.
+  assert.deepEqual(allowed(`fs: { allow: [pick(/['"]/u, '../..')] }`), ['']);
   // The rule is one string, not one argument. A helper handed a base it cannot see still credits
   // its single quoted argument — the residual limit stated on `resolveQuoted`, pinned so a reader
   // does not mistake it for a shape this gate closes.

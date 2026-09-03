@@ -42,8 +42,10 @@ carries the worked example.
 Both readings scan the config text for quoted paths, one list element at a time, and
 read an element only when it holds exactly one string. `fileURLToPath(new URL('../..',
 import.meta.url))` reads fine; `path.join(base, '..', 'shared')` holds two strings and
-is unreadable, so the gate reds rather than guessing which one is the path. Write the
-path as a single string if a helper would otherwise split it.
+is unreadable, so the element is dropped rather than guessed at. A dropped `setupFiles`
+or `globalSetup` entry reds the wiring gate; a dropped `server.fs.allow` entry just
+withholds coverage, which is only visible on a web-shaped suite. Write the path as a
+single string if a helper would otherwise split it.
 
 A config that declares `projects` gets one Vite config per entry, and the gate reads
 `server.fs.allow` the same way: an allowance inside a `projects` entry covers only the
@@ -59,11 +61,10 @@ operator's own home-plus-temp seam at `operator/test/_support/`) names an entry 
 does not resolve to its seam, if a web-shaped config names a seam its own environment
 cannot reach — any environment other than `node`, and browser mode, which declares no
 environment at all — and if either seam file has moved out from under the configs that
-point at it. That is the regression coverage for
-the wiring; `tmp-isolation.test.ts` next to this README is the behavioural coverage
-for the seam itself, and runs under `packages/benchmark-product/core`. Note what the
-wiring gate reads is config text — that a suite still *starts* is proven by the package's
-own CI job running it, not here.
+point at it. That is the regression coverage for the wiring; `tmp-isolation.test.ts`
+next to this README is the behavioural coverage for the seam itself, and runs under
+`packages/benchmark-product/core`. Note what the wiring gate reads is config text —
+that a suite still *starts* is proven by the package's own CI job running it, not here.
 
 ## Why this is a directory and not a package
 
