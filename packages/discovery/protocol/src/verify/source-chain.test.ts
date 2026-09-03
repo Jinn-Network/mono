@@ -89,6 +89,17 @@ function makeHwmStore(seed?: { mark: HighWaterMark }): HighWaterMarkStore {
   };
 }
 
+function futureHead(entryDigest: `sha256:${string}`, issuedAt: string, refreshBy: string): SourceHead {
+  return {
+    protocol: RECORD_DISCOVERY_VERSION,
+    origin: `${AGENT}/feed`,
+    sequence: GENESIS_SEQUENCE,
+    entry: entryDigest,
+    issuedAt,
+    refreshBy,
+  };
+}
+
 async function* oneEntry(entry: AnnouncementEntry): AsyncIterable<{ entry: AnnouncementEntry; signature: DsseEnvelope }> {
   yield { entry, signature: signedEntry(entry) };
 }
@@ -432,17 +443,6 @@ describe("verifySourceChain: the published-profile refreshBy ceiling (#3467, §5
 });
 
 describe("verifySourceChain: the future-issued head the ceiling alone cannot see (#3467, §5.2)", () => {
-  function futureHead(entryDigest: `sha256:${string}`, issuedAt: string, refreshBy: string): SourceHead {
-    return {
-      protocol: RECORD_DISCOVERY_VERSION,
-      origin: `${AGENT}/feed`,
-      sequence: GENESIS_SEQUENCE,
-      entry: entryDigest,
-      issuedAt,
-      refreshBy,
-    };
-  }
-
   it("rejects a head issued further into the future than one freshness window, even with a conformant window", async () => {
     // Left open by a refreshBy-vs-issuedAt ceiling alone, and worse here than
     // on the revalidation path: on first adoption this head also becomes the
@@ -495,5 +495,54 @@ describe("verifySourceChain: the future-issued head the ceiling alone cannot see
     });
 
     expect(outcome).toEqual({ status: "broken-chain", at: "refresh-by-ceiling" });
+  });
+});
+
+describe("verifySourceChain: a refused future-dated head writes no monotonicity floor (#3491, §5.2)", () => {
+  // The damage the window rule exists to prevent is not the acceptance, it is
+  // what the acceptance PERSISTS. An admitted `issuedAt` becomes the
+  // consumer's strict-increase floor -- `native_discovery_source_checkpoints.
+  // issued_at` for the operator, the mark's `issuedAt` for the corpus mirror
+  // -- and nothing in the tree repairs one that has been set beyond reach, so
+  // a floor in 2099 refuses every honest head after it, forever. These two
+  // pin the property the outcome assertions above cannot see: the store is
+  // never written on the way to the refusal.
+  const FUTURE = ["2099-01-01T00:00:00.000Z", "2099-01-02T00:00:00.000Z"] as const;
+
+  it("creates no mark on first adoption", async () => {
+    const entry = genesisEntry();
+    const hwm = makeHwmStore();
+    const head = futureHead(sealJson(entry).digest, ...FUTURE);
+
+    const outcome = await verifySourceChain({
+      head,
+      headSignature: signedHead(head),
+      entries: oneEntry(entry),
+      ports: { keys, sigs, fresh, hwm, now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: true },
+    });
+
+    expect(outcome).toEqual({ status: "broken-chain", at: "head-issued-ahead" });
+    await expect(hwm.get(SOURCE)).resolves.toBeUndefined();
+  });
+
+  it("leaves a returning consumer's honest mark exactly where it was", async () => {
+    const entry = genesisEntry();
+    const mark: HighWaterMark = {
+      sequence: GENESIS_SEQUENCE,
+      entry: sealJson(entry).digest,
+      issuedAt: "2026-07-27T12:00:00.000Z",
+    };
+    const hwm = makeHwmStore({ mark });
+    const head = futureHead(sealJson(entry).digest, ...FUTURE);
+
+    const outcome = await verifySourceChain({
+      head,
+      headSignature: signedHead(head),
+      entries: oneEntry(entry),
+      ports: { keys, sigs, fresh, hwm, now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: false },
+    });
+
+    expect(outcome).toEqual({ status: "broken-chain", at: "head-issued-ahead" });
+    await expect(hwm.get(SOURCE)).resolves.toEqual(mark);
   });
 });

@@ -7,10 +7,12 @@ import { BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
 import { BUNDLE_FORMAT, PUBLIC_BUNDLE_FILES } from "./legacy-closures.js";
 import {
   BUNDLE_V5_FORMAT,
+  FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
+  SUPPORTED_BUNDLE_FORMATS,
 } from "@colophon-claims/verify";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
 import {
@@ -92,7 +94,7 @@ describe("product documentation consistency", () => {
     };
     const coreReadme = read(coreReadmePath);
 
-    expect(parity.entries).toHaveLength(45);
+    expect(parity.entries).toHaveLength(46);
     for (const entry of parity.entries) {
       expect(coreReadme, entry.operation).toContain(`\`${entry.operation}\``);
       expect(coreReadme, entry.cliVerb).toContain(`\`${PRODUCT_BRANDING.commandName} ${entry.cliVerb}`);
@@ -102,7 +104,7 @@ describe("product documentation consistency", () => {
 
     for (const operation of GATED_OPERATIONS) expect(coreReadme).toContain(`\`${operation}\``);
     for (const code of PRODUCT_ERROR_CODES) expect(coreReadme).toContain(`\`${code}\``);
-    expect(coreReadme).toContain("45 generated operations");
+    expect(coreReadme).toContain("46 generated operations");
     expect(coreReadme).toContain("ten gated operations");
     expect(coreReadme).toContain("11 typed error codes");
     expect(coreReadme).toContain("`{\"ok\":true,\"result\":...}`");
@@ -176,6 +178,18 @@ describe("product documentation consistency", () => {
     expect(guide).toContain("GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null");
     expect(guide).toContain("git add -A -f");
     expect(guide).toContain("--no-gpg-sign");
+    // The guide said "a qualification bundle" with no format qualifier while the export accepted a
+    // fixed two (issue #3540), so a reader could not tell which bundle it would take. An accepted
+    // format this section does not name is that same defect returning -- scoped to the section,
+    // because every format is named somewhere in a document that describes all of them.
+    const freezeStart = guide.indexOf("\n## Freeze-artifact repository\n");
+    expect(freezeStart).toBeGreaterThan(-1);
+    const freezeEnd = guide.indexOf("\n## ", freezeStart + 1);
+    const freezeSection = guide.slice(freezeStart, freezeEnd === -1 ? undefined : freezeEnd);
+    for (const format of SUPPORTED_BUNDLE_FORMATS) {
+      const accepted = FREEZE_REPO_BUNDLE_SUPPORT[format].qualification;
+      expect(freezeSection.includes(`\`${format}\``), `${format} accepted=${accepted}`).toBe(accepted);
+    }
   });
 
   it("pins the published evidence-native v5 closure, its two profiles, and its reader line", () => {

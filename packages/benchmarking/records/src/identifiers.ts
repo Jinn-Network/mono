@@ -71,6 +71,7 @@ export const BEACON_SOURCE_EXTENSION =
  */
 export const SAMPLE_SIZE_ADVISORY_EXTENSION =
   "https://spec.jinn.network/extensions/sample-size-advisory/v1";
+
 /**
  * The disclosure-specification record (design `2026-08-19-disclosure-specification-record.md` §4.1,
  * issue #2839): one sealed record naming exactly one subject and exactly six variables, each

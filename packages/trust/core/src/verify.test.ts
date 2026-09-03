@@ -164,6 +164,7 @@ const VOUCHER_DID = didPkh(8453, "0x2222222222222222222222222222222222222222");
 const OTHER_VOUCHER_DID = didPkh(8453, "0x3333333333333333333333333333333333333333");
 const KEY_2 = "did:key:z6MkfKEY22222222222222222222222222222222222";
 const CONSENT_KEY = "did:key:z6MkfCONSENT11111111111111111111111111111";
+const OTHER_AGENT = "urn:uuid:eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 
 describe("verifyEnvelopeBinding", () => {
   test("a real sealed KeyBinding can carry and verify the admission-receipt scope (§7.42/§7.45)", async () => {
@@ -533,6 +534,74 @@ describe("verifyEnvelopeBinding", () => {
     expect(outcome.ok).toBe(true);
   });
 
+  // The three procedures below resolve bindings directly rather than through
+  // `verifyEnvelopeBinding`, so each needs the same (key, agent) assertion the
+  // step-2 tests above pin (issue #3572). A key-only resolver is the realistic bug.
+  test("a consent countersignature by a key bound to a DIFFERENT Agent IRI does not consent (§7.4a option 2)", async () => {
+    const binding = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+      voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+      consent: { keyid: CONSENT_KEY, sig: btoa("irrelevant-in-this-fake") },
+    });
+    // Bindings-scoped, so the scope guard alone would wave it through: the
+    // agent assertion has to run first for this to be refused at all.
+    const foreignConsentingBinding = keyBinding({
+      agent: OTHER_AGENT,
+      key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+      scope: ["bindings"],
+    });
+    const keyOnlyResolver: BindingResolver = {
+      async resolveBinding(query) {
+        if (query.key === CONSENT_KEY) return resolvedBinding({ binding: foreignConsentingBinding });
+        return resolvedBinding({
+          binding,
+          isGenesis: false,
+          incumbentControlVoucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+        });
+      },
+    };
+    const envelopeBytes = sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2);
+
+    const outcome = await verifyEnvelopeBinding(
+      { envelopeBytes, key: KEY_2, agent: AGENT, family: "deliveries", atTime: "2026-03-01T00:00:00Z" },
+      { bindingResolver: keyOnlyResolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+    );
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
+    expect(outcome.reason).toBe("consent-chain-violation");
+  });
+
+  test("a revocation signed by a bindings-scoped key of a DIFFERENT Agent IRI does not revoke (§7.4b)", async () => {
+    const binding = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+    });
+    const foreignRevokerBinding = keyBinding({
+      agent: OTHER_AGENT,
+      key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+      voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+      scope: ["bindings"],
+    });
+    const keyOnlyResolver: BindingResolver = {
+      async resolveBinding(query) {
+        if (query.key === CONSENT_KEY) return resolvedBinding({ binding: foreignRevokerBinding });
+        return resolvedBinding({
+          binding,
+          revocations: [revocationEntry(CONSENT_KEY, "2026-02-01T00:00:00Z")],
+        });
+      },
+    };
+    const envelopeBytes = sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2);
+
+    const outcome = await verifyEnvelopeBinding(
+      { envelopeBytes, key: KEY_2, agent: AGENT, family: "deliveries", atTime: "2026-03-01T00:00:00Z" },
+      { bindingResolver: keyOnlyResolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+    );
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+  });
+
   test("policy rejection at step 5 when applyPolicy is not disabled", async () => {
     const binding = keyBinding({
       agent: AGENT,
@@ -669,6 +738,105 @@ describe("settlementJoinCheck (§7.5a)", () => {
       { bindingResolver: resolver },
     );
     expect(outcome.ok).toBe(false);
+  });
+  // §7.5a is the money-adjacent join: it ties a verdict's DSSE key to a
+  // settling on-chain actor, so a key-only resolver must not let one agent's
+  // key stand in for another's on any of the three legs (issue #3572). Each
+  // foreign binding below carries the scope the leg wants, so the agent
+  // assertion is the only thing that can refuse it.
+  test("(e) a verdict leg the resolver returned for a different Agent IRI fails the join", async () => {
+    const keyOnlyResolver: BindingResolver = {
+      async resolveBinding(query) {
+        if (query.key === VERDICT_KEY) {
+          return resolvedBinding({ binding: { ...verdictBinding(), agent: OTHER_AGENT } });
+        }
+        return resolvedBinding({ binding: settlementBinding() });
+      },
+    };
+
+    const outcome = await settlementJoinCheck(
+      {
+        verdictKey: VERDICT_KEY,
+        settlementDeclarationKey: SETTLEMENT_KEY,
+        claimedEvaluatorAgent: AGENT,
+        family: "verdicts",
+        envelopeEffectiveTime: "2026-03-01T00:00:00Z",
+        claimTime: "2026-03-05T00:00:00Z",
+      },
+      { bindingResolver: keyOnlyResolver },
+    );
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
+    expect(outcome.reason).toMatch(/verdict leg does not resolve/);
+  });
+
+  test("(e) a settlement leg the resolver returned for a different Agent IRI fails the join", async () => {
+    const keyOnlyResolver: BindingResolver = {
+      async resolveBinding(query) {
+        if (query.key === VERDICT_KEY) return resolvedBinding({ binding: verdictBinding() });
+        return resolvedBinding({ binding: { ...settlementBinding(), agent: OTHER_AGENT } });
+      },
+    };
+
+    const outcome = await settlementJoinCheck(
+      {
+        verdictKey: VERDICT_KEY,
+        settlementDeclarationKey: SETTLEMENT_KEY,
+        claimedEvaluatorAgent: AGENT,
+        family: "verdicts",
+        envelopeEffectiveTime: "2026-03-01T00:00:00Z",
+        claimTime: "2026-03-05T00:00:00Z",
+      },
+      { bindingResolver: keyOnlyResolver },
+    );
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
+    expect(outcome.reason).toMatch(/settlement leg does not resolve/);
+  });
+
+  test("(e) a settlement leg that drifts to a different Agent IRI by claim time fails the join", async () => {
+    const keyOnlyResolver: BindingResolver = {
+      async resolveBinding(query, atTime) {
+        if (query.key === VERDICT_KEY) return resolvedBinding({ binding: verdictBinding() });
+        if (atTime === "2026-03-01T00:00:00Z") return resolvedBinding({ binding: settlementBinding() });
+        return resolvedBinding({ binding: { ...settlementBinding(), agent: OTHER_AGENT } });
+      },
+    };
+
+    const outcome = await settlementJoinCheck(
+      {
+        verdictKey: VERDICT_KEY,
+        settlementDeclarationKey: SETTLEMENT_KEY,
+        claimedEvaluatorAgent: AGENT,
+        family: "verdicts",
+        envelopeEffectiveTime: "2026-03-01T00:00:00Z",
+        claimTime: "2026-03-05T00:00:00Z",
+      },
+      { bindingResolver: keyOnlyResolver },
+    );
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
+    expect(outcome.reason).toMatch(/not valid \(revoked or expired\) at claim time/);
+  });
+
+  // The join's `ok: true` should carry the agent it PROVED, not the one it was
+  // handed. With the assertion in place the two are equal by construction --
+  // this pins that the successful outcome names the resolved binding's agent.
+  test("(e) a successful join reports the resolved verdict leg's Agent IRI", async () => {
+    const resolver = new FakeBindingResolver()
+      .register({ key: VERDICT_KEY, agent: AGENT, resolved: resolvedBinding({ binding: verdictBinding() }) })
+      .register({ key: SETTLEMENT_KEY, agent: AGENT, resolved: resolvedBinding({ binding: settlementBinding() }) });
+
+    const outcome = await settlementJoinCheck(
+      {
+        verdictKey: VERDICT_KEY,
+        settlementDeclarationKey: SETTLEMENT_KEY,
+        claimedEvaluatorAgent: AGENT,
+        family: "verdicts",
+        envelopeEffectiveTime: "2026-03-01T00:00:00Z",
+        claimTime: "2026-03-05T00:00:00Z",
+      },
+      { bindingResolver: resolver },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.agent).toBe(verdictBinding().agent);
   });
 });
 

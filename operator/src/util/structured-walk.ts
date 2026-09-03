@@ -89,7 +89,17 @@ export function walkStructured(value: unknown, policy: StructuredWalkPolicy): un
       const out: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(node as Record<string, unknown>)) {
         const override = policy.entry?.(key, entry);
-        out[key] = override ? override.value : walk(entry, depth + 1);
+        const value = override ? override.value : walk(entry, depth + 1);
+        // `defineProperty`, not assignment: `JSON.parse` can produce an own
+        // enumerable `__proto__` key, and `out[key] = …` would route that
+        // through the `Object.prototype` setter — re-parenting `out` and
+        // dropping the key from the output entirely.
+        Object.defineProperty(out, key, {
+          value,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
       }
       return out;
     }

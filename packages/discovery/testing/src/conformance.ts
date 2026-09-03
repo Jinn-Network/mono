@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CEILINGS,
   parseSourceHead,
+  splitOrigin,
 } from "@jinn-network/record-discovery-protocol";
 import type {
   DiscoveryQueryService,
@@ -127,6 +128,14 @@ export function runSourceChainConformance(verify: typeof verifySourceChain): voi
           keys: input.seed.keys as never,
           hwm: input.seed.hwm as never,
         });
+        // The seeded mark BEFORE the call, so a refusal can be checked to have
+        // left it alone (#3491). An accepted `issuedAt` is what a consumer
+        // persists as its strict-increase floor, and nothing in the protocol
+        // repairs one set beyond reach -- so "refused" is only half the
+        // contract for every non-`ok` vector here, and an implementation that
+        // writes the mark and THEN refuses would otherwise pass this kit green.
+        const source = splitOrigin(input.head.origin);
+        const markBefore = await ports.hwm.get(source);
         const outcome = await verify({
           head: input.head,
           headSignature: vectorEnvelopeToWire(input.headSignature),
@@ -144,6 +153,10 @@ export function runSourceChainConformance(verify: typeof verifySourceChain): voi
           },
         });
         assertSourceChainOutcome(outcome, vector);
+        if (outcome.status !== "ok") {
+          expect(await ports.hwm.get(source), `${vector.name}: a refusal must persist no high-water mark`)
+            .toEqual(markBefore);
+        }
       });
     }
   });

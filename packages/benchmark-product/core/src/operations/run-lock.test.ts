@@ -345,6 +345,12 @@ describe("runLock — declared beacon source", () => {
     await setUpQuotedDraft(clock);
     const patched = updateDraft(contextFor(clock), { draftId: "draft-1", patch: { beaconSource: "drand/nonesuch" } });
     expect(patched.ok).toBe(false);
+    if (patched.ok) return;
+    // Assert the refusal this test is about, not merely that something refused: `updateDraft`
+    // rejects for several unrelated reasons, and `ok === false` alone would be satisfied by any
+    // of them.
+    expect(patched.error.code).toBe("validation");
+    expect(patched.error.issues?.some((issue) => issue.path.startsWith("beaconSource"))).toBe(true);
   });
 });
 

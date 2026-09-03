@@ -752,6 +752,7 @@ export {
   runAnchor,
   runBind,
   anchoringConfigure,
+  identityBind,
   disclosureDeclare,
   disclosureShow,
   runPreview,
@@ -902,6 +903,12 @@ export type { PublicBundleVerificationCheck, PublicBundleVerificationResult } fr
 export { BEACON_SOURCES, BEACON_SOURCE_IDS, MAX_BEACON_ROUND } from "@colophon-claims/verify";
 export type { BeaconReference, BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
 
+// The declared denominator beside the strict all-slots one (issue #2977). Re-exported for the same
+// reason as the two surfaces above: the product's GUI imports only this package, and a second copy
+// of the derivation would be a second place the two numbers could disagree.
+export { armDenominators } from "@colophon-claims/verify";
+export type { ArmDenominators } from "@colophon-claims/verify";
+
 // PUB-13b: an additive publication-profile projection. This is intentionally not wired into the
 // v2 `publish` operation or CLI: callers opt into its accounting-first, report-optional contract.
 export { BUNDLE_V3_FORMAT } from "./bundle/manifest.js";
@@ -957,3 +964,5 @@ export type { CliContext, CliResult } from "./cli/result.js";
 
 /** The product core's own version, mirrored from package.json. */
 export const PRODUCT_VERSION = "0.1.0";
+// Reader-legible publisher identity (issue #2983).
+export type { IdentityBindInput, IdentityBindResult } from "./operations/index.js";

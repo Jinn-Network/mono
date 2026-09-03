@@ -6,11 +6,12 @@ Verify a public Colophon claim bundle without the Colophon app or any execution 
 npx @colophon-claims/verify@0.2 ./bundle
 ```
 
-Use `--json` for machine-readable output. The reader runs the checks declared by the
-bundle format, covering its manifest, evidence closure, calculations, report, and claim
-consistency. Exit status is `0` when the bundle is valid for the format and profile it
-declares, `1` for an invalid bundle, and `2` for usage or operational failures. A check a
-profile defers is reported as deferred, never as passed, and never as a failure.
+Use `--json` for machine-readable output. The reader runs the checks the bundle's declared
+format closes over, and its verdict names each one — different formats close over different
+checks, so the list is the bundle's, not this README's. Exit status is `0` when the bundle
+is valid for the format and profile it declares, `1` for an invalid bundle, and `2` for
+usage or operational failures. A check a profile defers is reported as deferred, never as
+passed, and never as a failure.
 
 This 0.2 reader supports public bundle formats v2, v4, v5, v6, v7, and v8. It
 intentionally rejects the unrelated accounting bundle v3. Formats v2 and v4 run six
@@ -32,13 +33,13 @@ For this release, `@jinn-network/*` is pinned to the exact
 It is not a floating `@canary` dependency and is not a stable stack release.
 
 Verification opens no network connection, reads no account or API credential, and uploads
-nothing. It checks the bundle's integrity, evidence closure, calculations, report, and claim
-consistency. It does not prove that the producing machine was honest or that the compared
-identities are independent parties.
+nothing. It recomputes the checks the bundle's declared format closes over, against the bytes
+the bundle carries and nothing else. It does not prove that the producing machine was honest
+or that the compared identities are independent parties.
 
 ## Freeze-artifact repositories
 
-A qualification bundle (v4 or v7) can be projected into a public repository of its freeze
+A qualification bundle (v4, v7, or v8) can be projected into a public repository of its freeze
 artifacts — item bank, sources, admission decisions, labels, judge instruments, and the
 screening material. That repository is a **derived artifact, never the claim of record**:
 the sealed records stay the source of truth, and the tree is a pure function of the bundle,

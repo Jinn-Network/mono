@@ -153,6 +153,16 @@
       }
     },
     {
+      "operation": "identityBind",
+      "cliVerb": "identity bind",
+      "authorityGated": false,
+      "description": "Binds the workspace's report-signing key to a domain the operator controls, minting the colophon-domain-binding/1 document a reader supplies to the verifier and naming the exact record to publish at that domain (issue #2983).",
+      "gui": {
+        "status": "unavailable",
+        "reason": "the operator publishes the proof at their own domain, outside any Colophon surface"
+      }
+    },
+    {
       "operation": "importBinaryItemBank",
       "cliVerb": "import item-bank",
       "authorityGated": false,

@@ -327,6 +327,16 @@ export async function fetchSignedEnvelopeFromIpfs(
 }
 
 /**
+ * Byte cap for a trajectory read.
+ *
+ * Larger than the 8 MiB default (#3441): span attributes are truncated at 8000
+ * characters each in `transcript-to-spans/attrs.ts`, but the span count is
+ * unbounded, so a long run's trajectory can legitimately exceed the envelope
+ * default. The bound still exists — an unbounded read would be buffered whole.
+ */
+export const MAX_TRAJECTORY_IPFS_RESPONSE_BYTES = 64 * 1024 * 1024;
+
+/**
  * Fetch a JinnTrajectoryV1 from IPFS by CID.
  * Returns the raw parsed JSON object (caller must validate schema).
  */
@@ -335,7 +345,12 @@ export async function fetchTrajectoryFromIpfs(
   cid: string,
   opts?: FetchFromIpfsOptions,
 ): Promise<unknown> {
-  return fetchFromIpfs(gatewayUrl, cid, opts);
+  return fetchFromIpfs(gatewayUrl, cid, {
+    ...opts,
+    // `?? ` rather than an `...opts` override, so an explicitly-undefined
+    // `maxResponseBytes` still gets the trajectory bound, not the 8 MiB default.
+    maxResponseBytes: opts?.maxResponseBytes ?? MAX_TRAJECTORY_IPFS_RESPONSE_BYTES,
+  });
 }
 
 /**

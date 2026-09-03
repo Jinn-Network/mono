@@ -319,6 +319,18 @@ if (command === "probe-broker") {
     };
     const finishTermination = () => {
       terminationPromise ??= (async () => {
+        // Reap the worker container BEFORE waiting on the `docker run` client, not after. The
+        // cancellation ladder above this process (`shim-script.ts`'s `relayCancellation`) SIGTERMs
+        // the whole harness process group, sleeps `graceMs` (10s by default, `backend.ts`), then
+        // SIGKILLs the group. The wait ladder below can consume that entire budget on its own --
+        // 5s for the client to exit, then 5s more after SIGKILLing it -- so cleanup that runs only
+        // afterwards starts at the exact instant the group is killed. Losing that dead heat leaves
+        // a `--rm` container running with nobody left to remove it, which is the orphan the
+        // cancellation integration test observes minutes later. Issuing `docker rm --force` first
+        // also makes the client exit on its own, so this shortens the wait rather than competing
+        // with it; `cleanup()` below still runs to catch a container that Docker Engine had not
+        // yet created when this call looked, and is idempotent for the ordinary case where it had.
+        const reaped = removeWorkerContainer(dockerPath, containerName);
         if (child !== undefined && !settled) {
           await Promise.race([childSettled, delay(5_000)]);
           if (!settled) {
@@ -326,6 +338,7 @@ if (command === "probe-broker") {
             await Promise.race([childSettled, delay(5_000)]);
           }
         }
+        await reaped;
         await cleanup();
         for (const signal of terminationSignals) process.removeAllListeners(signal);
         process.kill(process.pid, terminationSignal ?? "SIGTERM");

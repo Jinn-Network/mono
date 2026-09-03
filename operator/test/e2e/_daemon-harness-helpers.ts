@@ -74,6 +74,11 @@ import { startApiServer } from '../../src/api/server.js';
 import type { SolverNetRegistry } from '../../src/solver-nets/registry.js';
 import type { Harness } from '../../src/harnesses/types.js';
 import { buildOperatorComposition, type OperatorComposition } from '../../src/daemon/composition-root.js';
+import type { LauncherContract } from '@jinn-network/task-execution-launchers';
+import {
+  makeSweRebenchV2StubLauncher,
+  SWE_REBENCH_V2_STUB_LAUNCHER_ID,
+} from './_swe-rebench-v2-stub-launcher.js';
 import type { JinnConfig } from '../../src/config.js';
 import { CONFIG_SHAPE_VERSION, type ExecutionWiringConfigEntry } from '../../src/config/shape-v2.js';
 import type { MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
@@ -1006,6 +1011,32 @@ export async function startDaemon(
      * `tx-retry.ts`).
      */
     installDefaultEoaBroadcastLock?: boolean;
+    /**
+     * Composition `executionWiring` that REPLACES the built-in prediction.v1 entry. A caller
+     * posting some OTHER solverType through the legacy bridge needs an entry whose
+     * `legacyManifestDigest` equals the on-chain manifest digest of its tasks: the claim
+     * predicate (`buildClaimPredicate`) declines every card whose resolved `workKind` has no
+     * wiring entry, and `resolveLegacyWorkKind` (`work-loop.ts`) resolves that `workKind` by
+     * matching exactly this digest. The entry's `workKind` also becomes the delivered
+     * envelope's `solverType` (`buildLegacyExecutionEnvelope`).
+     *
+     * Replacement rather than addition is deliberate. A legacy-bridged card carries no
+     * `requirements.harness` (`synthesizeLegacyFactsCard` sets `requirements: {}`), so the
+     * backend picks its launcher purely by task profile — and every legacy-bridge launcher
+     * advertises `repository-work/1.0`. `selectProfileSafeLauncher` breaks that tie by
+     * lowest launcher id, so leaving the prediction entry in place routes swe-rebench-v2 work
+     * to `legacy-prediction-v1-baseline`, which exits 2 and terminates the attempt.
+     *
+     * Only meaningful when `enableComposition` is `true`; defaults to the built-in entry →
+     * unchanged behavior.
+     */
+    executionWiring?: readonly ExecutionWiringConfigEntry[];
+    /**
+     * Host-supplied launchers threaded straight to `buildOperatorComposition`'s
+     * `extraLaunchers`, for a work kind the shipped registry has no launcher for. Only
+     * meaningful when `enableComposition` is `true`; defaults to none.
+     */
+    extraLaunchers?: readonly { readonly launcher: LauncherContract; readonly command: string }[];
   },
   /**
    * Extra SolverType→harness-name dispatch entries merged into
@@ -1256,6 +1287,8 @@ export async function startDaemon(
         legacyManifestDigest,
       },
     ];
+    const resolvedWiring = opts.executionWiring ?? executionWiring;
+
     const compositionConfig = {
       configShapeVersion: CONFIG_SHAPE_VERSION,
       claimPolicy: {
@@ -1263,7 +1296,7 @@ export async function startDaemon(
         spendCapWei: '1000000000000000000',
         aiUnitCap: 1000,
       },
-      executionWiring,
+      executionWiring: resolvedWiring,
       ipfsRegistryUrl: resolvedIpfsRegistryUrl,
       // Last-mile fix: `buildOperatorComposition`'s projector (`resolveSubmissionBytes`'s IPFS
       // fetch, `readSealedDocuments`) reads `config.ipfsGatewayUrl` via the SAME
@@ -1350,6 +1383,7 @@ export async function startDaemon(
       // yet") on stdout so a stalled projector is diagnosable instead of silently ticking.
       logger: { info: (m: string) => console.log(m), warn: (m: string) => console.warn(m) },
       installDefaultEoaBroadcastLock: opts.installDefaultEoaBroadcastLock ?? true,
+      ...(opts.extraLaunchers ? { extraLaunchers: opts.extraLaunchers } : {}),
     });
   }
 
@@ -1539,7 +1573,31 @@ export async function startSweRebenchSolverDaemon(
   ipfsGatewayUrl: string,
   v3Env: TaskV3Env,
   ipfsRegistryUrl: string,
-  opts: { instanceLabel?: string; fixturesDir: string; instanceMatcher: string },
+  opts: {
+    instanceLabel?: string;
+    fixturesDir: string;
+    instanceMatcher: string;
+    /**
+     * Post-Wave-4 D1 the composition `WorkLoop` is the only claim path, and it dispatches
+     * through `LauncherContract`s rather than the `HarnessRegistry` the env-gated `StubHarness`
+     * below registers into — so a caller that needs its swe-rebench-v2 tasks actually claimed
+     * and delivered must pass this. It enables the composition, adds an `executionWiring` entry
+     * anchored on the on-chain manifest digest of `manifestCid` (what the claim predicate
+     * matches against), and injects the launcher-shaped canned-patch stub reading the same
+     * `fixturesDir`.
+     *
+     * Omitted leaves the pre-D1 shape untouched for callers that have not moved yet
+     * (`test/release/tier-2/T2.4-producer-evaluator-swe-rebench.ts`).
+     */
+    composition?: {
+      manifestCid: string;
+      /**
+       * Pass `false` for every `startDaemon` call after the first in one process —
+       * `setDefaultEoaBroadcastLock` refuses to rebind a conflicting key.
+       */
+      installDefaultEoaBroadcastLock?: boolean;
+    };
+  },
 ): Promise<RunningDaemon> {
   const prev = {
     instance: process.env['JINN_HARNESS_STUB_INSTANCE'],
@@ -1568,7 +1626,34 @@ export async function startSweRebenchSolverDaemon(
       ipfsGatewayUrl,
       v3Env,
       ipfsRegistryUrl,
-      { instanceLabel: opts.instanceLabel ?? 'op-a' },
+      {
+        instanceLabel: opts.instanceLabel ?? 'op-a',
+        ...(opts.composition
+          ? {
+              enableComposition: true,
+              installDefaultEoaBroadcastLock:
+                opts.composition.installDefaultEoaBroadcastLock ?? true,
+              executionWiring: [
+                {
+                  workKind: 'swe-rebench-v2.v1',
+                  harness: SWE_REBENCH_V2_STUB_LAUNCHER_ID,
+                  model: 'stub',
+                  plugins: [],
+                  credentialRef: 'e2e-swe-rebench-v2-stub',
+                  isolationPolicy: 'process',
+                  legacyManifestDigest: keccak256(toBytes(opts.composition.manifestCid)),
+                },
+              ],
+              extraLaunchers: [
+                {
+                  launcher: makeSweRebenchV2StubLauncher(opts.fixturesDir),
+                  // The stub's own `plan()` argv spawns this exact binary.
+                  command: process.execPath,
+                },
+              ],
+            }
+          : {}),
+      },
       // HarnessRegistry.findFor() checks the configured `default` (claude-code,
       // DEFAULT_HARNESS) BEFORE falling through to first-match-by-supports() —
       // and LearnerHarness.supports() returns true for every solverType except

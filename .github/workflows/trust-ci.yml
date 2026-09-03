@@ -13,6 +13,13 @@ on:
       - ".github/workflows/trust-ci.yml"
       - "docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md"
       - "docs/superpowers/specs/2026-08-17-pluggable-integrity-providers-design.md"
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/discovery/protocol/**"
+      - "packages/evidence/protocol/**"
+      - "packages/task-execution/profiles/**"
+      - "packages/task-execution/protocol/**"
   push:
     branches: [next]
     paths:
@@ -21,6 +28,13 @@ on:
       - ".github/workflows/trust-ci.yml"
       - "docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md"
       - "docs/superpowers/specs/2026-08-17-pluggable-integrity-providers-design.md"
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/discovery/protocol/**"
+      - "packages/evidence/protocol/**"
+      - "packages/task-execution/profiles/**"
+      - "packages/task-execution/protocol/**"
 
 permissions:
   contents: read

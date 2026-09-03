@@ -624,4 +624,111 @@ describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
     );
     warn.mockRestore();
   });
+  // #3114.2 — `row.finalized === true` read any non-boolean as `false`, so a
+  // finalized task could present as not-finalized: the dangerous direction, and
+  // the only authoritative task column that failed OPEN.
+  it('withdraws the read when finalized is not a boolean', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([page('tasks', [{ ...TASK_ROW, finalized: 'true' }])]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unusable tasks row (taskId=7)'));
+    warn.mockRestore();
+  });
+
+  it('withdraws the read when refunded is not a boolean', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([page('tasks', [{ ...TASK_ROW, refunded: null }])]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unusable tasks row (taskId=7)'));
+    warn.mockRestore();
+  });
+
+  // #3115 — the number branch stringified large values into exponent form
+  // (`String(1234567890123456789012)` -> "1.2345678901234568e+21"), which is
+  // rounded, is not a decimal integer, and throws on a downstream `BigInt(...)`.
+  it('withdraws the read when deliveryRate is a number outside the safe-integer range', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'),
+          deliveryRate: 1234567890123456789012, createdAtBlock: '20' },
+      ]),
+    ]);
+    expect((await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unusable attempts row'));
+    warn.mockRestore();
+  });
+
+  it('keeps a safe-integer number deliveryRate as a decimal-integer string', async () => {
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'),
+          deliveryRate: 1000, createdAtBlock: '20' },
+      ]),
+      page('verdicts', []),
+      page('attemptEnvelopeMetas', []),
+    ]);
+    const ev = (await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).get('7')!;
+    expect(ev.authoritative.attempts[0]!.deliveryRate).toBe('1000');
+  });
+
+  // #3114.1 — `manifestCid` and `publisherAgentId` are `notNull` primary-key
+  // components copied straight off the wire while every sibling on the same
+  // projection was guarded. Untrusted candidate rows, so they skip rather than
+  // withdraw — but never silently.
+  it('skips an attempt candidate whose manifestCid is not a string', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20' },
+      ]),
+      page('verdicts', []),
+      page('attemptEnvelopeMetas', [
+        { requestId: hex32('b0'), chainId: 84532, manifestCid: null, publisherAgentId: '1',
+          manifestHash: hex32('01'), enrichedAtBlock: '25' },
+        { requestId: hex32('b0'), chainId: 84532, manifestCid: 'bafy2', publisherAgentId: '2',
+          manifestHash: hex32('02'), enrichedAtBlock: '26' },
+      ]),
+    ]);
+    const map = await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] });
+    const candidates = map.get('7')!.authoritative.attempts[0]!.attemptEnvelopeCandidates;
+    expect(candidates.map((c) => c.manifestCid)).toEqual(['bafy2']);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('skipped attemptEnvelopeMetas row(s)'),
+    );
+    warn.mockRestore();
+  });
+
+  it('skips a verdict candidate whose publisherAgentId is not a string', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20' },
+      ]),
+      page('verdicts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, verdictIndex: 0, requestId: hex32('d0'),
+          evaluator: addr('e0'), verdictCode: 1, createdAtBlock: '30' },
+      ]),
+      page('attemptEnvelopeMetas', []),
+      page('verdictEnvelopeMetas', [
+        { requestId: hex32('d0'), chainId: 84532, manifestCid: 'bafy1', publisherAgentId: 7,
+          manifestHash: hex32('01'), enrichedAtBlock: '35' },
+      ]),
+    ]);
+    const map = await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] });
+    const verdicts = map.get('7')!.authoritative.attempts[0]!.verdicts;
+    expect(verdicts[0]!.verdictEnvelopeCandidates).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('skipped verdictEnvelopeMetas row(s)'),
+    );
+    warn.mockRestore();
+  });
 });
