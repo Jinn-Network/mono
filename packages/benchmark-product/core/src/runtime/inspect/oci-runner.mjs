@@ -330,7 +330,14 @@ if (command === "probe-broker") {
         // also makes the client exit on its own, so this shortens the wait rather than competing
         // with it; `cleanup()` below still runs to catch a container that Docker Engine had not
         // yet created when this call looked, and is idempotent for the ordinary case where it had.
-        const reaped = removeWorkerContainer(dockerPath, containerName);
+        // The handler is attached at creation, not left to the `await` below: the reap runs
+        // unobserved for up to ten seconds while the client-exit ladder plays out, and an
+        // unhandled rejection in that window would terminate the process under Node's default
+        // policy -- during cancellation cleanup, the worst possible moment. `removeWorkerContainer`
+        // cannot reject today (it only calls the `spawnSync`-backed `docker()` and `delay()`), so
+        // this is structural safety against a future edit to it rather than a live fault. Removal
+        // is best effort by construction and the idempotent `cleanup()` below retries it.
+        const reaped = removeWorkerContainer(dockerPath, containerName).catch(() => {});
         if (child !== undefined && !settled) {
           await Promise.race([childSettled, delay(5_000)]);
           if (!settled) {
