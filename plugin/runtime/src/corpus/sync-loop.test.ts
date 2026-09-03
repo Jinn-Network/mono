@@ -134,6 +134,8 @@ function harness(options: {
   /** Parks the index pass inside `listRecords` until `releaseIndexPass` is called. */
   readonly indexPassBlocks?: boolean;
   readonly timeoutMs?: number;
+  /** Makes the injected clock throw on its next read, once. */
+  readonly clockThrowsOnce?: boolean;
 } = {}): Harness {
   const fs = memoryFilesystem();
   const index = indexDouble();
@@ -145,6 +147,7 @@ function harness(options: {
   let syncCalls = 0;
   let listCalls = 0;
   let now = START;
+  let clockThrows = options.clockThrowsOnce === true;
   let sourceStatuses: readonly MirrorSourceStatus[] = [];
 
   const mirror: CorpusMirror = {
@@ -233,7 +236,13 @@ function harness(options: {
     openLocalRuntime: async () => {
       throw new Error("unreachable: the local plane is never opened by the public pass");
     },
-    now: () => now,
+    now: () => {
+      if (clockThrows) {
+        clockThrows = false;
+        throw new Error("the clock exploded");
+      }
+      return now;
+    },
   });
 
   return {
@@ -585,6 +594,25 @@ describe("the corpus-sync capability", () => {
     // would stay alive holding the exclusive sync lock and never sync again.
     built.log.info.mockImplementationOnce(() => {
       throw new Error("EPIPE: broken pipe");
+    });
+    await built.start();
+    await settle();
+    expect(built.syncCalls()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    expect(built.syncCalls()).toBe(2);
+    await built.capability.stop!();
+  });
+
+  test("the next cycle is still scheduled when the injected clock throws", async () => {
+    // The same guard, through its other door: the clock is injected too, and
+    // a cycle that cannot stamp its own record must still leave a successor.
+    // A skipped-locked cycle so the FIRST read of the clock is the one in the
+    // `finally` that stamps the record; a cycle that reaches `recordOutcome`
+    // reads it inside the `try`, where the existing catch already absorbs it.
+    const built = harness({
+      outcomes: [{ status: "skipped-locked", sources: [] }],
+      clockThrowsOnce: true,
     });
     await built.start();
     await settle();

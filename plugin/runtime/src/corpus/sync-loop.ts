@@ -264,23 +264,27 @@ export function createCorpusSyncCapability(
       error = describeError(caught);
     } finally {
       clearTimeout(timer);
-      if (status !== "skipped-locked" || state.lastCycle === undefined) {
-        state.lastCycle = {
-          completedAt: now().toISOString(),
-          status,
-          ...(indexError === undefined ? {} : { indexError }),
-        };
-      }
       try {
+        if (status !== "skipped-locked" || state.lastCycle === undefined) {
+          state.lastCycle = {
+            completedAt: now().toISOString(),
+            status,
+            ...(indexError === undefined ? {} : { indexError }),
+          };
+        }
         await writeStatus(state);
         await reportCycle(state, { status, indexed, error, indexError });
       } catch {
-        // Reporting is supplementary; the reschedule below is not. Both calls
-        // end in an injected logger, and a stderr write can fail (EPIPE on a
-        // piped stderr) -- which, unguarded, exits this block early, stops the
-        // loop permanently and silently, and leaves the process alive holding
-        // the exclusive sync lock. Swallowed without a line of its own
-        // because the logger is the thing that just threw.
+        // Recording and reporting are what this cycle has to say; the
+        // reschedule below is whether there is ever another one. Everything
+        // above runs on injected dependencies that can throw -- the clock,
+        // and a logger whose stderr can EPIPE -- and unguarded, any of them
+        // exits this block early, stopping the loop permanently and silently
+        // while the process stays alive holding the exclusive sync lock. That
+        // is the failure this file argues against one line below, where the
+        // NEXT cycle's rejection is already guarded for the same reason.
+        // Swallowed without a line of its own because the logger is a
+        // candidate for the thing that just threw.
       }
       if (!state.lifetime.signal.aborted) {
         state.timer = setTimeout(() => {
