@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
-import { summarizeVerificationOutcome } from "./outcome.js";
+import { describeRecomputedChecks, summarizeVerificationOutcome } from "./outcome.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult, type VerifyPublicBundleDeps } from "./verify.js";
 import { verifyFreezeRepo, type FreezeRepoVerificationResult } from "./freeze-repo.js";
 import type {
@@ -29,6 +29,13 @@ export interface VerifierCliDeps {
   readonly readFile?: (path: string) => Uint8Array;
 }
 
+/**
+ * What this tool does to the platform bytes, stated identically wherever it is stated. The verdict
+ * surface said one thing and the usage block another -- "Verification uses …", the noun #2982 ruled
+ * overclaims -- because the sentence was written twice (issue #3675).
+ */
+const PLATFORM_BYTES_SENTENCE = "Checks run against the exact platform bytes installed from npm." as const;
+
 function usage(): string {
   return "Usage: colophon-verify <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
     + "                        [--freeze-repo <dir>]\n"
@@ -42,12 +49,29 @@ function usage(): string {
     + "Exit 0: valid bundle; 1: invalid bundle, or a freeze repository that drifted from it;\n"
     + "     2: usage or operational failure, including a freeze repository that could not be\n"
     + "     rendered from the bundle — the bundle's own verdict is still reported.\n"
-    + "Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet. Verification uses exact platform bytes from npm.\n";
+    + `Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet. ${PLATFORM_BYTES_SENTENCE}\n`;
 }
 
 // ---------------------------------------------------------------------------
 // Human rendering
 // ---------------------------------------------------------------------------
+
+/** Greedy wrap at the column the surrounding fixed prose is already written to. */
+function wrap(text: string): string {
+  const width = 76;
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    if (line === "") line = word;
+    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
+    else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line !== "") lines.push(line);
+  return lines.join("\n");
+}
 
 function anchoredValue(entry: AnchorVerificationEntry): string | undefined {
   const facts = entry.facts as
@@ -174,21 +198,33 @@ export function renderVerifiedBundle(result: PublicBundleVerificationResult): st
   const anchorLimits = anchors === ""
     ? ""
     : "\nAn anchor dates the bytes it covers and says nothing else about the run: not\nthat results were produced after it, and not that the anchoring authority is\nindependent of the bundle's owner.";
+  // "Verified" is the most overloaded word in this market and claims more than this tool does: it
+  // recomputes the arithmetic, closure, and consistency of bytes someone handed it, and reads
+  // nothing about whether the recorded outcomes reflect real executions (issue #2982). The verdict
+  // names the operation instead, and the limits of that operation print directly under it --
+  // unconditionally, so no bundle shape can render a verdict with its caveats pushed off-screen.
+  // The second sentence enumerates what this bundle's checks recomputed, derived from the same
+  // outcome the denominator above comes from: an anchored or disclosed closure runs seven or eight
+  // checks, and a fixed six-check list beneath an "of 8" verdict is a caveat that undercounts its
+  // own subject (issue #3691). Wrapped here rather than hard-wrapped in the literal because the
+  // enumeration's length now varies by format.
+  const caveats = wrap("Not checked by this tool: whether the machine that produced this bundle was"
+    + " honest, and whether the compared identities are independent parties. What is recomputed is "
+    + `${describeRecomputedChecks(outcome)} — against the bytes the bundle carries, nothing else.`);
   const verdictLine = outcome.notFetched === 0
-    ? `Verified: ${outcome.passed} of ${totalChecks} checks passed`
-    : `Verified: ${outcome.passed} of ${totalChecks} checks passed, ${outcome.notFetched} not fetched`;
+    ? `Recomputed: ${outcome.passed} of ${totalChecks} checks passed`
+    : `Recomputed: ${outcome.passed} of ${totalChecks} checks passed, ${outcome.notFetched} not fetched`;
   return `${verdictLine}
 Bundle: ${identity}
 Format: ${result.format}
 
+${caveats}
+
 ${checks}
-${signers}${artifactContentReport}${anchors}
-This checks the bundle's integrity, evidence closure, calculations, report,
-and claim consistency. It does not prove that the machine that produced the
-bundle was honest or that the compared identities are independent parties.${artifactContentLimit}${anchorLimits}
+${signers}${artifactContentReport}${anchors}${artifactContentLimit}${anchorLimits}
 No files were uploaded.
 Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.
-Verification uses the exact platform bytes installed from npm.
+${PLATFORM_BYTES_SENTENCE}
 `;
 }
 

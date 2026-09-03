@@ -26,6 +26,7 @@ describe("resolveRuntimeConfig", () => {
         sources: [],
         maxEntriesPerSync: 500,
         syncTimeoutMs: 30_000,
+        syncIntervalMs: 300_000,
         acknowledgeUnverifiedChain: false,
         chainVerification: "verified",
       },

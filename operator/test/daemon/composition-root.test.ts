@@ -195,6 +195,31 @@ describe('native launcher executable inspection', () => {
       requirements: { harness: { id: 'claude-code' } },
     })).resolves.toMatchObject({ probe: { ready: false } });
   });
+
+  it('resolves a host-injected launcher and its supplied command, leaving the shipped set intact', async () => {
+    const { buildLauncherDeployments } = await import('../../src/daemon/composition-root.js');
+    const injected = {
+      id: 'e2e-injected-launcher',
+      capabilities: () => predictionV1BaselineLauncher.capabilities(),
+      probe: async () => ({ ready: true }),
+      plan: predictionV1BaselineLauncher.plan.bind(predictionV1BaselineLauncher),
+    };
+
+    // `resolveLauncherCommand` knows only the shipped ids, so an injected launcher gets no
+    // deployment unless its own supplied command is honored.
+    expect(buildLauncherDeployments([injected], {} as never)).toEqual({});
+
+    const deployments = buildLauncherDeployments(
+      [injected, predictionV1BaselineLauncher],
+      {} as never,
+      [{ launcher: injected, command: process.execPath }],
+    );
+    expect(Object.keys(deployments).sort()).toEqual([
+      'e2e-injected-launcher',
+      'prediction-v1-baseline',
+    ]);
+    expect(deployments['e2e-injected-launcher']?.executable.path).toBe(process.execPath);
+  });
 });
 
 function stubVenue() {

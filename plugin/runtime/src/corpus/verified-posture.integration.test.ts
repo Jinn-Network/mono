@@ -17,14 +17,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { DsseSigner } from "@jinn-network/trust-core";
-import type { FetchLike } from "@jinn-network/record-discovery-transport-http";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { resolveRuntimeConfig, type MirrorSourceConfig } from "../config.js";
 import { didKeyFromEd25519PublicKey } from "../session-host-crypto.js";
 import { createLocalCorpusPorts } from "../session-host-corpus.js";
 import { createCorpusCapability } from "./capability.js";
-import { buildSignedFixtureArchive } from "./testing-fixture.js";
+import { buildSignedFixtureArchive, loopbackFetch } from "./testing-fixture.js";
 
 const NOW = new Date("2026-07-30T00:00:00Z");
 
@@ -51,7 +50,14 @@ function log() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-/** A real Ed25519 signer whose keyid is the did:key its own public half encodes. */
+/**
+ * A real Ed25519 signer whose keyid is the did:key its own public half encodes.
+ *
+ * It stays in the test files that use it rather than moving beside
+ * `loopbackFetch` in `testing-fixture.js`: that module is scanned as
+ * production source, and the custody gate's key-material canary refuses a
+ * private key there. Test files are exempt.
+ */
 function archiveSigner(): { readonly didKey: string; readonly signer: DsseSigner } {
   const pair = generateKeyPairSync("ed25519");
   const didKey = didKeyFromEd25519PublicKey(pair.publicKey);
@@ -63,17 +69,6 @@ function archiveSigner(): { readonly didKey: string; readonly signer: DsseSigner
   };
 }
 
-function loopback(routes: ReadonlyMap<string, Uint8Array>): FetchLike {
-  return async (url) => {
-    const bytes = routes.get(url);
-    if (bytes === undefined) return new Response(null, { status: 404 });
-    return new Response(bytes.slice().buffer as ArrayBuffer, {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-  };
-}
-
 /**
  * Composes the archive, the config, and the capability exactly as a process
  * entry point does — the ports come from `createLocalCorpusPorts`, not from a
@@ -82,6 +77,8 @@ function loopback(routes: ReadonlyMap<string, Uint8Array>): FetchLike {
 async function compose(options: {
   readonly declareSigningKey?: boolean;
   readonly tamper?: "head" | "entry";
+  readonly entryCount?: number;
+  readonly maxEntriesPerSync?: number;
 } = {}) {
   const { didKey, signer } = archiveSigner();
   const archive = await buildSignedFixtureArchive({
@@ -90,6 +87,7 @@ async function compose(options: {
     signerKeyid: didKey,
     signer,
     ...(options.tamper === undefined ? {} : { tamper: options.tamper }),
+    ...(options.entryCount === undefined ? {} : { entryCount: options.entryCount }),
   });
 
   const policyDirectory = join(home, "policy");
@@ -111,6 +109,9 @@ async function compose(options: {
           },
         ],
         chainVerification: "verified",
+        ...(options.maxEntriesPerSync === undefined
+          ? {}
+          : { maxEntriesPerSync: options.maxEntriesPerSync }),
         trust: { genesisDigest: archive.genesisDigest, policyDirectory: "policy" },
       },
     },
@@ -122,7 +123,7 @@ async function compose(options: {
   let clock = NOW;
   const ports = createLocalCorpusPorts({
     config,
-    fetchLike: loopback(archive.routes),
+    fetchLike: loopbackFetch(archive.routes),
     now: () => clock,
   });
   const capability = createCorpusCapability({
@@ -349,5 +350,52 @@ describe("the verified posture fails closed", () => {
       message: "broken-chain",
     });
     expect(outcome.sources[0]!.indexed).toBe(0);
+  });
+});
+
+describe("a backlog larger than the per-pass entry bound (#3252)", () => {
+  test("is refused as truncated, not as a broken chain", async () => {
+    // A cold adoption of a two-entry archive under a one-entry bound. The walk
+    // yields oldest-first, so the entry the bound drops is the one the head
+    // cites: handed to `verifySourceChain` this is `broken-chain` at linkage,
+    // blaming the archive for a cut this runtime made. And because the mark
+    // only advances on a clean verification, every later pass cuts the walk
+    // in exactly the same place -- a permanent red on a healthy source.
+    const { capability } = await compose({ entryCount: 2, maxEntriesPerSync: 1 });
+
+    const outcome = await capability.mirror.syncOnce();
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.sources[0]!.failure).toEqual({
+      code: "chain-verification-rejected",
+      message: "sync-truncated",
+    });
+    expect(outcome.sources[0]!.indexed).toBe(0);
+
+    // The reason reaches the operator surface naming the bound, rather than a
+    // linkage break they would go looking for in the archive.
+    const check = await chainVerificationCheck(capability);
+    expect(check.ok).toBe(false);
+    expect(check.detail).toContain(`${source.agent}/${source.name} (sync-truncated)`);
+
+    // And the remedy sends them to the bound they set, not to the archive's
+    // head signature or entry linkage -- the phantom hunt this refusal exists
+    // to prevent (#3252).
+    expect(check.remedy).toContain("corpus.maxEntriesPerSync");
+    expect(check.remedy).not.toContain("head signature");
+    expect(check.remedy).not.toContain("entry linkage it served");
+  });
+
+  test("the same archive verifies once the bound covers the backlog", async () => {
+    const { capability, config } = await compose({ entryCount: 2, maxEntriesPerSync: 2 });
+
+    const outcome = await capability.mirror.syncOnce();
+
+    expect(outcome.status).toBe("synced");
+    expect(outcome.sources[0]!.entriesWalked).toBe(2);
+    const state = JSON.parse(await readFile(config.mirrorStatePath, "utf8")) as {
+      readonly marks: Record<string, { readonly sequence: string }>;
+    };
+    expect(state.marks[`${source.agent}/${source.name}`]?.sequence).toBe("0000000000000002");
   });
 });

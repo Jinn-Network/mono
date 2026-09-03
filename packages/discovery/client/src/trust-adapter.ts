@@ -1,3 +1,4 @@
+import { resolveBindingForAgent } from "@jinn-network/trust-core";
 import type { BindingResolver } from "@jinn-network/trust-core";
 import { DISCOVERY_SIGNING_SCOPE } from "@jinn-network/record-discovery-protocol";
 import type { FreshnessPolicy, KeyResolver, ResolvedKey, SignatureVerifier } from "@jinn-network/record-discovery-protocol";
@@ -85,7 +86,7 @@ export function createTrustAdapter(deps: TrustAdapterDeps): TrustAdapter {
       const candidates = await deps.keyCatalog.candidateKeys(agent);
       const resolved: ResolvedKey[] = [];
       for (const candidate of candidates) {
-        const binding = await deps.bindingResolver.resolveBinding({ key: candidate.keyid, agent }, atIso);
+        const binding = await resolveBindingForAgent(deps.bindingResolver, { key: candidate.keyid, agent }, atIso);
         if (isActiveForDiscoverySigning(binding, atIso)) {
           resolved.push({ keyid: binding!.binding.key.keyid, publicKey: binding!.binding.key.publicKey, algorithm: binding!.binding.key.algorithm });
         }
@@ -102,7 +103,7 @@ export function createTrustAdapter(deps: TrustAdapterDeps): TrustAdapter {
       const candidates = await deps.keyCatalog.candidateKeys(agent);
       const candidate = candidates.find((c) => c.keyid === keyid);
       if (candidate === undefined) return false;
-      const binding = await deps.bindingResolver.resolveBinding({ key: keyid, agent }, candidate.probeAt);
+      const binding = await resolveBindingForAgent(deps.bindingResolver, { key: keyid, agent }, candidate.probeAt);
       return binding !== null && binding.binding.scope.includes(DISCOVERY_SIGNING_SCOPE);
     },
   };

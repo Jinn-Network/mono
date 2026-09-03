@@ -54,6 +54,13 @@ on:
       - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
       - "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md"
       - "docs/superpowers/plans/2026-08-13-benchmark-publication-implementation-program.md"
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/benchmarking/testing/**"
+      - "packages/discovery/testing/**"
+      - "packages/task-execution/testing/**"
+      - "packages/trust/resolve/**"
       # Demo-1's sealed pre-run artifacts. demo1-task-evidence.test.ts round-trips these three
       # files through the real verifiers and pins their digests, so an edit here must run this
       # suite even when no package source moves.
@@ -112,6 +119,13 @@ on:
       - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
       - "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md"
       - "docs/superpowers/plans/2026-08-13-benchmark-publication-implementation-program.md"
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/benchmarking/testing/**"
+      - "packages/discovery/testing/**"
+      - "packages/task-execution/testing/**"
+      - "packages/trust/resolve/**"
       # Demo-1's sealed pre-run artifacts. demo1-task-evidence.test.ts round-trips these three
       # files through the real verifiers and pins their digests, so an edit here must run this
       # suite even when no package source moves.

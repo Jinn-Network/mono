@@ -13,10 +13,11 @@
  *   the verified binding itself, so the text is identical for every reader.
  *
  * A third rule follows from issues #3322 and #3426: **a sentence claims unchosen-ness only where
- * the seal established it**, separately for the round and for the source. A beacon that merely postdates the seal makes the value unpredictable and
- * leaves the operator choosing among the values that postdate it. So both sentences carry
- * `roundChoiceClause`, which asserts the second property under `seal-derived` and retracts it under
- * `operator-chosen` rather than letting either branch imply it.
+ * the seal established it**, separately for the round and for the source. A beacon that merely
+ * postdates the seal makes the value unpredictable and leaves the operator choosing among the
+ * values that postdate it. So both sentences carry `roundChoiceClause`, which asserts the second
+ * property under `seal-derived` and retracts it under `operator-chosen` rather than letting either
+ * branch imply it.
  *
  * A fourth rule is this module's own, and is the whole point of the originating issue: **the census
  * sentence says it is the weaker binding.** Ordering-only binding shows the run's order was fixed by
@@ -89,17 +90,25 @@ function roundChoiceClause(binding: VerifiedRunBinding): string {
   // clause applies. Under `seal-declared` the beacon is fixed outright on a scheduled source; on a
   // height-indexed one it fixes only WHICH CHAIN, and the round clause below still concedes the
   // height. Under `operator-chosen` this is the residue PR #3375 could only report.
-  const sourceClause = binding.sourceBasis === "seal-declared"
-    ? "Nor was the source: the sealed record names the beacon this run binds to, so a binding naming any "
-      + "other source is refused."
-    : "What choosing remains is the source — the seal names no beacon, so an operator could have bound "
-      + "a different one, and this procedure admits a beacon indexed by block height where no round "
-      + "follows from a seal at all.";
+  //
+  // The declared branch takes its connective from the caller (#3525) because the two round clauses
+  // that append this say opposite things before it: "Nor" continues the seal-derived branch's
+  // denial, and would read as a contradiction after the chosen-round branch's concession that the
+  // round WAS the operator's. The property after the colon is one string on both branches -- only
+  // the word joining it to the sentence before moves. The residue opens on its own subject and
+  // follows either clause, so it needs no such split.
+  const sourceClause = (connective: string): string =>
+    binding.sourceBasis === "seal-declared"
+      ? `${connective}: the sealed record names the beacon this run binds to, so a binding naming `
+        + "any other source is refused."
+      : "What choosing remains is the source — the seal names no beacon, so an operator could have "
+        + "bound a different one, and this procedure admits a beacon indexed by block height where "
+        + "no round follows from a seal at all.";
   if (binding.roundBasis === "seal-derived") {
     // Only a scheduled source reaches here: `requiredBeaconRound` derives nothing for a height, so
     // an `attributive` binding is `operator-chosen` by construction.
     return "The round was not the operator's to pick either: it is the first round this source publishes after "
-      + `the seal, so the seal instant alone fixes it. ${sourceClause}`;
+      + `the seal, so the seal instant alone fixes it. ${sourceClause("Nor was the source")}`;
   }
   if (binding.postSeal === "attributive") {
     // Say no more here than the postdating clause two sentences earlier already conceded. Claiming
@@ -121,7 +130,7 @@ function roundChoiceClause(binding: VerifiedRunBinding): string {
   return `Which post-seal value applied was still the operator's choice: this binding names a round selected after `
     + `the seal, and every round the source published in between was an available alternative deriving a `
     + `different ${derived} from the same inputs. The value could not have been predicted; this ${derived} is `
-    + `nonetheless one of several the operator could have realized by waiting. ${sourceClause}`;
+    + `nonetheless one of several the operator could have realized by waiting. ${sourceClause("The source was not")}`;
 }
 
 /**

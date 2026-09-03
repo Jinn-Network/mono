@@ -42,6 +42,7 @@ jobs:
             .github/scripts/architecture-control-workflow.test.mjs \
             .github/scripts/platform-verification-selection.test.mjs \
             .github/scripts/hermetic-selection.test.mjs \
+            .github/scripts/portal-path-filters.test.mjs \
             .github/scripts/required-check-set.test.mjs \
             .github/scripts/stack-package-graph.test.mjs
           node .github/scripts/architecture-control.mjs \
@@ -80,8 +81,9 @@ jobs:
         id: select
         env:
           EVENT_NAME: ${{ github.event_name }}
-          # Set only on pull_request events, which is exactly where it is read.
+          # Set only on pull_request events, which is exactly where they are read.
           PR_BASE_REF: ${{ github.base_ref }}
+          PR_HEAD_REF: ${{ github.head_ref }}
           MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         # Tiered lanes (DR-2026-08-18-b D3). Fast mode is scoped to the lane the
         # QUEUE BACKSTOPS: a pull request that does not target `main` is not selected
@@ -95,6 +97,13 @@ jobs:
         # `main`, so there is no merge group to carry the battery and fast mode would
         # simply delete the verification. Those PRs verify in full, like every other
         # unbackstopped lane.
+        #
+        # The standing release-review PR is the one `main`-targeting PR that is NOT a
+        # hotfix (issue #2831): `release-notes-scaffold.yml` opens it as the single
+        # `base:main head:next` PR and it resynchronizes on every push to `next`. Every
+        # commit it carries was verified on the merge group that landed it, so it takes
+        # the fast lane. Excluding it on `head_ref` leaves every other head — the real
+        # hotfixes — verifying in full.
         #
         # The MERGE_GROUP lane carries its own base/head pair, so the changed-package
         # closure applies to the speculative merge commit and a narrow entry stops
@@ -115,7 +124,7 @@ jobs:
           set -o pipefail
           case "${EVENT_NAME}" in
             pull_request)
-              if [ "${PR_BASE_REF}" = main ]; then
+              if [ "${PR_BASE_REF}" = main ] && [ "${PR_HEAD_REF}" != next ]; then
                 echo 'hotfix lane: no merge queue backstops main, so verify in full'
                 echo 'run=true' >> "${GITHUB_OUTPUT}"
                 exit 0

@@ -119,6 +119,25 @@ jobs:
           # notice, and it then ejects every candidate built on that base, not just
           # the change that caused it (#3527, and #2809 before it). Manifests only:
           # sources under an unselected package still leave this lane unselected.
+          #
+          # Its `packages/` scoping is not the only thing standing between a new portal
+          # edge and the merge queue, and does not need loosening to reach another tree
+          # (#3532). The trailing closure block below is DERIVED from the `portal:` graph
+          # and enforced by `.github/scripts/portal-path-filters.test.mjs`, which runs in
+          # `platform-architecture-control.yml` — a lane with no `paths:` filter, so it
+          # runs on EVERY pull request whatever this selector decides. That gate requires
+          # every workspace in the closure of a workspace this lane selects on, in ANY
+          # tree, to be covered by an anchored entry below; the entry it names covers that
+          # tree's manifest as much as its sources. So a first portal edge into `plugin/`
+          # or `apps/` reddens on the pull request that adds it, naming the exact entry to
+          # add — which is how this pattern's `packages/` blind spot is covered.
+          #
+          # The trailing block is the transitive `portal:` closure of the trees above
+          # (#3573). Each of those packages is built from SOURCE into this lane's
+          # workspace by `yarn install`, so a change confined to one of them changes
+          # what this lane verifies — and until #3573 none of them selected it. The
+          # list is derived from the `portal:` graph and enforced by
+          # `.github/scripts/portal-path-filters.test.mjs`; it is not hand-curated.
           patterns=(
             '^operator/'
             '^apps/operator-console/'
@@ -131,6 +150,46 @@ jobs:
             '^\.github/workflows/npm-publish\.yml$'
             '^\.github/scripts/npm-publish-workflow\.test\.mjs$'
             '^\.github/scripts/operator-[^/]*\.test\.mjs$'
+            '^packages/discovery/client/'
+            '^packages/discovery/facts/offers/'
+            '^packages/discovery/facts/task-execution/'
+            '^packages/discovery/protocol/'
+            '^packages/discovery/serve/'
+            '^packages/discovery/sources/evidence-journal/'
+            '^packages/discovery/testing/'
+            '^packages/discovery/transport-http/'
+            '^packages/environments/record/'
+            '^packages/evidence/attestation-issuer/'
+            '^packages/evidence/catalog-sqlite/'
+            '^packages/evidence/discovery/'
+            '^packages/evidence/execution-evidence-builder/'
+            '^packages/evidence/execution-recorder/'
+            '^packages/evidence/local-runtime/'
+            '^packages/evidence/offer/'
+            '^packages/evidence/protocol/'
+            '^packages/evidence/repository/'
+            '^packages/layer/'
+            '^packages/marketplace/binding/'
+            '^packages/marketplace/pipeline/'
+            '^packages/marketplace/projector/'
+            '^packages/marketplace/venue-base/'
+            '^packages/policy/identity/'
+            '^packages/read-plane/'
+            '^packages/task-execution/backend/'
+            '^packages/task-execution/backend-local/assembly/'
+            '^packages/task-execution/backend-local/launchers/'
+            '^packages/task-execution/backend-local/supervisor/'
+            '^packages/task-execution/backend-local/workspace/'
+            '^packages/task-execution/evaluation-harness/'
+            '^packages/task-execution/evaluator-adapters/'
+            '^packages/task-execution/profiles/'
+            '^packages/task-execution/protocol/'
+            '^packages/task-execution/testing/'
+            '^packages/task-supply/admission/'
+            '^packages/trust/authoring/'
+            '^packages/trust/core/'
+            '^packages/trust/observation/'
+            '^packages/trust/resolve/'
           )
           printf '%s\n' "${patterns[@]}" > "${RUNNER_TEMP}/selection.ere"
           # The changed list goes to a file and grep reads the file. Piping it into
@@ -267,7 +326,16 @@ jobs:
     # hotfix lane — D2 puts no queue there, so nothing would run this at all if
     # the PR lane were thinned wholesale. Push, dispatch, and schedule lanes stay
     # heavy for the same reason. The PR lane keeps `architecture` and `check`.
-    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    #
+    # The one `main`-targeting PR that is NOT a hotfix is the standing
+    # release-review PR (issue #2831), which `release-notes-scaffold.yml` opens as
+    # the single `base:main head:next` PR and which resynchronizes on every push to
+    # `next` — post-flip, on every queue landing. Its head IS `next`, so every
+    # commit it carries already passed this battery on the merge group that landed
+    # it. Re-running here is duplicate load against the 20-concurrent-job ceiling
+    # DR-2026-08-18-b names as the binding constraint, so `head_ref != 'next'`
+    # excludes it. No other head is excluded, so hotfixes keep the full battery.
+    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || (github.base_ref == 'main' && github.head_ref != 'next'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -316,7 +384,7 @@ jobs:
     name: Operator console E2E (Playwright)
     needs: [changes, check]
     # Queue-backstopped PR lane only — see pack-smoke above.
-    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || (github.base_ref == 'main' && github.head_ref != 'next'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -363,7 +431,7 @@ jobs:
     name: Degraded Daemon Guard E2E
     needs: [changes, check]
     # Queue-backstopped PR lane only — see pack-smoke above.
-    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || (github.base_ref == 'main' && github.head_ref != 'next'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -413,7 +481,7 @@ jobs:
     # Queue-backstopped PR lane only — see pack-smoke above. This is the
     # workflow's 90-minute tail, so it is the single biggest saving the fast PR
     # lane buys.
-    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || (github.base_ref == 'main' && github.head_ref != 'next'))
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -469,8 +537,9 @@ jobs:
       - name: Require exact success from every selected operator-CI job
         env:
           EVENT_NAME: ${{ github.event_name }}
-          # Set only on pull_request events, which is exactly where it is read.
+          # Set only on pull_request events, which is exactly where they are read.
           BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
           SELECTED: ${{ needs.changes.outputs.run }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
@@ -482,7 +551,7 @@ jobs:
           GOLD_PROOF_RESULT: ${{ needs.task-creator-amd64-gold-proof.result }}
         run: |
           set -euo pipefail
-          echo "event=${EVENT_NAME} base_ref=${BASE_REF:-none} selected=${SELECTED} changes=${CHANGES_RESULT}"
+          echo "event=${EVENT_NAME} base_ref=${BASE_REF:-none} head_ref=${HEAD_REF:-none} selected=${SELECTED} changes=${CHANGES_RESULT}"
           echo "architecture=${ARCHITECTURE_RESULT} check=${CHECK_RESULT}"
           echo "pack-smoke=${PACK_SMOKE_RESULT} dashboard-e2e=${DASHBOARD_E2E_RESULT}"
           echo "degraded-daemon-guard-e2e=${DEGRADED_DAEMON_GUARD_RESULT}"
@@ -512,11 +581,14 @@ jobs:
           # (DR-2026-08-18-b D3): a pull request that does not target `main` gets
           # them on the merge group instead. Every other lane keeps them —
           # merge_group, push, workflow_dispatch, and PRs targeting `main`, which
-          # is the hotfix lane no queue backstops. This mirrors their `if:`
-          # exactly. A failed or cancelled job never reads as skipped, so the
-          # fast lane cannot launder a red either.
+          # is the hotfix lane no queue backstops. The one exception is the
+          # standing release-review PR (`base:main head:next`, issue #2831): its
+          # commits already ran this battery on the merge group that landed them,
+          # so it is thinned like the queue-backstopped lane. This mirrors their
+          # `if:` exactly. A failed or cancelled job never reads as skipped, so
+          # the fast lane cannot launder a red either.
           heavy_expected="${expected}"
-          if [ "${EVENT_NAME}" = pull_request ] && [ "${BASE_REF}" != main ]; then
+          if [ "${EVENT_NAME}" = pull_request ] && { [ "${BASE_REF}" != main ] || [ "${HEAD_REF}" = next ]; }; then
             heavy_expected=skipped
           fi
           test "${PACK_SMOKE_RESULT}" = "${heavy_expected}"

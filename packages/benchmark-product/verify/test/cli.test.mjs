@@ -68,14 +68,21 @@ test("human success names all six checks and states the verification limit", asy
     reportSha256: "e".repeat(64),
     reportEnvelopeSha256: "f".repeat(64),
   });
-  assert.match(output, /^Verified: 6 of 6 checks passed/m);
+  assert.match(output, /^Recomputed: 6 of 6 checks passed/m);
   const orderedChecks = ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"];
   for (const check of orderedChecks) {
     assert.match(output, new RegExp(`${check}\\s+passed`));
   }
-  assert.deepEqual(orderedChecks.map((check) => output.indexOf(check)), [...orderedChecks.map((check) => output.indexOf(check))].sort((a, b) => a - b));
+  // Ordering is asserted over the per-check list, not the whole report: the caveat above it now
+  // names what each check recomputed ("signing trust", issue #3691), so a whole-output `indexOf`
+  // would find prose rather than the list row it means to order.
+  const checkList = output.slice(output.indexOf("\nmanifest  "));
+  assert.deepEqual(
+    orderedChecks.map((check) => checkList.indexOf(check)),
+    [...orderedChecks.map((check) => checkList.indexOf(check))].sort((a, b) => a - b),
+  );
   assert.match(output, /Format: benchmark-product-public-bundle\/4/);
-  assert.match(output, /does not prove that the machine that produced the/);
+  assert.match(output, /Not checked by this tool: whether the machine that produced this bundle was/);
   assert.match(output, /No files were uploaded/);
   assert.match(output, /spec\.jinn\.network/);
   assert.match(output, /not hosted/);
@@ -90,8 +97,66 @@ test("human summary reports the actual passed count against the fixed six-check 
     benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
     reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
   });
-  assert.match(output, /^Verified: 1 of 6 checks passed/m);
+  assert.match(output, /^Recomputed: 1 of 6 checks passed/m);
   assert.match(output, /Format: benchmark-product-public-bundle\/2/);
+});
+
+test("the verdict names the operation and its limits print directly under it (issue #2982)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  // The two shapes whose rendering genuinely differs, not two check counts of one shape: the
+  // complete six-check `/4` closure, and the `/5` metadata-first bundle, which is the only shape
+  // `summarizeVerificationOutcome` defers a check for and so the only one that also emits the
+  // `Artifact content` block and its limit paragraph. The caveats are unconditional, so neither may
+  // render a verdict without them immediately beneath it (issue #3690).
+  const shapes = [
+    {
+      format: "benchmark-product-public-bundle/4",
+      identity: "a".repeat(64),
+      checks: [
+        "manifest", "evidence-closure", "trust", "matrix-rederivation",
+        "report-verification", "claim-consistency",
+      ],
+      benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
+      reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
+    },
+    {
+      format: "benchmark-product-public-bundle/5",
+      identity: `sha256:${"a".repeat(64)}`,
+      checks: [
+        "manifest", "evidence-closure", "artifact-integrity", "signature-validity",
+        "matrix-rederivation", "report-verification", "claim-consistency",
+      ],
+      benchmarkDigest: `sha256:${"b".repeat(64)}`,
+      manifestDigest: `sha256:${"c".repeat(64)}`,
+      cohortDigest: `sha256:${"d".repeat(64)}`,
+      matrixDigest: `sha256:${"e".repeat(64)}`,
+      reportDigest: `sha256:${"f".repeat(64)}`,
+      evidenceRecords: 12,
+      artifacts: 5,
+      verifiedSignerKeyIds: [],
+      profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+      artifactContent: {
+        status: "not-fetched", verified: 2, notFetched: 3,
+        notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
+      },
+    },
+  ];
+  for (const shape of shapes) {
+    const output = renderVerifiedBundle(shape);
+    const [verdict, ...rest] = output.split("\n");
+    assert.match(verdict, /^Recomputed: \d+ of \d+ checks passed/);
+    assert.doesNotMatch(verdict, /verified|certified|validated|audited/i);
+    // Directly under the verdict: only the bundle identity header separates them, and the caveats
+    // precede the per-check list rather than trailing it.
+    const caveatIndex = output.indexOf("Not checked by this tool:");
+    assert.ok(caveatIndex > 0, "caveats must render");
+    assert.ok(caveatIndex < output.indexOf("manifest"), "caveats must precede the check list");
+    assert.equal(rest.slice(0, 2).filter((line) => line.startsWith("Bundle:") || line.startsWith("Format:")).length, 2);
+  }
+  // The second shape really is the deferred one, so the loop above is not two spellings of the
+  // same rendering.
+  assert.match(renderVerifiedBundle(shapes[1]), /artifact-integrity\s+not fetched/);
+  assert.doesNotMatch(renderVerifiedBundle(shapes[0]), /not fetched/);
 });
 
 const V6_IDENTITIES = {
@@ -154,7 +219,7 @@ test("the default human surface discloses every carried anchor and every subject
       invalid: [],
     },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, /^Recomputed: 7 of 7 checks passed/m);
   assert.match(output, /integrity-anchors\s+passed/);
   // Each carried anchor: subject, time basis, status, and its byte-embedded time or height.
   assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
@@ -333,7 +398,7 @@ test("human summary names all seven evidence-native checks for bundle v5", async
     profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
     artifactContent: { status: "verified", verified: 300, notFetched: 0, notFetchedDigests: [] },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, /^Recomputed: 7 of 7 checks passed/m);
   assert.match(output, new RegExp(`Bundle: sha256:${"a".repeat(64)}`));
   assert.doesNotMatch(output, /sha256:sha256:/);
 });
@@ -368,7 +433,7 @@ test("the anchored qualification closure counts its seven checks, not the unanch
       invalid: [],
     },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, /^Recomputed: 7 of 7 checks passed/m);
   assert.match(output, /^Format: benchmark-product-public-bundle\/7$/m);
   assert.match(output, /integrity-anchors\s+passed/);
   assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
@@ -503,7 +568,7 @@ test("a full-evidence v5 bundle prints all seven checks as passed", async () => 
     profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
     artifactContent: { status: "verified", verified: 5, notFetched: 0, notFetchedDigests: [] },
   });
-  assert.match(output, /^Verified: 7 of 7 checks passed$/m);
+  assert.match(output, /^Recomputed: 7 of 7 checks passed$/m);
   for (const check of V5_CHECKS) assert.match(output, new RegExp(`${check}\\s+passed`));
   assert.doesNotMatch(output, /not fetched/);
   assert.doesNotMatch(output, /Artifact content/);
@@ -522,7 +587,7 @@ test("a metadata-first v5 bundle discloses artifact-integrity as not fetched", a
     },
   });
   // The deferred check is never printed as a pass and never folded into the passed total.
-  assert.match(output, /^Verified: 6 of 7 checks passed, 1 not fetched$/m);
+  assert.match(output, /^Recomputed: 6 of 7 checks passed, 1 not fetched$/m);
   assert.match(output, /artifact-integrity\s+not fetched/);
   for (const check of V5_CHECKS.filter((check) => check !== "artifact-integrity")) {
     assert.match(output, new RegExp(`${check}\\s+passed`));
@@ -551,4 +616,109 @@ test("a metadata-first bundle with one deferred body says body, not bodies", asy
     },
   });
   assert.match(output, /1 artifact body was not fetched/);
+});
+
+// ── The promoted caveat's enumeration (issue #3691) ─────────────────────────────────────────────
+//
+// The sentence beneath the verdict says what was recomputed. It used to hand-list the v2/v4
+// closure — and not even all of it: `trust` was missing — so an anchored or disclosed bundle
+// printed `of 7` or `of 8` above a sentence that accounted for five checks.
+
+const V8_CHECKS = [...V6_CHECKS, "disclosure-specification"];
+
+function caveatOf(output) {
+  const start = output.indexOf("Not checked by this tool:");
+  assert.ok(start >= 0, "caveats must render");
+  const end = output.indexOf("\n\n", start);
+  return output.slice(start, end === -1 ? undefined : end).replace(/\n/g, " ");
+}
+
+test("the caveat enumerates the anchored closure's seventh check (issue #3691)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/6",
+    identity: "a".repeat(64),
+    checks: V6_CHECKS,
+    ...V6_IDENTITIES,
+    anchors: { anchors: [], subjects: [], invalid: [] },
+  });
+  assert.match(output, /^Recomputed: 7 of 7 checks passed$/m);
+  const caveat = caveatOf(output);
+  assert.match(caveat, /anchor well-formedness/);
+  // The check the pre-#3691 hand-list dropped.
+  assert.match(caveat, /signing trust/);
+  assert.doesNotMatch(caveat, /undefined/);
+});
+
+test("the caveat enumerates the disclosed closure's eighth check (issue #3691)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/8",
+    identity: "a".repeat(64),
+    checks: V8_CHECKS,
+    ...V6_IDENTITIES,
+    anchors: { anchors: [], subjects: [], invalid: [] },
+  });
+  assert.match(output, /^Recomputed: 8 of 8 checks passed$/m);
+  const caveat = caveatOf(output);
+  assert.match(caveat, /the disclosure specification/);
+  assert.match(caveat, /anchor well-formedness/);
+  assert.doesNotMatch(caveat, /undefined/);
+});
+
+test("the caveat never claims a deferred check was recomputed (issue #3691)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+    artifactContent: {
+      status: "not-fetched", verified: 2, notFetched: 3,
+      notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
+    },
+  });
+  const caveat = caveatOf(output);
+  assert.doesNotMatch(caveat, /artifact integrity/);
+  assert.match(caveat, /signature validity/);
+  // The deferral is still disclosed, in the block that exists to disclose it.
+  assert.match(output, /artifact-integrity\s+not fetched/);
+});
+
+test("every closure's checks have a caveat phrase (issue #3691)", async () => {
+  const { describeRecomputedChecks } = await import("../dist/index.js");
+  const closures = [
+    ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
+    V6_CHECKS,
+    V8_CHECKS,
+    V5_CHECKS,
+  ];
+  for (const checks of closures) {
+    const sentence = describeRecomputedChecks({
+      outcomes: checks.map((check) => ({ check, state: "passed" })),
+      passed: checks.length,
+      notFetched: 0,
+      total: checks.length,
+    });
+    assert.doesNotMatch(sentence, /undefined/, `no phrase for a check in ${checks.join(", ")}`);
+    // One phrase per check: phrases carry no commas, so the joined sentence splits cleanly.
+    assert.equal(sentence.split(", ").length, checks.length);
+  }
+});
+
+test("the usage block and the verdict agree on what this tool does to the npm bytes (issue #3675)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const sentence = "Checks run against the exact platform bytes installed from npm.";
+  const result = await invoke([]);
+  assert.equal(result.code, 2);
+  // The pre-#3675 usage sentence was "Verification uses exact platform bytes from npm." -- the
+  // noun #2982 ruled overclaims, surviving on the one surface #2982 did not rewrite.
+  assert.doesNotMatch(result.stderr, /Verification uses/);
+  assert.ok(result.stderr.includes(sentence), "usage must state the platform-bytes sentence");
+  const verdict = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/4",
+    identity: "a".repeat(64),
+    checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
+    benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
+    reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
+  });
+  assert.ok(verdict.includes(sentence), "the verdict must state the same sentence");
 });

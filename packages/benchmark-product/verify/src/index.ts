@@ -109,8 +109,9 @@ export * from "./profile/binary-qualification.js";
 export { ClaimPackageSchema, DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID } from "./profile/claim.js";
 export type { ClaimPackage } from "./profile/claim.js";
 export { firstDifference } from "./profile/claim-consistency.js";
-export { NOT_FETCHED_CHECK, summarizeVerificationOutcome } from "./outcome.js";
+export { NOT_FETCHED_CHECK, describeRecomputedChecks, summarizeVerificationOutcome } from "./outcome.js";
 export type {
+  VerificationCheckName,
   VerificationCheckOutcome,
   VerificationCheckState,
   VerificationOutcome,
@@ -146,6 +147,7 @@ export {
 // implementation for the producer to drift from.
 export {
   FREEZE_REPO_BUNDLE_MEMBERS,
+  FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   FREEZE_REPO_ROLES,
@@ -155,6 +157,7 @@ export {
   verifyFreezeRepo,
 } from "./freeze-repo.js";
 export type {
+  FreezeRepoBundleSupport,
   FreezeRepoDifference,
   FreezeRepoDifferenceKind,
   FreezeRepoExportResult,
@@ -196,3 +199,8 @@ export type {
 } from "./binding/beacon-binding.js";
 export { runBindingClass, runBindingSentence, runBoundVenueLimits } from "./binding/report-face.js";
 export type { RunBindingClass } from "./binding/report-face.js";
+// The declared denominator beside the strict all-slots one (issue #2977). Exported for the same
+// single-sourcing reason as the binding report face above: the product core depends on this
+// package, so every surface that shows the pair derives it from one function.
+export { armDenominators } from "./denominators.js";
+export type { ArmDenominators, PlannedSlotAccounting } from "./denominators.js";

@@ -9,6 +9,34 @@ on:
       - "docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md"
       - "docs/superpowers/specs/2026-08-05-policy-optimization-live-host-and-guided-journey-design.md"
       - "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md"
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/benchmarking/aggregate/**"
+      - "packages/benchmarking/local/**"
+      - "packages/benchmarking/records/**"
+      - "packages/benchmarking/run/**"
+      - "packages/benchmarking/testing/**"
+      - "packages/evidence/attestation-issuer/**"
+      - "packages/evidence/discovery/**"
+      - "packages/evidence/execution-evidence-builder/**"
+      - "packages/evidence/execution-recorder/**"
+      - "packages/evidence/protocol/**"
+      - "packages/evidence/repository/**"
+      - "packages/policy/identity/**"
+      - "packages/policy/outcomes/**"
+      - "packages/task-execution/backend/**"
+      - "packages/task-execution/backend-local/assembly/**"
+      - "packages/task-execution/backend-local/launchers/**"
+      - "packages/task-execution/backend-local/supervisor/**"
+      - "packages/task-execution/backend-local/workspace/**"
+      - "packages/task-execution/evaluation-harness/**"
+      - "packages/task-execution/evaluator-adapters/**"
+      - "packages/task-execution/oci-grader/**"
+      - "packages/task-execution/profiles/**"
+      - "packages/task-execution/protocol/**"
+      - "packages/task-execution/testing/**"
+      - "packages/trust/core/**"
   push:
     branches: [next]
     paths:
@@ -18,6 +46,34 @@ on:
       - "docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md"
       - "docs/superpowers/specs/2026-08-05-policy-optimization-live-host-and-guided-journey-design.md"
       - "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md"
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/benchmarking/aggregate/**"
+      - "packages/benchmarking/local/**"
+      - "packages/benchmarking/records/**"
+      - "packages/benchmarking/run/**"
+      - "packages/benchmarking/testing/**"
+      - "packages/evidence/attestation-issuer/**"
+      - "packages/evidence/discovery/**"
+      - "packages/evidence/execution-evidence-builder/**"
+      - "packages/evidence/execution-recorder/**"
+      - "packages/evidence/protocol/**"
+      - "packages/evidence/repository/**"
+      - "packages/policy/identity/**"
+      - "packages/policy/outcomes/**"
+      - "packages/task-execution/backend/**"
+      - "packages/task-execution/backend-local/assembly/**"
+      - "packages/task-execution/backend-local/launchers/**"
+      - "packages/task-execution/backend-local/supervisor/**"
+      - "packages/task-execution/backend-local/workspace/**"
+      - "packages/task-execution/evaluation-harness/**"
+      - "packages/task-execution/evaluator-adapters/**"
+      - "packages/task-execution/oci-grader/**"
+      - "packages/task-execution/profiles/**"
+      - "packages/task-execution/protocol/**"
+      - "packages/task-execution/testing/**"
+      - "packages/trust/core/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

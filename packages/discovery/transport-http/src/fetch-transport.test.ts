@@ -248,3 +248,49 @@ describe("createHttpTransport redirect containment (#3411)", () => {
     expect(transport.stats().revalidations).toBe(1);
   });
 });
+
+describe("createHttpTransport deadline (#3222)", () => {
+  it("hands the caller's signal to the fetch primitive, on every redirect hop", async () => {
+    const controller = new AbortController();
+    const seen: (AbortSignal | undefined)[] = [];
+    const transport = createHttpTransport("", async (url, init) => {
+      seen.push(init?.signal);
+      return url === "https://peer.example/a"
+        ? new Response(null, { status: 302, headers: { location: "https://peer.example/b" } })
+        : new Response(encoder.encode("ok"), { status: 200 });
+    });
+
+    await transport.fetch("https://peer.example/a", { signal: controller.signal });
+    expect(seen).toEqual([controller.signal, controller.signal]);
+  });
+
+  it("abandons a body that stalls after the headers arrive", async () => {
+    const controller = new AbortController();
+    // Headers land, then the stream trickles and never ends -- the shape a
+    // black-holed peer presents. Nothing here aborts the socket, so the only
+    // thing that can end this read is the loop observing the signal.
+    const transport = createHttpTransport("", async () => {
+      let chunks = 0;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controllerStream) {
+            chunks += 1;
+            if (chunks === 2) controller.abort();
+            controllerStream.enqueue(encoder.encode("."));
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    await expect(
+      transport.fetch("https://peer.example/slow", { signal: controller.signal }),
+    ).rejects.toThrow(/abort/iu);
+  });
+
+  it("still fetches when no signal is supplied", async () => {
+    const stub = stubFetch(() => new Response(encoder.encode("ok"), { status: 200 }));
+    const transport = createHttpTransport("", stub.fetchLike);
+    expect((await transport.fetch("https://peer.example/x")).status).toBe(200);
+  });
+});

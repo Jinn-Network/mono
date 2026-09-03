@@ -18,6 +18,7 @@ import {
   fetchTrajectoryFromIpfs,
   fetchSourceBundleFromIpfs,
 } from '../adapters/mech/ipfs.js';
+import { classifyIpfsFetchFailure } from '@jinn-network/core/corpus-read';
 import { parseTask } from '../types/task.js';
 import { checkEnvelopeSchema } from './checks/envelope-schema.js';
 import { checkPayload } from './checks/payload.js';
@@ -183,8 +184,19 @@ export async function runConformance(args: RunConformanceArgs): Promise<Conforma
           options.ipfsGatewayUrl ?? '',
           trajCid,
         );
-      } catch {
-        /* leave undefined — trajectory checks will skip */
+      } catch (err) {
+        // Leave undefined — trajectory checks will skip. But a skipped check
+        // caused by a byte-cap refusal or a blocked redirect is not the same
+        // thing as a trajectory that is genuinely not on IPFS (#3441), and the
+        // report cannot tell them apart, so say so here.
+        const classification = classifyIpfsFetchFailure(err);
+        if (classification !== 'not-found') {
+          console.warn(
+            `[conformance] trajectory ${trajCid} could not be read `
+              + `(${classification}); trajectory checks will skip: `
+              + `${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
     }
   }

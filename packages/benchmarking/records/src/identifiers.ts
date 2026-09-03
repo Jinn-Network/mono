@@ -61,6 +61,7 @@ export const TASK_SELECTION_EXTENSION =
  */
 export const BEACON_SOURCE_EXTENSION =
   "https://spec.jinn.network/extensions/beacon-source/v1";
+
 /**
  * The disclosure-specification record (design `2026-08-19-disclosure-specification-record.md` §4.1,
  * issue #2839): one sealed record naming exactly one subject and exactly six variables, each

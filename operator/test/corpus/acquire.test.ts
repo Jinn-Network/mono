@@ -159,6 +159,50 @@ describe('acquireArtifactContent', () => {
     expect(store.getNetworkArtifact(realSha)?.content.equals(realBytes)).toBe(true);
   });
 
+  it('warns when the donated IPFS read was refused rather than absent (#3441)', async () => {
+    // Falling through silently turns a byte-cap refusal — positive evidence the
+    // content EXISTS — into an invisible data gap. A 404 stays quiet.
+    const realSha = (await import('node:crypto')).createHash('sha256').update(realBytes).digest('hex');
+    const { IpfsFetchFailedError, IpfsResponseTooLargeError, IpfsContentNotFoundError } =
+      await import('@jinn-network/core/corpus-read');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const run = async (cause: unknown) =>
+      acquireArtifactContent({
+        sha256: realSha,
+        artifactType: 'design_document',
+        access,
+        store,
+        selfSafeAddress: '0x' + 'f'.repeat(40),
+        privateKey: TEST_KEY,
+        acquireFn: vi.fn(async () => realBytes),
+        fetchFromIpfs: vi.fn(async () => {
+          throw new IpfsFetchFailedError('IPFS JSON fetch failed after all candidates', [cause]);
+        }),
+        ipfsGatewayUrl: 'https://gateway.example.com',
+        ownerSafe: '0x' + 'a'.repeat(40),
+        sources: [{
+          kind: 'ipfs',
+          cid: 'bafy-donated',
+          sha256: realSha,
+          encoding: 'jinn.artifact.donation.v1',
+        }],
+      });
+
+    await run(new IpfsResponseTooLargeError(8 * 1024 * 1024));
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toMatch(/too-large/);
+    expect(warn.mock.calls[0]![0]).toContain(realSha);
+
+    store.close();
+    store = new Store(':memory:');
+    warn.mockClear();
+    await run(new IpfsContentNotFoundError('missing', 404));
+    expect(warn).not.toHaveBeenCalled();
+
+    warn.mockRestore();
+  });
+
   it('treats donated IPFS sha mismatch as fatal and does not cache', async () => {
     const declaredSha = (await import('node:crypto')).createHash('sha256').update(realBytes).digest('hex');
     const wrongBytes = Buffer.from('wrong donated bytes');

@@ -19,6 +19,24 @@ name: Operator Images
 on:
   push:
     branches: [next]
+    # DELIBERATELY NARROWER than `ci.yml`'s operator-lane selector, which also selects
+    # on every workspace in `operator`'s transitive `portal:` closure and on any
+    # `packages/**/package.json` (#3532, #3573). The two filters describe the same
+    # dependency — this image is built from those portal targets' source — but they
+    # answer different questions, and only one of them is a correctness gate:
+    #
+    #  - Whether the image's COPY set is still right is decided PRE-merge, by the
+    #    Dockerfile portal guard behind the wider selector. A change that invalidates
+    #    the COPY set cannot reach `next` without that guard having run on it.
+    #  - This lane is canary CADENCE, not a gate. Widening its trigger would change
+    #    what publishes and how often — a release-policy call, which
+    #    `.github/scripts/portal-path-filters.mjs` records as out of scope for the
+    #    portal audit for exactly this reason, and which is not settled by this filter.
+    #
+    # The residue is staleness, not incorrectness: a push touching only a portal
+    # target's source rebuilds no canary image, so `operator-*:next` lags that source
+    # until the next push under one of the paths below. (This lane's own health is
+    # tracked separately — #2811, #2812.)
     paths:
       - 'operator/**'
       - 'deploy/railway-launcher-operator/**'
