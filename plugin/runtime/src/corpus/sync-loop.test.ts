@@ -620,6 +620,12 @@ describe("the corpus-sync capability", () => {
 
     await vi.advanceTimersByTimeAsync(INTERVAL);
     expect(built.syncCalls()).toBe(2);
+    // A cycle the clock cost its own line still says SOMETHING: unlike the
+    // EPIPE case, the logger here is working, so swallowing the throw would
+    // leave the cycle entirely silent.
+    expect(
+      built.log.warn.mock.calls.some(([message]) => message === "corpus.mirror.cycle.unreported"),
+    ).toBe(true);
     await built.capability.stop!();
   });
 

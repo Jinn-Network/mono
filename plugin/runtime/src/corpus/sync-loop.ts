@@ -274,7 +274,7 @@ export function createCorpusSyncCapability(
         }
         await writeStatus(state);
         await reportCycle(state, { status, indexed, error, indexError });
-      } catch {
+      } catch (caught) {
         // Recording and reporting are what this cycle has to say; the
         // reschedule below is whether there is ever another one. Everything
         // above runs on injected dependencies that can throw -- the clock,
@@ -283,8 +283,17 @@ export function createCorpusSyncCapability(
         // while the process stays alive holding the exclusive sync lock. That
         // is the failure this file argues against one line below, where the
         // NEXT cycle's rejection is already guarded for the same reason.
-        // Swallowed without a line of its own because the logger is a
-        // candidate for the thing that just threw.
+        //
+        // Reported best-effort rather than swallowed outright: the logger is
+        // only one candidate for what just threw, and when it is not the
+        // culprit -- a clock that threw stamping the record -- this is the
+        // sole signal the cycle produced at all. Nested, because the case
+        // where it IS the culprit must still reach the reschedule.
+        try {
+          state.log.warn("corpus.mirror.cycle.unreported", { reason: describeError(caught) });
+        } catch {
+          // The logger itself. Nothing is left to report it to.
+        }
       }
       if (!state.lifetime.signal.aborted) {
         state.timer = setTimeout(() => {
