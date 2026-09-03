@@ -1,7 +1,7 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.1
-- **Date:** 2026-09-02 (v1.1: 2026-09-03)
+- **Version:** 1.2
+- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -15,6 +15,9 @@
   spelling they were standing in for; adds §5's headings rule and splits its venue row;
   corrects three source pointers, one prescribed reader name, and one word of prose. No v1.0
   disposition is reversed.
+- **v1.2** (#3837): files §7's five presentation-rename units as issues (#3861–#3865) and
+  records each number in §7. §7's closing note now says no *external* condition gates them,
+  which is what "unblocked" meant before the tracker could see their order. No ruling changes.
 
 ## 1. Scope
 
@@ -375,10 +378,10 @@ leaves by rename (§4.1: `CAS record` → *Evidence file*), not by hiding.
 **Presentation renames — ordinary changes, landable now.** No format revision, no bundle
 reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in this order:
 
-1. **Reader tool check-name glosses** — §4.2's gloss column, in
+1. **Reader tool check-name glosses** (#3861) — §4.2's gloss column, in
    `verify/src/cli.ts` `renderVerifiedBundle`; gate `verify/test/cli.test.mjs`. Highest value,
    smallest diff, zero contract exposure. Do this first, independently of everything else.
-2. **Report page vocabulary** — §4.1 applied to `verify/src/assets.ts` (`index.html`,
+2. **Report page vocabulary** (#3862) — §4.1 applied to `verify/src/assets.ts` (`index.html`,
    `README.md`, `share.txt`, badge, social card); gates
    `verify/src/assets-presentation-profile.test.ts` and `assets-binary-admission.test.ts`.
    Covers the ordinary report surface and both method-specific surfaces ruled at the end of
@@ -390,19 +393,20 @@ reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in t
    Sequenced *after* #2985 rules the IA, so the renames land against the surviving elements
    rather than being applied twice; #2985 closed completed on 2026-09-02, so that sequencing
    condition is already satisfied.
-3. **Reader tool prose vocabulary** — §4.2's remaining rows, including the usage text; same
-   gate as (1).
-4. **Docs reader-vocabulary tables** — §4.3: one table each in `PUBLIC-BUNDLE.md` and
+3. **Reader tool prose vocabulary** (#3863) — §4.2's remaining rows, including the usage
+   text; same gate as (1).
+4. **Docs reader-vocabulary tables** (#3864) — §4.3: one table each in `PUBLIC-BUNDLE.md` and
    `EXTERNAL-VERIFICATION.md`, no prose rename.
-5. **Glossary conformance test** — an asset/CLI test asserting that no hidden term from §5
-   appears in any reader-facing generated string, and that no §5 concept is presented under
-   two names. It asserts over §4's **Reader-facing name** column, with the rows §5's
+5. **Glossary conformance test** (#3865) — an asset/CLI test asserting that no hidden term
+   from §5 appears in any reader-facing generated string, and that no §5 concept is presented
+   under two names. It asserts over §4's **Reader-facing name** column, with the rows §5's
    headings rule marks as headings or column headers as its exception set; §5 states that
    boundary, and states what it does not settle. Without it this spec decays on the next
    feature that adds a surface.
 
-All five items are unblocked today — (2)'s only sequencing condition, #2985, has closed. All
-five adopt the verdict verb ruled by #2982 rather than minting one.
+No external condition gates any of the five — (2)'s only one, #2985, has closed — so the order
+above is the whole of their sequencing. All five adopt the verdict verb ruled by #2982 rather
+than minting one.
 
 **Contract renames — queued to a bundle-format revision, not scheduled here.** Nothing in §4
 requires one; every ruling above is reachable through presentation. The queue exists so the
