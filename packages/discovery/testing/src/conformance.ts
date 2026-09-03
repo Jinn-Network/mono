@@ -379,13 +379,13 @@ export interface ClientUnderTest {
    * Resolves a well-known `archiveRoot` against the serving root that served the
    * document, refusing one that does not stay inside it (§7 item 3, #3434).
    *
-   * OPTIONAL, deliberately. `checkLocator` is a whole-fetch guard every HTTP
-   * consumer performs; containment is a pure URL decision that belongs to
-   * whichever layer holds the configured serving root, and an implementer that
-   * does not hold one has nothing to answer with. An implementer that supplies
-   * it has the `consumer-archive-root-*` vectors asserted against it; one that
-   * does not skips them, exactly as the non-locator consumer vectors skip
-   * today.
+   * OPTIONAL, deliberately. `checkLocator` guards a whole retrieval, which
+   * every HTTP consumer performs; containment is a pure URL decision that
+   * belongs to whichever layer holds the configured serving root, and an
+   * implementer that holds none has nothing to answer with. An implementer
+   * that supplies this method has the `consumer-archive-root-*` vectors
+   * asserted against it; one that omits it skips them, exactly as the
+   * non-locator consumer vectors skip today.
    */
   checkArchiveRoot?(servingRoot: string, archiveRoot: string): Promise<{ rejected: boolean; reason?: string }>;
 }
