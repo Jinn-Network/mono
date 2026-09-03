@@ -414,11 +414,18 @@ export async function buildFleetNativeRuntime(
     );
   }
 
+  // Required at the point the transport's destination policy is decided, rather than left to the
+  // `?? []` this replaced (#3461). `JinnConfig` cannot mark the key required — it is the
+  // legacy-shaped config — but an omission was never survivable: `buildFleetNativeDiscovery`,
+  // called unconditionally further down, already refuses it. The `?? []` only moved the refusal
+  // past a transport silently built with an empty origin set. Placed after the identity-store
+  // refusals above so their message ordering is unchanged.
+  const recordSources = required(config.recordSources, 'recordSources');
   const records = createBaseSepoliaRecordTransport({
     ipfsApiUrl,
     // The record origins this operator configured (#3431): its own serving plane plus every
     // configured record source. A peer-announced locator outside them is refused before the fetch.
-    recordOrigins: [publicBaseUrl, ...(config.recordSources ?? []).map(({ baseUrl }) => baseUrl)],
+    recordOrigins: [publicBaseUrl, ...recordSources.map(({ baseUrl }) => baseUrl)],
     fetchImpl: input.fetchImpl ?? globalThis.fetch,
   });
   // One `createViemBaseSepoliaReadClients` call supplies both trust-catalog chain reads: the
@@ -504,7 +511,7 @@ export async function buildFleetNativeRuntime(
       exactDocuments: exactDocumentsByDigest,
       resolveEvaluationSpec: buildNativeEvaluationSpecResolver(
         records,
-        selectFleetRequesterSources(config.recordSources).map(({ baseUrl }) => baseUrl),
+        selectFleetRequesterSources(recordSources).map(({ baseUrl }) => baseUrl),
       ),
       // #29: the same chain-direct settlement reader the single-host solver wires as the settlement
       // port's `canonicalReader`. Without it the fleet settlement port derives finality solely from
@@ -532,7 +539,7 @@ export async function buildFleetNativeRuntime(
   // self-resolution depend on the operator having listed itself as a peer.
   const nativeRecordBytes = buildFleetDeliveryBytesResolver(
     (url) => records.byLocation(url),
-    [publicBaseUrl, ...(config.recordSources ?? []).map(({ baseUrl }) => baseUrl)],
+    [publicBaseUrl, ...recordSources.map(({ baseUrl }) => baseUrl)],
   );
   // ENGAGEMENT-keyed readers for the TODAY generation this fleet actually pins (`chain` above is
   // `BASE_SEPOLIA_TODAY`), whose delivery events carry no digest for `nativeRecordBytes` to key
@@ -578,7 +585,7 @@ export async function buildFleetNativeRuntime(
   const discovery = await buildFleetNativeDiscovery({
     store: input.store,
     trust,
-    recordSources: config.recordSources,
+    recordSources,
     // #2547: this operator's own archive origin, so a self-hosted requester source's idle-lapsed
     // head degrades rather than deadlocking the solver loop's boot `sync()`.
     selfBaseUrl: publicBaseUrl,
