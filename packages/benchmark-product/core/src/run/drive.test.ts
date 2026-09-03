@@ -1612,8 +1612,9 @@ describe("dispatchEvaluation — the replayed-Submission refusals are contained 
       evaluationTerminal: "could-not-grade",
       detail,
     });
-    // Non-retryable: no `retryable` category is carried, so the evalIndex is completed for good.
-    expect(evaluations[0]).not.toHaveProperty("retryable");
+    // Non-retryable: `retryableFailureFromCause` sees no `TaskExecutionError`, so the terminal
+    // carries no `failureCategory` and the evalIndex is completed for good.
+    expect(evaluations[0]).not.toHaveProperty("failureCategory");
     // Every other leg — the same cell's second leg and both of the other cell's — still judged.
     for (const other of evaluations.slice(1)) {
       expect(other.kind === "evaluation" && other.verdictSha256 !== undefined).toBe(true);

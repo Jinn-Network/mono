@@ -55,8 +55,8 @@ import {
   type DriveDeps,
 } from "../run/drive.js";
 import { createProductLaunchCapture } from "../run/publication-capture.js";
-import { reconcileReplayedSubmission } from "../run/replayed-submission-recovery.js";
 import { createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
+import { reconcileReplayedSubmission } from "../run/replayed-submission-recovery.js";
 import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import {
   appendRunJournalEntry,
@@ -783,10 +783,9 @@ export function runResume(
                     `${cell.cellKey}::${cell.dispatch}`,
                   );
                   if (submissionSha256 === undefined) continue;
-                  // Shared with the evaluation leg's replay preamble; see
-                  // `../run/replayed-submission-recovery.ts` for the ref discipline both enforce.
-                  // "absent" simply means the crash preceded backend acceptance, and `resumeRun`
-                  // submits these same bytes normally below.
+                  // One preamble, shared with the evaluation leg's replay block
+                  // (`../run/replayed-submission-recovery.ts`), so the ref discipline both
+                  // enforce cannot drift between them.
                   await reconcileReplayedSubmission({
                     backend,
                     submissionBytes: getSealedBytes(
