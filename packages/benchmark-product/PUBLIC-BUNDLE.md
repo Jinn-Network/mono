@@ -828,7 +828,9 @@ The layout:
   all, and neither does a compound expression, which names no one list entry. The
   publication's `name`, `version`, `author`, and `citation` are spliced into these
   generated files verbatim, so each is refused if it carries a control character
-  or a line that would read as a second `SPDX-…:` tag. In `metadata/spdx.json` a
+  or line separator — C0, DEL, all of C1, `U+2028` and `U+2029`, since a
+  licence scanner breaks lines on more of those than JavaScript does — or a line
+  that would read as a second `SPDX-…:` tag. In `metadata/spdx.json` a
   source `downloadLocation` that is not a remote URL, and an `author` that is a
   scheme-qualified machine identifier rather than a supplier name, both report
   `NOASSERTION` rather than stating something the record does not support.

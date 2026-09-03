@@ -581,6 +581,19 @@ describe("git-tree construction rules the renderer never exercises", () => {
     }
   });
 
+  test("refuses an unpaired surrogate, which two distinct names would otherwise share", () => {
+    // A lone surrogate has no UTF-8 encoding, so it and U+FFFD encode to the same bytes: two
+    // distinct file sets would return one oid, and two names differing only there would emit a
+    // tree body carrying the same name twice.
+    for (const name of ["a\uD800", "a\uDC00"]) {
+      expect(() => freezeRepoCommitId(new Map([[name, encoder.encode("x")]]), "identity"), name)
+        .toThrow(/unpaired surrogate/);
+    }
+    // A real U+FFFD is ordinary content and still hashes.
+    expect(freezeRepoCommitId(new Map([["a\uFFFD", encoder.encode("x")]]), "identity"))
+      .toMatch(/^[0-9a-f]{40}$/);
+  });
+
   test("refuses a NUL in a name, which would not even be a tree object", () => {
     // A tree entry is framed `<mode> <name>\0<oid>`, so a NUL in the name breaks the framing
     // itself rather than merely producing a tree git would decline to hold.
@@ -660,6 +673,30 @@ describe("generated licence text is not writable from a free-text field", () => 
     expect(() => renderFreezeRepo(snapshotOf({
       benchmark: withBenchmark({ citation: "Someone, 2026.\nSPDX-License-Identifier: MIT" }),
     }))).toThrow(/reads as an SPDX tag/);
+  });
+
+  test("refuses every line separator a licence scanner breaks on, not only the ones JS does", () => {
+    // A tag-line check that stops at U+007F is bypassed by every reader that does not. Python's
+    // str.splitlines() and Java's String.lines() both break on CR, U+0085, U+2028 and U+2029, so
+    // a tag after any of them is a second licence tag to the reader that matters.
+    for (const separator of ["\r", "\u0085", "\u2028", "\u2029"]) {
+      expect(() => renderFreezeRepo(snapshotOf({
+        benchmark: withBenchmark({ citation: `Someone, 2026.${separator}SPDX-License-Identifier: GPL-3.0-only` }),
+      })), JSON.stringify(separator)).toThrow();
+      // Single-line fields refuse the separator itself, before any tag is needed.
+      expect(() => renderFreezeRepo(snapshotOf({
+        benchmark: withBenchmark({ name: `Foo${separator}SPDX-License-Identifier: GPL-3.0-only` }),
+      })), JSON.stringify(separator)).toThrow();
+    }
+  });
+
+  test("refuses a licence padded or separated by anything but single spaces", () => {
+    // The value is rendered onto the SPDX-License-Identifier line exactly as declared, so
+    // whitespace the grammar tokenizes away would still reach the tag line.
+    for (const license of ["MIT\tOR Apache-2.0", "MIT  OR  Apache-2.0", " MIT", "MIT "]) {
+      expect(() => renderFreezeRepo(snapshotOf({ benchmark: withBenchmark({ license }) })), license)
+        .toThrow();
+    }
   });
 
   test("refuses a name carrying a newline or a control character", () => {

@@ -262,37 +262,45 @@ export function isSpdxLicenseExpression(value: string): boolean {
 }
 
 /**
- * C0 control characters other than tab (and newline, in the one field that may carry one) and DEL,
- * plus any line that would read as an SPDX tag. `citation` and `name` are spliced verbatim into
- * `LICENSE` and the README heading, so a citation carrying a newline followed by
- * `SPDX-License-Identifier: MIT`
- * would put a second licence tag into a machine-scanned licence file. Self-inflicted rather than
- * an outside attack — the field is the publication's own sealed record — but a generated licence
- * file must not be writable from a free-text field, and refusing is cheaper than escaping.
+ * Control characters and line separators, plus any line that would read as an SPDX tag.
+ * `citation` and `name` are spliced verbatim into `LICENSE` and the README heading, so a citation
+ * carrying a line break followed by `SPDX-License-Identifier: MIT` would put a second licence tag
+ * into a machine-scanned licence file. Self-inflicted rather than an outside attack — the field is
+ * the publication's own sealed record — but a generated licence file must not be writable from a
+ * free-text field, and refusing is cheaper than escaping.
+ *
+ * The refused set is C0 (tab excepted, and the line terminators in the one multi-line field), DEL,
+ * ALL of C1, and `U+2028` / `U+2029`. C1 and the separators are not decoration: a line-break check
+ * that stops at `U+007F` is bypassed by every scanner that does not. Python's `str.splitlines()`
+ * — the idiom in ScanCode and most licence scanners — breaks on `\r`, `U+0085`, `U+2028` and
+ * `U+2029`, and Java's `String.lines()` breaks on the same set, so a tag after any of them is a
+ * second licence tag to the reader that matters even though this file saw one line.
+ *
+ * The splitter below therefore recognizes exactly the terminators the classes admit, and nothing
+ * outside them can reach a rendered file to be recognized by anyone else.
  */
 const SPDX_TAG_LINE = /^[ \t]*SPDX-[A-Za-z][A-Za-z0-9-]*[ \t]*:/u;
 
 function assertRenderableFreeText(path: string, value: string, multiline: boolean): void {
-  const field = path.slice(path.indexOf(".") + 1);
   // Tab is carried in both cases; CR and LF only where the field is documented as multi-line. CR
   // is admitted there because a citation pasted with CRLF endings is ordinary and the record is
-  // already sealed, so refusing it would make such a bundle permanently unexportable — and it buys
-  // nothing: the tag-line check below splits on CRLF as well as LF.
+  // already sealed, so refusing it would make such a bundle permanently unexportable — and the
+  // splitter below treats it as the line break it is.
   const forbidden = multiline
-    ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
-    : /[\u0000-\u0008\u000A-\u001F\u007F]/u;
+    ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u2028\u2029]/u
+    : /[\u0000-\u0008\u000A-\u001F\u007F-\u009F\u2028\u2029]/u;
   if (forbidden.test(value)) {
     refuse(
       "record-integrity",
       path,
-      `the sealed record's ${field} carries a control character; a freeze repository renders it into generated text and will not emit unprintable bytes`,
+      `the sealed record's ${path} carries a control character or line separator; a freeze repository renders it into generated text and will not emit one`,
     );
   }
-  if (value.split(/\r?\n/u).some((line) => SPDX_TAG_LINE.test(line))) {
+  if (value.split(/\r\n|[\n\r]/u).some((line) => SPDX_TAG_LINE.test(line))) {
     refuse(
       "record-integrity",
       path,
-      `the sealed record's ${field} carries a line that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it`,
+      `the sealed record's ${path} carries a line that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it`,
     );
   }
 }
@@ -441,6 +449,19 @@ function insert(root: TreeNode, path: string, bytes: Uint8Array): void {
   if (segments.some((segment) => segment === "." || segment === "..")) {
     refuse("conflict", path, `"${path}" contains a "." or ".." segment; git records no such entry`);
   }
+  if (Buffer.from(path, "utf8").toString("utf8") !== path) {
+    // A lone surrogate has no UTF-8 encoding, so `Buffer.from` replaces it with U+FFFD — and both
+    // the sort key and the emitted entry name go through that encoding. Two distinct file sets
+    // ("a\uD800" and "a\uFFFD") would otherwise return ONE oid, and two names differing only in
+    // their surrogate would emit a tree body carrying the same name twice: bytes no git repository
+    // can hold. The round trip is the check because it tests the exact property that matters —
+    // that the bytes emitted for this name represent this name.
+    refuse(
+      "conflict",
+      path,
+      `"${path}" is not representable in UTF-8 (an unpaired surrogate); git tree entry names are UTF-8 bytes`,
+    );
+  }
   if (path.includes("\u0000")) {
     // A tree entry is framed as `<mode> <name>\0<oid>`, so a NUL in a name does not merely produce
     // a tree git would refuse — it produces bytes that are not a tree object at all.
@@ -502,6 +523,13 @@ function treeObjectId(node: TreeNode): Buffer {
  * The commit id for a rendered tree: a real git commit object over a real git tree, computed
  * in-process. No `git` binary, no working directory, no index — so the value is a function of the
  * bundle rather than of whatever machine happened to run the export.
+ *
+ * Stated exactly, because the README tells a reader `git rev-parse HEAD` equals this value: the
+ * hash is plain SHA-1, while git uses hardened SHA-1 (sha1dc), which REFUSES a block bearing a
+ * known collision-attack signature. The two agree on every input git accepts and disagree only on
+ * content deliberately built to carry such a block — where git produces no oid at all rather than
+ * a different one. A bundle's records are digest-committed by the closure that sealed them, so
+ * this is a limit of the parity claim, not a way to move a published pin.
  */
 export function freezeRepoCommitId(files: ReadonlyMap<string, Uint8Array>, bundleIdentity: string): string {
   const root = emptyNode();
@@ -537,7 +565,20 @@ function readPublication(snapshot: VerifiedBundleSnapshot): FreezeRepoPublicatio
   const license = record["license"];
   // The expression grammar tokenizes on whitespace, so a licence carrying a newline could satisfy
   // it and then render as two lines under one `SPDX-License-Identifier:` tag. Checked first.
-  if (typeof license === "string" && license.length > 0) assertRenderableFreeText("benchmark.json.license", license, false);
+  if (typeof license === "string" && license.length > 0) {
+    assertRenderableFreeText("benchmark.json.license", license, false);
+    // The grammar below tokenizes on whitespace, but the value is rendered onto the
+    // `SPDX-License-Identifier:` line exactly as it arrived — so a tab or a doubled space would
+    // satisfy the grammar and still produce a tag line no scanner has to read the way this one
+    // meant it. Single spaces, no padding.
+    if (license !== license.trim() || /\s\s|[^\S ]/u.test(license)) {
+      refuse(
+        "record-integrity",
+        "benchmark.json.license",
+        "the sealed Benchmark record's licence is padded or separated by something other than single spaces; a freeze repository renders it onto an SPDX-License-Identifier line exactly as declared",
+      );
+    }
+  }
   if (typeof license === "string" && license.length > 0 && !isSpdxLicenseExpression(license)) {
     refuse(
       "record-integrity",
