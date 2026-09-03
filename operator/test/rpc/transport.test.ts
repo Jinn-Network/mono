@@ -917,6 +917,25 @@ describe('sanitizeErrorText (#642)', () => {
     expect(sanitizeStructuredValue(deepPrimitives)).toEqual(deepPrimitives);
   });
 
+  it('still host-masks a credential-bearing URL nested past the depth cap (#3548)', () => {
+    // The cap is container-scoped, so this string survives instead of becoming
+    // '[truncated]' — which only stays safe while the leaf policy keeps masking
+    // it. Pin the masking half, not just the type-preservation half.
+    const url = 'https://user:SECRETKEY123@rpc.example/v2/SECRETKEY123';
+    const deep = { a: { b: { c: { d: { e: { f: { url } } } } } } };
+    expect(sanitizeStructuredValue(deep)).toEqual({
+      a: { b: { c: { d: { e: { f: { url: 'rpc.example' } } } } } },
+    });
+  });
+
+  it('markers a bigint rather than emitting a value JSON.stringify rejects (#3120)', () => {
+    const sanitized = sanitizeStructuredValue({ block: 123n, tries: 2 });
+    expect(sanitized).toEqual({ block: '[unserializable]', tries: 2 });
+    // The ring buffer is JSON-serialized on the way out of the notifications
+    // endpoint, so every sanitized value must survive JSON.stringify.
+    expect(() => JSON.stringify(sanitized)).not.toThrow();
+  });
+
   it('represents non-plain values honestly instead of collapsing them to {} (#3038)', () => {
     const iso = '2026-08-27T00:00:00.000Z';
     expect(sanitizeStructuredValue({ at: new Date(iso) })).toEqual({ at: iso });

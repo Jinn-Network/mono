@@ -85,9 +85,12 @@ afterAll(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-function binding(key: string): ResolvedBinding {
+// A conforming `BindingResolver` never resolves by key alone, so the fixture echoes
+// the queried Agent IRI back on the binding it returns (issue #3629).
+function binding(key: string, agent: string): ResolvedBinding {
   return {
     binding: {
+      agent,
       key: { didKey: key, keyid: key },
       // Every scope a native role can require, including the announce-plane scope the three
       // `*-discovery` roles gained in issue #2525.
@@ -105,7 +108,7 @@ async function fixture(input: { readonly agent?: string } = {}) {
   const root = await mkdtemp(join(tmpdir(), "jinn-swe-rebench-deployment-composition-"));
   roots.push(root);
   const resolver: BindingResolver = {
-    resolveBinding: async (query) => binding(query.key),
+    resolveBinding: async (query) => binding(query.key, query.agent),
   };
   const roles = await openRoleIdentitySet({
     storePath: join(root, "identity", "roles.enc.json"),

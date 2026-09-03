@@ -172,7 +172,11 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
     source: MirrorSourceConfig,
     counters: Counters,
     signal: AbortSignal | undefined,
-  ): Promise<{ readonly entries: SyncedEntry[]; readonly head: Awaited<ReturnType<typeof fetchHead>> }> {
+  ): Promise<{
+    readonly entries: SyncedEntry[];
+    readonly truncated: boolean;
+    readonly head: Awaited<ReturnType<typeof fetchHead>>;
+  }> {
     const endpoint: SourceEndpoint = {
       agent: source.agent,
       name: source.name,
@@ -193,13 +197,18 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
         : returningSync(endpoint, { sequence: mark.sequence, entry: mark.entry }, ports);
 
     const entries: SyncedEntry[] = [];
+    // Set only when an entry the walk had already produced is abandoned, so a
+    // walk that simply ran out is never reported as cut (#3252).
+    let truncated = false;
     for await (const synced of walk) {
-      if (signal?.aborted === true) break;
-      if (counters.entriesWalked >= options.maxEntriesPerSync) break;
+      if (signal?.aborted === true || counters.entriesWalked >= options.maxEntriesPerSync) {
+        truncated = true;
+        break;
+      }
       counters.entriesWalked += 1;
       entries.push(synced);
     }
-    return { entries, head };
+    return { entries, truncated, head };
   }
 
   async function syncSource(
@@ -219,7 +228,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
     try {
       const mark = await options.highWaterMarks.get(identity);
       const firstAdoption = mark === undefined;
-      const { entries, head } = await collect(source, counters, signal);
+      const { entries, truncated, head } = await collect(source, counters, signal);
 
       // An archive polled more often than it appends re-serves the chain
       // position this mirror already accepted -- byte-identical if the poll
@@ -234,8 +243,12 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
       // healthy mirror would sit red between publishes. Revalidate instead
       // (#3443, #3468), the same shape `operator/src/daemon/native-discovery.ts`
       // takes.
+      // A cut walk is never an idle poll: the entries it abandoned sit above
+      // the mark whatever the head says, so it belongs on the verification
+      // path where the truncation is judged, not on the revalidation one where
+      // it would read as a clean no-op (#3252).
       const idle =
-        mark === undefined || entries.length !== 0
+        mark === undefined || entries.length !== 0 || truncated
           ? undefined
           : classifyIdleHead(head.head, identity, mark);
       if (mark !== undefined && idle !== undefined) {
@@ -276,6 +289,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
         head: head.head,
         ...(head.signature === undefined ? {} : { headSignature: head.signature }),
         entries,
+        truncated,
         firstAdoption,
       });
       if (verification.status === "rejected") {

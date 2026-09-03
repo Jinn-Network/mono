@@ -4,7 +4,7 @@
 |---|---|
 | **Version** | 0.3 |
 | **Date** | 2026-08-07 |
-| **Amended** | 2026-08-19 — catalog `method.bind` form ([DR-2026-08-19](../../../log/decisions/2026-08-19-colophon-method-cli-discover.md)) |
+| **Amended** | 2026-08-19 — catalog `method.bind` form ([DR-2026-08-19](../../../log/decisions/2026-08-19-colophon-method-cli-discover.md)); 2026-09-02 — declared and strict all-slots denominators on the headline tables (issue #2977) |
 | **Author** | Packet BP-30, amended by packet BP-31 of the standalone benchmarking product implementation program |
 | **Shape** | `feat` |
 | **Status** | draft |
@@ -370,6 +370,20 @@ failure is reduced to a typed browser-safe receipt with logical relative issue
 paths; server filesystem paths and raw filesystem messages never cross the
 browser boundary. Reloading the route reads and renders the durable bundle
 identity, relative path, publication time, and named checks from RunState.
+
+Both headline-by-arm tables on this surface — the sealed Report's and the
+claim package's — state the method's declared denominator, the strict
+all-slots denominator, and the count of planned slots the declared one leaves
+out (issue #2977). The strict number is §3.4's per-arm `expected`, already in
+this surface's state; the third column is the difference between two sealed
+counts. This is accounting over stored facts, not a calculated statistic, and
+it adds no state, collection, or action. All three render always, including
+when nothing was left out.
+
+The published bundle page does not carry the pair. Its bytes are pinned by the
+verifier that every allocated bundle format names, so rendering it there is a
+bundle-format allocation rather than a page change
+(`../../../spec/2026-09-02-report-page-information-architecture.md` section 8).
 
 #### 3.5.1 Claim package (sub-surface of the report)
 

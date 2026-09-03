@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { accessSync, constants, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { accessSync, constants, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -25,9 +27,64 @@ const waitFor = async <T>(fn: () => T | undefined, label: string): Promise<T> =>
   throw new Error(`timed out: ${label}`);
 };
 
+// A recursive `rmSync` walks the tree as readdir -> unlink -> rmdir, so a file that lands in a
+// directory between its readdir and its rmdir makes the rmdir fail with ENOTEMPTY; `force: true`
+// suppresses only ENOENT. Every case below hands `meta/` to the shim, which is a separate process
+// that keeps publishing there after the one artifact the case awaited -- `custody.json` and
+// `cancellation-result.json` arrive later -- so teardown races it, and that race turned a green
+// run red on an unrelated markdown-only pull request (issue #2678).
+//
+// `rmSync`'s own `maxRetries`/`retryDelay` do NOT cover it, which is the whole reason this loop
+// exists. Measured on Node 22: when the internal rimraf meets ENOTEMPTY it removes the children it
+// read, then retries the bare `rmdir` on its retry schedule WITHOUT re-reading the directory, so
+// an entry created after that readdir is never unlinked and every retry fails on it. At
+// `maxRetries: 60, retryDelay: 50` a 300ms writer produced a throw after 92 seconds of retrying --
+// slower and no more correct. Re-entering `rmSync` from the top is what re-reads the directory.
+//
+// One budget for the WHOLE hook, not one per directory. The hostile-documents case registers
+// eight trees, so a per-directory budget multiplies by eight and a hook that overruns Vitest's
+// 10s default hook timeout is the same false red this change exists to remove. Every tree still
+// gets at least one attempt whatever the clock says, because the deadline is only consulted after
+// a failure.
+const REMOVE_BUDGET_MS = 4_000;
+const REMOVE_POLL_MS = 20;
+
+// `afterEach` is synchronous, and a worker may block: a bounded synchronous wait keeps the
+// teardown one statement instead of making every caller async. One buffer, since nothing ever
+// stores into it and the wait therefore always runs to its timeout.
+const waitCell = new Int32Array(new SharedArrayBuffer(4));
+const sleepSync = (ms: number): void => {
+  Atomics.wait(waitCell, 0, 0, ms);
+};
+
+/**
+ * Removes one attempt tree, re-entering `rmSync` until it succeeds or `deadline` passes.
+ *
+ * Never throws: the assertions have already passed by the time this runs, so failing the file here
+ * reports a defect the test did not find. It is warned about instead -- and nothing leaks either
+ * way, because `$TMPDIR` is the managed root that `test-support/tmp-isolation` sweeps when the run
+ * ends. Same contract as `sweepManagedTree` in that seam, which this file cannot import: every
+ * package tsconfig here sets `rootDir: "src"`.
+ */
+const removeAttemptTree = (dir: string, deadline = Date.now() + REMOVE_BUDGET_MS): void => {
+  for (;;) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (Date.now() >= deadline) {
+        console.warn(`[jinn-test] could not remove attempt tree ${dir}:`, error);
+        return;
+      }
+      sleepSync(REMOVE_POLL_MS);
+    }
+  }
+};
+
 afterEach(() => {
   for (const pid of residualPids.splice(0)) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  const deadline = Date.now() + REMOVE_BUDGET_MS;
+  for (const dir of dirs.splice(0)) removeAttemptTree(dir, deadline);
 });
 
 describe.runIf(linux)("Linux native custody shim", () => {
@@ -275,4 +332,64 @@ describe.runIf(linux)("Linux native custody shim", () => {
       else process.env["JINN_NATIVE_CUSTODY_TEST_SKIP_KILL"] = prior;
     }
   }, 10_000);
+});
+
+// Teardown coverage for the removal above. Not gated on Linux: the shim cases are, but the
+// ENOTEMPTY race is a property of recursive removal against a live writer and reproduces on any
+// platform, so gating it would leave the regression unproven everywhere else the suite runs.
+describe("attempt tree teardown", () => {
+  // A tight synchronous writer, bounded by wall clock so a loaded runner does not lengthen it, and
+  // a directory pre-filled deeply enough that the readdir -> unlink phase takes long enough for a
+  // new entry to land before the rmdir. That is the shim's shape -- a separate process still
+  // publishing into `meta/` after the artifact a case awaited -- and against the pre-fix teardown
+  // (a bare recursive `rmSync`) it raises ENOTEMPTY on `meta` in most trials.
+  const WRITER_WINDOW_MS = 300;
+  const PRE_EXISTING_ENTRIES = 400;
+  const CONSECUTIVE_CYCLES = 25;
+  const RACE_TRIALS = 5;
+  const writerProgram = [
+    "const {writeFileSync}=require('node:fs');const {join}=require('node:path');",
+    "const dir=process.argv[1];let index=0;",
+    `const deadline=Date.now()+${WRITER_WINDOW_MS};`,
+    "while(Date.now()<deadline){index+=1;try{writeFileSync(join(dir,`late-${index}.json`),'{}');}catch{}}",
+  ].join("");
+
+  it(`removes the tree on every one of ${CONSECUTIVE_CYCLES} consecutive cycles`, () => {
+    for (let cycle = 0; cycle < CONSECUTIVE_CYCLES; cycle += 1) {
+      const root = mkdtempSync(join(tmpdir(), "jinn-teardown-cycle-"));
+      dirs.push(root);
+      const meta = join(root, "meta");
+      mkdirSync(meta, { recursive: true });
+      writeFileSync(join(meta, "outcome.json"), "{}");
+      removeAttemptTree(root);
+      expect(existsSync(root)).toBe(false);
+    }
+  });
+
+  it("removes the tree without throwing while another process is still writing into it", async () => {
+    for (let trial = 0; trial < RACE_TRIALS; trial += 1) {
+      const root = mkdtempSync(join(tmpdir(), "jinn-teardown-race-"));
+      // Registered like every other case: an assertion that fails below leaves the tree to the
+      // shared teardown rather than to the end-of-run sweep.
+      dirs.push(root);
+      const meta = join(root, "meta");
+      mkdirSync(meta, { recursive: true });
+      for (let entry = 0; entry < PRE_EXISTING_ENTRIES; entry += 1) {
+        writeFileSync(join(meta, `pre-${entry}.json`), "{}");
+      }
+      const writer = spawn(process.execPath, ["-e", writerProgram, meta], { stdio: "ignore" });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Two separate claims. Not throwing is what keeps a passing test body from going red; the
+      // tree actually being gone is what proves the retries outlasted the writer rather than the
+      // catch merely swallowing the error. The retry budget covers several times the writer's
+      // window, so the second claim does not race the first.
+      expect(() => removeAttemptTree(root)).not.toThrow();
+      expect(existsSync(root)).toBe(false);
+      // `once` never resolves for a child that has already exited, and this one exits on its own
+      // deadline -- usually before the removal returns. Check before awaiting, as
+      // `shim.integration.test.ts` does.
+      writer.kill("SIGKILL");
+      if (writer.exitCode === null && writer.signalCode === null) await once(writer, "exit");
+    }
+  }, 30_000);
 });

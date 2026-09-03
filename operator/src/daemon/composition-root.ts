@@ -427,6 +427,18 @@ export interface CompositionRootInput {
    * assemble a real `ProjectorLoop`/`ClaimGate`/`EngagementLedger` rather than stubs.
    */
   readonly store: Store;
+  /**
+   * Host-supplied launchers considered alongside `ALL_LAUNCHERS` when resolving this
+   * composition's `executionWiring`. Each entry carries the executable its own `plan()` argv
+   * spawns, because `resolveLauncherCommand` only knows the shipped launcher ids.
+   *
+   * The seam exists so a hermetic rig can dispatch a work kind the shipped registry has no
+   * launcher for (the swe-rebench-v2 e2e's canned-patch stub) without a test stub — or an
+   * env-gated branch selecting one — landing in the production launcher list. Omitted by
+   * `main.ts` and every production host: the shipped registry is then the whole set, exactly
+   * as before.
+   */
+  readonly extraLaunchers?: readonly { readonly launcher: LauncherContract; readonly command: string }[];
   /** Projector poll interval (ms). Defaults to 5000, matching `LOOP_REGISTRY`'s entry. */
   readonly projectorPollIntervalMs?: number;
   readonly logger?: { info(m: string): void; warn(m: string): void };
@@ -572,21 +584,25 @@ function buildVerifiedExecutable(command: string): VerifiedExecutable {
 function buildLaunchers(
   wiring: readonly ExecutionWiringEntry[],
   mode: CompositionRootInput['mode'],
+  extra: CompositionRootInput['extraLaunchers'] = [],
 ): readonly LauncherContract[] {
   const aliases = mode === 'legacy' ? LEGACY_HARNESS_TO_LAUNCHER_ID : HARNESS_TO_LAUNCHER_ID;
   const wanted = new Set(
     wiring.map((entry) => aliases[entry.harness] ?? entry.harness),
   );
-  return ALL_LAUNCHERS.filter((launcher) => wanted.has(launcher.id));
+  const available = [...ALL_LAUNCHERS, ...extra.map((entry) => entry.launcher)];
+  return available.filter((launcher) => wanted.has(launcher.id));
 }
 
 export function buildLauncherDeployments(
   launchers: readonly LauncherContract[],
   config: JinnConfig,
+  extra: CompositionRootInput['extraLaunchers'] = [],
 ): Readonly<Record<string, LauncherDeployment>> {
+  const extraCommands = new Map(extra.map((entry) => [entry.launcher.id, entry.command]));
   const deployments: Record<string, LauncherDeployment> = {};
   for (const launcher of launchers) {
-    const command = resolveLauncherCommand(launcher.id, config);
+    const command = extraCommands.get(launcher.id) ?? resolveLauncherCommand(launcher.id, config);
     if (command === undefined) continue;
     const executable = buildVerifiedExecutable(command);
     deployments[launcher.id] = {
@@ -2403,8 +2419,8 @@ export async function buildOperatorComposition(
   const evidence = await openOperatorEvidence({ rootDir: input.evidenceRoot });
 
   const wiring = toPipelineWiring(config.executionWiring ?? []);
-  const launchers = buildLaunchers(wiring, input.mode);
-  const launcherDeployments = buildLauncherDeployments(launchers, config);
+  const launchers = buildLaunchers(wiring, input.mode, input.extraLaunchers);
+  const launcherDeployments = buildLauncherDeployments(launchers, config, input.extraLaunchers);
   const workspaceRuntime = buildWorkspaceRuntimePorts();
 
   const backendConfig: LocalTaskExecutionBackendConfig = {
