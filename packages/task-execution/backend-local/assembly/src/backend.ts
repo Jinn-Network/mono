@@ -1584,6 +1584,10 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       // cheapest diagnostic there is; keep them.
       const spawn: SpawnRequest & { readonly stdoutPath: string; readonly stderrPath: string } = {
         argv: plan.argv,
+        // temp-env: the plan's own env pins TMPDIR/TMP/TEMP at the attempt's `tmp` (the launchers'
+        // `baseEnv`) and `executionEnv`'s allowlist carries all three through; both lines are held
+        // by their own regression assertions. The carriage is real but reaches this site through a
+        // runtime provisioner object, which the repository scan reads no further than.
         env: provisioner.executionEnv({ env: plan.env, cwd: plan.cwd }),
         cwd: plan.cwd,
         stdoutPath: join(this.paths(attempt).logs, HARNESS_STDOUT_LOG),
@@ -1591,6 +1595,8 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       };
       const planBytes = serializeCanonicalJson({
         argv: [...plan.argv],
+        // temp-env: the launch plan as it is recorded in the journal, not an environment handed to a
+        // child. What the harness actually receives is built above, from the same plan.
         env: { ...plan.env },
         cwd: plan.cwd,
         validExitCodes: [...plan.validExitCodes],

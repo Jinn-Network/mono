@@ -138,6 +138,8 @@ export function describeWorkspaceContract(subject: WorkspaceContractSubject): vo
       });
       expect(provisioner.executionEnv({
         cwd: "/work",
+        // temp-env: the input to an `executionEnv` allowlist assertion, not an environment handed to
+        // a child. What the assertion is about is which of these names survive the filter.
         env: {
           JINN_ATTEMPT_ID: "urn:test", CODEX_HOME: "/state",
           OPENAI_API_KEY: "secrets/openai", AWS_SECRET_ACCESS_KEY: "resolved-secret",
