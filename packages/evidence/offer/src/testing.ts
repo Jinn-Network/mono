@@ -16,7 +16,7 @@ import {
   type GoldenOfferName,
 } from "./fixtures.js";
 import { OFFER_RECORD_KIND, OFFER_RECORD_MEDIA_TYPE } from "./identifiers.js";
-import { InvalidOfferError, parseOfferEnvelope, sealOffer, sealOfferPayload } from "./seal.js";
+import { parseOfferEnvelope, sealOffer, sealOfferPayload } from "./seal.js";
 import { OfferRecordSchema } from "./schema.js";
 
 /** The keyid the shipped golden envelopes declare. */
@@ -116,8 +116,9 @@ export function describeOfferRecordConformance(): void {
           sealOfferPayload(document);
           expect.unreachable("an unsealable document must throw");
         } catch (error) {
-          expect(error).toBeInstanceOf(InvalidOfferError);
-          expect((error as InvalidOfferError).category).toBe("invalid-document");
+          // On `category`, never on the class: this driver also runs against a packed copy
+          // of the package, where the class a consumer imports need not be this one.
+          expect((error as { readonly category?: unknown }).category).toBe("invalid-document");
         }
       });
     });

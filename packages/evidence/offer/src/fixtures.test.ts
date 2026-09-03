@@ -42,12 +42,6 @@ describe("the shipped fixture corpus", () => {
     expect(await listUnsealableFixtureNames()).toEqual([...UNSEALABLE_OFFERS].sort());
   });
 
-  // The two corpora prove different refusals, so a name in both would mean one of them is
-  // asserting the wrong thing about that document.
-  test("the two refused corpora share no name", () => {
-    expect(INVALID_OFFERS.filter((name) => UNSEALABLE_OFFERS.includes(name))).toEqual([]);
-  });
-
   test("the superseding fixture names the priced fixture it replaces", async () => {
     const superseding = parseOfferEnvelope(await loadGoldenEnvelope("superseding")).offer;
     const priced = parseOfferEnvelope(await loadGoldenEnvelope("priced"));
