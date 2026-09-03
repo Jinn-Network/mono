@@ -253,7 +253,7 @@ describe('buildLaunchers selection (extraLaunchers seam)', () => {
       .toEqual(['claude-code']);
   });
 
-  it('refuses an extraLaunchers id that collides with a shipped launcher', async () => {
+  it('refuses an extraLaunchers id that collides with another launcher', async () => {
     const { buildLaunchers } = await import('../../src/daemon/composition-root.js');
     // Both contracts would otherwise survive the filter, and the two downstream consumers
     // disagree about which wins — pairing a shipped launcher's plan() with an injected binary.
@@ -261,14 +261,24 @@ describe('buildLaunchers selection (extraLaunchers seam)', () => {
       wiringFor('claude-code'),
       'native',
       [{ launcher: injectedLauncher('claude-code'), command: process.execPath }],
-    )).toThrow(/collides with a shipped launcher/u);
+    )).toThrow(/collides with another launcher/u);
 
     // The refusal does not depend on the colliding id being selected by the wiring.
     expect(() => buildLaunchers(
       wiringFor('prediction-v1-baseline'),
       'native',
       [{ launcher: injectedLauncher('claude-code'), command: process.execPath }],
-    )).toThrow(/collides with a shipped launcher/u);
+    )).toThrow(/collides with another launcher/u);
+
+    // Two extras sharing an id collide with each other for the same reason.
+    expect(() => buildLaunchers(
+      wiringFor('e2e-injected-launcher'),
+      'native',
+      [
+        { launcher: injectedLauncher('e2e-injected-launcher'), command: process.execPath },
+        { launcher: injectedLauncher('e2e-injected-launcher'), command: process.execPath },
+      ],
+    )).toThrow(/collides with another launcher/u);
   });
 });
 

@@ -438,8 +438,8 @@ export interface CompositionRootInput {
    * `main.ts` and every production host: the shipped registry is then the whole set, exactly
    * as before.
    *
-   * An entry whose id equals a shipped launcher's is refused at composition build time — see
-   * `buildLaunchers`.
+   * An entry whose id collides with a shipped launcher (or another entry) is refused at
+   * composition build time — see `buildLaunchers`.
    */
   readonly extraLaunchers?: readonly { readonly launcher: LauncherContract; readonly command: string }[];
   /** Projector poll interval (ms). Defaults to 5000, matching `LOOP_REGISTRY`'s entry. */
@@ -602,21 +602,20 @@ export function buildLaunchers(
   const wanted = new Set(
     wiring.map((entry) => aliases[entry.harness] ?? entry.harness),
   );
-  // Refuse an id collision loudly rather than returning both contracts: downstream consumers
-  // disagree about which one wins (`buildLauncherDeployments` keys by id and the injected
-  // command wins for both iterations, while `buildNativeLauncherCapabilityPort`'s `find` hits
-  // the prepended shipped contract), so a collision silently pairs a shipped launcher's
-  // `capabilities()`/`plan()` with an injected executable. A host that reuses a shipped id has
-  // a wiring bug; say so at composition build time.
-  const shippedIds = new Set(ALL_LAUNCHERS.map((launcher) => launcher.id));
-  for (const entry of extra) {
-    if (shippedIds.has(entry.launcher.id)) {
-      throw new Error(
-        `extraLaunchers id "${entry.launcher.id}" collides with a shipped launcher; use a distinct id`,
-      );
-    }
-  }
   const available = [...ALL_LAUNCHERS, ...extra.map((entry) => entry.launcher)];
+  // Refuse a duplicate id loudly rather than carrying both contracts: the downstream consumers
+  // disagree about which one wins (`buildLauncherDeployments` keys by id, so the injected
+  // command wins for both iterations, while `buildNativeLauncherCapabilityPort`'s `find` hits
+  // whichever contract comes first — the shipped one, since `ALL_LAUNCHERS` is prepended). A
+  // collision therefore pairs a shipped launcher's `capabilities()`/`plan()` with an injected
+  // executable. A host that reuses an id has a wiring bug; say so at composition build time.
+  const seen = new Set<string>();
+  for (const launcher of available) {
+    if (seen.has(launcher.id)) {
+      throw new Error(`extraLaunchers id "${launcher.id}" collides with another launcher; use a distinct id`);
+    }
+    seen.add(launcher.id);
+  }
   return available.filter((launcher) => wanted.has(launcher.id));
 }
 
