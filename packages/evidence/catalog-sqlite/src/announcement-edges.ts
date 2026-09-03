@@ -7,6 +7,7 @@ import {
 } from "@jinn-network/evidence-discovery";
 import type Database from "better-sqlite3";
 
+import { snapshotQuery } from "./cursors.js";
 import { catalogIoError } from "./errors.js";
 import { canonicalJsonSnapshot, sha256Text } from "./projection-row.js";
 import type {
@@ -24,6 +25,17 @@ const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u;
 export const ANNOUNCEMENT_EDGE_DEFAULT_LIMIT = 50;
 /** The largest page a read may take, matching the rest of this binding. */
 export const ANNOUNCEMENT_EDGE_MAX_LIMIT = 100;
+
+/** Every field an announcement-edge query may carry; anything else is a typo, not a filter. */
+const ANNOUNCEMENT_EDGE_QUERY_FIELDS = [
+  "sourceId",
+  "recordKind",
+  "recordDigest",
+  "field",
+  "targetDigest",
+  "limit",
+  "cursor",
+] as const;
 
 /** The ordering key a cursor resumes from: source, record, field, ordinal. */
 type EdgeOrder = readonly [string, string, string, number];
@@ -85,6 +97,11 @@ function queryString(value: unknown, where: string): string {
  * says no more than omission does. Anything else under a reference-bearing name must be a digest,
  * or an array of them in record order; a card that puts something else there is malformed, and
  * refusing it is more useful than indexing it.
+ *
+ * `referenceFields` is read as a set. A profile that names one field twice describes one edge
+ * twice, not two edges, and reading it literally would emit two rows sharing the
+ * `(source_id, record_digest, field, ordinal)` primary key -- reporting a card-shaped mistake as
+ * the `IO_FAILURE` a constraint violation wraps to.
  */
 export function announcementEdgesFromCard(
   input: AnnouncementEdgeIndexInput,
@@ -94,7 +111,7 @@ export function announcementEdgesFromCard(
   const recordKind = cardString(input.recordKind, "recordKind");
   const recordDigest = cardDigest(input.recordDigest, "recordDigest");
   const edges: AnnouncementEdge[] = [];
-  for (const field of input.referenceFields) {
+  for (const field of new Set(input.referenceFields)) {
     if (!Object.prototype.hasOwnProperty.call(input.facts, field)) continue;
     const announced = input.facts[field];
     if (announced === undefined || announced === null) continue;
@@ -112,6 +129,21 @@ export function announcementEdgesFromCard(
     });
   }
   return edges;
+}
+
+/**
+ * The exact page statement one filter shape reads through. Exported so an index-coverage test can
+ * take `EXPLAIN QUERY PLAN` over the statement the binding really runs, rather than over a
+ * restatement of it that could drift.
+ */
+export function announcementEdgeSelectSql(where: string): string {
+  return `
+      SELECT source_id, announcement_id, record_kind, record_digest, field, ordinal, target_digest
+      FROM announcement_edges
+      WHERE ${where}
+      ORDER BY source_id ASC, record_digest ASC, field ASC, ordinal ASC
+      LIMIT ?
+    `;
 }
 
 export class SqliteAnnouncementEdgeIndex {
@@ -179,22 +211,24 @@ export class SqliteAnnouncementEdgeIndex {
   #statementFor(where: string): Database.Statement {
     const cached = this.#selectEdges.get(where);
     if (cached !== undefined) return cached;
-    const statement = this.database.prepare(`
-      SELECT source_id, announcement_id, record_kind, record_digest, field, ordinal, target_digest
-      FROM announcement_edges
-      WHERE ${where}
-      ORDER BY source_id ASC, record_digest ASC, field ASC, ordinal ASC
-      LIMIT ?
-    `);
+    const statement = this.database.prepare(announcementEdgeSelectSql(where));
     this.#selectEdges.set(where, statement);
     return statement;
   }
 
   async query(
-    query: AnnouncementEdgeQuery,
+    unchecked: AnnouncementEdgeQuery,
     options?: CatalogOperationOptions,
   ): Promise<CatalogPage<AnnouncementEdge>> {
     this.active(options);
+    // A field this binding does not serve is refused rather than ignored: a `sourceID` typo that
+    // silently dropped the source filter would return every source's edges, and `sourceId` is the
+    // whole isolation boundary.
+    const query = snapshotQuery(
+      unchecked,
+      ANNOUNCEMENT_EDGE_QUERY_FIELDS,
+      "Announcement-edge query",
+    ) as AnnouncementEdgeQuery;
     const clauses: string[] = [];
     const parameters: (string | number)[] = [];
     if (query.sourceId !== undefined) {
