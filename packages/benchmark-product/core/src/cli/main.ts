@@ -1530,6 +1530,15 @@ function handleStatus(args: ParsedArgs, context: CliContext, jsonMode: boolean):
       `expected ${value.counts.expected}, dispatched ${value.counts.dispatched}, delivered ${value.counts.delivered}, `
         + `judged ${value.counts.judged}, failed ${value.counts.failed}, `
         + `awaiting evaluation ${value.counts.awaitingEvaluation}`,
+      // The binding halves, which `--json` has always carried and this surface did not (issue
+      // #3428). Exactly one can apply: `bindableBeaconRounds` is present only while the run is
+      // locked, unlaunched and unbound, and `binding` only once it has bound.
+      ...(value.binding === undefined ? [] : [`binding ${value.binding.class}: ${value.binding.statement}`]),
+      // Naming the round is the point: an operator who guesses one too low is refused for
+      // postdating, and that refusal does not name the round the seal requires.
+      ...(value.bindableBeaconRounds ?? []).map(
+        (entry) => `bindable\t${entry.source}\tround ${entry.round}\tpublished ${entry.publishedAt}`,
+      ),
     ];
     return `${lines.join("\n")}\n`;
   });
