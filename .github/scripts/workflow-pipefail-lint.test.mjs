@@ -638,7 +638,10 @@ test('every tracked composite action is inside the scanned set (#3808)', () => {
     encoding: 'utf8',
   })
     .split('\0')
-    .filter((entry) => entry !== '')
+    // `git ls-files '*action.yml'` matches any path *ending* in it, so
+    // `packages/x/docker-action.yml` comes back too. The walker keys on the exact
+    // basename GitHub requires, so filter to that or the guard fails spuriously.
+    .filter((entry) => entry.split('/').at(-1) === 'action.yml' || entry.split('/').at(-1) === 'action.yaml')
     .sort();
   const walked = new Set(findActionFiles(repoRoot).map((path) => path.replaceAll('\\', '/')));
   assert.deepEqual(
@@ -646,4 +649,112 @@ test('every tracked composite action is inside the scanned set (#3808)', () => {
     [],
     'a tracked action file the lint never reads is a silent hole in the gate',
   );
+});
+
+// Regressions from the sweep's own internal review.
+
+test('an `exit` inside an awk regex or string is not the exit statement', () => {
+  assert.equal(earlyExitConsumer("awk '/exit code/{print}'"), null);
+  assert.equal(earlyExitConsumer('awk \'{print "exit"}\''), null);
+  assert.equal(earlyExitConsumer("awk '/fail/{print; exit}'"), 'awk …exit');
+});
+
+test('a trailing comment is not part of a `shell:` value', () => {
+  // Reading the comment into the shell string makes `shellSetsPipefail` miss the `bash`
+  // and downgrades a real pipefail site to a warning — a fail-open on the gate.
+  const step = [
+    'jobs:',
+    '  a:',
+    '    steps:',
+    '      - shell: bash # the default is not pipefail',
+    '        run: |',
+    '          git tag | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', step).map((finding) => finding.severity),
+    ['error'],
+  );
+
+  const jobDefaults = [
+    'jobs:',
+    '  a:',
+    '    defaults:',
+    '      run:',
+    '        shell: bash # every step',
+    '    steps:',
+    '      - run: |',
+    '          git tag | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', jobDefaults).map((finding) => finding.severity),
+    ['error'],
+  );
+});
+
+test('every block-scalar indicator masks its body', () => {
+  // `collectRunBlocks` accepts any `|`/`>` header, so the mask must too: a header the
+  // mask does not recognise reopens the phantom-`defaults:` hole for that step.
+  for (const indicator of ['|', '|-', '|+', '|2', '|2-', '|-2', '>', '>-']) {
+    const source = [
+      'jobs:',
+      '  sample:',
+      '    steps:',
+      '      - name: write a workflow fixture',
+      `        run: ${indicator}`,
+      "          cat > wf.yml <<'YAML'",
+      '          defaults:',
+      '            run:',
+      '              shell: bash',
+      '          YAML',
+      '      - name: real step, no shell declared',
+      '        run: |',
+      '          producer | head -1',
+      '',
+    ].join('\n');
+    assert.deepEqual(
+      analyzeWorkflow('sample.yml', source).map((finding) => finding.severity),
+      ['warning'],
+      `run: ${indicator}`,
+    );
+  }
+});
+
+test('a composite action under a generated-looking directory is still discovered', () => {
+  // `dist` and `build` are real places to put `.github/actions/<name>/action.yml`, and a
+  // prune entry matching a bare name at any depth would hide one from the lint while the
+  // discovery guard blamed the repository for it.
+  const root = mkdtempSync(join(tmpdir(), 'pipefail-lint-prune-'));
+  try {
+    for (const name of ['build', 'dist', 'coverage']) {
+      mkdirSync(join(root, '.github', 'actions', name), { recursive: true });
+      writeFileSync(
+        join(root, '.github', 'actions', name, 'action.yml'),
+        ['runs:', '  using: composite', '  steps:', '    - shell: bash', '      run: |', '        git tag | head -1', ''].join(
+          '\n',
+        ),
+      );
+    }
+    assert.deepEqual(
+      findActionFiles(root).map((path) => path.replaceAll('\\', '/')),
+      [
+        '.github/actions/build/action.yml',
+        '.github/actions/coverage/action.yml',
+        '.github/actions/dist/action.yml',
+      ],
+    );
+    assert.equal(lintCompositeActions(root).length, 3);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('an annotation finding is not reported as a pipe into a consumer', () => {
+  const [annotation] = findings('# pipefail-lint: allow', { shell: 'bash' });
+  assert.equal(annotation.kind, 'annotation');
+  assert.equal(annotation.consumer, null);
+  const [pipe] = findings('git tag | head -1', { shell: 'bash' });
+  assert.equal(pipe.kind, 'pipe');
+  assert.equal(pipe.consumer, 'head');
 });

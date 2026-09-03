@@ -46,19 +46,13 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '../..');
 const WORKFLOWS_DIR = join(REPOSITORY_ROOT, '.github', 'workflows');
 
-// Directories that hold no source of ours. Pruning them keeps the composite-action walk
-// cheap; the `git ls-files` guard in the test suite fails if one ever hides a tracked
-// action file, so the gate cannot go quietly blind to a surface it stopped reading.
-const PRUNED_DIRECTORIES = new Set([
-  '.git',
-  '.next',
-  '.turbo',
-  '.yarn',
-  'build',
-  'coverage',
-  'dist',
-  'node_modules',
-]);
+// Trees that can never hold a composite action of ours. Deliberately only these three:
+// a name like `dist` or `build` matches at *any* depth, so pruning it would hide
+// `.github/actions/build/action.yml` — a real place to put one — and the discovery guard
+// would then report a hole the walker itself had created. Dependency and VCS trees carry
+// no such ambiguity. The `git ls-files` guard in the test suite still fails if one of
+// these ever hides a tracked action file.
+const PRUNED_DIRECTORIES = new Set(['.git', '.yarn', 'node_modules']);
 
 // Shells whose `run:` body is a POSIX-ish pipeline language. Anything else (`pwsh`,
 // `python`, `node`, …) has no `|` semantics this lint models, and is skipped whole.
@@ -101,10 +95,14 @@ const ANNOTATION = /#\s*pipefail-lint:\s*allow\b(?<rest>.*)$/u;
 
 /**
  * @typedef {object} Finding
- * @property {string} file      workflow file name
+ * @property {string} file      path of the workflow or composite action
  * @property {number} line      1-based line in that file
+ * @property {'pipe'|'annotation'} kind what was found — an unguarded pipe, or a misuse
+ *   of the escape hatch itself. They read as different sentences, so the reporter must
+ *   not describe an annotation as a pipe into a consumer.
  * @property {'error'|'warning'} severity
- * @property {string} consumer  the early-exit consumer, e.g. `grep -q`
+ * @property {string|null} consumer the early-exit consumer, e.g. `grep -q`; `null` for
+ *   an annotation finding
  * @property {string} statement the offending statement, trimmed
  * @property {string} detail    why it is reported at this severity
  */
@@ -291,6 +289,16 @@ function sedStopsEarly(words) {
   return /(?:^|[;{}\s])[0-9,$~+]*q(?:[;}\s]|$)/u.test(stripSedPatterns(unquote(script.join(' '))));
 }
 
+// `/…/` regex literals and `"…"` strings inside an awk program are text, not code, so
+// they are stripped before the probe below: `awk '/exit code/{print}'` and
+// `awk '{print "exit"}'` read their whole input, and reporting either would be a false
+// positive on a required gate. The same reasoning as `stripSedPatterns`.
+function stripAwkLiterals(program) {
+  return program
+    .replaceAll(/\/(?:\\.|[^/\\\n])*\//gu, ' ')
+    .replaceAll(/"(?:\\.|[^"\\])*"/gu, ' ');
+}
+
 // `awk` drains its input unless its program can `exit`. The program is read as the rest
 // of the segment rather than as one word, because `awk 'NR==1 {print; exit}'` splits into
 // three whitespace-separated words and the `exit` is in the last of them. A program the
@@ -303,7 +311,7 @@ function awkStopsEarly(words) {
       continue;
     }
     if (word.startsWith('-') || word === '--') continue;
-    return /\bexit\b/u.test(words.slice(index).join(' '));
+    return /\bexit\b/u.test(stripAwkLiterals(words.slice(index).join(' ')));
   }
   return false;
 }
@@ -461,6 +469,16 @@ function indentOf(line) {
   return line.length - line.trimStart().length;
 }
 
+// One YAML scalar value. A `#` preceded by whitespace opens a comment, so `shell: bash #
+// see below` is the value `bash` — reading the comment as part of the shell string makes
+// `shellSetsPipefail` miss the `bash` and downgrades a real pipefail site to a warning,
+// which is a fail-open on the gate.
+function scalarValue(text) {
+  const quoted = /^(?<quote>['"])(?<value>.*?)\k<quote>\s*(?:#.*)?$/u.exec(text.trim());
+  if (quoted !== null) return quoted.groups.value;
+  return text.replace(/\s+#.*$/u, '').trim();
+}
+
 // Which lines are the body of a block scalar (`run: |`, `script: >`, …). No YAML key can
 // legally live there, so the structure readers below must not detect one: a workflow that
 // writes a workflow or action fixture through a heredoc would otherwise contribute a
@@ -481,7 +499,7 @@ function blockScalarBodies(lines) {
       }
       bodyIndent = null;
     }
-    const match = /^(?<indent>\s*)(?<dash>-\s+)?[A-Za-z0-9_.-]+:\s*[|>][+-]?[0-9]*\s*(?:#.*)?$/u.exec(line);
+    const match = /^(?<indent>\s*)(?<dash>-\s+)?[A-Za-z0-9_.-]+:\s*[|>][0-9+-]*\s*(?:#.*)?$/u.exec(line);
     if (match !== null) bodyIndent = match.groups.indent.length + (match.groups.dash?.length ?? 0);
   }
   return inside;
@@ -505,7 +523,7 @@ function collectDefaultShells(lines, inside) {
     let shell = null;
     if (match.groups.flow !== undefined) {
       const flow = FLOW_SHELL.exec(match.groups.flow);
-      if (flow !== null) shell = unquote(flow.groups.value);
+      if (flow !== null) shell = scalarValue(flow.groups.value);
     } else {
       for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
         const line = lines[cursor];
@@ -513,12 +531,12 @@ function collectDefaultShells(lines, inside) {
         if (indentOf(line) <= indent) break;
         const shellMatch = /^\s*shell:\s*(?<value>.+?)\s*$/u.exec(line);
         if (shellMatch !== null) {
-          shell = unquote(shellMatch.groups.value);
+          shell = scalarValue(shellMatch.groups.value);
           break;
         }
         const flow = FLOW_SHELL.exec(line);
         if (flow !== null) {
-          shell = unquote(flow.groups.value);
+          shell = scalarValue(flow.groups.value);
           break;
         }
       }
@@ -566,7 +584,9 @@ function inheritedShell(scopes, jobs, line) {
 // A `shell:` key, whether it opens its step (`- shell: bash`) or follows one.
 function readShellKey(line) {
   const match = /^\s*(?:-\s+)?shell:\s*(?<value>.+?)\s*$/u.exec(line);
-  return match === null ? null : unquote(match.groups.value);
+  if (match === null) return null;
+  const value = scalarValue(match.groups.value);
+  return value === '' ? null : value;
 }
 
 // The `shell:` declared on the step that owns the `run:` at `runLine`. Step keys share
@@ -816,8 +836,9 @@ export function analyzeWorkflow(file, source, { defaultShell = null } = {}) {
           findings.push({
             file,
             line: entry.line,
+            kind: 'annotation',
             severity: 'error',
-            consumer: 'pipefail-lint: allow',
+            consumer: null,
             statement: entry.text.trim() === '' ? '# pipefail-lint: allow' : entry.text.trim(),
             detail: 'pipefail-lint: allow annotation carries no reasoning',
           });
@@ -832,6 +853,7 @@ export function analyzeWorkflow(file, source, { defaultShell = null } = {}) {
         findings.push({
           file,
           line: entry.line,
+          kind: 'pipe',
           severity: context.pipefail ? 'error' : 'warning',
           consumer,
           statement,
@@ -924,19 +946,27 @@ function main() {
   for (const finding of findings) {
     const where = `${finding.file}:${finding.line}`;
     const level = finding.severity === 'error' ? '::error' : '::warning';
-    process.stdout.write(
-      `${level} file=${finding.file},line=${finding.line}::` +
-        `unguarded pipe into ${finding.consumer} — ${finding.detail}\n` +
-        `  ${where}: ${finding.statement}\n`,
-    );
+    const summary =
+      finding.kind === 'annotation' ? finding.detail : `unguarded pipe into ${finding.consumer} — ${finding.detail}`;
+    process.stdout.write(`${level} file=${finding.file},line=${finding.line}::${summary}\n  ${where}: ${finding.statement}\n`);
   }
 
   if (errors.length > 0) {
-    process.stdout.write(
-      `\n${errors.length} unguarded early-exit pipe consumer(s) under pipefail.\n` +
-        'Guard the pipeline (`… || true`), read the whole input (`grep -E … > /dev/null`),\n' +
-        'or annotate the site with `# pipefail-lint: allow -- <why this producer cannot fill the pipe>`.\n',
-    );
+    const pipes = errors.filter((finding) => finding.kind === 'pipe').length;
+    const annotations = errors.length - pipes;
+    if (pipes > 0) {
+      process.stdout.write(
+        `\n${pipes} unguarded early-exit pipe consumer(s) under pipefail.\n` +
+          'Guard the pipeline (`… || true`), read the whole input (`grep -E … > /dev/null`),\n' +
+          'or annotate the site with `# pipefail-lint: allow -- <why this producer cannot fill the pipe>`.\n',
+      );
+    }
+    if (annotations > 0) {
+      process.stdout.write(
+        `\n${annotations} allow annotation(s) with no reasoning.\n` +
+          'Write `# pipefail-lint: allow -- <why this producer cannot fill the pipe>`, or remove the annotation.\n',
+      );
+    }
     process.exitCode = 1;
     return;
   }
