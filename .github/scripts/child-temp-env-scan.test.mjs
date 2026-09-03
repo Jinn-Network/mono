@@ -9,7 +9,7 @@
 // else. It lives here instead of being copied per package because the heuristics are subtle enough
 // that two copies would drift, and because a repository-wide gate is what this directory is for.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -19,24 +19,29 @@ import { scanRoots, sourceFiles, unhandledSites } from './child-temp-env-scan.mj
 const root = resolve(import.meta.dirname, '../..');
 
 /**
- * Source roots the scan governs, discovered by directory existence so a package that moves or
- * arrives does not silently drop out of coverage. `benchmark-product/core` is where the scan began;
- * the `task-execution` trees are the ones it could not previously see.
+ * Source roots the scan governs. `benchmark-product/core` is where the scan began; the
+ * `task-execution` trees are the ones it could not previously see. Discovered rather than listed,
+ * because a listed root is exactly the coverage gap this gate exists to close — a package added to
+ * `task-execution` tomorrow would sit outside a list and nothing would say so.
  */
-const ROOTS = [
-  'packages/benchmark-product/core/src',
-  'packages/task-execution/backend/src',
-  'packages/task-execution/backend-local/assembly/src',
-  'packages/task-execution/backend-local/launchers/src',
-  'packages/task-execution/backend-local/supervisor/src',
-  'packages/task-execution/backend-local/workspace/src',
-  'packages/task-execution/evaluation-harness/src',
-  'packages/task-execution/evaluator-adapters/src',
-  'packages/task-execution/oci-grader/src',
-  'packages/task-execution/profiles/src',
-  'packages/task-execution/protocol/src',
-  'packages/task-execution/testing/src',
-].map((path) => join(root, path)).filter((path) => existsSync(path));
+function discoverRoots() {
+  const roots = [];
+  const core = join(root, 'packages/benchmark-product/core/src');
+  if (existsSync(core)) roots.push(core);
+  const trees = join(root, 'packages/task-execution');
+  for (const entry of readdirSync(trees, { withFileTypes: true }).filter((e) => e.isDirectory())) {
+    const src = join(trees, entry.name, 'src');
+    if (existsSync(src)) roots.push(src);
+    // `backend-local` holds a second level of packages rather than sources of its own.
+    else for (const nested of readdirSync(join(trees, entry.name), { withFileTypes: true })) {
+      const nestedSrc = join(trees, entry.name, nested.name, 'src');
+      if (nested.isDirectory() && existsSync(nestedSrc)) roots.push(nestedSrc);
+    }
+  }
+  return roots.sort();
+}
+
+const ROOTS = discoverRoots();
 
 /** Floor on the real-tree walk: a `sourceFiles` regression must fail loud, not pass over nothing. */
 const MIN_SCANNED_FILES = 250;

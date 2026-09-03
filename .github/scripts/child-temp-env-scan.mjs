@@ -84,8 +84,11 @@ function delegatedNames(expression, calls) {
  * later same-named local borrowed an earlier one's proof.
  */
 function definitionWindow(source, name, from) {
+  // `$` is legal in an identifier and is the end-of-line anchor in a pattern, so a name carrying one
+  // would match nothing and read as undefined rather than as the definition it is.
+  const literal = name.replace(/\$/gu, '\\$');
   let chosen;
-  for (const match of source.matchAll(new RegExp(`^([ \\t]*)${DECLARATION}${name}\\b`, 'gmu'))) {
+  for (const match of source.matchAll(new RegExp(`^([ \\t]*)${DECLARATION}${literal}\\b`, 'gmu'))) {
     if (match.index <= from) chosen = match;
     else {
       if (chosen === undefined) chosen = match;
