@@ -37,6 +37,17 @@ const ANNOUNCEMENT_EDGE_QUERY_FIELDS = [
   "cursor",
 ] as const;
 
+// The list above is the gate, so a field added to `AnnouncementEdgeQuery` and forgotten here
+// would be refused at runtime rather than served. This makes that a compile error: the two
+// differences must both be empty, so the list names every key of the type and nothing else.
+type SameAsQueryType =
+  Exclude<keyof AnnouncementEdgeQuery, (typeof ANNOUNCEMENT_EDGE_QUERY_FIELDS)[number]> extends never
+    ? Exclude<(typeof ANNOUNCEMENT_EDGE_QUERY_FIELDS)[number], keyof AnnouncementEdgeQuery> extends never
+      ? true
+      : false
+    : false;
+const announcementEdgeQueryFieldsAreExact: SameAsQueryType = true;
+
 /** The ordering key a cursor resumes from: source, record, field, ordinal. */
 type EdgeOrder = readonly [string, string, string, number];
 
@@ -134,7 +145,11 @@ export function announcementEdgesFromCard(
 /**
  * The exact page statement one filter shape reads through. Exported so an index-coverage test can
  * take `EXPLAIN QUERY PLAN` over the statement the binding really runs, rather than over a
- * restatement of it that could drift.
+ * restatement of it that could drift. It is package-internal: `index.ts` exports an explicit list
+ * and does not include it.
+ *
+ * `where` is interpolated, so it may only ever be clause text this module builds -- every value a
+ * caller supplies is a bound parameter and none of it reaches this string.
  */
 export function announcementEdgeSelectSql(where: string): string {
   return `
