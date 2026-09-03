@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
-import { describeRecomputedChecks, summarizeVerificationOutcome } from "./outcome.js";
+import { bundleIdentityLabel, describeRecomputedChecks, summarizeVerificationOutcome } from "./outcome.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult, type VerifyPublicBundleDeps } from "./verify.js";
 import { verifyFreezeRepo, type FreezeRepoVerificationResult } from "./freeze-repo.js";
 import type {
@@ -233,7 +233,7 @@ export function renderVerifiedBundle(
     .map(({ check, state }) => `${check.padEnd(24)}${state}`)
     .join("\n");
   const totalChecks = outcome.total;
-  const identity = result.identity.startsWith("sha256:") ? result.identity : `sha256:${result.identity}`;
+  const identity = bundleIdentityLabel(result);
   const anchors = "anchors" in result && result.anchors !== undefined
     ? renderAnchorReport(result.anchors)
     : "";

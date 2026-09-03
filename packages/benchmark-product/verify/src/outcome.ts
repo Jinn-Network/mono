@@ -1,4 +1,5 @@
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
+import { isMetadataFirstBundleProfile } from "@jinn-network/benchmarking-protocol";
 import { legacyClosure } from "./legacy-closures.js";
 import { PUBLIC_BUNDLE_V8_CHECKS } from "./reader-instructions.js";
 import type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./verify.js";
@@ -72,6 +73,26 @@ export function describeRecomputedChecks(outcome: VerificationOutcome): string {
   if (subjects.length === 1) return subjects[0]!;
   if (subjects.length === 2) return `${subjects[0]!} and ${subjects[1]!}`;
   return `${subjects.slice(0, -1).join(", ")}, and ${subjects.at(-1)!}`;
+}
+
+/**
+ * The bundle identity in the one shape a reader quotes and compares: exactly one `sha256:` prefix.
+ * The evidence-native line returns an already-prefixed `documentDigest`, the legacy line returns a
+ * bare digest, so a surface that spells the prefix itself renders `sha256:sha256:...` for half the
+ * formats it supports (issue #3312). Every reader surface calls this rather than concatenating.
+ */
+export function bundleIdentityLabel(result: Pick<PublicBundleVerificationResult, "identity">): string {
+  return result.identity.startsWith("sha256:") ? result.identity : `sha256:${result.identity}`;
+}
+
+/**
+ * True exactly for a bundle whose own manifest declares the metadata-first profile. Keyed on the
+ * declared profile, never on whether a body happened to be deferred: a metadata-first bundle whose
+ * declared artifacts are all carried reports `artifactContent.status === "verified"`, and a reader
+ * that keys on that side effect hands out a command no released reader line can run (issue #3313).
+ */
+export function isMetadataFirstBundle(result: PublicBundleVerificationResult): boolean {
+  return result.format === "benchmark-product-public-bundle/5" && isMetadataFirstBundleProfile(result.profile);
 }
 
 /**
