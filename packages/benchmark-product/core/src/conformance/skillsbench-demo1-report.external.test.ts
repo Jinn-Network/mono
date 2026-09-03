@@ -49,6 +49,8 @@ import {
   informativeSubset,
   manipulationCheck,
   pairedDeltaEstimate,
+  SKILLSBENCH_DEMO1_METHOD_IDS,
+  SKILLSBENCH_DEMO1_METHOD_VERSION,
   varianceDecomposition,
 } from "../method/skillsbench-demo1-stats.js";
 
@@ -367,9 +369,15 @@ describe.skipIf(!ENABLED)("Demo-1 evidence-native report", () => {
       subjects: [descriptor("matrix-v2.json", matrix.record.digest)],
       manifest: descriptor("analysis-manifest.json", manifest.digest),
       cohort: descriptor("cohort.json", cohort.digest),
+      // The paired estimate is `pairedDeltaEstimate` above — a Student-t interval over continuous
+      // per-task reward deltas — so the report cites Demo-1's own identifier, not the registered
+      // `jinn.benchmarking.method/paired-delta@1` whose implementation is a clustered BCa
+      // bootstrap over binary pass rates (issue #2973). The records published on 2026-08-20 carry
+      // the registered identifier; see the erratum in `skillsbench-demo1-seal.ts` for why those
+      // sealed bytes are not rewritten.
       method: {
-        id: "jinn.benchmarking.method/paired-delta",
-        version: "1",
+        id: SKILLSBENCH_DEMO1_METHOD_IDS.pairedMeanDelta,
+        version: SKILLSBENCH_DEMO1_METHOD_VERSION,
         parameters: { pairedBy: "task", arms: ["A-native-skill", "B-flat-claude-md"], control: "C-no-instructions" },
         implementation,
       },
