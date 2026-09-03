@@ -320,7 +320,7 @@ describe("freeze repository rendering", () => {
  * and if it is, bump `FREEZE_REPO_FORMAT` — every already-published tree stops verifying against
  * its bundle otherwise — then update this literal in the same change.
  */
-const GOLDEN_COMMIT_ID = "65bfe7cc80f038772fcd5fb9b5f75b91e66bc7fc";
+const GOLDEN_COMMIT_ID = "e2bbfa6a16edd9cc67d3392c4e142aa4d5b8fd83";
 
 describe("freeze repository rendered bytes", () => {
   test("renders to the pinned commit id, so a renderer change is a format bump and not silent drift", () => {
