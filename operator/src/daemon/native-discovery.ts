@@ -399,12 +399,17 @@ function sameHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): bool
  * `source-head-revalidation`, which re-checks signature, currently-valid key, the §5.2
  * `refreshBy` window and freshness on every call. That window check is `checkRefreshWindow`
  * inside `verifySourceHead` (#3467): it returns `refresh-by-ceiling` or `head-issued-ahead`
- * when the head breaks the published-source profile's §5.2 rules, and this path throws on
- * every status but `ok` and `stale`, so both are hard refusals here. The far-future
- * `refreshBy` a re-sign could otherwise install at an unchanged position is therefore refused
- * rather than admitted: what this predicate opens is bounded, not a widening. The plugin
- * runtime's mirror documents the same property the same way (`classifyIdleHead`,
- * `plugin/runtime/src/corpus/mirror.ts`).
+ * when the head breaks the published-source profile's §5.2 rules. `refresh-by-ceiling` is a hard
+ * refusal on this path for every source — it is a writer fault, not a clock one.
+ * `head-issued-ahead` is a hard refusal for a PEER, and for a SELF-HOSTED source it degrades
+ * instead: the `self-source-future-head` branch below returns before the throw, on the #2547
+ * reasoning that a source this operator serves cannot equivocate against itself (see
+ * `NativeDiscoveryDegradedReason`). Neither is ADMITTED, which is the property that matters
+ * here: the degrade also returns before the checkpoint write, so no instant and no `refreshBy`
+ * is persisted. The far-future `refreshBy` a re-sign could otherwise install at an unchanged
+ * position is therefore refused rather than admitted: what this predicate opens is bounded, not
+ * a widening. The plugin runtime's mirror documents the same property the same way
+ * (`classifyIdleHead`, `plugin/runtime/src/corpus/mirror.ts`).
  */
 function reSignedIdleHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): boolean {
   const held = checkpoint.signedHighWater;
