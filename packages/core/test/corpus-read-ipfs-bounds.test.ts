@@ -235,13 +235,31 @@ describe('fetchFromIpfs response byte cap (#3410)', () => {
       ),
     );
 
+    // Match the cap message, not the aggregate label (#3442): with the cap
+    // removed, 64 MiB of NUL bytes still decode as valid UTF-8 and still fail
+    // `JSON.parse`, so the loose match stayed green on the unguarded path.
     await expect(
       fetchFromIpfs('https://gateway.example', CID, { fallbackGatewayBase: false }),
-    ).rejects.toThrow(/IPFS JSON fetch failed after all candidates/);
+    ).rejects.toThrow(/exceeds the 8388608-byte cap/);
 
     // Bounded: the reader stopped near the 8 MiB cap instead of draining
     // all 64 MiB the stream was willing to hand over.
     expect(enqueued).toBeLessThan(16);
+  });
+
+  it('still returns a normal small JSON body', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ hello: 'world' })));
+
+    await expect(
+      fetchFromIpfs('https://gateway.example', CID, { fallbackGatewayBase: false }),
+    ).resolves.toEqual({ hello: 'world' });
+  });
+});
+
+describe('normalizeIpfsGatewayBase (#3410)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('drops gateway credentials so they cannot reach an error message', async () => {
@@ -261,13 +279,59 @@ describe('fetchFromIpfs response byte cap (#3410)', () => {
       expect.objectContaining({ message: expect.not.stringContaining('SUPERSECRET') }) as Error,
     );
   });
+});
 
-  it('still returns a normal small JSON body', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ hello: 'world' })));
+describe('fetchFromIpfs body decoding (#3410)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('refuses a body that is not valid UTF-8 rather than decoding it leniently', async () => {
+    // Deliberate strictness (#3410): `response.json()` / `response.text()`
+    // decode with replacement characters, so `{"a":"x\x80y"}` used to parse
+    // into a silently mangled string. The `fatal: true` decoder rejects it.
+    const body = new Uint8Array([...new TextEncoder().encode('{"a":"x'), 0x80,
+      ...new TextEncoder().encode('y"}')]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }),
+      ),
+    );
 
     await expect(
       fetchFromIpfs('https://gateway.example', CID, { fallbackGatewayBase: false }),
-    ).resolves.toEqual({ hello: 'world' });
+    ).rejects.toThrow(/IPFS response is not valid UTF-8/);
+  });
+});
+
+describe('fetchFromIpfs candidate resolution (#3410)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('reports an unparseable gateway base as a candidate failure, not a bare throw', async () => {
+    // `normalizeIpfsGatewayBase` leaves a non-absolute base alone, so the
+    // candidate cannot be resolved. That must stay inside the per-candidate
+    // error collection: escaping as a raw TypeError would discard every other
+    // candidate's error.
+    const requested: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        requested.push(String(input));
+        return json({ ok: true });
+      }),
+    );
+
+    await expect(
+      fetchFromIpfs('not-an-absolute-url', CID, { fallbackGatewayBase: false }),
+    ).rejects.toThrow(/primary: candidate URL could not be parsed/);
+
+    expect(requested).toEqual([]);
   });
 });
 

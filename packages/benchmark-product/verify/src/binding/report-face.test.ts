@@ -224,6 +224,9 @@ describe("runBindingSentence", () => {
         // The residue paragraph is retracted, not merely joined by a stronger one.
         expect(declared).not.toContain("What choosing remains is the source");
         expect(declared).not.toContain("could have bound a different one");
+        // The connective belongs to THIS branch (#3525): "Nor" continues the negative clause
+        // before it, and the chosen-round branch's opener would not.
+        expect(declared).not.toContain("The source was not:");
       },
     );
 
@@ -239,7 +242,26 @@ describe("runBindingSentence", () => {
     test.each([true, false])("a chosen round on a scheduled source still states the source (declared=%s)", (declared) => {
       const sentence = runBindingSentence(census("drand/quicknet", CHOSEN_ROUND, declared));
       expect(sentence).toContain("one of several the operator could have realized");
-      expect(sentence).toContain(declared ? "Nor was the source:" : "What choosing remains is the source");
+      expect(sentence).toContain(declared ? "The source was not:" : "What choosing remains is the source");
+    });
+
+    // #3525. The clause after the colon is the same on both branches; only the connective moves,
+    // because on this branch the sentence before it asserts a choice rather than denying one, and
+    // "Nor" continuing from a positive statement reads as a contradiction of it.
+    test("the declared-source connective follows the clause before it on each branch", () => {
+      const sealDerived = runBindingSentence(census("drand/quicknet", SEAL_DERIVED_ROUND, true));
+      const chosen = runBindingSentence(census("drand/quicknet", CHOSEN_ROUND, true));
+      expect(sealDerived).toContain("The round was not the operator's to pick either");
+      expect(sealDerived).toContain("Nor was the source:");
+      expect(sealDerived).not.toContain("The source was not:");
+      expect(chosen).toContain("was still the operator's choice");
+      expect(chosen).toContain("The source was not:");
+      expect(chosen).not.toContain("Nor was the source:");
+      // Only the connective differs: the property both branches state is one string.
+      const property = "the sealed record names the beacon this run binds to, so a binding naming "
+        + "any other source is refused.";
+      expect(sealDerived).toContain(property);
+      expect(chosen).toContain(property);
     });
 
     // AC3: declaring the source fixes the BEACON, not the height inside it. A face that read

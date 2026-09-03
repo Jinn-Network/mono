@@ -120,6 +120,18 @@ jobs:
           # the change that caused it (#3527, and #2809 before it). Manifests only:
           # sources under an unselected package still leave this lane unselected.
           #
+          # Its `packages/` scoping is not the only thing standing between a new portal
+          # edge and the merge queue, and does not need loosening to reach another tree
+          # (#3532). The trailing closure block below is DERIVED from the `portal:` graph
+          # and enforced by `.github/scripts/portal-path-filters.test.mjs`, which runs in
+          # `platform-architecture-control.yml` — a lane with no `paths:` filter, so it
+          # runs on EVERY pull request whatever this selector decides. That gate requires
+          # every workspace in the closure of a workspace this lane selects on, in ANY
+          # tree, to be covered by an anchored entry below; the entry it names covers that
+          # tree's manifest as much as its sources. So a first portal edge into `plugin/`
+          # or `apps/` reddens on the pull request that adds it, naming the exact entry to
+          # add — which is how this pattern's `packages/` blind spot is covered.
+          #
           # The trailing block is the transitive `portal:` closure of the trees above
           # (#3573). Each of those packages is built from SOURCE into this lane's
           # workspace by `yarn install`, so a change confined to one of them changes

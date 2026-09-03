@@ -15,7 +15,7 @@ import type {
   RouteResolver,
 } from './types.js';
 import { AcquireError, HashMismatchError } from './types.js';
-import { fetchFromIpfs as defaultFetchFromIpfs } from './ipfs.js';
+import { classifyIpfsFetchFailure, fetchFromIpfs as defaultFetchFromIpfs } from './ipfs.js';
 
 /**
  * Origin acquire function. Historically returned `Buffer | null`; the
@@ -52,6 +52,21 @@ export interface AcquireArtifactArgs {
 
 function sha256Hex(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');
+}
+
+/**
+ * Log an IPFS read that the acquisition chain is about to fall through, unless
+ * the gateway actually answered "not there" (#3441). A cap refusal is positive
+ * evidence the content exists, so it must not read like an ordinary miss.
+ */
+function warnIpfsFallThrough(subject: string, error: unknown): void {
+  const classification = classifyIpfsFetchFailure(error);
+  if (classification === 'not-found') return;
+  const detail = error instanceof Error ? error.message : String(error);
+  console.warn(
+    `[corpus-read] IPFS source for ${subject} could not be used (${classification}), `
+      + `falling through to the next source: ${detail}`,
+  );
 }
 
 function decodeDonationArtifact(raw: unknown, expectedSha256: string): Buffer {
@@ -141,6 +156,11 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
       // Donated IPFS is an opportunistic fast path. Gateway failures and
       // malformed donation payloads should not block the acquisition chain;
       // only verified byte hash mismatches remain fatal.
+      //
+      // Swallowing the failure silently, though, turns a size-policy refusal or
+      // a blocked redirect into an invisible data gap (#3441). Classify before
+      // swallowing so anything that is not proven absence reaches the operator.
+      warnIpfsFallThrough(`donation artifact ${sha256}`, err);
     }
   }
 

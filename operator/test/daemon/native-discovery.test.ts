@@ -637,6 +637,80 @@ describe('native discovery consumer', () => {
       });
     });
 
+    // #3492 — origin binding. `sameHead` compared the whole envelope, so byte equality bound
+    // `head.origin` implicitly; `reSignedIdleHead` compares neither origin nor bytes, so the
+    // binding rests entirely on the injected `verifyHead` (stated as a requirement on the
+    // `NativeDiscoverySource` port). Every other `verifyHead` in this file is an `ok` stub, so
+    // nothing here proved the consumer refuses the status that carries the binding.
+    it('refuses one whose revalidation reports head-origin-mismatch', async () => {
+      const { store, first } = await checkpointed();
+      const refused = consumer({
+        store,
+        routes: reSignedRoutes(first, '2026-08-02T12:00:00.000Z', '2026-08-03T12:00:00.000Z'),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'head-origin-mismatch' }),
+        now: () => new Date('2026-08-02T13:00:00.000Z'),
+      });
+
+      await expect(refused.sync()).rejects.toMatchObject({ reason: 'head-origin-mismatch' });
+      expect(refused.checkpoint({ agent: AGENT, name: SOURCE_NAME })?.signedHighWater).toMatchObject({
+        issuedAt: '2026-08-02T01:00:00.000Z',
+      });
+    });
+
+    // #3492 — the SEQUENCE half of the position check. The `entry` half is pinned by the fork
+    // case below; drop the `sequence` clause and this head — the mark's entry digest cited at a
+    // higher sequence — would be revalidated as an idle re-sign and the checkpoint written with
+    // the head's new sequence, from a poll that adopted no entry at all.
+    it('keeps the chain path for a head citing the mark entry digest at a HIGHER sequence', async () => {
+      const { store, first } = await checkpointed();
+      const routes = routesFor([first]);
+      routes.set(`${ROOT}${headPath(SOURCE_NAME)}`, wireHead({
+        ...head(first, '2026-08-02T12:00:00.000Z'),
+        sequence: '0000000000000002',
+      }));
+      const verifyHead = vi.fn(async () => ({ status: 'ok' as const }));
+
+      const polled = consumer({
+        store,
+        routes,
+        verify: async () => ({ status: 'ok' }),
+        verifyHead,
+        now: () => new Date('2026-08-02T13:00:00.000Z'),
+      });
+
+      await expect(polled.sync()).rejects.toMatchObject({ reason: 'advertised-head-entry-mismatch' });
+      expect(verifyHead).not.toHaveBeenCalled();
+      expect(polled.checkpoint({ agent: AGENT, name: SOURCE_NAME })?.signedHighWater).toMatchObject({
+        sequence: '0000000000000001',
+      });
+    });
+
+    // #3531 — the STRICT increase. `sameHead` runs first and compares `refreshBy` and the
+    // envelope as well, so a head at the same position with the SAME `issuedAt` but a stretched
+    // `refreshBy` and a new envelope is not `sameHead`; relaxing `>` to `>=` would admit it and
+    // persist that stretched `refreshBy` to the checkpoint. §5.2's strict-increase rule at this
+    // consumer had no test.
+    it('keeps the chain path for a head at the same instant with a stretched refreshBy', async () => {
+      const { store, first } = await checkpointed();
+      const verifyHead = vi.fn(async () => ({ status: 'ok' as const }));
+      const polled = consumer({
+        store,
+        // Same `issuedAt` as the checkpointed head; only `refreshBy` (and so the envelope) moves.
+        routes: reSignedRoutes(first, '2026-08-02T01:00:00.000Z', '2026-08-09T00:00:00.000Z'),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead,
+        now: () => new Date('2026-08-02T13:00:00.000Z'),
+      });
+
+      await expect(polled.sync()).rejects.toMatchObject({ reason: 'rewound-or-tampered-head' });
+      expect(verifyHead).not.toHaveBeenCalled();
+      expect(polled.checkpoint({ agent: AGENT, name: SOURCE_NAME })?.signedHighWater).toMatchObject({
+        issuedAt: '2026-08-02T01:00:00.000Z',
+        refreshBy: '2026-08-03T01:00:00.000Z',
+      });
+    });
+
     it('keeps the chain path for a head whose entry digest differs at the same sequence', async () => {
       const { store } = await checkpointed();
       const forked = entry('0000000000000001', null, DIGEST_C);
@@ -1349,7 +1423,7 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
       await expect(synced.sync()).rejects.toMatchObject({ reason: status });
     });
 
-    it.each(['unauthorized-signer', 'head-payload-mismatch', 'invalid-head-envelope'])(
+    it.each(['unauthorized-signer', 'head-payload-mismatch', 'invalid-head-envelope', 'head-origin-mismatch'])(
       'refuses a byte-identical head that revalidation rejects as %s',
       async (status) => {
         const first = entry('0000000000000001', null, DIGEST_A);
