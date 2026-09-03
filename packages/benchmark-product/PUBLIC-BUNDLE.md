@@ -811,7 +811,8 @@ The layout:
   sealed Benchmark record declares; the per-source attribution and licence
   descriptors come from the sealed source-manifest rows. `LICENSE` states the
   identifier, and where the SPDX list can carry it the list address for that
-  identifier, rather than reproducing licence text the bundle does not carry. `NOTICE` carries the modification notice, and it states the
+  identifier, rather than reproducing licence text the bundle does not carry.
+  `NOTICE` carries the modification notice, and it states the
   fact rather than inverting it: the bundle carries no upstream source bytes at
   all, so no member is an unmodified upstream copy. Every member under
   `artifacts/` is a Colophon-authored or Colophon-derived sealed record over

@@ -284,11 +284,15 @@ test("the trust-material flags reach the verifier; a malformed header file exits
       readFile: (path) => files.get(path),
       verify: async (_dir, options) => {
         seen = options;
-        return { format: "benchmark-product-public-bundle/6", identity: "a".repeat(64), checks: V6_CHECKS, ...V6_IDENTITIES };
+        return { verification: { format: "benchmark-product-public-bundle/6", identity: "a".repeat(64), checks: V6_CHECKS, ...V6_IDENTITIES } };
       },
     },
   );
   assert.equal(ok.exitCode, 0);
+  // The seam returns the verification AND the snapshot the freeze check renders from, so the
+  // reported body must still be the verification. A stub returning the bare verification spreads
+  // to nothing rather than throwing, which would empty this body with nothing said.
+  assert.equal(JSON.parse(ok.stdout).identity, "a".repeat(64));
   assert.equal(seen.anchorTrust.rfc3161.trustAnchorsDer.length, 1);
   assert.deepEqual([...seen.anchorTrust.opentimestamps.blockHeaders].map((entry) => entry.height), [880017]);
   assert.equal(seen.anchorTrust.opentimestamps.blockHeaders[0].header.length, 80);
@@ -305,10 +309,11 @@ test("the trust-material flags reach the verifier; a malformed header file exits
     readFile: () => { throw new Error("must not be reached"); },
     verify: async (_dir, options) => {
       seen = options;
-      return { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES };
+      return { verification: { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES } };
     },
   });
   assert.equal(bare.exitCode, 0);
+  assert.deepEqual(JSON.parse(bare.stdout).checks, ["manifest"]);
   assert.deepEqual(seen, {});
 });
 
@@ -321,7 +326,7 @@ test("a PEM trust anchor file is decoded into one DER root per block", async () 
     readFile: () => new TextEncoder().encode(pem + pem),
     verify: async (_dir, options) => {
       seen = options;
-      return { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES };
+      return { verification: { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES } };
     },
   });
   assert.equal(result.exitCode, 0);

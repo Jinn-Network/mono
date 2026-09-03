@@ -55,6 +55,20 @@ those move the commit oid a freeze announcement pins. Rendering a repository fro
 is `colophon freeze-repo export` in the product CLI; the layout and the licence scaffolding
 are specified in `../PUBLIC-BUNDLE.md`.
 
+The rendered tree's format is `colophon-freeze-repo/2`. The `/1` renderer stated a source
+`downloadLocation` and a `supplier` its record did not support, and refused an ordinary
+dual licence such as `Apache-2.0 OR MIT` outright; correcting those changes the rendered
+bytes, so it is a format bump rather than silent drift, and a tree published under `/1`
+reports drift against this version. Regenerate and republish it.
+
+Two API notes for anyone embedding this package rather than running its binary. `runVerifierCli`'s
+`deps.verify` test seam now returns `VerifiedPublicBundleSnapshot` (the verification **and** the
+snapshot) rather than the verification alone, so `--freeze-repo` renders from the same
+authenticated snapshot the reported verdict came from instead of verifying the bundle a second
+time without the caller's trust material. A supplied `verify` stub must be updated. Alongside it,
+`verifyFreezeRepoSnapshot(snapshot, repoDir)` is exported for callers that already hold a verified
+snapshot; `verifyFreezeRepo(bundleDir, repoDir, deps)` is unchanged.
+
 Bundles are also verifiable without this package: `../EXTERNAL-VERIFICATION.md` specifies
 the external path (openssl plus a dependency-free script, shipped here as
 `scripts/external-verify.py`), the JSON Schemas under `schemas/`, and the conformance kit

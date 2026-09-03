@@ -202,6 +202,14 @@ const FIXED_INSTANT = "1970-01-01T00:00:00Z";
 const SPDX_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9.+-]*$/u;
 
 /**
+ * Annex D's `idstring` — the same character set WITHOUT `+`, because in an expression `+` is the
+ * "or later" operator and is legal only as the last character of a licence id. Folding it into the
+ * character class would accept `MIT+++`, `A+B`, and `… WITH Classpath-exception-2.0+` (SPDX allows
+ * no `+` on an exception at all), so the operator is matched by the parser rather than the class.
+ */
+const SPDX_IDSTRING = /^[A-Za-z0-9][A-Za-z0-9.-]*$/u;
+
+/**
  * The same grammar, widened to the SPDX 2.3 Annex D licence EXPRESSION: `id`, `id+`,
  * `id WITH exception`, and those joined by `AND` / `OR` with optional parentheses. A publication
  * licensed `Apache-2.0 OR MIT` is an ordinary dual licence, and the short-identifier check alone
@@ -221,7 +229,7 @@ export function isSpdxLicenseExpression(value: string): boolean {
   const keyword = (token: string | undefined): boolean =>
     token === "AND" || token === "OR" || token === "WITH";
   const identifier = (token: string | undefined, allowPlus: boolean): boolean =>
-    token !== undefined && !keyword(token) && SPDX_IDENTIFIER.test(allowPlus ? token.replace(/\+$/u, "") : token);
+    token !== undefined && !keyword(token) && SPDX_IDSTRING.test(allowPlus ? token.replace(/\+$/u, "") : token);
   const simple = (): boolean => {
     if (!identifier(tokens[index], true)) return false;
     index += 1;
@@ -264,21 +272,27 @@ export function isSpdxLicenseExpression(value: string): boolean {
  */
 const SPDX_TAG_LINE = /^[ \t]*SPDX-[A-Za-z][A-Za-z0-9-]*[ \t]*:/u;
 
-function assertRenderableFreeText(field: string, value: string, multiline: boolean): void {
-  // Tab is carried in both cases; newline only where the field is documented as multi-line.
-  const forbidden = multiline ? /[\u0000-\u0008\u000B-\u001F\u007F]/u : /[\u0000-\u0008\u000A-\u001F\u007F]/u;
+function assertRenderableFreeText(path: string, value: string, multiline: boolean): void {
+  const field = path.slice(path.indexOf(".") + 1);
+  // Tab is carried in both cases; CR and LF only where the field is documented as multi-line. CR
+  // is admitted there because a citation pasted with CRLF endings is ordinary and the record is
+  // already sealed, so refusing it would make such a bundle permanently unexportable — and it buys
+  // nothing: the tag-line check below splits on CRLF as well as LF.
+  const forbidden = multiline
+    ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
+    : /[\u0000-\u0008\u000A-\u001F\u007F]/u;
   if (forbidden.test(value)) {
     refuse(
       "record-integrity",
-      `benchmark.json.${field}`,
-      `the sealed Benchmark record's ${field} carries a control character; a freeze repository renders it into generated text and will not emit unprintable bytes`,
+      path,
+      `the sealed record's ${field} carries a control character; a freeze repository renders it into generated text and will not emit unprintable bytes`,
     );
   }
-  if (value.split("\n").some((line) => SPDX_TAG_LINE.test(line))) {
+  if (value.split(/\r?\n/u).some((line) => SPDX_TAG_LINE.test(line))) {
     refuse(
       "record-integrity",
-      `benchmark.json.${field}`,
-      `the sealed Benchmark record's ${field} carries a line that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it`,
+      path,
+      `the sealed record's ${field} carries a line that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it`,
     );
   }
 }
@@ -299,6 +313,11 @@ function spdxDownloadLocation(uri: string): string {
  * neither — and labelling one an organization also reverses `verify.ts`'s note that the human
  * surface deliberately does not print signer identifiers. A scheme-qualified identifier therefore
  * reports `NOASSERTION` rather than being given a role it does not have.
+ *
+ * What this does NOT settle: `Organization:` versus `Person:` for an ordinary name. The sealed
+ * record carries one free-text `author` and nothing that distinguishes the two, so a personal name
+ * is still reported as an organization. Choosing between them needs a field the record does not
+ * have; inventing the distinction here would be a claim no record backs.
  */
 function spdxSupplier(author: string): string {
   // Scheme-qualified AND whitespace-free: a supplier name almost always carries a space, a machine
@@ -422,6 +441,11 @@ function insert(root: TreeNode, path: string, bytes: Uint8Array): void {
   if (segments.some((segment) => segment === "." || segment === "..")) {
     refuse("conflict", path, `"${path}" contains a "." or ".." segment; git records no such entry`);
   }
+  if (path.includes("\u0000")) {
+    // A tree entry is framed as `<mode> <name>\0<oid>`, so a NUL in a name does not merely produce
+    // a tree git would refuse — it produces bytes that are not a tree object at all.
+    refuse("conflict", path, `"${path}" contains a NUL; a git tree entry is NUL-terminated and cannot carry one`);
+  }
   let node = root;
   for (const [index, segment] of segments.slice(0, -1).entries()) {
     if (node.files.has(segment)) {
@@ -513,7 +537,7 @@ function readPublication(snapshot: VerifiedBundleSnapshot): FreezeRepoPublicatio
   const license = record["license"];
   // The expression grammar tokenizes on whitespace, so a licence carrying a newline could satisfy
   // it and then render as two lines under one `SPDX-License-Identifier:` tag. Checked first.
-  if (typeof license === "string" && license.length > 0) assertRenderableFreeText("license", license, false);
+  if (typeof license === "string" && license.length > 0) assertRenderableFreeText("benchmark.json.license", license, false);
   if (typeof license === "string" && license.length > 0 && !isSpdxLicenseExpression(license)) {
     refuse(
       "record-integrity",
@@ -540,12 +564,12 @@ function readPublication(snapshot: VerifiedBundleSnapshot): FreezeRepoPublicatio
   const citation = record["citation"];
   // Every field below is spliced verbatim into generated text — LICENSE, NOTICE, the README
   // heading, the SPDX document — so each is checked before it can reach any of them.
-  assertRenderableFreeText("name", name, false);
-  assertRenderableFreeText("version", version, false);
-  if (typeof author === "string") assertRenderableFreeText("author", author, false);
+  assertRenderableFreeText("benchmark.json.name", name, false);
+  assertRenderableFreeText("benchmark.json.version", version, false);
+  if (typeof author === "string") assertRenderableFreeText("benchmark.json.author", author, false);
   // A citation is legitimately multi-line (a BibTeX entry), so newlines are allowed there and
   // nothing else is.
-  if (typeof citation === "string") assertRenderableFreeText("citation", citation, true);
+  if (typeof citation === "string") assertRenderableFreeText("benchmark.json.citation", citation, true);
   return {
     name,
     version,
@@ -574,6 +598,18 @@ function readSourceLicences(sourceManifestBytes: readonly Uint8Array[]): readonl
         refuse("record-integrity", "source-manifest", "a sealed source-manifest row does not match the pinned schema");
       }
       const entry = parsed.data;
+      // `uri` is `z.string().min(1)` in the sealed schema, and `renderNotice` splices each of
+      // these into NOTICE verbatim — so the rule the publication fields are held to holds here
+      // too: a generated licence-bearing file is not writable from a free-text field. Multi-line
+      // because nothing forbids a wrapped descriptor; the tag-line check is what matters.
+      for (const [field, value] of [
+        ["source.uri", entry.source.uri],
+        ["source.name", entry.source.name],
+        ["license.uri", entry.license.uri],
+        ["attribution.uri", entry.attribution.uri],
+      ] as const) {
+        if (typeof value === "string") assertRenderableFreeText(`source-manifest.${field}`, value, true);
+      }
       rows.push({
         provenanceSha256: entry.provenanceSha256,
         source: entry.source,

@@ -580,6 +580,13 @@ describe("git-tree construction rules the renderer never exercises", () => {
       expect(() => freezeRepoCommitId(new Map([[path, encoder.encode("x")]]), "identity"), path).toThrow();
     }
   });
+
+  test("refuses a NUL in a name, which would not even be a tree object", () => {
+    // A tree entry is framed `<mode> <name>\0<oid>`, so a NUL in the name breaks the framing
+    // itself rather than merely producing a tree git would decline to hold.
+    expect(() => freezeRepoCommitId(new Map([["a\u0000b", encoder.encode("x")]]), "identity"))
+      .toThrow(/NUL/);
+  });
 });
 
 describe("the SPDX licence expression grammar", () => {
@@ -590,6 +597,7 @@ describe("the SPDX licence expression grammar", () => {
       "LicenseRef-Internal-1",
       "GPL-2.0+",
       "GPL-2.0-only WITH Classpath-exception-2.0",
+      "(GPL-2.0+ OR MIT) AND (CC0-1.0 OR Apache-2.0)",
       "Apache-2.0 OR MIT",
       "MIT AND CC-BY-4.0",
       "(MIT OR Apache-2.0) AND CC0-1.0",
@@ -609,6 +617,11 @@ describe("the SPDX licence expression grammar", () => {
       "MIT)",
       "MIT WITH",
       "-MIT",
+      // `+` is the "or later" operator, legal only as the last character of a licence id -- never
+      // on an exception, and never repeated or infix.
+      "GPL-2.0-only WITH Classpath-exception-2.0+",
+      "MIT+++",
+      "A+B",
     ]) {
       expect(isSpdxLicenseExpression(value), value).toBe(false);
     }
@@ -655,6 +668,37 @@ describe("generated licence text is not writable from a free-text field", () => 
       .toThrow(/control character/);
     expect(() => renderFreezeRepo(snapshotOf({ benchmark: withBenchmark({ author: "A\u0007B" }) })))
       .toThrow(/control character/);
+  });
+
+  test("a citation with CRLF line endings is still allowed", () => {
+    // The record is sealed, so refusing CRLF would make such a bundle permanently unexportable --
+    // and it buys nothing, because the tag-line check splits on CRLF as well as LF.
+    const tree = renderFreezeRepo(snapshotOf({
+      benchmark: withBenchmark({ citation: "Someone, 2026.\r\nSecond line." }),
+    }));
+    expect(decoder.decode(tree.files.get("LICENSE")!)).toContain("Second line.");
+    expect(() => renderFreezeRepo(snapshotOf({
+      benchmark: withBenchmark({ citation: "Someone, 2026.\r\nSPDX-License-Identifier: MIT" }),
+    }))).toThrow(/reads as an SPDX tag/);
+  });
+
+  test("refuses a source-manifest descriptor carrying an SPDX tag line", () => {
+    // NOTICE splices every source uri verbatim, and `uri` is `z.string().min(1)` in the sealed
+    // schema -- so the rule the publication fields are held to has to hold here too.
+    const injected = JSON.stringify({
+      protocol: "https://spec.jinn.network/binary-judgment/source-manifest-entry/v1",
+      provenanceSha256: `sha256:${"e".repeat(64)}`,
+      source: { uri: "https://example.test/x\nSPDX-License-Identifier: GPL-3.0-only", digest: { sha256: "e".repeat(64) } },
+      license: { uri: "https://example.test/LICENSE.txt", digest: { sha256: "b".repeat(64) } },
+      attribution: { uri: "https://example.test/ATTRIBUTION.txt", digest: { sha256: "c".repeat(64) } },
+      publishedAt: "2026-01-02T03:04:05Z",
+    });
+    expect(() => renderFreezeRepo(snapshotOf({
+      records: [
+        { bytes: ITEM_BANK_BYTES, roles: ["item-bank"] },
+        { bytes: encoder.encode(`${injected}\n`), roles: ["source-manifest"] },
+      ],
+    }))).toThrow(/reads as an SPDX tag/);
   });
 
   test("a multi-line citation with no tag line is still allowed", () => {

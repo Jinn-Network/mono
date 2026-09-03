@@ -187,22 +187,30 @@ describe("freeze-repository export against a real v4 bundle", () => {
   });
 
   test("verifies the bundle once, and renders the freeze tree from that same snapshot", async () => {
-    // The freeze check used to run a second full verification of the same bundle, without the
-    // caller's `--tsa-root` / `--ots-headers` material and outside the `deps.verify` seam, so its
-    // anchor outcomes could differ from the reported ones with nothing saying so (issue #3352).
+    // The freeze check used to call `verifyFreezeRepo(bundleDir, repoDir)`, which re-opened the
+    // bundle and ran a second full verification -- outside the `deps.verify` seam, and so without
+    // the caller's `--tsa-root` / `--ots-headers` material, leaving its anchor outcomes free to
+    // differ from the reported ones with nothing saying so (issue #3352).
+    //
+    // Counting seam calls cannot see that: the second pass bypassed the seam, which is the whole
+    // defect. So the bundle directory the CLI is given does not exist on disk, and the snapshot
+    // comes only from the seam. A second pass has nothing to read and throws; one pass renders the
+    // tree from the snapshot it was handed.
     const bundleDir = licensedBundle;
     const repoDir = join(tempDir("single-verify"), "tree");
     await exportFreezeRepo(bundleDir, repoDir);
+    const verified = await verifyPublicBundleSnapshot(bundleDir);
 
     let calls = 0;
-    const result = await runVerifierCli([bundleDir, "--freeze-repo", repoDir, "--json"], {
-      verify: async (dir, options) => {
+    const result = await runVerifierCli([join(tempDir("absent"), "no-such-bundle"), "--freeze-repo", repoDir, "--json"], {
+      verify: async () => {
         calls += 1;
-        return verifyPublicBundleSnapshot(dir, options);
+        return verified;
       },
     });
 
     expect(calls).toBe(1);
+    expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
     expect((JSON.parse(result.stdout) as { freezeRepo: { ok: boolean } }).freezeRepo.ok).toBe(true);
   });
