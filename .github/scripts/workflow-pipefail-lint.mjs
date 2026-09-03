@@ -25,9 +25,12 @@
 //
 //   - pipefail in scope (`shell: bash`, a custom shell string naming pipefail, or a
 //     `set … pipefail` earlier in the block) -> error; the lint exits 1.
-//   - the default `bash -e {0}` -> warning; printed, but not this gate's failure. A
-//     bare `bash -e` pipeline reports only the last command's status, so it launders a
-//     failed producer rather than inventing a failure (the PR #2819 finding).
+//   - the default `bash -e {0}` (or `sh -e {0}`) -> warning; printed, but not this
+//     gate's failure. A bare `-e` pipeline reports only the last command's status, so it
+//     launders a failed producer rather than inventing a failure (the PR #2819 finding).
+//   - a composite action's step -> error even with no shell resolved. GitHub requires
+//     every composite `run:` step to declare `shell:`, so an unresolved one is this
+//     reader failing rather than a step running under the default.
 //
 // Escape hatch, on the offending line or the body line above it:
 //
@@ -88,8 +91,25 @@ const AWK_ARG_TAKING = new Set(['-v', '-f', '-F', '--assign', '--file', '--field
 // Shell reserved words that open and close a compound statement. `{`/`}` and `(`/`)` are
 // handled alongside them; `do` is deliberately not an opener, because `for … ; do` puts a
 // genuine top-level `;` before it and the loop is already opened by `for`.
-const COMPOUND_OPENERS = new Set(['if', 'for', 'while', 'until', 'case', 'select', '{', '(']);
-const COMPOUND_CLOSERS = new Set(['fi', 'done', 'esac', '}', ')']);
+// Matching by kind, rather than letting any closer pop any opener, is what keeps a
+// `case` arm's `a)` from closing the `case` itself. Parens are recognised from the token
+// text instead (see `tokenCompound`), because `(printf …` and `… echo yes)` glue the
+// bracket to a word.
+const OPENER_KIND = new Map([
+  ['if', 'if'],
+  ['for', 'loop'],
+  ['while', 'loop'],
+  ['until', 'loop'],
+  ['select', 'loop'],
+  ['case', 'case'],
+  ['{', 'brace'],
+]);
+const CLOSER_KIND = new Map([
+  ['fi', 'if'],
+  ['done', 'loop'],
+  ['esac', 'case'],
+  ['}', 'brace'],
+]);
 
 const ANNOTATION = /#\s*pipefail-lint:\s*allow\b(?<rest>.*)$/u;
 
@@ -394,7 +414,17 @@ function shellTokens(text) {
       if ((char === '&' || char === '|') && text[index + 1] === char && mask[index + 1] === true) break;
       index += 1;
     }
-    tokens.push({ type: 'word', value: text.slice(start, index), start, end: index });
+    tokens.push({
+      type: 'word',
+      value: text.slice(start, index),
+      start,
+      end: index,
+      // A shell-syntax `(`/`)` glued to the word. `$( … )` is transparent to the mask, so
+      // its brackets are not shell syntax here and a command substitution neither opens
+      // nor closes a compound.
+      opensParen: mask[start] === true && text[start] === '(',
+      closesParen: mask[index - 1] === true && text[index - 1] === ')',
+    });
   }
   return tokens;
 }
@@ -412,20 +442,71 @@ function shellTokens(text) {
  * across body lines — matches nothing and leaves its `;` splitting exactly as before,
  * which is what keeps a multi-line compound reporting on the line that owns the site.
  */
-function splitTopLevel(text) {
-  const tokens = shellTokens(text);
+function tokenCompound(token) {
+  if (token.type !== 'word') return null;
+  // `(cmd)` written with no spaces is self-contained: it can hold no top-level separator,
+  // so counting it would only unbalance the depth.
+  if (token.opensParen && token.closesParen) return null;
+  if (token.opensParen) return { role: 'open', kind: 'paren' };
+  if (token.closesParen) return { role: 'close', kind: 'paren' };
+  const opener = OPENER_KIND.get(token.value);
+  if (opener !== undefined) return { role: 'open', kind: opener };
+  const closer = CLOSER_KIND.get(token.value);
+  return closer === undefined ? null : { role: 'close', kind: closer };
+}
+
+function matchCompounds(tokens) {
   const enclosed = new Array(tokens.length).fill(false);
+  /** @type {{position: number, kind: string}[]} */
   const open = [];
+  /** @type {{kind: string, guarded: boolean}[]} */
+  const unmatchedClosers = [];
   for (const [position, token] of tokens.entries()) {
-    if (token.type !== 'word') continue;
-    if (COMPOUND_OPENERS.has(token.value)) {
-      open.push(position);
+    const compound = tokenCompound(token);
+    if (compound === null) continue;
+    if (compound.role === 'open') {
+      open.push({ position, kind: compound.kind });
       continue;
     }
-    if (COMPOUND_CLOSERS.has(token.value) && open.length > 0) {
-      for (let inner = open.pop() + 1; inner < position; inner += 1) enclosed[inner] = true;
+    const depth = open.findLastIndex((entry) => entry.kind === compound.kind);
+    if (depth === -1) {
+      // A closer with no opener on this line either closes a compound that began on an
+      // earlier body line, or is a `case` arm's `)`. Whether a `||` follows it is what
+      // says the compound it closes is guarded; the kind is what says which one.
+      const next = tokens[position + 1];
+      unmatchedClosers.push({
+        kind: compound.kind,
+        guarded: next !== undefined && next.type === 'operator' && next.value === '||',
+      });
+      continue;
     }
+    for (let inner = open[depth].position + 1; inner < position; inner += 1) enclosed[inner] = true;
+    open.length = depth;
   }
+  return { enclosed, unmatchedClosers, unmatchedOpeners: open.map((entry) => entry.kind) };
+}
+
+/**
+ * How one logical line changes the compound nesting the *block* is in, for the compounds
+ * it does not open and close by itself. `openerFirst` says the line's leading token is
+ * the unmatched opener — `if producer | head -1; then` — so a guard on the eventual
+ * closer covers findings on this line too, whereas in `producer | head -1; if x; then`
+ * the pipeline stands outside the compound the line opens.
+ */
+function lineNesting(text) {
+  const tokens = shellTokens(text);
+  const { unmatchedClosers, unmatchedOpeners } = matchCompounds(tokens);
+  const first = tokens[0];
+  return {
+    unmatchedClosers,
+    unmatchedOpeners,
+    openerFirst: first !== undefined && tokenCompound(first)?.role === 'open',
+  };
+}
+
+function splitTopLevel(text) {
+  const tokens = shellTokens(text);
+  const { enclosed } = matchCompounds(tokens);
 
   const units = [];
   let start = 0;
@@ -441,22 +522,25 @@ function splitTopLevel(text) {
 // The body of a compound statement, or null. Unwrapping lets the guard that covers the
 // compound cover its contents, and keeps the finding naming the statement inside rather
 // than the whole construct.
+// `isolated` marks a subshell. Its body runs in a child shell, so a `set -o pipefail`
+// there does not survive the closing paren — verified against bash. A `{ … }` group and
+// the loop and `if` bodies all run in the current shell, so their toggles do carry.
 const COMPOUNDS = [
-  { open: /^\s*\{\s/u, close: /\s\}\s*$/u },
-  { open: /^\s*\(/u, close: /\)\s*$/u },
-  { open: /^\s*if\s/u, close: /\sfi\s*$/u },
-  { open: /^\s*(?:for|while|until|select)\s/u, close: /\sdone\s*$/u },
-  { open: /^\s*case\s/u, close: /\sesac\s*$/u },
+  { open: /^\s*\{\s/u, close: /\s\}\s*$/u, isolated: false },
+  { open: /^\s*\(/u, close: /\)\s*$/u, isolated: true },
+  { open: /^\s*if\s/u, close: /\sfi\s*$/u, isolated: false },
+  { open: /^\s*(?:for|while|until|select)\s/u, close: /\sdone\s*$/u, isolated: false },
+  { open: /^\s*case\s/u, close: /\sesac\s*$/u, isolated: false },
 ];
 
 function compoundBody(statement) {
-  for (const { open, close } of COMPOUNDS) {
+  for (const { open, close, isolated } of COMPOUNDS) {
     const opener = open.exec(statement);
     if (opener === null) continue;
     const closer = close.exec(statement);
     const bodyStart = opener.index + opener[0].length;
     if (closer === null || closer.index < bodyStart) continue;
-    return statement.slice(bodyStart, closer.index);
+    return { body: statement.slice(bodyStart, closer.index), isolated };
   }
   return null;
 }
@@ -508,7 +592,13 @@ function blockScalarBodies(lines) {
 // `shell:` inside a flow mapping — `defaults: { run: { shell: bash } }`, or a block
 // `defaults:` whose `run:` is written flow-style. Both are legal YAML that the block-form
 // reader alone misses, and missing one silently downgrades a real site to a warning.
+//
+// FLOW_SHELL is only ever applied to text already known to be *inside* the braces.
+// Applying it to a whole line reads `# shell: sh was the old setting` as a declaration
+// and lets a comment beat the real key below it — a fail-open when the comment names a
+// weaker shell, and a gate-failing false positive when it names a stronger one.
 const FLOW_SHELL = /\bshell:\s*(?<value>[^,}]+?)\s*(?:[,}]|$)/u;
+const FLOW_MAPPING = /^\s*[A-Za-z0-9_.-]+:\s*(?<flow>\{.*\})\s*(?:#.*)?$/u;
 
 // `defaults: { run: { shell: … } }` at workflow scope (column 0) and job scope
 // (column 4, under `jobs:` > `<job>:`). Returned as a list of scopes ordered by the
@@ -527,14 +617,15 @@ function collectDefaultShells(lines, inside) {
     } else {
       for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
         const line = lines[cursor];
-        if (line.trim() === '' || inside[cursor]) continue;
+        if (line.trim() === '' || line.trimStart().startsWith('#') || inside[cursor]) continue;
         if (indentOf(line) <= indent) break;
         const shellMatch = /^\s*shell:\s*(?<value>.+?)\s*$/u.exec(line);
         if (shellMatch !== null) {
           shell = scalarValue(shellMatch.groups.value);
           break;
         }
-        const flow = FLOW_SHELL.exec(line);
+        const mapping = FLOW_MAPPING.exec(line);
+        const flow = mapping === null ? null : FLOW_SHELL.exec(mapping.groups.flow);
         if (flow !== null) {
           shell = scalarValue(flow.groups.value);
           break;
@@ -786,9 +877,12 @@ function scanStatements(text, guarded, context) {
       continue;
     }
 
-    const body = compoundBody(statement);
-    if (body !== null) {
-      scanStatements(body, unitGuarded, context);
+    const compound = compoundBody(statement);
+    if (compound !== null) {
+      // A subshell gets a copy of the pipefail state, so its `set ±o pipefail` cannot
+      // reach the statements after the closing paren.
+      const nested = compound.isolated ? { ...context } : context;
+      scanStatements(compound.body, unitGuarded, nested);
       continue;
     }
     if (unitGuarded) continue;
@@ -821,19 +915,51 @@ export function analyzeWorkflow(file, source, { defaultShell = null } = {}) {
     if (!shellIsPipeline(shell)) continue;
     const context = { pipefail: shellSetsPipefail(shell), report: () => {} };
 
+    // `splitTopLevel` resolves a compound written on one line. A compound written across
+    // body lines — the ordinary spelling — needs the same guard honoured across them, so
+    // findings are collected per block and those inside a compound whose closing line
+    // carries the `|| …` are retracted before they are reported. Without this,
+    // `{`/`producer | head -1`/`} || true` reddens a required gate over a pipeline that
+    // is guarded, which is the defect this sweep exists to remove.
+    /** @type {Finding[]} */
+    const blockFindings = [];
+    /** @type {{kind: string, findingIndex: number}[]} */
+    const openCompounds = [];
+    /** @type {[number, number][]} */
+    const guardedRanges = [];
+
+    // One logical line's effect on the compounds the *block* is inside. Run after the
+    // line is scanned, so `openerFirst` decides whether this line's own findings sit
+    // inside the compound it opens: they do for `if producer | head -1; then`, and they
+    // do not for `producer | head -1; if x; then`.
+    const trackNesting = (text, beforeEntry) => {
+      const nesting = lineNesting(text);
+      for (const closer of nesting.unmatchedClosers) {
+        const depth = openCompounds.findLastIndex((entry) => entry.kind === closer.kind);
+        if (depth === -1) continue; // a `case` arm's `)`, or a closer with no opener
+        const opened = openCompounds[depth];
+        openCompounds.length = depth;
+        if (closer.guarded) guardedRanges.push([opened.findingIndex, blockFindings.length]);
+      }
+      for (const kind of nesting.unmatchedOpeners) {
+        openCompounds.push({ kind, findingIndex: nesting.openerFirst ? beforeEntry : blockFindings.length });
+      }
+    };
+
     const logical = logicalLines(block.body);
 
     // An annotation applies to the next statement, however many comment or blank lines
     // its own reasoning runs to.
     let carried;
     for (const entry of logical) {
+      const beforeEntry = blockFindings.length;
       if (entry.annotation !== undefined) {
         carried = entry.annotation;
         // The hatch may never be used without a reason. Reporting this only from inside
         // the finding loop left it unenforced in the one placement where the annotation
         // is inert — written above a statement that has nothing to silence.
         if (entry.annotation === '') {
-          findings.push({
+          blockFindings.push({
             file,
             line: entry.line,
             kind: 'annotation',
@@ -844,13 +970,16 @@ export function analyzeWorkflow(file, source, { defaultShell = null } = {}) {
           });
         }
       }
-      if (entry.text.trim() === '') continue;
+      if (entry.text.trim() === '') {
+        trackNesting(entry.text, beforeEntry);
+        continue;
+      }
       const allowReason = carried;
       carried = undefined;
 
       context.report = (statement, consumer) => {
         if (allowReason !== undefined) return;
-        findings.push({
+        blockFindings.push({
           file,
           line: entry.line,
           kind: 'pipe',
@@ -863,6 +992,15 @@ export function analyzeWorkflow(file, source, { defaultShell = null } = {}) {
         });
       };
       scanStatements(entry.text, false, context);
+      trackNesting(entry.text, beforeEntry);
+    }
+
+    for (const [index, finding] of blockFindings.entries()) {
+      // A reasonless annotation is a violation of the hatch itself, not a pipeline a
+      // guard can excuse, so it is never retracted.
+      const guarded =
+        finding.kind === 'pipe' && guardedRanges.some(([start, end]) => index >= start && index < end);
+      if (!guarded) findings.push(finding);
     }
   }
   return findings;
@@ -873,9 +1011,13 @@ export function isWorkflowSource(name) {
   return name.endsWith('.yml') || name.endsWith('.yaml');
 }
 
-// The path a finding names: repository-relative inside the repository, so the GitHub
-// annotation points at the file; the bare name for a corpus outside it.
-function displayPath(directory, name) {
+/**
+ * The path a finding names: repository-relative inside the repository, so the
+ * `::error file=…` annotation attaches to the file in the GitHub UI; the bare name for a
+ * corpus outside it. Exported because the live corpus reports nothing, so this is the
+ * only place the in-repository arm can be pinned.
+ */
+export function workflowDisplayPath(directory, name) {
   const path = relative(REPOSITORY_ROOT, join(directory, name));
   return path.startsWith('..') || isAbsolute(path) ? name : path;
 }
@@ -886,7 +1028,7 @@ export function lintWorkflows(workflowsDir = WORKFLOWS_DIR) {
     .filter((name) => isWorkflowSource(name))
     .sort()
     .flatMap((name) =>
-      analyzeWorkflow(displayPath(workflowsDir, name), readFileSync(join(workflowsDir, name), 'utf8')),
+      analyzeWorkflow(workflowDisplayPath(workflowsDir, name), readFileSync(join(workflowsDir, name), 'utf8')),
     );
 }
 

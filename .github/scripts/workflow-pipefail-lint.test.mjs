@@ -20,7 +20,9 @@ import {
   findActionFiles,
   isWorkflowSource,
   lintCompositeActions,
+  lintRepository,
   lintWorkflows,
+  workflowDisplayPath,
 } from './workflow-pipefail-lint.mjs';
 
 const workflowsDir = resolve(import.meta.dirname, '../workflows');
@@ -607,21 +609,45 @@ test('composite action steps are scanned and default to pipefail in scope (#3808
     mkdirSync(join(root, 'packages', 'js-action'), { recursive: true });
     writeFileSync(
       join(root, 'packages', 'js-action', 'action.yml'),
-      ['name: js', 'runs:', "  using: node20", "  main: index.js", ''].join('\n'),
+      // A `run:` step this WOULD report if it were scanned, so the `using: composite`
+      // filter is load-bearing: a vacuous fixture with no pipeline proves nothing.
+      [
+        'name: js',
+        'runs:',
+        '  using: node20',
+        '  main: index.js',
+        '  steps:',
+        '    - shell: bash',
+        '      run: |',
+        '        git tag | head -1',
+        '',
+      ].join('\n'),
+    );
+
+    // `#3808` says `action.y*ml`; GitHub reads both spellings, so both are pinned.
+    mkdirSync(join(root, '.github', 'actions', 'alt'), { recursive: true });
+    writeFileSync(
+      join(root, '.github', 'actions', 'alt', 'action.yaml'),
+      ['runs:', '  using: composite', '  steps:', '    - shell: bash', '      run: |', '        git tag | head -1', ''].join(
+        '\n',
+      ),
     );
 
     assert.deepEqual(
       findActionFiles(root).map((path) => path.replaceAll('\\', '/')).sort(),
-      ['.github/actions/probe/action.yml', 'packages/js-action/action.yml'],
+      ['.github/actions/alt/action.yaml', '.github/actions/probe/action.yml', 'packages/js-action/action.yml'],
     );
 
     assert.deepEqual(
       lintCompositeActions(root).map((finding) => `${finding.file}:${finding.line}:${finding.severity}`),
       [
+        '.github/actions/alt/action.yaml:6:error',
         '.github/actions/probe/action.yml:7:error',
         // A composite `run:` step is required to declare `shell:`, so an unresolved one
         // is the reader failing — the safe default is pipefail in scope.
         '.github/actions/probe/action.yml:9:error',
+        // `packages/js-action/action.yml` is absent: it declares `using: node20`, so the
+        // composite filter must keep its pipeline out of the corpus.
       ],
     );
   } finally {
@@ -629,14 +655,23 @@ test('composite action steps are scanned and default to pipefail in scope (#3808
   }
 });
 
-test('every tracked composite action is inside the scanned set (#3808)', () => {
+test('every tracked composite action is inside the scanned set (#3808)', (t) => {
   // The discovery half: the walker prunes build and dependency trees, so assert that
   // no pruned directory hides a tracked `action.y*ml` from the lint.
   const repoRoot = resolve(import.meta.dirname, '../..');
-  const tracked = execFileSync('git', ['ls-files', '-z', '*action.yml', '*action.yaml'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-  })
+  let listed;
+  try {
+    listed = execFileSync('git', ['ls-files', '-z', '*action.yml', '*action.yaml'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+  } catch {
+    // A source tarball or a checkout without git cannot answer the question. Skip loudly
+    // rather than erroring, and rely on the hermetic prune controls below.
+    t.skip('git is unavailable, so the tracked set cannot be read');
+    return;
+  }
+  const tracked = listed
     .split('\0')
     // `git ls-files '*action.yml'` matches any path *ending* in it, so
     // `packages/x/docker-action.yml` comes back too. The walker keys on the exact
@@ -757,4 +792,218 @@ test('an annotation finding is not reported as a pipe into a consumer', () => {
   const [pipe] = findings('git tag | head -1', { shell: 'bash' });
   assert.equal(pipe.kind, 'pipe');
   assert.equal(pipe.consumer, 'head');
+});
+
+// Regressions from the sweep's independent review.
+
+test('a `||` guard on a compound spanning body lines reaches the site inside it (#3806)', () => {
+  // The multi-line spelling is the ordinary one in a workflow. `splitTopLevel` resolves
+  // a compound written on one line; this is the same guard honoured across lines, and
+  // without it a correctly guarded pipeline reddens a required gate.
+  for (const body of [
+    ['{', '  producer | head -1', '} || true'],
+    ['if producer | head -1; then', '  echo y', 'fi || true'],
+    ['for f in a b; do', '  producer | head -1', 'done || true'],
+    ['(', '  producer | head -1', ') || true'],
+  ]) {
+    assert.deepEqual(severities(body.join('\n'), { shell: 'bash' }), [], body[0]);
+  }
+
+  // …and the same compounds without the guard still report.
+  for (const body of [
+    ['{', '  producer | head -1', '}'],
+    ['if producer | head -1; then', '  echo y', 'fi'],
+    ['for f in a b; do', '  producer | head -1', 'done'],
+  ]) {
+    assert.deepEqual(severities(body.join('\n'), { shell: 'bash' }), ['error:head'], body[0]);
+  }
+
+  // A guard on a compound opened *after* a statement does not reach back to it.
+  assert.deepEqual(
+    severities(['producer | head -1', 'if x; then', '  echo y', 'fi || true'].join('\n'), { shell: 'bash' }),
+    ['error:head'],
+  );
+});
+
+test('a subshell opener glued to its first word still opens the compound (#3806)', () => {
+  // `(printf …` and `… echo yes)` are the ordinary spelling. Recognising `(` only as a
+  // standalone token left the outer guard on a different unit from the consumer.
+  assert.deepEqual(severities("(printf '%s' \"$x\" | grep -q foo && echo yes) || true", { shell: 'bash' }), []);
+  assert.deepEqual(severities('(producer | head -1; echo ok) || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities("(printf '%s' \"$x\" | grep -q foo && echo yes)", { shell: 'bash' }), [
+    'error:grep -q',
+  ]);
+});
+
+test("a subshell's `set ±o pipefail` dies with the subshell", () => {
+  // Verified against bash: neither toggle escapes `( … )`. A `{ … }` group, and loop and
+  // `if` bodies, do run in the current shell, so their toggles carry.
+  assert.deepEqual(severities(['( set -o pipefail; : )', 'printf x | head -1'].join('\n')), ['warning:head']);
+  assert.deepEqual(severities(['( set +o pipefail; : )', 'printf x | head -1'].join('\n'), { shell: 'bash' }), [
+    'error:head',
+  ]);
+  assert.deepEqual(severities(['{ set -o pipefail; }', 'printf x | head -1'].join('\n')), ['error:head']);
+});
+
+test('`until`, `select` and `case` are compound openers too (#3806)', () => {
+  assert.deepEqual(severities('until producer | head -1; do echo y; done || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('select f in a b; do producer | head -1; done || true', { shell: 'bash' }), []);
+  // A `case` arm's `)` must not close the `case` itself, on one line or across them.
+  assert.deepEqual(severities('case "$x" in a) producer | head -1 ;; esac || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('case "$x" in a) producer | head -1 ;; esac', { shell: 'bash' }), ['error:head']);
+  assert.deepEqual(
+    severities(['case "$x" in', '  a) producer | head -1 ;;', 'esac'].join('\n'), { shell: 'bash' }),
+    ['error:head'],
+  );
+});
+
+test('a comment inside a `defaults:` block is not a `shell:` declaration', () => {
+  // The first `shell:`-shaped text used to win, so a comment beat the real key below it:
+  // a fail-open when it named a weaker shell, a gate-failing error when it named a
+  // stronger one.
+  const commentedWeaker = [
+    'jobs:', '  j:', '    defaults:', '      run:',
+    '        # shell: sh was the old setting', '        shell: bash',
+    '    steps:', '      - run: printf x | head -1', '',
+  ].join('\n');
+  assert.deepEqual(analyzeWorkflow('sample.yml', commentedWeaker).map((f) => f.severity), ['error']);
+
+  const commentedStronger = [
+    'jobs:', '  j:', '    defaults:', '      run:',
+    '        # shell: bash', '        shell: sh',
+    '    steps:', '      - run: printf x | head -1', '',
+  ].join('\n');
+  assert.deepEqual(analyzeWorkflow('sample.yml', commentedStronger).map((f) => f.severity), ['warning']);
+
+  // A comment may sit at any column, including one shallower than the `defaults:` key.
+  // Treating it as the end of the block loses the declaration below it.
+  const outdented = [
+    'jobs:', '  j:', '    defaults:', '      run:',
+    '# an explanation at column 0', '        shell: bash',
+    '    steps:', '      - run: printf x | head -1', '',
+  ].join('\n');
+  assert.deepEqual(analyzeWorkflow('sample.yml', outdented).map((f) => f.severity), ['error']);
+
+  const trailing = [
+    'jobs:', '  j:', '    defaults:', '      run:',
+    '        working-directory: ./x # shell: sh is set elsewhere', '        shell: bash',
+    '    steps:', '      - run: printf x | head -1', '',
+  ].join('\n');
+  assert.deepEqual(analyzeWorkflow('sample.yml', trailing).map((f) => f.severity), ['error']);
+});
+
+test('a trailing comment on a job key or on `defaults:` does not lose the scope (#3806)', () => {
+  const source = [
+    'jobs: # all lanes', '  sample: # linux only', '    defaults: # every step',
+    '      run:', '        shell: bash', '    steps:', '      - run: |',
+    '          git tag | head -1', '',
+  ].join('\n');
+  assert.deepEqual(analyzeWorkflow('sample.yml', source).map((f) => f.severity), ['error']);
+});
+
+test('a blank line inside a block scalar does not end its body (#3807)', () => {
+  // A blank line is legal anywhere in a block scalar. If the mask ended there, the
+  // embedded `defaults:` below it would become a phantom job-level default again and
+  // escalate the neighbouring step from warning to error.
+  const source = [
+    'jobs:', '  sample:', '    steps:',
+    '      - name: write a workflow fixture', '        run: |',
+    "          cat > wf.yml <<'YAML'", '          name: generated', '',
+    '          defaults:', '            run:', '              shell: bash', '          YAML',
+    '      - name: real step, no shell declared', '        run: |',
+    '          producer | head -1', '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => `${finding.severity}:${finding.line}`),
+    ['warning:15'],
+  );
+});
+
+test('an option argument is not read as the awk program or the sed script', () => {
+  // Without the arg-taking sets, `-v msg=exit` is read as the program and matches
+  // `\bexit\b` — a false error on a required gate.
+  assert.equal(earlyExitConsumer("awk -v msg=exit '{print msg}'"), null);
+  assert.equal(earlyExitConsumer("awk -F exit '{print}'"), null);
+  assert.equal(earlyExitConsumer('sed -f q'), null, 'a script file named q is not the q command');
+  assert.equal(earlyExitConsumer("awk -v n=1 'NR==n{exit}'"), 'awk …exit', 'the program is still read');
+});
+
+test('the awk variants and the grep long forms are all classified', () => {
+  assert.equal(earlyExitConsumer("gawk 'NR==1{exit}'"), 'awk …exit');
+  assert.equal(earlyExitConsumer("mawk 'NR==1{exit}'"), 'awk …exit');
+  assert.equal(earlyExitConsumer("nawk 'NR==1{exit}'"), 'awk …exit');
+  assert.equal(earlyExitConsumer('grep --silent needle'), 'grep --silent');
+  assert.equal(earlyExitConsumer('{ head -1 )'), null, 'a mismatched group is not unwrapped');
+});
+
+test('the prune set stays narrow enough to reach any plausible action location (#3808)', () => {
+  // Widening the prune set is the failure the `git ls-files` guard cannot see while the
+  // repository tracks no action file — it would report a hole the walker itself created.
+  const root = mkdtempSync(join(tmpdir(), 'pipefail-lint-names-'));
+  try {
+    const names = ['bin', 'build', 'coverage', 'dist', 'lib', 'out', 'target', 'tmp', 'vendor'];
+    for (const name of names) {
+      mkdirSync(join(root, '.github', 'actions', name), { recursive: true });
+      writeFileSync(join(root, '.github', 'actions', name, 'action.yml'), 'runs:\n  using: composite\n');
+    }
+    assert.deepEqual(
+      findActionFiles(root)
+        .map((path) => path.replaceAll('\\', '/').split('/').at(-2))
+        .sort(),
+      [...names].sort(),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the discovery guard fires when a composite action sits under a pruned tree (#3808)', () => {
+  // The `git ls-files` guard is vacuous while the repository tracks no `action.y*ml`.
+  // This is its positive control: the set difference it computes is exercised on a tree
+  // where that difference is non-empty.
+  const root = mkdtempSync(join(tmpdir(), 'pipefail-lint-pruned-'));
+  try {
+    const planted = [];
+    for (const pruned of ['.git', '.yarn', 'node_modules']) {
+      mkdirSync(join(root, pruned, 'pkg'), { recursive: true });
+      writeFileSync(join(root, pruned, 'pkg', 'action.yml'), 'runs:\n  using: composite\n');
+      planted.push(`${pruned}/pkg/action.yml`);
+    }
+    mkdirSync(join(root, '.github', 'actions', 'real'), { recursive: true });
+    writeFileSync(join(root, '.github', 'actions', 'real', 'action.yml'), 'runs:\n  using: composite\n');
+
+    const walked = findActionFiles(root).map((path) => path.replaceAll('\\', '/'));
+    assert.deepEqual(walked, ['.github/actions/real/action.yml']);
+    assert.deepEqual(planted.filter((path) => !new Set(walked).has(path)), planted);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the whole repository is clean under the entry point the gate runs', () => {
+  // `main()` calls `lintRepository()`, not `lintWorkflows()`: the composite arm and the
+  // composition of the two were otherwise covered only by temp-dir fixtures.
+  const errors = lintRepository().filter((finding) => finding.severity === 'error');
+  assert.deepEqual(errors.map((finding) => `${finding.file}:${finding.line} ${finding.statement}`), []);
+});
+
+test('a workflow finding names a repository-relative path, so the annotation lands', () => {
+  // `::error file=…` only attaches to a file in the GitHub UI when the path is
+  // repo-relative; a corpus outside the repository falls back to the bare name.
+  const dir = mkdtempSync(join(tmpdir(), 'pipefail-lint-path-'));
+  try {
+    writeFileSync(
+      join(dir, 'probe.yml'),
+      ['jobs:', '  a:', '    steps:', '      - shell: bash', '        run: |', '          git tag | head -1', ''].join(
+        '\n',
+      ),
+    );
+    assert.deepEqual(lintWorkflows(dir).map((finding) => finding.file), ['probe.yml']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // The live corpus reports nothing, so the in-repository arm is pinned on the decision
+  // itself rather than on a finding that never appears.
+  assert.equal(workflowDisplayPath(workflowsDir, 'ci.yml'), join('.github', 'workflows', 'ci.yml'));
+  assert.equal(workflowDisplayPath('/definitely/outside/the/repo', 'ci.yml'), 'ci.yml');
 });
