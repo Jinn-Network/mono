@@ -1,0 +1,13 @@
+{
+  "name": "consumer-archive-root-escaping-serving-root",
+  "kind": "consumer",
+  "description": "§7 item 3: an archiveRoot on the serving root's own origin that leaves its path prefix is refused. Containment is origin AND prefix, so the two halves get a vector each.",
+  "input": {
+    "servingRoot": "https://peer.example/archive",
+    "archiveRoot": "/archived-elsewhere/entries/0000000000000001.json"
+  },
+  "expect": {
+    "rejected": true,
+    "reason": "outside-serving-root"
+  }
+}

@@ -375,16 +375,41 @@ export function runSubscribeConformance(sub: SubscribeClientUnderTest): void {
 /** The minimal surface a discovery client must expose for `runConsumerConformance` (M6). */
 export interface ClientUnderTest {
   checkLocator(location: unknown): Promise<{ rejected: boolean; reason?: string }>;
+  /**
+   * Resolves a well-known `archiveRoot` against the serving root that served the
+   * document, refusing one that does not stay inside it (§7 item 3, #3434).
+   *
+   * OPTIONAL, deliberately. `checkLocator` is a whole-fetch guard every HTTP
+   * consumer performs; containment is a pure URL decision that belongs to
+   * whichever layer holds the configured serving root, and an implementer that
+   * does not hold one has nothing to answer with. An implementer that supplies
+   * it has the `consumer-archive-root-*` vectors asserted against it; one that
+   * does not skips them, exactly as the non-locator consumer vectors skip
+   * today.
+   */
+  checkArchiveRoot?(servingRoot: string, archiveRoot: string): Promise<{ rejected: boolean; reason?: string }>;
 }
 
 export function runConsumerConformance(client: ClientUnderTest): void {
   describe("consumer conformance (§9.5/§7.4/§13.3/§5.1, §18 consumer vectors)", () => {
     for (const vector of loadVectorsByKind("consumer")) {
-      const input = vector.input as { location?: unknown };
+      const input = vector.input as { location?: unknown; servingRoot?: string; archiveRoot?: string };
+      const expected = vector.expect as { rejected: boolean; reason?: string };
+      // The well-known containment vectors (§7 item 3) name a serving root plus
+      // the `archiveRoot` introduced under it, not a locator.
+      if (input.servingRoot !== undefined && input.archiveRoot !== undefined) {
+        const check = client.checkArchiveRoot;
+        if (check === undefined) continue;
+        it(vector.name, async () => {
+          const result = await check.call(client, input.servingRoot!, input.archiveRoot!);
+          expect(result.rejected).toBe(expected.rejected);
+          if (expected.reason !== undefined) expect(result.reason).toBe(expected.reason);
+        });
+        continue;
+      }
       if (input.location === undefined) continue; // non-locator consumer vectors (debounce, divergence, cold-start, withdrawal) await a full ClientUnderTest surface at M6
       it(vector.name, async () => {
         const result = await client.checkLocator(input.location);
-        const expected = vector.expect as { rejected: boolean; reason?: string };
         expect(result.rejected).toBe(expected.rejected);
         if (expected.reason !== undefined) expect(result.reason).toBe(expected.reason);
       });
