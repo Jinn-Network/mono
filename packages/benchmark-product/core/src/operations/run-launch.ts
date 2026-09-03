@@ -42,7 +42,6 @@ import {
   resumeRun,
   type LaunchOptions,
 } from "@jinn-network/benchmarking-run";
-import type { SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse, toErrorEnvelope } from "../errors.js";
@@ -56,6 +55,7 @@ import {
   type DriveDeps,
 } from "../run/drive.js";
 import { createProductLaunchCapture } from "../run/publication-capture.js";
+import { reconcileReplayedSubmission } from "../run/replayed-submission-recovery.js";
 import { createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
 import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import {
@@ -783,35 +783,20 @@ export function runResume(
                     `${cell.cellKey}::${cell.dispatch}`,
                   );
                   if (submissionSha256 === undefined) continue;
-                  const submissionBytes = getSealedBytes(
-                    clockedContext.workspaceDir,
-                    submissionSha256,
-                  );
-                  const submission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
-                    submissionBytes,
-                  )) as { readonly submission?: unknown };
-                  if (
-                    typeof submission.submission !== "string"
-                    || !submission.submission.startsWith("urn:uuid:")
-                  ) {
-                    refuse(
-                      "record-integrity",
-                      `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
-                      "captured outstanding Submission carries no valid Submission URI",
-                    );
-                  }
-                  const reconciliation = await backend.recover(
-                    submission.submission as SubmissionUri,
-                  );
-                  if (reconciliation.classification === "contradictory") {
-                    refuse(
-                      "record-integrity",
-                      `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
-                      `backend recovery contradicted the captured Submission${
-                        reconciliation.detail === undefined ? "" : `: ${reconciliation.detail}`
-                      }`,
-                    );
-                  }
+                  // Shared with the evaluation leg's replay preamble; see
+                  // `../run/replayed-submission-recovery.ts` for the ref discipline both enforce.
+                  // "absent" simply means the crash preceded backend acceptance, and `resumeRun`
+                  // submits these same bytes normally below.
+                  await reconcileReplayedSubmission({
+                    backend,
+                    submissionBytes: getSealedBytes(
+                      clockedContext.workspaceDir,
+                      submissionSha256,
+                    ),
+                    refusalPath: `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
+                    invalidUriMessage: "captured outstanding Submission carries no valid Submission URI",
+                    contradictionMessage: "backend recovery contradicted the captured Submission",
+                  });
                 }
 
                 cancellation = createCancellationAwareBackend(backend, {
