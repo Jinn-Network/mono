@@ -1074,7 +1074,6 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
       probes: number;
     };
   }): ProxiedBackend {
-    let observes = 0;
     return {
       async capabilities() {
         throw new Error("not used");
@@ -1097,8 +1096,10 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
         };
       },
       async observe() {
-        observes += 1;
-        if (observes === 1) {
+        // The retention probe is the only `observe` that can precede this leg's `submit`; every
+        // later one is the ordinary post-submit read. Counting it that way is what lets these
+        // tests assert the probe was SKIPPED rather than merely answered.
+        if (options.calls.submits.length === 0) {
           options.calls.probes += 1;
           if (options.probe === "attempt-not-found") {
             throw new TaskExecutionError("attempt-not-found", { detail: "no Attempt or Submission" });
@@ -1142,6 +1143,8 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
     readonly reconciliation?: ReconciliationReport;
     readonly heldKeyBytes?: "replayed";
     readonly observeAlwaysMissing?: boolean;
+    /** Distinct per call within one test: the run journal is per-draft and appends. */
+    readonly draftId?: string;
   }): Promise<{
     readonly submitted: Uint8Array;
     readonly replayed: Uint8Array;
@@ -1149,6 +1152,7 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
     readonly entries: ReturnType<typeof readRunJournalEntries>;
   }> {
     const clock = makeClock();
+    const draftId = options.draftId ?? "draft-1";
     const { taskSha256 } = storeSubjectTaskAndSpec();
     const cellKey = `${taskSha256}/arm-a/1`;
     const solveDeliveryBytes = utf8({ outputs: [{ name: "prediction", digest: { sha256: "e".repeat(64) } }] });
@@ -1160,7 +1164,7 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
     await driveEvaluationCatchUp(
       {
         workspaceDir,
-        draftId: "draft-1",
+        draftId,
         venue: fakeVenue({ taskBytes: new Uint8Array([4, 5]), taskSha256: "4".repeat(64) }),
         backend: replayBackend({
           probe: options.probe,
@@ -1184,7 +1188,7 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
       submitted: calls.submits[0]!.submissionBytes,
       replayed,
       probes: calls.probes,
-      entries: readRunJournalEntries(workspaceDir, "draft-1"),
+      entries: readRunJournalEntries(workspaceDir, draftId),
     };
   }
 
@@ -1258,6 +1262,7 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
       reconciliation: { classification: "absent", retained: true, detail: "held" },
       heldKeyBytes: "replayed",
       observeAlwaysMissing: true,
+      draftId: "draft-2",
     });
     expect(replay.submitted).toEqual(replay.replayed);
 
