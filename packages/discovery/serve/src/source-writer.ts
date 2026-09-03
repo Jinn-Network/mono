@@ -686,10 +686,16 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     // - An idempotent replay of an already-committed announcement returns its receipt
     //   unconditionally (#3569). The window verdict is computed here but raised inside
     //   the CAS loop, *after* the committed-announcement short-circuit and still before
-    //   the first write -- so a refused append leaves no blob, no intent, no state
-    //   revision and no signature, while a backwards clock correction of more than one
-    //   window (an NTP fix on a badly fast host, exactly the population this bound
-    //   exists for) cannot make a published announcement stop being acknowledgeable.
+    //   the first write -- so a backwards clock correction of more than one window (an
+    //   NTP fix on a badly fast host, exactly the population this bound exists for)
+    //   cannot make a published announcement stop being acknowledgeable.
+    //
+    //   The refusal still writes, signs and stages nothing *of its own*. The one thing
+    //   it now runs first is the `recover()` at the top of the loop, which may finish a
+    //   pre-existing durable intent -- another append's already-signed bytes, under the
+    //   carve-out above. That is deliberate: refusing before recovery would let a
+    //   skewed clock strand a pending intent that was in-window when it was minted,
+    //   which is the wedge the carve-out exists to avoid.
 
     // `Number.isFinite` above admits timestamps near the ECMAScript Date limit, whose
     // window end overflows the range and makes `toISOString()` throw a bare RangeError.
@@ -702,8 +708,8 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     const refreshBy = new Date(timestampMs + refreshWithinMs).toISOString();
     const now = clock.now();
     const windowFailure = checkRefreshWindow({ issuedAt: command.timestamp, refreshBy }, now);
-    const refuseMintedWindow = (): never => {
-      if (windowFailure === "head-issued-ahead") {
+    const refuseMintedWindow = (failure: NonNullable<typeof windowFailure>): never => {
+      if (failure === "head-issued-ahead") {
         throw new SourceWriterIntegrityError(
           "announcement timestamp is further ahead of this source's clock than the freshness window allows"
           + ` (issuedAt ${command.timestamp}, now ${now.toISOString()},`
@@ -714,7 +720,7 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
       // §5.2 rule 1 refuses. Before this check such a writer minted it silently.
       throw new SourceWriterIntegrityError(
         "announcement timestamp yields a head freshness window no consumer accepts"
-        + ` -- it is empty or wider than the ceiling (${windowFailure})`,
+        + ` -- it is empty or wider than the ceiling (${failure})`,
       );
     };
 
@@ -771,7 +777,7 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
       }
 
       // Past the idempotent-replay short-circuit and still before the first write.
-      if (windowFailure !== undefined) refuseMintedWindow();
+      if (windowFailure !== undefined) refuseMintedWindow(windowFailure);
 
       if (announcement.action === "withdrawn") {
         const target = state.value.announcements[announcement.retracts];
