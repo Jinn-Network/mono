@@ -21,6 +21,7 @@ import {
   exportFreezeRepo,
   runVerifierCli,
   verifyFreezeRepo,
+  verifyPublicBundleSnapshot,
 } from "@colophon-claims/verify";
 import { runCli } from "../cli/main.js";
 import { createSyntheticV4BundleFixture } from "./testing/v4-synthetic-fixture.js";
@@ -185,6 +186,27 @@ describe("freeze-repository export against a real v4 bundle", () => {
     expect(drifted.stdout).toContain("changed: README.md");
   });
 
+  test("verifies the bundle once, and renders the freeze tree from that same snapshot", async () => {
+    // The freeze check used to run a second full verification of the same bundle, without the
+    // caller's `--tsa-root` / `--ots-headers` material and outside the `deps.verify` seam, so its
+    // anchor outcomes could differ from the reported ones with nothing saying so (issue #3352).
+    const bundleDir = licensedBundle;
+    const repoDir = join(tempDir("single-verify"), "tree");
+    await exportFreezeRepo(bundleDir, repoDir);
+
+    let calls = 0;
+    const result = await runVerifierCli([bundleDir, "--freeze-repo", repoDir, "--json"], {
+      verify: async (dir, options) => {
+        calls += 1;
+        return verifyPublicBundleSnapshot(dir, options);
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(result.exitCode).toBe(0);
+    expect((JSON.parse(result.stdout) as { freezeRepo: { ok: boolean } }).freezeRepo.ok).toBe(true);
+  });
+
   test("refuses to write into a directory that already holds files", async () => {
     const repoDir = join(tempDir("occupied"), "tree");
     mkdirSync(repoDir, { recursive: true });
@@ -284,6 +306,22 @@ describe("freeze-repo CLI verbs", () => {
     expect(envelope.ok).toBe(false);
     expect(envelope.error.code).toBe("record-integrity");
     expect(envelope.error.issues).toEqual([{ path: "README.md", message: "changed" }]);
+    // The oid the bundle renders to is reported on the drift path too, not only on the matching
+    // one (issue #3352): a reader deciding whether the tree they hold is the one an announcement
+    // pinned cannot answer that from a difference list alone.
+    const rendered = await verifyFreezeRepo(bundleDir, repoDir);
+    expect(envelope.error.detail).toContain(`commit ${rendered.commitId}`);
+  });
+
+  test("the roles an export reports are the frozen catalog order, not an alphabetical one", async () => {
+    // `freeze.json` renders role groups in the frozen order; the export result used to present the
+    // same list alphabetically, so one list appeared in two orders on two surfaces (issue #3352).
+    const repoDir = join(tempDir("cli-roles"), "repo");
+    const exported = await exportFreezeRepo(licensedBundle, repoDir);
+    const manifest = JSON.parse(readFileSync(join(repoDir, "freeze.json"), "utf8")) as {
+      roles: readonly { readonly role: string }[];
+    };
+    expect(exported.roles).toEqual(manifest.roles.map((group) => group.role));
   });
 });
 

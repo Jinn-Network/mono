@@ -152,8 +152,10 @@ export {
   FREEZE_REPO_ROLES,
   exportFreezeRepo,
   freezeRepoCommitId,
+  isSpdxLicenseExpression,
   renderFreezeRepo,
   verifyFreezeRepo,
+  verifyFreezeRepoSnapshot,
 } from "./freeze-repo.js";
 export type {
   FreezeRepoBundleSupport,

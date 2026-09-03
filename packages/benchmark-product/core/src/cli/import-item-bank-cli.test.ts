@@ -138,7 +138,7 @@ describe("colophon import item-bank", () => {
     expect(freeText.exitCode).toBe(2);
     expect(JSON.parse(freeText.stdout)).toMatchObject({
       ok: false,
-      error: { code: "invalid-invocation", detail: expect.stringContaining("SPDX short identifier") },
+      error: { code: "invalid-invocation", detail: expect.stringContaining("SPDX licence expression") },
     });
 
     writeFileSync(itemsPath, `\uFEFF${renderCanonicalJsonl([{

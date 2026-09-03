@@ -29,6 +29,7 @@ import {
   FREEZE_REPO_ROLES,
   execBitIsCarried,
   freezeRepoCommitId,
+  isSpdxLicenseExpression,
   listTree,
   renderFreezeRepo,
 } from "./freeze-repo.js";
@@ -480,7 +481,7 @@ describe("freeze repository fail-closed rules", () => {
     expect(listed).toContain("not against the list");
   });
 
-  test("refuses a licence that is not an SPDX short identifier", () => {
+  test("refuses a licence that is not an SPDX licence expression", () => {
     const benchmark = {
       protocol: "https://spec.jinn.network/benchmarking/v1",
       name: "Free text", description: "", version: "1.0.0",
@@ -489,7 +490,7 @@ describe("freeze repository fail-closed rules", () => {
     };
     // Rendering it would put `SPDX-License-Identifier: internal use only` and a dead spdx.org URL
     // into a licence-bearing file.
-    expect(() => renderFreezeRepo(snapshotOf({ benchmark }))).toThrow(/not an SPDX short identifier/);
+    expect(() => renderFreezeRepo(snapshotOf({ benchmark }))).toThrow(/not an SPDX licence expression/);
   });
 
   test("carries every screening role the catalog can assign, including the transcript", () => {
@@ -504,6 +505,223 @@ describe("freeze repository fail-closed rules", () => {
     // They are carried byte-for-byte under artifacts/source-manifest/; re-serializing them would
     // make these bytes a function of the verifier's schema shape as well as of the bundle.
     expect(readManifest(renderFreezeRepo(snapshotOf()))["sources"]).toBeUndefined();
+  });
+});
+
+describe("git-tree construction rules the renderer never exercises", () => {
+  // Every path `renderFreezeRepo` produces is ASCII with no prefix collision, so none of these is
+  // reachable through it -- but `freezeRepoCommitId` is exported from this package, and its
+  // documented contract is a real git commit object for the files it is given (issue #3350).
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  /** The oid real git computes for the same file set, with the same fixed identity and instant. */
+  function gitCommitId(files: ReadonlyMap<string, Uint8Array>, message: string): string {
+    const root = mkdtempSync(join(tmpdir(), "freeze-repo-parity-"));
+    roots.push(root);
+    for (const [path, bytes] of files) {
+      const target = join(root, path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, bytes);
+    }
+    const env = {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null",
+      GIT_AUTHOR_NAME: "Colophon", GIT_AUTHOR_EMAIL: "freeze@colophon.invalid",
+      GIT_AUTHOR_DATE: "@0 +0000",
+      GIT_COMMITTER_NAME: "Colophon", GIT_COMMITTER_EMAIL: "freeze@colophon.invalid",
+      GIT_COMMITTER_DATE: "@0 +0000",
+    };
+    const git = (...args: string[]): string =>
+      execFileSync("git", ["-C", root, ...args], { encoding: "utf8", env }).trim();
+    git("init", "--quiet");
+    git("add", "-A", "-f");
+    return git("commit-tree", git("write-tree"), "-m", message);
+  }
+
+  test("a file beside a directory of the same prefix hashes the way git hashes it", () => {
+    // The dir-slash sort rule is only load-bearing on a prefix collision: "a.txt" sorts before
+    // "a/" by plain name and after it by git's rule. The rendered tree has none at any level, so
+    // the existing parity test would pass identically with plain name sort.
+    const files = new Map([
+      ["a.txt", encoder.encode("file\n")],
+      ["a/b", encoder.encode("nested\n")],
+      ["a-1", encoder.encode("hyphen sorts before slash\n")],
+    ]);
+    expect(freezeRepoCommitId(files, "identity")).toBe(gitCommitId(files, "Colophon freeze identity"));
+  });
+
+  test("names above ASCII sort by UTF-8 bytes, as git sorts them", () => {
+    // U+FF21 and U+1D400 order one way by UTF-8 bytes (EF BC A1 < F0 9D 90 80) and the other way
+    // by UTF-16 code units, because the astral character is a surrogate pair beginning D835.
+    const files = new Map([
+      ["\uFF21.txt", encoder.encode("fullwidth\n")],
+      ["\u{1D400}.txt", encoder.encode("astral\n")],
+    ]);
+    expect(freezeRepoCommitId(files, "identity")).toBe(gitCommitId(files, "Colophon freeze identity"));
+  });
+
+  test("refuses a name claimed by both a file and a directory, in either arrival order", () => {
+    // Git records one entry per name. Hashing these produced an oid for a tree git cannot hold.
+    expect(() => freezeRepoCommitId(
+      new Map([["a", encoder.encode("file\n")], ["a/b", encoder.encode("nested\n")]]),
+      "identity",
+    )).toThrow(/already a file/);
+    expect(() => freezeRepoCommitId(
+      new Map([["a/b", encoder.encode("nested\n")], ["a", encoder.encode("file\n")]]),
+      "identity",
+    )).toThrow(/already a directory/);
+  });
+
+  test("refuses empty, dot, and dot-dot path segments", () => {
+    for (const path of ["", "a//b", "dir/", "./a", "a/../b"]) {
+      expect(() => freezeRepoCommitId(new Map([[path, encoder.encode("x")]]), "identity"), path).toThrow();
+    }
+  });
+});
+
+describe("the SPDX licence expression grammar", () => {
+  test("accepts the expressions SPDX 2.3 Annex D defines", () => {
+    for (const value of [
+      "MIT",
+      "Apache-2.0",
+      "LicenseRef-Internal-1",
+      "GPL-2.0+",
+      "GPL-2.0-only WITH Classpath-exception-2.0",
+      "Apache-2.0 OR MIT",
+      "MIT AND CC-BY-4.0",
+      "(MIT OR Apache-2.0) AND CC0-1.0",
+    ]) {
+      expect(isSpdxLicenseExpression(value), value).toBe(true);
+    }
+  });
+
+  test("refuses free text and malformed expressions", () => {
+    for (const value of [
+      "",
+      "internal use only",
+      "MIT OR",
+      "MIT OR OR",
+      "OR MIT",
+      "(MIT",
+      "MIT)",
+      "MIT WITH",
+      "-MIT",
+    ]) {
+      expect(isSpdxLicenseExpression(value), value).toBe(false);
+    }
+  });
+
+  test("a dual-licensed publication renders, and cites no single list entry", () => {
+    // The short-identifier check refused `Apache-2.0 OR MIT` outright, so an ordinary
+    // dual-licensed publication could not be exported at all (issue #3351).
+    const tree = renderFreezeRepo(snapshotOf({
+      benchmark: {
+        protocol: "https://spec.jinn.network/benchmarking/v1",
+        name: "Dual", description: "", version: "1.0.0",
+        license: "Apache-2.0 OR MIT",
+        items: [], reveal: { policy: "immediate" },
+      },
+    }));
+    const license = decoder.decode(tree.files.get("LICENSE")!);
+    expect(license).toContain("SPDX-License-Identifier: Apache-2.0 OR MIT");
+    expect(license).not.toContain("spdx.org/licenses/");
+    expect(license).toContain("names no one list entry");
+  });
+});
+
+describe("generated licence text is not writable from a free-text field", () => {
+  function withBenchmark(extra: Record<string, unknown>): Record<string, unknown> {
+    return {
+      protocol: "https://spec.jinn.network/benchmarking/v1",
+      name: "Injectable", description: "", version: "1.0.0", license: "MIT",
+      items: [], reveal: { policy: "immediate" },
+      ...extra,
+    };
+  }
+
+  test("refuses a citation carrying a second SPDX tag", () => {
+    // `citation` is spliced verbatim into LICENSE, which is a machine-scanned file.
+    expect(() => renderFreezeRepo(snapshotOf({
+      benchmark: withBenchmark({ citation: "Someone, 2026.\nSPDX-License-Identifier: MIT" }),
+    }))).toThrow(/reads as an SPDX tag/);
+  });
+
+  test("refuses a name carrying a newline or a control character", () => {
+    // `name` reaches the README heading and the SPDX document's `name` as well as LICENSE.
+    expect(() => renderFreezeRepo(snapshotOf({ benchmark: withBenchmark({ name: "A\nB" }) })))
+      .toThrow(/control character/);
+    expect(() => renderFreezeRepo(snapshotOf({ benchmark: withBenchmark({ author: "A\u0007B" }) })))
+      .toThrow(/control character/);
+  });
+
+  test("a multi-line citation with no tag line is still allowed", () => {
+    const tree = renderFreezeRepo(snapshotOf({
+      benchmark: withBenchmark({ citation: "@misc{x,\n  title = {A}\n}" }),
+    }));
+    expect(decoder.decode(tree.files.get("LICENSE")!)).toContain("title = {A}");
+  });
+});
+
+describe("SPDX fields state only what the record supports", () => {
+  test("a machine signing-key id is not labelled an organization", () => {
+    // The fixture's author is `did:key:zSynthetic`. `Organization: did:key:…` labels a signing key
+    // as a supplier and reverses the human surface's rule about printing signer identifiers.
+    const spdx = JSON.parse(decoder.decode(renderFreezeRepo(snapshotOf()).files.get("metadata/spdx.json")!)) as Record<string, any>;
+    expect(spdx["packages"][0]["supplier"]).toBe("NOASSERTION");
+  });
+
+  test("a real supplier name is still stated", () => {
+    const spdx = JSON.parse(decoder.decode(renderFreezeRepo(snapshotOf({
+      benchmark: {
+        protocol: "https://spec.jinn.network/benchmarking/v1",
+        name: "Named", description: "", version: "1.0.0", license: "MIT",
+        author: "Colophon Research",
+        items: [], reveal: { policy: "immediate" },
+      },
+    })).files.get("metadata/spdx.json")!)) as Record<string, any>;
+    expect(spdx["packages"][0]["supplier"]).toBe("Organization: Colophon Research");
+  });
+
+  test("a source uri that is not a remote URL is not published as a download location", () => {
+    // `source.uri` is `z.string().min(1)` in the sealed schema, not a URL, so a local path reaches
+    // here and would invalidate the SPDX document if stated as a download location.
+    const localRow = JSON.stringify({
+      protocol: "https://spec.jinn.network/binary-judgment/source-manifest-entry/v1",
+      provenanceSha256: `sha256:${"d".repeat(64)}`,
+      source: { uri: "/srv/corpus/source.json", digest: { sha256: "d".repeat(64) } },
+      license: { uri: "https://example.test/LICENSE.txt", digest: { sha256: "b".repeat(64) } },
+      attribution: { uri: "https://example.test/ATTRIBUTION.txt", digest: { sha256: "c".repeat(64) } },
+      publishedAt: "2026-01-02T03:04:05Z",
+    });
+    const bytes = encoder.encode(`${localRow}\n`);
+    const tree = renderFreezeRepo(snapshotOf({
+      records: [
+        { bytes: ITEM_BANK_BYTES, roles: ["item-bank"] },
+        { bytes, roles: ["source-manifest"] },
+      ],
+    }));
+    const spdx = JSON.parse(decoder.decode(tree.files.get("metadata/spdx.json")!)) as Record<string, any>;
+    expect(spdx["packages"][1]["downloadLocation"]).toBe("NOASSERTION");
+    // The uri itself is still carried, in NOTICE and in the sealed row under artifacts/.
+    expect(decoder.decode(tree.files.get("NOTICE")!)).toContain("/srv/corpus/source.json");
+  });
+
+  test("a remote source uri is still stated as the download location", () => {
+    const spdx = JSON.parse(decoder.decode(renderFreezeRepo(snapshotOf()).files.get("metadata/spdx.json")!)) as Record<string, any>;
+    expect(spdx["packages"][1]["downloadLocation"]).toMatch(/^https:\/\/example\.test\/source-/u);
+  });
+});
+
+describe("the roles a rendered tree reports", () => {
+  test("are the frozen catalog order, the order freeze.json renders them in", () => {
+    // The export result presented them alphabetically while `freeze.json` used the frozen order,
+    // so the same list appeared in two orders on two surfaces (issue #3352).
+    const tree = renderFreezeRepo(snapshotOf());
+    expect(tree.roles).toEqual(readManifest(tree)["roles"].map((group: any) => group.role));
+    expect(tree.roles).toEqual(["item-bank", "source-manifest", "source-item", "screening-sampling-script"]);
   });
 });
 

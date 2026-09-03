@@ -41,7 +41,7 @@ import { refuse } from "./profile/errors.js";
 import { verifyPublicBundleSnapshot } from "./verify.js";
 import type { VerifyPublicBundleDeps } from "./verify.js";
 
-export const FREEZE_REPO_FORMAT = "colophon-freeze-repo/1" as const;
+export const FREEZE_REPO_FORMAT = "colophon-freeze-repo/2" as const;
 
 /**
  * What each public-bundle closure means to this projection.
@@ -201,6 +201,108 @@ const FIXED_INSTANT = "1970-01-01T00:00:00Z";
  */
 const SPDX_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9.+-]*$/u;
 
+/**
+ * The same grammar, widened to the SPDX 2.3 Annex D licence EXPRESSION: `id`, `id+`,
+ * `id WITH exception`, and those joined by `AND` / `OR` with optional parentheses. A publication
+ * licensed `Apache-2.0 OR MIT` is an ordinary dual licence, and the short-identifier check alone
+ * refused it outright — so such a publication could not be exported at all, which is a refusal
+ * with no honest reason behind it.
+ *
+ * Still grammar, not list membership, exactly as the single-identifier check is; and `spdxUrl`
+ * below cites a list address only for the single-identifier case, because a compound expression
+ * names no one page.
+ */
+export function isSpdxLicenseExpression(value: string): boolean {
+  const tokens = value.trim().split(/\s+/u).flatMap((token) => token.match(/\(|\)|[^()]+/gu) ?? []);
+  if (tokens.length === 0) return false;
+  let index = 0;
+  const peek = (): string | undefined => tokens[index];
+  // The operators are reserved: without this `MIT OR OR` parses as three identifiers and passes.
+  const keyword = (token: string | undefined): boolean =>
+    token === "AND" || token === "OR" || token === "WITH";
+  const identifier = (token: string | undefined, allowPlus: boolean): boolean =>
+    token !== undefined && !keyword(token) && SPDX_IDENTIFIER.test(allowPlus ? token.replace(/\+$/u, "") : token);
+  const simple = (): boolean => {
+    if (!identifier(tokens[index], true)) return false;
+    index += 1;
+    if (peek() === "WITH") {
+      index += 1;
+      if (!identifier(tokens[index], false)) return false;
+      index += 1;
+    }
+    return true;
+  };
+  const unit = (): boolean => {
+    if (peek() === "(") {
+      index += 1;
+      if (!expression()) return false;
+      if (peek() !== ")") return false;
+      index += 1;
+      return true;
+    }
+    return simple();
+  };
+  function expression(): boolean {
+    if (!unit()) return false;
+    while (peek() === "AND" || peek() === "OR") {
+      index += 1;
+      if (!unit()) return false;
+    }
+    return true;
+  }
+  return expression() && index === tokens.length;
+}
+
+/**
+ * C0 control characters (tab excepted where a field may carry one) and DEL, plus any line that
+ * would read as an SPDX tag. `citation` and `name` are spliced verbatim into `LICENSE` and the
+ * README heading, so a citation carrying a newline followed by `SPDX-License-Identifier: MIT`
+ * would put a second licence tag into a machine-scanned licence file. Self-inflicted rather than
+ * an outside attack — the field is the publication's own sealed record — but a generated licence
+ * file must not be writable from a free-text field, and refusing is cheaper than escaping.
+ */
+const SPDX_TAG_LINE = /^[ \t]*SPDX-[A-Za-z][A-Za-z0-9-]*[ \t]*:/u;
+
+function assertRenderableFreeText(field: string, value: string, multiline: boolean): void {
+  // eslint-disable-next-line no-control-regex
+  const forbidden = multiline ? /[\u0000-\u0008\u000B-\u001F\u007F]/u : /[\u0000-\u001F\u007F]/u;
+  if (forbidden.test(value)) {
+    refuse(
+      "record-integrity",
+      `benchmark.json.${field}`,
+      `the sealed Benchmark record's ${field} carries a control character; a freeze repository renders it into generated text and will not emit unprintable bytes`,
+    );
+  }
+  if (value.split("\n").some((line) => SPDX_TAG_LINE.test(line))) {
+    refuse(
+      "record-integrity",
+      `benchmark.json.${field}`,
+      `the sealed Benchmark record's ${field} carries a line that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it`,
+    );
+  }
+}
+
+/**
+ * A download location SPDX will accept. `source.uri` is `z.string().min(1)` in the sealed
+ * source-manifest schema, not a URL, so a local path can reach here — and publishing one as a
+ * download location makes the SPDX document wrong rather than merely sparse. `NOASSERTION` is the
+ * field's own word for "not stated", which is the true thing to say.
+ */
+function spdxDownloadLocation(uri: string): string {
+  return /^(?:https?|ftp|git|git\+https?|svn|hg|bzr):\/\//u.test(uri) ? uri : "NOASSERTION";
+}
+
+/**
+ * SPDX's `supplier` is `Organization: <name>` or `Person: <name>`. The Benchmark record's
+ * `author` is free text and is frequently a machine signing-key id (`did:key:z6Mk…`), which is
+ * neither — and labelling one an organization also reverses `verify.ts`'s note that the human
+ * surface deliberately does not print signer identifiers. A scheme-qualified identifier therefore
+ * reports `NOASSERTION` rather than being given a role it does not have.
+ */
+function spdxSupplier(author: string): string {
+  return /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(author) ? "NOASSERTION" : `Organization: ${author}`;
+}
+
 export interface FreezeRepoSourceLicence {
   readonly provenanceSha256: string;
   readonly source: BinarySourceManifestEntry["source"];
@@ -224,6 +326,12 @@ export interface FreezeRepoTree {
   readonly publication: FreezeRepoPublication;
   /** The git commit id this tree hashes to — the value a freeze announcement pins. */
   readonly commitId: string;
+  /**
+   * The roles this tree carries, in `FREEZE_REPO_ROLES`' frozen order — the same order
+   * `freeze.json` renders its role groups in. Frozen rather than alphabetical so the two surfaces
+   * present one list once, not the same list in two orders.
+   */
+  readonly roles: readonly string[];
   /** Every rendered path, sorted, mapped to its exact bytes. */
   readonly files: ReadonlyMap<string, Uint8Array>;
 }
@@ -242,6 +350,18 @@ function sha256Hex(bytes: Uint8Array): string {
 /** Code-unit ordering, the same total order the bundle's own catalogs are sorted by. */
 function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * UTF-8 byte ordering, which is the order git sorts tree entries in — NOT the code-unit order
+ * above. The two agree on ASCII and diverge above it: `U+FF21` precedes `U+1D400` by UTF-8 bytes
+ * (`EF BC A1` < `F0 9D 90 80`) and follows it by UTF-16 code units, because the astral character
+ * is a surrogate pair beginning `D835`. No path `renderFreezeRepo` produces is affected — every
+ * one of them is ASCII — but `freezeRepoCommitId` is exported, and a caller passing such a name
+ * would otherwise be handed an oid git disagrees with while the function documents the opposite.
+ */
+function compareUtf8(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
 }
 
 function text(value: string): Uint8Array {
@@ -284,10 +404,29 @@ function emptyNode(): TreeNode {
   return { files: new Map(), directories: new Map() };
 }
 
+/**
+ * Place one file in the tree under construction, refusing every path git itself would refuse to
+ * record. The renderer produces none of these, but this function is reached through the exported
+ * `freezeRepoCommitId`, and each of them otherwise yields an oid for a tree no git repository can
+ * hold — a worse failure than a refusal, because the number still looks like a commit id.
+ */
 function insert(root: TreeNode, path: string, bytes: Uint8Array): void {
   const segments = path.split("/");
+  if (segments.some((segment) => segment.length === 0)) {
+    refuse("conflict", path, `"${path}" has an empty path segment; git records no such entry`);
+  }
+  if (segments.some((segment) => segment === "." || segment === "..")) {
+    refuse("conflict", path, `"${path}" contains a "." or ".." segment; git records no such entry`);
+  }
   let node = root;
-  for (const segment of segments.slice(0, -1)) {
+  for (const [index, segment] of segments.slice(0, -1).entries()) {
+    if (node.files.has(segment)) {
+      refuse(
+        "conflict",
+        path,
+        `"${path}" needs a directory at "${segments.slice(0, index + 1).join("/")}", which is already a file`,
+      );
+    }
     let next = node.directories.get(segment);
     if (next === undefined) {
       next = emptyNode();
@@ -295,12 +434,19 @@ function insert(root: TreeNode, path: string, bytes: Uint8Array): void {
     }
     node = next;
   }
-  node.files.set(segments[segments.length - 1]!, bytes);
+  const name = segments[segments.length - 1]!;
+  if (node.directories.has(name)) {
+    refuse("conflict", path, `"${path}" is already a directory in this tree; git records one entry per name`);
+  }
+  node.files.set(name, bytes);
 }
 
 /**
- * Git's tree ordering compares a directory entry as if its name ended in "/" — the one rule that
- * makes a hand-built tree object hash the same as one `git write-tree` would produce.
+ * Git's tree ordering compares a directory entry as if its name ended in "/", over UTF-8 bytes —
+ * the two rules that make a hand-built tree object hash the same as one `git write-tree` would
+ * produce. The slash rule bites only on a prefix collision (`a.txt` beside a directory `a`), which
+ * `freezeRepoCommitId`'s own git-parity test now exercises directly rather than relying on a
+ * rendered tree that happens to have none.
  */
 function treeObjectId(node: TreeNode): Buffer {
   const entries: { readonly sortKey: string; readonly mode: string; readonly name: string; readonly id: Buffer }[] = [
@@ -316,7 +462,7 @@ function treeObjectId(node: TreeNode): Buffer {
       name,
       id: treeObjectId(child),
     })),
-  ].sort((left, right) => compareStrings(left.sortKey, right.sortKey));
+  ].sort((left, right) => compareUtf8(left.sortKey, right.sortKey));
 
   const body = Buffer.concat(
     entries.map((entry) => Buffer.concat([Buffer.from(text(`${entry.mode} ${entry.name}\0`)), entry.id])),
@@ -361,11 +507,11 @@ function readPublication(snapshot: VerifiedBundleSnapshot): FreezeRepoPublicatio
   }
   const record = benchmark as Record<string, unknown>;
   const license = record["license"];
-  if (typeof license === "string" && license.length > 0 && !SPDX_IDENTIFIER.test(license)) {
+  if (typeof license === "string" && license.length > 0 && !isSpdxLicenseExpression(license)) {
     refuse(
       "record-integrity",
       "benchmark.json.license",
-      `the sealed Benchmark record's licence "${license}" is not an SPDX short identifier; a freeze repository renders it as one and will not present free text as a licence identifier`,
+      `the sealed Benchmark record's licence "${license}" is not an SPDX licence expression; a freeze repository renders it as one and will not present free text as a licence identifier`,
     );
   }
   if (typeof license !== "string" || license.length === 0) {
@@ -385,6 +531,14 @@ function readPublication(snapshot: VerifiedBundleSnapshot): FreezeRepoPublicatio
   }
   const author = record["author"];
   const citation = record["citation"];
+  // Every field below is spliced verbatim into generated text — LICENSE, NOTICE, the README
+  // heading, the SPDX document — so each is checked before it can reach any of them.
+  assertRenderableFreeText("name", name, false);
+  assertRenderableFreeText("version", version, false);
+  if (typeof author === "string") assertRenderableFreeText("author", author, false);
+  // A citation is legitimately multi-line (a BibTeX entry), so newlines are allowed there and
+  // nothing else is.
+  if (typeof citation === "string") assertRenderableFreeText("citation", citation, true);
   return {
     name,
     version,
@@ -430,6 +584,7 @@ function readSourceLicences(sourceManifestBytes: readonly Uint8Array[]): readonl
  * has no page there. The grammar check upstream cannot prove list membership for anything else, so
  * this is the narrowest honest cut. */
 function spdxUrl(identifier: string): string | undefined {
+  if (!SPDX_IDENTIFIER.test(identifier)) return undefined; // a compound expression names no one page
   return /^LicenseRef-/u.test(identifier) ? undefined : `https://spdx.org/licenses/${identifier}.html`;
 }
 
@@ -441,7 +596,11 @@ function renderLicense(publication: FreezeRepoPublication, sources: readonly Fre
     "",
     `The Colophon-authored records in this repository are published under ${publication.license}.`,
     ...(spdxUrl(publication.license) === undefined
-      ? [`${publication.license} is a LicenseRef identifier, which SPDX defines as a licence the list does not carry, so there is no list entry to cite for it.`]
+      ? [
+        SPDX_IDENTIFIER.test(publication.license)
+          ? `${publication.license} is a LicenseRef identifier, which SPDX defines as a licence the list does not carry, so there is no list entry to cite for it.`
+          : `${publication.license} is an SPDX licence expression rather than a single identifier, so it names no one list entry to cite; look each identifier in it up on the SPDX list.`,
+      ]
       : [
         `SPDX list entry for that identifier: ${spdxUrl(publication.license)!}`,
         "That address is where the SPDX list publishes this identifier if it carries it. The export",
@@ -533,12 +692,12 @@ function renderSpdxMetadata(
         filesAnalyzed: false,
         licenseDeclared: publication.license,
         licenseConcluded: publication.license,
-        ...(publication.author === undefined ? {} : { supplier: `Organization: ${publication.author}` }),
+        ...(publication.author === undefined ? {} : { supplier: spdxSupplier(publication.author) }),
       },
       ...sources.map((source, index) => ({
         SPDXID: `SPDXRef-Source-${index + 1}`,
         name: source.source.name ?? source.source.uri,
-        downloadLocation: source.source.uri,
+        downloadLocation: spdxDownloadLocation(source.source.uri),
         filesAnalyzed: false,
         licenseDeclared: "NOASSERTION",
         licenseConcluded: "NOASSERTION",
@@ -773,6 +932,7 @@ export function renderFreezeRepo(snapshot: VerifiedBundleSnapshot): FreezeRepoTr
     bundleIdentity: snapshot.identity,
     publication,
     commitId: freezeRepoCommitId(sorted, snapshot.identity),
+    roles: roleGroups.map(({ role }) => role),
     files: sorted,
   };
 }
@@ -832,9 +992,7 @@ export async function exportFreezeRepo(
     bundleIdentity: tree.bundleIdentity,
     commitId: tree.commitId,
     fileCount: tree.files.size,
-    roles: [...new Set([...tree.files.keys()]
-      .filter((path) => path.startsWith("artifacts/"))
-      .map((path) => path.split("/")[1]!))],
+    roles: tree.roles,
   };
 }
 
@@ -968,7 +1126,22 @@ export async function verifyFreezeRepo(
   repoDir: string,
   deps: VerifyPublicBundleDeps = {},
 ): Promise<FreezeRepoVerificationResult> {
-  const tree = renderFreezeRepo((await verifyPublicBundleSnapshot(bundleDir, deps)).snapshot);
+  return verifyFreezeRepoSnapshot((await verifyPublicBundleSnapshot(bundleDir, deps)).snapshot, repoDir);
+}
+
+/**
+ * The same check against a bundle snapshot the caller has ALREADY authenticated.
+ *
+ * This is the form a caller that just verified the bundle wants: re-verifying it here would run a
+ * second full pass whose anchor outcomes are computed without the caller's own `--tsa-root` /
+ * `--ots-headers` trust material, so they could differ — silently — from the ones the caller went
+ * on to report. One verification, one set of outcomes.
+ */
+export function verifyFreezeRepoSnapshot(
+  snapshot: VerifiedBundleSnapshot,
+  repoDir: string,
+): FreezeRepoVerificationResult {
+  const tree = renderFreezeRepo(snapshot);
   const differences: FreezeRepoDifference[] = [];
 
   let present: readonly TreeEntry[];
