@@ -880,7 +880,10 @@ export { verifyPublicBundle } from "./bundle/verify.js";
 // The one derivation of what a verification result may be said to have proved. Re-exported beside
 // `verifyPublicBundle` so every consumer of that result reaches the same counts and check states
 // rather than counting `checks` for itself (issue #2986).
-export { summarizeVerificationOutcome } from "@colophon-claims/verify";
+// `bundleIdentityLabel` rides beside it for the same reason: the identity a reader quotes is
+// normalized once, so a surface cannot render `sha256:sha256:...` for the format whose identity
+// already carries the prefix (issue #3312).
+export { bundleIdentityLabel, summarizeVerificationOutcome } from "@colophon-claims/verify";
 export type {
   VerificationCheckOutcome,
   VerificationCheckState,

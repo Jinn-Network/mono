@@ -8,6 +8,7 @@ import {
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
+  isMetadataFirstBundle,
   summarizeVerificationOutcome,
   verifyPublicBundleSnapshot,
   type PublicComparisonCell,
@@ -97,10 +98,12 @@ function viewerHtml(
           : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
   // No released npx line understands the metadata-first profile -- an older reader refuses it at
   // manifest parse -- so this page offers the local command that does work instead of an
-  // instruction to fail.
-  const copyCommand = outcome.artifactContent === undefined
-    ? `${verificationCommand} ${JSON.stringify(bundleDir)}`
-    : `colophon bundle verify --bundle ${JSON.stringify(bundleDir)}`;
+  // instruction to fail. The key is the bundle's declared profile, not whether a body happened to
+  // be deferred: a metadata-first bundle with every declared artifact carried defers nothing and
+  // would otherwise be handed the npx line that refuses it (issue #3313).
+  const copyCommand = isMetadataFirstBundle(verification)
+    ? `colophon bundle verify --bundle ${JSON.stringify(bundleDir)}`
+    : `${verificationCommand} ${JSON.stringify(bundleDir)}`;
   const qualification = verification.format === "benchmark-product-public-bundle/5"
     ? undefined
     : verification.qualification;

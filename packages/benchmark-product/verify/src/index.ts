@@ -109,7 +109,13 @@ export * from "./profile/binary-qualification.js";
 export { ClaimPackageSchema, DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID } from "./profile/claim.js";
 export type { ClaimPackage } from "./profile/claim.js";
 export { firstDifference } from "./profile/claim-consistency.js";
-export { NOT_FETCHED_CHECK, describeRecomputedChecks, summarizeVerificationOutcome } from "./outcome.js";
+export {
+  NOT_FETCHED_CHECK,
+  bundleIdentityLabel,
+  describeRecomputedChecks,
+  isMetadataFirstBundle,
+  summarizeVerificationOutcome,
+} from "./outcome.js";
 export type {
   VerificationCheckName,
   VerificationCheckOutcome,

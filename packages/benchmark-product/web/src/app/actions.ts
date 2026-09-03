@@ -47,6 +47,7 @@ import {
   profileArmPinning,
   readAgentProfile,
   updateDraft,
+  bundleIdentityLabel,
   summarizeVerificationOutcome,
   verifyPublicBundle,
 } from "@colophon-claims/core";
@@ -175,17 +176,19 @@ export async function guidedVerifyBundleAction(_previous: GuiActionState, formDa
     return {
       status: "success",
       result: {
-        identity: `sha256:${verification.identity}`,
+        identity: bundleIdentityLabel(verification),
         checks: verification.checks,
         statement: `${outcome.passed} of ${outcome.total} checks passed.${deferred} The bundle was not uploaded or changed.`,
       },
     };
   } catch {
+    // Verification threw, so there is no result to read a check count off. Naming a number here
+    // would state a denominator no bundle format promises, which is the defect issue #3311 closes.
     return {
       status: "error",
       error: {
         code: "record-integrity",
-        detail: "This directory did not pass all six bundle checks. Colophon did not change it or print a verified result.",
+        detail: "This directory did not pass the bundle checks. Colophon did not change it or print a verified result.",
       },
     };
   }
