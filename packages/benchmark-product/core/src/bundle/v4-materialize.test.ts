@@ -753,6 +753,30 @@ describe("binary public-bundle/4 qualification exclusions", () => {
     expect(carried).toEqual([...carried].sort());
   });
 
+  // The three tamper cases below only prove anything if the UNTAMPERED bundle passes: a
+  // `projectAdmissionExclusions` that disagreed with the producer for any reason -- a digest
+  // prefix it did not strip, a sort it did not mirror, a field it named differently -- would
+  // refuse every bundle at this same path, and all three would still be green. This is the
+  // positive half, and it is the kill-check for the two-sided mirror the sort lives in.
+  test("the untampered two-exclusions bundle cold-verifies with both exclusions counted", async () => {
+    const fixture = await twoExclusions();
+
+    const verification = await verifyPublicBundle(fixture.bundle.bundleDir);
+    expect(verification.format).toBe(BUNDLE_V4_FORMAT);
+    if (verification.format !== BUNDLE_V4_FORMAT) {
+      throw new Error(`expected ${BUNDLE_V4_FORMAT}, received ${verification.format}`);
+    }
+    expect(verification.qualification).toEqual({
+      publicationGrade: true,
+      truthAdmission: "two-human-unanimous",
+      candidateClasses: ["synthetic"],
+      strata: ["core", "stress"],
+      armCount: 4,
+      itemCount: 2,
+      exclusionCount: 2,
+    });
+  }, 120_000);
+
   test("the reader refuses an exclusion whose reason was rewritten", async () => {
     const fixture = await twoExclusions();
     const bundleDir = copyBundle(fixture.bundle.bundleDir, "exclusion-reason");
