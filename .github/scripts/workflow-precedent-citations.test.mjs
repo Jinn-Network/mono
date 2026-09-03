@@ -21,7 +21,7 @@
 // keeps unique.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -56,12 +56,15 @@ function scriptModules(dir, prefix = '') {
   return modules;
 }
 
-test('the artifact-name walks are defined once, in the shared module', () => {
-  const definers = scriptModules(scriptsDir)
+export function walkRedefiners(scriptsRoot = scriptsDir) {
+  return scriptModules(scriptsRoot)
     .filter((name) => name !== 'workflow-artifact-steps.mjs')
-    .filter((name) => WALK_REDEFINITION.test(readFileSync(join(scriptsDir, name), 'utf8')));
+    .filter((name) => WALK_REDEFINITION.test(readFileSync(join(scriptsRoot, name), 'utf8')));
+}
+
+test('the artifact-name walks are defined once, in the shared module', () => {
   assert.deepEqual(
-    definers,
+    walkRedefiners(),
     [],
     'import the restored* / uploaded* walks from workflow-artifact-steps.mjs instead of redefining them',
   );
@@ -493,4 +496,58 @@ test('a lane whose glob resolves to no shared-walk importer is not reported', ()
   ) => {
     assert.deepEqual(lanesMissingSharedModule(workflowsRoot, scriptsRoot), []);
   });
+});
+
+// Each widening of the guard gets its own failing test. Reading the real
+// `.github/scripts` proves only that no copy exists today; a fixture root proves
+// the guard would still catch one if it did — so dropping `var`, the `uploaded`
+// arm, or the recursive descent turns the suite red rather than passing silently.
+function redefinersIn(files) {
+  const scriptsRoot = fixtureScripts(files);
+  try {
+    return walkRedefiners(scriptsRoot);
+  } finally {
+    rmSync(scriptsRoot, { recursive: true, force: true });
+  }
+}
+
+// Composed from fragments rather than written out. This file lives in the
+// directory the guard scans and the guard reads raw text, so spelling a
+// declaration of one of the walks here — even inside a string or a comment —
+// would report this very file.
+const WALK = 'Artifact';
+
+function copyOf(keyword, direction, tail) {
+  return `${keyword} ${direction}${WALK}${tail}\n`;
+}
+
+test('a var-declared copy of a walk is reported', () => {
+  assert.deepEqual(redefinersIn({ 'copy.mjs': copyOf('var', 'restored', 'Names = (s) => [];') }), [
+    'copy.mjs',
+  ]);
+});
+
+test('a copy of the upload walk is reported', () => {
+  assert.deepEqual(redefinersIn({ 'copy.mjs': copyOf('function', 'uploaded', 'Names(s) {}') }), [
+    'copy.mjs',
+  ]);
+});
+
+test('a copy nested under .github/scripts is reported', () => {
+  const scriptsRoot = fixtureScripts({});
+  mkdirSync(join(scriptsRoot, 'nested'));
+  writeFileSync(join(scriptsRoot, 'nested/copy.mjs'), copyOf('const', 'restored', 's = (s) => [];'));
+
+  try {
+    assert.deepEqual(walkRedefiners(scriptsRoot), ['nested/copy.mjs']);
+  } finally {
+    rmSync(scriptsRoot, { recursive: true, force: true });
+  }
+});
+
+// Importing the walks is the whole point of the shared module, so the guard must
+// read a definition, not a mention. Without this a guard broadened to any
+// occurrence of the identifiers would report every correct importer.
+test('a file that imports the walks is not reported', () => {
+  assert.deepEqual(redefinersIn({ 'importer.mjs': IMPORTER }), []);
 });

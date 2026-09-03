@@ -38,16 +38,16 @@ export function leavesStep(line, stepIndent) {
   return indent <= stepIndent;
 }
 
-// Returns one `{ name, path }` per download step that restores by name. Reading
-// both from inside the step is what makes a placement assertion mean anything:
-// a bare `name: x` / `path: y` search over the whole file also matches the
-// *upload* steps, so it would pass while the restores land somewhere else
-// entirely.
-export function restoredArtifacts(source) {
-  const restored = [];
+// Returns one `{ name, path }` per step of `action` that names an artifact.
+// Reading both from inside the step is what makes a placement assertion mean
+// anything: a bare `name: x` / `path: y` search over the whole file also matches
+// the steps going the other way, so it would pass while the restores land
+// somewhere else entirely.
+function artifactSteps(source, action) {
+  const steps = [];
   const lines = source.split('\n');
   for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].includes('uses: actions/download-artifact')) continue;
+    if (!lines[index].includes(`uses: actions/${action}-artifact`)) continue;
     const stepIndent = stepOpenerIndent(lines, index);
     const step = { name: undefined, path: undefined };
     for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
@@ -57,9 +57,13 @@ export function restoredArtifacts(source) {
       const path = artifactValue(lines[cursor], 'path');
       if (path) step.path = path;
     }
-    if (step.name) restored.push(step);
+    if (step.name) steps.push(step);
   }
-  return restored;
+  return steps;
+}
+
+export function restoredArtifacts(source) {
+  return artifactSteps(source, 'download');
 }
 
 export function restoredArtifactNames(source) {
@@ -68,29 +72,12 @@ export function restoredArtifactNames(source) {
 
 // The upload side of the same walk. It was copied into the two per-workflow
 // tests and had already diverged: one copy read names through `artifactValue`,
-// the other through `/^\s+name: (\S+)$/`, which skips a quoted name and any
-// name carrying a `${{ }}` expression. A skipped uploader is one the by-name
-// assertions never see, so quoting an artifact name made a gate pass while
-// restoring nothing (#3503).
-export function uploadedArtifacts(source) {
-  const uploaded = [];
-  const lines = source.split('\n');
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].includes('uses: actions/upload-artifact')) continue;
-    const stepIndent = stepOpenerIndent(lines, index);
-    const step = { name: undefined, path: undefined };
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      if (leavesStep(lines[cursor], stepIndent)) break;
-      const name = artifactValue(lines[cursor], 'name');
-      if (name) step.name = name;
-      const path = artifactValue(lines[cursor], 'path');
-      if (path) step.path = path;
-    }
-    if (step.name) uploaded.push(step);
-  }
-  return uploaded;
-}
-
+// the other through `/^\s+name: (\S+)$/`, which keeps a quoted name's quotes and
+// skips any name carrying a `${{ }}` expression. The quoted case fails loudly —
+// uploaded `'x'` never matches restored `x` — but the skipped one does not: an
+// uploader the walk never returns is one the by-name assertion never checks, so
+// naming an artifact by expression made the gate pass while restoring nothing
+// (#3503). Only names are wanted here; no caller asks where an upload came from.
 export function uploadedArtifactNames(source) {
-  return uploadedArtifacts(source).map((step) => step.name);
+  return artifactSteps(source, 'upload').map((step) => step.name);
 }
