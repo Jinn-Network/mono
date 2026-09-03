@@ -656,18 +656,27 @@ describe('native discovery consumer', () => {
       expect(verifyHead).not.toHaveBeenCalled();
     });
 
-    it('keeps the chain path for a head whose issuedAt is unparseable', async () => {
+    // Was 'keeps the chain path for a head whose issuedAt is unparseable': such a head
+    // used to reach `sameHead`, whose NaN comparison declined to call it a re-sign, and
+    // the chain path refused it as `rewound-or-tampered-head`. Since #3482 the §5.2
+    // grammar is read at the head schema, so `fetchHead` refuses it one step earlier and
+    // neither verification port is consulted. The refusal is not one `degradedReason`
+    // recognises -- malformed bytes are a statement, not silence -- so it still
+    // propagates out of `sync()`, which is the property this test exists for.
+    it('refuses a head whose issuedAt is unparseable before either verification port', async () => {
       const { store, first } = await checkpointed();
+      const verify = vi.fn(async () => ({ status: 'ok' as const }));
       const verifyHead = vi.fn(async () => ({ status: 'ok' as const }));
       const polled = consumer({
         store,
         routes: reSignedRoutes(first, 'not-a-date', '2026-08-03T12:00:00.000Z'),
-        verify: async () => ({ status: 'ok' }),
+        verify,
         verifyHead,
         now: () => new Date('2026-08-02T13:00:00.000Z'),
       });
 
-      await expect(polled.sync()).rejects.toMatchObject({ reason: 'rewound-or-tampered-head' });
+      await expect(polled.sync()).rejects.toThrow(/calendar-strict RFC 3339/u);
+      expect(verify).not.toHaveBeenCalled();
       expect(verifyHead).not.toHaveBeenCalled();
     });
   });
