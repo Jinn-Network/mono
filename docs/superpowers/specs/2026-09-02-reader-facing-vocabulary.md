@@ -15,8 +15,9 @@
   spelling they were standing in for; adds §5's headings rule and splits its venue row;
   corrects three source pointers, one prescribed reader name, and one word of prose. No v1.0
   disposition is reversed.
-- **v1.2** (#3837): files §7's five presentation-rename units as the issues they were written to
-  be, and records each number in §7. No ruling changes.
+- **v1.2** (#3837): files §7's five presentation-rename units as issues (#3861–#3865) and
+  records each number in §7. §7's closing note now says no *external* condition gates them,
+  which is what "unblocked" meant before the tracker could see their order. No ruling changes.
 
 ## 1. Scope
 
