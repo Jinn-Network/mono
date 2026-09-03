@@ -332,6 +332,11 @@ collapses `conflicted` (Report/Claim) and *assembly dissent* (verification), whi
 reader concept under two names on the same page today; and **"the runs"** collapses *Matrix
 accounting* and *completeness/attrition*, which a reader reads as one thing.
 
+One entry earns its place by preventing a duplicate this spec would otherwise create:
+**"how the judges were qualified"** keeps the binary report's *Registered configuration*
+heading clear of the `arm` → *configuration* rename, so **configuration** names one arm and
+nothing else on a page that carries both (§4.1, binary-qualification surface).
+
 **Headings and column headers.** A section heading and a table column header are
 length-constrained surfaces: the first wants a sentence, the second wants one or two words, and
 neither can carry a nine-word canonical name. A heading or column header may therefore be a
@@ -349,11 +354,6 @@ the §4 rows marked heading or column header as its exception set. The distincti
 own. **The runs** is still presented under four names in §4.1 (*What was run, and what came
 back*, *Runs planned / runs judged / minimum required*, *How much was judged*, *Runs that did
 not count*), which the collapse above licenses and the test will have to encode.
-
-One entry earns its place by preventing a duplicate this spec would otherwise create:
-**"how the judges were qualified"** keeps the binary report's *Registered configuration*
-heading clear of the `arm` → *configuration* rename, so **configuration** names one arm and
-nothing else on a page that carries both (§4.1, binary-qualification surface).
 
 Concepts a reader never meets by name, after this spec: Matrix, envelope, catalog, projection,
 subject, assurance preset, assurance primitive, disclosure specification, declaration, CAS.
