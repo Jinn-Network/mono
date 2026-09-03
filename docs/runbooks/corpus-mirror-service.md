@@ -66,7 +66,9 @@ refused `unauthorized-signer`.
 
 Two further values are yours to choose rather than to read: `servingRoot` is the
 base URL you fetched the two documents from, and `repositoryId` is a stable
-identifier for this archive within this install.
+identifier for this archive within this install. It must be unique across the
+followed sources, and it is what orders retrieval fallback after the local
+mirror.
 
 Write the `servingRoot` with the scheme and port the archive actually answers
 on. Everything the source introduces — its `archiveRoot`, and every redirect it
@@ -78,9 +80,7 @@ host almost always presents: a plain `http://<host>` that answers `301` up to
 `https://<host>`, both on their default ports, resolves — the hostname is
 unchanged and the peer picks neither host nor port, so the upgrade can only
 increase assurance. An explicit non-default port on either side is outside that
-exception; name the final origin and you never meet it. It must be unique across the
-followed sources, and it is what orders retrieval fallback after the local
-mirror.
+exception; name the final origin and you never meet it.
 
 The trust-policy anchor — `trust.genesisDigest` and the signed version chain
 that goes in `trust.policyDirectory` — is not published on the serving plane.

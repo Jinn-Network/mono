@@ -8266,6 +8266,33 @@
         "kind": "fixtures",
         "package": "@jinn-network/record-discovery-testing",
         "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/consumer-archive-root-escaping-serving-root/vector.json",
+        "relativeSource": "fixtures/vectors/consumer-archive-root-escaping-serving-root/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/consumer-archive-root-inside-serving-root/vector.json",
+        "relativeSource": "fixtures/vectors/consumer-archive-root-inside-serving-root/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/consumer-archive-root-outside-serving-root/vector.json",
+        "relativeSource": "fixtures/vectors/consumer-archive-root-outside-serving-root/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/consumer-cold-start-mirror-disagreement/vector.json",
         "relativeSource": "fixtures/vectors/consumer-cold-start-mirror-disagreement/vector.json"
       },
