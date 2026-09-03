@@ -2697,8 +2697,16 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     try {
       attempt = this.resolveAttempt(ref);
     } catch {
-      return { classification: "absent", detail: `no durable record for ref "${ref}"` };
+      // Nothing durable under this ref, so its idempotency key is FREE — the one `absent` a
+      // caller may re-seal under (#3634). Everything `reconcileResolvedRef` reports below
+      // concerns an attempt this backend durably remembers, whose key is HELD whatever the
+      // classification, which is why the stamp is applied here rather than at each return.
+      return { classification: "absent", retained: false, detail: `no durable record for ref "${ref}"` };
     }
+    return { ...(await this.reconcileResolvedRef(attempt)), retained: true };
+  }
+
+  private async reconcileResolvedRef(attempt: AttemptUri): Promise<ReconciliationReport> {
     const events = this.journal(attempt).read();
     const record = foldAttemptRecord(events);
     const paths = this.paths(attempt);

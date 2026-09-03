@@ -334,7 +334,7 @@ describe("createProjectorObservePort (design §7, Task 16 -- retires the in-memo
         submission: SUBMISSION_A, attempt: ATTEMPT_A,
       });
 
-      expect(await port.recover(SUBMISSION_A)).toEqual({ classification: "matching" });
+      expect(await port.recover(SUBMISSION_A)).toEqual({ classification: "matching", retained: true });
     });
 
     test("returns absent when the scope exists but the chain shows no attempt", async () => {
@@ -349,6 +349,9 @@ describe("createProjectorObservePort (design §7, Task 16 -- retires the in-memo
       const report = await port.recover(SUBMISSION_B);
 
       expect(report.classification).toBe("absent");
+      // The durable scope means the idempotency key is still HELD, which `absent` alone cannot
+      // say and a caller must not re-seal under (#3634).
+      expect(report.retained).toBe(true);
     });
 
     test("returns contradictory when the chain shows an attempt bound to a different Submission", async () => {
@@ -398,6 +401,17 @@ describe("createProjectorObservePort (design §7, Task 16 -- retires the in-memo
 
     port.simulateReconciliation(ATTEMPT_A, { classification: "contradictory", detail: "forced" });
     expect(await port.recover(ATTEMPT_A)).toEqual({ classification: "contradictory", detail: "forced" });
-    expect(await port.recover(ATTEMPT_A)).toEqual({ classification: "matching" });
+    expect(await port.recover(ATTEMPT_A)).toEqual({ classification: "matching", retained: true });
+  });
+
+  test("reports the key free only when neither the chain nor a durable scope knows the ref (#3634)", async () => {
+    const port = createProjectorObservePort({
+      chain: CHAIN, state, logSource: fakeLogSource(), observations: async () => [],
+    });
+
+    const report = await port.recover(SUBMISSION_B);
+
+    expect(report.classification).toBe("absent");
+    expect(report.retained).toBe(false);
   });
 });

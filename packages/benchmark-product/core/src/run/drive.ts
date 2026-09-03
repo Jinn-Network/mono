@@ -492,18 +492,25 @@ function requireEvaluatorCoverage(deps: DriveDeps): void {
  * Whether the backend still retains a durable record for this Submission ref — and therefore still
  * holds its idempotency key.
  *
- * `recover`'s `absent` does not answer that on its own. The local backend returns `absent` from
- * two places: an unresolvable ref (nothing is retained, the key is free) and an attempt it fully
- * remembers whose spawn intent left no recoverable shim or outcome (the key is HELD, and
- * submitting different bytes under it is refused `submission-conflict`, which carries no retryable
- * category and so completes the evalIndex could-not-grade forever).
+ * `recover`'s `classification` does not answer that on its own. The local backend returns `absent`
+ * from two opposite places: an unresolvable ref (nothing is retained, the key is free) and an
+ * attempt it fully remembers whose spawn intent left no recoverable shim or outcome (the key is
+ * HELD, and submitting different bytes under it is refused `submission-conflict`, which carries no
+ * retryable category and so completes the evalIndex could-not-grade forever).
  *
- * `observe` is not an exact test of that — it needs the attempt index too, which a crash can leave
- * behind the submission-scope index that `submit`'s idempotency check actually reads. The warrant
- * is one-sided instead, which is all this branch needs: `observe` succeeding proves the replay is
- * viable, and `observe` failing means the replay would have died at this leg's own post-submit
- * `observe` regardless — so re-sealing there can only help, while every genuinely retained key
- * stays on the byte-exact replay.
+ * `ReconciliationReport.retained` is now that exact answer (#3634), so a backend that reports it is
+ * believed and this probe is never reached. This function is the FALLBACK for backends that do not,
+ * and remains a one-sided warrant rather than an exact test: `observe` needs the attempt index too,
+ * which a crash can leave behind the submission-scope index that `submit`'s idempotency check
+ * actually reads.
+ *
+ * That leaves the same disclosed false negative it always had, now scoped to non-reporting
+ * backends: with the submission scope durable but the attempt index missing, `observe` throws
+ * `attempt-not-found`, this reports the key free, and the re-seal draws `submission-conflict`.
+ * No worse than keeping the replay, which in that same state reaches an idempotent `submit` hit and
+ * then dies at this leg's own post-submit `observe` — both sides lose the leg identically, and
+ * every genuinely retained key that `observe` CAN see stays on the byte-exact replay.
+ * `./drive.test.ts` pins both halves of that equivalence.
  *
  * Fail-safe by construction: anything but `attempt-not-found` — a snapshot, or any other error —
  * reports retained, which keeps that replay.
@@ -518,6 +525,22 @@ async function backendRetainsSubmission(
   } catch (cause) {
     return !(cause instanceof TaskExecutionError && cause.category === "attempt-not-found");
   }
+}
+
+/**
+ * The retention answer for one `absent` reconciliation: the backend's own typed `retained` when it
+ * reports one, else the `observe` probe above.
+ *
+ * `undefined` means "not reported", never "not retained" — so an unreporting backend falls back to
+ * the probe rather than being read as free, and the probe's own fail-safe direction is unchanged.
+ */
+async function submissionKeyStillHeld(
+  backend: ProxiedBackend,
+  ref: SubmissionUri,
+  report: ReconciliationReport,
+): Promise<boolean> {
+  if (report.retained !== undefined) return report.retained;
+  return backendRetainsSubmission(backend, ref);
 }
 
 /** Seals + submits + watches ONE evaluation leg (`evalIndex`, 1-based) for a prepared evaluation
@@ -636,7 +659,11 @@ async function dispatchEvaluation(
     }
     if (
       reconciliation.classification === "absent"
-      && !(await backendRetainsSubmission(deps.backend, replayedSubmission.submission as SubmissionUri))
+      && !(await submissionKeyStillHeld(
+        deps.backend,
+        replayedSubmission.submission as SubmissionUri,
+        reconciliation,
+      ))
     ) {
       // The backend retains no record of this Submission, so it never accepted these bytes: the
       // capture below is written before `submit`, so a kill in that gap leaves a capture the

@@ -9,6 +9,7 @@ import {
   type AttemptUri,
   type DeliveryRef,
   type ObservationSnapshot,
+  type ReconciliationReport,
   type SubmissionAck,
   type SubmissionUri,
 } from "@jinn-network/task-execution-backend";
@@ -1052,13 +1053,26 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
    * (nothing retained, the idempotency key is free) and an attempt it fully remembers whose spawn
    * intent left no recoverable shim or outcome (the key is HELD). Re-sealing under a held key is
    * refused `submission-conflict`, which carries no retryable category and so completes the
-   * evalIndex could-not-grade forever — the very loss #3237 exists to close. The discriminator is
-   * `observe`, which resolves through the same durable ref index `submit`'s idempotency check
-   * reads.
+   * evalIndex could-not-grade forever — the very loss #3237 exists to close.
+   *
+   * `ReconciliationReport.retained` is the exact discriminator (#3634). `observe` is the fallback
+   * for backends that do not report it, and only a one-sided warrant: it resolves through the
+   * attempt index, which a crash can leave behind the submission-scope index that `submit`'s
+   * idempotency check actually reads.
    */
   function replayBackend(options: {
-    readonly retained: boolean | "unknown-error";
-    readonly calls: { submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] };
+    /** How the FIRST `observe` (the fallback probe) answers. Later ones are the post-submit read. */
+    readonly probe: "snapshot" | "attempt-not-found" | "unknown-error";
+    /** Exactly what `recover` reports — `retained` omitted means the backend does not report it. */
+    readonly reconciliation: ReconciliationReport;
+    /** When set, `submit` refuses anything but these exact bytes: the backend HOLDS the key. */
+    readonly heldKeyBytes?: Uint8Array;
+    /** Every post-submit `observe` throws `attempt-not-found` too, not just the probe. */
+    readonly observeAlwaysMissing?: boolean;
+    readonly calls: {
+      submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[];
+      probes: number;
+    };
   }): ProxiedBackend {
     let observes = 0;
     return {
@@ -1067,6 +1081,15 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
       },
       async submit(taskBytes, submissionBytes) {
         options.calls.submits.push({ taskBytes, submissionBytes });
+        const held = options.heldKeyBytes;
+        if (held !== undefined && !bytesEqual(held, submissionBytes)) {
+          return {
+            accepted: false,
+            error: new TaskExecutionError("submission-conflict", {
+              detail: "already has different exact bytes in this requester/backend scope",
+            }),
+          };
+        }
         return {
           accepted: true,
           submission: "urn:uuid:00000000-0000-4000-8000-000000000099" as SubmissionUri,
@@ -1075,16 +1098,21 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
       },
       async observe() {
         observes += 1;
-        // The FIRST observe is the discriminator's; later ones are the ordinary post-submit read.
-        if (observes === 1 && options.retained !== true) {
-          throw options.retained === "unknown-error"
-            ? new TaskExecutionError("backend-unavailable", { detail: "probe failed" })
-            : new TaskExecutionError("attempt-not-found", { detail: "no Attempt or Submission" });
+        if (observes === 1) {
+          options.calls.probes += 1;
+          if (options.probe === "attempt-not-found") {
+            throw new TaskExecutionError("attempt-not-found", { detail: "no Attempt or Submission" });
+          }
+          if (options.probe === "unknown-error") {
+            throw new TaskExecutionError("backend-unavailable", { detail: "probe failed" });
+          }
+        } else if (options.observeAlwaysMissing === true) {
+          throw new TaskExecutionError("attempt-not-found", { detail: "no Attempt or Submission" });
         }
         return fakeSnapshot("att-eval-1", "failed");
       },
       async recover() {
-        return { classification: "absent", detail: "absent-never-executed" };
+        return options.reconciliation;
       },
       async deliveries() {
         return [];
@@ -1096,6 +1124,10 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
     };
   }
 
+  function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+    return left.length === right.length && left.every((byte, index) => byte === right[index]);
+  }
+
   function replayedBytes(): Uint8Array {
     // Only the `submission` URI is read off the replayed bytes before `recover`; the deadline is
     // what makes them distinguishable from a fresh seal.
@@ -1105,9 +1137,16 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
     });
   }
 
-  async function driveOneLeg(retained: boolean | "unknown-error"): Promise<{
+  async function driveOneLeg(options: {
+    readonly probe: "snapshot" | "attempt-not-found" | "unknown-error";
+    readonly reconciliation?: ReconciliationReport;
+    readonly heldKeyBytes?: "replayed";
+    readonly observeAlwaysMissing?: boolean;
+  }): Promise<{
     readonly submitted: Uint8Array;
     readonly replayed: Uint8Array;
+    readonly probes: number;
+    readonly entries: ReturnType<typeof readRunJournalEntries>;
   }> {
     const clock = makeClock();
     const { taskSha256 } = storeSubjectTaskAndSpec();
@@ -1116,14 +1155,20 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
     const deliverySha256 = putSealedBytes(workspaceDir, solveDeliveryBytes);
     const predictionSha256 = putSealedBytes(workspaceDir, utf8({ probabilityYes: "0.5" }));
     const replayed = replayedBytes();
-    const calls = { submits: [] as { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] };
+    const calls = { submits: [] as { taskBytes: Uint8Array; submissionBytes: Uint8Array }[], probes: 0 };
 
     await driveEvaluationCatchUp(
       {
         workspaceDir,
         draftId: "draft-1",
         venue: fakeVenue({ taskBytes: new Uint8Array([4, 5]), taskSha256: "4".repeat(64) }),
-        backend: replayBackend({ retained, calls }),
+        backend: replayBackend({
+          probe: options.probe,
+          reconciliation: options.reconciliation ?? { classification: "absent", detail: "absent-never-executed" },
+          ...(options.heldKeyBytes === undefined ? {} : { heldKeyBytes: replayed }),
+          ...(options.observeAlwaysMissing === undefined ? {} : { observeAlwaysMissing: options.observeAlwaysMissing }),
+          calls,
+        }),
         runSha256: "r".repeat(64),
         owner: "urn:uuid:owner",
         cellWindowMs: 3_600_000,
@@ -1135,26 +1180,95 @@ describe("dispatchEvaluation — a replayed capture is re-sealed only when the k
     );
 
     expect(calls.submits).toHaveLength(1);
-    return { submitted: calls.submits[0]!.submissionBytes, replayed };
+    return {
+      submitted: calls.submits[0]!.submissionBytes,
+      replayed,
+      probes: calls.probes,
+      entries: readRunJournalEntries(workspaceDir, "draft-1"),
+    };
   }
 
   test("a retained record keeps the byte-exact replay, so the held key is never re-minted", async () => {
-    const { submitted, replayed } = await driveOneLeg(true);
+    const { submitted, replayed } = await driveOneLeg({ probe: "snapshot" });
     expect(submitted).toEqual(replayed);
   });
 
   test("a probe that fails for any other reason reports retained, so the replay is kept", async () => {
     // Fail-safe direction: only `attempt-not-found` proves the key free. Anything else must not
     // re-mint bytes under a key the backend may still hold.
-    const { submitted, replayed } = await driveOneLeg("unknown-error");
+    const { submitted, replayed } = await driveOneLeg({ probe: "unknown-error" });
     expect(submitted).toEqual(replayed);
   });
 
   test("an unresolvable ref proves the key is free, so the stale-deadline capture is re-sealed", async () => {
-    const { submitted, replayed } = await driveOneLeg(false);
+    const { submitted, replayed } = await driveOneLeg({ probe: "attempt-not-found" });
     expect(submitted).not.toEqual(replayed);
     const doc = JSON.parse(new TextDecoder().decode(submitted)) as { readonly deadline?: string };
     expect(Date.parse(doc.deadline ?? "")).toBeGreaterThan(Date.parse("2020-01-01T00:00:00.000Z"));
+  });
+
+  test("a reported `retained: false` re-seals without probing at all (#3634)", async () => {
+    // The typed answer is believed outright: the probe would have said the same thing here, but
+    // it is the extra round trip #3634 exists to remove.
+    const { submitted, replayed, probes } = await driveOneLeg({
+      probe: "snapshot",
+      reconciliation: { classification: "absent", retained: false, detail: "no durable record" },
+    });
+    expect(probes).toBe(0);
+    expect(submitted).not.toEqual(replayed);
+  });
+
+  test("a reported `retained: true` keeps the replay without probing, even when the probe would disagree (#3634)", async () => {
+    // This is the false negative, eliminated: `observe` cannot see the attempt, but the backend
+    // has said in the report itself that it still holds the key, so the bytes are not re-minted.
+    const { submitted, replayed, probes } = await driveOneLeg({
+      probe: "attempt-not-found",
+      reconciliation: { classification: "absent", retained: true, detail: "spawn intent has no recoverable shim or outcome" },
+    });
+    expect(probes).toBe(0);
+    expect(submitted).toEqual(replayed);
+  });
+
+  test("the retention probe is skipped entirely when the reconciliation is not `absent`", async () => {
+    // The "one extra `observe` only on the rare `absent` recovery path" claim, pinned (#3635).
+    const { submitted, replayed, probes } = await driveOneLeg({
+      probe: "attempt-not-found",
+      reconciliation: { classification: "matching" },
+    });
+    expect(probes).toBe(0);
+    expect(submitted).toEqual(replayed);
+  });
+
+  test("the fallback probe's disclosed false negative loses no more than the replay would (#3635)", async () => {
+    // A backend that does NOT report `retained`, whose submission scope is durable (so `submit`
+    // refuses different bytes `submission-conflict`) while its attempt index is gone (so every
+    // `observe` throws `attempt-not-found`). The probe reports the key free and the leg re-seals.
+    const reseal = await driveOneLeg({
+      probe: "attempt-not-found",
+      heldKeyBytes: "replayed",
+      observeAlwaysMissing: true,
+    });
+    expect(reseal.probes).toBe(1);
+    expect(reseal.submitted).not.toEqual(reseal.replayed);
+
+    // The counterfactual, same backend state: keeping the byte-exact replay reaches an idempotent
+    // `submit` hit and then dies at the leg's own post-submit `observe`.
+    const replay = await driveOneLeg({
+      probe: "attempt-not-found",
+      reconciliation: { classification: "absent", retained: true, detail: "held" },
+      heldKeyBytes: "replayed",
+      observeAlwaysMissing: true,
+    });
+    expect(replay.submitted).toEqual(replay.replayed);
+
+    // Both sides lose the leg identically — the equivalence the docstring asserts. If either
+    // terminal's shape ever improves, this pins that the other must improve with it.
+    const terminalOf = (entries: ReturnType<typeof readRunJournalEntries>) =>
+      entries
+        .filter((entry) => entry.kind === "evaluation")
+        .map((entry) => (entry.kind === "evaluation" ? entry.evaluationTerminal : undefined));
+    expect(terminalOf(reseal.entries)).toEqual(["could-not-grade"]);
+    expect(terminalOf(replay.entries)).toEqual(terminalOf(reseal.entries));
   });
 });
 

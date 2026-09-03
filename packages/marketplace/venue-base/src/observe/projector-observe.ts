@@ -151,7 +151,14 @@ export function createProjectorObservePort(input: CreateProjectorObservePortInpu
         (observation): observation is EngagedObservation => isEngaged(observation) && observation.subject === durableAttempt,
       );
       if (chainEngaged === undefined) {
-        return { classification: "absent", detail: `no chain-derived attempt engagement for "${durableAttempt}"` };
+        // A durably recorded submission scope means the idempotency key is HELD even though the
+        // chain shows no engagement — exactly the `absent`-but-retained state `retained` exists
+        // to name. With no scope either, nothing is retained and the key is free.
+        return {
+          classification: "absent",
+          retained: scope !== undefined,
+          detail: `no chain-derived attempt engagement for "${durableAttempt}"`,
+        };
       }
       if (scope !== undefined && chainEngaged.data.submission !== scope.submissionUri) {
         return {
@@ -160,7 +167,7 @@ export function createProjectorObservePort(input: CreateProjectorObservePortInpu
             + `not the durably recorded "${scope.submissionUri}"`,
         };
       }
-      return { classification: "matching" };
+      return { classification: "matching", retained: true };
     },
 
     async drive(attempt, observations): Promise<void> {
