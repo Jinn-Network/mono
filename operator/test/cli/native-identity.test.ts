@@ -95,6 +95,8 @@ function alwaysBindingResolver(): BindingResolver {
   return {
     resolveBinding: vi.fn(async (query): Promise<ResolvedBinding> => ({
       binding: {
+        // A conforming `BindingResolver` never resolves by key alone (issue #3629).
+        agent: query.agent,
         key: { didKey: query.key, keyid: query.key },
         // Every scope a native role can require, including the announce-plane scope the three
         // `*-discovery` roles gained in issue #2525.

@@ -174,21 +174,28 @@ export function renderVerifiedBundle(result: PublicBundleVerificationResult): st
   const anchorLimits = anchors === ""
     ? ""
     : "\nAn anchor dates the bytes it covers and says nothing else about the run: not\nthat results were produced after it, and not that the anchoring authority is\nindependent of the bundle's owner.";
+  // "Verified" is the most overloaded word in this market and claims more than this tool does: it
+  // recomputes the arithmetic, closure, and consistency of bytes someone handed it, and reads
+  // nothing about whether the recorded outcomes reflect real executions (issue #2982). The verdict
+  // names the operation instead, and the limits of that operation print directly under it --
+  // unconditionally, so no bundle shape can render a verdict with its caveats pushed off-screen.
   const verdictLine = outcome.notFetched === 0
-    ? `Verified: ${outcome.passed} of ${totalChecks} checks passed`
-    : `Verified: ${outcome.passed} of ${totalChecks} checks passed, ${outcome.notFetched} not fetched`;
+    ? `Recomputed: ${outcome.passed} of ${totalChecks} checks passed`
+    : `Recomputed: ${outcome.passed} of ${totalChecks} checks passed, ${outcome.notFetched} not fetched`;
   return `${verdictLine}
 Bundle: ${identity}
 Format: ${result.format}
 
+Not checked by this tool: whether the machine that produced this bundle was
+honest, and whether the compared identities are independent parties. What is
+recomputed is the bundle's integrity, evidence closure, calculations, report,
+and claim consistency — against the bytes the bundle carries, nothing else.
+
 ${checks}
-${signers}${artifactContentReport}${anchors}
-This checks the bundle's integrity, evidence closure, calculations, report,
-and claim consistency. It does not prove that the machine that produced the
-bundle was honest or that the compared identities are independent parties.${artifactContentLimit}${anchorLimits}
+${signers}${artifactContentReport}${anchors}${artifactContentLimit}${anchorLimits}
 No files were uploaded.
 Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.
-Verification uses the exact platform bytes installed from npm.
+Checks run against the exact platform bytes installed from npm.
 `;
 }
 

@@ -762,6 +762,16 @@ function neutralClaimHtml(facts: MethodFacts): string {
 // a bundle that rendered the sentence would carry an instruction to run a verifier that refuses
 // it. Restoring the render is issue #3416, once the reader line that derives it is re-pinned.
 
+// The strict all-slots denominator (issue #2977) is held for the same reason, so the wilson arm
+// table below still shows the declared denominator alone. Nothing is missing but a place to put
+// it: `armDenominators` in `denominators.ts` derives the pair from records this page already
+// holds -- the Report's own per-arm `n` and the Matrix's per-arm `expected`. Rendering it here is
+// a bundle-format allocation, because `verify.ts` byte-compares every asset against the reader's
+// own rebuild and every allocated format pins a released reader, so a bundle that rendered the
+// pair would carry an instruction to run a verifier that refuses it
+// (`spec/2026-09-02-report-page-information-architecture.md` section 8). The operator's results
+// page renders the pair today; it is not part of the sealed bundle.
+
 function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
   const outcome = input.matrix.completeness.runOutcome;
   const status = reportFacts.kind === "binary" ? qualificationOutcomeLabel(outcome) : outcomeLabel(outcome);
