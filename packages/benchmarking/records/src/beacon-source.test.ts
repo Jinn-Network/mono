@@ -16,6 +16,9 @@ function minimalRun(): Record<string, unknown> {
   return JSON.parse(readFileSync(url, "utf8")) as Record<string, unknown>;
 }
 
+/** `sealRun(minimalRun()).digest` as it stood before `beacon-source/v1` existed. */
+const UNDECLARED_MINIMAL_RUN_DIGEST = "sha256:cf9266be44722aa97a2da6d461ae761445022e6fafdd2d709bbeaeb6a69b5ed5";
+
 describe("the beacon-source extension key", () => {
   test("is a namespaced extension URI, distinct from the other Run extensions", () => {
     expect(BEACON_SOURCE_EXTENSION).toBe("https://spec.jinn.network/extensions/beacon-source/v1");
@@ -56,7 +59,11 @@ describe("attaching and reading the declaration", () => {
 
   test("an undeclared Run seals byte-identical bytes to before the extension existed", () => {
     expect(Object.keys(minimalRun())).not.toContain(BEACON_SOURCE_EXTENSION);
-    expect(sealRun(minimalRun()).digest).toBe(sealRun(minimalRun()).digest);
+    // A fixed constant, not the sealer compared to itself: this test's whole claim is that the
+    // extension moved nobody's bytes, and only a digest recorded before it existed can fail if it
+    // did. Comparing two calls asserts `sealRun` determinism instead, and would pass with the
+    // feature removed. Regenerate this only alongside a deliberate, documented Run-record change.
+    expect(sealRun(minimalRun()).digest).toBe(UNDECLARED_MINIMAL_RUN_DIGEST);
   });
 
   test("declaring changes the sealed bytes, so the beacon is fixed at the lock", () => {
