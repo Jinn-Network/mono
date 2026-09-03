@@ -478,6 +478,24 @@ describe("durable Record Discovery source writer", () => {
     expect(harness.signCount()).toBe(signCount);
   });
 
+  // The carve-out is idempotency, not a clock special case: a writer whose window has
+  // since collapsed refuses to mint, but must still acknowledge what it already minted.
+  it("returns a committed announcement's receipt from a writer whose window now collapses", async () => {
+    const harness = makeHarness();
+    const first = await writer(harness).append(command());
+    const collapsed = createDurableSourceWriter({
+      source: SOURCE,
+      signer: harness.signer,
+      blobs: harness.blobs,
+      states: harness.states,
+      intents: harness.intents,
+      clock: DEFAULT_TEST_CLOCK,
+      refreshWithinMs: 0.5,
+    });
+
+    await expect(collapsed.append(command())).resolves.toEqual(first);
+  });
+
   it("accepts a past-dated timestamp however far behind its own clock", async () => {
     const harness = makeHarness();
     const receipt = await writer(harness, undefined, clockAt("2031-01-01T00:00:00.000Z")).append(command());

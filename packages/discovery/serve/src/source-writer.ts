@@ -656,7 +656,7 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     // consumer refuses a head issued further ahead than one freshness window
     // (`head-issued-ahead`). Bound it here, with the very predicate the reading side
     // applies, so the source does not sign and publish a head every consumer
-    // permanently refuses and hear about it only from peer logs (#3481).
+    // permanently refuses. Before this bound the only symptom was a peer's logs (#3481).
     //
     // Be precise about what this compares (#3571): the *caller's* timestamp against
     // *this host's* clock. Where the caller derives its timestamp from that same clock,
@@ -690,12 +690,24 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     //   NTP fix on a badly fast host, exactly the population this bound exists for)
     //   cannot make a published announcement stop being acknowledgeable.
     //
-    //   The refusal still writes, signs and stages nothing *of its own*. The one thing
-    //   it now runs first is the `recover()` at the top of the loop, which may finish a
-    //   pre-existing durable intent -- another append's already-signed bytes, under the
-    //   carve-out above. That is deliberate: refusing before recovery would let a
-    //   skewed clock strand a pending intent that was in-window when it was minted,
-    //   which is the wedge the carve-out exists to avoid.
+    //   The refusal still writes, signs and stages nothing *of its own*. The one
+    //   side-effecting thing it now runs first is the `recover()` at the top of the
+    //   loop, which may finish a pre-existing durable intent -- another append's
+    //   already-signed bytes, under the carve-out above. That is deliberate: a pending
+    //   intent for this same announcementId is not yet visible in state, so refusing
+    //   ahead of recovery would refuse a replay of work that is already durable, which
+    //   is the wedge the carve-out exists to avoid.
+    //
+    //   Be honest about the rest of the reordering too. The input-shape checks (facts
+    //   ceiling, record-required, digest and mediaType agreement, withdrawn-carries-no-
+    //   record), `loadState`'s ownership assertion, and the mismatched-fingerprint
+    //   `SourceAnnouncementConflictError` now all precede the window refusal. So a
+    //   command that is malformed *and* out-of-window reports the malformation, not the
+    //   clock, and a replay under a committed announcementId with different bytes still
+    //   raises the conflict rather than the clock error. Nothing in-repo keys off that
+    //   precedence, and the one consumer that discriminates the conflict --
+    //   `native-solution-corrections`, which adopts the committed receipt -- is helped
+    //   by it.
 
     // `Number.isFinite` above admits timestamps near the ECMAScript Date limit, whose
     // window end overflows the range and makes `toISOString()` throw a bare RangeError.
