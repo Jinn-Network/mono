@@ -152,7 +152,7 @@ function blankComments(text: string): string {
  * Blanked after comments, and only where the statement starts a line, so an `export const` or an
  * ordinary object literal is untouched.
  */
-export function blankModuleStatements(text: string): string {
+function blankModuleStatements(text: string): string {
   return text.replace(
     /^[ \t]*(?:import|export)\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*(?:from\s*["'][^"']*["'])?\s*;?/gmu,
     (match) => match.replace(/[^\n]/gu, " "),
@@ -224,7 +224,15 @@ function topLevelArguments(text: string, openParen: number): string[] | undefine
   return undefined;
 }
 
-/** The module specifier one file imports `name` from, or `undefined` if it imports no such name. */
+/**
+ * The module specifier one file names `name` in, whether it imports it or re-exports it: the entry
+ * a caller reaches the face through re-exports it, so following a hop reads the same statement
+ * shape the caller wrote.
+ *
+ * An aliased binding (`import { runBindingSentence as emit }`) is not matched, and the scan then
+ * sees neither the origin nor any occurrence of the name -- a bypass of the same family as #3954,
+ * pre-existing for every emitter and not narrowed by it. Stated rather than left to be discovered.
+ */
 function importedFrom(source: string, name: string): string | undefined {
   for (const match of source.matchAll(/^[ \t]*(?:import|export)\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/gmu)) {
     const bound = match[1]!.split(",").map((entry) => entry.trim().split(/\s+as\s+/u).at(-1)!.trim());
@@ -319,13 +327,16 @@ export function emitterCallSites(
     for (const match of references.matchAll(new RegExp(String.raw`\b${name}\b`, "gu"))) {
       const index = match.index!;
       const before = references.slice(Math.max(0, index - 24), index);
-      const after = references.slice(index + name.length);
-      // A call is already counted above; a member access names someone else's property; a key
-      // (`{ runBindingSentence: f }`) declares a name rather than reading one; a declaration
-      // introduces the emitter instead of passing it on.
-      if (/^\s*\(/u.test(after) || /^\s*:/u.test(after)) continue;
-      if (/[.?]\s*$/u.test(before)) continue;
+      const after = references.slice(index + name.length, index + name.length + 24);
+      // A call is already counted above. A member access (`report.runBindingSentence`) names
+      // someone else's property. A declaration introduces the emitter rather than passing it on.
+      if (/^\s*\(/u.test(after)) continue;
+      if (/\.\s*$/u.test(before)) continue;
       if (/\b(?:function|const|let|var|class)\s+$/u.test(before)) continue;
+      // A property KEY (`{ runBindingSentence: other }`) declares a name rather than reading one,
+      // and is distinguished from a ternary branch (`flag ? runBindingSentence : other`, which IS
+      // a reference) by what precedes it: a key opens its entry, a branch follows an operator.
+      if (/^\s*:/u.test(after) && /(?:^|[{,\n])\s*$/u.test(before)) continue;
       sites.push({ site: `${label}:${name}`, binding: VALUE_REFERENCE, justified: marked(index) });
     }
   }
@@ -388,8 +399,14 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     // A declaration introduces the emitter rather than passing it on, in either form.
     expect(emitterCallSites("export function runBindingSentence(binding) {\n  return \"\";\n}\n", "fixture.ts"))
       .toEqual([]);
-    // A property named after the emitter is a key, not a reference to the function.
+    // A property named after the emitter is a key, not a reference to the function -- but a
+    // ternary branch is a reference, and both sit before a colon.
     expect(emitterCallSites("const table = { runBindingSentence: other };\n", "fixture.ts")).toEqual([]);
+    expect(emitterCallSites("const emit = flag ? runBindingSentence : other;\n", "fixture.ts")).toEqual([
+      { site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false },
+    ]);
+    // A member access names someone else's property, not the emitter this file imported.
+    expect(emitterCallSites("const emit = report.runBindingSentence;\n", "fixture.ts")).toEqual([]);
   });
 
   // The bare name is not unique in this tree, so the key is proven to discriminate before the scan
