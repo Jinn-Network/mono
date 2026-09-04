@@ -121,6 +121,23 @@ describe('T3.1 producer-evaluator-real', () => {
   });
 });
 
+describe('resolveT31SolverHermesConfigPath env handling', () => {
+  it('treats a blank JINN_ENGINE_IMPL_STATE_DIR_ROOT as unset', () => {
+    expect(
+      resolveT31SolverHermesConfigPath('/gold/op-b', {
+        JINN_ENGINE_IMPL_STATE_DIR_ROOT: '   ',
+        JINN_STATE_DIR: '/state',
+      }),
+    ).toBe(
+      path.join(
+        defaultImplStateDirRoot('/state'),
+        harnessStateDirName(HERMES_AGENT_HARNESS),
+        'config.yaml',
+      ),
+    );
+  });
+});
+
 describe('createT31GuardMismatchScanner', () => {
   const mismatchLine =
     `[hermes-agent] ${RESOLVED_HERMES_MODEL_MISMATCH_MARKER}: ` +

@@ -709,8 +709,11 @@ export async function runT31ProducerEvaluatorReal(
   // or, for a bare `run-tier-3` invocation, through the env names the guard
   // already owns — so an operator can sanction a one-off swap for a real run
   // without editing this scenario.
+  // `||`, not `??`: an env var set to the empty string is an unset provider, not
+  // a provider named ''. With `??` it would survive into the evidence log as a
+  // blank `hermesProvider=` while the daemon actually ran the openrouter default.
   const hermesProvider =
-    opts.hermesProvider ?? process.env['JINN_HERMES_PROVIDER']?.trim() ?? undefined;
+    opts.hermesProvider || process.env['JINN_HERMES_PROVIDER']?.trim() || undefined;
   const approvedOverrideModel = process.env[T31_APPROVED_HERMES_MODEL_ENV]?.trim();
   const approvedOverrideProvider = process.env[T31_APPROVED_HERMES_PROVIDER_ENV]?.trim();
   const approvedHermesOverride =
