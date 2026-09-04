@@ -10564,6 +10564,33 @@
       },
       {
         "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/unsealable-non-finite-extension-number.json",
+        "relativeSource": "fixtures/offer/unsealable-non-finite-extension-number.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/unsealable-non-integral-extension-number.json",
+        "relativeSource": "fixtures/offer/unsealable-non-integral-extension-number.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/unsealable-unpaired-surrogate-extension-string.json",
+        "relativeSource": "fixtures/offer/unsealable-unpaired-surrogate-extension-string.json"
+      },
+      {
+        "claim": null,
         "export": "./testing",
         "kind": "conformance",
         "package": "@jinn-network/evidence-offer",

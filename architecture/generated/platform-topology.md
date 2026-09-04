@@ -1176,6 +1176,9 @@ The exact 75-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/superseding.document.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/superseding.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/superseding.sha256 | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/unsealable-non-finite-extension-number.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/unsealable-non-integral-extension-number.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/unsealable-unpaired-surrogate-extension-string.json | — | — | — |
 | conformance | @jinn-network/evidence-offer | packages/evidence/offer/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
 | fixtures | @jinn-network/evidence-protocol | packages/evidence/protocol/fixtures/autopilot-issue-1697/artifacts/executor.observed.json | — | — | — |
 | fixtures | @jinn-network/evidence-protocol | packages/evidence/protocol/fixtures/autopilot-issue-1697/artifacts/repository-input.observed.json | — | — | — |
