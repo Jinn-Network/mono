@@ -1029,7 +1029,21 @@ test("every printed check name carries its plain-language gloss (issue #3861)", 
       );
     }
   }
-  assert.deepEqual([...seen].sort(), Object.keys(glosses).sort(), "both shapes must cover every check");
+  // The two shapes together must cover every check any supported closure can emit, so this test
+  // cannot drift narrower than the product. The exhaustiveness of the gloss map itself is a type
+  // obligation -- it is keyed by the check union, the same discipline `CHECK_SUBJECTS` uses.
+  const { PUBLIC_BUNDLE_VERIFICATION_CHECKS, PUBLIC_BUNDLE_V6_CHECKS, PUBLIC_BUNDLE_V7_CHECKS, PUBLIC_BUNDLE_V8_CHECKS } =
+    await import("../dist/index.js");
+  const { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } = await import("@jinn-network/benchmarking-evidence");
+  const everyCheck = new Set([
+    ...PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+    ...PUBLIC_BUNDLE_V6_CHECKS,
+    ...PUBLIC_BUNDLE_V7_CHECKS,
+    ...PUBLIC_BUNDLE_V8_CHECKS,
+    ...EVIDENCE_NATIVE_BUNDLE_V5_CHECKS,
+  ]);
+  assert.deepEqual([...seen].sort(), [...everyCheck].sort(), "both shapes must cover every check a closure can emit");
+  assert.deepEqual(Object.keys(glosses).sort(), [...everyCheck].sort(), "every emittable check needs a gloss");
 });
 
 test("the deferred check's gloss states what was not established, not that it held (issue #3861)", async () => {
