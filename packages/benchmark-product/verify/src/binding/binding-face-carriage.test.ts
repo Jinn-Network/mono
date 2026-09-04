@@ -177,13 +177,45 @@ export function isScannedSource(name: string): boolean {
 }
 
 /**
- * Quoted string contents blanked the same way, so a help string or an error message naming the
- * emitter is not read as a reference to it. Single and double quotes only: a template literal can
- * carry `${runBindingSentence(binding)}`, which is code, and blanking it would hide the very shape
- * this file exists to see.
+ * String contents blanked the same way, for both scans: a help string, an error message or a log
+ * line naming the emitter is prose about it, not a use of it, and reading one as a site would be
+ * exactly the misdirected noise #3952 was filed to remove.
+ *
+ * Walked rather than matched, because the three string forms nest. A template literal's TEXT is
+ * blanked but its `${...}` expressions are not -- `${runBindingSentence(binding)}` is code, and
+ * blanking it would hide the shape this file exists to see -- and an apostrophe inside that text
+ * ("it's") must not open a quoted run, which is what a regex over the three forms would do. The
+ * quotes and backticks themselves survive, so `topLevelArguments` still reads its own depth, and
+ * newlines survive so every offset and line number does.
  */
 function blankStringLiterals(text: string): string {
-  return text.replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/gu, (match) => `${match[0]}${" ".repeat(match.length - 2)}${match[0]}`);
+  const out = text.split("");
+  const blank = (index: number): void => { if (out[index] !== "\n") out[index] = " "; };
+  // "`" marks template text; "{" marks a brace-delimited code region, including the one a `${`
+  // opens, so a nested object literal inside an interpolation closes the right brace.
+  const stack: string[] = [];
+  let quote: string | undefined;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (quote !== undefined) {
+      if (character === "\\") { blank(index); blank(index + 1); index += 1; continue; }
+      if (character === quote) { quote = undefined; continue; }
+      blank(index);
+      continue;
+    }
+    if (stack.at(-1) === "`") {
+      if (character === "\\") { blank(index); blank(index + 1); index += 1; continue; }
+      if (character === "`") { stack.pop(); continue; }
+      if (character === "$" && text[index + 1] === "{") { stack.push("{"); index += 1; continue; }
+      blank(index);
+      continue;
+    }
+    if (character === '"' || character === "'") { quote = character; continue; }
+    if (character === "`") { stack.push("`"); continue; }
+    if (character === "{") { stack.push("{"); continue; }
+    if (character === "}" && stack.at(-1) === "{") stack.pop();
+  }
+  return out.join("");
 }
 
 function sourceFiles(directory: string): string[] {
@@ -315,8 +347,8 @@ export function emitterCallSites(
   label: string,
   origins: ReadonlyMap<string, string | undefined> = new Map(),
 ): CallSite[] {
-  const blanked = blankComments(source);
-  const references = blankStringLiterals(blankModuleStatements(blanked));
+  const blanked = blankStringLiterals(blankComments(source));
+  const references = blankModuleStatements(blanked);
   const rawLines = source.split("\n");
   // `import * as face from ...` binds the emitter behind a namespace, so `face.runBindingSentence`
   // IS the emitter rather than an unrelated object's property, and the member-access skip below
@@ -435,6 +467,29 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     expect(emitterCallSites('const help = "the sentence comes from runBindingSentence";\n', "fixture.ts"))
       .toEqual([]);
     expect(emitterCallSites("type Emitter = typeof runBindingSentence;\n", "fixture.ts")).toEqual([]);
+  });
+
+  // All three string forms nest, and both scans read through the same blanking, so each form is
+  // proven on both sides: prose naming an emitter is not a site, and code inside an interpolation
+  // still is.
+  test("reads through every string form: prose is not a site, an interpolation still is", () => {
+    // Prose in each of the three forms, for the call shape and the reference shape.
+    expect(emitterCallSites('const help = "call runBindingSentence(binding) to render";\n', "fixture.ts"))
+      .toEqual([]);
+    expect(emitterCallSites("const help = 'call runBindingSentence(binding) to render';\n", "fixture.ts"))
+      .toEqual([]);
+    expect(emitterCallSites("const help = `the sentence comes from runBindingSentence`;\n", "fixture.ts"))
+      .toEqual([]);
+    // An apostrophe inside template TEXT must not open a quoted run and hide the code between two
+    // of them -- ordinary English prose around an interpolation is the shape that does it.
+    expect(emitterCallSites("const line = `it's ${items.map(runBindingSentence)} — don't`;\n", "fixture.ts"))
+      .toEqual([{ site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false }]);
+    // And the interpolation's own code is read as code, in either shape.
+    expect(emitterCallSites("const line = `bound: ${runBindingSentence(forged)}`;\n", "fixture.ts")[0])
+      .toEqual({ site: "fixture.ts:runBindingSentence", binding: "forged", justified: false });
+    // A nested object literal inside the interpolation closes the right brace, so the text after
+    // it is still text.
+    expect(emitterCallSites("const line = `${f({ a: 1 })} runBindingSentence`;\n", "fixture.ts")).toEqual([]);
   });
 
   // The bare name is not unique in this tree, so the key is proven to discriminate before the scan
