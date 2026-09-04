@@ -1253,3 +1253,125 @@ test('a workflow finding names a repository-relative path, so the annotation lan
   assert.equal(workflowDisplayPath(workflowsDir, 'ci.yml'), join('.github', 'workflows', 'ci.yml'));
   assert.equal(workflowDisplayPath('/definitely/outside/the/repo', 'ci.yml'), 'ci.yml');
 });
+
+test('a guarded compound retracts only the findings that stand before its closer (#3921)', () => {
+  // The retraction range used to end at the whole closing line, so a statement written
+  // *after* the closer — which is the `||` fallback itself, and genuinely unguarded —
+  // was swallowed along with the compound's own findings. Keying the range end on the
+  // closer's token position is what tells the two apart.
+  for (const body of [
+    ['{', '  echo hi', '} || producer | head -1'],
+    ['for f in a; do', '  echo $f', 'done || producer | head -1'],
+    ['{', '  echo hi', '} || true; producer | head -1'],
+  ]) {
+    assert.deepEqual(severities(body.join('\n'), { shell: 'bash' }), ['error:head'], body.at(-1));
+  }
+
+  // …and the last body statement may still share the closer's line, where the retraction
+  // has to reach it.
+  assert.deepEqual(
+    severities(['{', '  echo a', '  producer | head -1; } || true'].join('\n'), { shell: 'bash' }),
+    [],
+  );
+});
+
+test('a pipeline standing before a compound opener is outside the compound (#3922)', () => {
+  // `lineNesting`'s `openerFirst` is what decides whether a line's own findings sit
+  // inside the compound that line opens. Its `false` branch was unpinned: forcing the
+  // field to `true` left the whole suite green while this shape went silently clean.
+  assert.deepEqual(
+    severities(['producer | head -1; if x; then', '  echo y', 'fi || true'].join('\n'), { shell: 'bash' }),
+    ['error:head'],
+  );
+  // The `true` branch, for contrast: here the pipeline is the compound's own condition.
+  assert.deepEqual(
+    severities(['if producer | head -1; then', '  echo y', 'fi || true'].join('\n'), { shell: 'bash' }),
+    [],
+  );
+});
+
+test("a `case` arm's `)` does not close the subshell around the `case` (#3924)", () => {
+  // The arm terminator has no opener of its own, so it used to pop the nearest open
+  // `paren` from the block's stack — the enclosing subshell. The subshell's real `)`
+  // then closed nothing and its guard never reached the arm, reddening a required gate
+  // over a guarded pipeline.
+  assert.deepEqual(
+    severities(
+      ['(', '  case "$x" in', '    a) producer | head -1 ;;', '  esac', ') || true'].join('\n'),
+      { shell: 'bash' },
+    ),
+    [],
+  );
+  assert.deepEqual(
+    severities(
+      ['(', '  case "$x" in', '    a) echo one ;;', '  esac', '  producer | head -1', ') || true'].join('\n'),
+      { shell: 'bash' },
+    ),
+    [],
+  );
+  // Losing the arm terminator must not lose a genuinely unguarded pipeline with it.
+  assert.deepEqual(
+    severities(['(', '  case "$x" in', '    a) producer | head -1 ;;', '  esac', ')'].join('\n'), {
+      shell: 'bash',
+    }),
+    ['error:head'],
+  );
+  // A subshell opened *inside* an arm still owns its own `)`.
+  assert.deepEqual(
+    severities(
+      ['case "$x" in', '  a) (', '    producer | head -1', '  ) || true ;;', 'esac'].join('\n'),
+      { shell: 'bash' },
+    ),
+    [],
+  );
+  // The arm may open on the `case`'s own line, where the block stack has not yet been
+  // told the `case` is open and only the line itself can tell the two `)` apart.
+  assert.deepEqual(
+    severities(
+      ['(', '  case "$x" in a) producer | head -1 ;;', '  esac', ') || true'].join('\n'),
+      { shell: 'bash' },
+    ),
+    [],
+  );
+});
+
+test('a guard on a function definition does not reach the deferred body (#4000)', () => {
+  // Verified against bash: `f () { seq 1 5000000 | head -1 >/dev/null; } || true; f` exits
+  // 141 at the call. The guard covers defining the function, which cannot fail; the body
+  // runs unguarded whenever the function is later called.
+  for (const body of [
+    ['f () {', '  producer | head -1', '} || true', 'f'],
+    ['function f {', '  producer | head -1', '} || true', 'f'],
+    ['{', '  f () {', '    producer | head -1', '  }', '} || true', 'f'],
+  ]) {
+    assert.deepEqual(severities(body.join('\n'), { shell: 'bash' }), ['error:head'], body[0]);
+  }
+  assert.deepEqual(severities('f () { producer | head -1; } || true', { shell: 'bash' }), ['error:head']);
+
+  // A guard written *inside* the body is the one that runs with the body, so it counts —
+  // on one line and across them.
+  assert.deepEqual(severities('f () { producer | head -1 || true; }', { shell: 'bash' }), []);
+  assert.deepEqual(
+    severities(['f () {', '  producer | head -1 || true', '}'].join('\n'), { shell: 'bash' }),
+    [],
+  );
+  assert.deepEqual(
+    severities(['f () {', '  { producer | head -1', '  } || true', '}'].join('\n'), { shell: 'bash' }),
+    [],
+  );
+  // A subshell body is a definition's body too.
+  assert.deepEqual(
+    severities(['f () (', '  producer | head -1', ') || true', 'f'].join('\n'), { shell: 'bash' }),
+    ['error:head'],
+  );
+
+  // The guard still covers everything in the group that is *not* deferred: only the
+  // definition's own body escapes it.
+  assert.deepEqual(
+    severities(
+      ['{', '  f () {', '    producer | head -1', '  }', '  git tag | head -1', '} || true'].join('\n'),
+      { shell: 'bash' },
+    ),
+    ['error:head'],
+  );
+});
