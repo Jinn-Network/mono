@@ -157,7 +157,8 @@ test("the sandbox relay emits a final frame the worker did not newline-terminate
 test("a final frame the relay cannot parse fails the runner instead of exiting 0", async () => {
   const directory = mkdtempSync(join(tmpdir(), "jinn-oci-runner-truncated-"));
   temporaryDirectories.push(directory);
-  const dockerPath = writeUnterminatedFrameDocker(directory, '{"ok":true,"value":{"runt');
+  const truncatedFrame = '{"ok":true,"value":{"runt';
+  const dockerPath = writeUnterminatedFrameDocker(directory, truncatedFrame);
   const runner = spawn(process.execPath, [
     runnerPath,
     "sandbox",
@@ -179,6 +180,9 @@ test("a final frame the relay cannot parse fails the runner instead of exiting 0
 
   expect({ code, stdout }).toEqual({ code: 1, stdout: "" });
   expect(stderr).toContain("could not relay a worker protocol frame");
-  // The frame is never echoed: only stdout is contractually the bounded machine envelope.
-  expect(stderr).not.toContain("runt");
+  // The frame is never echoed: only stdout is contractually the bounded machine envelope. Assert
+  // on the frame's own bytes rather than a prefix of them -- this runner's other stderr lines say
+  // "OCI runtime ...", so a substring of the truncated `"runtime"` key would collide with them and
+  // report an unrelated preflight failure as a leaked frame.
+  expect(stderr).not.toContain(truncatedFrame);
 }, 30_000);
