@@ -175,6 +175,30 @@ test('a folded compound still ends where its closer does', () => {
   );
 });
 
+test('a reserved word used as an argument opens nothing', () => {
+  // Bash recognises a reserved word only in command position. Reading `if` as an opener
+  // wherever it appears was survivable while nesting lived inside one logical line; once
+  // the fold consults it, an opener that is not one keeps the line open for the rest of
+  // the run block — and swallows a guard written after it, which is the very harm #3923
+  // set out to remove.
+  for (const argument of ['grep -q if patterns', 'echo for', 'printf %s while', 'echo case']) {
+    assert.deepEqual(
+      severities([argument, '{', '  producer | head -1', '} || true'].join('\n'), { shell: 'bash' }),
+      [],
+      argument,
+    );
+    assert.deepEqual(
+      severities([argument, 'producer | head -1'].join('\n'), { shell: 'bash' }),
+      ['error:head'],
+      argument,
+    );
+  }
+  // A brace group passed as an argument is not a group either, and `function f { … }`
+  // still is one: the name stands between the keyword and the opener.
+  assert.deepEqual(severities('f { producer | head -1; }', { shell: 'bash' }), ['error:head']);
+  assert.deepEqual(severities('function f { producer | head -1 || true; }', { shell: 'bash' }), []);
+});
+
 test('a case pattern closes a pattern, not the `case` itself', () => {
   // `splitStatementUnits` lowered the nesting depth on any `)` operator, and a case
   // pattern is terminated by exactly that `)`. So `case $v in a)` netted back to depth 0,

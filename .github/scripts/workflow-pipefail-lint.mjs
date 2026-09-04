@@ -252,7 +252,7 @@ function splitStatementUnits(tokens) {
     current = [];
   };
 
-  for (const token of tokens) {
+  for (const [index, token] of tokens.entries()) {
     const separates =
       stack.length === 0 &&
       !token.subst &&
@@ -262,17 +262,38 @@ function splitStatementUnits(tokens) {
       flush(token.operator ? token.value : ';');
       continue;
     }
-    applyNesting(stack, token);
+    applyNesting(stack, tokens, index);
     current.push(token);
   }
   flush(null);
   return units;
 }
 
-// `token`'s effect on the stack of compound commands still open. A substitution's tokens
-// have no effect: `walkStatement` walks the interior as its own list, and letting an inner
-// `(`, `{` or `esac` move this stack would cut the outer statement in the wrong place.
-function applyNesting(stack, token) {
+// Whether `tokens[index]` stands where a command name would: bash recognises a reserved
+// word only there, so `grep -q if patterns` names a pattern rather than opening an `if`.
+// The check matters most to the fold, where an opener that is not one would keep the
+// logical line open for the rest of the run block.
+//
+// A newline is a command terminator too, but the fold joins its lines with a space, so a
+// closer written on its own line follows the last word of the body rather than a
+// separator. Only openers are held to this rule for that reason — the failure it would
+// cause runs the wrong way (a compound that never closes) while a closer read one word
+// early merely ends the fold where the fold used to end anyway.
+function opensInCommandPosition(tokens, index) {
+  const previous = tokens[index - 1];
+  if (previous === undefined) return true;
+  if (previous.operator) return true;
+  if (BODY_SEPARATORS.has(previous.value) || COMPOUND_OPENERS.has(previous.value)) return true;
+  // `function f { … }` — the name stands between the keyword and the group.
+  return tokens[index - 2]?.operator === false && tokens[index - 2].value === 'function';
+}
+
+// The effect of `tokens[index]` on the stack of compound commands still open. A
+// substitution's tokens have no effect: `walkStatement` walks the interior as its own
+// list, and letting an inner `(`, `{` or `esac` move this stack would cut the outer
+// statement in the wrong place.
+function applyNesting(stack, tokens, index) {
+  const token = tokens[index];
   if (token.subst) return;
   if (token.operator) {
     if (token.value === '(') stack.push('(');
@@ -282,15 +303,17 @@ function applyNesting(stack, token) {
     else if (token.value === ')' && stack.at(-1) === '(') stack.pop();
     return;
   }
-  if (COMPOUND_OPENERS.has(token.value)) stack.push(token.value);
-  else if (COMPOUND_CLOSERS.has(token.value) && stack.length > 0) stack.pop();
+  if (COMPOUND_OPENERS.has(token.value)) {
+    if (opensInCommandPosition(tokens, index)) stack.push(token.value);
+  } else if (COMPOUND_CLOSERS.has(token.value) && stack.length > 0) stack.pop();
 }
 
 // How many compound commands `text` leaves open. A logical line that ends inside one is
 // not finished, however few continuation operators it carries.
 function openCompounds(text) {
   const stack = [];
-  for (const token of shellTokens(text)) applyNesting(stack, token);
+  const tokens = shellTokens(text);
+  for (let index = 0; index < tokens.length; index += 1) applyNesting(stack, tokens, index);
   return stack.length;
 }
 
