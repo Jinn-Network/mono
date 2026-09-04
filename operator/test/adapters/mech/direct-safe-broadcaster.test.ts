@@ -308,6 +308,17 @@ describe('direct Safe broadcaster rejects a mined-but-reverted execTransaction (
     // Terminal, so the write is not repeated: RouterWrongRequestKind is in the retry policy's
     // permanent set and cannot clear within the budget.
     expect(walletClient.writeContract).toHaveBeenCalledTimes(1);
+
+    // A CLI log line on this branch must still say which logical operation failed; the decoded
+    // cause replaces the status text, not the context around it.
+    const second = revertingClients({ rejectWith: { data: innerData } });
+    await expect(createDirectSafeBroadcaster(
+      second.publicClient as never,
+      second.walletClient as never,
+      SAFE,
+    ).execute({ to: ROUTER, value: 0n, data: '0xdeadbeef', logicalTx: 'verdict:openVerdictAttempt' }))
+      .rejects.toThrow(/verdict:openVerdictAttempt/u);
+
   });
 
   it('retries the whole sign-and-send, then throws naming the tx hash, Safe and operation', async () => {

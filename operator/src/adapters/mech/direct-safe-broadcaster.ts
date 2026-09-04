@@ -111,7 +111,8 @@ export function createDirectSafeBroadcaster(
             ? `undecoded selector ${inner.innerSelector}`
             : formatDecodedRevert(inner.decodedName, inner.decodedArgs);
           return new SafeInnerRevertError(
-            `Safe execTransaction inner revert: ${detail}`,
+            `Safe execTransaction inner revert on ${request.logicalTx} for Safe ${safeAddress}:`
+            + ` ${detail}`,
             inner.innerSelector,
             inner.innerData,
             inner.decodedName,
@@ -185,9 +186,11 @@ export function createDirectSafeBroadcaster(
         // decoding miss rather than the cause, or (on the legs that decode nothing) as a
         // `settled` result pointing at a transaction that did nothing (issue #3733).
         //
-        // Same two-branch shape venue-base's `createSafeBroadcaster` uses on this receipt.
         // `safeTxGas` and `gasPrice` are both 0 here, so a failing inner call reverts
         // execTransaction at the top level: re-simulating recovers the reason where there is one.
+        // venue-base's `createSafeBroadcaster` treats the same receipt the same way, minus its
+        // already-settled branch -- this broadcaster pins `alreadySettled: false` and hands the
+        // decoded error to the caller to classify instead (see the interface docstring above).
         if (receipt.status !== 'success') {
           const inner = await decodeInnerRevertError(txHash);
           if (inner !== null) throw inner;
