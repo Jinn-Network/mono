@@ -18,12 +18,12 @@ import {
   PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
   PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+  PUBLIC_BUNDLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V7_CHECKS,
-  PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_CHECKS,
   SUPPORTED_BUNDLE_FORMATS,
 } from "@colophon-claims/verify";
@@ -354,7 +354,9 @@ describe("product documentation consistency", () => {
   it("pins the too-old refusal sample to the formats the released 0.2.0 reader supports", () => {
     // The `supportedFormats` array is quoted verbatim as the thing an auditor diffs their own
     // format against, so it states the RELEASED 0.2.0 list, not the current one. That list is
-    // derivable: 0.2.0 is every format whose pinned line is not the unpublished 0.2.1 line.
+    // derivable, and derivable POSITIVELY: 0.2.0 reads exactly the formats that stamp the first
+    // public line. Deriving it as "not the 0.2.1 line" would silently readmit a future format
+    // that pins some third line.
     const guide = read(bundleReadmePath);
     const start = guide.indexOf("\n### Reading a bundle with a reader that is too old\n");
     expect(start).toBeGreaterThan(-1);
@@ -368,8 +370,8 @@ describe("product documentation consistency", () => {
     };
     const releasedFormats = SUPPORTED_BUNDLE_FORMATS.filter(
       (format) =>
-        PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[format].command !==
-        PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
+        PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[format].command ===
+        PUBLIC_BUNDLE_VERIFICATION_COMMAND,
     );
     expect(refusal.supportedFormats).toEqual([...releasedFormats]);
     expect(refusal.verifierVersion).toBe(
