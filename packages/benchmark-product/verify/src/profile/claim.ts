@@ -61,6 +61,7 @@ import {
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
 } from "../legacy-closures.js";
 import { PUBLIC_BUNDLE_V8_CHECKS as READER_DISCLOSED_VERIFICATION_CHECKS } from "../reader-instructions.js";
+import { refuse } from "./errors.js";
 import { ClaimDisclosureSectionSchema } from "./disclosure.js";
 import type { ClaimDisclosureSection } from "./disclosure.js";
 import { PROMPTED_SCREENING_PROFILE } from "../admission/contracts.js";
@@ -660,13 +661,45 @@ interface MethodProjection {
   readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
 }
 
+/** Every check below reads the sealed Report, so every refusal names the file that carries the
+ * malformed fact — the same two-source rule `assets.ts` states, with only one source in reach
+ * here. */
+const REPORT_SOURCE = "report.json";
+
+/*
+ * Every `throw new Error` site in this file's projection rebuild is accounted for below (issue
+ * #3855, the residual `assets.ts`'s own accounting block names). The same rule sorts them: a
+ * projection check refuses when nothing earlier settles the same fact, and stays a bare throw when
+ * an earlier check or the caller already does.
+ *
+ * WHAT REFUSES. `buildClaimPackage` is reached from `assertClaimConsistency` on every successful
+ * verification, so this rebuild is a reader path — and it is the FIRST reader of the sealed
+ * Report's results and method identity. `ReportRecordSchema` types `results` as `JsonValueSchema`
+ * and `MethodRefSchema`'s `id`/`version` as bare `z.string()`, so nothing between record parsing
+ * and here settles any of it. `singleSubjectResults`, the five per-method shape checks, and
+ * `methodProjection`'s three unsupported-version throws and unregistered-method default therefore
+ * refuse: a mismatch is a named disagreement with the record a reader was handed, not an internal
+ * fault, and `execution` — which is what `toErrorEnvelope` carries an untyped throw as, and which
+ * the CLI maps to "the verifier broke" — would be the wrong code for it.
+ *
+ * These five per-method checks are the strictly stronger shadows that let four outer-shape checks
+ * in `assets.ts` stay bare. Converting them is what makes the typed shape the one a reader
+ * actually sees for those conditions, rather than the untyped code that used to fire first.
+ *
+ * WHAT STAYS BARE. The two throws in `buildClaimPackage` itself are internal faults: the CALLER
+ * derives both facts they assert. `assertClaimConsistency` builds `assurance.resolved` from the
+ * sealed Run's own `policy` and the plan entry selected by the same method+version match this
+ * function re-selects, and it re-derives the `disclosure` section it then hands in. Reaching
+ * either means this package disagrees with itself about a fact it just derived, and `execution` is
+ * the correct code for exactly that.
+ */
 /** Every method this product wires publishes its single Matrix subject's results at this fixed
  * path — the wrapper itself is method-agnostic; only what's inside `results` differs by method. */
 function singleSubjectResults(reportRecord: ReportRecord): unknown {
   const results = reportRecord.results as { readonly perSubject?: readonly { readonly results?: unknown }[] } | undefined;
   const perSubject = results?.perSubject;
   if (!Array.isArray(perSubject) || perSubject.length !== 1) {
-    throw new Error("claim package: expected exactly one Report subject (this product's single-Matrix Report shape)");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: expected exactly one Report subject (this product's single-Matrix Report shape)");
   }
   return perSubject[0]?.results;
 }
@@ -683,7 +716,7 @@ function wilsonProjection(subjectResults: unknown): MethodProjection {
     || typeof shape.conflicted?.count !== "number"
     || !Array.isArray(shape.conflicted.cellKeys)
   ) {
-    throw new Error("claim package: Report results do not carry wilson@1's arms/conflicted shape");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: Report results do not carry wilson@1's arms/conflicted shape");
   }
   return {
     headline: shape.arms as Record<string, unknown>,
@@ -723,7 +756,7 @@ function comparisonProjection(subjectResults: unknown): MethodProjection {
     || !Array.isArray(shape.conflicted.cellKeys)
     || shape.bootstrap === undefined
   ) {
-    throw new Error("claim package: Report results do not carry paired-delta@1's comparison shape");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: Report results do not carry paired-delta@1's comparison shape");
   }
   const conflicted = { count: shape.conflicted.count, cellKeys: shape.conflicted.cellKeys as readonly string[] };
   return {
@@ -745,7 +778,7 @@ function comparisonProjection(subjectResults: unknown): MethodProjection {
 function binaryQualificationProjection(subjectResults: unknown): MethodProjection {
   const shape = subjectResults as { readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown } } | undefined;
   if (typeof shape?.conflicted?.count !== "number" || !Array.isArray(shape.conflicted.cellKeys)) {
-    throw new Error("claim package: Report results do not carry binary-instrument@1's conflicted shape");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: Report results do not carry binary-instrument@1's conflicted shape");
   }
   return {
     qualification: subjectResults,
@@ -771,7 +804,7 @@ function pairwiseDisagreementProjection(subjectResults: unknown): MethodProjecti
     || typeof shape.conflicted?.count !== "number"
     || !Array.isArray(shape.conflicted.cellKeys)
   ) {
-    throw new Error("claim package: Report results do not carry pairwise-disagreement@1's pairs/conflicted shape");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: Report results do not carry pairwise-disagreement@1's pairs/conflicted shape");
   }
   const conflicted = { count: shape.conflicted.count, cellKeys: shape.conflicted.cellKeys as readonly string[] };
   return {
@@ -818,7 +851,7 @@ function pairedMajorityDeltaProjection(subjectResults: unknown): MethodProjectio
     || typeof shape.conflicted?.count !== "number"
     || !Array.isArray(shape.conflicted.cellKeys)
   ) {
-    throw new Error("claim package: Report results do not carry paired-majority-delta@1's baseline/candidate/delta shape");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: Report results do not carry paired-majority-delta@1's baseline/candidate/delta shape");
   }
   const conflicted = { count: shape.conflicted.count, cellKeys: shape.conflicted.cellKeys as readonly string[] };
   return {
@@ -858,21 +891,21 @@ function methodProjection(reportRecord: ReportRecord): MethodProjection {
       return comparisonProjection(subjectResults);
     case BENCHMARKING_METHOD_IDS.binaryInstrument:
       if (reportRecord.method.version !== BENCHMARKING_METHOD_VERSION) {
-        throw new Error(`claim package: binary-instrument version "${reportRecord.method.version}" is not supported`);
+        refuse("record-integrity", REPORT_SOURCE, `claim package: binary-instrument version "${reportRecord.method.version}" is not supported`);
       }
       return binaryQualificationProjection(subjectResults);
     case BENCHMARKING_METHOD_IDS.pairwiseDisagreement:
       if (reportRecord.method.version !== BENCHMARKING_METHOD_VERSION) {
-        throw new Error(`claim package: pairwise-disagreement version "${reportRecord.method.version}" is not supported`);
+        refuse("record-integrity", REPORT_SOURCE, `claim package: pairwise-disagreement version "${reportRecord.method.version}" is not supported`);
       }
       return pairwiseDisagreementProjection(subjectResults);
     case BENCHMARKING_METHOD_IDS.pairedMajorityDelta:
       if (reportRecord.method.version !== BENCHMARKING_METHOD_VERSION) {
-        throw new Error(`claim package: paired-majority-delta version "${reportRecord.method.version}" is not supported`);
+        refuse("record-integrity", REPORT_SOURCE, `claim package: paired-majority-delta version "${reportRecord.method.version}" is not supported`);
       }
       return pairedMajorityDeltaProjection(subjectResults);
     default:
-      throw new Error(`claim package: method "${reportRecord.method.id}" has no claim-package projection`);
+      refuse("record-integrity", REPORT_SOURCE, `claim package: method "${reportRecord.method.id}" has no claim-package projection`);
   }
 }
 
