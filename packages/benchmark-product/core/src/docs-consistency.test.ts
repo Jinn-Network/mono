@@ -382,7 +382,9 @@ describe("product documentation consistency", () => {
       const start = guide.indexOf(heading);
       expect(start, heading).toBeGreaterThan(-1);
       const after = start + heading.length;
-      const next = /\n##+ /u.exec(guide.slice(after));
+      // `##`/`###` only: a `####` subheading belongs to the section it sits in, and ending the
+      // slice at one would silently shrink what this pin covers.
+      const next = /\n#{2,3} /u.exec(guide.slice(after));
       const section = guide.slice(start, next === null ? undefined : after + next.index);
 
       // Only the fenced recipes are pinned. Prose in a section legitimately names lines the format
