@@ -231,6 +231,12 @@ CREATE INDEX announcement_edges_target_idx
 -- on field, so it needs the ordering the index above gives it.
 CREATE INDEX announcement_edges_target_field_idx
   ON announcement_edges(target_digest, field, source_id, record_digest, ordinal);
+-- A query filtered on record_kind alone gets no index of its own, deliberately. It is the one
+-- served filter shape with no leading-column index behind it, so its first page is a full scan --
+-- but the primary key already spells the ORDER BY exactly, so SQLite reads in key order, the page
+-- ordering costs nothing extra, and a resumed page seeks to its cursor rather than re-scanning to
+-- it. A fifth index would buy the first page a seek at the cost of write amplification on every
+-- indexed card, and nothing in-tree queries this shape; it stays a scan until something does.
 `;
 
 interface MetadataRow {

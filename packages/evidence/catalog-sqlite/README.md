@@ -82,7 +82,15 @@ once for the digest narrowed to a single field, which is how a graph is walked
 a hop at a time. SQLite applies equality terms only across an index prefix, so
 one index cannot serve both shapes without falling back to a temporary b-tree
 for the page ordering. `announcement-edges.test.ts` asserts the query plan for
-each shape, so the coverage is proven rather than restated.
+each shape — first page and resumed page both, since every page after the first
+appends the cursor comparison — so the coverage is proven rather than restated.
+
+A filter on `recordKind` alone is served but not indexed. It is the one shape
+with no leading-column index behind it, so its first page is a full scan; the
+primary key spells the `ORDER BY` exactly, so the ordering is free and a resumed
+page seeks to its cursor instead of re-scanning to it. A fifth index would buy
+that first page a seek and charge write amplification on every indexed card, and
+nothing in-tree queries the shape — so it stays a scan until something does.
 
 A card is a holder-authored claim and nothing here is checked against the
 record, so edges are scoped to the announcing source: a source replacing its own

@@ -8,7 +8,10 @@ import { EvidenceCatalogError, type Sha256Digest } from "@jinn-network/evidence-
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
-import { announcementEdgeSelectSql } from "./announcement-edges.js";
+import {
+  ANNOUNCEMENT_EDGE_CURSOR_CLAUSE,
+  announcementEdgeSelectSql,
+} from "./announcement-edges.js";
 import {
   ANNOUNCEMENT_EDGE_MAX_LIMIT,
   announcementEdgesFromCard,
@@ -427,27 +430,62 @@ describe("announcement-edge index coverage", () => {
     }
   };
 
-  test("covers the referrers shape the README advertises: target plus one field", () => {
-    const plan = planFor("target_digest = ? AND field = ?");
-    expect(plan.join("\n")).toContain("announcement_edges_target_field_idx");
-    expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
-  });
+  // Every shape is asserted twice: once as the first page, and once resumed. The resumed form is
+  // the one the graph walk spends most of its time in -- every page after the first appends the
+  // cursor comparison -- and it is a different plan question, because the comparison is a range
+  // term over the ordering key rather than another equality. Asserting only the first page would
+  // leave a reordered index column able to regress paging while the suite stayed green.
+  const shapes = [
+    {
+      name: "the referrers shape the README advertises: target plus one field",
+      where: "target_digest = ? AND field = ?",
+      index: "announcement_edges_target_field_idx",
+    },
+    {
+      name: "the target-only referrers shape",
+      where: "target_digest = ?",
+      index: "announcement_edges_target_idx",
+    },
+    {
+      name: "the outbound shape narrowed to one field, which the graph walk pages through",
+      where: "record_digest = ? AND field = ?",
+      index: "announcement_edges_record_field_idx",
+    },
+    {
+      name: "the record-only outbound shape",
+      where: "record_digest = ?",
+      index: "announcement_edges_record_idx",
+    },
+  ] as const;
 
-  test("still covers the target-only referrers shape", () => {
-    const plan = planFor("target_digest = ?");
-    expect(plan.join("\n")).toContain("announcement_edges_target_idx");
-    expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
-  });
+  for (const shape of shapes) {
+    test(`covers ${shape.name}`, () => {
+      const plan = planFor(shape.where);
+      expect(plan.join("\n")).toContain(shape.index);
+      expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+    });
 
-  test("covers the outbound shape narrowed to one field, which the graph walk pages through", () => {
-    const plan = planFor("record_digest = ? AND field = ?");
-    expect(plan.join("\n")).toContain("announcement_edges_record_field_idx");
-    expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
-  });
+    test(`covers ${shape.name}, resumed from a cursor`, () => {
+      // The clause comes from the binding, so a change to the cursor key moves this with it.
+      const plan = planFor(`${shape.where} AND ${ANNOUNCEMENT_EDGE_CURSOR_CLAUSE}`);
+      expect(plan.join("\n")).toContain(shape.index);
+      expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+    });
+  }
 
-  test("still covers the record-only outbound shape", () => {
-    const plan = planFor("record_digest = ?");
-    expect(plan.join("\n")).toContain("announcement_edges_record_idx");
-    expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+  // Not a covered shape, and deliberately so -- see the README's note on the recordKind-only
+  // filter. This asserts the conclusion that note records: no index of its own, but the primary
+  // key already matches the ORDER BY exactly, so the page ordering is free and a resumed page
+  // seeks rather than re-scanning. A change that cost the ordering a temp b-tree fails here.
+  test("has no index of its own for the recordKind-only filter, but orders for free", () => {
+    const firstPage = planFor("record_kind = ?");
+    expect(firstPage.join("\n")).toContain("SCAN announcement_edges");
+    expect(firstPage.join("\n")).toContain("sqlite_autoindex_announcement_edges_1");
+    expect(firstPage.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+
+    const resumed = planFor(`record_kind = ? AND ${ANNOUNCEMENT_EDGE_CURSOR_CLAUSE}`);
+    expect(resumed.join("\n")).toContain("SEARCH announcement_edges");
+    expect(resumed.join("\n")).toContain("sqlite_autoindex_announcement_edges_1");
+    expect(resumed.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
   });
 });
