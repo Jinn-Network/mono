@@ -433,7 +433,7 @@ export function createBaseSepoliaRecordTransport(input: {
    * The per-hop half is not belt-and-braces: a destination guard that inspects only the requested
    * URL is worth nothing if the server at that URL can then post a forwarding address. The default
    * `redirect: "follow"` let a contained locator answer `302 Location: http://127.0.0.1:8545/` and
-   * walked the daemon there. Same shape as `transport-http`'s `fetchWithinOrigin` on the archive
+   * walked the daemon there. Same shape as `transport-http`'s `requestWithinOrigin` on the archive
    * path, with containment in place of same-origin because containment is what a locator has.
    *
    * Two consequences of that substitution, stated rather than left to be inferred:
