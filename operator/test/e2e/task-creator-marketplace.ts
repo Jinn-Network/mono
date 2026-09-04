@@ -61,13 +61,16 @@
  * `VerdictSafeBroadcaster` (`Pick<..., 'execute'>`) — the surface it actually consumes; it
  * never calls `classify()`. Assertions 4 and 5 therefore reach the chain.
  *
- * Remaining blocker (issue #3715): they do not yet pass. The first full run of this lane
- * (CI `workflow_dispatch`, 2026-09-04) cleared assertions 1-3 and then reverted on the first
- * verdict settlement with `TCAttemptNotSubmitted(1, 0)`. `TaskCoordinator.claimEvaluation`
- * requires the attempt to be `AttemptStatus.Submitted`, which only the router's solution-side
- * `claimDelivery` sets. That call is `MechAdapter.submitSolutionDelivery`, and after Wave-4
- * D1/D2 nothing invokes it: the composition `WorkLoop` delivers to the mech but never settles
- * the solution on the router, so every attempt stays `Claimed`/`RequestRegistered`.
+ * Remaining blocker (issue #3715): assertions 4 and 5 do not yet pass. This is a legacy-lane E2E gap, not missing settlement in production native mode.
+ * The first full run (CI `workflow_dispatch`, 2026-09-04) cleared assertions 1-3 and then
+ * reverted on `TCAttemptNotSubmitted(1, 0)`: this helper explicitly builds
+ * `buildOperatorComposition({ mode: 'legacy' })` and runs its `WorkLoop` with
+ * `acceptLegacyCards: true`, but that legacy loop lacks router solution settlement. Production
+ * `main.ts` selects `mode: 'native'`, passes `nativeClaimRuntime`, threads
+ * `composition.nativeSolutionCoordinator` into `WorkLoop`, and constructs the coordinator with
+ * `buildNativeSolutionSettlementPort`; the coordinator persistently begins, broadcasts, and
+ * records settlement. The old optional `MechAdapter.submitSolutionDelivery` is not the native
+ * mechanism. Issue #3715 owns the legacy-lane repair; this E2E remains unchanged until then.
  *
  * Public command: `yarn e2e:task-creator`.
  */
