@@ -470,6 +470,12 @@ jobs:
           node-version: 22
       - run: corepack enable
       - run: yarn install --immutable
+      # `@jinn-network/*` resolve through `portal:` to `packages/*`, whose
+      # package `exports` point at `dist/`. `yarn install` alone leaves those
+      # unbuilt, so the script dies at import with ERR_MODULE_NOT_FOUND before
+      # a single assertion runs. Same reason `task-creator-amd64-gold-proof`
+      # below builds; this job was the one tsx-based lane that omitted it.
+      - run: yarn build
       # The e2e compiles the local V3 task stack via `yarn compile` in
       # contracts/ (task-first-helpers.compileContracts), so the contracts
       # workspace needs its own install.
