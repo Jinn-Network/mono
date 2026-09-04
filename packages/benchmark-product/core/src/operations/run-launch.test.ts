@@ -11,6 +11,8 @@ import type {
   SubmissionUri,
 } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
+import { computeBeaconOrder, requiredBeaconRound } from "@colophon-claims/verify";
+import { itemTaskDigest, parseBenchmark } from "@jinn-network/benchmarking-records";
 import { readAuditEntries } from "../audit/journal.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { writeCancelMarker } from "../run/cancel-marker.js";
@@ -26,6 +28,7 @@ import { authorityGrant } from "./authority-ops.js";
 import type { OperationContext } from "./context.js";
 import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
+import { runBind } from "./run-bind.js";
 import { runLaunch, runResume } from "./run-launch.js";
 import { publicationConfigure, publicationRegister } from "./publication-register.js";
 import { publicationStatus } from "./publication-status.js";
@@ -1196,4 +1199,145 @@ describe("runResume — evaluation catch-up", () => {
       (entry.kind === "cell-event" && entry.event.cellKey === gapCellKey) || (entry.kind === "delivery" && entry.cellKey === gapCellKey));
     expect(gapCellEvents).toEqual(originalGapCellEvents);
   });
+});
+
+/**
+ * The wiring that makes a bound run actually dispatch in its beacon-derived order (issue #3337).
+ *
+ * `orderCellsByTask` and `readRunBindingCarriage` are each covered on their own; what these pin is
+ * the three lines between them — `loadLockedOrRunningRun` turning the verified binding into
+ * `dispatchTaskOrder`, the first launch handing it to `launchAndWatch`, and `runResume` applying
+ * it to the outstanding subset. A regression that dropped the spread, or stripped the wrong prefix
+ * length, would leave every other test green while the run dispatched in `cellKey` order and still
+ * recorded, reported and published a binding claiming beacon-derived order — the one failure mode
+ * where the binding record says something the run did not do.
+ *
+ * They also cover the launch half of issue #3334: the order dispatched is the one committed when
+ * `launchedAt` became durable, read after that write rather than before it.
+ */
+describe("runLaunch / runResume — a bound run dispatches in its beacon-derived order", () => {
+  /** The tasks of the sealed Benchmark, `sha256:`-prefixed and unique — `runBind`'s own identity set. */
+  function sealedTaskSha256s(draftId: string): readonly string[] {
+    const document = readDraftDocument(workspaceDir, draftId);
+    if (document.spec.taskSet.kind !== "benchmark") throw new Error("fixture has no benchmark");
+    const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
+    return [...new Set(benchmark.items.map((item) => `sha256:${itemTaskDigest(item)}`))];
+  }
+
+  /**
+   * A beacon value whose derived order is NOT ascending task-digest order.
+   *
+   * `expectedCellSet` sorts by `cellKey`, which begins with the task digest, so an unbound run
+   * dispatches its tasks in exactly that ascending order. If the derived order happened to agree
+   * with it, both assertions below would pass while proving nothing — so the value is chosen to
+   * disagree, and the disagreement is asserted before the wiring is.
+   */
+  function beaconValueThatReorders(sealDigest: string, itemSha256s: readonly string[]): string {
+    const cellKeyOrder = [...itemSha256s].sort();
+    for (let candidate = 0; candidate < 256; candidate += 1) {
+      const value = candidate.toString(16).padStart(2, "0").repeat(32);
+      const { order } = computeBeaconOrder({ sealDigest, beaconValue: value, itemSha256s });
+      if (order.some((item, index) => item !== cellKeyOrder[index])) return value;
+    }
+    throw new Error("no candidate beacon value reordered the sample benchmark's tasks");
+  }
+
+  /** The bare task digests of the solve legs this backend was handed, in dispatch order, deduped. */
+  function solveTaskDispatchOrder(
+    submits: readonly { taskBytes: Uint8Array }[],
+    taskDigests: ReadonlySet<string>,
+  ): readonly string[] {
+    const seen: string[] = [];
+    for (const call of submits) {
+      const digest = sha256Hex(call.taskBytes);
+      // Evaluation legs go through the same `submit`; their task bytes are the fake venue's own
+      // synthesized evaluation task, which is never one of the sealed Benchmark's items.
+      if (!taskDigests.has(digest) || seen.includes(digest)) continue;
+      seen.push(digest);
+    }
+    return seen;
+  }
+
+  /** Locks, binds to the one round the seal names, and returns the bare task digests in derived order. */
+  async function setUpBoundDraft(clock: () => string, draftId = "draft-1"): Promise<readonly string[]> {
+    await setUpLockedDraft(clock, draftId);
+    const runState = readRunState(workspaceDir, draftId)!;
+    const sealDigest = `sha256:${runState.runSha256!}`;
+    const itemSha256s = sealedTaskSha256s(draftId);
+    const value = beaconValueThatReorders(sealDigest, itemSha256s);
+    const round = requiredBeaconRound("drand/quicknet", runState.lockedAt!)!.round;
+
+    const bound = runBind(contextFor(clock), {
+      draftId,
+      beacon: { source: "drand/quicknet", round, value },
+    });
+    expect(bound.ok, JSON.stringify(bound)).toBe(true);
+    if (!bound.ok) throw new Error("bind failed");
+
+    const derived = bound.result.binding.order.map((item) => item.slice("sha256:".length));
+    // The precondition the whole suite rests on: this run's beacon order is not the order it would
+    // have run in unbound.
+    expect(derived).not.toEqual([...derived].sort());
+    return derived;
+  }
+
+  test("the first launch dispatches solve legs in the binding's order, not cellKey order", async () => {
+    const clock = makeClock();
+    const derived = await setUpBoundDraft(clock);
+    const { backend, submits } = makeStatefulFakeBackend();
+
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(backend),
+    });
+    expect(launched.ok, JSON.stringify(launched)).toBe(true);
+
+    expect(solveTaskDispatchOrder(submits, new Set(derived))).toEqual(derived);
+  });
+
+  test("an unbound run keeps cellKey order — the fixture isolates the binding as the cause", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const taskDigests = sealedTaskSha256s("draft-1").map((item) => item.slice("sha256:".length));
+    const { backend, submits } = makeStatefulFakeBackend();
+
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(backend),
+    });
+    expect(launched.ok, JSON.stringify(launched)).toBe(true);
+
+    expect(solveTaskDispatchOrder(submits, new Set(taskDigests))).toEqual([...taskDigests].sort());
+  });
+
+  test("resume dispatches the outstanding subset in that same order", async () => {
+    const clock = makeClock();
+    const derived = await setUpBoundDraft(clock);
+    const { backend: launchBackend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(launchBackend),
+    });
+    expect(launched.ok, JSON.stringify(launched)).toBe(true);
+
+    // Retain only the first derived task's cells, so the outstanding set on resume is exactly the
+    // remaining tasks and the order over it is still observable.
+    const completedTask = derived[0]!;
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    const cellKeyOf = (entry: RunJournalEntry): string | undefined => (
+      entry.kind === "cell-event" ? entry.event.cellKey : "cellKey" in entry ? entry.cellKey : undefined
+    );
+    overwriteRunJournal("draft-1", entries.filter((entry) => {
+      const cellKey = cellKeyOf(entry);
+      return cellKey === undefined || cellKey.startsWith(`${completedTask}/`);
+    }));
+
+    const { backend: resumeBackend, submits } = makeStatefulFakeBackend();
+    const resumed = await runResume(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(resumeBackend),
+    });
+    expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
+
+    expect(solveTaskDispatchOrder(submits, new Set(derived))).toEqual(derived.slice(1));
+    // Above the suite's 30s bound (#2766): this case drives a whole run to completion through the
+    // fake venue and then drives most of it again on resume, so its real cost is two runs' worth
+    // of dispatch and it is the one case here the shared bound does not fit.
+  }, 120_000);
 });

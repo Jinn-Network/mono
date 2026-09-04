@@ -738,4 +738,42 @@ describe.sequential("server action layer against a real workspace", () => {
       result: { state: "published-bundle", bundleIdentity: (published as { result: { bundleIdentity: string } }).result.bundleIdentity },
     });
   }, 240_000);
+  /**
+   * Issue #3332. `Number` coerces rather than parses, so `"1e3"`, `"0x10"` and `"+1"` all became
+   * integers `Number.isInteger` accepted and the schema's bound admitted -- the operator who
+   * mistyped a round was not refused by name, they got a successfully bound run at a round they
+   * never typed. `bind` is write-once by design, so that cannot be corrected by rebinding.
+   */
+  test("run.bind refuses a coerced beacon round, and still binds the round the seal names", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "bp-bind-round-"));
+    workspaces.push(workspace);
+    process.env[WORKSPACE_ENV] = workspace;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    await prepareLockedDraft("bind-round");
+
+    const bind = (beaconRound: string): Promise<GuiActionState> => invoke("run.bind", {
+      draftId: "bind-round",
+      beaconSource: "drand/quicknet",
+      beaconRound,
+      beaconValue: "b".repeat(64),
+    });
+
+    for (const round of ["1e3", "0x10", "+1", "1.0", "-1", "0", "", "Infinity"]) {
+      expect(await bind(round), `beaconRound ${JSON.stringify(round)}`).toMatchObject({
+        status: "error",
+        error: { code: "invalid-invocation" },
+      });
+    }
+
+    // Nothing was recorded: the run is still offering a round to bind to.
+    const offered = await invoke("run.status", { draftId: "bind-round" });
+    expect(offered).toMatchObject({ status: "success" });
+    const rounds = (offered as { result: { bindableBeaconRounds?: readonly { source: string; round: number }[] } })
+      .result.bindableBeaconRounds ?? [];
+    const quicknet = rounds.find((entry) => entry.source === "drand/quicknet");
+    if (quicknet === undefined) throw new Error("a locked, unbound run offered no quicknet round");
+
+    // And the shape check does not stand between the operator and a legitimate bind.
+    expect(await bind(String(quicknet.round))).toMatchObject({ status: "success" });
+  }, 120_000);
 });
