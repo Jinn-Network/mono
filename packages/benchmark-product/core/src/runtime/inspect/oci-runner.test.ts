@@ -93,3 +93,56 @@ test("termination reaps the worker container before waiting out the docker clien
 
   await exited;
 }, 30_000);
+
+/**
+ * A stand-in for the `docker` CLI whose `run` writes one protocol frame to stdout and exits 0
+ * without terminating it with a newline -- the shape a stdout truncated on its way through a
+ * loaded Docker Engine leaves behind, and the shape the relay used to drop.
+ */
+function writeUnterminatedFrameDocker(directory: string, frame: string): string {
+  const dockerPath = join(directory, "docker");
+  writeFileSync(dockerPath, [
+    `#!${process.execPath}`,
+    "const args = process.argv.slice(2);",
+    "if (args[0] === 'run') {",
+    `  process.stdout.write(${JSON.stringify(frame)});`,
+    "} else if (args[0] === 'container' && args[1] === 'inspect') {",
+    // Report the container absent so the reap's two-consecutive-absent rule settles promptly.
+    "  process.exit(1);",
+    "}",
+  ].join("\n"), { mode: 0o755 });
+  chmodSync(dockerPath, 0o755);
+  return dockerPath;
+}
+
+/**
+ * Regression for #2832's second failure mode (#3720). The sandbox relay emitted a frame only when
+ * it saw a newline and settled on the client's `exit` event, so a final chunk the worker did not
+ * terminate was dropped and this runner still exited 0 having written nothing. Its caller
+ * (`probeInspectOciSelection` / `assertInspectOciHostUndrifted` in `oci.ts`) then parsed an empty
+ * stdout, and V8's `Unexpected end of JSON input` reached the operator as `venue-unavailable` at
+ * path `venue` with no subject at all -- which is exactly what CI run 33686563879 recorded.
+ */
+test("the sandbox relay emits a final frame the worker did not newline-terminate", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jinn-oci-runner-relay-"));
+  temporaryDirectories.push(directory);
+  const frame = '{"ok":true,"value":{"runtime":{},"task":{}}}';
+  const dockerPath = writeUnterminatedFrameDocker(directory, frame);
+  const runner = spawn(process.execPath, [
+    runnerPath,
+    "sandbox",
+    dockerPath,
+    `sha256:${"b".repeat(64)}`,
+    "run", "--rm", "--name=jinn-inspect-relay-fixture", "--network=none",
+    `sha256:${"a".repeat(64)}`,
+    "/jinn/input/inspect-probe.json",
+  ], { stdio: ["ignore", "pipe", "ignore"] });
+  let stdout = "";
+  runner.stdout.setEncoding("utf8");
+  runner.stdout.on("data", (chunk: string) => { stdout += chunk; });
+  const code = await new Promise<number | null>((resolve) => {
+    runner.once("exit", (exitCode) => { resolve(exitCode); });
+  });
+
+  expect({ code, stdout }).toEqual({ code: 0, stdout: `${frame}\n` });
+}, 30_000);

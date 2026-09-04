@@ -390,6 +390,19 @@ if (command === "probe-broker") {
     });
     let frameBuffer = "";
     let frameChain = Promise.resolve();
+    const pushFrame = (line) => {
+      frameChain = frameChain.then(async () => {
+        const frame = JSON.parse(line);
+        if (frame?.channel === "sandbox") {
+          const response = await sandboxController.handle(frame);
+          child.stdin.write(`${JSON.stringify(response)}\n`);
+        } else if (typeof frame?.ok === "boolean") {
+          process.stdout.write(`${JSON.stringify(frame)}\n`);
+        } else {
+          throw new Error("worker emitted an unknown protocol frame");
+        }
+      }).catch(() => child.kill("SIGKILL"));
+    };
     if (sandboxMode) {
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk) => {
@@ -399,17 +412,7 @@ if (command === "probe-broker") {
           const newline = frameBuffer.indexOf("\n");
           const line = frameBuffer.slice(0, newline);
           frameBuffer = frameBuffer.slice(newline + 1);
-          frameChain = frameChain.then(async () => {
-            const frame = JSON.parse(line);
-            if (frame?.channel === "sandbox") {
-              const response = await sandboxController.handle(frame);
-              child.stdin.write(`${JSON.stringify(response)}\n`);
-            } else if (typeof frame?.ok === "boolean") {
-              process.stdout.write(`${JSON.stringify(frame)}\n`);
-            } else {
-              throw new Error("worker emitted an unknown protocol frame");
-            }
-          }).catch(() => child.kill("SIGKILL"));
+          pushFrame(line);
         }
       });
     }
@@ -425,9 +428,32 @@ if (command === "probe-broker") {
       process.stderr.write(`OCI runtime could not start: ${error instanceof Error ? error.name : "unknown error"}\n`);
       process.exitCode = 1;
     });
-    child.once("exit", async (code, signal) => {
+    // `exit` settles the termination ladder as early as possible -- `finishTermination` waits on
+    // `childSettled` to decide whether it still has to SIGKILL the client -- but it is NOT the
+    // point at which this process may stop relaying. Node emits `exit` when the child ends, with
+    // its stdio streams possibly still open; `close` is emitted once they have closed, and is
+    // documented to always follow `exit` (or `error`, when the child never spawned).
+    let exitStatus;
+    child.once("exit", (code, signal) => {
       settled = true;
       settleChild();
+      exitStatus = { code, signal };
+    });
+    child.once("close", async () => {
+      // The `error` path above already cleaned up and set an exit code for a child that never ran.
+      if (exitStatus === undefined) return;
+      const { code, signal } = exitStatus;
+      // #3720: a frame was emitted only on a newline, so a final chunk the worker did not
+      // terminate -- because its stdout was truncated on the way through a loaded Docker Engine,
+      // for instance -- was dropped silently and this process still exited 0 having relayed
+      // nothing. The caller then parsed an empty stdout and reported V8's
+      // `Unexpected end of JSON input` with no subject. Everything the worker wrote has now been
+      // read, so flush whatever is left as the frame it is and let it fail as a frame.
+      if (frameBuffer !== "") {
+        const line = frameBuffer;
+        frameBuffer = "";
+        pushFrame(line);
+      }
       await frameChain;
       await cleanup();
       if (terminating) {
