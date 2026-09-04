@@ -362,11 +362,25 @@ test('every verifier specifier in the product tree is classified, whatever its e
   assert.deepEqual(mentionOnly.sort(), ['packages/benchmark-product/verify/src/assets.ts']);
 });
 
-test('every CLAIM_PIN_SOURCES entry contributes at least one parsed pin', () => {
+/**
+ * The exact pin set each claim source seals. Asserting the whole set, not just that the file yields
+ * something, is what catches a *partial* drop: a multi-pin file that loses one pin but keeps another
+ * stays `sealed` in the exhaustiveness walk above and would otherwise pass unnoticed (issue #3900).
+ */
+const CLAIM_PIN_SETS = {
+  'packages/benchmark-product/core/scripts/demo1-export-public-bundle.mjs': ['0.1'],
+  'packages/benchmark-product/core/src/legacy-closures.ts': ['0.1', '0.1.0', '0.2', '0.2.0', '0.2.1'],
+  'packages/benchmark-product/verify/src/legacy-closures.ts': ['0.1', '0.1.0', '0.2', '0.2.0', '0.2.1'],
+  'packages/benchmark-product/cli/src/main.ts': ['0.1'],
+};
+
+test('every CLAIM_PIN_SOURCES entry contributes exactly the pins it seals', () => {
+  assert.deepEqual(Object.keys(CLAIM_PIN_SETS).sort(), [...CLAIM_PIN_SOURCES].sort());
   for (const source of CLAIM_PIN_SOURCES) {
-    assert.ok(
-      collectClaimVerifyPins(repoRoot, [source]).length > 0,
-      `${source} is listed as a claim pin source but yields no X.Y[.Z] pin`,
+    assert.deepEqual(
+      collectClaimVerifyPins(repoRoot, [source]),
+      CLAIM_PIN_SETS[source],
+      `${source} no longer seals the pins the publish guard expects to see from it`,
     );
   }
 });
@@ -397,9 +411,39 @@ test('the pin scan reaches into a template interpolation, and refuses what it ca
     ['0.2.1'],
   );
   assert.throws(
-    () => collectPinsFromSource('const q = /"/; const c = "npx @colophon-claims/verify@9.9.9 <dir>";', 'probe.ts'),
+    () => collectPinsFromSource('const c = npx @colophon-claims/verify@9.9.9 <dir>;', 'probe.ts'),
     /cannot tell whether @colophon-claims\/verify@9\.9\.9 in probe\.ts is sealed or explained/u,
     'a pin the scan cannot place must fail loudly, never vanish from the publish guard',
+  );
+});
+
+test('a regex literal cannot swallow the pin on its line, or the pins on the lines after it', () => {
+  const sealed = 'npx @colophon-claims/verify@9.9.9 <dir>';
+  assert.deepEqual(
+    collectPinsFromSource(`const _U = /^https:\\/\\//; export const P = "${sealed}";`, 'probe.ts'),
+    ['9.9.9'],
+    'the escaped slashes in a URL regex are not a line comment, and the pin after them is sealed',
+  );
+  assert.deepEqual(
+    collectPinsFromSource(`const _U = /a\\/*b/;\nexport const P = "${sealed}";`, 'probe.ts'),
+    ['9.9.9'],
+    'an escaped slash-star inside a regex is not a block comment swallowing the rest of the file',
+  );
+  assert.deepEqual(
+    collectPinsFromSource(`const q = /"/; const c = "${sealed}";`, 'probe.ts'),
+    ['9.9.9'],
+    'a regex carrying a quote no longer defeats the scan',
+  );
+  assert.deepEqual(collectPinsFromSource('const q = /foo/; const n = a / b / c;'), []);
+  assert.throws(
+    () => collectPinsFromSource(`const q = /${sealed}/;`, 'probe.ts'),
+    /cannot tell whether @colophon-claims\/verify@9\.9\.9 in probe\.ts is sealed or explained/u,
+    'a specifier inside a regex literal is neither sealed nor prose, so it refuses',
+  );
+  assert.throws(
+    () => collectPinsFromSource(`/* unterminated\nconst c = "${sealed}";`, 'probe.ts'),
+    /cannot tell whether @colophon-claims\/verify@9\.9\.9 in probe\.ts is sealed or explained/u,
+    'an unterminated block comment refuses its tail rather than calling every pin in it prose',
   );
 });
 

@@ -329,30 +329,90 @@ export async function fetchPublishedVerifyVersions(
  */
 const VERIFY_PIN_PATTERN = /@colophon-claims\/verify@([0-9]+(?:\.[0-9]+){0,2})/gu;
 
+const REGEX_PRECEDING_KEYWORDS = new Set([
+  'await', 'case', 'delete', 'do', 'else', 'in', 'instanceof', 'new', 'of', 'return', 'throw',
+  'typeof', 'void', 'yield',
+]);
+
+const IDENTIFIER_CHAR = /[\p{L}\p{N}_$]/u;
+
 /**
- * The source ranges a JavaScript or TypeScript file spends inside a string literal or inside a
- * comment. Everything else is code.
+ * Whether a `/` opens a regex literal, by the standard previous-significant-token rule. The rule is
+ * biased toward regex: only a value -- an identifier that is not a regex-admitting keyword, a
+ * number, a closing `)` or `]`, or a completed literal -- reads the `/` as division. Reading a
+ * regex as division is the direction that loses a pin, because `/^https:\/\//` then opens a line
+ * comment and `/a\/*b/` opens a block comment. Reading division as a regex only widens a span, and
+ * a pin inside a span that is neither string nor comment refuses rather than vanishing.
+ */
+function slashOpensRegex(previous) {
+  if (previous === null) return true;
+  if (previous.value) return false;
+  if (previous.word !== undefined) return REGEX_PRECEDING_KEYWORDS.has(previous.word);
+  return true;
+}
+
+/**
+ * The index of the closing `/` of the regex literal opening at `index`, or -1 when the text is not
+ * one. A regex literal cannot carry an unescaped newline, so a `/` whose line ends before a closing
+ * `/` was division after all.
+ */
+function regexLiteralEnd(text, index) {
+  let cursor = index + 1;
+  let inClass = false;
+  while (cursor < text.length) {
+    const char = text[cursor];
+    if (char === '\\') cursor += 2;
+    else if (char === '\n') return -1;
+    else if (inClass) {
+      if (char === ']') inClass = false;
+      cursor += 1;
+    } else if (char === '[') {
+      inClass = true;
+      cursor += 1;
+    } else if (char === '/') return cursor;
+    else cursor += 1;
+  }
+  return -1;
+}
+
+/**
+ * The source ranges a JavaScript or TypeScript file spends inside a string literal, inside a
+ * comment, or inside a regex literal. Everything else is code.
  *
  * A pin is sealed into a bundle by a string constant; a version named in a comment is prose about
  * a pin, not a pin. Scanning the raw text cannot tell the two apart, so a sentence explaining a
  * pending bump would refuse a publish that nothing in the tree actually blocks (issue #3686).
+ *
+ * Regex literals are tracked for the opposite reason. A scanner with no state for them reads the
+ * escaped slashes in `/^https:\/\//` as a line comment and the escaped slash-star in `/a\/*b/` as
+ * a block comment, and a
+ * pin caught inside either bogus span is classified as prose and dropped -- silently, because a
+ * dropped pin never reaches `unclassified` (issue #3900). They are yielded as their own span kind
+ * rather than folded into `string`, so a pin inside one refuses instead of sealing.
  */
 function* literalAndCommentSpans(text) {
-  const stack = [{ kind: 'code', depth: 0 }];
+  const stack = [{ kind: 'code', depth: 0, previous: null }];
   let index = 0;
   while (index < text.length) {
     const frame = stack[stack.length - 1];
     const char = text[index];
+    // Computed once per slash the heuristic admits; the comment branches below still win the tie,
+    // because `//` is never an empty regex and `/*` is never a valid one.
+    const regexEnd =
+      frame.kind === 'code' && char === '/' && slashOpensRegex(frame.previous)
+        ? regexLiteralEnd(text, index)
+        : -1;
     if (frame.kind === 'template') {
       if (char === '\\') {
         index += 2;
       } else if (char === '`') {
         yield { kind: 'string', start: frame.chunkStart, end: index };
         stack.pop();
+        stack[stack.length - 1].previous = { value: true };
         index += 1;
       } else if (char === '$' && text[index + 1] === '{') {
         yield { kind: 'string', start: frame.chunkStart, end: index };
-        stack.push({ kind: 'code', depth: 0 });
+        stack.push({ kind: 'code', depth: 0, previous: null });
         index += 2;
       } else {
         index += 1;
@@ -364,8 +424,18 @@ function* literalAndCommentSpans(text) {
       index = end + 1;
     } else if (char === '/' && text[index + 1] === '*') {
       const end = text.indexOf('*/', index + 2);
-      yield { kind: 'comment', start: index, end: end < 0 ? text.length : end + 2 };
+      // An unterminated block comment is a syntax error, and calling the rest of the file prose
+      // would drop every pin in it without a word. Refuse the tail instead.
+      yield {
+        kind: end < 0 ? 'unterminated' : 'comment',
+        start: index,
+        end: end < 0 ? text.length : end + 2,
+      };
       index = end < 0 ? text.length : end + 2;
+    } else if (regexEnd >= 0) {
+      yield { kind: 'regex', start: index, end: regexEnd + 1 };
+      frame.previous = { value: true };
+      index = regexEnd + 1;
     } else if (char === '"' || char === "'") {
       let cursor = index + 1;
       while (cursor < text.length) {
@@ -374,21 +444,36 @@ function* literalAndCommentSpans(text) {
         else cursor += 1;
       }
       yield { kind: 'string', start: index, end: Math.min(cursor + 1, text.length) };
+      frame.previous = { value: true };
       index = cursor + 1;
     } else if (char === '`') {
       stack.push({ kind: 'template', chunkStart: index + 1 });
       index += 1;
+    } else if (IDENTIFIER_CHAR.test(char)) {
+      let cursor = index;
+      while (cursor < text.length && IDENTIFIER_CHAR.test(text[cursor])) cursor += 1;
+      const word = text.slice(index, cursor);
+      frame.previous = /^[0-9]/u.test(word) ? { value: true } : { word };
+      index = cursor;
     } else if (char === '{') {
       frame.depth += 1;
+      frame.previous = { punct: char };
       index += 1;
     } else if (char === '}') {
-      if (frame.depth > 0) frame.depth -= 1;
-      else if (stack.length > 1) {
+      if (frame.depth > 0) {
+        frame.depth -= 1;
+        frame.previous = { punct: char };
+      } else if (stack.length > 1) {
         stack.pop();
         stack[stack.length - 1].chunkStart = index + 1;
+      } else {
+        frame.previous = { punct: char };
       }
       index += 1;
     } else {
+      if (!/\s/u.test(char)) {
+        frame.previous = char === ')' || char === ']' ? { value: true } : { punct: char };
+      }
       index += 1;
     }
   }
@@ -397,10 +482,11 @@ function* literalAndCommentSpans(text) {
 /**
  * The `@colophon-claims/verify` specifiers one source file seals, in every shape npx resolves.
  *
- * The scanner above is deliberately small -- it tracks nested template interpolations but has no
- * state for a regex literal carrying a quote -- so it refuses rather than guesses: a specifier it
- * can place in neither a string nor a comment throws. Silently dropping one would hide it from the
- * publish guard, which is the failure this scan exists to prevent.
+ * The scanner above is deliberately small -- it tracks nested template interpolations and regex
+ * literals, and nothing else -- so it refuses rather than guesses: any specifier it cannot place in
+ * a string or a comment throws, including one it can place in a regex literal and one it can place
+ * nowhere at all. Silently dropping one would hide it from the publish guard, which is the failure
+ * this scan exists to prevent.
  */
 export function collectPinsFromSource(text, label = 'source') {
   const spans = [...literalAndCommentSpans(text)];
@@ -409,7 +495,7 @@ export function collectPinsFromSource(text, label = 'source') {
   for (const match of text.matchAll(VERIFY_PIN_PATTERN)) {
     const span = spans.find(({ start, end }) => match.index >= start && match.index < end);
     if (span?.kind === 'string') pins.add(match[1]);
-    else if (!span) unclassified.push(match[1]);
+    else if (span?.kind !== 'comment') unclassified.push(match[1]);
   }
   if (unclassified.length > 0) {
     throw new Error(
