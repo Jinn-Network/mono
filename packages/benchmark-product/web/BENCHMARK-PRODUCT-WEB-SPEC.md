@@ -4,7 +4,7 @@
 |---|---|
 | **Version** | 0.3 |
 | **Date** | 2026-08-07 |
-| **Amended** | 2026-08-19 — catalog `method.bind` form ([DR-2026-08-19](../../../log/decisions/2026-08-19-colophon-method-cli-discover.md)); 2026-09-02 — declared and strict all-slots denominators on the headline tables (issue #2977) |
+| **Amended** | 2026-08-19 — catalog `method.bind` form ([DR-2026-08-19](../../../log/decisions/2026-08-19-colophon-method-cli-discover.md)); 2026-09-02 — declared and strict all-slots denominators on the headline tables (issue #2977); 2026-09-04 — per-subject sourcing of the strict denominator and the negative-delta state message (issues #3700, #3701) |
 | **Author** | Packet BP-30, amended by packet BP-31 of the standalone benchmarking product implementation program |
 | **Shape** | `feat` |
 | **Status** | draft |
@@ -345,6 +345,11 @@ Covers the design spec §4.6 Report row. The **Claim package** sub-surface
 - **State messages** — "recompute divergence" — when an independent
   `verify` recomputation disagrees with the sealed Report, this is
   fail-loud: rendered prominently, never downgraded to a footnote.
+  "denominator disagreement" — when an arm's declared denominator exceeds the
+  planned slots the sealed Matrix counted for it, the two sealed records
+  disagree; the surface says so beside the number rather than printing a
+  negative integer as though it were a count. Neither message maps to an
+  action: both are read-only statements about what the sealed records say.
 - **Collections** — subject matrices; conflicted-cell list; limitations.
 - **Actions** — inspect / verify → the same `runResults` / `results` and
   `runVerify` / `verify` operations described in §3.4 (a Report's
@@ -374,11 +379,18 @@ identity, relative path, publication time, and named checks from RunState.
 Both headline-by-arm tables on this surface — the sealed Report's and the
 claim package's — state the method's declared denominator, the strict
 all-slots denominator, and the count of planned slots the declared one leaves
-out (issue #2977). The strict number is §3.4's per-arm `expected`, already in
-this surface's state; the third column is the difference between two sealed
-counts. This is accounting over stored facts, not a calculated statistic, and
-it adds no state, collection, or action. All three render always, including
-when nothing was left out.
+out (issue #2977). This is accounting over stored facts, not a calculated
+statistic, and it adds no state, collection, or action. All three render
+always, including when nothing was left out.
+
+Each table takes its strict number from the accounting that belongs to that
+table's own denominator (issue #3700). The claim package's headline covers the
+whole run, so it reads §3.4's run-wide per-arm `expected`. The Report's
+headline is per subject, so each rendered subject reads its own
+`disclosures.perSubject[…].attrition`, matched to the parsed results entry by
+subject digest. A subject with no matching sealed disclosure withholds its
+strict number rather than borrowing the run-wide one: stating a wrong number
+is worse than stating none.
 
 The published bundle page does not carry the pair. Its bytes are pinned by the
 verifier that every allocated bundle format names, so rendering it there is a

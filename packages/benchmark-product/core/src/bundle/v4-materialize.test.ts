@@ -692,3 +692,129 @@ describe("binary public-bundle/4 standalone-reader rejection boundaries", () => 
     await expectRejectedAt(bundleDir, "report-verification");
   }, 120_000);
 });
+
+/**
+ * The qualification projection's exclusion list, both directions (issues #3246, #3247).
+ *
+ * Every other qualification-carrying fixture yields zero or one exclusion, where sorting the
+ * projection is a no-op and comparing it proves nothing. The `two-exclusions` scenario is the
+ * first with two, deliberately emitted in replacement-ledger order that is NOT their sorted
+ * order, so the producer's sort and the reader's re-derivation both have something to be wrong
+ * about.
+ */
+describe("binary public-bundle/4 qualification exclusions", () => {
+  let shared: Promise<SyntheticV4BundleFixture> | undefined;
+
+  /** One real two-human run carrying two exclusions, built once; tamper cases copy its bundle. */
+  function twoExclusions(): Promise<SyntheticV4BundleFixture> {
+    if (shared === undefined) {
+      const root = mkdtempSync(join(tmpdir(), "binary-v4-two-exclusions-"));
+      shared = createSyntheticV4BundleFixture({
+        workspaceDir: root,
+        truthAdmission: "two-human-unanimous",
+        scenario: "two-exclusions",
+      });
+    }
+    return shared;
+  }
+
+  function bare(digest: string): string {
+    return digest.startsWith("sha256:") ? digest.slice("sha256:".length) : digest;
+  }
+
+  function record(bundleDir: string, digest: string): Record<string, any> {
+    return json(join(bundleDir, "records", `${bare(digest)}.bin`));
+  }
+
+  /** The excluded digests in the authenticated replacement ledger's own order. */
+  function ledgerOrder(bundleDir: string, qualification: Record<string, any>): string[] {
+    const manifest = record(bundleDir, qualification.admissionManifestSha256 as string);
+    const ledger = record(bundleDir, manifest.replacementLedgerSha256 as string);
+    return (ledger.entries as Array<{ excludedItemSha256: string }>)
+      .map((entry) => bare(entry.excludedItemSha256));
+  }
+
+  test("the materialized projection is sorted even when the ledger is not", async () => {
+    const fixture = await twoExclusions();
+    const bundleDir = fixture.bundle.bundleDir;
+    const qualification = json(join(bundleDir, "qualification.json"));
+    const exclusions = qualification.exclusions as Array<{ itemSha256: string }>;
+
+    expect(exclusions).toHaveLength(2);
+
+    // The case is only non-vacuous while the two orders disagree. If a payload field ever changes
+    // and the fixture's digests reorder, this fails loudly rather than letting the sort go
+    // untested again (issue #3247's whole complaint).
+    const carried = exclusions.map((entry) => bare(entry.itemSha256));
+    const ledger = ledgerOrder(bundleDir, qualification);
+    expect([...ledger].sort()).toEqual([...carried].sort());
+    expect(ledger).not.toEqual(carried);
+
+    expect(carried).toEqual([...carried].sort());
+  }, 120_000);
+
+  // The three tamper cases below only prove anything if the UNTAMPERED bundle passes: a
+  // `projectAdmissionExclusions` that disagreed with the producer for any reason -- a digest
+  // prefix it did not strip, a sort it did not mirror, a field it named differently -- would
+  // refuse every bundle at this same path, and all three would still be green. This is the
+  // positive half, and it is the kill-check for the two-sided mirror the sort lives in.
+  test("the untampered two-exclusions bundle cold-verifies with both exclusions counted", async () => {
+    const fixture = await twoExclusions();
+
+    const verification = await verifyPublicBundle(fixture.bundle.bundleDir);
+    expect(verification.format).toBe(BUNDLE_V4_FORMAT);
+    if (verification.format !== BUNDLE_V4_FORMAT) {
+      throw new Error(`expected ${BUNDLE_V4_FORMAT}, received ${verification.format}`);
+    }
+    expect(verification.qualification).toEqual({
+      publicationGrade: true,
+      truthAdmission: "two-human-unanimous",
+      candidateClasses: ["synthetic"],
+      strata: ["core", "stress"],
+      armCount: 4,
+      itemCount: 2,
+      exclusionCount: 2,
+    });
+  }, 120_000);
+
+  test("the reader refuses an exclusion whose reason was rewritten", async () => {
+    const fixture = await twoExclusions();
+    const bundleDir = copyBundle(fixture.bundle.bundleDir, "exclusion-reason");
+    const qualification = json(join(bundleDir, "qualification.json"));
+    // `review-disagreement` -> `review-incomplete` keeps both digests reachable, correctly roled,
+    // sorted and unique, so no pre-existing check can catch it. Only re-deriving the list can.
+    qualification.exclusions[0].reason = qualification.exclusions[0].reason === "review-incomplete"
+      ? "review-disagreement"
+      : "review-incomplete";
+    writeCanonical(join(bundleDir, "qualification.json"), qualification);
+    rewriteManifest(bundleDir);
+
+    await expectRejectedAt(bundleDir, "qualification.json");
+  }, 120_000);
+
+  test("the reader refuses an exclusion pointed at the other entry's replacement", async () => {
+    const fixture = await twoExclusions();
+    const bundleDir = copyBundle(fixture.bundle.bundleDir, "exclusion-replacement");
+    const qualification = json(join(bundleDir, "qualification.json"));
+    // Both replacements are admitted source-items already reachable from this bundle, so the
+    // swapped digest satisfies the schema's reachability and role checks exactly as the real one
+    // did.
+    const swapped = qualification.exclusions[1].replacementItemSha256 as string;
+    qualification.exclusions[0].replacementItemSha256 = swapped;
+    writeCanonical(join(bundleDir, "qualification.json"), qualification);
+    rewriteManifest(bundleDir);
+
+    await expectRejectedAt(bundleDir, "qualification.json");
+  }, 120_000);
+
+  test("the reader refuses a dropped exclusion", async () => {
+    const fixture = await twoExclusions();
+    const bundleDir = copyBundle(fixture.bundle.bundleDir, "exclusion-dropped");
+    const qualification = json(join(bundleDir, "qualification.json"));
+    qualification.exclusions = [qualification.exclusions[0]];
+    writeCanonical(join(bundleDir, "qualification.json"), qualification);
+    rewriteManifest(bundleDir);
+
+    await expectRejectedAt(bundleDir, "qualification.json");
+  }, 120_000);
+});

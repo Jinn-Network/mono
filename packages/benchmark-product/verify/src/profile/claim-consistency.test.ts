@@ -627,3 +627,87 @@ describe("assertClaimConsistency: paired-estimate limitation (packet #2837, port
     )).not.toThrow();
   });
 });
+
+/**
+ * Issue #3855: the projection rebuild is on the reader path -- `assertClaimConsistency` calls
+ * `buildClaimPackage` on every successful verification -- so a sealed Report whose results do not
+ * carry the shape its own method produces is a named disagreement with the record a reader was
+ * handed, not an internal fault. It refuses with the package's typed error, at `report.json`, the
+ * source that carries the malformed fact. Pinned structurally on `name` / `code` / `issues[].path`
+ * rather than on the prose: messages are free to change, codes and paths are the contract.
+ */
+describe("issue #3855: the projection rebuild refuses at the source that carries the malformed fact", () => {
+  /** A Run whose sealed plan carries the method under test, so the assurance cross-check upstream
+   * of the projection passes and the projection itself is what the assertion reaches. */
+  function planFor(method: ReportRecord["method"]): RunRecord {
+    return {
+      ...runRecord,
+      analysisPlan: [{ method: method.id, version: method.version, parameters: { verdictRule: RESOLVED_ASSURANCE.verdictRule } }],
+    } as unknown as RunRecord;
+  }
+
+  function projectFrom(results: unknown, method?: ReportRecord["method"]): ClaimPackage {
+    const plannedRun = method === undefined ? runRecord : planFor(method);
+    return buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord: plannedRun,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord: {
+        ...reportRecord,
+        ...(method === undefined ? {} : { method }),
+        results,
+      } as unknown as ReportRecord,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, plannedRun),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+    });
+  }
+
+  const refusal = { name: "BenchmarkProductError", code: "record-integrity", issues: [expect.objectContaining({ path: "report.json" })] };
+
+  test("a Report carrying no single-subject results wrapper refuses", () => {
+    expect(() => projectFrom({ perSubject: [] })).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a Report whose results do not carry its method's shape refuses", () => {
+    expect(() => projectFrom({ perSubject: [{ results: { conflicted: { count: 0, cellKeys: [] } } }] }))
+      .toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a Report naming a method with no claim-package projection refuses", () => {
+    const method = { id: "jinn.benchmarking.method/not-wired", version: BENCHMARKING_METHOD_VERSION, parameters: {} };
+    expect(() => projectFrom(reportRecord.results, method as ReportRecord["method"]))
+      .toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a Report naming an unsupported version of a wired method refuses", () => {
+    const method = { id: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: "99", parameters: {} };
+    expect(() => projectFrom(reportRecord.results, method as ReportRecord["method"]))
+      .toThrow(expect.objectContaining(refusal));
+  });
+
+  /** The two throws `buildClaimPackage` keeps bare are internal faults, not reader-facing: the
+   * CALLER derives both facts they assert. `execution` stays the right code for them, so they must
+   * NOT be typed -- this pins that boundary rather than only the conversions. */
+  test("the assurance-primitive mismatch stays an untyped internal fault", () => {
+    expect(() => buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: { ...RESOLVED_ASSURANCE, minVerdicts: 99 } },
+    })).toThrow(expect.objectContaining({ name: "Error" }));
+  });
+});

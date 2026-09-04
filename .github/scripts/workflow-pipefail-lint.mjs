@@ -522,25 +522,48 @@ function splitTopLevel(text) {
 // The body of a compound statement, or null. Unwrapping lets the guard that covers the
 // compound cover its contents, and keeps the finding naming the statement inside rather
 // than the whole construct.
-// `isolated` marks a subshell. Its body runs in a child shell, so a `set -o pipefail`
-// there does not survive the closing paren — verified against bash. A `{ … }` group and
-// the loop and `if` bodies all run in the current shell, so their toggles do carry.
+//
+// `carries` says whether a `set ±o pipefail` written in the body may reach the statements
+// after the closing token. Only the brace group runs in the current shell *and*
+// unconditionally; a subshell scopes the flag to a child shell, and an `if`, `case` or
+// loop body may never run at all — so a toggle in any of those is read and dropped rather
+// than allowed to move the boundary for code it does not govern.
 const COMPOUNDS = [
-  { open: /^\s*\{\s/u, close: /\s\}\s*$/u, isolated: false },
-  { open: /^\s*\(/u, close: /\)\s*$/u, isolated: true },
-  { open: /^\s*if\s/u, close: /\sfi\s*$/u, isolated: false },
-  { open: /^\s*(?:for|while|until|select)\s/u, close: /\sdone\s*$/u, isolated: false },
-  { open: /^\s*case\s/u, close: /\sesac\s*$/u, isolated: false },
+  { open: /^\s*\{\s/u, close: /\s\}\s*$/u, carries: true },
+  { open: /^\s*\(/u, close: /\)\s*$/u, carries: false },
+  { open: /^\s*if\s/u, close: /\sfi\s*$/u, carries: false },
+  { open: /^\s*(?:for|while|until|select)\s/u, close: /\sdone\s*$/u, carries: false },
+  { open: /^\s*case\s/u, close: /\sesac\s*$/u, carries: false },
 ];
 
+// The `f ()` / `function f` / `function f ()` prefix standing before a definition's group,
+// as its length in characters, or 0. Without skipping it `compoundBody` never sees the
+// opener, the definition falls through to the simple-pipeline branch, and splitting its
+// raw text on `|` cuts an inner `||` in half and loses the guard entirely — a false
+// positive on a required gate. The parentheses are what mark a definition unless
+// `function` is written, so `f { …; }` stays the command with a brace-group argument that
+// it is. A definition's body is never `carries`: defining a function does not run it.
+const DEFINITION_PREFIX = /^\s*(?:function\s+[^\s(){}]+\s*(?:\(\s*\)\s*)?|[^\s(){}]+\s*\(\s*\)\s*)/u;
+
+function definitionPrefixLength(statement) {
+  const match = DEFINITION_PREFIX.exec(statement);
+  if (match === null) return 0;
+  // The prefix only counts when a group actually opens behind it; otherwise the leading
+  // word is an ordinary command and the statement is not a definition at all.
+  const rest = statement.slice(match[0].length);
+  return /^[({]/u.test(rest) ? match[0].length : 0;
+}
+
 function compoundBody(statement) {
-  for (const { open, close, isolated } of COMPOUNDS) {
-    const opener = open.exec(statement);
+  const skip = definitionPrefixLength(statement);
+  const text = statement.slice(skip);
+  for (const { open, close, carries } of COMPOUNDS) {
+    const opener = open.exec(text);
     if (opener === null) continue;
-    const closer = close.exec(statement);
+    const closer = close.exec(text);
     const bodyStart = opener.index + opener[0].length;
     if (closer === null || closer.index < bodyStart) continue;
-    return { body: statement.slice(bodyStart, closer.index), isolated };
+    return { body: text.slice(bodyStart, closer.index), carries: skip === 0 && carries };
   }
   return null;
 }
@@ -802,12 +825,13 @@ function shellSetsPipefail(shell) {
 // GitHub invokes `bash --noprofile --norc -eo pipefail {0}` for `shell: bash`, `sh -e {0}`
 // for `shell: sh`, and `bash -e {0}` when a step declares no shell. Only the shells that
 // do *not* set pipefail reach this, so name the one that actually laundered the producer
-// rather than always saying `bash`.
+// rather than always saying `bash` — and name it as GitHub writes it, `{0}` included, so
+// the advisory can be matched against the workflow syntax it is talking about.
 function invokedShellLabel(shell) {
   if (shell === null) return 'default shell (`bash -e`)';
   const trimmed = shell.trim();
   const name = trimmed.split(/\s+/u)[0].split('/').at(-1);
-  return trimmed === name ? `\`${name} -e\`` : `\`${trimmed}\``;
+  return trimmed === name ? `\`${name} -e {0}\`` : `\`${trimmed}\``;
 }
 
 function pipefailToggle(statement) {
@@ -876,32 +900,58 @@ function logicalLines(body) {
 }
 
 /**
+ * Which unit of a list the operator after it guards. `||` guards the unit to its left, and
+ * `&&` passes that guard further left, because `a && b || true` is `(a && b) || true` — a
+ * failing `a` short-circuits into the same `|| true`. Reading only the immediate operator
+ * reported `producer | head -1 && echo hit || true` as an error it could not honestly
+ * clear.
+ */
+function guardFlags(units) {
+  const guarded = new Array(units.length).fill(false);
+  for (let index = units.length - 1; index >= 0; index -= 1) {
+    const separator = units[index].separator;
+    guarded[index] = separator === '||' || (separator === '&&' && (guarded[index + 1] ?? false));
+  }
+  return guarded;
+}
+
+/**
  * Walk one logical line's statements, honouring nesting: a `||` guard written after a
  * compound guards everything inside it. A compound is unwrapped and re-walked so the
  * finding still names the statement that owns the pipeline.
  *
+ * `scope` says what a `set ±o pipefail` found here may do. At `'top'` it moves the
+ * boundary as it always has. Unwrapping compounds made nested toggles visible to the walk
+ * for the first time, and honouring those unconditionally would let a `set +o pipefail`
+ * written inside a branch that never runs downgrade every later pipeline from `error` to
+ * `warning` — the required lane going green over a genuinely exposed site. So a nested
+ * toggle may only ever tighten the verdict, and only from a compound that runs in the
+ * current shell (`'carry'`); everywhere else it is read and dropped (`'sealed'`).
+ *
  * @param {string} text
  * @param {boolean} guarded
  * @param {{pipefail: boolean, report: (statement: string, consumer: string) => void}} context
+ * @param {'top'|'carry'|'sealed'} [scope]
  */
-function scanStatements(text, guarded, context) {
-  for (const unit of splitTopLevel(text)) {
+function scanStatements(text, guarded, context, scope = 'top') {
+  const units = splitTopLevel(text);
+  const guards = guardFlags(units);
+
+  for (const [index, unit] of units.entries()) {
     const statement = unit.text;
     if (statement.trim() === '') continue;
-    const unitGuarded = guarded || unit.separator === '||';
+    const unitGuarded = guarded || guards[index];
 
     const toggle = pipefailToggle(statement);
     if (toggle !== null) {
-      context.pipefail = toggle;
+      if (scope === 'top' || (scope === 'carry' && toggle)) context.pipefail = toggle;
       continue;
     }
 
     const compound = compoundBody(statement);
     if (compound !== null) {
-      // A subshell gets a copy of the pipefail state, so its `set ±o pipefail` cannot
-      // reach the statements after the closing paren.
-      const nested = compound.isolated ? { ...context } : context;
-      scanStatements(compound.body, unitGuarded, nested);
+      const nestedScope = scope !== 'sealed' && compound.carries ? 'carry' : 'sealed';
+      scanStatements(compound.body, unitGuarded, context, nestedScope);
       continue;
     }
     if (unitGuarded) continue;
