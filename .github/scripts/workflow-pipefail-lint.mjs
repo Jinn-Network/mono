@@ -442,7 +442,22 @@ function shellTokens(text) {
  * across body lines — matches nothing and leaves its `;` splitting exactly as before,
  * which is what keeps a multi-line compound reporting on the line that owns the site.
  */
-function tokenCompound(token) {
+// Words after which the shell begins a new command, so a reserved word standing there
+// is a keyword rather than an argument. `|` and `&` stay inside a word token (only `&&`,
+// `||` and `;` are operators), and `(` alone opens a subshell whose first word leads a
+// statement — `(printf` does not, its next word being printf's argument.
+const COMMAND_POSITION_WORDS = new Set(['|', '&', '!', 'then', 'else', 'elif', 'do', '{', 'time']);
+
+const BRACE_TOKENS = new Set(['{', '}']);
+
+function leadsStatement(previous) {
+  if (previous === undefined) return true;
+  if (previous.type === 'operator') return true;
+  if (previous.value === '(') return true;
+  return COMMAND_POSITION_WORDS.has(previous.value);
+}
+
+function tokenCompound(token, previous) {
   if (token.type !== 'word') return null;
   // `(cmd)` written with no spaces is self-contained: it can hold no top-level separator,
   // so counting it would only unbalance the depth.
@@ -450,9 +465,18 @@ function tokenCompound(token) {
   if (token.opensParen) return { role: 'open', kind: 'paren' };
   if (token.closesParen) return { role: 'close', kind: 'paren' };
   const opener = OPENER_KIND.get(token.value);
-  if (opener !== undefined) return { role: 'open', kind: opener };
-  const closer = CLOSER_KIND.get(token.value);
-  return closer === undefined ? null : { role: 'close', kind: closer };
+  const closer = opener === undefined ? CLOSER_KIND.get(token.value) : undefined;
+  if (opener === undefined && closer === undefined) return null;
+  // A reserved *word* is only a compound keyword where a statement may begin. Classifying
+  // it by value alone made `grep -w case file` push a `case` nothing ever popped, and the
+  // enclosing subshell's genuinely guarded `)` was then read as that phantom `case`'s arm
+  // terminator and skipped — so the guard never retracted the pipeline it covered. `{`
+  // and `}` are punctuation rather than words: they are exempt, because a function
+  // definition writes its `{` after the `()` that no rule can call a command position.
+  if (!BRACE_TOKENS.has(token.value) && !leadsStatement(previous)) return null;
+  return opener === undefined
+    ? { role: 'close', kind: /** @type {string} */ (closer) }
+    : { role: 'open', kind: opener };
 }
 
 function matchCompounds(tokens) {
@@ -462,7 +486,7 @@ function matchCompounds(tokens) {
   /** @type {{kind: string, guarded: boolean}[]} */
   const unmatchedClosers = [];
   for (const [position, token] of tokens.entries()) {
-    const compound = tokenCompound(token);
+    const compound = tokenCompound(token, tokens[position - 1]);
     if (compound === null) continue;
     if (compound.role === 'open') {
       open.push({ position, kind: compound.kind });
@@ -533,7 +557,7 @@ function lineNesting(text) {
       kind: entry.kind,
       definition: opensDefinition(text, tokens, entry.position),
     })),
-    openerFirst: first !== undefined && tokenCompound(first)?.role === 'open',
+    openerFirst: first !== undefined && tokenCompound(first, undefined)?.role === 'open',
   };
 }
 

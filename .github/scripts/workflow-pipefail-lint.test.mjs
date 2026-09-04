@@ -1335,6 +1335,47 @@ test("a `case` arm's `)` does not close the subshell around the `case` (#3924)",
   );
 });
 
+test('a bare `case` word does not suppress the subshell guard (#4015)', () => {
+  // `tokenCompound` classified the reserved word by value alone, so a `case` written as
+  // an ordinary argument pushed an opener nothing ever popped. The subshell's genuinely
+  // guarded `)` was then read as that phantom `case`'s arm terminator and skipped, the
+  // retraction never ran, and a guarded pipeline reddened a required gate.
+  for (const bare of ['grep -w case file', 'echo case', 'find . | xargs -I case echo case']) {
+    assert.deepEqual(
+      severities(['(', `  ${bare}`, '  producer | head -1', ') || true'].join('\n'), { shell: 'bash' }),
+      [],
+      bare,
+    );
+    // The bare word may also stand after the pipeline: the stack accumulates across the
+    // logical line before the `)` is seen.
+    assert.deepEqual(
+      severities(['(', '  producer | head -1', `  ${bare}`, ') || true'].join('\n'), { shell: 'bash' }),
+      [],
+      bare,
+    );
+  }
+  // A genuinely unguarded pipeline inside a subshell holding a bare `case` still reports.
+  assert.deepEqual(
+    severities(['(', '  echo case', '  producer | head -1', ')'].join('\n'), { shell: 'bash' }),
+    ['error:head'],
+  );
+  // The same positional rule applies to every reserved word, opener and closer alike.
+  for (const bare of ['echo if', 'echo for', 'echo while', 'echo until', 'echo select', 'echo done', 'echo fi', 'echo esac']) {
+    assert.deepEqual(
+      severities(['(', `  ${bare}`, '  producer | head -1', ') || true'].join('\n'), { shell: 'bash' }),
+      [],
+      bare,
+    );
+  }
+  // A real `case` still opens one, wherever a statement may legally begin.
+  assert.deepEqual(
+    severities(['if true; then case "$x" in a) producer | head -1 ;; esac; fi'].join('\n'), {
+      shell: 'bash',
+    }),
+    ['error:head'],
+  );
+});
+
 test('a guard on a function definition does not reach the deferred body (#4000)', () => {
   // Verified against bash: `f () { seq 1 5000000 | head -1 >/dev/null; } || true; f` exits
   // 141 at the call. The guard covers defining the function, which cannot fail; the body
