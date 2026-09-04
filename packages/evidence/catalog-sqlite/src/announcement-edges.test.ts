@@ -5,14 +5,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { EvidenceCatalogError, type Sha256Digest } from "@jinn-network/evidence-discovery";
+import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
+import { announcementEdgeSelectSql } from "./announcement-edges.js";
 import {
   ANNOUNCEMENT_EDGE_MAX_LIMIT,
   announcementEdgesFromCard,
   createSqliteEvidenceCatalog,
 } from "./index.js";
-import type { AnnouncementEdgeIndexInput, SqliteEvidenceCatalog } from "./types.js";
+import type {
+  AnnouncementEdgeIndexInput,
+  AnnouncementEdgeQuery,
+  SqliteEvidenceCatalog,
+} from "./types.js";
 
 const generation = {
   catalogSchemaVersion: "1.0.0",
@@ -150,6 +156,29 @@ describe("announcementEdgesFromCard", () => {
     expect(() => announcementEdgesFromCard(announcement(
       "", "ann-1", EXECUTION_KIND, EXECUTION_ONE, ["taskDigest"], { taskDigest: TASK },
     ))).toThrow(EvidenceCatalogError);
+  });
+
+  test("reads a repeated field name once, rather than emitting a duplicate primary key", () => {
+    // A field named twice describes one edge twice. Emitted literally, the two rows collide on
+    // `(source_id, record_digest, field, ordinal)` and the constraint surfaces as IO_FAILURE --
+    // an infrastructure fault standing in for a caller-shaped mistake.
+    const edges = announcementEdgesFromCard(announcement(
+      HOLDER, "ann-1", EXECUTION_KIND, EXECUTION_ONE,
+      ["taskDigest", "resultDigests", "taskDigest"],
+      { taskDigest: TASK, resultDigests: [RESULT_A] },
+    ));
+    expect(edges.map((edge) => [edge.field, edge.ordinal])).toEqual([
+      ["taskDigest", 0],
+      ["resultDigests", 0],
+    ]);
+  });
+
+  test("persists a repeated field name without a constraint failure", async () => {
+    const repeated = digest("f1");
+    await expect(catalog.indexAnnouncementEdges(announcement(
+      HOLDER, "ann-repeat", EXECUTION_KIND, repeated, ["taskDigest", "taskDigest"],
+      { taskDigest: TASK },
+    ))).resolves.toMatchObject({ indexed: 1 });
   });
 });
 
@@ -368,5 +397,57 @@ describe("paging a heavily referenced target", () => {
       targetDigest: popular,
       limit: ANNOUNCEMENT_EDGE_MAX_LIMIT + 1,
     })).rejects.toThrow(EvidenceCatalogError);
+  });
+
+  test("refuses a query field it does not serve rather than dropping the filter", async () => {
+    // `sourceID` is a typo for `sourceId`. Ignored, it would drop the isolation filter and return
+    // every source's edges under a query that reads as scoped to one.
+    await expect(catalog.queryAnnouncementEdges(
+      { sourceID: HOLDER, targetDigest: TASK } as unknown as AnnouncementEdgeQuery,
+    )).rejects.toMatchObject({ code: "INVALID_QUERY" });
+  });
+});
+
+describe("announcement-edge index coverage", () => {
+  // The plan is asserted over the statement the binding itself builds, so a change to the SELECT
+  // or the ORDER BY moves this assertion with it. A temp b-tree here means the page cost is
+  // quadratic in the page depth even though the results stay correct.
+  const planFor = (where: string): string[] => {
+    // The real catalog file, so the plan is taken against the schema this package creates.
+    const database = new Database(catalog.databasePath, { readonly: true });
+    // One binding per filter placeholder, plus the LIMIT the statement always carries. The
+    // values are irrelevant to the plan; SQLite only needs the statement to be fully bound.
+    const bindings = Array.from({ length: (where.match(/\?/gu) ?? []).length + 1 }, () => "x");
+    try {
+      return (database
+        .prepare(`EXPLAIN QUERY PLAN ${announcementEdgeSelectSql(where)}`)
+        .all(...bindings) as { detail: string }[]).map((row) => row.detail);
+    } finally {
+      database.close();
+    }
+  };
+
+  test("covers the referrers shape the README advertises: target plus one field", () => {
+    const plan = planFor("target_digest = ? AND field = ?");
+    expect(plan.join("\n")).toContain("announcement_edges_target_field_idx");
+    expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+  });
+
+  test("still covers the target-only referrers shape", () => {
+    const plan = planFor("target_digest = ?");
+    expect(plan.join("\n")).toContain("announcement_edges_target_idx");
+    expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+  });
+
+  test("covers the outbound shape narrowed to one field, which the graph walk pages through", () => {
+    const plan = planFor("record_digest = ? AND field = ?");
+    expect(plan.join("\n")).toContain("announcement_edges_record_field_idx");
+    expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+  });
+
+  test("still covers the record-only outbound shape", () => {
+    const plan = planFor("record_digest = ?");
+    expect(plan.join("\n")).toContain("announcement_edges_record_idx");
+    expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
   });
 });
