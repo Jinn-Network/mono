@@ -665,11 +665,19 @@ function compoundBody(tokens) {
  * everything the compound contains — and an unguarded compound is unwrapped and walked
  * again, so a guard written inside it applies to the inside only.
  *
+ * A `set … pipefail` is honoured only at the top level of the walk. Nested toggles are
+ * read but never carried forward: a `( … )` or function body scopes the flag to its own
+ * invocation, and an `if false; then set +o pipefail; fi` branch never runs at all, so
+ * letting either mutate the flag would downgrade a genuine `error` on the pipelines that
+ * follow. Unwrapping compounds made those toggles visible for the first time; this keeps
+ * the flag's reach where it was.
+ *
  * @param {string} text the logical line the tokens were read from
  * @param {object[]} tokens the tokens of this list
  * @param {{pipefail: boolean, report: (statement: string, consumer: string) => void}} context
+ * @param {boolean} [topLevel] false once the walk has descended into a compound body
  */
-function walkStatement(text, tokens, context) {
+function walkStatement(text, tokens, context, topLevel = true) {
   const units = splitStatementUnits(tokens);
   const guarded = guardFlags(units);
 
@@ -679,14 +687,14 @@ function walkStatement(text, tokens, context) {
 
     const toggle = pipefailToggle(statement);
     if (toggle !== null) {
-      context.pipefail = toggle;
+      if (topLevel) context.pipefail = toggle;
       continue;
     }
     if (guarded[index]) continue;
 
     const body = compoundBody(unit.tokens);
     if (body !== null) {
-      walkStatement(text, body, context);
+      walkStatement(text, body, context, false);
       continue;
     }
 

@@ -190,6 +190,32 @@ test('a mid-block `set -o pipefail` moves the boundary, and `set +o pipefail` mo
   );
 });
 
+test('a `set … pipefail` nested inside a compound does not escape it', () => {
+  // Unwrapping compounds made these toggles visible to the walk for the first time.
+  // Honouring them would downgrade a genuine `error` on the pipeline that follows —
+  // under `shell: bash` pipefail is in scope for it in every one of these shapes, and
+  // the `if false` branch does not even run.
+  for (const nested of [
+    '( set +o pipefail; echo x )',
+    '{ set +o pipefail; echo x; }',
+    'if false; then set +o pipefail; fi',
+    'for f in a; do set +o pipefail; done',
+    'f() { set +o pipefail; }',
+  ]) {
+    assert.deepEqual(
+      severities([nested, 'git tag | head -1'].join('\n'), { shell: 'bash' }),
+      ['error:head'],
+      nested,
+    );
+  }
+
+  // The mirror image: a branch that never runs must not red a gate that should advise.
+  assert.deepEqual(
+    severities(['if false; then set -o pipefail; fi', 'git tag | head -1'].join('\n'), { shell: 'sh' }),
+    ['warning:head'],
+  );
+});
+
 test('`shell:` is found on either side of the `run:` key it belongs to', () => {
   const source = [
     'jobs:',
