@@ -107,13 +107,21 @@ node "$COLOPHON" draft create --workspace "$WS" --principal operator \
 node "$COLOPHON" runtime inspect eval select --workspace "$WS" \
   --principal operator --draft inspect-one --file "$WS/selection.json" --json
 node "$COLOPHON" quote --workspace "$WS" --principal operator --draft inspect-one --json
-node "$COLOPHON" lock --workspace "$WS" --principal operator --draft inspect-one
+node "$COLOPHON" lock --ack-sample-size --workspace "$WS" --principal operator --draft inspect-one
 node "$COLOPHON" launch --workspace "$WS" --principal operator --draft inspect-one
 node "$COLOPHON" collect --workspace "$WS" --principal operator --draft inspect-one --json
 node "$COLOPHON" runtime inspect eval export --workspace "$WS" \
   --principal operator --draft inspect-one --arm control --json
 node "$COLOPHON" report --workspace "$WS" --principal operator --draft inspect-one --json
 ```
+
+`--ack-sample-size` is required on every lock. Before running the block above,
+run the lock once on its own without the flag: it refuses, and the refusal
+prints the widest 95% interval this run's per-arm n can produce, alongside the
+widths at roughly double and half that n. Read those widths, decide whether the
+declared n is the sample size this run needs, and only then run the block. The
+acknowledged n and width are sealed into the Run and reprinted on the lock's
+stdout above the run digest.
 
 Expect two judged cells (1 sample × 2 arms × 1 replicate). mockllm is local
 and usually finishes in seconds.

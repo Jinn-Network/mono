@@ -461,6 +461,9 @@ export function containerGraderReportSource(
           platform,
           workdir,
           mounts: [{ source: hostWorkdir, target: workdir, readOnly: false }],
+          // temp-env: the environment inside the grader CONTAINER, not a host child. The container's
+          // temp directory is its own filesystem's; the only host path it can write is the workdir
+          // mount above, which the caller owns.
           env: options.env ?? {},
           timeoutSignal,
         });

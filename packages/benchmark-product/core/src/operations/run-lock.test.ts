@@ -5,9 +5,11 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   ANCHOR_INTENT_EXTENSION,
   BEACON_SOURCE_EXTENSION,
+  SAMPLE_SIZE_ADVISORY_EXTENSION,
   parseRun,
   readBeaconSource,
   readRunAnchorIntentExtension,
+  readRunSampleSizeAdvisory,
   sealRun,
 } from "@jinn-network/benchmarking-records";
 import { PREDICTION_FORECAST_PROFILE_DIGEST_HEX } from "@jinn-network/task-execution-profiles";
@@ -21,7 +23,7 @@ import { authorityGrant } from "./authority-ops.js";
 import type { OperationContext } from "./context.js";
 import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
-import { runLock } from "./run-lock.js";
+import { draftSampleSizeAdvisory, runLock } from "./run-lock.js";
 import { buildRegistrationClosure } from "./publication-register.js";
 import { runQuote } from "./run-quote.js";
 import { sampleInit } from "./sample.js";
@@ -81,7 +83,7 @@ describe("runLock — lifecycle transition", () => {
 
     const entries = readAuditEntries(workspaceDir);
     expect(entries[entries.length - 1]).toMatchObject({ action: "lock", subject: "draft-1", outcome: "ok" });
-  }, 30_000);
+  });
 
   test("retains an exact registration closure ordered Task material -> Tasks -> Benchmark -> Run", async () => {
     const clock = makeClock();
@@ -120,7 +122,7 @@ describe("runLock — lifecycle transition", () => {
       locked.result.runSha256,
       "2026-08-13T12:00:00Z",
     )).toThrow(/missing/);
-  }, 30_000);
+  });
 
   test("refuses illegal-transition when the draft is not 'quoted' (e.g. still 'draft')", async () => {
     const clock = makeClock();
@@ -143,7 +145,7 @@ describe("runLock — lifecycle transition", () => {
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.error.code).toBe("illegal-transition");
-  }, 30_000);
+  });
 });
 
 describe("runLock — A2 quote invalidation", () => {
@@ -173,7 +175,7 @@ describe("runLock — A2 quote invalidation", () => {
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("conflict");
     expect(outcome.error.detail).toMatch(/re-quote/);
-  }, 30_000);
+  });
 
   test("refuses not-found when locking a quoted draft with no RunState at all (should not happen via the public API, but the check is defensive)", async () => {
     const clock = makeClock();
@@ -208,7 +210,7 @@ describe("runLock — gating (authority-denied / grant)", () => {
     authorityGrant(contextFor(clock), { principalId: "agent-1", operations: ["lock"] });
     const allowed = runLock(contextFor(clock, "agent-1"), { draftId: "draft-1" });
     expect(allowed.ok).toBe(true);
-  }, 30_000);
+  });
 });
 
 describe("runLock — draft immutability after lock", () => {
@@ -222,7 +224,7 @@ describe("runLock — draft immutability after lock", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("illegal-transition");
-  }, 30_000);
+  });
 
   test("armAdd refuses illegal-transition on a locked draft", async () => {
     const clock = makeClock();
@@ -234,7 +236,7 @@ describe("runLock — draft immutability after lock", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("illegal-transition");
-  }, 30_000);
+  });
 });
 
 describe("declared anchoring intent (anchor-evidence design §7.3)", () => {
@@ -349,5 +351,84 @@ describe("runLock — declared beacon source", () => {
     // of them.
     expect(patched.error.code).toBe("validation");
     expect(patched.error.issues?.some((issue) => issue.path.startsWith("beaconSource"))).toBe(true);
+  });
+});
+
+/**
+ * Issue #2978. The lock accepted any replicate and item count without comment, while the interval
+ * those counts imply was computable before a single cell was dispatched. What the seal records is
+ * not the arithmetic — n and the width are both derivable from the plan — but that the operator was
+ * shown the width before the irreversible seal and locked at this n regardless.
+ */
+describe("runLock — acknowledged sample-size advisory", () => {
+  const sealedRun = (draftId = "draft-1"): Record<string, unknown> => {
+    const runSha256 = readRunState(workspaceDir, draftId)?.runSha256;
+    if (runSha256 === undefined) throw new Error("no sealed Run");
+    return parseRun(getSealedBytes(workspaceDir, runSha256)) as unknown as Record<string, unknown>;
+  };
+
+  test("seals the advisory when the caller acknowledged it, and returns the same numbers", async () => {
+    const clock = makeClock();
+    await setUpQuotedDraft(clock);
+    const planned = draftSampleSizeAdvisory(workspaceDir, "draft-1");
+    expect(planned).toBeDefined();
+
+    const outcome = runLock(contextFor(clock), { draftId: "draft-1", acknowledgedSampleSizeAdvisory: true });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.sampleSizeAdvisory).toEqual(planned);
+    expect(readRunSampleSizeAdvisory(sealedRun()))
+      .toEqual({ n: planned?.n, expectedIntervalWidth: planned?.expectedIntervalWidth });
+  });
+
+  test("the sealed n is items x replicates, so it is the denominator each arm's interval will use", async () => {
+    const clock = makeClock();
+    await setUpQuotedDraft(clock);
+    const single = draftSampleSizeAdvisory(workspaceDir, "draft-1");
+    updateDraft(contextFor(clock), { draftId: "draft-1", patch: { replicates: 3 } });
+    await runQuote(contextFor(clock), { draftId: "draft-1" });
+    const tripled = draftSampleSizeAdvisory(workspaceDir, "draft-1");
+    expect(tripled?.n).toBe((single?.n ?? 0) * 3);
+
+    expect(runLock(contextFor(clock), { draftId: "draft-1", acknowledgedSampleSizeAdvisory: true }).ok).toBe(true);
+    expect(readRunSampleSizeAdvisory(sealedRun())?.n).toBe(tripled?.n);
+    // More trials, a narrower ceiling: the advisory is about the tradeoff, so it has to move.
+    expect(Number(tripled?.expectedIntervalWidth))
+      .toBeLessThan(Number(single?.expectedIntervalWidth));
+  });
+
+  test("touches the record at all only when the caller acknowledged", async () => {
+    const clock = makeClock();
+    await setUpQuotedDraft(clock);
+    const outcome = runLock(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.sampleSizeAdvisory).toBeUndefined();
+    expect(sealedRun()).not.toHaveProperty(SAMPLE_SIZE_ADVISORY_EXTENSION);
+    expect(readRunSampleSizeAdvisory(sealedRun())).toBeUndefined();
+  });
+
+  test("an unacknowledged lock seals byte-identically to a lock before the advisory existed", async () => {
+    const clock = makeClock();
+    await setUpQuotedDraft(clock);
+    expect(runLock(contextFor(clock), { draftId: "draft-1" }).ok).toBe(true);
+    const plain = sealedRun();
+    // Sealing the same record with the extension removed is the only difference the acknowledgement
+    // makes: it does not re-shape the record.
+    const acknowledged = { ...plain };
+    expect(Object.keys(plain)).not.toContain(SAMPLE_SIZE_ADVISORY_EXTENSION);
+    expect(Buffer.from(sealRun(acknowledged).bytes).toString("hex"))
+      .toBe(Buffer.from(sealRun(plain).bytes).toString("hex"));
+  });
+});
+
+describe("draftSampleSizeAdvisory", () => {
+  test("is undefined for a draft no lock could seal yet, so the lock's own refusal is the answer", async () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(clock));
+    createDraft(contextFor(clock), { draftId: "bare", name: "Bare" });
+    // No benchmark, not quoted: there is no n to advise about.
+    expect(draftSampleSizeAdvisory(workspaceDir, "bare")).toBeUndefined();
+    expect(runLock(contextFor(clock), { draftId: "bare" }).ok).toBe(false);
   });
 });

@@ -23,6 +23,13 @@ describe("landing page", () => {
     }
   });
 
+  test("states no check count the bundle's declared format does not promise", () => {
+    // The verify surface serves several bundle formats with different closure sizes, so a numeral
+    // on the submit label is a denominator the reader cannot rely on (issue #3311).
+    expect(markup).toContain("Verify a bundle");
+    expect(markup).not.toMatch(/\b(?:six|seven|[0-9]+)\s+(?:bundle\s+)?checks\b/iu);
+  });
+
   test("keeps expert work behind an advanced disclosure", () => {
     expect(markup).toContain("Advanced product surfaces");
     expect(markup).toContain('href="/workspace"');

@@ -968,7 +968,7 @@ describe("portable public bundle", () => {
     const replay = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(replay.ok, JSON.stringify(replay)).toBe(true);
     if (replay.ok) expect(replay.result.bundleIdentity).toBe(published.result.bundleIdentity);
-  }, 30_000);
+  });
 
   test("a fault after rename or after RunState leaves a reported draft with a retryable immutable bundle", async () => {
     const clock = makeClock();
@@ -988,7 +988,7 @@ describe("portable public bundle", () => {
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(retry.ok, JSON.stringify(retry)).toBe(true);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
-  }, 30_000);
+  });
 
   test("a throw between the rename and the return removes the bundle directory it renamed into place", async () => {
     const clock = makeClock();
@@ -1010,7 +1010,7 @@ describe("portable public bundle", () => {
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(retry.ok, JSON.stringify(retry)).toBe(true);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
-  }, 30_000);
+  });
 
   test("a fault before rename leaves no final bundle and no state advancement", async () => {
     const clock = makeClock();
@@ -1025,7 +1025,7 @@ describe("portable public bundle", () => {
       : []).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
-  }, 30_000);
+  });
 
   test("a refusal after the bundle is materialized removes the bundle directory it staged", async () => {
     const clock = makeClock();
@@ -1046,7 +1046,7 @@ describe("portable public bundle", () => {
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(retry.ok, JSON.stringify(retry)).toBe(true);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
-  }, 30_000);
+  });
 
   test("a refusal after materialization removes the additional-Report bundle directories too", async () => {
     // The sibling test above pins only the single-bundle case. A publish with additional Reports
@@ -1121,7 +1121,7 @@ describe("portable public bundle", () => {
     expect(identity).toMatch(/^[a-f0-9]{64}$/);
     if (identity === undefined) return;
     expect(existsSync(publicBundlePath(workspaceDir, "draft-1", identity))).toBe(true);
-  }, 30_000);
+  });
 
   test("workspace tampering refuses before staging and leaves the reported draft unchanged", async () => {
     const clock = makeClock();
@@ -1138,7 +1138,7 @@ describe("portable public bundle", () => {
       ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
       : []).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
-  }, 30_000);
+  });
 
   test("verifies from bundle-carried records and public keys after the source workspace is deleted", async () => {
     const clock = makeClock();
@@ -1194,7 +1194,7 @@ describe("portable public bundle", () => {
     } finally {
       rmSync(copied, { recursive: true, force: true });
     }
-  }, 30_000);
+  });
 
   test("verification refuses a canonical v2 bundle relabeled as v3 at the manifest boundary", async () => {
     const clock = makeClock();
@@ -1222,7 +1222,7 @@ describe("portable public bundle", () => {
         message: "bundle.json does not satisfy the manifest schema",
       })],
     });
-  }, 30_000);
+  });
 
   test("materializes and portably verifies every real could-not-grade lineage shape", async () => {
     const clock = makeClock();
@@ -1607,7 +1607,7 @@ describe("portable public bundle", () => {
     } finally {
       rmSync(substituted, { recursive: true, force: true });
     }
-  }, 30_000);
+  });
 
   test("rejects out-of-domain and duplicate solve Submission coordinates and unconsumed evaluation Submissions", async () => {
     const clock = makeClock();
@@ -1675,7 +1675,7 @@ describe("portable public bundle", () => {
         rmSync(copy, { recursive: true, force: true });
       }
     }
-  }, 30_000);
+  });
 
   test("rejects unknown raw claim fields and unknown or non-canonical cancellation markers", async () => {
     const clock = makeClock();
@@ -1736,7 +1736,7 @@ describe("portable public bundle", () => {
         rmSync(copy, { recursive: true, force: true });
       }
     }
-  }, 30_000);
+  });
 
   test("authenticates one immutable byte snapshot and rejects externally-linked files", async () => {
     const clock = makeClock();
@@ -1784,7 +1784,7 @@ describe("portable public bundle", () => {
       rmSync(hardlinked, { recursive: true, force: true });
       rmSync(outside, { force: true });
     }
-  }, 30_000);
+  });
 
   test("derives every trust identity from SPKI and requires the exact Matrix evaluator set", async () => {
     const clock = makeClock();
@@ -1860,7 +1860,7 @@ describe("portable public bundle", () => {
         rmSync(copy, { recursive: true, force: true });
       }
     }
-  }, 30_000);
+  });
 
   test("re-derives every public claim block and every fixed presentation asset", async () => {
     const clock = makeClock();
@@ -1963,7 +1963,7 @@ describe("portable public bundle", () => {
     } finally {
       rmSync(copy, { recursive: true, force: true });
     }
-  }, 30_000);
+  });
 
   test("publishes to a digest-addressed target with one audit and an atomic RunState/draft pair", async () => {
     const clock = makeClock();
@@ -1993,7 +1993,7 @@ describe("portable public bundle", () => {
     expect(readAuditEntries(workspaceDir).slice(auditBefore).filter((entry) => entry.action === "run.verify")).toHaveLength(0);
     expect(readRunState(workspaceDir, "draft-1")?.bundleRelativePath).toBe(one.result.bundleRelativePath);
     expect(readDraftDocument(workspaceDir, "draft-1").updatedAt).toBe(readRunState(workspaceDir, "draft-1")?.publishedAt);
-  }, 30_000);
+  });
 });
 
 describe("runReport — refusals", () => {
@@ -2024,7 +2024,7 @@ describe("runReport — refusals", () => {
 
     // The draft was NOT advanced to reported by a refused report attempt.
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("closed");
-  }, 30_000);
+  });
 
   test("refuses authority-denied for a workspace member without the report grant, and audits it", async () => {
     const clock = makeClock();
@@ -2046,7 +2046,7 @@ describe("runReport — refusals", () => {
 
     // The draft was NOT advanced to reported by a denied report attempt.
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("closed");
-  }, 30_000);
+  });
 });
 
 describe("runReport — claim-package write failure does not strand the draft", () => {

@@ -263,7 +263,7 @@ describe("runLaunch — lifecycle guard", () => {
     // venue, so a venue failure still leaves the draft "running" with an empty journal.
     const document = readDraftDocument(workspaceDir, "draft-1");
     expect(document.state).toBe("running");
-  }, 30_000);
+  });
 });
 
 describe("runLaunch — gating (authority-denied / grant)", () => {
@@ -282,7 +282,7 @@ describe("runLaunch — gating (authority-denied / grant)", () => {
 
     // Denial happens before any state mutation.
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
-  }, 30_000);
+  });
 
   test("a granted principal can launch (drives via the injected fake venue)", async () => {
     const clock = makeClock();
@@ -292,7 +292,7 @@ describe("runLaunch — gating (authority-denied / grant)", () => {
 
     const outcome = await runLaunch(contextFor(clock, "agent-1"), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
     expect(outcome.ok).toBe(true);
-  }, 30_000);
+  });
 });
 
 describe("runLaunch — prospective mounted publication", () => {
@@ -338,7 +338,7 @@ describe("runLaunch — prospective mounted publication", () => {
         recovery: { resumable: true, guidance: expect.stringMatching(/durable receipt.*retry/i) },
       },
     });
-  }, 30_000);
+  });
 
   test("registers and probes every prospective Submission beneath the exact nested archive mount", async () => {
     const clock = makeClock();
@@ -370,7 +370,7 @@ describe("runLaunch — prospective mounted publication", () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-  }, 30_000);
+  });
 
   test("resume reconstructs a public Submission committed before its local capture journal fact", async () => {
     const clock = makeClock();
@@ -443,7 +443,7 @@ describe("runLaunch — prospective mounted publication", () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-  }, 30_000);
+  });
 });
 
 describe("runLaunch — drives a full 2-arm run to completion (fake backend)", () => {
@@ -472,7 +472,7 @@ describe("runLaunch — drives a full 2-arm run to completion (fake backend)", (
         maxConcurrentCells: 8,
       }),
     );
-  }, 30_000);
+  });
 
   test("records the historical serial default explicitly", async () => {
     const clock = makeClock();
@@ -490,7 +490,7 @@ describe("runLaunch — drives a full 2-arm run to completion (fake backend)", (
         maxConcurrentCells: 1,
       }),
     );
-  }, 30_000);
+  });
 
   test("a shutdown rejection is the generation's single durable failed terminal", async () => {
     const clock = makeClock();
@@ -590,7 +590,7 @@ describe("runLaunch — drives a full 2-arm run to completion (fake backend)", (
       return doc.requirements?.harness?.id === "evaluation-harness";
     });
     expect(evalSubmits).toHaveLength(6);
-  }, 30_000);
+  });
 });
 
 describe("runLaunch — minVerdicts threads from the SEALED Run into the venue and drive (BP-21)", () => {
@@ -639,7 +639,7 @@ describe("runLaunch — minVerdicts threads from the SEALED Run into the venue a
     for (const [cellKey, evalIndexes] of byCell) {
       expect(evalIndexes.sort((a, b) => a - b), cellKey).toEqual([1, 2]);
     }
-  }, 30_000);
+  });
 });
 
 describe("runResume — minVerdicts-aware evaluation catch-up (BP-21)", () => {
@@ -679,7 +679,7 @@ describe("runResume — minVerdicts-aware evaluation catch-up (BP-21)", () => {
     const gapEvaluations = afterEntries.filter((entry) => entry.kind === "evaluation" && entry.cellKey === gapCellKey);
     expect(gapEvaluations).toHaveLength(2);
     expect(gapEvaluations.map((entry) => (entry.kind === "evaluation" ? entry.evalIndex : 0)).sort()).toEqual([1, 2]);
-  }, 30_000);
+  });
 });
 
 /**
@@ -717,7 +717,7 @@ describe("runLaunch — onProgress streaming (BP-13)", () => {
     // 6 cells x (dispatch + delivered cell-events) + 6 judged evaluation terminals = 18 lines.
     expect(expectedLines).toHaveLength(18);
     expect(lines).toEqual(expectedLines);
-  }, 30_000);
+  });
 
   test("omitting onProgress leaves the journal and return value byte-identical (purely additive)", async () => {
     const clock = makeClock();
@@ -744,7 +744,7 @@ describe("runLaunch — onProgress streaming (BP-13)", () => {
     // clock, so their `at` stamps genuinely differ — but the SEQUENCE of journal-entry kinds an
     // identical 2-arm run produces must be identical whether or not `onProgress` is supplied.
     expect(entriesWith.map((entry) => entry.kind)).toEqual(entriesWithout.map((entry) => entry.kind));
-  }, 30_000);
+  });
 });
 
 /** Wraps a fake backend's `submit` so the cancel marker is written right after the Nth accepted
@@ -799,7 +799,7 @@ describe("runLaunch — earlyClose getter reacts to a marker written mid-drive (
 
     const finalEvent = entries.find((entry) => entry.kind === "cell-event" && entry.event.cellKey === "*");
     expect(finalEvent).toMatchObject({ kind: "cell-event", event: { kind: "cancelled", cancelledRun: true } });
-  }, 30_000);
+  });
 });
 
 describe("runResume — lifecycle guard", () => {
@@ -826,7 +826,7 @@ describe("runResume — lifecycle guard", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("conflict");
-  }, 30_000);
+  });
 
   test("a marker written during the first outstanding cell's own dispatch stops the loop before the second outstanding cell is redispatched", async () => {
     const clock = makeClock();
@@ -882,7 +882,7 @@ describe("runResume — lifecycle guard", () => {
       (entry) => entry.kind === "cell-event" && entry.event.kind === "delivered" && (entry.event.cellKey === droppedA || entry.event.cellKey === droppedB),
     );
     expect(redeliveredEntry).toBeDefined();
-  }, 30_000);
+  });
 
   test("ungated: a bare workspace member with no grants can resume", async () => {
     const clock = makeClock();
@@ -894,7 +894,7 @@ describe("runResume — lifecycle guard", () => {
     authorityGrant(contextFor(clock), { principalId: "agent-1", operations: [] });
     const outcome = await runResume(contextFor(clock, "agent-1"), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
     expect(outcome.ok).toBe(true);
-  }, 30_000);
+  });
 });
 
 /** Rewrites the run journal to exactly `entries` — a test-only fixture technique (the append-only
@@ -955,7 +955,7 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     expect(status.ok).toBe(true);
     if (!status.ok) return;
     expect(status.result.driver?.status).toBe("succeeded");
-  }, 30_000);
+  });
 
   test("reconciles a captured in-flight Submission before resuming its exact dispatch", async () => {
     const clock = makeClock();
@@ -1028,7 +1028,7 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     expect(afterEntries.filter(
       (entry) => entry.kind === "observation-accepted" && entry.cellKey === cellKey,
     )).toHaveLength(1);
-  }, 30_000);
+  });
 
   test("fails closed when backend recovery contradicts a captured Submission", async () => {
     const clock = makeClock();
@@ -1074,7 +1074,7 @@ describe("runResume — re-dispatches only outstanding cells", () => {
       },
     });
     expect(submits).toHaveLength(0);
-  }, 30_000);
+  });
 
   test("a cell whose journal entries are entirely missing (crash before it was ever dispatched) is picked up; already-complete cells are untouched", async () => {
     const clock = makeClock();
@@ -1128,7 +1128,7 @@ describe("runResume — re-dispatches only outstanding cells", () => {
         || ((entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") && entry.cellKey === cellKey));
       expect(after).toEqual(original);
     }
-  }, 30_000);
+  });
 
   test("a clean run with nothing outstanding is a true no-op on resume", async () => {
     const clock = makeClock();
@@ -1150,7 +1150,7 @@ describe("runResume — re-dispatches only outstanding cells", () => {
       expect.objectContaining({ kind: "driver-started", operation: "resume" }),
       expect.objectContaining({ kind: "driver-succeeded", operation: "resume" }),
     ]);
-  }, 30_000);
+  });
 });
 
 describe("runResume — evaluation catch-up", () => {
@@ -1195,5 +1195,5 @@ describe("runResume — evaluation catch-up", () => {
     const originalGapCellEvents = fullEntries.filter((entry) =>
       (entry.kind === "cell-event" && entry.event.cellKey === gapCellKey) || (entry.kind === "delivery" && entry.cellKey === gapCellKey));
     expect(gapCellEvents).toEqual(originalGapCellEvents);
-  }, 30_000);
+  });
 });

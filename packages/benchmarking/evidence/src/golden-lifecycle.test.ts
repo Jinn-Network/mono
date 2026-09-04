@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  createPrivateKey,
   createPublicKey,
-  generateKeyPairSync,
   sign as signEd25519,
   verify as verifyEd25519,
   type KeyObject,
 } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   BENCHMARKING_PROTOCOL_V2,
   EXECUTION_BATCH_CAPTURE_RECORD_KIND,
@@ -64,6 +65,29 @@ interface GoldenSigningKey {
   readonly publicKeyBytes: Uint8Array;
 }
 
+/**
+ * The DER prefix of a PKCS#8 Ed25519 private key, followed by its 32-byte seed. Fixing the seed
+ * fixes the key, and Ed25519 signing is itself deterministic (RFC 8032 §5.1.6), so every DSSE
+ * signature below -- and therefore every cohort, matrix, and report digest -- is byte-stable
+ * across machines and runs. That is what lets `fixtures/golden-lifecycle/digests.json` pin them
+ * as literals fixed outside the run that produces them (issue #3341).
+ *
+ * These seeds are counters. The keys are therefore public knowledge and are test material only:
+ * they must never sign anything outside this file, and nothing outside this file may treat a
+ * signature they produce as evidence of anything.
+ */
+const PKCS8_ED25519_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
+
+function deterministicEd25519Key(index: number): KeyObject {
+  const seed = Buffer.alloc(32);
+  seed.writeUInt8(index + 1, 31);
+  return createPrivateKey({
+    key: Buffer.concat([PKCS8_ED25519_PREFIX, seed]),
+    format: "der",
+    type: "pkcs8",
+  });
+}
+
 const signingKeys = new Map([
   ...["A", "B", "C", "D"].map((armId) => ({
     identity: `urn:evaluator:instrument-${armId}`,
@@ -75,13 +99,15 @@ const signingKeys = new Map([
   })),
   { identity: "urn:issuer:human-label-resolution", keyId: "urn:key:label-admission" },
   { identity: "urn:publisher:colophon", keyId: "urn:key:report" },
-].map(({ identity, keyId }) => {
-  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+].map(({ identity, keyId }, index) => {
+  const privateKey = deterministicEd25519Key(index);
   const value: GoldenSigningKey = {
     identity,
     keyId,
     privateKey,
-    publicKeyBytes: new Uint8Array(publicKey.export({ format: "der", type: "spki" })),
+    publicKeyBytes: new Uint8Array(
+      createPublicKey(privateKey).export({ format: "der", type: "spki" }),
+    ),
   };
   return [identity, value] as const;
 }));
@@ -956,8 +982,43 @@ describe("Harbor → Inspect → human evidence-first golden lifecycle", () => {
       files: truncatedFullFiles,
       verifySignature: verifyEd25519Signature,
     })).rejects.toThrow(/is missing artifacts\//u);
+
+    // Pinned literals (issue #3341). Everything above re-checks digests the same run produced,
+    // which shows the D append leaves the A/B/C artifacts alone but not that either matches a
+    // value fixed outside the run. These are that value: a serialization change applied uniformly
+    // across both the A/B/C build and the D append moves them, and this assertion is the only
+    // thing that notices. Regenerate by running this test and copying the values vitest prints in
+    // the diff into `packages/benchmarking/protocol/fixtures/golden-lifecycle/digests.json` --
+    // that file is an append-only pinned fixture, so a change there needs a dated erratum.
+    expect({
+      benchmark: benchmarkRecord.digest,
+      manifest: manifest.digest,
+      cohortAbc: cohortABC.digest,
+      matrixAbc: matrixABC.record.digest,
+      reportPayloadAbc: reportABC.payload.digest,
+      reportEnvelopeAbc: documentDigest(reportABC.envelopeBytes),
+      cohortAbcd: cohortABCD.digest,
+      matrixAbcd: matrixABCD.record.digest,
+      reportPayloadAbcd: finalReport.payload.digest,
+      reportEnvelopeAbcd: documentDigest(finalReport.envelopeBytes),
+      claimPackage: claim.digest,
+      bundleManifest: documentDigest(bundleFiles.get("bundle.json")!),
+      metadataFirstBundleManifest: documentDigest(metadataFirstFiles.get("bundle.json")!),
+    }).toEqual(loadGoldenLifecycleDigests());
   });
 });
+
+/**
+ * The pinned tier-2 digests of this lifecycle, read from `fixtures/` rather than recomputed. The
+ * file is covered by the repo-wide fixture drift and immutability guards, so changing a pinned
+ * value takes a dated erratum, not an edit.
+ */
+function loadGoldenLifecycleDigests(): Record<string, string> {
+  const { digests } = JSON.parse(
+    readFileSync(new URL("../fixtures/golden-lifecycle/digests.json", import.meta.url), "utf8"),
+  ) as { digests: Record<string, string> };
+  return digests;
+}
 
 function claimRecordsArtifactDigests(claimBytes: Uint8Array): readonly string[] {
   const document = JSON.parse(new TextDecoder().decode(claimBytes)) as {

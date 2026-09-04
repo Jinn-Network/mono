@@ -93,7 +93,10 @@ async function prepareLockedDraft(draftId: string): Promise<void> {
     pinning: JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } }),
   })).toMatchObject({ status: "success" });
   expect(await invoke("run.quote", { draftId })).toMatchObject({ status: "success" });
-  expect(await invoke("run.lock", { draftId })).toMatchObject({ status: "success" });
+  // The seal-time sample-size advisory is a gate on this surface too (issue #2978): an
+  // unacknowledged lock is refused, so every fixture that needs a locked draft acknowledges.
+  expect(await invoke("run.lock", { draftId, "ack-sample-size": "acknowledged" }))
+    .toMatchObject({ status: "success" });
 }
 
 async function waitForDurableStatus(
@@ -482,7 +485,24 @@ describe.sequential("server action layer against a real workspace", () => {
         status: "success",
         result: { presentation: { runSize: { solveCells: 6 } } },
       });
-      const locked = await invoke("run.lock", { draftId: "gui-walkthrough" });
+      // Submitting the lock without acknowledging the sample size is refused, and the refusal is
+      // where the operator reads the width the declared n can deliver (issue #2978).
+      const unacknowledged = await invoke("run.lock", { draftId: "gui-walkthrough" });
+      expect(unacknowledged, JSON.stringify(unacknowledged)).toMatchObject({
+        status: "error",
+        error: { code: "invalid-invocation" },
+      });
+      expect(unacknowledged.status === "error" ? unacknowledged.error.detail : "")
+        .toContain("interval width");
+      expect(await invoke("draft.show", { draftId: "gui-walkthrough" })).toMatchObject({
+        status: "success",
+        result: { draft: { state: "quoted" } },
+      });
+
+      const locked = await invoke("run.lock", {
+        draftId: "gui-walkthrough",
+        "ack-sample-size": "acknowledged",
+      });
       expect(locked, JSON.stringify(locked)).toMatchObject({
         status: "success",
         result: { draft: { state: "locked" } },

@@ -89,6 +89,12 @@ jobs:
         run: node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs
       - name: Vitest temp-directory sweep seam is wired everywhere
         run: node --test .github/scripts/vitest-tmp-isolation.test.mjs
+      # The spawn-site half of the same containment: a child handed an env
+      # allowlist naming no temp directory writes outside the root its parent
+      # was confined to. Repository-wide, so it belongs beside the suite-level
+      # seam gate rather than behind any one package lane's `paths:` filter.
+      - name: Every spawn site names a temp directory or says why not
+        run: node --test .github/scripts/child-temp-env-scan.test.mjs
       # Repository-wide, so it must not sit behind any one workflow's `paths:`
       # filter: the pull request that removes a cited workflow's restores has to
       # be the one that goes red (#3126).

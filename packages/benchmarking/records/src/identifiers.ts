@@ -63,6 +63,16 @@ export const BEACON_SOURCE_EXTENSION =
   "https://spec.jinn.network/extensions/beacon-source/v1";
 
 /**
+ * The sample-size advisory an operator acknowledged at lock (issue #2978): the per-arm n the seal
+ * commits to, and the widest 95% interval that n can produce. Both are derivable from the sealed
+ * plan; what is NOT derivable, and what this extension actually records, is that the operator was
+ * shown the width before the seal and locked anyway. A Run that carries no acknowledgement seals
+ * byte-identical bytes to before this existed.
+ */
+export const SAMPLE_SIZE_ADVISORY_EXTENSION =
+  "https://spec.jinn.network/extensions/sample-size-advisory/v1";
+
+/**
  * The disclosure-specification record (design `2026-08-19-disclosure-specification-record.md` §4.1,
  * issue #2839): one sealed record naming exactly one subject and exactly six variables, each
  * carrying exactly one of three statuses. The record-kind URI follows the record-discovery grammar

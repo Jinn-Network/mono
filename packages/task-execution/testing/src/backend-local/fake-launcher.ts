@@ -78,6 +78,9 @@ export function makeFakeLauncher(script: FakeLaunchScript): LauncherContract {
         // this fake never reads a real secret, but it carries the SAME reference-only shape a
         // real launcher must (a literal handle string, not a value) so the contract test's
         // "references, not values" assertion has something meaningful to check.
+        // temp-env: the fake pins no temp directory on purpose. A real launcher's `baseEnv` does, and
+        // the conformance kit asserts that separately; a fake that carried one too would make the
+        // contract tests pass on the fake's own doing rather than on the launcher contract.
         env: {
           JINN_ATTEMPT_ID: attempt.attemptUri,
           JINN_ATTEMPT_NONCE: attempt.nonce,

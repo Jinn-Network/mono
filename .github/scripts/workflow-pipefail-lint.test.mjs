@@ -429,6 +429,84 @@ test('a heredoc opener ending on a pipe still spans its body as one pipeline', (
   );
 });
 
+test('a workflow written through a heredoc contributes no `defaults:` to the enclosing file', () => {
+  // The block scalar holding the heredoc is a string, so the `defaults:` inside it is
+  // text. Read as structure it becomes a job-level scope and escalates the *next*,
+  // entirely unrelated step from `warning` to `error` — and there is no honest place to
+  // write the allow annotation, since the real site is safe for the reason the lint
+  // already models.
+  const source = [
+    'jobs:',
+    '  sample:',
+    '    steps:',
+    '      - name: write a workflow fixture',
+    '        run: |',
+    "          cat > wf.yml <<'YAML'",
+    '          defaults:',
+    '            run:',
+    '              shell: bash',
+    '          YAML',
+    '      - name: real step, no shell declared',
+    '        run: |',
+    '          producer | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => `${finding.severity}:${finding.line}`),
+    ['warning:13'],
+  );
+});
+
+test('a `run:` written inside a block scalar mints no run block', () => {
+  // The same class one key over: an embedded `- run: |` read as structure gives the lint
+  // a step that does not exist, with a body it invents by indentation.
+  const source = [
+    'jobs:',
+    '  sample:',
+    '    steps:',
+    '      - name: write a workflow fixture',
+    '        shell: bash',
+    '        run: |',
+    "          cat > wf.yml <<'YAML'",
+    '          - run: |',
+    '              git tag | head -1',
+    '          YAML',
+    '',
+  ].join('\n');
+  assert.deepEqual(analyzeWorkflow('sample.yml', source), []);
+  assert.deepEqual(
+    collectRunBlocks(source).map((block) => block.runLine),
+    [6],
+  );
+});
+
+test('a phantom scope hides a real error as readily as it invents one', () => {
+  // The escalation direction is the one the issue reported, but the same phantom read
+  // the other way round is worse: the embedded `shell: sh` shadowed the real
+  // workflow-level `bash`, and a genuinely pipefail-exposed site downgraded itself to an
+  // advisory warning the gate does not fail on.
+  const source = [
+    'defaults:',
+    '  run:',
+    '    shell: bash',
+    'jobs:',
+    '  sample:',
+    '    steps:',
+    '      - run: |',
+    "          cat > wf.yml <<'YAML'",
+    '          defaults:',
+    '            run:',
+    '              shell: sh',
+    '          YAML',
+    '      - run: git tag | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => `${finding.severity}:${finding.line}`),
+    ['error:13'],
+  );
+});
+
 test('a pipeline spanning body lines is still one pipeline', () => {
   assert.deepEqual(severities(['git tag --list \\', '  | grep -q v1'].join('\n'), { shell: 'bash' }), [
     'error:grep -q/-m',

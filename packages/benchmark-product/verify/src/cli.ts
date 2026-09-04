@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
-import { describeRecomputedChecks, summarizeVerificationOutcome } from "./outcome.js";
+import {
+  bundleIdentityLabel,
+  describeRecomputedChecks,
+  summarizeVerificationOutcome,
+  type VerificationCheckName,
+} from "./outcome.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult, type VerifyPublicBundleDeps } from "./verify.js";
 import { verifyFreezeRepo, type FreezeRepoVerificationResult } from "./freeze-repo.js";
 import type {
@@ -220,6 +225,42 @@ function wrapParagraph(text: string | undefined, width = 76): string | undefined
   return lines.join("\n");
 }
 
+/**
+ * The plain-language gloss printed beside each check name (reader-facing-vocabulary spec §4.2).
+ * The check names themselves are **contract** -- sealed into `claim-package.json`'s
+ * `verification.checks` and asserted by the external verification path -- so the spec rules them
+ * *keep + gloss*: the reader gets the plain words on the same line, at zero contract cost.
+ *
+ * Each gloss is the proposition the check stands for, in the present tense, not a verdict on it.
+ * That is what lets one gloss serve both states: beside `passed` it reads as what held, and beside
+ * `not fetched` -- the one state a deferred check prints -- it reads as what was not established.
+ * A past-tense gloss would claim, on the deferred row, exactly the thing that row exists to deny.
+ *
+ * Keyed by the check union so a closure that adds a check cannot print an unglossed name, the same
+ * discipline `CHECK_SUBJECTS` uses in `outcome.ts`. Vocabulary follows the spec's §5 glossary:
+ * *run*, *the result*, *the claim*, *evidence*, *fingerprint*, *timestamp proof*, *what was pinned*.
+ */
+const CHECK_GLOSSES: { readonly [C in VerificationCheckName]: string } = {
+  "manifest": "every listed file is here, unaltered",
+  "evidence-closure": "every run's evidence is carried here",
+  "trust": "the signing keys match the identities",
+  "matrix-rederivation": "the run tally follows from the evidence",
+  "report-verification": "the result follows from the runs",
+  "claim-consistency": "the claim agrees with the records here",
+  "integrity-anchors": "the timestamp proofs are well formed",
+  "disclosure-specification": "what was pinned is recorded and matches",
+  "artifact-integrity": "each artifact matches its fingerprint",
+  "signature-validity": "each signature matches its key",
+};
+
+/**
+ * Wide enough for the longest check name (`disclosure-specification`, 24) plus a gutter. At 24 that
+ * name rendered flush against its own state.
+ */
+const CHECK_NAME_COLUMN = 26;
+/** Wide enough for the longest state (`not fetched`, 11) plus a gutter. */
+const CHECK_STATE_COLUMN = 13;
+
 export function renderVerifiedBundle(
   result: PublicBundleVerificationResult,
   binding?: VerifiedDomainBinding,
@@ -230,10 +271,11 @@ export function renderVerifiedBundle(
   const outcome = summarizeVerificationOutcome(result);
   const artifactContent = outcome.artifactContent;
   const checks = outcome.outcomes
-    .map(({ check, state }) => `${check.padEnd(24)}${state}`)
+    .map(({ check, state }) =>
+      `${check.padEnd(CHECK_NAME_COLUMN)}${state.padEnd(CHECK_STATE_COLUMN)}${CHECK_GLOSSES[check]}`)
     .join("\n");
   const totalChecks = outcome.total;
-  const identity = result.identity.startsWith("sha256:") ? result.identity : `sha256:${result.identity}`;
+  const identity = bundleIdentityLabel(result);
   const anchors = "anchors" in result && result.anchors !== undefined
     ? renderAnchorReport(result.anchors)
     : "";

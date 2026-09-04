@@ -161,9 +161,10 @@ export function isRecoverableTransactionError(error: unknown): boolean {
   if (msg.includes('GS026')) return false;
   if (msg.includes('GS013')) return false;
 
-  // Receipt path from safe.ts: inner re-simulation succeeded but the mined
-  // execTransaction reverted — a stale Safe nonce / signature race that
-  // re-read + re-sign self-heals within executeSafeTransaction's retry loop.
+  // Receipt path: inner re-simulation succeeded but the mined execTransaction
+  // reverted — a stale Safe nonce / signature race that re-read + re-sign
+  // self-heals within the broadcaster's retry loop. Produced by
+  // `createDirectSafeBroadcaster` (issue #3733).
   if (msg.includes(SAFE_STALE_NONCE_ERROR_TOKEN)) return true;
 
   if (

@@ -270,7 +270,7 @@ describe("runCancel — gating", () => {
     expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.result.phase).toBe("cancelled");
-  }, 30_000);
+  });
 });
 
 describe("runCancel — running-state guard", () => {
@@ -289,7 +289,7 @@ describe("runCancel — running-state guard", () => {
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("record-integrity");
     expect(outcome.error.detail).toMatch(/cancel marker/iu);
-  }, 30_000);
+  });
 
   test("refuses illegal-transition when the draft has never been launched (locked, not running)", async () => {
     const clock = makeClock();
@@ -318,7 +318,7 @@ describe("runCancel — running-state guard", () => {
 
     const entries = readAuditEntries(workspaceDir);
     expect(entries[entries.length - 1]).toMatchObject({ action: "cancel", outcome: "illegal-transition" });
-  }, 30_000);
+  });
 
   test("does not bless a naturally complete Matrix merely because a stray cancel marker exists", async () => {
     const clock = makeClock();
@@ -335,7 +335,7 @@ describe("runCancel — running-state guard", () => {
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("record-integrity");
     expect(outcome.error.detail).toMatch(/not cancelled/iu);
-  }, 30_000);
+  });
 });
 
 describe("runCancel — full finalize on a fake venue", () => {
@@ -404,7 +404,7 @@ describe("runCancel — full finalize on a fake venue", () => {
     expect(afterEntries.filter((entry) => entry.kind === "cancel-requested")).toHaveLength(1);
     const closedEntry = afterEntries.find((entry) => entry.kind === "closed");
     expect(closedEntry).toMatchObject({ matrixSha256: outcome.result.matrixSha256 });
-  }, 30_000);
+  });
 
   test("cancelling a run with nothing outstanding still marks the Matrix cancelled (every cell stays judged)", async () => {
     const clock = makeClock();
@@ -421,7 +421,7 @@ describe("runCancel — full finalize on a fake venue", () => {
     const matrix = parseMatrix(getSealedBytes(workspaceDir, outcome.result.matrixSha256));
     expect(matrix.completeness.runOutcome).toBe("cancelled");
     expect(matrix.cells.every((cell) => cell.outcome === "judged")).toBe(true);
-  }, 30_000);
+  });
 });
 
 describe("runCancel — cell-level outcomes are decided independently of the run-level cancelled flag", () => {
@@ -487,7 +487,7 @@ describe("runCancel — cell-level outcomes are decided independently of the run
       .reverse()
       .find((entry) => entry.kind === "cell-event" && entry.event.cellKey === expiredCellKey);
     expect(lastEventForCell).toMatchObject({ event: { kind: "cancelled" } });
-  }, 30_000);
+  });
 });
 
 describe("runCancel — marker-resume: a busy venue records the request without finalizing", () => {
@@ -599,7 +599,7 @@ describe("runCancel — marker-resume: a busy venue records the request without 
     const afterThird = readRunJournalEntries(workspaceDir, "draft-1");
     expect(afterThird.filter((entry) => entry.kind === "cancel-requested")).toHaveLength(1);
     expect(afterThird.filter((entry) => entry.kind === "closed")).toHaveLength(1);
-  }, 30_000);
+  });
 
   test("the marker also records the requesting principal", async () => {
     const clock = makeClock();
@@ -621,7 +621,7 @@ describe("runCancel — marker-resume: a busy venue records the request without 
     if (!outcome.ok) return;
     expect(outcome.result.phase).toBe("requested");
     expect(readCancelMarker(workspaceDir, "draft-1")).toMatchObject({ principal: "agent-1" });
-  }, 30_000);
+  });
 
   test("concurrent cancel callers preserve the first attribution and one durable intent", async () => {
     const clock = makeClock();
@@ -669,5 +669,5 @@ describe("runCancel — marker-resume: a busy venue records the request without 
     expect(firstOutcome.result.phase).toBe("requested");
     expect(readCancelMarker(workspaceDir, "draft-1")?.principal).toBe("sponsor-1");
     expect(readRunJournalEntries(workspaceDir, "draft-1").filter((entry) => entry.kind === "cancel-requested")).toHaveLength(1);
-  }, 30_000);
+  });
 });

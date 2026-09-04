@@ -70,6 +70,18 @@ identifier for this archive within this install. It must be unique across the
 followed sources, and it is what orders retrieval fallback after the local
 mirror.
 
+Write the `servingRoot` with the scheme and port the archive actually answers
+on. Everything the source introduces — its `archiveRoot`, and every redirect it
+posts — is held inside the origin of this value, because that origin is the one
+thing about the destination that you chose rather than the peer. A scheme or
+port that differs from where the archive really lives is therefore a refusal,
+not a redirect the client will chase. The single exception is the shape a real
+host almost always presents: a plain `http://<host>` that answers `301` up to
+`https://<host>`, both on their default ports, resolves — the hostname is
+unchanged and the peer picks neither host nor port, so the upgrade can only
+increase assurance. An explicit non-default port on either side is outside that
+exception; name the final origin and you never meet it.
+
 The trust-policy anchor — `trust.genesisDigest` and the signed version chain
 that goes in `trust.policyDirectory` — is not published on the serving plane.
 Get it from the source's publisher and store the chain as one file per version,
@@ -197,7 +209,9 @@ that mirrored but whose index pass failed carries `indexError`, and keeps
 `status: "synced"` — the mirror succeeded, the pass that makes what it
 mirrored searchable did not. `freshness` is the `corpus-mirror-freshness`
 verdict for that cycle, `ok` or `stale`. The same facts, plus per-source
-timestamps, are in `mirror-sync-status.json`.
+timestamps, are in `mirror-sync-status.json`. That file lists only the sources
+this install currently follows: drop a source from `corpus.sources` and its
+entry goes with it at the next start.
 
 A `stale` verdict is also written on its own line, at `warn`, carrying the
 row's full detail and remedy:
