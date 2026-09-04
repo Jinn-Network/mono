@@ -115,6 +115,12 @@ export interface RunStatusResult {
     readonly class: RunBindingClass;
     readonly beacon: VerifiedRunBinding["beacon"];
     readonly postSeal: VerifiedRunBinding["postSeal"];
+    /**
+     * Whether the seal named this round or the operator picked it (issue #3322). Carried beside
+     * `postSeal` because it is the field that decides which claim the report face may make, and a
+     * machine consumer that had only `statement` could recover it only by matching English.
+     */
+    readonly roundBasis: VerifiedRunBinding["roundBasis"];
     readonly poolDigest: string;
     readonly statement: string;
   };
@@ -323,6 +329,7 @@ export function runStatus(
             class: runBindingClass(binding),
             beacon: binding.beacon,
             postSeal: binding.postSeal,
+            roundBasis: binding.roundBasis,
             poolDigest: binding.poolDigest,
             statement: runBindingSentence(binding),
           },
