@@ -134,6 +134,41 @@ describe("the readouts the width does not bound", () => {
     expect(text.match(/interval width /g)).toHaveLength(advisory.references.length);
   });
 
+  /**
+   * Issue #3907. `unboundedReadoutsOf` selects every declared method that is not `wilson@1`, not
+   * only the three comparisons, so the line has to hold for the rest of the registry too. These
+   * two are the cases a comparison-shaped sentence gets wrong: `binary-instrument@1` reports a
+   * qualification with no interval at all, and `avg-at-k@1` has no pairing or clustering to
+   * compute one from.
+   */
+  test("names a non-comparison readout without asserting a mechanism it does not have", () => {
+    const advisory = sampleSizeAdvisory({
+      items: 12,
+      replicates: 2,
+      declaredAnalyses: [
+        wilson,
+        { method: BENCHMARKING_METHOD_IDS.avgAtK, version: "1" },
+        { method: BENCHMARKING_METHOD_IDS.binaryInstrument, version: "1" },
+      ],
+    });
+    expect(advisory.unboundedReadouts).toEqual(["avg-at-k@1", "binary-instrument@1"]);
+    const text = formatSampleSizeAdvisory(advisory);
+    expect(text).toContain("does not bound the declared readouts avg-at-k@1, binary-instrument@1");
+    // The over-claim this test exists to keep out: neither readout reports an interval computed
+    // from pairing or clustering, and `binary-instrument@1` reports no interval at all.
+    expect(text).not.toContain("pairing");
+    expect(text).not.toContain("clustering");
+    expect(text).not.toContain("report their own intervals");
+  });
+
+  test("says only that the width does not reach them, for a comparison readout too", () => {
+    const text = formatSampleSizeAdvisory(
+      sampleSizeAdvisory({ items: 12, replicates: 2, declaredAnalyses: [paired] }),
+    );
+    expect(text).toContain("does not bound the declared readouts paired-delta@1");
+    expect(text).not.toContain("pairing");
+  });
+
   test("leaves n and the width untouched: naming scope is not a second measurement", () => {
     const scoped = sampleSizeAdvisory({ items: 12, replicates: 2, declaredAnalyses: [paired] });
     const bare = sampleSizeAdvisory({ items: 12, replicates: 2 });

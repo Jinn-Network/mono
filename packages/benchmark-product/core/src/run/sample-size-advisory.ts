@@ -47,6 +47,13 @@
  * cover, the advisory names it, so the operator is not left to infer which of their numbers the
  * ceiling applies to. Naming is free and needs no unknown — the declared analyses are readable off
  * the draft at the lock.
+ *
+ * The scope line says only that, deliberately (issue #3907). The three comparisons are not the only
+ * readouts a draft may declare — `binary-instrument@1` reports a qualification with no interval at
+ * all, and `avg-at-k@1` and `clean-subset@1` have no pairing or clustering structure — so a line
+ * that explained WHY the width does not reach them would have to explain a different mechanism for
+ * each, and would be false for some of them however it was worded. Naming what the width does not
+ * bound is true for every registered readout; explaining their uncertainty is not this line's job.
  */
 
 import { wilsonInterval } from "@jinn-network/benchmarking-aggregate";
@@ -159,9 +166,9 @@ export function formatSampleSizeAdvisory(advisory: SampleSizeAdvisory): string {
   // silence. Naming them is what stops the operator reading this ceiling as covering their delta.
   const scope = advisory.unboundedReadouts === undefined
     ? ""
-    : `\nThis bounds a per-arm pass rate only. The declared readouts `
-      + `${advisory.unboundedReadouts.join(", ")} report their own intervals, computed from the `
-      + `pairing and clustering this run turns out to have, which no sample size fixes in advance.`;
+    : `\nThis bounds a per-arm pass rate only. It does not bound the declared readouts `
+      + `${advisory.unboundedReadouts.join(", ")}: whatever each of those reports is on its own `
+      + `terms, and nothing stated here constrains it.`;
   return `At the declared n=${advisory.n} per arm, no pass rate this run can have gives a 95% `
     + `interval wider than ${advisory.expectedIntervalWidth}. At this and neighboring sample sizes:`
     + `\n${rows}\nCells that do not score (excluded, or conflicted across replicates) lower the `
