@@ -431,12 +431,13 @@ describe("the binding face is never emitted from an unchecked binding", () => {
   });
 
   // A bare reference hands the face on without ever being a call, which is the shape the scan used
-  // to pass over entirely (#3954).
-  // A bare reference hands the face on without ever being a call, which is the shape the scan used
   // to pass over entirely (#3954). Every fixture below carries the import, because that is what
   // puts the emitter in the file's hands and so what the reference scan is gated on.
   test("detects a value reference to an emitter, and does not read a module statement as one", () => {
-    const IMPORTED = 'import { runBindingSentence } from "@colophon-claims/verify";\n';
+    // The specifier is shape, not resolution: no fixture here passes an `origins` map, so only the
+    // statement's form is read. It is written relative so the file does not name its own package in
+    // a code position, which the source-boundaries gate reads as `verify` importing itself.
+    const IMPORTED = 'import { runBindingSentence } from "./report-face.js";\n';
     const reference = [{ site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false }];
     expect(emitterCallSites(`${IMPORTED}const lines = bindings.map(runBindingSentence);\n`, "fixture.ts"))
       .toEqual(reference);
@@ -459,7 +460,7 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     // A member access names someone else's property, not the emitter this file imported -- but a
     // namespace import binds the emitter itself behind exactly that shape.
     expect(emitterCallSites(`${IMPORTED}const emit = report.runBindingSentence;\n`, "fixture.ts")).toEqual([]);
-    const namespaced = 'import * as face from "@colophon-claims/verify";\nconst emit = face.runBindingSentence;\n';
+    const namespaced = 'import * as face from "./report-face.js";\nconst emit = face.runBindingSentence;\n';
     expect(emitterCallSites(namespaced, "fixture.ts")).toEqual(reference);
     // A type position emits nothing at runtime.
     expect(emitterCallSites(`${IMPORTED}type Emitter = typeof runBindingSentence;\n`, "fixture.ts")).toEqual([]);
@@ -476,7 +477,7 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     }
     // And a regex literal carrying a quote or a backtick is inert: the scan reads the text after
     // it exactly as it reads the text before it.
-    const afterRegex = 'import { runBindingSentence } from "@colophon-claims/verify";\n'
+    const afterRegex = 'import { runBindingSentence } from "./report-face.js";\n'
       + "const media = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;\n"
       + "const s = runBindingSentence(forged);\n";
     expect(emitterCallSites(afterRegex, "fixture.ts")[0])
