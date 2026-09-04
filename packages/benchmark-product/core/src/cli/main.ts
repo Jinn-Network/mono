@@ -96,7 +96,7 @@ import { disclosureDeclare, disclosureShow } from "../operations/disclosure-decl
 import type { BeaconReference } from "@colophon-claims/verify";
 import {
   exportFreezeRepo,
-  isSpdxLicenseExpression,
+  spdxLicenseProblem,
   summarizeVerificationOutcome,
   verifyFreezeRepo,
 } from "@colophon-claims/verify";
@@ -558,18 +558,17 @@ function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: b
   const description = optional(args, "description");
   const version = optional(args, "version");
   const license = optional(args, "license");
-  if (license !== undefined && !isSpdxLicenseExpression(license)) {
-    // The same grammar the freeze-repository export applies when it renders
+  const licenseProblem = license !== undefined ? spdxLicenseProblem(license) : undefined;
+  if (licenseProblem !== undefined) {
+    // The whole check the freeze-repository export applies before it renders
     // `SPDX-License-Identifier:` — imported rather than restated, so the flag and the export
-    // cannot come to disagree about what a licence is. Refusing here makes free text a one-second
-    // failure at the flag rather than a refusal after the record is sealed and published. It is an
-    // expression, not a bare identifier: `Apache-2.0 OR MIT` is an ordinary dual licence, and the
-    // narrower check refused it outright.
-    refuse(
-      "invalid-invocation",
-      "--license",
-      "--license must be an SPDX licence expression (SPDX 2.3 Annex D grammar), not free text",
-    );
+    // cannot come to disagree about what a licence is. Importing the grammar alone would not do
+    // that: the grammar tokenizes on whitespace, so it admits padding and tabs the export refuses
+    // (issue #3878). Refusing here makes such a value a one-second failure at the flag rather than
+    // a refusal after the record is sealed and published — at which point the licence can no
+    // longer be corrected. It is an expression, not a bare identifier: `Apache-2.0 OR MIT` is an
+    // ordinary dual licence, and the narrower check refused it outright.
+    refuse("invalid-invocation", "--license", `--license ${licenseProblem}`);
   }
   const citation = optional(args, "citation");
   const parserInvalidPolicy = optional(args, "parser-invalid-policy");

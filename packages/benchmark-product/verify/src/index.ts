@@ -154,6 +154,7 @@ export {
   freezeRepoCommitId,
   isSpdxLicenseExpression,
   renderFreezeRepo,
+  spdxLicenseProblem,
   verifyFreezeRepo,
   verifyFreezeRepoSnapshot,
 } from "./freeze-repo.js";

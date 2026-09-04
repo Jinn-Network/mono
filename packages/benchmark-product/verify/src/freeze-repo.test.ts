@@ -30,6 +30,7 @@ import {
   execBitIsCarried,
   freezeRepoCommitId,
   isSpdxLicenseExpression,
+  spdxLicenseProblem,
   listTree,
   renderFreezeRepo,
 } from "./freeze-repo.js";
@@ -638,6 +639,21 @@ describe("the SPDX licence expression grammar", () => {
     ]) {
       expect(isSpdxLicenseExpression(value), value).toBe(false);
     }
+  });
+
+  test("the shared licence check refuses everything the grammar tokenizes away", () => {
+    // `isSpdxLicenseExpression` splits on `/\s+/u`, so it is blind to padding, doubled separators,
+    // and which whitespace character was used -- but the value is rendered onto the tag line
+    // exactly as declared. `spdxLicenseProblem` is the whole check, and it is what
+    // `colophon import-item-bank --license` calls, so the flag and the export cannot disagree
+    // about what a licence is (issue #3878).
+    for (const value of ["Apache-2.0  OR  MIT", "MIT\tOR Apache-2.0", " MIT", "MIT "]) {
+      expect(isSpdxLicenseExpression(value), value).toBe(true);
+      expect(spdxLicenseProblem(value), value).toMatch(/single spaces/);
+    }
+    expect(spdxLicenseProblem("MIT\nOR Apache-2.0")).toMatch(/control character or line separator/);
+    expect(spdxLicenseProblem("internal use only")).toMatch(/not an SPDX licence expression/);
+    expect(spdxLicenseProblem("Apache-2.0 OR MIT")).toBeUndefined();
   });
 
   test("a dual-licensed publication renders, and cites no single list entry", () => {

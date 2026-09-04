@@ -281,7 +281,7 @@ export function isSpdxLicenseExpression(value: string): boolean {
  */
 const SPDX_TAG_LINE = /^[ \t]*SPDX-[A-Za-z][A-Za-z0-9-]*[ \t]*:/u;
 
-function assertRenderableFreeText(path: string, value: string, multiline: boolean): void {
+function renderableFreeTextProblem(value: string, multiline: boolean): string | undefined {
   // Tab is carried in both cases; CR and LF only where the field is documented as multi-line. CR
   // is admitted there because a citation pasted with CRLF endings is ordinary and the record is
   // already sealed, so refusing it would make such a bundle permanently unexportable — and the
@@ -290,19 +290,43 @@ function assertRenderableFreeText(path: string, value: string, multiline: boolea
     ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u2028\u2029]/u
     : /[\u0000-\u0008\u000A-\u001F\u007F-\u009F\u2028\u2029]/u;
   if (forbidden.test(value)) {
-    refuse(
-      "record-integrity",
-      path,
-      `the sealed record's ${path} carries a control character or line separator; a freeze repository renders it into generated text and will not emit one`,
-    );
+    return "carries a control character or line separator; a freeze repository renders it into generated text and will not emit one";
   }
   if (value.split(/\r\n|[\n\r]/u).some((line) => SPDX_TAG_LINE.test(line))) {
-    refuse(
-      "record-integrity",
-      path,
-      `the sealed record's ${path} carries a line that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it`,
-    );
+    return "carries a line that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it";
   }
+  return undefined;
+}
+
+function assertRenderableFreeText(path: string, value: string, multiline: boolean): void {
+  const problem = renderableFreeTextProblem(value, multiline);
+  if (problem !== undefined) refuse("record-integrity", path, `the sealed record's ${path} ${problem}`);
+}
+
+/**
+ * Everything a licence must satisfy before it can be rendered onto an `SPDX-License-Identifier:`
+ * line, in one place: the free-text guard, the single-space rule, then the Annex D grammar.
+ * Returns the reason the value cannot be rendered — a fragment whose subject the caller supplies
+ * — or `undefined` when it can.
+ *
+ * The grammar alone is not the check. `isSpdxLicenseExpression` tokenizes with `split(/\s+/u)`,
+ * so it is blind to padding, to doubled separators, and to which whitespace character was used;
+ * the value is rendered onto the tag line exactly as it arrived. A caller that applied only the
+ * grammar would admit `Apache-2.0  OR  MIT` and `MIT\tOR Apache-2.0`, which this export refuses.
+ * That is why the whole check is exported rather than one half of it: `colophon import-item-bank
+ * --license` calls this function, so the flag and the export cannot come to disagree about what a
+ * licence is (issue #3878).
+ */
+export function spdxLicenseProblem(value: string): string | undefined {
+  const freeText = renderableFreeTextProblem(value, false);
+  if (freeText !== undefined) return freeText;
+  if (value !== value.trim() || /\s\s|[^\S ]/u.test(value)) {
+    return "is padded or separated by something other than single spaces; a freeze repository renders it onto an SPDX-License-Identifier line exactly as declared";
+  }
+  if (!isSpdxLicenseExpression(value)) {
+    return "is not an SPDX licence expression (SPDX 2.3 Annex D grammar); a freeze repository renders it as one and will not present free text as a licence identifier";
+  }
+  return undefined;
 }
 
 /**
@@ -563,28 +587,13 @@ function readPublication(snapshot: VerifiedBundleSnapshot): FreezeRepoPublicatio
   }
   const record = benchmark as Record<string, unknown>;
   const license = record["license"];
-  // The expression grammar tokenizes on whitespace, so a licence carrying a newline could satisfy
-  // it and then render as two lines under one `SPDX-License-Identifier:` tag. Checked first.
+  // The free-text guard, the single-space rule, and the grammar are one function, shared with the
+  // `--license` flag that seals this field, so the two cannot disagree about what a licence is.
   if (typeof license === "string" && license.length > 0) {
-    assertRenderableFreeText("benchmark.json.license", license, false);
-    // The grammar below tokenizes on whitespace, but the value is rendered onto the
-    // `SPDX-License-Identifier:` line exactly as it arrived — so a tab or a doubled space would
-    // satisfy the grammar and still produce a tag line no scanner has to read the way this one
-    // meant it. Single spaces, no padding.
-    if (license !== license.trim() || /\s\s|[^\S ]/u.test(license)) {
-      refuse(
-        "record-integrity",
-        "benchmark.json.license",
-        "the sealed Benchmark record's licence is padded or separated by something other than single spaces; a freeze repository renders it onto an SPDX-License-Identifier line exactly as declared",
-      );
+    const problem = spdxLicenseProblem(license);
+    if (problem !== undefined) {
+      refuse("record-integrity", "benchmark.json.license", `the sealed Benchmark record's licence ${problem}`);
     }
-  }
-  if (typeof license === "string" && license.length > 0 && !isSpdxLicenseExpression(license)) {
-    refuse(
-      "record-integrity",
-      "benchmark.json.license",
-      `the sealed Benchmark record's licence "${license}" is not an SPDX licence expression; a freeze repository renders it as one and will not present free text as a licence identifier`,
-    );
   }
   if (typeof license !== "string" || license.length === 0) {
     // Licence scaffolding is generated from licence data or it is not generated at all. Inventing
