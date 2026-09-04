@@ -159,8 +159,12 @@ describe("the four closure cells", () => {
     // symbol in the refusal message is what must not throw first. Unreachable from bundle bytes
     // -- `JSON.parse` produces no symbol keys -- but the untyped published caller this guard
     // exists for can reach it, and a bare TypeError there is the exact escape it prevents.
-    expect(() => legacyClosure(Symbol("benchmark-product-public-bundle/9") as never))
-      .toThrow(BenchmarkProductError);
+    const refused = () => legacyClosure(Symbol("benchmark-product-public-bundle/9") as never);
+    expect(refused).toThrow(BenchmarkProductError);
+    expect(refused).toThrow(expect.objectContaining({
+      code: "record-integrity",
+      issues: [expect.objectContaining({ path: "bundle.manifest.format" })],
+    }));
   });
 
   test("two independent axes: v6 is v2 plus anchors, v7 is v4 plus anchors", () => {

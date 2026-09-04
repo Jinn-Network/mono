@@ -33,11 +33,9 @@ For this release, `@jinn-network/*` is pinned to the exact
 It is not a floating `@canary` dependency and is not a stable stack release.
 
 `summarizeVerificationOutcome` no longer falls through to the six-check denominator for a
-`result.format` it does not recognize; it raises an error named `BenchmarkProductError`
-carrying code `record-integrity` instead. Printing one closure's check denominator over
-another closure's bytes is an accounting failure, not a degraded pass, so the refusal is
-the correct answer. This changed after the 0.2.1 cut: a JavaScript caller on the 0.2.x
-line that relied on the old fallback sees a throw where it previously saw a number.
+`result.format` it does not recognize; it throws instead, with `.name` `BenchmarkProductError`
+and `.code` `record-integrity`. This changed after the 0.2.1 cut, so a JavaScript caller on
+the 0.2.x line that relied on the old fallback sees a throw where it previously saw a number.
 
 Verification opens no network connection, reads no account or API credential, and uploads
 nothing. It recomputes the checks the bundle's declared format closes over, against the bytes
