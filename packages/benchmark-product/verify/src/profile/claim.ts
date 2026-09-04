@@ -668,7 +668,7 @@ const REPORT_SOURCE = "report.json";
 
 /*
  * Every `throw new Error` site in this file's projection rebuild is accounted for below (issue
- * #3855, the residual `assets.ts`'s own accounting block names). The same rule sorts them: a
+ * #3855 — the residual named by `assets.ts`'s own accounting block). The same rule sorts them: a
  * projection check refuses when nothing earlier settles the same fact, and stays a bare throw when
  * an earlier check or the caller already does.
  *

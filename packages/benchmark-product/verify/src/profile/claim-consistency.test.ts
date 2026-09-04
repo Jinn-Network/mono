@@ -708,6 +708,6 @@ describe("issue #3855: the projection rebuild refuses at the source that carries
       venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord),
       verificationCommandVerb: "bundle verify",
       assurance: { preset: ASSURANCE_PRESET, resolved: { ...RESOLVED_ASSURANCE, minVerdicts: 99 } },
-    })).toThrow(expect.not.objectContaining({ name: "BenchmarkProductError" }));
+    })).toThrow(expect.objectContaining({ name: "Error" }));
   });
 });
