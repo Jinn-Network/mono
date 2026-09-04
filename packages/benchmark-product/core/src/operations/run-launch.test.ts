@@ -1224,22 +1224,31 @@ describe("runLaunch / runResume — a bound run dispatches in its beacon-derived
     return [...new Set(benchmark.items.map((item) => `sha256:${itemTaskDigest(item)}`))];
   }
 
+  /** Whether a sequence is in the ascending order `expectedCellSet` would have dispatched it in. */
+  function isCellKeyOrder(tasks: readonly string[]): boolean {
+    const ascending = [...tasks].sort();
+    return tasks.every((task, index) => task === ascending[index]);
+  }
+
   /**
-   * A beacon value whose derived order is NOT ascending task-digest order.
+   * A beacon value whose derived order is NOT ascending task-digest order, and whose TAIL is not
+   * either.
    *
    * `expectedCellSet` sorts by `cellKey`, which begins with the task digest, so an unbound run
    * dispatches its tasks in exactly that ascending order. If the derived order happened to agree
-   * with it, both assertions below would pass while proving nothing — so the value is chosen to
-   * disagree, and the disagreement is asserted before the wiring is.
+   * with it, the assertions below would pass while proving nothing. The tail matters for the same
+   * reason one step down: the resume case observes the order over the outstanding subset only, so
+   * a value whose full order disagrees but whose remaining tasks happen to be ascending would
+   * leave that case green with the wiring removed. Both disagreements are asserted before the
+   * wiring is.
    */
   function beaconValueThatReorders(sealDigest: string, itemSha256s: readonly string[]): string {
-    const cellKeyOrder = [...itemSha256s].sort();
     for (let candidate = 0; candidate < 256; candidate += 1) {
       const value = candidate.toString(16).padStart(2, "0").repeat(32);
       const { order } = computeBeaconOrder({ sealDigest, beaconValue: value, itemSha256s });
-      if (order.some((item, index) => item !== cellKeyOrder[index])) return value;
+      if (!isCellKeyOrder(order) && !isCellKeyOrder(order.slice(1))) return value;
     }
-    throw new Error("no candidate beacon value reordered the sample benchmark's tasks");
+    throw new Error("no candidate beacon value reordered the sample benchmark's tasks or their tail");
   }
 
   /** The bare task digests of the solve legs this backend was handed, in dispatch order, deduped. */
@@ -1275,9 +1284,10 @@ describe("runLaunch / runResume — a bound run dispatches in its beacon-derived
     if (!bound.ok) throw new Error("bind failed");
 
     const derived = bound.result.binding.order.map((item) => item.slice("sha256:".length));
-    // The precondition the whole suite rests on: this run's beacon order is not the order it would
-    // have run in unbound.
-    expect(derived).not.toEqual([...derived].sort());
+    // The precondition the whole suite rests on: neither this run's beacon order nor the subset a
+    // resume observes is the order it would have run in unbound.
+    expect(isCellKeyOrder(derived)).toBe(false);
+    expect(isCellKeyOrder(derived.slice(1))).toBe(false);
     return derived;
   }
 
