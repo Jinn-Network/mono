@@ -198,6 +198,11 @@ function blankStringLiterals(text: string): string {
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index]!;
     if (quote !== undefined) {
+      // A quoted string cannot contain a raw newline, so one ends the run whether or not the
+      // closing quote arrived. That bounds the damage of an unmatched quote -- an unterminated
+      // literal, or one inside a regex literal such as `/['\"]/`, which is not parsed here -- to
+      // its own line, rather than blanking the rest of the file and hiding every site in it.
+      if (character === "\n") { quote = undefined; continue; }
       if (character === "\\") { blank(index); blank(index + 1); index += 1; continue; }
       if (character === quote) { quote = undefined; continue; }
       blank(index);
@@ -287,7 +292,10 @@ function importedFrom(source: string, name: string): string | undefined {
 function moduleForSpecifier(specifier: string, fromFile: string): string | undefined {
   if (specifier.startsWith(".")) {
     const target = resolve(dirname(fromFile), specifier.replace(/\.js$/u, ".ts"));
-    return existsSync(target) ? relative(productRoot, target) : undefined;
+    const module = relative(productRoot, target);
+    // A specifier that climbs out of the product is not a module this scan can key on, and
+    // following one would read a file the scan never walked.
+    return existsSync(target) && !module.startsWith("..") ? module : undefined;
   }
   const member = memberByPackageName.get(specifier);
   if (member === undefined) return undefined;
@@ -490,6 +498,10 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     // A nested object literal inside the interpolation closes the right brace, so the text after
     // it is still text.
     expect(emitterCallSites("const line = `${f({ a: 1 })} runBindingSentence`;\n", "fixture.ts")).toEqual([]);
+    // An unmatched quote -- a regex literal the walker does not parse, or a genuinely unterminated
+    // string -- ends at its own line rather than blanking every site below it.
+    expect(emitterCallSites("const q = /['\"]/u;\nconst s = runBindingSentence(forged);\n", "fixture.ts")[0])
+      .toEqual({ site: "fixture.ts:runBindingSentence", binding: "forged", justified: false });
   });
 
   // The bare name is not unique in this tree, so the key is proven to discriminate before the scan
