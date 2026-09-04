@@ -691,6 +691,97 @@ describe("issue #3855: the projection rebuild refuses at the source that carries
       .toThrow(expect.objectContaining(refusal));
   });
 
+  /**
+   * Issue #3942: the four cases above pin four of the ten conversions. The six below pin the
+   * rest, one per site, so no conversion can be reverted to a bare throw with the suite still
+   * green. Each fixture is a WELL-FORMED result wrapper for its own method with exactly ONE
+   * field malformed, so `singleSubjectResults` and the two bare outer checks in
+   * `buildClaimPackage` itself are not what trips -- the target check is.
+   */
+  const wrap = (results: unknown) => ({ perSubject: [{ results }] });
+  const versioned = (id: string) => ({ id, version: "99", parameters: {} } as unknown as ReportRecord["method"]);
+  const supported = (id: string) =>
+    ({ id, version: BENCHMARKING_METHOD_VERSION, parameters: {} } as unknown as ReportRecord["method"]);
+
+  /** paired-delta@1's well-formed comparison shape; `pairs` is the field each case malforms. */
+  const pairedDeltaResults = {
+    pairs: 2,
+    delta: "0.5000",
+    interval: { alpha: "0.05", low: "0.0000", high: "1.0000" },
+    reasons: [],
+    pairing: { taskDigests: [digest("1")] },
+    clustering: { basis: "source", clusters: 1 },
+    excluded: { count: 0, cellKeys: [] },
+    conflicted: { count: 0, cellKeys: [] },
+    bootstrap: { seed: 1, resamples: 1 },
+  } as const;
+
+  /** binary-instrument@1 carries only `conflicted` through this projection. */
+  const binaryInstrumentResults = { conflicted: { count: 0, cellKeys: [] } } as const;
+
+  /** pairwise-disagreement@1's well-formed pairs/conflicted shape. */
+  const pairwiseDisagreementResults = {
+    pairs: [{ armA: "armA", armB: "armB", n: 2, disagreements: 1, rate: "0.5000" }],
+    conflicted: { count: 0, cellKeys: [] },
+  } as const;
+
+  /** paired-majority-delta@1's well-formed baseline/candidate/delta shape. */
+  const pairedMajorityDeltaResults = {
+    baseline: "armA",
+    candidate: "armB",
+    n: 2,
+    delta: "0.5000",
+    interval: null,
+    reasons: [],
+    clusters: { count: 1 },
+    byCandidateClass: [],
+    byStratum: [],
+    exclusions: [],
+    conflicted: { count: 0, cellKeys: [] },
+  } as const;
+
+  test("a paired-delta@1 Report whose comparison shape is malformed refuses", () => {
+    expect(() => projectFrom(
+      wrap({ ...pairedDeltaResults, pairs: "2" }),
+      supported(BENCHMARKING_METHOD_IDS.pairedDelta),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a binary-instrument@1 Report whose conflicted shape is malformed refuses", () => {
+    expect(() => projectFrom(
+      wrap({ conflicted: { count: "0", cellKeys: [] } }),
+      supported(BENCHMARKING_METHOD_IDS.binaryInstrument),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a pairwise-disagreement@1 Report whose pairs/conflicted shape is malformed refuses", () => {
+    expect(() => projectFrom(
+      wrap({ ...pairwiseDisagreementResults, pairs: {} }),
+      supported(BENCHMARKING_METHOD_IDS.pairwiseDisagreement),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a paired-majority-delta@1 Report whose baseline/candidate/delta shape is malformed refuses", () => {
+    expect(() => projectFrom(
+      wrap({ ...pairedMajorityDeltaResults, baseline: 1 }),
+      supported(BENCHMARKING_METHOD_IDS.pairedMajorityDelta),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a Report naming an unsupported binary-instrument version refuses", () => {
+    expect(() => projectFrom(
+      wrap(binaryInstrumentResults),
+      versioned(BENCHMARKING_METHOD_IDS.binaryInstrument),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a Report naming an unsupported paired-majority-delta version refuses", () => {
+    expect(() => projectFrom(
+      wrap(pairedMajorityDeltaResults),
+      versioned(BENCHMARKING_METHOD_IDS.pairedMajorityDelta),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
   /** The two throws `buildClaimPackage` keeps bare are internal faults, not reader-facing: the
    * CALLER derives both facts they assert. `execution` stays the right code for them, so they must
    * NOT be typed -- this pins that boundary rather than only the conversions. */
