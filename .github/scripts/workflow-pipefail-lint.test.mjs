@@ -1367,12 +1367,25 @@ test('a bare `case` word does not suppress the subshell guard (#4015)', () => {
       bare,
     );
   }
-  // A real `case` still opens one, wherever a statement may legally begin.
+  // A real `case` still opens one, wherever a statement may legally begin — including
+  // straight after an arm pattern, which ends the word it is glued to.
   assert.deepEqual(
     severities(['if true; then case "$x" in a) producer | head -1 ;; esac; fi'].join('\n'), {
       shell: 'bash',
     }),
     ['error:head'],
+  );
+  assert.deepEqual(
+    severities('case "$x" in a) while true; do producer | head -1; done || true ;; esac', {
+      shell: 'bash',
+    }),
+    [],
+  );
+  assert.deepEqual(
+    severities('case "$x" in a) case "$y" in b) producer | head -1 ;; esac ;; esac || true', {
+      shell: 'bash',
+    }),
+    [],
   );
 });
 

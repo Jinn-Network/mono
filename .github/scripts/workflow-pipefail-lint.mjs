@@ -430,9 +430,8 @@ function shellTokens(text) {
 }
 
 // Words after which the shell begins a new command, so a reserved word standing there
-// is a keyword rather than an argument. `|` and `&` stay inside a word token (only `&&`,
-// `||` and `;` are operators), and `(` alone opens a subshell whose first word leads a
-// statement — `(printf` does not, its next word being printf's argument.
+// is a keyword rather than an argument. `|` and `&` stay inside a word token, only `&&`,
+// `||` and `;` being operators.
 const COMMAND_POSITION_WORDS = new Set(['(', '|', '&', '!', 'then', 'else', 'elif', 'do', '{', 'time']);
 
 const BRACE_TOKENS = new Set(['{', '}']);
@@ -440,6 +439,10 @@ const BRACE_TOKENS = new Set(['{', '}']);
 function leadsStatement(previous) {
   if (previous === undefined) return true;
   if (previous.type === 'operator') return true;
+  // A `case` arm pattern — `a)`, `*)`, `b|c)` — ends the word it is glued to, and the arm
+  // body begins right after it. Without this a compound leading an arm was read as an
+  // argument, which is the same false red this positional rule exists to remove.
+  if (previous.closesParen === true) return true;
   return COMMAND_POSITION_WORDS.has(previous.value);
 }
 
@@ -463,19 +466,18 @@ function tokenCompound(token, previous) {
   if (token.opensParen && token.closesParen) return null;
   if (token.opensParen) return { role: 'open', kind: 'paren' };
   if (token.closesParen) return { role: 'close', kind: 'paren' };
-  const opener = OPENER_KIND.get(token.value);
-  const closer = opener === undefined ? CLOSER_KIND.get(token.value) : undefined;
-  if (opener === undefined && closer === undefined) return null;
   // A reserved *word* is only a compound keyword where a statement may begin. Classifying
   // it by value alone made `grep -w case file` push a `case` nothing ever popped, and the
   // enclosing subshell's genuinely guarded `)` was then read as that phantom `case`'s arm
   // terminator and skipped — so the guard never retracted the pipeline it covered. `{`
   // and `}` are punctuation rather than words: they are exempt, because a function
   // definition writes its `{` after the `()` that no rule can call a command position.
-  if (!BRACE_TOKENS.has(token.value) && !leadsStatement(previous)) return null;
-  return opener === undefined
-    ? { role: 'close', kind: /** @type {string} */ (closer) }
-    : { role: 'open', kind: opener };
+  const positional = BRACE_TOKENS.has(token.value) || leadsStatement(previous);
+  const opener = OPENER_KIND.get(token.value);
+  if (opener !== undefined) return positional ? { role: 'open', kind: opener } : null;
+  const closer = CLOSER_KIND.get(token.value);
+  if (closer === undefined) return null;
+  return positional ? { role: 'close', kind: closer } : null;
 }
 
 function matchCompounds(tokens) {
