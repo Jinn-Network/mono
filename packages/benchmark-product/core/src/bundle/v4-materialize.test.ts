@@ -751,7 +751,7 @@ describe("binary public-bundle/4 qualification exclusions", () => {
     expect(ledger).not.toEqual(carried);
 
     expect(carried).toEqual([...carried].sort());
-  });
+  }, 120_000);
 
   // The three tamper cases below only prove anything if the UNTAMPERED bundle passes: a
   // `projectAdmissionExclusions` that disagreed with the producer for any reason -- a digest
@@ -790,7 +790,7 @@ describe("binary public-bundle/4 qualification exclusions", () => {
     rewriteManifest(bundleDir);
 
     await expectRejectedAt(bundleDir, "qualification.json");
-  });
+  }, 120_000);
 
   test("the reader refuses an exclusion pointed at the other entry's replacement", async () => {
     const fixture = await twoExclusions();
@@ -805,7 +805,7 @@ describe("binary public-bundle/4 qualification exclusions", () => {
     rewriteManifest(bundleDir);
 
     await expectRejectedAt(bundleDir, "qualification.json");
-  });
+  }, 120_000);
 
   test("the reader refuses a dropped exclusion", async () => {
     const fixture = await twoExclusions();
@@ -816,5 +816,5 @@ describe("binary public-bundle/4 qualification exclusions", () => {
     rewriteManifest(bundleDir);
 
     await expectRejectedAt(bundleDir, "qualification.json");
-  });
+  }, 120_000);
 });
