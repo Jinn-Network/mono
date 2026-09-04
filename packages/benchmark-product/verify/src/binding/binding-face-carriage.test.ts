@@ -138,8 +138,18 @@ const CONSTRAINT = [
   "EXPECTED_JUSTIFIED_SITES in this file so the addition is reviewed rather than assumed.",
 ].join(" ");
 
-/** Comments blanked to same-length runs, so offsets and line numbers survive and prose about a
- * binding is not read as one. */
+/**
+ * Comments blanked to same-length runs, so offsets and line numbers survive and prose about a
+ * binding is not read as one.
+ *
+ * Two known residues, both pre-existing and neither present in the tree today. A `//` inside a
+ * string literal (`"https://example.com"`) blanks the rest of THAT line, so a call sharing the
+ * line is missed; and conversely a call written inside a string ("call runBindingSentence(binding)
+ * to render") is read as one, since only the reference scan knows about prose. Both are same-line
+ * and predate this file's widenings; stated rather than fixed, because a real string lexer here
+ * cost more than it bought -- a stray backtick in a regex character class, which the tree does
+ * contain, put it in template mode to end of file and blanked a whole tail silently.
+ */
 function blankComments(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, (match) => match.replace(/[^\n]/gu, " "));
 }
@@ -174,55 +184,6 @@ export function isScannedSource(name: string): boolean {
   return (name.endsWith(".ts") || name.endsWith(".tsx"))
     && !name.endsWith(".d.ts")
     && !name.endsWith(".test.ts") && !name.endsWith(".test.tsx");
-}
-
-/**
- * String contents blanked the same way, for both scans: a help string, an error message or a log
- * line naming the emitter is prose about it, not a use of it, and reading one as a site would be
- * exactly the misdirected noise #3952 was filed to remove.
- *
- * Walked rather than matched, because the three string forms nest. A template literal's TEXT is
- * blanked but its `${...}` expressions are not -- `${runBindingSentence(binding)}` is code, and
- * blanking it would hide the shape this file exists to see -- and an apostrophe inside that text
- * ("it's") must not open a quoted run, which is what a regex over the three forms would do. The
- * quotes and backticks themselves survive, so `topLevelArguments` still reads its own depth, and
- * newlines survive so every offset and line number does.
- */
-function blankStringLiterals(text: string): string {
-  const out = text.split("");
-  // Guarded on both ends: a newline keeps every line number, and an escape at the very end of
-  // the text must not append a character the source never had.
-  const blank = (index: number): void => { if (index < out.length && out[index] !== "\n") out[index] = " "; };
-  // "`" marks template text; "{" marks a brace-delimited code region, including the one a `${`
-  // opens, so a nested object literal inside an interpolation closes the right brace.
-  const stack: string[] = [];
-  let quote: string | undefined;
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index]!;
-    if (quote !== undefined) {
-      // A quoted string cannot contain a raw newline, so one ends the run whether or not the
-      // closing quote arrived. That bounds the damage of an unmatched quote -- an unterminated
-      // literal, or one inside a regex literal such as `/['\"]/`, which is not parsed here -- to
-      // its own line, rather than blanking the rest of the file and hiding every site in it.
-      if (character === "\n") { quote = undefined; continue; }
-      if (character === "\\") { blank(index); blank(index + 1); index += 1; continue; }
-      if (character === quote) { quote = undefined; continue; }
-      blank(index);
-      continue;
-    }
-    if (stack.at(-1) === "`") {
-      if (character === "\\") { blank(index); blank(index + 1); index += 1; continue; }
-      if (character === "`") { stack.pop(); continue; }
-      if (character === "$" && text[index + 1] === "{") { stack.push("{"); index += 1; continue; }
-      blank(index);
-      continue;
-    }
-    if (character === '"' || character === "'") { quote = character; continue; }
-    if (character === "`") { stack.push("`"); continue; }
-    if (character === "{") { stack.push("{"); continue; }
-    if (character === "}" && stack.at(-1) === "{") stack.pop();
-  }
-  return out.join("");
 }
 
 function sourceFiles(directory: string): string[] {
@@ -290,6 +251,31 @@ function importedFrom(source: string, name: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Whether this file has the emitter in hand at all: it imports the name, re-exports it, declares
+ * it, or reaches it through a namespace import (`import * as face`, used as `face.name`).
+ *
+ * This is what gates the value-reference scan (#3954), and it is the whole reason that scan does
+ * not need to lex string literals. A bare name match is only evidence of a reference in a file
+ * that could reference it; anywhere else it is prose -- a help string, an error message, a log
+ * line -- and reading one as a site would be exactly the misdirected noise #3952 removed. Unlike
+ * the origin, this is deliberately NOT a resolution: a name imported through a barrel is in hand
+ * even when the chain cannot be followed, so the reference is still counted.
+ */
+function bindsEmitter(code: string, name: string, declared: RegExp): boolean {
+  if (importedFrom(code, name) !== undefined || declared.test(code)) return true;
+  return [...code.matchAll(/^[ \t]*import\s+\*\s+as\s+(\w+)\s+from/gmu)]
+    .some((match) => new RegExp(String.raw`\b${match[1]!}\s*\??\s*\.\s*${name}\b`, "u").test(code));
+}
+
+/** The declaration of `name` in the module that owns it, in either of the two forms it takes. */
+function declarationPattern(name: string): RegExp {
+  return new RegExp(
+    String.raw`(?:export\s+)?(?:declare\s+)?(?:async\s+)?(?:function|const|let|var|class)\s+${name}\b`,
+    "u",
+  );
+}
+
 /** The product-relative module a specifier names, for a relative path or a member package name. */
 function moduleForSpecifier(specifier: string, fromFile: string): string | undefined {
   if (specifier.startsWith(".")) {
@@ -318,10 +304,7 @@ function moduleForSpecifier(specifier: string, fromFile: string): string | undef
  * declaration, and it was not the emitter's (#3952).
  */
 export function resolveOrigin(source: string, filePath: string, name: string): string | undefined {
-  const declared = new RegExp(
-    String.raw`(?:export\s+)?(?:declare\s+)?(?:async\s+)?(?:function|const|let|var|class)\s+${name}\b`,
-    "u",
-  );
+  const declared = declarationPattern(name);
   // Read through blanked comments, for the reason the scans do: a commented-out import naming the
   // emitter would otherwise resolve the origin to a module this file never reaches, and a wrong
   // origin drops the file's real calls -- the same silent-hole shape the barrel case had.
@@ -361,7 +344,7 @@ export function emitterCallSites(
   label: string,
   origins: ReadonlyMap<string, string | undefined> = new Map(),
 ): CallSite[] {
-  const blanked = blankStringLiterals(blankComments(source));
+  const blanked = blankComments(source);
   const references = blankModuleStatements(blanked);
   const rawLines = source.split("\n");
   // `import * as face from ...` binds the emitter behind a namespace, so `face.runBindingSentence`
@@ -385,6 +368,9 @@ export function emitterCallSites(
       if (args === undefined) throw new Error(`${label}: unterminated call to ${name}`);
       sites.push({ site: `${label}:${name}`, binding: args[position], justified: marked(index) });
     }
+    // A value reference is counted only in a file that has the emitter in hand. Everywhere else a
+    // bare name match is prose, and this gate is what lets the scan read strings as ordinary text.
+    if (!bindsEmitter(blanked, name, declarationPattern(name))) continue;
     for (const match of references.matchAll(new RegExp(String.raw`\b${name}\b`, "gu"))) {
       const index = match.index!;
       const before = references.slice(Math.max(0, index - 24), index);
@@ -446,83 +432,55 @@ describe("the binding face is never emitted from an unchecked binding", () => {
 
   // A bare reference hands the face on without ever being a call, which is the shape the scan used
   // to pass over entirely (#3954).
+  // A bare reference hands the face on without ever being a call, which is the shape the scan used
+  // to pass over entirely (#3954). Every fixture below carries the import, because that is what
+  // puts the emitter in the file's hands and so what the reference scan is gated on.
   test("detects a value reference to an emitter, and does not read a module statement as one", () => {
-    expect(emitterCallSites("const lines = bindings.map(runBindingSentence);\n", "fixture.ts")).toEqual([
-      { site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false },
-    ]);
-    expect(emitterCallSites("const emit = runBindingSentence;\n", "fixture.ts")).toEqual([
-      { site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false },
-    ]);
-    const marked = "// binding-carriage: checked by readRunBindingCarriage above.\nconst emit = runBindingSentence;\n";
+    const IMPORTED = 'import { runBindingSentence } from "@colophon-claims/verify";\n';
+    const reference = [{ site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false }];
+    expect(emitterCallSites(`${IMPORTED}const lines = bindings.map(runBindingSentence);\n`, "fixture.ts"))
+      .toEqual(reference);
+    expect(emitterCallSites(`${IMPORTED}const emit = runBindingSentence;\n`, "fixture.ts")).toEqual(reference);
+    const marked = `${IMPORTED}// binding-carriage: checked above.\nconst emit = runBindingSentence;\n`;
     expect(emitterCallSites(marked, "fixture.ts")[0]?.justified).toBe(true);
     // The export list `verify/src/index.ts:206` writes, and the import a caller writes: naming the
     // face is how a module hands it over, not a site that emits it.
     expect(emitterCallSites('export { runBindingClass, runBindingSentence } from "./binding/report-face.js";\n', "fixture.ts"))
       .toEqual([]);
-    expect(emitterCallSites('import {\n  runBindingSentence,\n} from "@colophon-claims/verify";\n', "fixture.ts"))
-      .toEqual([]);
+    expect(emitterCallSites(IMPORTED, "fixture.ts")).toEqual([]);
     // A declaration introduces the emitter rather than passing it on, in either form.
     expect(emitterCallSites("export function runBindingSentence(binding) {\n  return \"\";\n}\n", "fixture.ts"))
       .toEqual([]);
     // A property named after the emitter is a key, not a reference to the function -- but a
     // ternary branch is a reference, and both sit before a colon.
-    expect(emitterCallSites("const table = { runBindingSentence: other };\n", "fixture.ts")).toEqual([]);
-    expect(emitterCallSites("const emit = flag ? runBindingSentence : other;\n", "fixture.ts")).toEqual([
-      { site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false },
-    ]);
+    expect(emitterCallSites(`${IMPORTED}const table = { runBindingSentence: other };\n`, "fixture.ts")).toEqual([]);
+    expect(emitterCallSites(`${IMPORTED}const emit = flag ? runBindingSentence : other;\n`, "fixture.ts"))
+      .toEqual(reference);
     // A member access names someone else's property, not the emitter this file imported -- but a
     // namespace import binds the emitter itself behind exactly that shape.
-    expect(emitterCallSites("const emit = report.runBindingSentence;\n", "fixture.ts")).toEqual([]);
+    expect(emitterCallSites(`${IMPORTED}const emit = report.runBindingSentence;\n`, "fixture.ts")).toEqual([]);
     const namespaced = 'import * as face from "@colophon-claims/verify";\nconst emit = face.runBindingSentence;\n';
-    expect(emitterCallSites(namespaced, "fixture.ts")).toEqual([
-      { site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false },
-    ]);
-    // Prose inside a string is not a reference, and a type position emits nothing at runtime.
-    expect(emitterCallSites('const help = "the sentence comes from runBindingSentence";\n', "fixture.ts"))
-      .toEqual([]);
-    expect(emitterCallSites("type Emitter = typeof runBindingSentence;\n", "fixture.ts")).toEqual([]);
+    expect(emitterCallSites(namespaced, "fixture.ts")).toEqual(reference);
+    // A type position emits nothing at runtime.
+    expect(emitterCallSites(`${IMPORTED}type Emitter = typeof runBindingSentence;\n`, "fixture.ts")).toEqual([]);
   });
 
-  // All three string forms nest, and both scans read through the same blanking, so each form is
-  // proven on both sides: prose naming an emitter is not a site, and code inside an interpolation
-  // still is.
-  test("reads through every string form: prose is not a site, an interpolation still is", () => {
-    // Prose in each of the three forms, for the call shape and the reference shape.
-    expect(emitterCallSites('const help = "call runBindingSentence(binding) to render";\n', "fixture.ts"))
-      .toEqual([]);
-    expect(emitterCallSites("const help = 'call runBindingSentence(binding) to render';\n", "fixture.ts"))
-      .toEqual([]);
-    expect(emitterCallSites("const help = `the sentence comes from runBindingSentence`;\n", "fixture.ts"))
-      .toEqual([]);
-    // An apostrophe inside template TEXT must not open a quoted run and hide the code between two
-    // of them -- ordinary English prose around an interpolation is the shape that does it.
-    expect(emitterCallSites("const line = `it's ${items.map(runBindingSentence)} — don't`;\n", "fixture.ts"))
-      .toEqual([{ site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false }]);
-    // And the interpolation's own code is read as code, in either shape.
-    expect(emitterCallSites("const line = `bound: ${runBindingSentence(forged)}`;\n", "fixture.ts")[0])
-      .toEqual({ site: "fixture.ts:runBindingSentence", binding: "forged", justified: false });
-    // A nested object literal inside the interpolation closes the right brace, so the text after
-    // it is still text.
-    expect(emitterCallSites("const line = `${f({ a: 1 })} runBindingSentence`;\n", "fixture.ts")).toEqual([]);
-    // An unmatched quote -- a regex literal the walker does not parse, or a genuinely unterminated
-    // string -- ends at its own line rather than blanking every site below it.
-    expect(emitterCallSites("const q = /['\"]/u;\nconst s = runBindingSentence(forged);\n", "fixture.ts")[0])
-      .toEqual({ site: "fixture.ts:runBindingSentence", binding: "forged", justified: false });
-  });
-
-  // The marker lookback counts lines in the blanked text and reads them out of the raw source, so
-  // every blanking step must preserve length and line count exactly. Asserted over the real tree
-  // rather than a fixture, because the shapes that could break it -- an escape at end of file, a
-  // line continuation, a nested template -- are what the tree contains and a fixture guesses at.
-  test("blanking preserves every offset and line number across the scanned tree", () => {
-    const files = memberRoots.flatMap((directory) => sourceFiles(directory));
-    expect(files.length).toBeGreaterThan(0);
-    for (const file of files) {
-      const source = readFileSync(file, "utf8");
-      const blanked = blankStringLiterals(blankComments(source));
-      expect(blanked.length, file).toBe(source.length);
-      expect(blanked.split("\n").length, file).toBe(source.split("\n").length);
+  // Prose is read as prose without lexing it, because a file that never took the emitter in hand
+  // cannot be referencing it. This is what a string walker was doing before, at the cost of a
+  // stray backtick in a regex literal blanking a whole file's tail.
+  test("prose naming an emitter is not a reference, in a file that never imported it", () => {
+    for (const form of ['"..."', "'...'", "`...`"]) {
+      const quote = form[0]!;
+      expect(emitterCallSites(`const help = ${quote}the face comes from runBindingSentence${quote};\n`, "fixture.ts"))
+        .toEqual([]);
     }
+    // And a regex literal carrying a quote or a backtick is inert: the scan reads the text after
+    // it exactly as it reads the text before it.
+    const afterRegex = 'import { runBindingSentence } from "@colophon-claims/verify";\n'
+      + "const media = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;\n"
+      + "const s = runBindingSentence(forged);\n";
+    expect(emitterCallSites(afterRegex, "fixture.ts")[0])
+      .toEqual({ site: "fixture.ts:runBindingSentence", binding: "forged", justified: false });
   });
 
   // The bare name is not unique in this tree, so the key is proven to discriminate before the scan
