@@ -190,7 +190,9 @@ export function isScannedSource(name: string): boolean {
  */
 function blankStringLiterals(text: string): string {
   const out = text.split("");
-  const blank = (index: number): void => { if (out[index] !== "\n") out[index] = " "; };
+  // Guarded on both ends: a newline keeps every line number, and an escape at the very end of
+  // the text must not append a character the source never had.
+  const blank = (index: number): void => { if (index < out.length && out[index] !== "\n") out[index] = " "; };
   // "`" marks template text; "{" marks a brace-delimited code region, including the one a `${`
   // opens, so a nested object literal inside an interpolation closes the right brace.
   const stack: string[] = [];
@@ -502,6 +504,21 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     // string -- ends at its own line rather than blanking every site below it.
     expect(emitterCallSites("const q = /['\"]/u;\nconst s = runBindingSentence(forged);\n", "fixture.ts")[0])
       .toEqual({ site: "fixture.ts:runBindingSentence", binding: "forged", justified: false });
+  });
+
+  // The marker lookback counts lines in the blanked text and reads them out of the raw source, so
+  // every blanking step must preserve length and line count exactly. Asserted over the real tree
+  // rather than a fixture, because the shapes that could break it -- an escape at end of file, a
+  // line continuation, a nested template -- are what the tree contains and a fixture guesses at.
+  test("blanking preserves every offset and line number across the scanned tree", () => {
+    const files = memberRoots.flatMap((directory) => sourceFiles(directory));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const source = readFileSync(file, "utf8");
+      const blanked = blankStringLiterals(blankComments(source));
+      expect(blanked.length, file).toBe(source.length);
+      expect(blanked.split("\n").length, file).toBe(source.split("\n").length);
+    }
   });
 
   // The bare name is not unique in this tree, so the key is proven to discriminate before the scan
