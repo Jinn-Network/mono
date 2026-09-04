@@ -20,7 +20,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import {
   BUNDLE_V5_FORMAT,
@@ -845,15 +845,25 @@ export interface FreezeRepoDifference {
   readonly kind: FreezeRepoDifferenceKind;
 }
 
+/**
+ * Why the mode dimension was dropped. The two are materially different to a reader — one is a
+ * fact about their filesystem, the other is a fact about this run — so the check names which,
+ * rather than reporting the filesystem's shape when all it established was its own reach.
+ */
+export type ExecutableBitSkipReason = "constant-mode" | "not-probed";
+
 export interface FreezeRepoVerificationResult {
   readonly ok: boolean;
   /**
-   * False when the filesystem holding the tree does not carry an executable bit (or could not be
-   * asked), so the mode dimension was not checked and `ok` rests on bytes and entry type alone.
-   * Reported rather than assumed: a check that silently drops a dimension is the kind of quiet
-   * claim this tool exists to avoid.
+   * False when the mode dimension was not checked — the filesystem holding the tree carries no
+   * executable bit, or the probe could not be run at all — so `ok` rests on bytes and entry type
+   * alone. Reported rather than assumed: a check that silently drops a dimension is the kind of
+   * quiet claim this tool exists to avoid.
    */
   readonly executableBitChecked: boolean;
+  /** Which of those two it was. Set exactly when `executableBitChecked` is false; both fields are
+   * derived from one probe, so they cannot disagree. */
+  readonly executableBitSkipped?: ExecutableBitSkipReason;
   readonly bundleIdentity: string;
   readonly commitId: string;
   readonly fileCount: number;
@@ -869,6 +879,10 @@ interface TreeEntry {
   readonly executable: boolean;
 }
 
+/** What the filesystem probe established. `carried` is the ordinary answer; the other two are the
+ * two distinct reasons the mode dimension gets dropped (issue #3604). */
+export type ExecutableBitProbe = "carried" | ExecutableBitSkipReason;
+
 /**
  * @internal Exported for this module's own tests; not part of the package's public surface.
  *
@@ -882,20 +896,31 @@ interface TreeEntry {
  * EVERY member as `changed`, which is the loudest possible false alarm for a tool whose whole
  * claim is that the tree matches.
  *
- * Fails to "not carried" on any error (a read-only mount, a permission refusal). That direction
- * is deliberate and matches git's: the byte comparison still runs on every member, so the cost is
- * one unreported mode bit on a filesystem we could not interrogate, against a total spurious
- * failure the other way.
+ * A refusal (a read-only mount, a permission refusal) answers `not-probed` rather than throwing.
+ * Dropping the dimension is deliberate and matches git's direction: the byte comparison still runs
+ * on every member, so the cost is one unreported mode bit against a total spurious failure the
+ * other way. It stays DISTINCT from `constant-mode` because only one of the two is a fact about
+ * the caller's filesystem, and the report repeats what was established, not what was assumed.
  */
-export function execBitIsCarried(dir: string): boolean {
-  // Written inside the repository's own `.git` when it has one — same filesystem, and the walk
-  // already skips root `.git`, so a probe stranded by a SIGKILL between create and unlink cannot
-  // later read back as an unexpected member of the published tree.
+export function probeExecutableBit(dir: string): ExecutableBitProbe {
+  // Written inside the repository's own `.git` when that is a real directory on the same
+  // filesystem as the tree — the walk already skips root `.git`, so a probe stranded there by a
+  // SIGKILL between create and unlink cannot later read back as an unexpected member. `lstat`
+  // rather than `stat`, and the device comparison, are what make "same filesystem" true rather
+  // than assumed: a symlinked or bind-mounted `.git` answers for somewhere else (issue #3605).
+  //
+  // Everywhere else — no `.git`, an unreadable one, or the regular FILE a linked worktree and a
+  // submodule checkout carry — the probe goes in the tree itself, and the guarantee above does not
+  // hold: a hard kill inside that window strands a `.colophon-filemode-probe-<hex>` that the next
+  // verification reports as `unexpected` (issue #3606). That is a loud, self-explaining, one-`rm`
+  // failure, and it is preferred to the alternative, which is teaching the check to skip
+  // probe-shaped names and so carry a permanent blind spot.
   const name = `.colophon-filemode-probe-${randomBytes(8).toString("hex")}`;
   const gitDir = join(dir, ".git");
   let probeDir = dir;
   try {
-    if (statSync(gitDir).isDirectory()) probeDir = gitDir;
+    const gitEntry = lstatSync(gitDir);
+    if (gitEntry.isDirectory() && gitEntry.dev === statSync(dir).dev) probeDir = gitDir;
   } catch {
     // no `.git`, or an unreadable one: probe the tree itself
   }
@@ -903,11 +928,11 @@ export function execBitIsCarried(dir: string): boolean {
   try {
     writeFileSync(probe, "", { mode: 0o644, flag: "wx" });
     // A filesystem that reports the bit on a file created without it is reporting a constant.
-    if ((statSync(probe).mode & 0o111) !== 0) return false;
+    if ((statSync(probe).mode & 0o111) !== 0) return "constant-mode";
     chmodSync(probe, 0o755);
-    return (statSync(probe).mode & 0o100) !== 0;
+    return (statSync(probe).mode & 0o100) !== 0 ? "carried" : "constant-mode";
   } catch {
-    return false;
+    return "not-probed";
   } finally {
     // The probe answers a question; it never raises one. A cleanup refusal (EPERM on an unusual
     // mount) must not escape as the caller's failure — at worst it strands the file note below.
@@ -972,11 +997,11 @@ export async function verifyFreezeRepo(
   const differences: FreezeRepoDifference[] = [];
 
   let present: readonly TreeEntry[];
-  let executableBitChecked = false;
+  let probe: ExecutableBitProbe = "not-probed";
   try {
     if (!statSync(repoDir).isDirectory()) throw new Error("not a directory");
-    executableBitChecked = execBitIsCarried(repoDir);
-    present = listTree(repoDir, executableBitChecked);
+    probe = probeExecutableBit(repoDir);
+    present = listTree(repoDir, probe === "carried");
   } catch {
     refuse("not-found", repoDir, `"${repoDir}" is not a readable directory`);
   }
@@ -1003,7 +1028,8 @@ export async function verifyFreezeRepo(
 
   return {
     ok: differences.length === 0,
-    executableBitChecked,
+    executableBitChecked: probe === "carried",
+    ...(probe === "carried" ? {} : { executableBitSkipped: probe }),
     bundleIdentity: tree.bundleIdentity,
     commitId: tree.commitId,
     fileCount: tree.files.size,

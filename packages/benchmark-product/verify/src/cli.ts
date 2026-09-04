@@ -448,9 +448,14 @@ function renderFreezeRepoCheck(check: FreezeRepoVerificationResult): string {
     : `\nfreeze repository: DOES NOT match this bundle (${check.differences.length} of ${check.fileCount} members)`;
   const pin = `\n  commit ${check.commitId}`;
   const drift = check.differences.map((difference) => `\n  ${difference.kind}: ${difference.path}`).join("");
+  // Naming which of the two it was, because "does not carry an executable bit" is a claim about the
+  // reader's filesystem that a refused probe never established (issue #3604). An unknown reason
+  // reads as the unestablished one, which is the honest direction.
   const modes = check.executableBitChecked
     ? ""
-    : "\n  note: this filesystem does not carry an executable bit, so file modes were not checked";
+    : check.executableBitSkipped === "constant-mode"
+      ? "\n  note: file modes were not checked (this filesystem reports a constant mode)"
+      : "\n  note: file modes were not checked (the filesystem could not be probed)";
   return `${head}${pin}${modes}${drift}\n`;
 }
 

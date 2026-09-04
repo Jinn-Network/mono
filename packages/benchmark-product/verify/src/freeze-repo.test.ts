@@ -27,7 +27,7 @@ import {
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   FREEZE_REPO_ROLES,
-  execBitIsCarried,
+  probeExecutableBit,
   freezeRepoCommitId,
   listTree,
   renderFreezeRepo,
@@ -576,7 +576,7 @@ describe("published-tree enumeration", () => {
   test("the filesystem probe answers for a real POSIX temp directory and leaves nothing behind", () => {
     const dir = treeDir();
 
-    expect(execBitIsCarried(dir)).toBe(true);
+    expect(probeExecutableBit(dir)).toBe("carried");
     expect(listTree(dir, true)).toEqual([]);
   });
 
@@ -585,12 +585,32 @@ describe("published-tree enumeration", () => {
     mkdirSync(join(dir, ".git"));
     writeFileSync(join(dir, "README.md"), "text\n");
 
-    expect(execBitIsCarried(dir)).toBe(true);
+    expect(probeExecutableBit(dir)).toBe("carried");
     expect(readdirSync(join(dir, ".git"))).toEqual([]);
     expect(listTree(dir, true).map((entry) => entry.path)).toEqual(["README.md"]);
   });
 
-  test("the probe answers no rather than throwing when it cannot write", () => {
-    expect(execBitIsCarried(join(treeDir(), "does-not-exist"))).toBe(false);
+  // Issue #3605: `statSync` follows symlinks, so a `.git` symlinked onto another filesystem —
+  // dotfile repositories, some container mounts — used to be probed in the target's place, and the
+  // answer described a filesystem other than the published tree's.
+  test("a symlinked .git is not used as the probe site", () => {
+    const dir = treeDir();
+    const elsewhere = treeDir();
+    writeFileSync(join(dir, "README.md"), "text\n");
+    symlinkSync(elsewhere, join(dir, ".git"));
+    // Refusing writes is what makes the assertion discriminating: probing the target answers
+    // `not-probed`, probing the tree answers `carried`.
+    chmodSync(elsewhere, 0o555);
+
+    try {
+      expect(probeExecutableBit(dir)).toBe("carried");
+      expect(readdirSync(elsewhere)).toEqual([]);
+    } finally {
+      chmodSync(elsewhere, 0o755);
+    }
+  });
+
+  test("the probe reports that it could not be run rather than throwing", () => {
+    expect(probeExecutableBit(join(treeDir(), "does-not-exist"))).toBe("not-probed");
   });
 });

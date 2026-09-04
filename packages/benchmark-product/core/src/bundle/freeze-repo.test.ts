@@ -185,6 +185,37 @@ describe("freeze-repository export against a real v4 bundle", () => {
     expect(drifted.stdout).toContain("changed: README.md");
   });
 
+  // Issue #3607: the mode dimension is skipped on a filesystem that carries no executable bit or
+  // that the probe cannot interrogate. A constant-mode filesystem is unreachable in CI, but a
+  // read-only repository directory reaches the same branch — the probe write is refused — while
+  // leaving the tree readable, so the byte comparison still runs.
+  test.skipIf(process.geteuid?.() === 0)(
+    "a tree the probe cannot interrogate still matches, and the report says which dimension it dropped",
+    async () => {
+      const bundleDir = licensedBundle;
+      const repoDir = join(tempDir("unprobed"), "tree");
+      await exportFreezeRepo(bundleDir, repoDir);
+
+      chmodSync(repoDir, 0o555);
+      try {
+        const checked = await verifyFreezeRepo(bundleDir, repoDir);
+        // The dropped dimension does not fail an otherwise faithful tree; it is reported instead.
+        expect(checked.ok).toBe(true);
+        expect(checked.differences).toEqual([]);
+        expect(checked.executableBitChecked).toBe(false);
+        expect(checked.executableBitSkipped).toBe("not-probed");
+
+        const human = await runVerifierCli([bundleDir, "--freeze-repo", repoDir]);
+        expect(human.exitCode).toBe(0);
+        // Not "this filesystem does not carry an executable bit": it may well carry one (issue #3604).
+        expect(human.stdout).toContain("file modes were not checked (the filesystem could not be probed)");
+      } finally {
+        // Before the suite's own cleanup, which cannot remove a read-only directory's contents.
+        chmodSync(repoDir, 0o755);
+      }
+    },
+  );
+
   test("refuses to write into a directory that already holds files", async () => {
     const repoDir = join(tempDir("occupied"), "tree");
     mkdirSync(repoDir, { recursive: true });
