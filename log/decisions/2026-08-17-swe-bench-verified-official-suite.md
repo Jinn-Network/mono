@@ -4,6 +4,7 @@
 - **Status:** **Accepted 2026-08-17.** Ratified by operator instruction to
   implement the SWE-bench Verified official-suite train (issue
   [#2744](https://github.com/Jinn-Network/mono/issues/2744)).
+- **Superseded in part by [DR-2026-09-04](./2026-09-04-colophon-surrounds-the-run.md) at its ratification:** running decisions superseded; named protocol, comparability, export-as-derived and aggregation stand.
 - **Owning docs:** the publication interoperability profile; Colophon
   self-serve; the benchmark-product GTM plan (copy); product-design pointer
   addendum.
