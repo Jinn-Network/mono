@@ -473,10 +473,13 @@ describe("announcement-edge index coverage", () => {
     });
   }
 
-  // Not a covered shape, and deliberately so -- see the README's note on the recordKind-only
-  // filter. This asserts the conclusion that note records: no index of its own, but the primary
-  // key already matches the ORDER BY exactly, so the page ordering is free and a resumed page
-  // seeks rather than re-scanning. A change that cost the ordering a temp b-tree fails here.
+  // Neither of the next two is a covered shape, and deliberately so -- see the README's note on
+  // the two unindexed served filters. Each asserts the conclusion that note records, so a change
+  // that moved either plan fails here rather than leaving the prose to drift.
+  //
+  // recordKind alone: no index of its own, but the primary key already matches the ORDER BY
+  // exactly, so the page ordering is free and a resumed page seeks rather than re-scanning. A
+  // change that cost the ordering a temp b-tree fails here.
   test("has no index of its own for the recordKind-only filter, but orders for free", () => {
     const firstPage = planFor("record_kind = ?");
     expect(firstPage.join("\n")).toContain("SCAN announcement_edges");
@@ -487,5 +490,23 @@ describe("announcement-edge index coverage", () => {
     expect(resumed.join("\n")).toContain("SEARCH announcement_edges");
     expect(resumed.join("\n")).toContain("sqlite_autoindex_announcement_edges_1");
     expect(resumed.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+  });
+
+  // field alone: the same missing index, but the ordering is not free. SQLite treats the
+  // equality-constrained field as constant and drops it from the ORDER BY, which leaves ordinal
+  // out of index order, so both pages sort through a temp b-tree. That cost is accepted rather
+  // than indexed away -- nothing in-tree queries the shape -- and pinning it keeps the acceptance
+  // a decision rather than an oversight: an index that removed the temp b-tree fails here too,
+  // and should be landed with the note above updated.
+  test("has no index of its own for the field-only filter, and pays a temp b-tree to order", () => {
+    const firstPage = planFor("field = ?");
+    expect(firstPage.join("\n")).toContain("SCAN announcement_edges");
+    expect(firstPage.join("\n")).toContain("sqlite_autoindex_announcement_edges_1");
+    expect(firstPage.some((detail) => detail.includes("TEMP B-TREE"))).toBe(true);
+
+    const resumed = planFor(`field = ? AND ${ANNOUNCEMENT_EDGE_CURSOR_CLAUSE}`);
+    expect(resumed.join("\n")).toContain("SEARCH announcement_edges");
+    expect(resumed.join("\n")).toContain("sqlite_autoindex_announcement_edges_1");
+    expect(resumed.some((detail) => detail.includes("TEMP B-TREE"))).toBe(true);
   });
 });
