@@ -137,9 +137,10 @@ describe("the readouts the width does not bound", () => {
   /**
    * Issue #3907. `unboundedReadoutsOf` selects every declared method that is not `wilson@1`, not
    * only the three comparisons, so the line has to hold for the rest of the registry too. These
-   * two are the cases a comparison-shaped sentence gets wrong: `binary-instrument@1` reports a
-   * qualification with no interval at all, and `avg-at-k@1` has no pairing or clustering to
-   * compute one from.
+   * two are the cases a comparison-shaped sentence gets wrong: `avg-at-k@1` reports per-task rates
+   * and a mean with no interval at all, and `binary-instrument@1` does report intervals — five
+   * Wilson intervals — but on denominators (`wrong`, `correct`, item and call counts) that are not
+   * this advisory's per-arm n.
    */
   test("names a non-comparison readout without asserting a mechanism it does not have", () => {
     const advisory = sampleSizeAdvisory({
@@ -154,8 +155,8 @@ describe("the readouts the width does not bound", () => {
     expect(advisory.unboundedReadouts).toEqual(["avg-at-k@1", "binary-instrument@1"]);
     const text = formatSampleSizeAdvisory(advisory);
     expect(text).toContain("does not bound the declared readouts avg-at-k@1, binary-instrument@1");
-    // The over-claim this test exists to keep out: neither readout reports an interval computed
-    // from pairing or clustering, and `binary-instrument@1` reports no interval at all.
+    // The over-claim this test exists to keep out: neither readout's uncertainty comes from pairing
+    // or clustering, and `binary-instrument@1`'s intervals are not on this advisory's denominator.
     expect(text).not.toContain("pairing");
     expect(text).not.toContain("clustering");
     expect(text).not.toContain("report their own intervals");

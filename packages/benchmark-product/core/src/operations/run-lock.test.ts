@@ -543,7 +543,6 @@ describe("draftSampleSizeAdvisory", () => {
       .toEqual(["paired-delta@1", "avg-at-k@1"]);
   });
 
-
   test("is undefined for a draft no lock could seal yet, so the lock's own refusal is the answer", async () => {
     const clock = makeClock();
     initWorkspace(contextFor(clock));
