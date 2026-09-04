@@ -884,6 +884,18 @@ test("a refused probe says so rather than describing the reader's filesystem", a
   assert.doesNotMatch(result.stdout, /does not carry an executable bit/);
 });
 
+test("a result carrying no reason claims neither cause", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
+    verify: async () => publisherResult(keyId),
+    freezeRepo: async () => matchedTree({ executableBitChecked: false }),
+  });
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /note: file modes were not checked\n/);
+  assert.doesNotMatch(result.stdout, /constant mode|could not be probed/);
+});
+
 test("a checked mode dimension adds no note at all", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();

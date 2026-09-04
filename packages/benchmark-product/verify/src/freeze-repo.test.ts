@@ -593,7 +593,9 @@ describe("published-tree enumeration", () => {
   // Issue #3605: `statSync` follows symlinks, so a `.git` symlinked onto another filesystem —
   // dotfile repositories, some container mounts — used to be probed in the target's place, and the
   // answer described a filesystem other than the published tree's.
-  test("a symlinked .git is not used as the probe site", () => {
+  // Skipped under root, which writes through a read-only directory and so would pass this either
+  // way — a green assertion that proves nothing is worse than an honest skip.
+  test.skipIf(process.geteuid?.() === 0)("a symlinked .git is not used as the probe site", () => {
     const dir = treeDir();
     const elsewhere = treeDir();
     writeFileSync(join(dir, "README.md"), "text\n");

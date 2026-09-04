@@ -449,13 +449,15 @@ function renderFreezeRepoCheck(check: FreezeRepoVerificationResult): string {
   const pin = `\n  commit ${check.commitId}`;
   const drift = check.differences.map((difference) => `\n  ${difference.kind}: ${difference.path}`).join("");
   // Naming which of the two it was, because "does not carry an executable bit" is a claim about the
-  // reader's filesystem that a refused probe never established (issue #3604). An unknown reason
-  // reads as the unestablished one, which is the honest direction.
+  // reader's filesystem that a refused probe never established (issue #3604). A result carrying no
+  // reason gets the bare sentence for the same reason: it says what was skipped and nothing more.
   const modes = check.executableBitChecked
     ? ""
     : check.executableBitSkipped === "constant-mode"
       ? "\n  note: file modes were not checked (this filesystem reports a constant mode)"
-      : "\n  note: file modes were not checked (the filesystem could not be probed)";
+      : check.executableBitSkipped === "not-probed"
+        ? "\n  note: file modes were not checked (the filesystem could not be probed)"
+        : "\n  note: file modes were not checked";
   return `${head}${pin}${modes}${drift}\n`;
 }
 

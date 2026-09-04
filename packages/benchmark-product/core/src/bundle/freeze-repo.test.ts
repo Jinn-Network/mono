@@ -11,7 +11,7 @@
  * acceptance is proved here, against a bundle a real disclosed run actually materialized.
  */
 
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -190,12 +190,13 @@ describe("freeze-repository export against a real v4 bundle", () => {
   // read-only repository directory reaches the same branch — the probe write is refused — while
   // leaving the tree readable, so the byte comparison still runs.
   test.skipIf(process.geteuid?.() === 0)(
-    "a tree the probe cannot interrogate still matches, and the report says which dimension it dropped",
+    "a tree the probe cannot interrogate still matches, and the report says why it skipped the modes",
     async () => {
       const bundleDir = licensedBundle;
       const repoDir = join(tempDir("unprobed"), "tree");
       await exportFreezeRepo(bundleDir, repoDir);
 
+      const originalMode = statSync(repoDir).mode & 0o7777;
       chmodSync(repoDir, 0o555);
       try {
         const checked = await verifyFreezeRepo(bundleDir, repoDir);
@@ -211,7 +212,7 @@ describe("freeze-repository export against a real v4 bundle", () => {
         expect(human.stdout).toContain("file modes were not checked (the filesystem could not be probed)");
       } finally {
         // Before the suite's own cleanup, which cannot remove a read-only directory's contents.
-        chmodSync(repoDir, 0o755);
+        chmodSync(repoDir, originalMode);
       }
     },
   );
