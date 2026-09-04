@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { wilsonInterval } from "@jinn-network/benchmarking-aggregate";
+import { BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import {
   expectedIntervalWidth,
   formatSampleSizeAdvisory,
@@ -80,5 +81,64 @@ describe("formatSampleSizeAdvisory", () => {
     // that promised a flat ceiling would be the exact self-deception this gate exists to prevent.
     expect(text).toContain("no pass rate this run can have");
     expect(text).toContain("Cells that do not score");
+  });
+});
+
+/**
+ * Issue #3832. The printed width is the ceiling on ONE ARM's Wilson interval, and three of the four
+ * readouts a claim package may carry are comparisons whose interval is not that. No seal-time bound
+ * on those is computable (see the module doc), so the advisory names them rather than inventing a
+ * number for them.
+ */
+describe("the readouts the width does not bound", () => {
+  const paired = { method: BENCHMARKING_METHOD_IDS.pairedDelta, version: "1" } as const;
+  const wilson = { method: BENCHMARKING_METHOD_IDS.wilson, version: "1" } as const;
+
+  test("a draft declaring only wilson@1 is unchanged: no list, and byte-identical text", () => {
+    const bare = sampleSizeAdvisory({ items: 12, replicates: 2 });
+    for (const declaredAnalyses of [[], [wilson]]) {
+      const advisory = sampleSizeAdvisory({ items: 12, replicates: 2, declaredAnalyses });
+      expect(advisory).toEqual(bare);
+      expect(advisory).not.toHaveProperty("unboundedReadouts");
+      expect(formatSampleSizeAdvisory(advisory)).toBe(formatSampleSizeAdvisory(bare));
+    }
+  });
+
+  test("names a declared comparison the way a claim package spells it, not as a method URI", () => {
+    const advisory = sampleSizeAdvisory({ items: 12, replicates: 2, declaredAnalyses: [paired] });
+    expect(advisory.unboundedReadouts).toEqual(["paired-delta@1"]);
+    expect(formatSampleSizeAdvisory(advisory)).toContain("paired-delta@1");
+    expect(formatSampleSizeAdvisory(advisory)).not.toContain(BENCHMARKING_METHOD_IDS.pairedDelta);
+  });
+
+  test("names every declared comparison once, in declaration order, and drops wilson@1", () => {
+    const advisory = sampleSizeAdvisory({
+      items: 12,
+      replicates: 2,
+      declaredAnalyses: [
+        wilson,
+        { method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: "1" },
+        paired,
+        paired,
+      ],
+    });
+    expect(advisory.unboundedReadouts).toEqual(["pairwise-disagreement@1", "paired-delta@1"]);
+  });
+
+  test("says the width does not cover them WITHOUT printing a width for them", () => {
+    const advisory = sampleSizeAdvisory({ items: 12, replicates: 2, declaredAnalyses: [paired] });
+    const text = formatSampleSizeAdvisory(advisory);
+    expect(text).toContain("bounds a per-arm pass rate only");
+    // The whole decision in one assertion: exactly the rows the per-arm ceiling covers carry a
+    // width, and the comparison line carries none. A fabricated bound would show up as a fourth.
+    expect(text.match(/interval width /g)).toHaveLength(advisory.references.length);
+  });
+
+  test("leaves n and the width untouched: naming scope is not a second measurement", () => {
+    const scoped = sampleSizeAdvisory({ items: 12, replicates: 2, declaredAnalyses: [paired] });
+    const bare = sampleSizeAdvisory({ items: 12, replicates: 2 });
+    expect(scoped.n).toBe(bare.n);
+    expect(scoped.expectedIntervalWidth).toBe(bare.expectedIntervalWidth);
+    expect(scoped.references).toEqual(bare.references);
   });
 });
