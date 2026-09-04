@@ -885,6 +885,10 @@ Every member is mode `100644`. An executable bit, or a member replaced by a
 symlink, changes what git records and therefore the pinned commit even though the
 bytes read back identical — so `freeze-repo verify` reports both as drift, and it
 treats a nested `.git` directory as ordinary content, skipping only the root one.
+The symlink half holds everywhere. The executable-bit half holds wherever the
+filesystem carries the bit, which the check establishes by probe rather than
+assumption; where it does not, or where the probe cannot be run, the mode
+dimension is dropped and `executableBitChecked` says so.
 
 The standalone verifier package checks a published tree with no product install:
 `colophon-verify <bundle> --freeze-repo <dir>`, exit `1` on drift.
