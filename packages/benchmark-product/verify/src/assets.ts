@@ -247,13 +247,13 @@ interface ProjectionSource {
  * `z.string()` and `results` is `JsonValueSchema`, so neither the unregistered-method default nor
  * the binary-qualification validation is unreachable on grammar grounds. What keeps them off the
  * public reader path is that `profile/claim.ts` reaches the same facts FIRST, and the two are
- * shadowed differently. The unregistered-method default is shadowed by the identical bare throw in
- * that file's own projection rebuild for `claim-consistency`. The binary-qualification one is
- * shadowed by something stronger: `ClaimPackageSchema`'s `superRefine` runs the same
+ * shadowed differently. The unregistered-method default is shadowed by the identical default in
+ * that file's own projection rebuild for `claim-consistency`, which now refuses with this same
+ * typed shape (issue #3855). The binary-qualification one is shadowed by something stronger:
+ * `ClaimPackageSchema`'s `superRefine` runs the same
  * `validateBinaryInstrumentQualificationProjection` while parsing `claim-package.json`, and emits a
- * typed Zod refusal rather than a throw. So a Report this file would reject never reaches it. The
- * remaining untyped throw on that earlier path is a real gap, but it is in `claim.ts` and outside
- * this issue's scope; converting the shadowed copy here would move nothing.
+ * typed Zod refusal rather than a throw. So a Report this file would reject never reaches it, and
+ * converting either shadowed copy here would move nothing.
  *
  * The mismatch in `buildPublicAssets` below is reader-facing for a different reason: it compares
  * two independently supplied inputs rather than restating a derived fact, so it refuses.
@@ -591,7 +591,7 @@ function pairedMajorityDeltaFactsHtml(facts: PairedMajorityDeltaFacts): string {
   return `<dl class="facts"><div><dt>Candidate (evidence-declaring arm)</dt><dd>${escapeMarkup(facts.candidate)}</dd></div><div><dt>Baseline (evidence-free twin)</dt><dd>${escapeMarkup(facts.baseline)}</dd></div><div><dt>Paired task count</dt><dd>${facts.n}</dd></div><div><dt>Candidate minus baseline estimate</dt><dd>${facts.delta === null ? "—" : escapeMarkup(facts.delta)}</dd></div></dl>${judgeIntervalHtml(facts.interval, facts.reasons)}`;
 }
 
-/** The projection is already validated at :294 (validateBinaryInstrumentQualificationProjection),
+/** The projection is already validated by `validateBinaryInstrumentQualificationProjection`,
  * so `configuration["strata"]` is a sealed, non-empty, sorted-unique, grammar-conforming array. */
 function stratumCaption(configuration: Record<string, unknown>): string {
   const strata = Array.isArray(configuration["strata"])
