@@ -326,6 +326,10 @@ export function runStatus(
         ...(runState.closeAt !== undefined ? { closeAt: runState.closeAt } : {}),
         ...(binding === undefined ? {} : {
           binding: {
+            // binding-carriage: `readRunBindingCarriage` above, which resolves the record out of
+            // the sealed store and refuses one whose `sealDigest`, `sealedAt` or `declaredSource`
+            // is not this run's own. Stated again here rather than shared with the `statement`
+            // marker below: the class label is its own emission of the face (#3953).
             class: runBindingClass(binding),
             beacon: binding.beacon,
             postSeal: binding.postSeal,
