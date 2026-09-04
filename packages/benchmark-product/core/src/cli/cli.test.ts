@@ -182,8 +182,9 @@ describe("launch and resume concurrency flag", () => {
  * Issue #3332. `Number` coerces rather than parses, so `"1e3"`, `"0x10"`, `"+1"` and a
  * whitespace-padded number all became integers `Number.isInteger` accepted and the schema's bound
  * admitted -- an operator who mistyped a round got a successfully bound run at a round they never
- * typed, and `bind` is write-once, so rebinding cannot correct it. Every case below refuses before
- * any workspace state is read, which is why these need no locked draft.
+ * typed, and `bind` is write-once, so rebinding cannot correct it. The refusals below happen on the
+ * flag, before any workspace state is read, which is why they need no locked draft; the two cases
+ * that do reach the operation assert only that they were not refused for their spelling.
  */
 describe("bind --beacon-round", () => {
   const bind = (round: string): Promise<{ exitCode: number; stdout: string }> => runCli([
