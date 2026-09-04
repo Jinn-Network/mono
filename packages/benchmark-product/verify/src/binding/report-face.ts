@@ -202,5 +202,8 @@ export function runBoundVenueLimits(
   limits: readonly string[],
   binding: VerifiedRunBinding | undefined,
 ): readonly string[] {
+  // binding-carriage: forwards this function's own parameter; the obligation belongs to whoever
+  // supplies it, and every such caller is pinned in `binding-face-carriage.test.ts`. Listed there
+  // as the forwarding origin rather than left implicit, so the forward is stated (#3757).
   return binding === undefined ? limits : [...limits, runBindingSentence(binding)];
 }
