@@ -146,3 +146,39 @@ test("the sandbox relay emits a final frame the worker did not newline-terminate
 
   expect({ code, stdout }).toEqual({ code: 0, stdout: `${frame}\n` });
 }, 30_000);
+
+/**
+ * The companion to the test above. A trailing chunk that is not a whole frame cannot be relayed,
+ * and this runner must not then report the worker's silence as success: exiting 0 with an empty
+ * stdout is exactly the state that reached the operator as an unattributed
+ * `Unexpected end of JSON input`. The in-flight failure path SIGKILLs the client, which says
+ * nothing once the client has already exited, so the final flush needs its own exit code.
+ */
+test("a final frame the relay cannot parse fails the runner instead of exiting 0", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jinn-oci-runner-truncated-"));
+  temporaryDirectories.push(directory);
+  const dockerPath = writeUnterminatedFrameDocker(directory, '{"ok":true,"value":{"runt');
+  const runner = spawn(process.execPath, [
+    runnerPath,
+    "sandbox",
+    dockerPath,
+    `sha256:${"b".repeat(64)}`,
+    "run", "--rm", "--name=jinn-inspect-truncated-fixture", "--network=none",
+    `sha256:${"a".repeat(64)}`,
+    "/jinn/input/inspect-probe.json",
+  ], { stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  runner.stdout.setEncoding("utf8");
+  runner.stderr.setEncoding("utf8");
+  runner.stdout.on("data", (chunk: string) => { stdout += chunk; });
+  runner.stderr.on("data", (chunk: string) => { stderr += chunk; });
+  const code = await new Promise<number | null>((resolve) => {
+    runner.once("exit", (exitCode) => { resolve(exitCode); });
+  });
+
+  expect({ code, stdout }).toEqual({ code: 1, stdout: "" });
+  expect(stderr).toContain("could not relay a worker protocol frame");
+  // The frame is never echoed: only stdout is contractually the bounded machine envelope.
+  expect(stderr).not.toContain("runt");
+}, 30_000);

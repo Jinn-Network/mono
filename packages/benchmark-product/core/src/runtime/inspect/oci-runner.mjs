@@ -390,6 +390,7 @@ if (command === "probe-broker") {
     });
     let frameBuffer = "";
     let frameChain = Promise.resolve();
+    let relayFailed = false;
     const pushFrame = (line) => {
       frameChain = frameChain.then(async () => {
         const frame = JSON.parse(line);
@@ -401,7 +402,10 @@ if (command === "probe-broker") {
         } else {
           throw new Error("worker emitted an unknown protocol frame");
         }
-      }).catch(() => child.kill("SIGKILL"));
+      }).catch(() => {
+        relayFailed = true;
+        child.kill("SIGKILL");
+      });
     };
     if (sandboxMode) {
       child.stdout.setEncoding("utf8");
@@ -461,8 +465,22 @@ if (command === "probe-broker") {
         return;
       }
       for (const terminationSignalName of terminationSignals) process.removeAllListeners(terminationSignalName);
-      if (signal !== null) process.kill(process.pid, signal);
-      else process.exitCode = code ?? 1;
+      if (signal !== null) {
+        process.kill(process.pid, signal);
+        return;
+      }
+      // A frame this process could not relay is this process's failure, not the worker's success.
+      // Before #3720 the only way a relay failure surfaced was the SIGKILL above, which cannot
+      // reach a client that has already exited -- so a frame that failed during the final flush
+      // left an exit code of 0 and an empty stdout, indistinguishable from a worker that answered
+      // nothing. Say so instead. The frame itself is never echoed: only stdout is contractually
+      // the machine envelope, and a frame that failed to parse is not known to be one.
+      if (relayFailed) {
+        process.stderr.write("OCI runner could not relay a worker protocol frame\n");
+        process.exitCode = 1;
+        return;
+      }
+      process.exitCode = code ?? 1;
     });
   }
   await runWorker();
