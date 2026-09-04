@@ -82,22 +82,19 @@ export interface DeclaredAnalysis {
   readonly version: string;
 }
 
-const METHOD_ID_PREFIX = "jinn.benchmarking.method/";
-
 /**
  * The declared readouts whose uncertainty is not the per-arm Wilson width — every declared method
  * that is not `wilson@1`. Deduplicated and in declaration order, so the line reads the way the
  * plan does.
+ *
+ * Named the way `report/claim.ts` names them: the last segment of the method id plus the registry
+ * version. The namespace is dropped rather than matched against a hand-typed prefix, so this stays
+ * correct for any registered id and never restates a §9.2 identifier in shipped source.
  */
 function unboundedReadoutsOf(declared: readonly DeclaredAnalysis[]): readonly string[] {
   const named = declared
     .filter((analysis) => analysis.method !== BENCHMARKING_METHOD_IDS.wilson)
-    .map((analysis) => {
-      const short = analysis.method.startsWith(METHOD_ID_PREFIX)
-        ? analysis.method.slice(METHOD_ID_PREFIX.length)
-        : analysis.method;
-      return `${short}@${analysis.version}`;
-    });
+    .map((analysis) => `${analysis.method.slice(analysis.method.lastIndexOf("/") + 1)}@${analysis.version}`);
   return [...new Set(named)];
 }
 
