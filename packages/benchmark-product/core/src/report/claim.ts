@@ -70,6 +70,7 @@ import {
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
 } from "../legacy-closures.js";
 import { join } from "node:path";
+import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { artifactsDir, claimPackageArtifactPath } from "../workspace/layout.js";
 import type { VenueHonesty } from "../operations/run-results.js";
@@ -678,13 +679,51 @@ interface MethodProjection {
   readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
 }
 
+/** Every check below reads the sealed Report, so every refusal names the file that carries the
+ * malformed fact — the same source rule the verifier's mirror of this file states. */
+const REPORT_SOURCE = "report.json";
+
+/*
+ * Issue #3943: the mirror of the accounting block in `@colophon-claims/verify`'s
+ * `profile/claim.ts` (issue #3855). That file typed its ten projection-rebuild throws; this copy
+ * is on a reader path of its own — `operations/verify.ts` calls core's `assertClaimConsistency`,
+ * which calls this `buildClaimPackage` — so leaving it bare classified the SAME malformed sealed
+ * Report two ways depending on the entry point. The same rule sorts the sites on both sides: a
+ * projection check refuses when nothing earlier settles the same fact, and stays a bare throw
+ * when an earlier check or the caller already does.
+ *
+ * WHAT REFUSES. This rebuild is the FIRST reader of the sealed Report's results and method
+ * identity. `ReportRecordSchema` types `results` as `JsonValueSchema` and `MethodRefSchema`'s
+ * `id`/`version` as bare `z.string()`, so nothing between record parsing and here settles any of
+ * it. `singleSubjectResults`, the five per-method shape checks, and `methodProjection`'s three
+ * unsupported-version throws and unregistered-method default therefore refuse: a mismatch is a
+ * named disagreement with the record a reader was handed, not an internal fault, and `execution`
+ * — which is what `toErrorEnvelope` carries an untyped throw as, and which the CLI maps to "the
+ * verifier broke" — would be the wrong code for it.
+ *
+ * CLASSIFICATION SHIFT. Through core's own verify operation these ten conditions previously
+ * surfaced as `execution`, the code `toErrorEnvelope` carries an untyped throw as; they now
+ * surface as `record-integrity` at `report.json`, which is what a reader already got for the
+ * same bytes through the standalone verifier. Where that code reaches a reader through
+ * `colophon-verify`'s exit mapping, this is the 2 ("the verifier broke") to 1 ("the bundle is
+ * bad") shift issue #3943 named, and it is the same shift issues #3741 and #3855 each stated for
+ * their own conversions. `errors.ts` documents why the two "not supported" conditions live under
+ * `record-integrity` rather than a compat code of their own (issue #3944).
+ *
+ * WHAT STAYS BARE. The two throws in `buildClaimPackage` itself are internal faults: the CALLER
+ * derives both facts they assert. `assertClaimConsistency` builds `assurance.resolved` from the
+ * sealed Run's own `policy` and the plan entry selected by the same method+version match this
+ * function re-selects, and it re-derives the `disclosure` section it then hands in. Reaching
+ * either means this package disagrees with itself about a fact it just derived, and `execution`
+ * is the correct code for exactly that.
+ */
 /** Every method this product wires publishes its single Matrix subject's results at this fixed
  * path — the wrapper itself is method-agnostic; only what's inside `results` differs by method. */
 function singleSubjectResults(reportRecord: ReportRecord): unknown {
   const results = reportRecord.results as { readonly perSubject?: readonly { readonly results?: unknown }[] } | undefined;
   const perSubject = results?.perSubject;
   if (!Array.isArray(perSubject) || perSubject.length !== 1) {
-    throw new Error("claim package: expected exactly one Report subject (this product's single-Matrix Report shape)");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: expected exactly one Report subject (this product's single-Matrix Report shape)");
   }
   return perSubject[0]?.results;
 }
@@ -701,7 +740,7 @@ function wilsonProjection(subjectResults: unknown): MethodProjection {
     || typeof shape.conflicted?.count !== "number"
     || !Array.isArray(shape.conflicted.cellKeys)
   ) {
-    throw new Error("claim package: Report results do not carry wilson@1's arms/conflicted shape");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: Report results do not carry wilson@1's arms/conflicted shape");
   }
   return {
     headline: shape.arms as Record<string, unknown>,
@@ -741,7 +780,7 @@ function comparisonProjection(subjectResults: unknown): MethodProjection {
     || !Array.isArray(shape.conflicted.cellKeys)
     || shape.bootstrap === undefined
   ) {
-    throw new Error("claim package: Report results do not carry paired-delta@1's comparison shape");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: Report results do not carry paired-delta@1's comparison shape");
   }
   const conflicted = { count: shape.conflicted.count, cellKeys: shape.conflicted.cellKeys as readonly string[] };
   return {
@@ -763,7 +802,7 @@ function comparisonProjection(subjectResults: unknown): MethodProjection {
 function binaryQualificationProjection(subjectResults: unknown): MethodProjection {
   const shape = subjectResults as { readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown } } | undefined;
   if (typeof shape?.conflicted?.count !== "number" || !Array.isArray(shape.conflicted.cellKeys)) {
-    throw new Error("claim package: Report results do not carry binary-instrument@1's conflicted shape");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: Report results do not carry binary-instrument@1's conflicted shape");
   }
   return {
     qualification: subjectResults,
@@ -788,7 +827,7 @@ function pairwiseDisagreementProjection(subjectResults: unknown): MethodProjecti
     || typeof shape.conflicted?.count !== "number"
     || !Array.isArray(shape.conflicted.cellKeys)
   ) {
-    throw new Error("claim package: Report results do not carry pairwise-disagreement@1's pairs/conflicted shape");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: Report results do not carry pairwise-disagreement@1's pairs/conflicted shape");
   }
   const conflicted = { count: shape.conflicted.count, cellKeys: shape.conflicted.cellKeys as readonly string[] };
   return {
@@ -835,7 +874,7 @@ function pairedMajorityDeltaProjection(subjectResults: unknown): MethodProjectio
     || typeof shape.conflicted?.count !== "number"
     || !Array.isArray(shape.conflicted.cellKeys)
   ) {
-    throw new Error("claim package: Report results do not carry paired-majority-delta@1's baseline/candidate/delta shape");
+    refuse("record-integrity", REPORT_SOURCE, "claim package: Report results do not carry paired-majority-delta@1's baseline/candidate/delta shape");
   }
   const conflicted = { count: shape.conflicted.count, cellKeys: shape.conflicted.cellKeys as readonly string[] };
   return {
@@ -871,21 +910,21 @@ function methodProjection(reportRecord: ReportRecord): MethodProjection {
       return comparisonProjection(subjectResults);
     case BENCHMARKING_METHOD_IDS.binaryInstrument:
       if (reportRecord.method.version !== BENCHMARKING_METHOD_VERSION) {
-        throw new Error(`claim package: binary-instrument version "${reportRecord.method.version}" is not supported`);
+        refuse("record-integrity", REPORT_SOURCE, `claim package: binary-instrument version "${reportRecord.method.version}" is not supported`);
       }
       return binaryQualificationProjection(subjectResults);
     case BENCHMARKING_METHOD_IDS.pairwiseDisagreement:
       if (reportRecord.method.version !== BENCHMARKING_METHOD_VERSION) {
-        throw new Error(`claim package: pairwise-disagreement version "${reportRecord.method.version}" is not supported`);
+        refuse("record-integrity", REPORT_SOURCE, `claim package: pairwise-disagreement version "${reportRecord.method.version}" is not supported`);
       }
       return pairwiseDisagreementProjection(subjectResults);
     case BENCHMARKING_METHOD_IDS.pairedMajorityDelta:
       if (reportRecord.method.version !== BENCHMARKING_METHOD_VERSION) {
-        throw new Error(`claim package: paired-majority-delta version "${reportRecord.method.version}" is not supported`);
+        refuse("record-integrity", REPORT_SOURCE, `claim package: paired-majority-delta version "${reportRecord.method.version}" is not supported`);
       }
       return pairedMajorityDeltaProjection(subjectResults);
     default:
-      throw new Error(`claim package: method "${reportRecord.method.id}" has no claim-package projection`);
+      refuse("record-integrity", REPORT_SOURCE, `claim package: method "${reportRecord.method.id}" has no claim-package projection`);
   }
 }
 
