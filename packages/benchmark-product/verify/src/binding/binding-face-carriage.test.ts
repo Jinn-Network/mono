@@ -152,12 +152,15 @@ const CONSTRAINT = [
  * the rest of THAT line -- a comment read as code, which is the loud direction -- and can never
  * reach the next line, let alone the file's tail.
  *
- * The residue that remains is a template literal: `${"`"}// ...${"`"}` inside one still opens a comment. It is
- * the shape that cost the last attempt the file, and it is the same-line, noise-direction half of
- * the pair anyway once `blankStringLiterals` runs over the quoted forms.
+ * The residue that remains is the template literal: a backtick-quoted string carrying a comment
+ * opener still blanks the rest of its line. That is precisely the form that cost the last attempt a
+ * whole file, and it is the noise-direction half of the pair anyway, since `blankStringLiterals`
+ * closes the forging direction over the quoted forms.
  */
 function blankComments(text: string): string {
-  const out = [...text];
+  // Split by UTF-16 unit, which is what `text[index]` reads: spreading would split by code
+  // point and desync every offset after the first astral character.
+  const out = text.split("");
   const blank = (from: number, to: number): void => {
     for (let index = from; index < to; index += 1) if (out[index] !== "\n") out[index] = " ";
   };
@@ -177,7 +180,9 @@ function blankComments(text: string): string {
       continue;
     }
     if (mode === "string") {
-      if (character === "\\") index += 1;
+      // An escape consumes the next character, but never the newline: state is dropped at every
+      // line break, so nothing this walker gets wrong can reach the line after it.
+      if (character === "\\" && text[index + 1] !== "\n") index += 1;
       else if (character === quote || character === "\n") mode = "code";
       continue;
     }
@@ -436,11 +441,15 @@ export function emitterCallSites(
   for (const [module, name, position] of EMITTERS) {
     const origin = origins.get(name);
     if (origin !== undefined && origin !== module) continue;
-    // The name this FILE spells the emitter as: an alias binds it under another one, and searching
-    // the declared name then finds neither the call nor the reference (#4017). The site is still
-    // reported under the declared name, which is what `EXPECTED_JUSTIFIED_SITES` is keyed on.
-    const local = importedFrom(blanked, name)?.local ?? name;
-    for (const match of blanked.matchAll(new RegExp(String.raw`\b${local}\s*\(`, "gu"))) {
+    // The names this FILE spells the emitter as: an alias binds it under another one, and
+    // searching only the declared name finds neither the call nor the reference (#4017). Both are
+    // searched rather than the alias alone, since a file may also reach the emitter under its own
+    // name -- through a declaration or a namespace import -- in the same breath. The site is
+    // reported under the declared name either way, which is what `EXPECTED_JUSTIFIED_SITES` keys
+    // on: the alias is how this file spells the emitter, not a different one.
+    const alias = importedFrom(blanked, name)?.local;
+    const spelled = alias === undefined || alias === name ? name : `(?:${name}|${alias})`;
+    for (const match of blanked.matchAll(new RegExp(String.raw`\b${spelled}\s*\(`, "gu"))) {
       const index = match.index!;
       if (/\b(?:function|const|let|var)\s+$/u.test(blanked.slice(Math.max(0, index - 24), index))) continue;
       const args = topLevelArguments(blanked, index + match[0].length - 1);
@@ -450,10 +459,11 @@ export function emitterCallSites(
     // A value reference is counted only in a file that has the emitter in hand. Everywhere else a
     // bare name match is prose, and this gate is what lets the scan read strings as ordinary text.
     if (!bindsEmitter(blanked, name, declarationPattern(name))) continue;
-    for (const match of references.matchAll(new RegExp(String.raw`\b${local}\b`, "gu"))) {
+    for (const match of references.matchAll(new RegExp(String.raw`\b${spelled}\b`, "gu"))) {
       const index = match.index!;
+      const spelling = match[0].length;
       const before = references.slice(Math.max(0, index - 24), index);
-      const after = references.slice(index + local.length, index + local.length + 24);
+      const after = references.slice(index + spelling, index + spelling + 24);
       // A call is already counted above. A declaration introduces the emitter rather than passing
       // it on, and `typeof name` reads its type rather than the function.
       if (/^\s*\(/u.test(after)) continue;
