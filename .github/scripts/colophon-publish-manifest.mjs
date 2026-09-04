@@ -330,40 +330,64 @@ export async function fetchPublishedVerifyVersions(
 const VERIFY_PIN_PATTERN = /@colophon-claims\/verify@([0-9]+(?:\.[0-9]+){0,2})/gu;
 
 /**
- * The contents of every string literal in a JavaScript or TypeScript source, with comments
- * dropped.
+ * The source ranges a JavaScript or TypeScript file spends inside a string literal or inside a
+ * comment. Everything else is code.
  *
  * A pin is sealed into a bundle by a string constant; a version named in a comment is prose about
  * a pin, not a pin. Scanning the raw text cannot tell the two apart, so a sentence explaining a
  * pending bump would refuse a publish that nothing in the tree actually blocks (issue #3686).
  */
-function* stringLiterals(text) {
+function* literalAndCommentSpans(text) {
+  const stack = [{ kind: 'code', depth: 0 }];
   let index = 0;
   while (index < text.length) {
+    const frame = stack[stack.length - 1];
     const char = text[index];
-    if (char === '/' && text[index + 1] === '/') {
+    if (frame.kind === 'template') {
+      if (char === '\\') {
+        index += 2;
+      } else if (char === '`') {
+        yield { kind: 'string', start: frame.chunkStart, end: index };
+        stack.pop();
+        index += 1;
+      } else if (char === '$' && text[index + 1] === '{') {
+        yield { kind: 'string', start: frame.chunkStart, end: index };
+        stack.push({ kind: 'code', depth: 0 });
+        index += 2;
+      } else {
+        index += 1;
+      }
+    } else if (char === '/' && text[index + 1] === '/') {
       const end = text.indexOf('\n', index);
+      yield { kind: 'comment', start: index, end: end < 0 ? text.length : end };
       if (end < 0) return;
       index = end + 1;
     } else if (char === '/' && text[index + 1] === '*') {
       const end = text.indexOf('*/', index + 2);
+      yield { kind: 'comment', start: index, end: end < 0 ? text.length : end + 2 };
       index = end < 0 ? text.length : end + 2;
-    } else if (char === '"' || char === "'" || char === '`') {
+    } else if (char === '"' || char === "'") {
       let cursor = index + 1;
-      let literal = '';
       while (cursor < text.length) {
-        if (text[cursor] === '\\') {
-          literal += text[cursor + 1] ?? '';
-          cursor += 2;
-        } else if (text[cursor] === char || (char !== '`' && text[cursor] === '\n')) {
-          break;
-        } else {
-          literal += text[cursor];
-          cursor += 1;
-        }
+        if (text[cursor] === '\\') cursor += 2;
+        else if (text[cursor] === char || text[cursor] === '\n') break;
+        else cursor += 1;
       }
-      yield literal;
+      yield { kind: 'string', start: index, end: Math.min(cursor + 1, text.length) };
       index = cursor + 1;
+    } else if (char === '`') {
+      stack.push({ kind: 'template', chunkStart: index + 1 });
+      index += 1;
+    } else if (char === '{') {
+      frame.depth += 1;
+      index += 1;
+    } else if (char === '}') {
+      if (frame.depth > 0) frame.depth -= 1;
+      else if (stack.length > 1) {
+        stack.pop();
+        stack[stack.length - 1].chunkStart = index + 1;
+      }
+      index += 1;
     } else {
       index += 1;
     }
@@ -371,13 +395,26 @@ function* stringLiterals(text) {
 }
 
 /**
- * The `@colophon-claims/verify` specifiers one source file seals. Both forms are collected: the
- * exact `X.Y.Z` command and the compatible `X.Y` line.
+ * The `@colophon-claims/verify` specifiers one source file seals, in every shape npx resolves.
+ *
+ * The scanner above is deliberately small -- it tracks nested template interpolations but has no
+ * state for a regex literal carrying a quote -- so it refuses rather than guesses: a specifier it
+ * can place in neither a string nor a comment throws. Silently dropping one would hide it from the
+ * publish guard, which is the failure this scan exists to prevent.
  */
-export function collectPinsFromSource(text) {
+export function collectPinsFromSource(text, label = 'source') {
+  const spans = [...literalAndCommentSpans(text)];
   const pins = new Set();
-  for (const literal of stringLiterals(text)) {
-    for (const match of literal.matchAll(VERIFY_PIN_PATTERN)) pins.add(match[1]);
+  const unclassified = [];
+  for (const match of text.matchAll(VERIFY_PIN_PATTERN)) {
+    const span = spans.find(({ start, end }) => match.index >= start && match.index < end);
+    if (span?.kind === 'string') pins.add(match[1]);
+    else if (!span) unclassified.push(match[1]);
+  }
+  if (unclassified.length > 0) {
+    throw new Error(
+      `cannot tell whether @colophon-claims/verify@${unclassified.join(', @')} in ${label} is sealed or explained; put the specifier in a plain string constant`,
+    );
   }
   return [...pins].sort();
 }
@@ -390,7 +427,7 @@ export function collectClaimVerifyPins(repoRoot, sources = CLAIM_PIN_SOURCES) {
   const pins = new Set();
   for (const source of sources) {
     const text = readFileSync(resolve(repoRoot, ...source.split('/')), 'utf8');
-    for (const pin of collectPinsFromSource(text)) pins.add(pin);
+    for (const pin of collectPinsFromSource(text, source)) pins.add(pin);
   }
   return [...pins].sort();
 }

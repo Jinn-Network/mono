@@ -386,6 +386,23 @@ test('a verifier version named only in a comment is not a sealed pin', () => {
   );
 });
 
+test('the pin scan reaches into a template interpolation, and refuses what it cannot place', () => {
+  assert.deepEqual(
+    collectPinsFromSource('const a = `x ${y ? `npx @colophon-claims/verify@0.9.9 <dir>` : ""} z`;'),
+    ['0.9.9'],
+    'a nested template is still a sealed string, not code the scan may skip',
+  );
+  assert.deepEqual(
+    collectPinsFromSource('const a = `${{ k: 1 }.k} npx @colophon-claims/verify@0.2.1 <dir>`;'),
+    ['0.2.1'],
+  );
+  assert.throws(
+    () => collectPinsFromSource('const q = /"/; const c = "npx @colophon-claims/verify@9.9.9 <dir>";', 'probe.ts'),
+    /cannot tell whether @colophon-claims\/verify@9\.9\.9 in probe\.ts is sealed or explained/u,
+    'a pin the scan cannot place must fail loudly, never vanish from the publish guard',
+  );
+});
+
 test('a comment naming an unpublished verifier does not refuse a publish, but a constant still does', () => {
   const published = ['0.1.0', '0.2.0'];
   const commented = 'const C = "npx @colophon-claims/verify@0.2.1 <dir>";\n// bumps to @colophon-claims/verify@0.9.9 next\n';
