@@ -243,14 +243,120 @@ function arrayLiterals(source, key) {
 }
 
 /**
- * The quoted entries of `literal`, resolved against `configDir` and made repo-relative, each with
- * the source offset it was read from so the caller can scope it.
+ * The top-level comma-separated elements of an array literal's inner text, as `{ text, start }`.
+ *
+ * Quote-, regex- and bracket-aware for the same reason `balancedEnd` is: a comma inside a quoted
+ * path, a regex literal, or a nested call or array belongs to that element, not to the list. Empty
+ * elements — the text after a trailing comma — are dropped rather than returned blank.
+ *
+ * Only part of that walk has an observable witness below, and this says which rather than implying
+ * all of it does. Call parentheses do: without them a multi-argument path helper splits into
+ * several single-string elements and every one of them is credited, which is the #3090 fail-open
+ * itself. The quote and regex walks, the `[`/`]` pair and the `{`/`}` pair are the defensive
+ * convention every scanner in this file follows and are unwitnessable in this reader's output —
+ * `stringLiterals` skips a regex literal itself and `resolveQuoted` reads through a nested array,
+ * so splitting differently there changes which elements come back without changing the paths read
+ * out of them. They are kept because the next shape added here should not have to rediscover them.
+ */
+function arrayElements(inner) {
+  const elements = [];
+  let depth = 0;
+  let start = 0;
+  const push = (end) => {
+    const text = inner.slice(start, end);
+    if (text.trim() !== '') elements.push({ text, start });
+  };
+  for (let i = 0; i < inner.length; i += 1) {
+    const character = inner[i];
+    if (character === "'" || character === '"' || character === '`') i = quotedSpanEnd(inner, i);
+    else if (character === '/' && regexStartsAt(inner, i)) i = regexLiteralEnd(inner, i);
+    else if ('([{'.includes(character)) depth += 1;
+    else if (')]}'.includes(character)) depth -= 1;
+    else if (character === ',' && depth === 0) {
+      push(i);
+      start = i + 1;
+    }
+  }
+  push(inner.length);
+  return elements;
+}
+
+/**
+ * The string literals in `text`, as `{ value, at }`.
+ *
+ * A `` ` ``-quoted span counts only when it holds no `${`: an interpolated path is not a path this
+ * reader can resolve, and crediting its literal halves would invent one. A span whose closing quote
+ * the scanner cannot find — `quotedSpanEnd` bounds a `'`/`"` at a newline — yields nothing, and a
+ * regex literal is skipped so the quotes inside `/['"]/u` are not read as a path.
+ */
+function stringLiterals(text) {
+  const found = [];
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === '/' && regexStartsAt(text, index)) {
+      index = regexLiteralEnd(text, index);
+      continue;
+    }
+    if (character !== "'" && character !== '"' && character !== '`') continue;
+    const end = quotedSpanEnd(text, index);
+    const value = text.slice(index + 1, end);
+    if (text[end] === character && !(character === '`' && value.includes('${'))) {
+      found.push({ value, at: index });
+    }
+    index = end;
+  }
+  return found;
+}
+
+/**
+ * The quoted paths of the array literal `literal`, resolved against `configDir` and made
+ * repo-relative, each with the source offset it was read from so the caller can scope it.
+ *
+ * Read one element at a time, and only where the element holds EXACTLY ONE string literal. Every
+ * config in the tree wraps its one quoted path in a call — `fileURLToPath(new URL('../../../',
+ * import.meta.url))` — so the single string is the path and the wrapper is noise. A path helper
+ * taking several quoted arguments is a different matter: `path.join(process.cwd(), '..', 'shared')`
+ * holds two, neither of which resolves against `configDir` to what the config allows, and reading
+ * both credited two paths that were never there. In `fsAllowPaths` that is over-permissive
+ * coverage, and coverage is what turns the reachability finding OFF, so it fails open on exactly
+ * the import failure this gate predicts (issue #3090). Such an element is therefore unreadable
+ * rather than approximated: dropping it withholds coverage and withholds a seam path, which reds a
+ * correctly wired config — noisy, and safe in the direction that matters.
+ *
+ * An element holding no string literal at all — a bare identifier, or a path built entirely from
+ * `import.meta.dirname` — is unreadable for the same reason and drops the same way.
+ *
+ * The rule is one STRING, not one ARGUMENT, and the gap between them is the residual limit. The
+ * tree's own shape proves the two cannot be merged: `new URL('../..', import.meta.url)` takes a
+ * second argument, so rejecting a call with more than one argument would read every config in the
+ * repository as unwired. So `path.join(SOME_BASE, '../..')` still resolves its one string against
+ * `configDir` and credits a path the config may not name — the #3090 fail-open, one argument
+ * narrower. Closing it needs the base the helper was handed, which is a value, not text, and this
+ * gate reads a checkout with no dependencies installed. Nothing in the tree writes that shape; a
+ * config that does is over-credited, and the limit is stated here rather than guessed at.
  */
 function resolveQuoted(literal, configDir, base, literalStart) {
-  return [...literal.matchAll(/['"]([^'"]+)['"]/gu)].map((quoted) => ({
-    resolved: relative(base, resolve(configDir, quoted[1])).split('\\').join('/'),
-    at: literalStart + quoted.index,
-  }));
+  const paths = [];
+  for (const element of arrayElements(literal)) {
+    const lead = element.text.length - element.text.trimStart().length;
+    const text = element.text.trim();
+    // A nested array is a list of elements, not an element: read through it rather than reading
+    // its entries as one unreadable element. `[['..'], '../..']` is a shape this gate already
+    // pinned before the one-string rule arrived, and a nested array of several entries has to keep
+    // reading as several.
+    if (text.startsWith('[') && balancedEnd(text, 1, '[', ']') === text.length - 1) {
+      const at = literalStart + element.start + lead + 1;
+      paths.push(...resolveQuoted(text.slice(1, -1), configDir, base, at));
+      continue;
+    }
+    const quoted = stringLiterals(element.text);
+    if (quoted.length !== 1) continue;
+    paths.push({
+      resolved: relative(base, resolve(configDir, quoted[0].value)).split('\\').join('/'),
+      at: literalStart + element.start + quoted[0].at,
+    });
+  }
+  return paths;
 }
 
 /**
@@ -346,6 +452,52 @@ export function declaredEnvironments(source) {
   return found;
 }
 
+/**
+ * Whether the config turns on Vitest's browser mode.
+ *
+ * Browser mode is the one shape that loads setup files through the web transform pipeline — and so
+ * is subject to the `/@fs/` restriction `server.fs.allow` governs — without declaring an
+ * `environment` at all. `declaredEnvironments` returns `[]` for it, `[].every(...)` is `true`, and
+ * the reachability check below skipped the config entirely: the one branch that turns the check
+ * OFF, reached by a suite that needs it most (issue #3091).
+ *
+ * Deliberately NOT anchored to an enclosing `test:` block, which is the opposite choice from
+ * `fsAllowPaths` anchoring `allow:` inside `fs:` — because the two anchors point opposite ways.
+ * There, crediting an unrelated `allow:` grants coverage and turns the reachability finding off,
+ * so narrowing fails closed. Here, crediting an unrelated `browser: { enabled: true }` turns the
+ * check ON, so narrowing is what fails open: a config that hoists its block — `const test = {
+ * browser: { enabled: true } }` — has no literal `test: {` to anchor to and would be skipped, the
+ * very branch this reader exists to close. An over-credited plugin option costs a reachability
+ * check on a suite that did not need one, which reds only a config whose seam path really is
+ * outside its Vite root and uncovered. Noise, against a fail-open.
+ *
+ * Only the literal `true` counts; a computed `enabled` is not read as browser mode, which matches
+ * how `declaredEnvironments` treats a value it cannot see — there the caller fails closed on the
+ * `'<computed>'` marker, and here a config it cannot read keeps whatever its `environment`
+ * declarations already say. Browser mode turned on from the command line (`--browser.enabled`) is
+ * invisible to any reader of the config text, and so is out of reach here.
+ */
+export function browserModeEnabled(source) {
+  return enclosedLiterals(stripComments(source), 'browser', '{', '}').some((browser) =>
+    /\benabled\s*:\s*true\b/u.test(browser.inner),
+  );
+}
+
+/**
+ * Whether `source` describes a suite that loads its setup files through Vite's web transform
+ * pipeline, and so can be blocked by `server.fs.allow`.
+ *
+ * Node-environment suites take the SSR pipeline, which has no `/@fs/` restriction, so the
+ * reachability check below is only meaningful for the rest. A config is web-shaped when it
+ * declares any environment other than `node` — an unreadable one included, which is why
+ * `declaredEnvironments` reports `'<computed>'` rather than skipping — or when it enables browser
+ * mode while declaring no environment at all.
+ */
+export function webTransformShaped(source) {
+  const environments = declaredEnvironments(source);
+  return !environments.every((environment) => environment === 'node') || browserModeEnabled(source);
+}
+
 /** True when repo-relative `path` is `ancestor` or lives inside it. */
 function contains(ancestor, path) {
   const rel = relative(ancestor, path);
@@ -397,11 +549,7 @@ test('configs that cannot reach the seam they name', () => {
   for (const seam of SEAMS) {
     for (const config of findVitestConfigs(seam.root)) {
       const source = readFileSync(resolve(root, config), 'utf8');
-      // Node-environment suites load setup files through the SSR pipeline, which has no `/@fs/`
-      // restriction. Only a browser-shaped environment can be blocked by `server.fs.allow`.
-      // A config declaring several environments is checked unless every one of them is `node`.
-      const environments = declaredEnvironments(source);
-      if (environments.every((environment) => environment === 'node')) continue;
+      if (!webTransformShaped(source)) continue;
       const configDir = relative(root, dirname(resolve(root, config))).split('\\').join('/');
       for (const entry of unreachableWirings(source, config)) {
         unreachable.push(
@@ -535,6 +683,124 @@ test('wiredPaths reads every setupFiles and globalSetup list', () => {
   assert.equal(scoped[0].scope, 'root');
   assert.notEqual(scoped[1].scope, 'root');
   assert.notEqual(scoped[1].scope, scoped[2].scope);
+});
+
+// `resolveQuoted` used to resolve EVERY quoted string in a list against the config directory,
+// which is right only while each element wraps a single quoted argument — the shape the whole tree
+// writes. A multi-argument path helper broke it in both directions at once: two credited paths,
+// neither of them the one the config names. In `fs.allow` that is over-permissive coverage, and
+// coverage is what turns the reachability finding off, so it fails open on exactly the import
+// failure this gate predicts; in `setupFiles` it invents seam paths that were never wired (#3090).
+test('a list element holding more than one string is unreadable, not two paths', () => {
+  const allowed = (source) =>
+    fsAllowPaths(source, 'packages/x/vitest.config.ts').map((entry) => entry.resolved);
+  const wired = (source) =>
+    wiredPaths(source, 'packages/x/vitest.config.ts').map((entry) => entry.resolved);
+
+  // The tree's own shape: one quoted argument inside a call wrapper, read through it.
+  assert.deepEqual(
+    allowed(`fs: { allow: [fileURLToPath(new URL('../..', import.meta.url))] }`),
+    [''],
+  );
+  // Two arguments: unreadable. Neither `packages` nor `packages/x/shared` is what the config allows.
+  assert.deepEqual(allowed(`fs: { allow: [path.join(process.cwd(), '..', 'shared')] }`), []);
+  assert.deepEqual(wired(`setupFiles: [path.join(dir, '..', 'isolate-tmp.ts')]`), []);
+  // Dropping one element leaves the others readable, so a mixed list is not lost with it.
+  assert.deepEqual(allowed(`fs: { allow: [path.join(a, '..', 'b'), '../..'] }`), ['']);
+  // An element with no string at all is unreadable the same way, rather than resolving to the
+  // config directory itself and covering everything under it.
+  assert.deepEqual(allowed(`fs: { allow: [ROOT] }`), []);
+  // The same drop in the `globalSetup` half, which reds the wiring gate rather than this one.
+  assert.deepEqual(wired(`globalSetup: [path.join(dir, '..', 'g.ts'), './h.ts']`), [
+    'packages/x/h.ts',
+  ]);
+  // A comma inside a quoted path belongs to that path, not to the list.
+  assert.deepEqual(allowed(`fs: { allow: ['../a,b'] }`), ['packages/a,b']);
+  // A nested array is read THROUGH, so its entries stay separate elements rather than collapsing
+  // into one unreadable multi-string element. Without that read-through the second line below
+  // drops both of its paths.
+  assert.deepEqual(allowed(`fs: { allow: [['../..'], '..'] }`), ['', 'packages']);
+  assert.deepEqual(allowed(`fs: { allow: [['../a', '../b'], '..'] }`), [
+    'packages/a',
+    'packages/b',
+    'packages',
+  ]);
+  // …and the one-string rule still applies inside it.
+  assert.deepEqual(allowed(`fs: { allow: [[path.join(a, '..', 'b')], '..'] }`), ['packages']);
+  // A regex literal is skipped rather than read for paths — the `/['"]/u` shape this file's other
+  // readers already have to survive. Read as text it yields the quoted fragment after it.
+  assert.deepEqual(allowed(`fs: { allow: [pick(/['"]/u, '../..')] }`), ['']);
+  // The rule is one string, not one argument. A helper handed a base it cannot see still credits
+  // its single quoted argument — the residual limit stated on `resolveQuoted`, pinned so a reader
+  // does not mistake it for a shape this gate closes.
+  assert.deepEqual(allowed(`fs: { allow: [path.join(SOME_BASE, '../..')] }`), ['']);
+  // A backtick-quoted path is read; an interpolated one is not a path this reader can resolve.
+  assert.deepEqual(allowed('fs: { allow: [`../..`] }'), ['']);
+  assert.deepEqual(allowed('fs: { allow: [`${root}/shared`] }'), []);
+});
+
+// Vitest browser mode is the one web-shaped suite that declares no `environment`, so
+// `declaredEnvironments` returned `[]`, `[].every(...)` was `true`, and the reachability check
+// skipped it — the single branch that turns the check off, taken by a suite that loads its setup
+// files through the very `/@fs/`-restricted pipeline the check exists for (#3091). There is no
+// browser-mode config in the tree, so these are the only witnesses.
+test('browser mode is web-shaped even though it declares no environment', () => {
+  assert.equal(browserModeEnabled(`test: { browser: { enabled: true } }`), true);
+  assert.equal(webTransformShaped(`test: { browser: { enabled: true } }`), true);
+  // Written without spaces, and under a `projects` entry, are the same declaration.
+  assert.equal(browserModeEnabled(`test:{browser:{enabled:true}}`), true);
+  assert.equal(browserModeEnabled(`projects: [{ test: { browser: { enabled: true } } }]`), true);
+  // A hoisted block has no `test: {` to anchor to, which is why this reader does not anchor: it
+  // reads as browser mode all the same, where an anchored one would skip the config outright.
+  assert.equal(browserModeEnabled(`const test = { browser: { enabled: true } };`), true);
+  // The cost of not anchoring is an unrelated option of the same name reading as browser mode.
+  // That only turns the reachability check ON, so it is noise rather than the fail-open above.
+  assert.equal(browserModeEnabled(`plugins: [vue({ browser: { enabled: true } })]`), true);
+  // Off, absent, or computed leaves the environment declarations to speak for themselves.
+  assert.equal(webTransformShaped(`test: { browser: { enabled: false } }`), false);
+  assert.equal(webTransformShaped(`test: { browser: { enabled: opts.browser } }`), false);
+  assert.equal(webTransformShaped(`test: { environment: 'node' }`), false);
+  assert.equal(webTransformShaped('export default {}'), false);
+  // A commented-out toggle is not a live one, the same as every other reader here.
+  assert.equal(browserModeEnabled(`test: { browser: { /* enabled: true */ } }`), false);
+  // Still web-shaped through the declared-environment half.
+  assert.equal(webTransformShaped(`test: { environment: 'jsdom' }`), true);
+  assert.equal(webTransformShaped(`test: { environment: process.env.VITEST_ENV }`), true);
+
+  // And at the gate: a browser-mode config naming a seam path outside its Vite root with no
+  // covering allowance is now reported rather than skipped.
+  const browserConfig =
+    'export default { test: { browser: { enabled: true },' +
+    " setupFiles: ['../../test-support/tmp-isolation/isolate-tmp.ts'] } }";
+  assert.ok(webTransformShaped(browserConfig));
+  assert.deepEqual(unreachableWirings(browserConfig, 'packages/x/vitest.config.ts'), [
+    { key: 'setupFiles', resolved: 'test-support/tmp-isolation/isolate-tmp.ts' },
+  ]);
+});
+
+// A regex literal whose body ends in `\/` puts an escaped slash immediately before the closing
+// delimiter. A scanner that is quote-aware but not regex-aware reads the resulting `//` as a line
+// comment and discards the rest of the line — for `fs.allow` a fail-closed red, but for
+// `declaredEnvironments` a swallowed `jsdom` that returns `[]` and skips the config (#3092). The
+// regex awareness `stripComments` gained for #3027 and #3154 closes this too; these pin the exact
+// shape so a rewrite of the comment scanner cannot reopen it.
+test('a regex literal ending in an escaped slash does not read as a line comment', () => {
+  const source = String.raw`exclude: [/https:\/\//], server: { fs: { allow: ['../..'] } }`;
+  assert.deepEqual(
+    fsAllowPaths(source, 'packages/x/vitest.config.ts').map((entry) => entry.resolved),
+    [''],
+  );
+  assert.deepEqual(
+    declaredEnvironments(String.raw`test: { exclude: [/a\/\//], environment: 'jsdom' }`),
+    ['jsdom'],
+  );
+  // The same source with the regex removed is the control: identical reading either way.
+  assert.deepEqual(
+    fsAllowPaths(`server: { fs: { allow: ['../..'] } }`, 'packages/x/vitest.config.ts').map(
+      (entry) => entry.resolved,
+    ),
+    [''],
+  );
 });
 
 test('projectEntryRanges finds one range per object entry, ordered per projects literal', () => {
