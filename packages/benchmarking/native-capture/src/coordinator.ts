@@ -18,6 +18,7 @@ import { buildExecutionEvidence } from "@jinn-network/execution-evidence-builder
 
 import { writeExecutionCommissioningLink } from "./commissioning.js";
 import { NativeCaptureError } from "./errors.js";
+import { sortedUnique as sortedUniqueOrThrow } from "./order.js";
 import type {
   CaptureAssurance,
   CaptureClock,
@@ -34,20 +35,13 @@ import type {
   PlanNativeCaptureInput,
 } from "./types.js";
 
-function compare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
+/** The capture path's duplicate classification over the shared helper. */
+function sortedUnique<T>(values: readonly T[], key: (value: T) => string): T[] {
+  return sortedUniqueOrThrow(values, key, "DUPLICATE_NATIVE_UNIT", "native inventory contains duplicate coordinates");
 }
 
 function descriptor(name: string, record: SealedRecord): DigestBearingResourceDescriptor {
   return { name, digest: { sha256: record.digest.slice(7) } };
-}
-
-function sortedUnique<T>(values: readonly T[], key: (value: T) => string): T[] {
-  const sorted = [...values].sort((left, right) => compare(key(left), key(right)));
-  if (sorted.some((value, index) => index > 0 && key(sorted[index - 1]!) === key(value))) {
-    throw new NativeCaptureError("DUPLICATE_NATIVE_UNIT", "native inventory contains duplicate coordinates");
-  }
-  return sorted;
 }
 
 function evidenceKey(reference: EvidenceRecordReference): string {
