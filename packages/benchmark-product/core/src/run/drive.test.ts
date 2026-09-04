@@ -9,6 +9,7 @@ import {
   type AttemptUri,
   type DeliveryRef,
   type ObservationSnapshot,
+  type ReconciliationReport,
   type SubmissionAck,
   type SubmissionUri,
 } from "@jinn-network/task-execution-backend";
@@ -21,7 +22,7 @@ import {
   driveEvaluationCatchUp,
   type ProxiedBackend,
 } from "./drive.js";
-import { evaluationGaps, foldRunJournal, readRunJournalEntries } from "./journal.js";
+import { evaluationGaps, foldRunJournal, readRunJournalEntries, type RunJournalEntry } from "./journal.js";
 import { requireWorkspaceAuthorship } from "./publication-authority.js";
 import { EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "../venue/venue.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
@@ -1534,5 +1535,130 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
 
     // The accounted unscorable cell: no third attempt is offered.
     expect(evaluationGaps(foldRunJournal(entries), deps.minVerdicts, 1)).toEqual([]);
+  });
+});
+
+/**
+ * #3236: the evaluation leg's two `refuse("record-integrity", ...)` branches in the replayed-
+ * Submission reconciliation preamble (`./replayed-submission-recovery.ts`).
+ *
+ * The solve leg's twin refusals are run-fatal ("fails closed when backend recovery contradicts a
+ * captured Submission", `../operations/run-launch.test.ts`). These are deliberately NOT: they sit
+ * inside `prepareAndDispatchEvaluation`'s per-leg catch, and a `BenchmarkProductError` is no
+ * `TaskExecutionError`, so `retryableFailureFromCause` returns undefined and the leg lands a
+ * non-retryable could-not-grade that completes that evalIndex while the run continues. That
+ * containment is what these tests pin — a change to the catch, to `retryableFailureFromCause`, or
+ * to the error type `refuse` raises would otherwise flip a per-leg terminal into a run abort, or
+ * the reverse, with nothing failing.
+ */
+describe("dispatchEvaluation — the replayed-Submission refusals are contained per leg (#3236)", () => {
+  /** Replays bytes for cell A's leg 1 only; every other leg seals fresh. */
+  async function driveWithReplayedLegOne(replayedBytes: Uint8Array, recover: () => Promise<ReconciliationReport>): Promise<{
+    readonly cellA: string;
+    readonly cellB: string;
+    readonly entries: readonly RunJournalEntry[];
+    readonly lines: readonly string[];
+  }> {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellA = `${taskSha256}/arm-a/1`;
+    const cellB = `${taskSha256}/arm-b/1`;
+    const submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] = [];
+    const inner = makeTwoLegBackend(submits);
+    const backend: ProxiedBackend = {
+      ...inner,
+      deliveries: async (attempt) =>
+        attempt === ("att-solve-2" as AttemptUri) ? inner.deliveries("att-solve-1" as AttemptUri) : inner.deliveries(attempt),
+      recover,
+    };
+    const venue = fakeVenue({ taskBytes: new Uint8Array([1, 2, 3]), taskSha256: sha256Hex(new Uint8Array([1, 2, 3])) }, 2);
+    const lines: string[] = [];
+
+    const events: CellStatusEvent[] = [
+      { cellKey: cellA, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
+      { cellKey: cellB, armId: "arm-b", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-2" },
+    ];
+    // Resolves rather than rejects: the run is not aborted by either refusal.
+    await driveCellEvents(
+      {
+        workspaceDir,
+        draftId: "draft-1",
+        venue,
+        backend,
+        runSha256: "r".repeat(64),
+        owner: "urn:uuid:owner-1",
+        cellWindowMs: 3_600_000,
+        minVerdicts: 2,
+        liveClock: clock,
+        onProgress: (line) => lines.push(line),
+        acceptedEvaluationSubmissionBytes: (cellKey, _dispatch, evalIndex) =>
+          cellKey === cellA && evalIndex === 1 ? replayedBytes : undefined,
+      },
+      (async function* () { for (const event of events) yield event; })(),
+    );
+
+    return { cellA, cellB, entries: readRunJournalEntries(workspaceDir, "draft-1"), lines };
+  }
+
+  function expectOnlyCellALegOneFailed(
+    result: Awaited<ReturnType<typeof driveWithReplayedLegOne>>,
+    detail: string,
+  ): void {
+    const evaluations = result.entries.filter((entry) => entry.kind === "evaluation");
+    expect(evaluations).toHaveLength(4);
+    expect(evaluations[0]).toMatchObject({
+      cellKey: result.cellA,
+      evalIndex: 1,
+      evaluationTerminal: "could-not-grade",
+      detail,
+    });
+    // Non-retryable: `retryableFailureFromCause` sees no `TaskExecutionError`, so the terminal
+    // carries no `failureCategory` and the evalIndex is completed for good.
+    expect(evaluations[0]).not.toHaveProperty("failureCategory");
+    // Every other leg — the same cell's second leg and both of the other cell's — still judged.
+    for (const other of evaluations.slice(1)) {
+      expect(other.kind === "evaluation" && other.verdictSha256 !== undefined).toBe(true);
+      expect(other).not.toHaveProperty("evaluationTerminal");
+    }
+    expect(result.lines).toEqual([
+      `${result.cellA} delivered`,
+      `${result.cellA} could-not-grade e1/2`,
+      `${result.cellA} judged e2/2`,
+      `${result.cellB} delivered`,
+      `${result.cellB} judged e1/2`,
+      `${result.cellB} judged e2/2`,
+    ]);
+  }
+
+  test("a contradictory reconciliation terminals only that leg could-not-grade; the run continues", async () => {
+    const replayed = utf8({
+      submission: "urn:uuid:00000000-0000-4000-8000-0000000000aa",
+      deadline: "2030-01-01T00:00:00.000Z",
+    });
+    const result = await driveWithReplayedLegOne(replayed, async () => ({
+      classification: "contradictory",
+      detail: "terminal state contradicted live survivors or durable terminals",
+    }));
+
+    expectOnlyCellALegOneFailed(
+      result,
+      "backend recovery contradicted the accepted evaluation Submission (e1, attempt 1): "
+        + "terminal state contradicted live survivors or durable terminals",
+    );
+  });
+
+  test("replayed bytes naming no Submission URI terminal only that leg, before `recover` is reached", async () => {
+    let recovers = 0;
+    const replayed = utf8({ submission: "not-a-urn", deadline: "2030-01-01T00:00:00.000Z" });
+    const result = await driveWithReplayedLegOne(replayed, async () => {
+      recovers += 1;
+      return { classification: "absent" };
+    });
+
+    expect(recovers).toBe(0);
+    expectOnlyCellALegOneFailed(
+      result,
+      "replayed evaluation Submission carries no valid Submission URI (e1, attempt 1)",
+    );
   });
 });
