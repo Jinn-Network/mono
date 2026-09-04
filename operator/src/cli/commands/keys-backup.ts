@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
@@ -10,6 +10,57 @@ import { FleetStateStore } from '../../earning/store.js';
 import { decryptMnemonic, encryptMnemonic } from '../../earning/wallet.js';
 import { resolveCliPassword, resolveNewPassword } from '../password.js';
 import { resolveDefaultStateDir } from '../../state-dir.js';
+import { loadConfig } from '../../config.js';
+
+interface EarningTarget {
+  /** Earning dir the subverb operates on. */
+  earningDir: string;
+  /** `<default state dir>/keystore-password` — the only path `resolveCliPassword` reads. */
+  passwordFilePath: string;
+  /** True when `earningDir` is the default operator's earning dir. */
+  isDefaultEarningDir: boolean;
+}
+
+/**
+ * Resolve which operator's earning dir a `keys` subverb targets (#2515).
+ *
+ * Precedence matches `init.ts` / `stop.ts`: `JINN_EARNING_DIR` > `--config`
+ * (or the default config file) `earningDir` > `<default state dir>/earning`.
+ * An explicitly passed `--config` that cannot be loaded is a hard error — the
+ * bug this replaces was silently ignoring `--config` and operating on the
+ * default operator instead.
+ */
+function resolveEarningTarget(
+  ctx: CommandContext,
+  configPath: string | undefined,
+): { ok: true; target: EarningTarget } | { ok: false; message: string } {
+  const home = ctx.env['HOME'] ?? ctx.env['USERPROFILE'] ?? homedir();
+  const defaultStateDir = resolveDefaultStateDir({ home, env: ctx.env });
+  const defaultEarningDir = join(defaultStateDir, 'earning');
+
+  const envEarningDir = ctx.env['JINN_EARNING_DIR'];
+  let configEarningDir: string | undefined;
+  if (configPath !== undefined || envEarningDir === undefined) {
+    try {
+      configEarningDir = loadConfig(configPath).earningDir;
+    } catch (err) {
+      if (configPath !== undefined) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      }
+      // Config file is optional; fall back to the default below.
+    }
+  }
+
+  const earningDir = envEarningDir ?? configEarningDir ?? defaultEarningDir;
+  return {
+    ok: true,
+    target: {
+      earningDir,
+      passwordFilePath: join(defaultStateDir, 'keystore-password'),
+      isDefaultEarningDir: resolve(earningDir) === resolve(defaultEarningDir),
+    },
+  };
+}
 
 async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
   let parsed;
@@ -64,8 +115,20 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
     return;
   }
 
-  const earningDir =
-    ctx.env['JINN_EARNING_DIR'] ?? join(resolveDefaultStateDir(), 'earning');
+  const target = resolveEarningTarget(ctx, parsed.values.config as string | undefined);
+  if (!target.ok) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: target.message,
+        exampleCli: 'jinn keys backup --config ./op-b.json --output /tmp/mnemonic.txt',
+        details: { field: '--config', expected: 'readable operator config file' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+  const { earningDir } = target.target;
   const store = new FleetStateStore(earningDir);
   const keystore = await store.loadMnemonicKeystore();
   const mnemonic = await decryptMnemonic(keystore, resolved.password);
@@ -118,8 +181,20 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
   }
 
   // 1. Resolve earning dir
-  const earningDir =
-    ctx.env['JINN_EARNING_DIR'] ?? join(resolveDefaultStateDir(), 'earning');
+  const target = resolveEarningTarget(ctx, parsed.values.config as string | undefined);
+  if (!target.ok) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: target.message,
+        exampleCli: 'JINN_PASSWORD=old JINN_NEW_PASSWORD=new jinn keys change-password --config ./op-b.json',
+        details: { field: '--config', expected: 'readable operator config file' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+  const { earningDir, passwordFilePath, isDefaultEarningDir } = target.target;
   const store = new FleetStateStore(earningDir);
 
   // 2. Check keystore exists
@@ -203,11 +278,13 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
   // 8. Save new keystore
   await store.saveMnemonicKeystore(newKeystore);
 
-  // 9. Delete password file if it exists
-  const home = ctx.env['HOME'] ?? homedir();
-  const passwordFilePath = join(resolveDefaultStateDir({ home, env: ctx.env }), 'keystore-password');
+  // 9. Delete the auto-generated password file — but only when this run actually
+  //    re-encrypted the default operator's keystore. That file is the default
+  //    operator's password (it is the only path `resolveCliPassword` reads); on a
+  //    multi-operator host, deleting it after changing another operator's password
+  //    locks the default operator out of its own keystore (#2515).
   let passwordFileDeleted = false;
-  if (existsSync(passwordFilePath)) {
+  if (isDefaultEarningDir && existsSync(passwordFilePath)) {
     unlinkSync(passwordFilePath);
     passwordFileDeleted = true;
   }
@@ -270,12 +347,17 @@ const command: CommandModule = {
   name: 'keys',
   summary: 'Keystore management: backup, change-password',
   helpText: `Usage:
-  jinn keys backup --output <path> [--human]
-  jinn keys change-password [--human]
+  jinn keys backup --output <path> [--config <path>] [--human]
+  jinn keys change-password [--config <path>] [--human]
 
 Subverbs:
   backup           Decrypt the keystore and write the mnemonic to a file.
   change-password  Re-encrypt the keystore with a new password.
+
+Target keystore:
+  Both subverbs operate on the earning dir resolved from, in order:
+  JINN_EARNING_DIR, the --config file's earningDir, then
+  ~/.jinn-operator/earning.
 
 backup:
   Decrypts the local keystore using JINN_PASSWORD and writes the
@@ -285,14 +367,18 @@ backup:
 change-password:
   Decrypts the keystore with the current password (resolved from
   --password-fd, JINN_PASSWORD, or the auto-generated
-  ~/.jinn-client/keystore-password file, in that order) and
+  ~/.jinn-operator/keystore-password file, in that order) and
   re-encrypts it with JINN_NEW_PASSWORD (min 8 characters).
-  Deletes the auto-generated password file if present; after that,
-  set JINN_PASSWORD yourself for subsequent commands.
+  Deletes the auto-generated password file only when the target IS
+  the default earning dir — that file is the default operator's
+  password, so another operator's change never removes it. After a
+  deletion, set JINN_PASSWORD yourself for subsequent commands.
 
 Examples:
   JINN_PASSWORD=secret jinn keys backup --output ~/backup/jinn.txt
   JINN_PASSWORD=old JINN_NEW_PASSWORD=mynewpass jinn keys change-password
+  JINN_EARNING_DIR=~/.jinn-client-op-b/earning JINN_PASSWORD=old \\
+    JINN_NEW_PASSWORD=mynewpass jinn keys change-password
 `,
   run,
 };
