@@ -701,11 +701,14 @@ const REPORT_SOURCE = "report.json";
  * — which is what `toErrorEnvelope` carries an untyped throw as, and which the CLI maps to "the
  * verifier broke" — would be the wrong code for it.
  *
- * EXIT-CODE SHIFT. Through core's own verify operation these ten conditions previously surfaced
- * as `execution` and exit 2 ("the verifier broke"); they now surface as `record-integrity` and
- * exit 1 ("the bundle is bad"), which is what a reader already got for the same bytes through
- * the standalone verifier. `errors.ts` documents why the two "not supported" conditions live
- * under `record-integrity` rather than a compat code of their own (issue #3944).
+ * CLASSIFICATION SHIFT. Through core's own verify operation these ten conditions previously
+ * surfaced as `execution`, the code `toErrorEnvelope` carries an untyped throw as; they now
+ * surface as `record-integrity` at `report.json`, which is what a reader already got for the
+ * same bytes through the standalone verifier. Where that code reaches a reader through
+ * `colophon-verify`'s exit mapping, this is the 2 ("the verifier broke") to 1 ("the bundle is
+ * bad") shift issue #3943 named, and it is the same shift issues #3741 and #3855 each stated for
+ * their own conversions. `errors.ts` documents why the two "not supported" conditions live under
+ * `record-integrity` rather than a compat code of their own (issue #3944).
  *
  * WHAT STAYS BARE. The two throws in `buildClaimPackage` itself are internal faults: the CALLER
  * derives both facts they assert. `assertClaimConsistency` builds `assurance.resolved` from the

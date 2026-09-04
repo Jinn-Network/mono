@@ -32,11 +32,11 @@ export const PRODUCT_ERROR_CODES = [
    * verifier can read.
    *
    * Issue #3944: the narrower "digest check on read" reading never described everything this
-   * code carries. `bundle/manifest.ts` refuses an unsafe path, a missing entry, and a symlinked
-   * or hard-linked entry with it; `binding/carriage.ts` and `anchor/carriage.ts` refuse a
-   * carried-vs-sealed disagreement with it; and `report/claim.ts`'s projection rebuild (issue
-   * #3855) refuses a Report whose results do not carry its own method's shape, whose method
-   * version this verifier does not support, and whose method has no projection wired at all.
+   * code carries. It is raised for a bundle manifest entry that is unsafe, missing, or not the
+   * regular file it claims to be; for a carried record that disagrees with the sealed record it
+   * cites; and, since issue #3855, for a sealed Report whose results do not carry its own
+   * method's shape, whose method version this verifier does not support, and whose method has no
+   * claim-package projection wired at all.
    *
    * Those last two are a fact about the READER's tooling, not about the publisher, and they are
    * deliberately here rather than under a compat code of their own: the v1 code set has no

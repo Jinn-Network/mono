@@ -6,11 +6,13 @@
  * core's own `assertClaimConsistency` -- a reader path of its own. Issue #3855 (PR #3899) typed
  * the ten projection-rebuild refusals on the verify side only, so until this file the SAME
  * malformed sealed Report was classified two ways depending on which entry point read it:
- * `record-integrity` and CLI exit 1 ("the bundle is bad") through the standalone verifier,
- * an untyped throw carried as `execution` and exit 2 ("the verifier broke") through here.
+ * `record-integrity` through the standalone verifier, an untyped throw carried as `execution`
+ * through here.
  *
- * That is the shift these tests pin: for these ten conditions core's own path moves from
- * exit 2 to exit 1, matching what a reader already gets from the standalone verifier.
+ * That is the shift these tests pin: for these ten conditions core's own path now carries the
+ * same code and source path a reader already gets from the standalone verifier. Where that code
+ * reaches a reader through `colophon-verify`'s exit mapping it is the 2 ("the verifier broke")
+ * to 1 ("the bundle is bad") shift issue #3943 named.
  *
  * Pinned structurally on `name` / `code` / `issues[].path` rather than on the prose: messages are
  * free to change, codes and paths are the contract. One case per site, each fixture malforming
