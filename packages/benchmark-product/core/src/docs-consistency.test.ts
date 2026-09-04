@@ -6,12 +6,25 @@ import { GATED_OPERATIONS } from "./authority/policy.js";
 import { BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
 import { BUNDLE_FORMAT, PUBLIC_BUNDLE_FILES } from "./legacy-closures.js";
 import {
+  BUNDLE_V4_FORMAT,
   BUNDLE_V5_FORMAT,
+  BUNDLE_V6_FORMAT,
+  BUNDLE_V7_FORMAT,
+  BUNDLE_V8_FORMAT,
   FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
+  LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+  PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V6_CHECKS,
+  PUBLIC_BUNDLE_V7_CHECKS,
+  PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V8_CHECKS,
   SUPPORTED_BUNDLE_FORMATS,
 } from "@colophon-claims/verify";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
@@ -73,6 +86,22 @@ function localMarkdownTargets(markdown: string): readonly string[] {
     .map((target) => target.split("#", 1)[0]!)
     .filter((target) => target.length > 0);
 }
+
+/** The `@x.y[.z]` token inside a full `npx @colophon-claims/verify@… <bundle-dir>` command. */
+const readerLine = (command: string): string => {
+  const token = /verify(@[0-9][^\s]*)/u.exec(command)?.[1];
+  if (token === undefined) throw new Error(`not a reader command: ${command}`);
+  return token;
+};
+
+const CHECK_COUNT_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight"];
+
+/** The guide states check counts in words, so a list length has to be rendered the same way. */
+const checkCountWord = (checks: readonly string[]): string => {
+  const word = CHECK_COUNT_WORDS[checks.length];
+  if (word === undefined) throw new Error(`no count word for ${checks.length} checks`);
+  return word;
+};
 
 describe("product documentation consistency", () => {
   it("ships the complete product-local documentation set with no broken local links", () => {
@@ -222,6 +251,130 @@ describe("product documentation consistency", () => {
     expect(guide).toMatch(/manifest-relative, not a fixed file list/i);
     expect(guide).toContain("`presentation.json`");
     expect(guide).toContain("`source/`");
+  });
+
+  it("pins the per-format reader table to the reader's own constants", () => {
+    // Issue #3519: the format-to-reader-line mapping is stated in each format section, in this
+    // table, and again in the too-old subsection. Nothing pinned any of them, so a ninth format or
+    // a `0.2.1` publication had to be applied in three places and could be applied in one. The
+    // table is the row a reader holding only `bundle.json` follows, so it is the one pinned here.
+    const guide = read(bundleReadmePath);
+    const tableStart = guide.indexOf("\n## Portable verification\n");
+    expect(tableStart).toBeGreaterThan(-1);
+    const tableEnd = guide.indexOf("\n### Reading a bundle with a reader that is too old\n");
+    expect(tableEnd).toBeGreaterThan(tableStart);
+    const rows = guide
+      .slice(tableStart, tableEnd)
+      .split("\n")
+      .filter((line) => line.startsWith("| `benchmark-product-public-bundle/"))
+      .map((line) => line.split("|").slice(1, -1).map((cell) => cell.trim()));
+
+    const instruction = (format: keyof typeof PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS) =>
+      PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[format];
+
+    // Keyed by the row's first cell verbatim. Prompted screening is a fourth axis the format string
+    // does not record, so `/2` and `/4` each carry two rows pinning different lines.
+    const expected: Record<
+      string,
+      { pinned: readonly string[]; compatible: readonly string[]; checks: readonly string[] }
+    > = {
+      [`\`${BUNDLE_FORMAT}\`, unprompted`]: {
+        pinned: [readerLine(instruction(BUNDLE_FORMAT).command)],
+        compatible: [readerLine(instruction(BUNDLE_FORMAT).compatibleCommand)],
+        checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+      },
+      [`\`${BUNDLE_FORMAT}\`, prompted screening`]: {
+        pinned: [
+          readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+          readerLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+        ],
+        compatible: [readerLine(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND)],
+        checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+      },
+      [`\`${BUNDLE_V4_FORMAT}\`, unprompted`]: {
+        pinned: [readerLine(instruction(BUNDLE_V4_FORMAT).command)],
+        compatible: [readerLine(instruction(BUNDLE_V4_FORMAT).compatibleCommand)],
+        checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+      },
+      [`\`${BUNDLE_V4_FORMAT}\`, prompted screening`]: {
+        pinned: [
+          readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+          readerLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+        ],
+        compatible: [readerLine(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND)],
+        checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+      },
+      // The one row that does not read the instruction table's `command`: claim-package/3 has a
+      // single `command` field and no compatible-line field, so a `/5` claim pins the compatible
+      // major line and nothing else. Pinning `command` here would state a line no `/5` bundle
+      // carries.
+      [`\`${BUNDLE_V5_FORMAT}\``]: {
+        pinned: [readerLine(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND)],
+        compatible: [],
+        checks: EVIDENCE_NATIVE_BUNDLE_V5_CHECKS,
+      },
+      [`\`${BUNDLE_V6_FORMAT}\``]: {
+        pinned: [readerLine(instruction(BUNDLE_V6_FORMAT).command)],
+        compatible: [readerLine(instruction(BUNDLE_V6_FORMAT).compatibleCommand)],
+        checks: PUBLIC_BUNDLE_V6_CHECKS,
+      },
+      [`\`${BUNDLE_V7_FORMAT}\``]: {
+        pinned: [readerLine(instruction(BUNDLE_V7_FORMAT).command)],
+        compatible: [readerLine(instruction(BUNDLE_V7_FORMAT).compatibleCommand)],
+        checks: PUBLIC_BUNDLE_V7_CHECKS,
+      },
+      [`\`${BUNDLE_V8_FORMAT}\``]: {
+        pinned: [readerLine(instruction(BUNDLE_V8_FORMAT).command)],
+        compatible: [readerLine(instruction(BUNDLE_V8_FORMAT).compatibleCommand)],
+        checks: PUBLIC_BUNDLE_V8_CHECKS,
+      },
+    };
+
+    expect(rows.map((cells) => cells[0])).toEqual(Object.keys(expected));
+    for (const cells of rows) {
+      const [subject, pinnedCell, compatibleCell, checksCell] = cells as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const row = expected[subject]!;
+      for (const line of row.pinned) expect(pinnedCell, subject).toContain(`\`${line}\``);
+      for (const line of row.compatible) expect(compatibleCell, subject).toContain(`\`${line}\``);
+      if (row.compatible.length === 0) expect(compatibleCell, subject).toBe("none pinned");
+      expect(checksCell, subject).toBe(checkCountWord(row.checks));
+    }
+    // A format with no row is the defect this pins: the table is the fallback for a reader who has
+    // only `bundle.json`, so every format that reader can hold must appear in it.
+    for (const format of SUPPORTED_BUNDLE_FORMATS) {
+      expect(rows.some((cells) => cells[0]!.startsWith(`\`${format}\``)), format).toBe(true);
+    }
+  });
+
+  it("pins the too-old refusal sample to the formats the released 0.2.0 reader supports", () => {
+    // The `supportedFormats` array is quoted verbatim as the thing an auditor diffs their own
+    // format against, so it states the RELEASED 0.2.0 list, not the current one. That list is
+    // derivable: 0.2.0 is every format whose pinned line is not the unpublished 0.2.1 line.
+    const guide = read(bundleReadmePath);
+    const start = guide.indexOf("\n### Reading a bundle with a reader that is too old\n");
+    expect(start).toBeGreaterThan(-1);
+    const end = guide.indexOf("\n## ", start + 1);
+    const section = guide.slice(start, end === -1 ? undefined : end);
+    const sample = /```json\n(\{.*?\})\n```/su.exec(section)?.[1];
+    expect(sample, "the too-old subsection must carry the --json refusal sample").toBeDefined();
+    const refusal = JSON.parse(sample!) as {
+      verifierVersion: string;
+      supportedFormats: string[];
+    };
+    const releasedFormats = SUPPORTED_BUNDLE_FORMATS.filter(
+      (format) =>
+        PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[format].command !==
+        PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
+    );
+    expect(refusal.supportedFormats).toEqual([...releasedFormats]);
+    expect(refusal.verifierVersion).toBe(
+      readerLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND).slice(1),
+    );
   });
 
   it("documents the exact private web configuration and package commands", () => {
