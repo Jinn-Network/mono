@@ -8,8 +8,12 @@ import {
   COLOPHON_PUBLISH_WORKFLOW,
   FIRST_CUT_PLATFORM_PIN_PATH,
   PRODUCT_RELEASE_PLATFORM_PINS_PATH,
+  READER_INSTRUCTION_DOCS,
   assertClaimPinsMatchPublish,
+  assertReaderInstructionPinsResolve,
   collectClaimVerifyPins,
+  collectPinsFromSource,
+  collectReaderInstructionPins,
   fetchPublishedVerifyVersions,
   loadFirstCutPlatformPin,
   loadProductReleasePlatformPin,
@@ -301,43 +305,52 @@ test('the guard reads what npm actually serves, and fails closed when it cannot'
   );
 });
 
-const PRODUCT_SOURCE_DIRS = ['src', 'scripts'];
-const PRODUCT_SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mjs'];
+/**
+ * Categories deliberately outside both pin lists. Naming them here is the point: the walk below
+ * classifies every file in the product tree that mentions a verifier specifier, so a pin can only
+ * escape both lists by landing in a category someone wrote down (issue #3648).
+ */
+const PIN_EXEMPT_CATEGORIES = [
+  ['lockfile', (path) => path.endsWith('yarn.lock')],
+  ['golden bundle fixture', (path) => /(^|\/)(fixtures|__fixtures__)\//u.test(path)],
+  ['test file', (path) => /(\.test\.[a-z]+|(^|\/)test\/)/u.test(path)],
+];
+const WALK_SKIPPED_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', '.next', '.turbo', '.yarn']);
 
-/** Every non-test source file under the product packages, so the pin scan cannot silently miss one. */
-function productSourceFiles(dir, found = []) {
+/** Every file under the product tree, whatever its extension or depth. */
+function productTreeFiles(dir, found = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name !== '__fixtures__' && entry.name !== 'node_modules') productSourceFiles(path, found);
-    } else if (
-      PRODUCT_SOURCE_EXTENSIONS.some(
-        (extension) => entry.name.endsWith(extension) && !entry.name.endsWith(`.test${extension}`),
-      )
-    ) {
+      if (!WALK_SKIPPED_DIRS.has(entry.name)) productTreeFiles(path, found);
+    } else if (entry.isFile()) {
       found.push(path);
     }
   }
   return found;
 }
 
-test('CLAIM_PIN_SOURCES names every product source that pins a verifier version', () => {
-  const productsRoot = join(repoRoot, 'packages/benchmark-product');
-  const pinning = readdirSync(productsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .flatMap((entry) =>
-      PRODUCT_SOURCE_DIRS.flatMap((dir) => {
-        try {
-          return productSourceFiles(join(productsRoot, entry.name, dir));
-        } catch {
-          return [];
-        }
-      }),
-    )
-    .filter((path) => readFileSync(path, 'utf8').includes('@colophon-claims/verify@'))
-    .map((path) => path.slice(repoRoot.length + 1))
-    .sort();
-  assert.deepEqual(pinning, [...CLAIM_PIN_SOURCES].sort());
+test('every verifier specifier in the product tree is classified, whatever its extension or directory', () => {
+  const sealed = [];
+  const docs = [];
+  const mentionOnly = [];
+  for (const absolute of productTreeFiles(join(repoRoot, 'packages/benchmark-product'))) {
+    const path = absolute.slice(repoRoot.length + 1);
+    let text;
+    try {
+      text = readFileSync(absolute, 'utf8');
+    } catch {
+      continue;
+    }
+    if (!text.includes('@colophon-claims/verify@')) continue;
+    if (PIN_EXEMPT_CATEGORIES.some(([, matches]) => matches(path))) continue;
+    if (path.endsWith('.md')) docs.push(path);
+    else if (collectPinsFromSource(text).length > 0) sealed.push(path);
+    else mentionOnly.push(path);
+  }
+  assert.deepEqual(sealed.sort(), [...CLAIM_PIN_SOURCES].sort());
+  assert.deepEqual(docs.sort(), [...READER_INSTRUCTION_DOCS].sort());
+  assert.deepEqual(mentionOnly.sort(), ['packages/benchmark-product/verify/src/assets.ts']);
 });
 
 test('every CLAIM_PIN_SOURCES entry contributes at least one parsed pin', () => {
@@ -347,4 +360,57 @@ test('every CLAIM_PIN_SOURCES entry contributes at least one parsed pin', () => 
       `${source} is listed as a claim pin source but yields no X.Y[.Z] pin`,
     );
   }
+});
+
+test('a verifier version named only in a comment is not a sealed pin', () => {
+  assert.deepEqual(collectPinsFromSource('// pin `@colophon-claims/verify@0.9.9` once 0.9.9 ships\n'), []);
+  assert.deepEqual(collectPinsFromSource('/* bump to @colophon-claims/verify@0.9.9 */\n'), []);
+  assert.deepEqual(collectPinsFromSource('const C = "npx @colophon-claims/verify@0.2.1 <dir>";'), ['0.2.1']);
+  assert.deepEqual(
+    collectPinsFromSource('const C = `see https://x/y and run npx @colophon-claims/verify@0.2 <dir>`;'),
+    ['0.2'],
+  );
+  assert.deepEqual(
+    collectClaimVerifyPins(repoRoot, ['packages/benchmark-product/verify/src/assets.ts']),
+    [],
+    'assets.ts names a version only in prose, so it seals nothing and is off the pin list',
+  );
+});
+
+test('a comment naming an unpublished verifier does not refuse a publish, but a constant still does', () => {
+  const published = ['0.1.0', '0.2.0'];
+  const commented = 'const C = "npx @colophon-claims/verify@0.2.1 <dir>";\n// bumps to @colophon-claims/verify@0.9.9 next\n';
+  assert.deepEqual(assertClaimPinsMatchPublish(collectPinsFromSource(commented), '0.2.1', published), ['0.2.1']);
+  const sealed = 'const C = "npx @colophon-claims/verify@0.2.1 <dir>";\nconst D = "npx @colophon-claims/verify@0.9.9 <dir>";\n';
+  assert.throws(
+    () => assertClaimPinsMatchPublish(collectPinsFromSource(sealed), '0.2.1', published),
+    /claim pins name unpublished verifier 0\.9\.9/u,
+  );
+});
+
+test('the publish guard admits a patch release a frozen compatible line already asks for', () => {
+  const pins = ['0.1.0', '0.1', '0.2', '0.2.0', '0.2.1'];
+  assert.deepEqual(
+    assertClaimPinsMatchPublish(pins, '0.2.2', ['0.0.0', '0.1.0', '0.2.0', '0.2.1']),
+    pins,
+    'the frozen @0.2 line exists precisely so a later 0.2.x fix reaches those readers',
+  );
+  assert.throws(
+    () => assertClaimPinsMatchPublish(pins, '0.3.0', ['0.0.0', '0.1.0', '0.2.0', '0.2.1']),
+    /no claim pin names 0\.3\.0 and no compatible line admits it/u,
+  );
+});
+
+test('reader instructions name only verifier versions npm serves', () => {
+  const pins = collectReaderInstructionPins(repoRoot);
+  assert.deepEqual(assertReaderInstructionPinsResolve(pins), pins);
+  assert.ok(pins.includes('0.2'), 'the reader docs must point at the current compatible line');
+  assert.throws(
+    () => assertReaderInstructionPinsResolve(['1'], ['0.1.0', '0.2.0', '0.2.1']),
+    /reader instructions name unpublished verifier @1;/u,
+  );
+  assert.throws(
+    () => assertReaderInstructionPinsResolve(['0.9.9'], ['0.1.0', '0.2.0', '0.2.1']),
+    /reader instructions name unpublished verifier @0\.9\.9;/u,
+  );
 });

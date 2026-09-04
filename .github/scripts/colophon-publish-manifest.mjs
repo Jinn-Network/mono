@@ -10,17 +10,35 @@ export const FIRST_CUT_PLATFORM_PIN_PATH = 'packages/benchmark-product/first-cut
 export const PRODUCT_RELEASE_PLATFORM_PINS_PATH = 'packages/benchmark-product/product-release-platform-pins.json';
 
 /**
- * Every source file that pins a `@colophon-claims/verify` version into a claim, a bundle asset, or
- * a reader instruction. A pin here is sealed immutably into every bundle built from this tree and
- * cannot be corrected after the bundle ships, so the publish workflow refuses whenever the set of
- * pins and the version it is about to publish disagree (issue #3244).
+ * Every source file that seals a `@colophon-claims/verify` version into a claim or a bundle asset.
+ * A pin here is sealed immutably into every bundle built from this tree and cannot be corrected
+ * after the bundle ships, so the publish workflow refuses whenever the set of pins and the version
+ * it is about to publish disagree (issue #3244).
+ *
+ * Reader instructions that live in repository markdown are *not* in this set: they ship no bytes
+ * into a bundle and stay correctable after the fact, so they carry their own list
+ * (`READER_INSTRUCTION_DOCS`) and their own check, which runs in the test suite rather than
+ * gating a publish (issue #3647).
  */
 export const CLAIM_PIN_SOURCES = [
   'packages/benchmark-product/core/scripts/demo1-export-public-bundle.mjs',
   'packages/benchmark-product/core/src/legacy-closures.ts',
-  'packages/benchmark-product/verify/src/assets.ts',
   'packages/benchmark-product/verify/src/legacy-closures.ts',
   'packages/benchmark-product/cli/src/main.ts',
+];
+
+/**
+ * Every repository markdown file that tells a reader which `@colophon-claims/verify` version to
+ * run. These are corrigible after publication, so they never gate a publish -- but a version npm
+ * has never served is still an instruction to fail, and CI refuses one (issue #3647).
+ */
+export const READER_INSTRUCTION_DOCS = [
+  'packages/benchmark-product/EXTERNAL-VERIFICATION.md',
+  'packages/benchmark-product/PUBLIC-BUNDLE.md',
+  'packages/benchmark-product/README.md',
+  'packages/benchmark-product/cli/README.md',
+  'packages/benchmark-product/core/README.md',
+  'packages/benchmark-product/verify/README.md',
 ];
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
@@ -303,19 +321,106 @@ export async function fetchPublishedVerifyVersions(
   return versions;
 }
 
+const CLAIM_PIN_PATTERN = /@colophon-claims\/verify@([0-9]+\.[0-9]+(?:\.[0-9]+)?)/gu;
+const READER_PIN_PATTERN = /@colophon-claims\/verify@([0-9]+(?:\.[0-9]+){0,2})/gu;
+
+/**
+ * The contents of every string literal in a JavaScript or TypeScript source, with comments
+ * dropped.
+ *
+ * A pin is sealed into a bundle by a string constant; a version named in a comment is prose about
+ * a pin, not a pin. Scanning the raw text cannot tell the two apart, so a sentence explaining a
+ * pending bump would refuse a publish that nothing in the tree actually blocks (issue #3686).
+ */
+function* stringLiterals(text) {
+  let index = 0;
+  while (index < text.length) {
+    const char = text[index];
+    if (char === '/' && text[index + 1] === '/') {
+      const end = text.indexOf('\n', index);
+      if (end < 0) return;
+      index = end + 1;
+    } else if (char === '/' && text[index + 1] === '*') {
+      const end = text.indexOf('*/', index + 2);
+      index = end < 0 ? text.length : end + 2;
+    } else if (char === '"' || char === "'" || char === '`') {
+      let cursor = index + 1;
+      let literal = '';
+      while (cursor < text.length) {
+        if (text[cursor] === '\\') {
+          literal += text[cursor + 1] ?? '';
+          cursor += 2;
+        } else if (text[cursor] === char || (char !== '`' && text[cursor] === '\n')) {
+          break;
+        } else {
+          literal += text[cursor];
+          cursor += 1;
+        }
+      }
+      yield literal;
+      index = cursor + 1;
+    } else {
+      index += 1;
+    }
+  }
+}
+
+/**
+ * The `@colophon-claims/verify` specifiers one source file seals. Both forms are collected: the
+ * exact `X.Y.Z` command and the compatible `X.Y` line.
+ */
+export function collectPinsFromSource(text) {
+  const pins = new Set();
+  for (const literal of stringLiterals(text)) {
+    for (const match of literal.matchAll(CLAIM_PIN_PATTERN)) pins.add(match[1]);
+  }
+  return [...pins].sort();
+}
+
 /**
  * Every `@colophon-claims/verify` specifier pinned by `CLAIM_PIN_SOURCES`, deduplicated and
- * sorted. Both forms are collected: the exact `X.Y.Z` command and the compatible `X.Y` line.
+ * sorted.
  */
 export function collectClaimVerifyPins(repoRoot, sources = CLAIM_PIN_SOURCES) {
   const pins = new Set();
   for (const source of sources) {
     const text = readFileSync(resolve(repoRoot, ...source.split('/')), 'utf8');
-    for (const match of text.matchAll(/@colophon-claims\/verify@([0-9]+\.[0-9]+(?:\.[0-9]+)?)/gu)) {
-      pins.add(match[1]);
-    }
+    for (const pin of collectPinsFromSource(text)) pins.add(pin);
   }
   return [...pins].sort();
+}
+
+/**
+ * Every `@colophon-claims/verify` specifier a reader-instruction document tells a reader to run.
+ * Markdown has no string literals to scan and no comments to exclude, so the whole text counts --
+ * and unlike a claim pin, a bare major line (`@1`) counts too, because that is exactly the shape
+ * that 404s (issue #3647).
+ */
+export function collectReaderInstructionPins(repoRoot, docs = READER_INSTRUCTION_DOCS) {
+  const pins = new Set();
+  for (const doc of docs) {
+    const text = readFileSync(resolve(repoRoot, ...doc.split('/')), 'utf8');
+    for (const match of text.matchAll(READER_PIN_PATTERN)) pins.add(match[1]);
+  }
+  return [...pins].sort();
+}
+
+/**
+ * Refuses a reader instruction naming a verifier version npm does not serve. An exact `X.Y.Z` must
+ * be published; a shorter `X` or `X.Y` line must have a published version under it.
+ */
+export function assertReaderInstructionPinsResolve(pins, published = registeredVerifyReleases()) {
+  const unresolvable = pins.filter((pin) =>
+    pin.split('.').length === 3
+      ? !published.includes(pin)
+      : !published.some((version) => version.startsWith(`${pin}.`)),
+  );
+  if (unresolvable.length > 0) {
+    throw new Error(
+      `reader instructions name unpublished verifier @${unresolvable.join(', @')}; a reader following them gets a 404`,
+    );
+  }
+  return pins;
 }
 
 /**
@@ -326,6 +431,11 @@ export function collectClaimVerifyPins(repoRoot, sources = CLAIM_PIN_SOURCES) {
  * builds. Publishing a version no pin names ships a reader no bundle asks for; leaving a pin on a
  * version that is neither published nor about to be published ships bundles whose sealed command
  * 404s, or whose compatible line resolves to a reader that refuses their format.
+ *
+ * A bundle asks for a reader two ways, and both count. An exact `X.Y.Z` pin names one release; a
+ * compatible `X.Y` line names every patch under it, which is what that line is for -- the closures
+ * carrying it are frozen and cannot be repointed, so requiring an exact pin would leave a
+ * verifier-only patch release unpublishable by the very design meant to deliver it (issue #3687).
  */
 export function assertClaimPinsMatchPublish(pins, publishVersion, published = registeredVerifyReleases()) {
   const resolvable = new Set([...published, publishVersion]);
@@ -342,9 +452,12 @@ export function assertClaimPinsMatchPublish(pins, publishVersion, published = re
   if (unsatisfied.length > 0) {
     throw new Error(`claim compatible lines @${unsatisfied.join(', @')} resolve to no published verifier`);
   }
-  if (!exact.includes(publishVersion)) {
+  const admittingLine = pins
+    .filter((pin) => pin.split('.').length === 2)
+    .find((line) => publishVersion.startsWith(`${line}.`));
+  if (!exact.includes(publishVersion) && !admittingLine) {
     throw new Error(
-      `no claim pin names ${publishVersion}; publishing it would ship a reader no bundle in this tree asks for`,
+      `no claim pin names ${publishVersion} and no compatible line admits it; publishing it would ship a reader no bundle in this tree asks for`,
     );
   }
   return pins;
