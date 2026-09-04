@@ -33,19 +33,16 @@
  *      minted (not baseline) bucket of `buildTaskCreatorMetricReport`.
  *
  * Scoping (see task-5-report.md for the full rationale):
- *   - REAL on-chain: task posting (createTask), the minter's refused claim
- *     attempt (a live Daemon that never emits a claimTx), the solver's real
- *     claim + solution delivery (a live Daemon via MechAdapter), and the
- *     verdict settlement (claimEvaluation → deliverToMarketplace →
- *     claimVerdictDelivery, Safe-mediated production `contracts.ts` calls).
- *   - FAKED (per controller resolution #3, matching task-creator-harvest-e2e.test.ts):
- *     the solver is the launcher-shaped stub returning a canned patch (no Claude); the
- *     evaluator grade is a deterministic score chosen by this script instead
- *     of running the real Docker-backed `SweRebenchV2Evaluator` (which needs
- *     a cloned upstream repo + Docker and is not wired for injectable stubs
- *     through `buildHarnesses`). computeExemplarPairYield is driven directly
- *     on the two real on-chain verdict outcomes rather than through the full
- *     yield-report/Docker pipeline.
+ *   - REAL on-chain: task posting (`createTask`) plus the solver's claim and
+ *     marketplace delivery through a live Daemon's legacy composition `WorkLoop`.
+ *   - DIRECT/in-process: the minter guard is exercised through
+ *     `LearnerHarness.canAttempt`; no minter daemon runs. The verdict leg invokes
+ *     Safe-mediated production ports, but currently fails at `openVerdictAttempt`
+ *     before a verdict is delivered or claimed.
+ *   - FAKED (per controller resolution #3, matching
+ *     task-creator-harvest-e2e.test.ts): the solver is the launcher-shaped stub
+ *     returning a canned patch (no Claude); the evaluator grade is a deterministic
+ *     score chosen by this script instead of the Docker-backed evaluator.
  *
  * Wave-4 D1 re-scope (issue #2667): the solve/claim leg runs on the composition
  * `WorkLoop` (`startSweRebenchSolverDaemon`'s `composition` option → `startDaemon`'s
@@ -61,12 +58,14 @@
  * `VerdictSafeBroadcaster` (`Pick<..., 'execute'>`) — the surface it actually consumes; it
  * never calls `classify()`. Assertions 4 and 5 therefore reach the chain.
  *
- * Remaining blocker (issue #3715): assertions 4 and 5 do not yet pass. This is a legacy-lane E2E gap, not missing settlement in production native mode.
+ * Remaining blocker (issue #3715): assertions 4 and 5 do not yet pass. This is a
+ * legacy-lane E2E gap, not a gap in the explicitly selected native composition.
  * The first full run (CI `workflow_dispatch`, 2026-09-04) cleared assertions 1-3 and then
  * reverted on `TCAttemptNotSubmitted(1, 0)`: this helper explicitly builds
  * `buildOperatorComposition({ mode: 'legacy' })` and runs its `WorkLoop` with
- * `acceptLegacyCards: true`, but that legacy loop lacks router solution settlement. Production
- * `main.ts` selects `mode: 'native'`, passes `nativeClaimRuntime`, threads
+ * `acceptLegacyCards: true`, but that legacy loop lacks router solution settlement. When
+ * `compositionMode: "native"` is explicitly configured, production `main.ts` selects
+ * `mode: 'native'`, passes `nativeClaimRuntime`, threads
  * `composition.nativeSolutionCoordinator` into `WorkLoop`, and constructs the coordinator with
  * `buildNativeSolutionSettlementPort`; the coordinator persistently begins, broadcasts, and
  * records settlement. The old optional `MechAdapter.submitSolutionDelivery` is not the native

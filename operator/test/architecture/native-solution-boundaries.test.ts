@@ -11,6 +11,15 @@ function source(path: string): string {
   return codeOnly(rawSource(path));
 }
 
+function sourceSection(contents: string, start: string, end: string): string {
+  const startIndex = contents.indexOf(start);
+  const endIndex = contents.indexOf(end, startIndex + start.length);
+  if (startIndex === -1 || endIndex === -1) {
+    throw new Error(`source section not found: ${start} ... ${end}`);
+  }
+  return contents.slice(startIndex, endIndex);
+}
+
 const coordinator = source('../../src/daemon/native-solution-coordinator.ts');
 const verification = source('../../src/daemon/native-solution-verification.ts');
 const settlement = source('../../src/daemon/native-solution-settlement.ts');
@@ -19,7 +28,19 @@ const composition = source('../../src/daemon/composition-root.ts');
 const workLoop = source('../../src/daemon/work-loop.ts');
 const main = source('../../src/main.ts');
 const e2eHelpers = source('../e2e/_daemon-harness-helpers.ts');
-const marketplaceE2e = rawSource('../e2e/task-creator-marketplace.ts');
+const marketplaceE2eSource = rawSource('../e2e/task-creator-marketplace.ts');
+const marketplaceE2e = codeOnly(marketplaceE2eSource);
+const startDaemonHelper = sourceSection(
+  e2eHelpers,
+  'export async function startDaemon(',
+  'export async function startSweRebenchSolverDaemon(',
+);
+const startSweRebenchSolverDaemonHelper = sourceSection(
+  e2eHelpers,
+  'export async function startSweRebenchSolverDaemon(',
+  'export async function postPredictionV1Task(',
+);
+const marketplaceE2eMain = sourceSection(marketplaceE2e, 'async function main()', 'main().catch(');
 const nativeModules = [coordinator, verification, settlement, publisher].join('\n');
 
 describe('Phase B native solution architecture boundaries', () => {
@@ -66,11 +87,16 @@ describe('Phase B native solution architecture boundaries', () => {
   });
 
   it('distinguishes the legacy marketplace E2E gap from native settlement wiring', () => {
-    expect(codeOnly(marketplaceE2e)).toContain('composition: { manifestCid: KNOWN_MANIFEST_CID }');
-    expect(e2eHelpers).toMatch(/composition = await buildOperatorComposition\(\{\s*mode: 'legacy'/u);
-    expect(e2eHelpers).toContain('acceptLegacyCards: true');
+    expect(marketplaceE2eMain).toContain('composition: { manifestCid: KNOWN_MANIFEST_CID }');
+    expect(startSweRebenchSolverDaemonHelper).toMatch(
+      /opts\.composition[\s\S]*enableComposition: true/u,
+    );
+    expect(startDaemonHelper).toMatch(
+      /if \(opts\?\.enableComposition === true\)[\s\S]*composition = await buildOperatorComposition\(\{\s*mode: 'legacy'/u,
+    );
+    expect(startDaemonHelper).toContain('acceptLegacyCards: true');
 
-    expect(main).toContain("COMPOSITION_MODE === 'native'");
+    expect(main).toContain("const nativeRuntime = COMPOSITION_MODE === 'native'");
     expect(main).toContain("mode: 'native' as const");
     expect(main).toContain('nativeClaimRuntime: nativeRuntime.claimRuntime');
     expect(main).toContain('nativeSolutionCoordinator: composition.nativeSolutionCoordinator!');
@@ -95,10 +121,10 @@ describe('Phase B native solution architecture boundaries', () => {
     expect(recordBroadcast).toBeGreaterThan(broadcastSettlement);
     expect(recordFinalized).toBeGreaterThan(recordBroadcast);
 
-    expect(marketplaceE2e).toContain(
-      'This is a legacy-lane E2E gap, not missing settlement in production native mode.',
+    expect(marketplaceE2eSource).toContain(
+      'legacy-lane E2E gap, not a gap in the explicitly selected native composition.',
     );
-    expect(marketplaceE2e).not.toContain(
+    expect(marketplaceE2eSource).not.toContain(
       'the composition `WorkLoop` delivers to the mech but never settles',
     );
   });
