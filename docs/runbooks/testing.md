@@ -307,8 +307,9 @@ property that [the measurement](#the-measurement-1627-2026-08-27) rests on,
 and it does so while leaving the suite green.
 
 A line carrying `lint:no-fixed-test-port-allow` is skipped, on all three rules.
-For the multi-line array form the marker goes on the **element** line, not on
-the `ports: [` header — the header is not where the literal is reported.
+For any form written across lines — a multi-line array, a multi-line
+`.listen(` — the marker goes on the **literal's** line, not on the `ports: [`
+or `.listen(` line above it: the literal is where the violation is reported.
 Suppressing a parallelism pin is the one use that should give you pause: the
 guard's premise is that changing parallelism is a deliberate decision that
 edits the guard in the same commit, so a marker there is a note to the next

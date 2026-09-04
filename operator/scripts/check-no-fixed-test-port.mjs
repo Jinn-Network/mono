@@ -185,8 +185,10 @@
  * Suppression: a line carrying the inline comment
  * `lint:no-fixed-test-port-allow` is skipped, matching the house
  * `lint:no-error-leak-allow` convention. It applies to all three rules. For
- * the multi-line array form the marker is per-ELEMENT line, not on the
- * `ports: [` header — the header line is not where the literal is reported.
+ * every form written across lines — a multi-line array, a multi-line
+ * `.listen(` — the marker goes on the LITERAL's line, not on the `ports: [` or
+ * `.listen(` line above it, because the literal is where the violation is
+ * reported.
  * For rule 3 the marker is read off the raw line rather than the blanked one,
  * since a marker only ever lives inside a comment. It is expected to have ZERO
  * consumers on landing: it exists for a future case nobody has met yet, not
