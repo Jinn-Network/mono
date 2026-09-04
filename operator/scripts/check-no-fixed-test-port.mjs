@@ -500,12 +500,13 @@ export function blankComments(text, { strings = false } = {}) {
       }
       // A `'` or `"` literal cannot contain a raw newline, so an apparent
       // opener that reaches one was never a string: it is a `'` or `"` inside
-      // a regex literal (`/from ['"]\\w+/`, `/don't/`), which this machine
-      // does not track. Closing the state at the newline bounds the resulting
-      // desync to the line that started it, instead of inverting code/string
-      // classification for the rest of the file. A backslash-newline line
-      // continuation still works: the `\\` branch above consumes the newline
-      // before this test ever sees it.
+      // something this machine misread — a regex whose opening `/` was taken
+      // for division, say. Regex literals ARE tracked now, so this is a
+      // backstop rather than the primary defence, but it stays: it bounds any
+      // such desync to the line that started it instead of inverting
+      // code/string classification for the rest of the file. A
+      // backslash-newline line continuation still works: the `\\` branch above
+      // consumes the newline before this test ever sees it.
       if (ch === '\n' && quote !== '`') {
         quote = null;
         i += 1;
