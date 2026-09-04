@@ -331,6 +331,9 @@ export function runStatus(
             postSeal: binding.postSeal,
             roundBasis: binding.roundBasis,
             poolDigest: binding.poolDigest,
+            // binding-carriage: `readRunBindingCarriage` above, which resolves the record out of
+            // the sealed store and refuses one whose `sealDigest`, `sealedAt` or `declaredSource`
+            // is not this run's own.
             statement: runBindingSentence(binding),
           },
         }),

@@ -30,7 +30,9 @@ import { describe, expect, test } from "vitest";
 /**
  * Every product member's source, read off the tree rather than listed here: the face is exported
  * from this package's public entry, so `cli` and `web` can reach it as readily as `core` can, and a
- * hard-coded pair would stop scanning the member a future caller lands in.
+ * hard-coded pair would stop scanning the member a future caller lands in. `web` reaches it from
+ * `.tsx` rather than `.ts` -- its results page already renders `venueHonesty.limits` as a list --
+ * so both extensions are read (#3757).
  */
 const productRoot = resolve(import.meta.dirname, "../../..");
 const memberRoots = readdirSync(productRoot, { withFileTypes: true })
@@ -39,13 +41,18 @@ const memberRoots = readdirSync(productRoot, { withFileTypes: true })
   .filter((directory) => existsSync(directory));
 
 /**
- * The two functions through which a binding becomes reader-visible prose, and the zero-based
- * argument position that carries it: `buildLocalVenueHonesty(cells, run, anchors, binding)` and
- * `runBoundVenueLimits(limits, binding)`.
+ * The functions through which a binding becomes reader-visible prose, and the zero-based argument
+ * position that carries it: `buildLocalVenueHonesty(cells, run, anchors, binding)`,
+ * `runBoundVenueLimits(limits, binding)` and `runBindingSentence(binding)`.
+ *
+ * The last is the one that literally builds the face sentence; the other two are wrappers over it,
+ * so a site writing `limits.push(runBindingSentence(binding))` is the most direct form of the
+ * bypass this file exists to make visible, and is covered here rather than assumed away (#3757).
  */
 const EMITTERS: ReadonlyArray<readonly [string, number]> = [
   ["buildLocalVenueHonesty", 3],
   ["runBoundVenueLimits", 1],
+  ["runBindingSentence", 0],
 ];
 
 /**
@@ -59,8 +66,17 @@ const JUSTIFICATION = /\bbinding-carriage:/u;
  * The complete set of marker-bearing sites. A forward is not an origin: `buildLocalVenueHonesty`
  * passes its own optional parameter through, so the obligation belongs to whoever supplies it, and
  * no in-repo caller does. Any addition here is the change #3464 exists to make visible.
+ *
+ * The three `runBindingSentence` origins covered since #3757 are the wrapper inside `report-face.ts`
+ * -- which states that it forwards rather than originates -- and the two `core` operations that
+ * reach the sentence from a binding this run's own sealed identity vouches for.
  */
-const EXPECTED_JUSTIFIED_SITES = ["verify/src/profile/run-results.ts:runBoundVenueLimits"];
+const EXPECTED_JUSTIFIED_SITES = [
+  "core/src/operations/run-bind.ts:runBindingSentence",
+  "core/src/operations/run-status.ts:runBindingSentence",
+  "verify/src/binding/report-face.ts:runBindingSentence",
+  "verify/src/profile/run-results.ts:runBoundVenueLimits",
+];
 
 const CONSTRAINT = [
   "A binding may be turned into reader-facing prose only after it has been cross-checked against",
@@ -77,6 +93,16 @@ function blankComments(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, (match) => match.replace(/[^\n]/gu, " "));
 }
 
+/**
+ * A file this scan reads. `.tsx` counts for the reason `.ts` does -- `web` is a product member and
+ * writes its pages in `.tsx` -- and a test file is excluded under either extension, since a fixture
+ * asserting the violating shape is not a site that commits it (#3757).
+ */
+export function isScannedSource(name: string): boolean {
+  return (name.endsWith(".ts") || name.endsWith(".tsx"))
+    && !name.endsWith(".test.ts") && !name.endsWith(".test.tsx");
+}
+
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     // `testing/` is scanned like any other source: a fixture builder that assembles a bundle is
@@ -84,7 +110,7 @@ function sourceFiles(directory: string): string[] {
     if (["node_modules", "dist", ".next"].includes(entry.name)) return [];
     const path = join(directory, entry.name);
     if (entry.isDirectory()) return sourceFiles(path);
-    return entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts") ? [path] : [];
+    return entry.isFile() && isScannedSource(entry.name) ? [path] : [];
   });
 }
 
@@ -176,6 +202,21 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     // indistinguishable from one that supplies an empty binding.
     expect(emitterCallSites("buildLocalVenueHonesty(\n  cells,\n  run,\n  anchors,\n);\n", "fixture.ts")[0]?.binding)
       .toBeUndefined();
+    // The sentence builder itself, whose only argument IS the binding: the shape a site takes to
+    // push the face onto a list without going through either wrapper (#3757).
+    expect(emitterCallSites("limits.push(runBindingSentence(forged));\n", "fixture.ts")[0]).toEqual({
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    });
+  });
+
+  // The tree walk is widened in the same act, and proven the same way: a predicate that silently
+  // stopped admitting `.tsx` would leave the scan passing over the member it was widened for.
+  test("reads both source extensions and neither test extension", () => {
+    expect(["page.tsx", "report-face.ts"].filter((name) => isScannedSource(name)))
+      .toEqual(["page.tsx", "report-face.ts"]);
+    expect(["page.test.tsx", "report-face.test.ts"].filter((name) => isScannedSource(name))).toEqual([]);
   });
 
   test("every in-repo emitter call either supplies no binding or names the check it satisfies", () => {
