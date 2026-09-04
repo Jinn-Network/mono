@@ -147,7 +147,15 @@ export function createCorpusSyncCapability(
         index: await options.openIndex(context.config),
         statusStore,
         ...(seed?.lastCycle === undefined ? {} : { lastCycle: seed.lastCycle }),
-        sources: { ...seed?.sources },
+        // Seeded ONLY for sources this install still follows. Dropping a
+        // source from `corpus.sources` is the documented way to stop
+        // following an archive, and the runbook points operators at this
+        // file; a key kept past its config entry shows them archives this
+        // install does not follow beside ones it does. Pruned here rather
+        // than at write because `start` is exactly when the followed set can
+        // have changed -- the config is read once -- so a source removed and
+        // later restored starts its history clean.
+        sources: followedOnly(context.config.corpus, seed?.sources),
         lifetime: new AbortController(),
         current: Promise.resolve(),
         indexedOnce: false,
@@ -237,7 +245,18 @@ export function createCorpusSyncCapability(
             // red freshness row on disk that the next process seeds and shows
             // until its own first cycle completes. A pass abandoned by the
             // cycle DEADLINE is a real fault and is recorded.
-            if (!state.lifetime.signal.aborted) indexError = describeError(caught);
+            // Through `recordable` for the same reason the failure halves
+            // beside it are: this text reaches a durable file whose read
+            // schema bounds it, and an operator-facing row. Written raw, an
+            // error longer than that bound writes a document the very next
+            // `read()` rejects as unrecognized -- discarding the seeded
+            // `lastCycle`, including the `indexError` that explains the row.
+            if (!state.lifetime.signal.aborted) {
+              indexError = recordable(
+                describeError(caught),
+                "the index pass failed with no detail",
+              );
+            }
           }
         }
       }
@@ -245,15 +264,37 @@ export function createCorpusSyncCapability(
       error = describeError(caught);
     } finally {
       clearTimeout(timer);
-      if (status !== "skipped-locked" || state.lastCycle === undefined) {
-        state.lastCycle = {
-          completedAt: now().toISOString(),
-          status,
-          ...(indexError === undefined ? {} : { indexError }),
-        };
+      try {
+        if (status !== "skipped-locked" || state.lastCycle === undefined) {
+          state.lastCycle = {
+            completedAt: now().toISOString(),
+            status,
+            ...(indexError === undefined ? {} : { indexError }),
+          };
+        }
+        await writeStatus(state);
+        await reportCycle(state, { status, indexed, error, indexError });
+      } catch (caught) {
+        // Recording and reporting are what this cycle has to say; the
+        // reschedule below is whether there is ever another one. Everything
+        // above runs on injected dependencies that can throw -- the clock,
+        // and a logger whose stderr can EPIPE -- and unguarded, any of them
+        // exits this block early, stopping the loop permanently and silently
+        // while the process stays alive holding the exclusive sync lock. That
+        // is the failure this file argues against one line below, where the
+        // NEXT cycle's rejection is already guarded for the same reason.
+        //
+        // Reported best-effort rather than swallowed outright: the logger is
+        // only one candidate for what just threw, and when it is not the
+        // culprit -- a clock that threw stamping the record -- this is the
+        // sole signal the cycle produced at all. Nested, because the case
+        // where it IS the culprit must still reach the reschedule.
+        try {
+          state.log.warn("corpus.mirror.cycle.unreported", { reason: describeError(caught) });
+        } catch {
+          // The logger itself. Nothing is left to report it to.
+        }
       }
-      await writeStatus(state);
-      await reportCycle(state, { status, indexed, error, indexError });
       if (!state.lifetime.signal.aborted) {
         state.timer = setTimeout(() => {
           // Guarded because everything below the `try` in this function --
@@ -362,6 +403,15 @@ export function createCorpusSyncCapability(
     const sanitized =
       value === undefined ? "" : sanitizeUntrustedText(value, MAX_FAILURE_CHARS).text;
     return sanitized === "" ? fallback : sanitized;
+  }
+
+  function followedOnly(
+    corpus: CorpusConfig,
+    seeded: Readonly<Record<string, MirrorSourceSyncStatus>> | undefined,
+  ): Record<string, MirrorSourceSyncStatus> {
+    if (seeded === undefined) return {};
+    const followed = new Set(corpus.sources.map((source) => `${source.agent}/${source.name}`));
+    return Object.fromEntries(Object.entries(seeded).filter(([key]) => followed.has(key)));
   }
 
   async function writeStatus(state: Started): Promise<void> {

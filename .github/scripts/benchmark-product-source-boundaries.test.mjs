@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './js-source-scanner.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const packageRoot = join(root, 'packages', 'benchmark-product');
@@ -236,38 +237,6 @@ function registeredMethodIds() {
   assert.ok(ids.length > 0, 'the registered method identifier list parsed empty');
   return ids;
 }
-// Strings survive, comments do not. A `//` inside a regex literal is read as a comment start, so
-// the scanner can drop code it should have read -- it under-reports, never over-reports.
-function stripComments(source) {
-  let out = '';
-  for (let index = 0; index < source.length;) {
-    const char = source[index];
-    if (char === '/' && source[index + 1] === '/') {
-      while (index < source.length && source[index] !== '\n') index += 1;
-      continue;
-    }
-    if (char === '/' && source[index + 1] === '*') {
-      index += 2;
-      while (index < source.length && !(source[index] === '*' && source[index + 1] === '/')) index += 1;
-      index += 2;
-      continue;
-    }
-    if (char === '"' || char === "'" || char === '`') {
-      out += char;
-      index += 1;
-      while (index < source.length && source[index] !== char) {
-        if (source[index] === '\\') { out += source[index]; index += 1; }
-        if (index < source.length) { out += source[index]; index += 1; }
-      }
-      out += char;
-      index += 1;
-      continue;
-    }
-    out += char;
-    index += 1;
-  }
-  return out;
-}
 function hardcodedMethodIds(sourceFiles) {
   const pattern = new RegExp(`${REGISTERED_METHOD_NAMESPACE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[A-Za-z0-9._-]*`, 'g');
   return sourceFiles.filter((file) => !isTestSource(file)).flatMap((file) => {
@@ -287,6 +256,23 @@ test('method-identifier scanner reads code and ignores comments', () => {
       hardcodedMethodIds(files(join(fixture, 'src'))),
       [`${relative(root, join(fixture, 'src', 'cited.ts'))} -> jinn.benchmarking.method/paired-delta`],
     );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('method-identifier scanner does not read a quote inside a regex literal as opening a string', () => {
+  // The over-report direction, and the reason this guard reads through the shared scanner rather
+  // than a local copy of it: a quote-first scanner enters string mode at the apostrophe of
+  // `/['"]/`, consumes to the next apostrophe anywhere in the file, and hands the intervening
+  // comment back as live code -- reddening the guard on a comment. The shared scanner resolves the
+  // `/` as a regex literal first, so the comment after it is still a comment.
+  const fixture = mkdtempSync(join(tmpdir(), 'colophon-method-id-regex-'));
+  try {
+    mkdirSync(join(fixture, 'src'));
+    writeFileSync(
+      join(fixture, 'src', 'described.ts'),
+      'const quoted = /[\'"]/u;\n// cites jinn.benchmarking.method/paired-delta in prose\nexport const x = quoted;\n',
+    );
+    assert.deepEqual(hardcodedMethodIds(files(join(fixture, 'src'))), []);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 

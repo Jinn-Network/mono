@@ -308,5 +308,5 @@ describe("Terminal-Bench 3.0 official-suite intake", () => {
     expect(selected.ok).toBe(false);
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/binary-instrument/u);
-  }, 30_000);
+  });
 });

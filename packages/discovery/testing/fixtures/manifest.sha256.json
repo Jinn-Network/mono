@@ -10,6 +10,18 @@
       "sha256": "3d7f3989d888229d49c326c094f8874faa5847bbaa90abf000513bd0ff43e22d"
     },
     {
+      "id": "vectors/consumer-archive-root-escaping-serving-root/vector.json",
+      "sha256": "549e638da8596cf9ba6be3a5a57458ba0baba00288d2da5bc7c3ab7003c64485"
+    },
+    {
+      "id": "vectors/consumer-archive-root-inside-serving-root/vector.json",
+      "sha256": "54e89c3b09174d3b19d38afd049f6f121da00d39667b6677bbfe1e47797d8f9e"
+    },
+    {
+      "id": "vectors/consumer-archive-root-outside-serving-root/vector.json",
+      "sha256": "a6701e20fb56584b00376e0c9726a7963c367a57c7d02de3cec22c602f8900ad"
+    },
+    {
       "id": "vectors/consumer-cold-start-mirror-disagreement/vector.json",
       "sha256": "2b0a1efc7e0f68738a658f5aed98400d2dcf46a4cadb931b6fe78507c8c1ea9b"
     },

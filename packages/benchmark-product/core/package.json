@@ -63,7 +63,7 @@
     "skillsbench:inventory": "SKILLSBENCH_INVENTORY=1 vitest run src/method/skillsbench-inventory.external.test.ts --reporter=verbose --silent=false",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build",
-    "demo1:report": "vitest run src/conformance/skillsbench-demo1-report.external.test.ts",
+    "demo1:report": "SKILLSBENCH_DEMO1_REPORT=1 vitest run src/conformance/skillsbench-demo1-report.external.test.ts --reporter=verbose",
     "demo1:verify": "yarn build && node scripts/demo1-verify.mjs",
     "demo1:public-bundle": "node scripts/demo1-export-public-bundle.mjs",
     "demo1:public-bundle:test": "node --test scripts/demo1-export-public-bundle.test.mjs"

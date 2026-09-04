@@ -183,6 +183,15 @@ describe("Colophon install surface", () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "colophon-publication-serve-"));
     const argv = ["publication", "serve", "--workspace", ".", "--principal", "sponsor-1", "--port", "0"];
 
+    // A real workspace, initialized through the product's own surface: serve refuses a directory
+    // that is not one (#3290), so relying on the permissive path would prove nothing about the
+    // wrapper's flag forwarding.
+    const initialized = await runColophonCli(
+      ["init", "--workspace", ".", "--principal", "sponsor-1"],
+      { ...context, cwd: workspaceDir },
+    );
+    expect(initialized.exitCode).toBe(0);
+
     const served = await runColophonCli(argv, {
       ...context,
       cwd: workspaceDir,
@@ -196,6 +205,15 @@ describe("Colophon install surface", () => {
     const refused = await runColophonCli(argv, { ...context, cwd: workspaceDir });
     expect(refused.exitCode).not.toBe(0);
     expect(refused.stderr).toMatch(/signal shutdown/);
+
+    // A mistyped `--workspace` is a refusal, not a bound socket over an empty archive.
+    const stale = await runColophonCli(
+      ["publication", "serve", "--workspace", "./typo", "--principal", "sponsor-1", "--port", "0"],
+      { ...context, cwd: workspaceDir, createShutdownSignal: () => AbortSignal.abort() },
+    );
+    expect(stale.exitCode).not.toBe(0);
+    expect(stale.stderr).toMatch(/not a workspace/);
+    expect(existsSync(join(workspaceDir, "typo"))).toBe(false);
   });
 });
 

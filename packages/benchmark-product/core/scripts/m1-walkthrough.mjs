@@ -183,7 +183,7 @@ async function main() {
   step("quote", ["quote", "--workspace", workspaceDir, "--principal", sponsor, "--draft", draftId]);
 
   // ── 10. lock — AS THE DELEGATED AGENT ───────────────────────────────────────────────────────
-  const lock = step("lock (as delegated agent)", ["lock", "--workspace", workspaceDir, "--principal", delegatedAgent, "--draft", draftId]);
+  const lock = step("lock (as delegated agent)", ["lock", "--ack-sample-size", "--workspace", workspaceDir, "--principal", delegatedAgent, "--draft", draftId]);
 
   // ── 11. launch — AS THE DELEGATED AGENT, real venue, real subprocesses ─────────────────────
   step("launch (as delegated agent)", ["launch", "--workspace", workspaceDir, "--principal", delegatedAgent, "--draft", draftId]);

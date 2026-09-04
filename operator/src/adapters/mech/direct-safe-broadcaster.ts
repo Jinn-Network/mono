@@ -20,7 +20,7 @@
  * is a point-in-time pidfile read at context construction, not a held lease: a daemon that starts
  * a moment later is unprotected (inherent TOCTOU).
  */
-import type { Address, Hex, PublicClient, WalletClient } from 'viem';
+import type { Address, Hex, Log, PublicClient, WalletClient } from 'viem';
 import { SAFE_ABI } from '../../contracts/abis.js';
 import { flattenErrorMessage, withEoaBroadcastLock, withRecoverableRetry } from '../../tx-retry.js';
 import type { VenueBroadcaster } from './safe.js';
@@ -31,6 +31,41 @@ import {
 } from './safe-revert.js';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address;
+
+/**
+ * The receipt this broadcaster resolves. Structurally venue-base's `SafeBroadcastReceipt`, so a
+ * direct broadcaster can drive venue-base ports that read block identity or decode router events
+ * out of the receipt logs -- `createVerdictPorts` does both (issue #2665: `openVerdictAttempt`
+ * ran `decodeEvaluationAttemptFromLogs(receipt.logs)` over `undefined` because this broadcaster
+ * awaited `waitForTransactionReceipt` and then discarded it).
+ */
+export interface DirectSafeBroadcastReceipt {
+  readonly txHash: Hex;
+  readonly blockNumber: bigint;
+  readonly blockHash: Hex;
+  readonly logs: readonly Log[];
+  /**
+   * Always `false`. This broadcaster has no already-settled reconciliation path: an inner revert
+   * whose effect is already on chain surfaces as a `SafeInnerRevertError` for the caller to
+   * classify, which is what a one-shot CLI verb wants. Venue-base's own `createSafeBroadcaster`
+   * is the broadcaster that resolves `true` here.
+   */
+  readonly alreadySettled: false;
+}
+
+/**
+ * `VenueBroadcaster` narrowed to the receipt above. Declared as an extension so the compiler
+ * proves the narrowing rather than the two shapes drifting apart silently.
+ */
+export interface DirectSafeBroadcaster extends VenueBroadcaster {
+  execute(request: {
+    readonly to: Address;
+    readonly value: bigint;
+    readonly data: Hex;
+    readonly logicalTx: string;
+    readonly operation?: 0 | 1;
+  }): Promise<DirectSafeBroadcastReceipt>;
+}
 
 /** eth_sign `v` adjustment — Safe's `checkNSignatures` expects `v > 30` for a message-prefixed hash. */
 function toSafeEthSignSignature(signature: Hex): Hex {
@@ -43,7 +78,7 @@ export function createDirectSafeBroadcaster(
   publicClient: PublicClient,
   walletClient: WalletClient,
   safeAddress: Address,
-): VenueBroadcaster {
+): DirectSafeBroadcaster {
   return {
     safeAddress,
     async execute(request) {
@@ -127,8 +162,14 @@ export function createDirectSafeBroadcaster(
           }
           throw error;
         }
-        await publicClient.waitForTransactionReceipt({ hash: txHash });
-        return { txHash };
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+        return {
+          txHash,
+          blockNumber: receipt.blockNumber,
+          blockHash: receipt.blockHash,
+          logs: receipt.logs,
+          alreadySettled: false,
+        };
       }));
     },
   };

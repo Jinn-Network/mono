@@ -6,13 +6,14 @@
  */
 
 import { createHash, verify as cryptoVerify } from "node:crypto";
-import { constants, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { constants, existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { open, realpath, stat } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import {
   DISCOVERY_SIGNING_SCOPE,
   MEDIA_HEAD,
   RECORD_DISCOVERY_VERSION,
+  WELL_KNOWN_PATH,
   archivePagePath,
   dssePreAuthEncoding,
   formatOrigin,
@@ -26,7 +27,9 @@ import {
 } from "@jinn-network/record-discovery-protocol";
 import {
   createDurableSourceWriter,
+  parseWellKnownDocument,
   writeWellKnownDocument,
+  type WellKnownSourceEntry,
   type CasSnapshot,
   type CasWriteResult,
   type DurableSourceAppendIntent,
@@ -39,8 +42,11 @@ import { createArchiveHttpHandler, createFsBlobStore, IMMUTABLE_CACHE_CONTROL } 
 import { sha256 as publicationSha256, type CasResult, type PublicationJournal, type PublicationJournalStore } from "@jinn-network/record-publication";
 import { atomicWriteFileSync, fsyncDirectorySync, readFileIfExistsSync } from "../fs/atomic.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
-import { publicationJournalPath, publicationServeRoot, publicationStatePath } from "../workspace/layout.js";
+import { assertWorkspace } from "../workspace/workspace.js";
+import { refuse } from "../errors.js";
+import { publicationJournalPath, publicationServeRoot, publicationStatePath, runsDir, runStatePath } from "../workspace/layout.js";
 import { acquirePublicationLock } from "./publication-lock.js";
+import { DEFAULT_PUBLICATION_SOURCE_NAME } from "./state.js";
 
 /** Canonical archive-mount contract shared by registration, accounting, launch, and Report. */
 export function normalizePublicArchiveBaseUrl(value: string): string {
@@ -145,7 +151,27 @@ function sourceSigner(workspaceDir: string): DurableSourceSigner {
 }
 
 /**
- * Writes the well-known discovery document for this workspace's one source.
+ * Reads the served well-known document's existing source entries.
+ *
+ * A document that cannot be read back as one is discarded rather than treated as fatal: it is
+ * derived, an unreadable document is indistinguishable from an absent one to a consumer, and
+ * every source's own next append rewrites its own entry. Refusing here would instead leave the
+ * whole workspace permanently unable to refresh until someone deleted a derived file by hand.
+ */
+async function readWellKnownSources(
+  blobs: { get(path: string): Promise<{ bytes: Uint8Array } | undefined> },
+): Promise<readonly WellKnownSourceEntry[]> {
+  try {
+    const stored = await blobs.get(WELL_KNOWN_PATH);
+    if (stored === undefined) return [];
+    return parseWellKnownDocument(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stored.bytes))).sources;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Writes the well-known discovery document for one of this workspace's sources.
  *
  * The document is the only thing in the served layout a first-time consumer can read without
  * already knowing the archive's page names: `coldSync` starts at `archiveRoot` and walks back to
@@ -154,25 +180,46 @@ function sourceSigner(workspaceDir: string): DurableSourceSigner {
  * than maintained as separate state, and `refreshWorkspacePublicationWellKnown` reconstructs it
  * for a source that appended before this workspace ever served anything.
  *
+ * The write is a MERGE over the document's `sources` array, keyed by `(agent, name)`. The schema
+ * has always held an array and the layout has always supported several sources under one public
+ * root; only this writer used to assume there was one, which silently made every source but the
+ * last-written undiscoverable. Entries are sorted so the same set of sources always seals to the
+ * same bytes.
+ *
+ * The merge is a read-modify-write, so unlike the blind overwrite it replaces it is NOT idempotent
+ * under concurrency: every caller must already hold `withWorkspacePublicationSourceLock`, which is
+ * workspace-wide rather than per-source and so serializes writers of different source names too.
+ *
  * `undefined` position means the source has never appended: there is no archive root to point a
- * consumer at, and no document is written.
+ * consumer at, and no document is written -- including no rewrite that would touch other sources.
  */
 async function writeSourceWellKnown(
-  blobs: { put(path: string, bytes: Uint8Array, contentType: string): Promise<void> },
+  blobs: {
+    put(path: string, bytes: Uint8Array, contentType: string): Promise<void>;
+    get(path: string): Promise<{ bytes: Uint8Array } | undefined>;
+  },
   source: SourceIdentity,
   writer: Pick<ReturnType<typeof createDurableSourceWriter>, "readState">,
 ): Promise<boolean> {
   const state = await writer.readState();
   const page = state?.last?.page;
   if (page === undefined) return false;
+  const entry: WellKnownSourceEntry = {
+    agent: source.agent,
+    name: source.name,
+    headPath: headPath(source.name),
+    archiveRoot: archivePagePath(source.name, page),
+  };
+  const others = (await readWellKnownSources(blobs))
+    .filter((existing) => existing.agent !== entry.agent || existing.name !== entry.name);
   await writeWellKnownDocument(blobs, {
     protocol: RECORD_DISCOVERY_VERSION,
-    sources: [{
-      agent: source.agent,
-      name: source.name,
-      headPath: headPath(source.name),
-      archiveRoot: archivePagePath(source.name, page),
-    }],
+    // Ordered by code unit, never `localeCompare`: the document is sealed, so the same set of
+    // sources must produce the same bytes on every host regardless of its locale.
+    sources: [...others, entry].sort((left, right) => {
+      const key = (value: WellKnownSourceEntry): string => `${value.agent}\u001f${value.name}`;
+      return key(left) < key(right) ? -1 : key(left) > key(right) ? 1 : 0;
+    }),
   });
   return true;
 }
@@ -302,8 +349,10 @@ export function createWorkspacePublicationSource(workspaceDir: string, sourceNam
 export async function withWorkspacePublicationSourceLock<T>(
   workspaceDir: string,
   run: () => Promise<T>,
+  /** Fired once if the acquire has to wait; see `acquirePublicationLock`. */
+  onContended?: () => void,
 ): Promise<T> {
-  const lock = await acquirePublicationLock(workspaceDir, "__record-discovery-source__");
+  const lock = await acquirePublicationLock(workspaceDir, "__record-discovery-source__", undefined, { ...(onContended === undefined ? {} : { onContended }) });
   try { return await run(); } finally { lock.release(); }
 }
 
@@ -312,12 +361,65 @@ export async function withWorkspacePublicationSourceLock<T>(
  * and a no-op returning `false` for a source that has never appended. Taken under the source lock
  * so it never observes a position mid-append.
  */
-export async function refreshWorkspacePublicationWellKnown(workspaceDir: string, sourceName: string): Promise<boolean> {
+export async function refreshWorkspacePublicationWellKnown(
+  workspaceDir: string,
+  sourceName: string,
+  onContended?: () => void,
+): Promise<boolean> {
   return withWorkspacePublicationSourceLock(workspaceDir, async () => {
     const source = createWorkspacePublicationSource(workspaceDir, sourceName);
     const blobs = createFsBlobStore(publicationServeRoot(workspaceDir));
     return writeSourceWellKnown(blobs, source.source, source.writer);
-  });
+  }, onContended);
+}
+
+/**
+ * The source name a workspace-scoped caller (`publication serve`) should refresh.
+ *
+ * Every other publication path reads `publication.source.name` from the RunState of the one draft
+ * it is acting on. Serving has no draft: it is workspace-scoped, and used to fall back to
+ * `DEFAULT_PUBLICATION_SOURCE_NAME` outright -- so a workspace that had configured a different
+ * name would resolve a source with no committed position and report `not-announced` for a source
+ * that had in fact announced.
+ *
+ * The rule enforces the workspace-global assumption rather than remembering it:
+ *
+ * - no run configures a name -> the default, which is what a never-configured workspace uses;
+ * - exactly one distinct name -> that name;
+ * - several -> refuse, naming them. Serving one of them silently is the failure this replaces,
+ *   and the caller has an explicit `--source` that always wins and never reaches this rule.
+ *
+ * A run document that cannot be read is skipped: an unreadable RunState is the business of the
+ * verb that owns that draft, and serving the rest of the workspace must not be blocked by it.
+ */
+export function resolveWorkspacePublicationSourceName(workspaceDir: string): string {
+  // Asserted here too, not only by the serve path that calls this first: a directory that is not
+  // a workspace has no runs to read, and "your runs disagree" would be the wrong thing to tell an
+  // operator who mistyped the path.
+  assertWorkspace(workspaceDir);
+  const directory = runsDir(workspaceDir);
+  let files: readonly string[];
+  try { files = readdirSync(directory); } catch { return DEFAULT_PUBLICATION_SOURCE_NAME; }
+  const names = new Set<string>();
+  for (const file of files) {
+    // `<draftId>.json` is the RunState; the cancel marker, journal, and lock files share the
+    // directory. The path is still rebuilt through `runStatePath` so this module never joins
+    // layout string literals of its own.
+    if (!file.endsWith(".json") || file.endsWith(".cancel-requested.json")) continue;
+    const bytes = readFileIfExistsSync(runStatePath(workspaceDir, file.slice(0, -".json".length)));
+    if (bytes === undefined) continue;
+    let parsed: unknown;
+    try { parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { continue; }
+    const name = (parsed as { publication?: { source?: { name?: unknown } } } | null)?.publication?.source?.name;
+    if (typeof name === "string" && name.length > 0) names.add(name);
+  }
+  if (names.size === 0) return DEFAULT_PUBLICATION_SOURCE_NAME;
+  if (names.size === 1) return [...names][0]!;
+  refuse(
+    "invalid-invocation",
+    "--source",
+    `this workspace configures more than one publication source name (${[...names].sort().join(", ")}); pass --source to name the one to serve`,
+  );
 }
 
 /** Durable neutral-plan journal, CAS-shaped so record-publication owns retry semantics. */

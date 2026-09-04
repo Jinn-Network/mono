@@ -137,7 +137,7 @@ describe("agent CLI", () => {
     expect(lockRefused.exitCode).toBe(2);
     const progress: string[] = [];
     const lock = await runCli(
-      ["lock", ...base, "--draft", "provider", "--ack-provider-network-costs"],
+      ["lock", ...base, "--draft", "provider", "--ack-provider-network-costs", "--ack-sample-size"],
       { ...context, progress: (line) => progress.push(line) },
     );
     expect(lock.exitCode, lock.stderr).toBe(0);
