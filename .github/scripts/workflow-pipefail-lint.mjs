@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Unguarded early-exit pipe consumers in `.github/workflows/*.yml` `run:` blocks.
+// Unguarded early-exit pipe consumers in `run:` blocks — every `.github/workflows/*.y*ml`
+// and every composite `action.y*ml` in the tree.
 //
 // A pipeline whose consumer stops reading before the producer stops writing kills the
 // producer with SIGPIPE once the output outruns the 64KiB pipe buffer. Under
@@ -24,9 +25,12 @@
 //
 //   - pipefail in scope (`shell: bash`, a custom shell string naming pipefail, or a
 //     `set … pipefail` earlier in the block) -> error; the lint exits 1.
-//   - the default `bash -e {0}` -> warning; printed, but not this gate's failure. A
-//     bare `bash -e` pipeline reports only the last command's status, so it launders a
-//     failed producer rather than inventing a failure (the PR #2819 finding).
+//   - the default `bash -e {0}` (or `sh -e {0}`) -> warning; printed, but not this
+//     gate's failure. A bare `-e` pipeline reports only the last command's status, so it
+//     launders a failed producer rather than inventing a failure (the PR #2819 finding).
+//   - a composite action's step -> error even with no shell resolved. GitHub requires
+//     every composite `run:` step to declare `shell:`, so an unresolved one is this
+//     reader failing rather than a step running under the default.
 //
 // Escape hatch, on the offending line or the body line above it:
 //
@@ -40,9 +44,18 @@
 // suite slices workflow sources the same way.
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 
-const WORKFLOWS_DIR = resolve(import.meta.dirname, '../workflows');
+const REPOSITORY_ROOT = resolve(import.meta.dirname, '../..');
+const WORKFLOWS_DIR = join(REPOSITORY_ROOT, '.github', 'workflows');
+
+// Trees that can never hold a composite action of ours. Deliberately only these three:
+// a name like `dist` or `build` matches at *any* depth, so pruning it would hide
+// `.github/actions/build/action.yml` — a real place to put one — and the discovery guard
+// would then report a hole the walker itself had created. Dependency and VCS trees carry
+// no such ambiguity. The `git ls-files` guard in the test suite still fails if one of
+// these ever hides a tracked action file.
+const PRUNED_DIRECTORIES = new Set(['.git', '.yarn', 'node_modules']);
 
 // Shells whose `run:` body is a POSIX-ish pipeline language. Anything else (`pwsh`,
 // `python`, `node`, …) has no `|` semantics this lint models, and is skipped whole.
@@ -52,14 +65,64 @@ const PIPELINE_SHELLS = new Set(['bash', 'sh', 'dash', 'zsh']);
 // like `-q` is never read as a flag.
 const GREP_ARG_TAKING = new Set(['-e', '-f', '-m', '--regexp', '--file', '--max-count']);
 
+// grep options that stop it reading: `-q` exits at the first match, `-m N` after N of
+// them, and `-l`/`-L` stop each file at its first match — on a pipe that is the same
+// early exit as `-q`. grep gives none of these letters another meaning, so a cluster
+// carrying one stops early.
+const GREP_STOPS_SHORT = new Map([
+  ['q', '-q'],
+  ['m', '-m'],
+  ['l', '-l'],
+  ['L', '-L'],
+]);
+const GREP_STOPS_LONG = new Set([
+  '--quiet',
+  '--silent',
+  '--max-count',
+  '--files-with-matches',
+  '--files-without-match',
+]);
+
+const SED_ARG_TAKING = new Set(['-f', '--file']);
+
+const AWK_COMMANDS = new Set(['awk', 'gawk', 'mawk', 'nawk']);
+const AWK_ARG_TAKING = new Set(['-v', '-f', '-F', '--assign', '--file', '--field-separator', '--source']);
+
+// Shell reserved words that open and close a compound statement. `{`/`}` and `(`/`)` are
+// handled alongside them; `do` is deliberately not an opener, because `for … ; do` puts a
+// genuine top-level `;` before it and the loop is already opened by `for`.
+// Matching by kind, rather than letting any closer pop any opener, is what keeps a
+// `case` arm's `a)` from closing the `case` itself. Parens are recognised from the token
+// text instead (see `tokenCompound`), because `(printf …` and `… echo yes)` glue the
+// bracket to a word.
+const OPENER_KIND = new Map([
+  ['if', 'if'],
+  ['for', 'loop'],
+  ['while', 'loop'],
+  ['until', 'loop'],
+  ['select', 'loop'],
+  ['case', 'case'],
+  ['{', 'brace'],
+]);
+const CLOSER_KIND = new Map([
+  ['fi', 'if'],
+  ['done', 'loop'],
+  ['esac', 'case'],
+  ['}', 'brace'],
+]);
+
 const ANNOTATION = /#\s*pipefail-lint:\s*allow\b(?<rest>.*)$/u;
 
 /**
  * @typedef {object} Finding
- * @property {string} file      workflow file name
+ * @property {string} file      path of the workflow or composite action
  * @property {number} line      1-based line in that file
+ * @property {'pipe'|'annotation'} kind what was found — an unguarded pipe, or a misuse
+ *   of the escape hatch itself. They read as different sentences, so the reporter must
+ *   not describe an annotation as a pipe into a consumer.
  * @property {'error'|'warning'} severity
- * @property {string} consumer  the early-exit consumer, e.g. `grep -q`
+ * @property {string|null} consumer the early-exit consumer, e.g. `grep -q`; `null` for
+ *   an annotation finding
  * @property {string} statement the offending statement, trimmed
  * @property {string} detail    why it is reported at this severity
  */
@@ -128,105 +191,6 @@ function splitUnquoted(text, separators) {
   return parts;
 }
 
-// Reserved words that open a compound command, and the words that close them. A `||`
-// written after the closer guards everything inside, so the separators nested in the
-// compound are not top-level separators at all — reading them as such is what lost the
-// guard in `{ producer | head -1; } || true`.
-const COMPOUND_OPENERS = new Set(['if', 'for', 'while', 'until', 'case', 'select', '{']);
-const COMPOUND_CLOSERS = new Set(['fi', 'done', 'esac', '}']);
-// Keywords that separate the parts of a compound command's body.
-const BODY_SEPARATORS = new Set(['then', 'do', 'else', 'elif']);
-const LIST_OPERATORS = new Set([';', ';;', '&&', '||', '&']);
-
-// Shell-syntax words and control operators of `text`, with the character range each
-// covers so a unit can be sliced back out of the original source. `{` is a word here,
-// which is exactly the rule bash uses: it opens a group only when it stands alone, so
-// `a{b,c}` and `${VAR}` are left as the single words they are.
-function shellTokens(text) {
-  const { mask } = syntaxMask(text);
-  // `2>&1` and `cmd &> log` carry an `&` that is part of a redirection, not the
-  // background operator — reading it as a list separator would cut a pipeline in two and
-  // lose the pipe entirely.
-  const isRedirectAmpersand = (index) =>
-    text[index] === '&' && ((index > 0 && '<>'.includes(text[index - 1])) || text[index + 1] === '>');
-  const isOperator = (index) =>
-    mask[index] === true && '&|;()'.includes(text[index]) && !isRedirectAmpersand(index);
-  const isBreak = (index) => (mask[index] === true && /\s/u.test(text[index])) || isOperator(index);
-  const tokens = [];
-
-  for (let index = 0; index < text.length; ) {
-    if (mask[index] === true && /\s/u.test(text[index])) {
-      index += 1;
-      continue;
-    }
-    if (isOperator(index)) {
-      const pair = text.slice(index, index + 2);
-      const value = ['&&', '||', ';;', '|&'].includes(pair) ? pair : text[index];
-      tokens.push({ operator: true, value, start: index, end: index + value.length });
-      index += value.length;
-      continue;
-    }
-    let end = index;
-    while (end < text.length && !isBreak(end)) end += 1;
-    tokens.push({ operator: false, value: text.slice(index, end), start: index, end });
-    index = end;
-  }
-  return tokens;
-}
-
-/**
- * `tokens` split into the units of one shell list, at the separators that sit outside
- * every compound command. Each unit carries the operator that follows it, which is what
- * decides whether it is guarded.
- *
- * @returns {{tokens: object[], terminator: string|null}[]}
- */
-function splitStatementUnits(tokens) {
-  const units = [];
-  let current = [];
-  let depth = 0;
-
-  const flush = (terminator) => {
-    units.push({ tokens: current, terminator });
-    current = [];
-  };
-
-  for (const token of tokens) {
-    const separates =
-      depth === 0 &&
-      ((token.operator && LIST_OPERATORS.has(token.value)) ||
-        (!token.operator && BODY_SEPARATORS.has(token.value)));
-    if (separates) {
-      flush(token.operator ? token.value : ';');
-      continue;
-    }
-    if (token.operator) {
-      if (token.value === '(') depth += 1;
-      if (token.value === ')') depth = Math.max(0, depth - 1);
-    } else if (COMPOUND_OPENERS.has(token.value)) {
-      depth += 1;
-    } else if (COMPOUND_CLOSERS.has(token.value)) {
-      depth = Math.max(0, depth - 1);
-    }
-    current.push(token);
-  }
-  flush(null);
-  return units;
-}
-
-// Whether the operator following each unit guards it. `||` guards the unit to its left,
-// and `&&` passes that guard further left because `a && b || true` is `(a && b) || true`
-// — so a failing `a` short-circuits into the same `|| true`.
-function guardFlags(units) {
-  const guarded = new Array(units.length).fill(false);
-  for (let index = units.length - 1; index >= 0; index -= 1) {
-    const terminator = units[index].terminator;
-    guarded[index] =
-      terminator === '||' || (terminator === '&&' && (guarded[index + 1] ?? false));
-  }
-  return guarded;
-}
-
 // One physical body line read in the quoting state its predecessors left behind: its
 // code (everything before a shell-syntax `#` that starts a word — `${VAR#prefix}` is
 // untouched, since its `#` follows `{` rather than whitespace), the heredoc delimiter it
@@ -274,29 +238,13 @@ function unquote(token) {
   return token.replaceAll(/['"]/gu, '');
 }
 
-// Split on whitespace the shell would act on, so a quoted argument stays one word.
-// Tearing `sed 's/ q / /'` apart on raw whitespace left a bare `q` that looked exactly
-// like the `q` command.
-function shellWords(segment) {
-  const { mask } = syntaxMask(segment);
-  const words = [];
-  let current = '';
-  for (let index = 0; index < segment.length; index += 1) {
-    if (mask[index] === true && /\s/u.test(segment[index])) {
-      if (current !== '') words.push(current);
-      current = '';
-      continue;
-    }
-    current += segment[index];
-  }
-  if (current !== '') words.push(current);
-  return words;
-}
-
 // Words of one pipe segment, with a leading `env VAR=x`-style prefix, `sudo`, `command`,
 // and `time` skipped so the real command name is what gets classified.
 function commandWords(segment) {
-  const words = shellWords(segment.trim());
+  const words = segment
+    .trim()
+    .split(/\s+/u)
+    .filter((word) => word !== '');
   while (words.length > 0) {
     const first = words[0];
     if (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(first) || ['sudo', 'command', 'env', 'time', 'exec'].includes(first)) {
@@ -308,6 +256,9 @@ function commandWords(segment) {
   return words;
 }
 
+// The option that makes this grep stop reading, or null. Naming the option rather than
+// the class is the point: for a lint whose whole output is "the site is here, and this is
+// why", reporting `-q` on a `grep -l` would be a defect of its own.
 function grepStopsEarly(words) {
   for (let index = 1; index < words.length; index += 1) {
     const word = words[index];
@@ -315,44 +266,305 @@ function grepStopsEarly(words) {
     if (word === '--') break;
     if (word.startsWith('--')) {
       const name = word.split('=')[0];
-      if (name === '--quiet' || name === '--silent' || name === '--max-count') return true;
+      if (GREP_STOPS_LONG.has(name)) return name;
       continue;
     }
     if (!word.startsWith('-') || word.length < 2) continue;
     for (const flag of word.slice(1)) {
-      // grep gives `q` and `m` no other meaning, so a cluster carrying either stops
-      // reading its input early.
-      if (flag === 'q' || flag === 'm') return true;
+      const option = GREP_STOPS_SHORT.get(flag);
+      if (option !== undefined) return option;
     }
+  }
+  return null;
+}
+
+// `s/…/…/flags`, `y/…/…/` and `/regex/` addresses are pattern text, not commands. Probing
+// the raw script reads the `q` in `sed 's/ q / /'` as the quit command and reports a
+// pipeline that never exits early — a false positive on a required gate, which is the
+// one failure mode a lint cannot afford.
+function stripSedPatterns(script) {
+  return script
+    .replaceAll(
+      /[sy](?<delim>[^\\\s])(?:\\.|(?!\k<delim>)[^\\])*\k<delim>(?:\\.|(?!\k<delim>)[^\\])*\k<delim>[A-Za-z0-9]*/gu,
+      ' ',
+    )
+    .replaceAll(/\/(?:\\.|[^/\\])*\//gu, ' ');
+}
+
+// A `q` used as a sed command — `sed -n '1p;q'`, `sed 2q`, `sed -n '/foo/q'` — rather
+// than a `q` inside a pattern or replacement. The script is rejoined before it is probed:
+// `sed 's/ q / /'` is three whitespace-separated words, and probing the middle one alone
+// reads a bare `q` as the quit command.
+function sedStopsEarly(words) {
+  const script = [];
+  for (let index = 1; index < words.length; index += 1) {
+    const word = words[index];
+    if (SED_ARG_TAKING.has(word)) {
+      index += 1; // `-f prog.sed` names a file, not a script this lint can read
+      continue;
+    }
+    if (word.startsWith('-')) continue;
+    script.push(word);
+  }
+  return /(?:^|[;{}\s])[0-9,$~+]*q(?:[;}\s]|$)/u.test(stripSedPatterns(unquote(script.join(' '))));
+}
+
+// `/…/` regex literals and `"…"` strings inside an awk program are text, not code, so
+// they are stripped before the probe below: `awk '/exit code/{print}'` and
+// `awk '{print "exit"}'` read their whole input, and reporting either would be a false
+// positive on a required gate. The same reasoning as `stripSedPatterns`.
+function stripAwkLiterals(program) {
+  return program
+    .replaceAll(/\/(?:\\.|[^/\\\n])*\//gu, ' ')
+    .replaceAll(/"(?:\\.|[^"\\])*"/gu, ' ');
+}
+
+// `awk` drains its input unless its program can `exit`. The program is read as the rest
+// of the segment rather than as one word, because `awk 'NR==1 {print; exit}'` splits into
+// three whitespace-separated words and the `exit` is in the last of them. A program the
+// lint cannot see — `awk -f prog.awk` — is left alone rather than guessed at.
+function awkStopsEarly(words) {
+  for (let index = 1; index < words.length; index += 1) {
+    const word = words[index];
+    if (AWK_ARG_TAKING.has(word)) {
+      index += 1;
+      continue;
+    }
+    if (word.startsWith('-') || word === '--') continue;
+    return /\bexit\b/u.test(stripAwkLiterals(words.slice(index).join(' ')));
   }
   return false;
 }
 
-// A `q` used as a sed command — `sed -n '1p;q'`, `sed 2q` — rather than a `q` inside a
-// pattern or replacement. sed separates its commands with `;`, a newline, or a `{`
-// block, never with a space, so only those may introduce the `q`; an address is allowed
-// to sit apart from it (`sed '2 q'`).
-function sedStopsEarly(words) {
-  for (let index = 1; index < words.length; index += 1) {
-    const word = words[index];
-    if (word.startsWith('-') && word !== '--') continue;
-    if (/(?:^|[;{}\n])\s*(?:[0-9,$~+]+\s*)?q(?:[;}\s]|$)/u.test(unquote(word))) return true;
-  }
-  return false;
+// A group or subshell wrapping the consumer — `producer | { head -1; }`,
+// `producer | ( head -1 )` — is the same early exit as the bare consumer, so look past
+// the wrapper instead of classifying `{` as the command name.
+function unwrapGroup(segment) {
+  const match = /^\s*(?<open>[({])(?<body>.*)(?<close>[)}])\s*$/su.exec(segment);
+  if (match === null) return null;
+  if ((match.groups.open === '{') !== (match.groups.close === '}')) return null;
+  return match.groups.body.replace(/;\s*$/u, '');
 }
 
 // The early-exit consumer this segment is, or null. Only ever asked about segments that
 // have a producer piping into them.
 export function earlyExitConsumer(segment) {
+  const grouped = unwrapGroup(segment);
+  if (grouped !== null) {
+    // A guard inside the group guards the group.
+    if (splitUnquoted(grouped, ['||']).length > 1) return null;
+    for (const part of splitUnquoted(grouped, [';', '&&'])) {
+      const consumer = earlyExitConsumer(part);
+      if (consumer !== null) return consumer;
+    }
+    return null;
+  }
+
   const words = commandWords(segment);
   if (words.length === 0) return null;
   const command = unquote(words[0]).split('/').at(-1);
 
   if (command === 'head') return 'head';
   if (['grep', 'egrep', 'fgrep', 'zgrep', 'rg'].includes(command)) {
-    return grepStopsEarly(words) ? `${command} -q/-m` : null;
+    const option = grepStopsEarly(words);
+    return option === null ? null : `${command} ${option}`;
   }
   if (command === 'sed') return sedStopsEarly(words) ? 'sed …q' : null;
+  if (AWK_COMMANDS.has(command)) return awkStopsEarly(words) ? 'awk …exit' : null;
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Compound statements
+// ---------------------------------------------------------------------------
+
+// One logical line as shell words and the `;` / `&&` / `||` operators between them.
+// A single `|` stays inside its word: the pipeline split is `splitUnquoted`'s job, and
+// only the operators that separate *statements* matter here.
+function shellTokens(text) {
+  const { mask } = syntaxMask(text);
+  const tokens = [];
+  let index = 0;
+  while (index < text.length) {
+    if (mask[index] === true && /\s/u.test(text[index])) {
+      index += 1;
+      continue;
+    }
+    if (mask[index] === true) {
+      const pair = text.slice(index, index + 2);
+      if ((pair === '&&' || pair === '||') && mask[index + 1] === true) {
+        tokens.push({ type: 'operator', value: pair, start: index, end: index + 2 });
+        index += 2;
+        continue;
+      }
+      if (text[index] === ';') {
+        tokens.push({ type: 'operator', value: ';', start: index, end: index + 1 });
+        index += 1;
+        continue;
+      }
+    }
+    const start = index;
+    while (index < text.length) {
+      if (mask[index] !== true) {
+        index += 1;
+        continue;
+      }
+      const char = text[index];
+      if (/\s/u.test(char) || char === ';') break;
+      if ((char === '&' || char === '|') && text[index + 1] === char && mask[index + 1] === true) break;
+      index += 1;
+    }
+    tokens.push({
+      type: 'word',
+      value: text.slice(start, index),
+      start,
+      end: index,
+      // A shell-syntax `(`/`)` glued to the word. `$( … )` is transparent to the mask, so
+      // its brackets are not shell syntax here and a command substitution neither opens
+      // nor closes a compound.
+      opensParen: mask[start] === true && text[start] === '(',
+      closesParen: mask[index - 1] === true && text[index - 1] === ')',
+    });
+  }
+  return tokens;
+}
+
+/**
+ * Split one logical line into statements at nesting depth 0, on `;`, `&&` and `||`
+ * together, each carrying the operator that follows it (`null` for the last).
+ *
+ * Splitting on `;`/`&&` first and only then on `||` — which is what this replaces — puts
+ * the guard of `{ producer | head -1; } || true` in a different fragment from the
+ * consumer and reports a genuinely guarded pipeline as an error. Splitting on `||` first
+ * is not the fix either: `producer | head -1; other || true` would then read as guarded.
+ * Only nesting tells the two apart, so an operator inside a *matched* opener/closer pair
+ * is not a split point. An opener with no closer on this line — `if …; then` written
+ * across body lines — matches nothing and leaves its `;` splitting exactly as before,
+ * which is what keeps a multi-line compound reporting on the line that owns the site.
+ */
+function tokenCompound(token) {
+  if (token.type !== 'word') return null;
+  // `(cmd)` written with no spaces is self-contained: it can hold no top-level separator,
+  // so counting it would only unbalance the depth.
+  if (token.opensParen && token.closesParen) return null;
+  if (token.opensParen) return { role: 'open', kind: 'paren' };
+  if (token.closesParen) return { role: 'close', kind: 'paren' };
+  const opener = OPENER_KIND.get(token.value);
+  if (opener !== undefined) return { role: 'open', kind: opener };
+  const closer = CLOSER_KIND.get(token.value);
+  return closer === undefined ? null : { role: 'close', kind: closer };
+}
+
+function matchCompounds(tokens) {
+  const enclosed = new Array(tokens.length).fill(false);
+  /** @type {{position: number, kind: string}[]} */
+  const open = [];
+  /** @type {{kind: string, guarded: boolean}[]} */
+  const unmatchedClosers = [];
+  for (const [position, token] of tokens.entries()) {
+    const compound = tokenCompound(token);
+    if (compound === null) continue;
+    if (compound.role === 'open') {
+      open.push({ position, kind: compound.kind });
+      continue;
+    }
+    const depth = open.findLastIndex((entry) => entry.kind === compound.kind);
+    if (depth === -1) {
+      // A closer with no opener on this line either closes a compound that began on an
+      // earlier body line, or is a `case` arm's `)`. Whether a `||` follows it is what
+      // says the compound it closes is guarded; the kind is what says which one.
+      const next = tokens[position + 1];
+      unmatchedClosers.push({
+        kind: compound.kind,
+        guarded: next !== undefined && next.type === 'operator' && next.value === '||',
+      });
+      continue;
+    }
+    for (let inner = open[depth].position + 1; inner < position; inner += 1) enclosed[inner] = true;
+    open.length = depth;
+  }
+  return { enclosed, unmatchedClosers, unmatchedOpeners: open.map((entry) => entry.kind) };
+}
+
+/**
+ * How one logical line changes the compound nesting the *block* is in, for the compounds
+ * it does not open and close by itself. `openerFirst` says the line's leading token is
+ * the unmatched opener — `if producer | head -1; then` — so a guard on the eventual
+ * closer covers findings on this line too, whereas in `producer | head -1; if x; then`
+ * the pipeline stands outside the compound the line opens.
+ */
+function lineNesting(text) {
+  const tokens = shellTokens(text);
+  const { unmatchedClosers, unmatchedOpeners } = matchCompounds(tokens);
+  const first = tokens[0];
+  return {
+    unmatchedClosers,
+    unmatchedOpeners,
+    openerFirst: first !== undefined && tokenCompound(first)?.role === 'open',
+  };
+}
+
+function splitTopLevel(text) {
+  const tokens = shellTokens(text);
+  const { enclosed } = matchCompounds(tokens);
+
+  const units = [];
+  let start = 0;
+  for (const [position, token] of tokens.entries()) {
+    if (token.type !== 'operator' || enclosed[position]) continue;
+    units.push({ text: text.slice(start, token.start), separator: token.value });
+    start = token.end;
+  }
+  units.push({ text: text.slice(start), separator: null });
+  return units;
+}
+
+// The body of a compound statement, or null. Unwrapping lets the guard that covers the
+// compound cover its contents, and keeps the finding naming the statement inside rather
+// than the whole construct.
+//
+// `carries` says whether a `set ±o pipefail` written in the body may reach the statements
+// after the closing token. Only the brace group runs in the current shell *and*
+// unconditionally; a subshell scopes the flag to a child shell, and an `if`, `case` or
+// loop body may never run at all — so a toggle in any of those is read and dropped rather
+// than allowed to move the boundary for code it does not govern.
+const COMPOUNDS = [
+  { open: /^\s*\{\s/u, close: /\s\}\s*$/u, carries: true },
+  { open: /^\s*\(/u, close: /\)\s*$/u, carries: false },
+  { open: /^\s*if\s/u, close: /\sfi\s*$/u, carries: false },
+  { open: /^\s*(?:for|while|until|select)\s/u, close: /\sdone\s*$/u, carries: false },
+  { open: /^\s*case\s/u, close: /\sesac\s*$/u, carries: false },
+];
+
+// The `f ()` / `function f` / `function f ()` prefix standing before a definition's group,
+// as its length in characters, or 0. Without skipping it `compoundBody` never sees the
+// opener, the definition falls through to the simple-pipeline branch, and splitting its
+// raw text on `|` cuts an inner `||` in half and loses the guard entirely — a false
+// positive on a required gate. The parentheses are what mark a definition unless
+// `function` is written, so `f { …; }` stays the command with a brace-group argument that
+// it is. A definition's body is never `carries`: defining a function does not run it.
+const DEFINITION_PREFIX = /^\s*(?:function\s+[^\s(){}]+\s*(?:\(\s*\)\s*)?|[^\s(){}]+\s*\(\s*\)\s*)/u;
+
+function definitionPrefixLength(statement) {
+  const match = DEFINITION_PREFIX.exec(statement);
+  if (match === null) return 0;
+  // The prefix only counts when a group actually opens behind it; otherwise the leading
+  // word is an ordinary command and the statement is not a definition at all.
+  const rest = statement.slice(match[0].length);
+  return /^[({]/u.test(rest) ? match[0].length : 0;
+}
+
+function compoundBody(statement) {
+  const skip = definitionPrefixLength(statement);
+  const text = statement.slice(skip);
+  for (const { open, close, carries } of COMPOUNDS) {
+    const opener = open.exec(text);
+    if (opener === null) continue;
+    const closer = close.exec(text);
+    const bodyStart = opener.index + opener[0].length;
+    if (closer === null || closer.index < bodyStart) continue;
+    return { body: text.slice(bodyStart, closer.index), carries: skip === 0 && carries };
+  }
   return null;
 }
 
@@ -364,13 +576,14 @@ function indentOf(line) {
   return line.length - line.trimStart().length;
 }
 
-// A structural line without its YAML comment. The structure readers anchor on the end of
-// the line (`^jobs:\s*$`), so a comment there hid the key from them entirely — and with
-// `jobs:` unseen, every job-level `defaults:` went unresolved and a real error was
-// reported as an advisory. `scanLine` already drops a `#` that starts a word without
-// touching one inside quotes, which is exactly the YAML rule too.
-function withoutComment(line) {
-  return scanLine(line, { quote: null, frames: [] }).code;
+// One YAML scalar value. A `#` preceded by whitespace opens a comment, so `shell: bash #
+// see below` is the value `bash` — reading the comment as part of the shell string makes
+// `shellSetsPipefail` miss the `bash` and downgrades a real pipefail site to a warning,
+// which is a fail-open on the gate.
+function scalarValue(text) {
+  const quoted = /^(?<quote>['"])(?<value>.*?)\k<quote>\s*(?:#.*)?$/u.exec(text.trim());
+  if (quoted !== null) return quoted.groups.value;
+  return text.replace(/\s+#.*$/u, '').trim();
 }
 
 // A block scalar header — `key: |`, `- run: >-`, `script: |2` — with any chomping or
@@ -418,31 +631,45 @@ function blockScalarBodies(lines) {
   return inside;
 }
 
+// `shell:` inside a flow mapping — `defaults: { run: { shell: bash } }`, or a block
+// `defaults:` whose `run:` is written flow-style. Both are legal YAML that the block-form
+// reader alone misses, and missing one silently downgrades a real site to a warning.
+//
+// FLOW_SHELL is only ever applied to text already known to be *inside* the braces.
+// Applying it to a whole line reads `# shell: sh was the old setting` as a declaration
+// and lets a comment beat the real key below it — a fail-open when the comment names a
+// weaker shell, and a gate-failing false positive when it names a stronger one.
+const FLOW_SHELL = /\bshell:\s*(?<value>[^,}]+?)\s*(?:[,}]|$)/u;
+const FLOW_MAPPING = /^\s*[A-Za-z0-9_.-]+:\s*(?<flow>\{.*\})\s*(?:#.*)?$/u;
+
 // `defaults: { run: { shell: … } }` at workflow scope (column 0) and job scope
 // (column 4, under `jobs:` > `<job>:`). Returned as a list of scopes ordered by the
 // line they open on, so a run block resolves against the last one that encloses it.
-function collectDefaultShells(lines, inBlockScalar) {
+function collectDefaultShells(lines, inside) {
   const scopes = [];
   for (let index = 0; index < lines.length; index += 1) {
-    if (inBlockScalar[index]) continue;
-    const match = /^(?<indent>\s*)defaults:(?<rest>.*)$/u.exec(withoutComment(lines[index]));
+    if (inside[index]) continue;
+    const match = /^(?<indent>\s*)defaults:\s*(?<flow>\{.*\})?\s*(?:#.*)?$/u.exec(lines[index]);
     if (match === null) continue;
     const indent = match.groups.indent.length;
-    const rest = match.groups.rest.trim();
     let shell = null;
-    if (rest !== '') {
-      // Flow style: `defaults: { run: { shell: bash } }` is the same mapping written on
-      // one line, and GitHub reads it identically.
-      const flow = /\brun:\s*\{[^}]*\bshell:\s*(?<value>[^,}]+)/u.exec(rest);
-      if (flow !== null) shell = unquote(flow.groups.value.trim());
+    if (match.groups.flow !== undefined) {
+      const flow = FLOW_SHELL.exec(match.groups.flow);
+      if (flow !== null) shell = scalarValue(flow.groups.value);
     } else {
       for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-        const line = withoutComment(lines[cursor]);
-        if (line.trim() === '' || inBlockScalar[cursor]) continue;
+        const line = lines[cursor];
+        if (line.trim() === '' || line.trimStart().startsWith('#') || inside[cursor]) continue;
         if (indentOf(line) <= indent) break;
         const shellMatch = /^\s*shell:\s*(?<value>.+?)\s*$/u.exec(line);
         if (shellMatch !== null) {
-          shell = unquote(shellMatch.groups.value);
+          shell = scalarValue(shellMatch.groups.value);
+          break;
+        }
+        const mapping = FLOW_MAPPING.exec(line);
+        const flow = mapping === null ? null : FLOW_SHELL.exec(mapping.groups.flow);
+        if (flow !== null) {
+          shell = scalarValue(flow.groups.value);
           break;
         }
       }
@@ -458,9 +685,11 @@ function collectJobRanges(lines) {
   const starts = [];
   let inJobs = false;
   for (let index = 0; index < lines.length; index += 1) {
-    const line = withoutComment(lines[index]);
-    if (line.trim() === '') continue;
-    if (/^jobs:\s*$/u.test(line)) {
+    const line = lines[index];
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    // A trailing comment is legal on any of these keys, and missing `jobs: # all lanes`
+    // costs every job-level `defaults:` in the file its scope.
+    if (/^jobs:\s*(?:#.*)?$/u.test(line)) {
       inJobs = true;
       continue;
     }
@@ -468,7 +697,7 @@ function collectJobRanges(lines) {
       inJobs = false;
       continue;
     }
-    if (inJobs && /^ {2}[A-Za-z0-9_-]+:\s*$/u.test(line)) starts.push(index);
+    if (inJobs && /^ {2}[A-Za-z0-9_-]+:\s*(?:#.*)?$/u.test(line)) starts.push(index);
   }
   return starts.map((start, position) => ({ start, end: starts[position + 1] ?? lines.length }));
 }
@@ -487,8 +716,10 @@ function inheritedShell(scopes, jobs, line) {
 
 // A `shell:` key, whether it opens its step (`- shell: bash`) or follows one.
 function readShellKey(line) {
-  const match = /^\s*(?:-\s+)?shell:\s*(?<value>.+?)\s*$/u.exec(withoutComment(line));
-  return match === null ? null : unquote(match.groups.value);
+  const match = /^\s*(?:-\s+)?shell:\s*(?<value>.+?)\s*$/u.exec(line);
+  if (match === null) return null;
+  const value = scalarValue(match.groups.value);
+  return value === '' ? null : value;
 }
 
 // The `shell:` declared on the step that owns the `run:` at `runLine`. Step keys share
@@ -499,11 +730,6 @@ function readShellKey(line) {
 // lines above the `run:` key at all, and walking backward would cross the *previous*
 // step's `run:` body — whose lines all sit at `indent > keyIndent` and are skipped —
 // and return that step's `shell:`. So the backward arm is skipped entirely there.
-//
-// The dash line is recognised by where it puts its first key rather than by a fixed
-// two-character `- ` prefix: `-   shell: bash` is legal YAML that opens its step four
-// columns out, and reading only the `- ` shape lost its `shell:` and downgraded the
-// finding.
 function stepShell(lines, runLine, keyIndent, opensStep) {
   for (const direction of opensStep ? [1] : [-1, 1]) {
     for (let index = runLine + direction; index >= 0 && index < lines.length; index += direction) {
@@ -513,9 +739,11 @@ function stepShell(lines, runLine, keyIndent, opensStep) {
       if (indent > keyIndent) continue;
       if (indent < keyIndent - 1) {
         // The step opens here; its inline first key may be the `shell:` we want, and
-        // nothing beyond it belongs to this step.
-        const dash = /^\s*-\s+/u.exec(line);
-        if (direction === -1 && dash !== null && dash[0].length === keyIndent) {
+        // nothing beyond it belongs to this step. The dash may be followed by any run of
+        // spaces — `-   shell: bash` is legal YAML — so the opener is recognised by the
+        // column its first key lands in, not by a fixed two-character `- `.
+        const opener = /^(?<lead>\s*-\s+)\S/u.exec(line);
+        if (direction === -1 && opener !== null && opener.groups.lead.length === keyIndent) {
           const shell = readShellKey(line);
           if (shell !== null) return shell;
         }
@@ -537,13 +765,13 @@ function stepShell(lines, runLine, keyIndent, opensStep) {
  */
 export function collectRunBlocks(source) {
   const lines = source.split('\n');
-  const inBlockScalar = blockScalarBodies(lines);
-  const defaultScopes = collectDefaultShells(lines, inBlockScalar);
+  const inside = blockScalarBodies(lines);
+  const defaultScopes = collectDefaultShells(lines, inside);
   const jobRanges = collectJobRanges(lines);
   const blocks = [];
 
   for (let index = 0; index < lines.length; index += 1) {
-    if (inBlockScalar[index]) continue;
+    if (inside[index]) continue;
     const match = /^(?<indent>\s*)(?<dash>-\s+)?run:(?<rest>.*)$/u.exec(lines[index]);
     if (match === null) continue;
     const keyIndent = match.groups.indent.length + (match.groups.dash?.length ?? 0);
@@ -594,12 +822,16 @@ function shellSetsPipefail(shell) {
   return trimmed === 'bash' || /\bpipefail\b/u.test(trimmed);
 }
 
-// How GitHub invokes the shell, for the advisory that reports a laundered producer. A
-// bare shell name is run `<name> -e {0}`; a custom string is run as written.
-function invokedShell(shell) {
+// GitHub invokes `bash --noprofile --norc -eo pipefail {0}` for `shell: bash`, `sh -e {0}`
+// for `shell: sh`, and `bash -e {0}` when a step declares no shell. Only the shells that
+// do *not* set pipefail reach this, so name the one that actually laundered the producer
+// rather than always saying `bash` — and name it as GitHub writes it, `{0}` included, so
+// the advisory can be matched against the workflow syntax it is talking about.
+function invokedShellLabel(shell) {
   if (shell === null) return 'default shell (`bash -e`)';
   const trimmed = shell.trim();
-  return /\s/u.test(trimmed) ? `custom shell (\`${trimmed}\`)` : `\`${trimmed} -e {0}\``;
+  const name = trimmed.split(/\s+/u)[0].split('/').at(-1);
+  return trimmed === name ? `\`${name} -e {0}\`` : `\`${trimmed}\``;
 }
 
 function pipefailToggle(statement) {
@@ -667,84 +899,62 @@ function logicalLines(body) {
   return lines;
 }
 
-// How many leading tokens of a function definition stand before the group that holds its
-// body: `f () { … }`, `function f { … }`, `function f() ( … )`. Skipping them lets
-// `compoundBody` unwrap the group, so a guard written inside the body is read as the guard
-// it is instead of the definition falling through to the simple-pipeline branch, where
-// splitting the raw text on `|` cuts the `||` in half and loses it. The parentheses are
-// required unless `function` is: `f { …; }` is a command with a brace-group argument,
-// not a definition.
-function definitionPrefixLength(tokens) {
-  let index = 0;
-  const keyword = tokens[0] !== undefined && !tokens[0].operator && tokens[0].value === 'function';
-  if (keyword) index += 1;
-
-  const name = tokens[index];
-  if (name === undefined || name.operator) return 0;
-  if (COMPOUND_OPENERS.has(name.value) || COMPOUND_CLOSERS.has(name.value)) return 0;
-  index += 1;
-
-  const parens =
-    tokens[index]?.operator === true &&
-    tokens[index].value === '(' &&
-    tokens[index + 1]?.operator === true &&
-    tokens[index + 1].value === ')';
-  if (parens) return index + 2;
-  return keyword ? index : 0;
-}
-
-// The body of a compound command, or null when the unit is a simple pipeline. The
-// closer is dropped when the unit actually reaches it: a folded `if producer | head -1;
-// then` is a real statement the lint must still read, and it has no `fi` on its line.
-function compoundBody(tokens) {
-  const skip = definitionPrefixLength(tokens);
-  const first = tokens[skip];
-  if (first === undefined) return null;
-  const opens = first.operator ? first.value === '(' : COMPOUND_OPENERS.has(first.value);
-  if (!opens) return null;
-  const last = tokens.at(-1);
-  const closes =
-    last !== first && (last.operator ? last.value === ')' : COMPOUND_CLOSERS.has(last.value));
-  return tokens.slice(skip + 1, closes ? -1 : undefined);
+/**
+ * Which unit of a list the operator after it guards. `||` guards the unit to its left, and
+ * `&&` passes that guard further left, because `a && b || true` is `(a && b) || true` — a
+ * failing `a` short-circuits into the same `|| true`. Reading only the immediate operator
+ * reported `producer | head -1 && echo hit || true` as an error it could not honestly
+ * clear.
+ */
+function guardFlags(units) {
+  const guarded = new Array(units.length).fill(false);
+  for (let index = units.length - 1; index >= 0; index -= 1) {
+    const separator = units[index].separator;
+    guarded[index] = separator === '||' || (separator === '&&' && (guarded[index + 1] ?? false));
+  }
+  return guarded;
 }
 
 /**
- * One shell list walked unit by unit. A guarded unit is skipped whole — the guard covers
- * everything the compound contains — and an unguarded compound is unwrapped and walked
- * again, so a guard written inside it applies to the inside only.
+ * Walk one logical line's statements, honouring nesting: a `||` guard written after a
+ * compound guards everything inside it. A compound is unwrapped and re-walked so the
+ * finding still names the statement that owns the pipeline.
  *
- * A `set … pipefail` is honoured only at the top level of the walk. Nested toggles are
- * read but never carried forward: a `( … )` or function body scopes the flag to its own
- * invocation, and an `if false; then set +o pipefail; fi` branch never runs at all, so
- * letting either mutate the flag would downgrade a genuine `error` on the pipelines that
- * follow. Unwrapping compounds made those toggles visible for the first time; this keeps
- * the flag's reach where it was.
+ * `scope` says what a `set ±o pipefail` found here may do. At `'top'` it moves the
+ * boundary as it always has. Unwrapping compounds made nested toggles visible to the walk
+ * for the first time, and honouring those unconditionally would let a `set +o pipefail`
+ * written inside a branch that never runs downgrade every later pipeline from `error` to
+ * `warning` — the required lane going green over a genuinely exposed site. So a nested
+ * toggle may only ever tighten the verdict, and only from a compound that runs in the
+ * current shell (`'carry'`); everywhere else it is read and dropped (`'sealed'`).
  *
- * @param {string} text the logical line the tokens were read from
- * @param {object[]} tokens the tokens of this list
+ * @param {string} text
+ * @param {boolean} guarded
  * @param {{pipefail: boolean, report: (statement: string, consumer: string) => void}} context
- * @param {boolean} [topLevel] false once the walk has descended into a compound body
+ * @param {'top'|'carry'|'sealed'} [scope]
  */
-function walkStatement(text, tokens, context, topLevel = true) {
-  const units = splitStatementUnits(tokens);
-  const guarded = guardFlags(units);
+function scanStatements(text, guarded, context, scope = 'top') {
+  const units = splitTopLevel(text);
+  const guards = guardFlags(units);
 
   for (const [index, unit] of units.entries()) {
-    if (unit.tokens.length === 0) continue;
-    const statement = text.slice(unit.tokens[0].start, unit.tokens.at(-1).end);
+    const statement = unit.text;
+    if (statement.trim() === '') continue;
+    const unitGuarded = guarded || guards[index];
 
     const toggle = pipefailToggle(statement);
     if (toggle !== null) {
-      if (topLevel) context.pipefail = toggle;
+      if (scope === 'top' || (scope === 'carry' && toggle)) context.pipefail = toggle;
       continue;
     }
-    if (guarded[index]) continue;
 
-    const body = compoundBody(unit.tokens);
-    if (body !== null) {
-      walkStatement(text, body, context, false);
+    const compound = compoundBody(statement);
+    if (compound !== null) {
+      const nestedScope = scope !== 'sealed' && compound.carries ? 'carry' : 'sealed';
+      scanStatements(compound.body, unitGuarded, context, nestedScope);
       continue;
     }
+    if (unitGuarded) continue;
 
     for (const segment of splitUnquoted(statement, ['|&', '|']).slice(1)) {
       const consumer = earlyExitConsumer(segment);
@@ -754,19 +964,56 @@ function walkStatement(text, tokens, context, topLevel = true) {
 }
 
 /**
- * Findings for one workflow source.
+ * Findings for one workflow or composite-action source.
  *
- * @param {string} file workflow file name, used only in the finding
+ * @param {string} file path used in the finding and in the GitHub annotation
  * @param {string} source
+ * @param {{defaultShell?: string|null}} [options] `defaultShell` is the shell a step with
+ *   no resolvable `shell:` runs under. `null` (a workflow) is the runner default; a
+ *   composite action passes `bash`, because GitHub *requires* every composite `run:` step
+ *   to declare one — so an unresolved shell there is this reader failing, and the safe
+ *   default is pipefail in scope.
  * @returns {Finding[]}
  */
-export function analyzeWorkflow(file, source) {
+export function analyzeWorkflow(file, source, { defaultShell = null } = {}) {
   /** @type {Finding[]} */
   const findings = [];
 
   for (const block of collectRunBlocks(source)) {
-    if (!shellIsPipeline(block.shell)) continue;
-    let pipefail = shellSetsPipefail(block.shell);
+    const shell = block.shell ?? defaultShell;
+    if (!shellIsPipeline(shell)) continue;
+    const context = { pipefail: shellSetsPipefail(shell), report: () => {} };
+
+    // `splitTopLevel` resolves a compound written on one line. A compound written across
+    // body lines — the ordinary spelling — needs the same guard honoured across them, so
+    // findings are collected per block and those inside a compound whose closing line
+    // carries the `|| …` are retracted before they are reported. Without this,
+    // `{`/`producer | head -1`/`} || true` reddens a required gate over a pipeline that
+    // is guarded, which is the defect this sweep exists to remove.
+    /** @type {Finding[]} */
+    const blockFindings = [];
+    /** @type {{kind: string, findingIndex: number}[]} */
+    const openCompounds = [];
+    /** @type {[number, number][]} */
+    const guardedRanges = [];
+
+    // One logical line's effect on the compounds the *block* is inside. Run after the
+    // line is scanned, so `openerFirst` decides whether this line's own findings sit
+    // inside the compound it opens: they do for `if producer | head -1; then`, and they
+    // do not for `producer | head -1; if x; then`.
+    const trackNesting = (text, beforeEntry) => {
+      const nesting = lineNesting(text);
+      for (const closer of nesting.unmatchedClosers) {
+        const depth = openCompounds.findLastIndex((entry) => entry.kind === closer.kind);
+        if (depth === -1) continue; // a `case` arm's `)`, or a closer with no opener
+        const opened = openCompounds[depth];
+        openCompounds.length = depth;
+        if (closer.guarded) guardedRanges.push([opened.findingIndex, blockFindings.length]);
+      }
+      for (const kind of nesting.unmatchedOpeners) {
+        openCompounds.push({ kind, findingIndex: nesting.openerFirst ? beforeEntry : blockFindings.length });
+      }
+    };
 
     const logical = logicalLines(block.body);
 
@@ -774,76 +1021,163 @@ export function analyzeWorkflow(file, source) {
     // its own reasoning runs to.
     let carried;
     for (const entry of logical) {
-      if (entry.annotation !== undefined) carried = entry.annotation;
-      if (entry.text.trim() === '') continue;
+      const beforeEntry = blockFindings.length;
+      if (entry.annotation !== undefined) {
+        carried = entry.annotation;
+        // The hatch may never be used without a reason. Reporting this only from inside
+        // the finding loop left it unenforced in the one placement where the annotation
+        // is inert — written above a statement that has nothing to silence.
+        if (entry.annotation === '') {
+          blockFindings.push({
+            file,
+            line: entry.line,
+            kind: 'annotation',
+            severity: 'error',
+            consumer: null,
+            statement: entry.text.trim() === '' ? '# pipefail-lint: allow' : entry.text.trim(),
+            detail: 'pipefail-lint: allow annotation carries no reasoning',
+          });
+        }
+      }
+      if (entry.text.trim() === '') {
+        trackNesting(entry.text, beforeEntry);
+        continue;
+      }
       const allowReason = carried;
       carried = undefined;
 
-      const context = {
-        pipefail,
-        report(statement, consumer) {
-          if (allowReason !== undefined) {
-            if (allowReason === '') {
-              findings.push({
-                file,
-                line: entry.line,
-                severity: 'error',
-                consumer,
-                statement,
-                detail: 'pipefail-lint: allow annotation carries no reasoning',
-              });
-            }
-            return;
-          }
-          findings.push({
-            file,
-            line: entry.line,
-            severity: context.pipefail ? 'error' : 'warning',
-            consumer,
-            statement,
-            detail: context.pipefail
-              ? 'pipefail is in scope: the producer takes SIGPIPE once its output outruns the pipe buffer, and the pipeline reports 141'
-              : `${invokedShell(block.shell)}: the pipeline reports only the consumer, so a failed producer is laundered`,
-          });
-        },
+      context.report = (statement, consumer) => {
+        if (allowReason !== undefined) return;
+        blockFindings.push({
+          file,
+          line: entry.line,
+          kind: 'pipe',
+          severity: context.pipefail ? 'error' : 'warning',
+          consumer,
+          statement,
+          detail: context.pipefail
+            ? 'pipefail is in scope: the producer takes SIGPIPE once its output outruns the pipe buffer, and the pipeline reports 141'
+            : `${invokedShellLabel(shell)}: the pipeline reports only the consumer, so a failed producer is laundered`,
+        });
       };
-      walkStatement(entry.text, shellTokens(entry.text), context);
-      pipefail = context.pipefail;
+      scanStatements(entry.text, false, context);
+      trackNesting(entry.text, beforeEntry);
+    }
+
+    for (const [index, finding] of blockFindings.entries()) {
+      // A reasonless annotation is a violation of the hatch itself, not a pipeline a
+      // guard can excuse, so it is never retracted.
+      const guarded =
+        finding.kind === 'pipe' && guardedRanges.some(([start, end]) => index >= start && index < end);
+      if (!guarded) findings.push(finding);
     }
   }
   return findings;
 }
 
+/** Whether a directory entry is a workflow source. GitHub reads both spellings. */
+export function isWorkflowSource(name) {
+  return name.endsWith('.yml') || name.endsWith('.yaml');
+}
+
+/**
+ * The path a finding names: repository-relative inside the repository, so the
+ * `::error file=…` annotation attaches to the file in the GitHub UI; the bare name for a
+ * corpus outside it. Exported because the live corpus reports nothing, so this is the
+ * only place the in-repository arm can be pinned.
+ */
+export function workflowDisplayPath(directory, name) {
+  const path = relative(REPOSITORY_ROOT, join(directory, name));
+  return path.startsWith('..') || isAbsolute(path) ? name : path;
+}
+
 /** Findings for every workflow in a directory, ordered by file then line. */
 export function lintWorkflows(workflowsDir = WORKFLOWS_DIR) {
   return readdirSync(workflowsDir)
-    // GitHub reads both spellings, so linting only `.yml` would leave a hole the day
-    // someone adds a `.yaml`.
-    .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
+    .filter((name) => isWorkflowSource(name))
     .sort()
-    .flatMap((name) => analyzeWorkflow(name, readFileSync(join(workflowsDir, name), 'utf8')));
+    .flatMap((name) =>
+      analyzeWorkflow(workflowDisplayPath(workflowsDir, name), readFileSync(join(workflowsDir, name), 'utf8')),
+    );
+}
+
+/** Every `action.yml` / `action.yaml` in the tree, as repository-relative paths. */
+export function findActionFiles(root = REPOSITORY_ROOT) {
+  /** @type {string[]} */
+  const found = [];
+  const walk = (directory) => {
+    let entries;
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return; // an unreadable directory is not a place a composite action of ours lives
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!PRUNED_DIRECTORIES.has(entry.name)) walk(join(directory, entry.name));
+        continue;
+      }
+      if (entry.isFile() && (entry.name === 'action.yml' || entry.name === 'action.yaml')) {
+        found.push(relative(root, join(directory, entry.name)));
+      }
+    }
+  };
+  walk(root);
+  return found.sort();
+}
+
+function isCompositeAction(source) {
+  return /^\s*using:\s*(?<quote>['"]?)composite\k<quote>\s*(?:#.*)?$/mu.test(source);
+}
+
+/**
+ * Findings for every composite action in the tree.
+ *
+ * A composite action is the highest-density pipefail surface there is: GitHub requires
+ * each of its `run:` steps to declare `shell:`, so every pipeline in one is in scope by
+ * construction. Reading only `.github/workflows` left that surface unscanned, with no
+ * signal on the day the first composite action lands.
+ */
+export function lintCompositeActions(root = REPOSITORY_ROOT) {
+  return findActionFiles(root).flatMap((path) => {
+    const source = readFileSync(join(root, path), 'utf8');
+    return isCompositeAction(source) ? analyzeWorkflow(path, source, { defaultShell: 'bash' }) : [];
+  });
+}
+
+/** Findings for the whole repository: workflows and composite actions. */
+export function lintRepository(root = REPOSITORY_ROOT) {
+  return [...lintWorkflows(join(root, '.github', 'workflows')), ...lintCompositeActions(root)];
 }
 
 function main() {
-  const findings = lintWorkflows();
+  const findings = lintRepository();
   const errors = findings.filter((finding) => finding.severity === 'error');
 
   for (const finding of findings) {
-    const where = `.github/workflows/${finding.file}:${finding.line}`;
+    const where = `${finding.file}:${finding.line}`;
     const level = finding.severity === 'error' ? '::error' : '::warning';
-    process.stdout.write(
-      `${level} file=.github/workflows/${finding.file},line=${finding.line}::` +
-        `unguarded pipe into ${finding.consumer} — ${finding.detail}\n` +
-        `  ${where}: ${finding.statement}\n`,
-    );
+    const summary =
+      finding.kind === 'annotation' ? finding.detail : `unguarded pipe into ${finding.consumer} — ${finding.detail}`;
+    process.stdout.write(`${level} file=${finding.file},line=${finding.line}::${summary}\n  ${where}: ${finding.statement}\n`);
   }
 
   if (errors.length > 0) {
-    process.stdout.write(
-      `\n${errors.length} unguarded early-exit pipe consumer(s) under pipefail.\n` +
-        'Guard the pipeline (`… || true`), read the whole input (`grep -E … > /dev/null`),\n' +
-        'or annotate the site with `# pipefail-lint: allow -- <why this producer cannot fill the pipe>`.\n',
-    );
+    const pipes = errors.filter((finding) => finding.kind === 'pipe').length;
+    const annotations = errors.length - pipes;
+    if (pipes > 0) {
+      process.stdout.write(
+        `\n${pipes} unguarded early-exit pipe consumer(s) under pipefail.\n` +
+          'Guard the pipeline (`… || true`), read the whole input (`grep -E … > /dev/null`),\n' +
+          'or annotate the site with `# pipefail-lint: allow -- <why this producer cannot fill the pipe>`.\n',
+      );
+    }
+    if (annotations > 0) {
+      process.stdout.write(
+        `\n${annotations} allow annotation(s) with no reasoning.\n` +
+          'Write `# pipefail-lint: allow -- <why this producer cannot fill the pipe>`, or remove the annotation.\n',
+      );
+    }
     process.exitCode = 1;
     return;
   }
