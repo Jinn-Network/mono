@@ -322,15 +322,19 @@ export function resolveOrigin(source: string, filePath: string, name: string): s
     String.raw`(?:export\s+)?(?:declare\s+)?(?:async\s+)?(?:function|const|let|var|class)\s+${name}\b`,
     "u",
   );
-  const specifier = importedFrom(source, name);
-  if (specifier === undefined) return declared.test(source) ? relative(productRoot, filePath) : undefined;
+  // Read through blanked comments, for the reason the scans do: a commented-out import naming the
+  // emitter would otherwise resolve the origin to a module this file never reaches, and a wrong
+  // origin drops the file's real calls -- the same silent-hole shape the barrel case had.
+  const code = blankComments(source);
+  const specifier = importedFrom(code, name);
+  if (specifier === undefined) return declared.test(code) ? relative(productRoot, filePath) : undefined;
   let module = moduleForSpecifier(specifier, filePath);
   const seen = new Set<string>();
   while (module !== undefined && !seen.has(module)) {
     seen.add(module);
     const absolute = join(productRoot, module);
     if (!existsSync(absolute)) return undefined;
-    const hopSource = readFileSync(absolute, "utf8");
+    const hopSource = blankComments(readFileSync(absolute, "utf8"));
     if (declared.test(hopSource)) return module;
     const hop = importedFrom(hopSource, name);
     module = hop === undefined ? undefined : moduleForSpecifier(hop, absolute);
@@ -536,6 +540,12 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     // A package specifier resolves through the entry's re-export to the module that declares it.
     const [statusCaller, statusPath] = read("core/src/operations/run-status.ts");
     expect(resolveOrigin(statusCaller, statusPath, "runBindingClass")).toBe("verify/src/binding/report-face.ts");
+
+    // A commented-out import is not where the name comes from: resolving to it would drop the
+    // file's real calls, which is the barrel hole in a different shape.
+    const commented = '// import { runBindingSentence } from "./bundle/schema.js";\n';
+    expect(resolveOrigin(commented, join(productRoot, "core/src/plant.ts"), "runBindingSentence"))
+      .toBeUndefined();
 
     // A barrel is not a declaration: `export * from` is not followed, so the chain ends unresolved
     // and the occurrence is counted rather than silently dropped against the barrel's own path.
