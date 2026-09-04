@@ -429,6 +429,20 @@ function shellTokens(text) {
   return tokens;
 }
 
+// Words after which the shell begins a new command, so a reserved word standing there
+// is a keyword rather than an argument. `|` and `&` stay inside a word token (only `&&`,
+// `||` and `;` are operators), and `(` alone opens a subshell whose first word leads a
+// statement — `(printf` does not, its next word being printf's argument.
+const COMMAND_POSITION_WORDS = new Set(['(', '|', '&', '!', 'then', 'else', 'elif', 'do', '{', 'time']);
+
+const BRACE_TOKENS = new Set(['{', '}']);
+
+function leadsStatement(previous) {
+  if (previous === undefined) return true;
+  if (previous.type === 'operator') return true;
+  return COMMAND_POSITION_WORDS.has(previous.value);
+}
+
 /**
  * Split one logical line into statements at nesting depth 0, on `;`, `&&` and `||`
  * together, each carrying the operator that follows it (`null` for the last).
@@ -442,21 +456,6 @@ function shellTokens(text) {
  * across body lines — matches nothing and leaves its `;` splitting exactly as before,
  * which is what keeps a multi-line compound reporting on the line that owns the site.
  */
-// Words after which the shell begins a new command, so a reserved word standing there
-// is a keyword rather than an argument. `|` and `&` stay inside a word token (only `&&`,
-// `||` and `;` are operators), and `(` alone opens a subshell whose first word leads a
-// statement — `(printf` does not, its next word being printf's argument.
-const COMMAND_POSITION_WORDS = new Set(['|', '&', '!', 'then', 'else', 'elif', 'do', '{', 'time']);
-
-const BRACE_TOKENS = new Set(['{', '}']);
-
-function leadsStatement(previous) {
-  if (previous === undefined) return true;
-  if (previous.type === 'operator') return true;
-  if (previous.value === '(') return true;
-  return COMMAND_POSITION_WORDS.has(previous.value);
-}
-
 function tokenCompound(token, previous) {
   if (token.type !== 'word') return null;
   // `(cmd)` written with no spaces is self-contained: it can hold no top-level separator,
