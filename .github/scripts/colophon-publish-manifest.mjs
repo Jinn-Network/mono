@@ -28,9 +28,10 @@ export const CLAIM_PIN_SOURCES = [
 ];
 
 /**
- * Every repository markdown file that tells a reader which `@colophon-claims/verify` version to
- * run. These are corrigible after publication, so they never gate a publish -- but a version npm
- * has never served is still an instruction to fail, and CI refuses one (issue #3647).
+ * Every markdown file in the product tree that tells a reader which `@colophon-claims/verify`
+ * version to run. These are corrigible after publication, so they never gate a publish -- but a
+ * version npm has never served is still an instruction to fail, and CI refuses one (issue #3647).
+ * Dated plans and decision records elsewhere in the repository are historical and out of scope.
  */
 export const READER_INSTRUCTION_DOCS = [
   'packages/benchmark-product/EXTERNAL-VERIFICATION.md',
@@ -321,8 +322,12 @@ export async function fetchPublishedVerifyVersions(
   return versions;
 }
 
-const CLAIM_PIN_PATTERN = /@colophon-claims\/verify@([0-9]+\.[0-9]+(?:\.[0-9]+)?)/gu;
-const READER_PIN_PATTERN = /@colophon-claims\/verify@([0-9]+(?:\.[0-9]+){0,2})/gu;
+/**
+ * Every specifier shape npx resolves: the exact `X.Y.Z`, and the compatible `X.Y` and `X` lines.
+ * The bare major is in the pattern because that is the shape that 404s against a 0.x package, and
+ * a scan that cannot see it cannot refuse it (issue #3647).
+ */
+const VERIFY_PIN_PATTERN = /@colophon-claims\/verify@([0-9]+(?:\.[0-9]+){0,2})/gu;
 
 /**
  * The contents of every string literal in a JavaScript or TypeScript source, with comments
@@ -372,7 +377,7 @@ function* stringLiterals(text) {
 export function collectPinsFromSource(text) {
   const pins = new Set();
   for (const literal of stringLiterals(text)) {
-    for (const match of literal.matchAll(CLAIM_PIN_PATTERN)) pins.add(match[1]);
+    for (const match of literal.matchAll(VERIFY_PIN_PATTERN)) pins.add(match[1]);
   }
   return [...pins].sort();
 }
@@ -392,15 +397,13 @@ export function collectClaimVerifyPins(repoRoot, sources = CLAIM_PIN_SOURCES) {
 
 /**
  * Every `@colophon-claims/verify` specifier a reader-instruction document tells a reader to run.
- * Markdown has no string literals to scan and no comments to exclude, so the whole text counts --
- * and unlike a claim pin, a bare major line (`@1`) counts too, because that is exactly the shape
- * that 404s (issue #3647).
+ * Markdown has no string literals to scan and no comments to exclude, so the whole text counts.
  */
 export function collectReaderInstructionPins(repoRoot, docs = READER_INSTRUCTION_DOCS) {
   const pins = new Set();
   for (const doc of docs) {
     const text = readFileSync(resolve(repoRoot, ...doc.split('/')), 'utf8');
-    for (const match of text.matchAll(READER_PIN_PATTERN)) pins.add(match[1]);
+    for (const match of text.matchAll(VERIFY_PIN_PATTERN)) pins.add(match[1]);
   }
   return [...pins].sort();
 }
@@ -408,6 +411,12 @@ export function collectReaderInstructionPins(repoRoot, docs = READER_INSTRUCTION
 /**
  * Refuses a reader instruction naming a verifier version npm does not serve. An exact `X.Y.Z` must
  * be published; a shorter `X` or `X.Y` line must have a published version under it.
+ *
+ * The default authority is the offline receipt ledger, so this runs in CI without a network call.
+ * The ledger names a release before the registry does, which leaves one window it cannot see: a
+ * doc bumped in the same change as the receipt reads as resolvable until the manual publish
+ * dispatch runs. That is the narrow, self-healing half; the shape it does catch -- a line npm has
+ * never served at all -- is the one that strands a reader indefinitely.
  */
 export function assertReaderInstructionPinsResolve(pins, published = registeredVerifyReleases()) {
   const unresolvable = pins.filter((pin) =>
@@ -447,13 +456,13 @@ export function assertClaimPinsMatchPublish(pins, publishVersion, published = re
     );
   }
   const unsatisfied = pins
-    .filter((pin) => pin.split('.').length === 2)
+    .filter((pin) => pin.split('.').length < 3)
     .filter((line) => ![...resolvable].some((version) => version.startsWith(`${line}.`)));
   if (unsatisfied.length > 0) {
     throw new Error(`claim compatible lines @${unsatisfied.join(', @')} resolve to no published verifier`);
   }
   const admittingLine = pins
-    .filter((pin) => pin.split('.').length === 2)
+    .filter((pin) => pin.split('.').length < 3)
     .find((line) => publishVersion.startsWith(`${line}.`));
   if (!exact.includes(publishVersion) && !admittingLine) {
     throw new Error(
