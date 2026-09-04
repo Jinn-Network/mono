@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { accessSync, constants, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
   INSPECT_MULTI_SCORER_SANDBOX_SELECTION_SCHEMA,
@@ -244,6 +244,50 @@ function resolveDockerCli(path: string): string {
   }
 }
 
+/**
+ * #4025: expiry of the wall-clock bound below, distinct from a real non-zero exit — the same line
+ * `JINN_SWE_REBENCH_COMMAND_TIMEOUT_MS` draws for the sibling Docker stack. A wedged engine and a
+ * command that ran and refused are different facts and must not arrive as the same one.
+ */
+export class InspectOciCommandTimeoutError extends Error {
+  override readonly name = "InspectOciCommandTimeoutError";
+}
+
+/** Short-lived `docker` shell-outs: `version`, `image inspect`. Generous against a loaded engine
+ *  while still far under any human's patience for a hung local check. */
+const DEFAULT_OCI_COMMAND_TIMEOUT_MS = 300_000;
+/** The worker probes: a `docker run` of the Inspect image, or the OCI runner supervising one.
+ *  These legitimately take many minutes, so they get their own far larger bound. */
+const DEFAULT_OCI_WORKER_TIMEOUT_MS = 1_800_000;
+/** How long a bound that has expired waits for the child to leave on its own terms before it is
+ *  SIGKILLed. The OCI runner reaps its worker container on SIGTERM, so this grace is what keeps an
+ *  expiry from orphaning the very container the runner exists to clean up. */
+const OCI_TIMEOUT_TERMINATION_GRACE_MS = 10_000;
+
+function resolveTimeoutMs(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  // `0` disables the bound. Anything else out of range is operator error, not an instruction to
+  // run unbounded, so it falls back to the default. A value past the 32-bit `setTimeout` ceiling
+  // is clamped rather than passed through: Node wraps such a delay and would fire it immediately,
+  // turning "bound this very loosely" into "refuse at once".
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.min(parsed, 2_147_483_647);
+}
+
+const ociCommandTimeoutMs = (): number => resolveTimeoutMs("JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS", DEFAULT_OCI_COMMAND_TIMEOUT_MS);
+const ociWorkerTimeoutMs = (): number => resolveTimeoutMs("JINN_INSPECT_OCI_WORKER_TIMEOUT_MS", DEFAULT_OCI_WORKER_TIMEOUT_MS);
+
+/** Names a bounded command by its executable and the verbs it was given. Operands — host paths,
+ *  digests, format strings, flag values — are dropped, so a refusal can name what timed out
+ *  without carrying a host path into operator-visible text. */
+function describeBoundedCommand(executable: string, args: readonly string[]): string {
+  const script = args[0] !== undefined && args[0].endsWith(".mjs") ? basename(args[0]) : undefined;
+  const verbs = args.filter((argument) => /^[a-z][a-z-]*$/u.test(argument)).slice(0, 2);
+  return [basename(executable), ...(script === undefined ? [] : [script]), ...verbs].join(" ");
+}
+
 async function runBoundedProcess(
   executable: string,
   args: readonly string[],
@@ -251,6 +295,7 @@ async function runBoundedProcess(
   signal?: AbortSignal,
   environment?: NodeJS.ProcessEnv,
   exposeStderr = false,
+  timeoutMs: number = ociCommandTimeoutMs(),
 ): Promise<ProcessResult> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(executable, args, {
@@ -275,8 +320,39 @@ async function runBoundedProcess(
       if (bytes > 1_000_000) child.kill("SIGKILL");
       else if (exposeStderr) stderr.push(chunk);
     });
-    child.once("error", reject);
+    // The byte guard above is the only bound this call had, and no caller on the OCI Inspect path
+    // supplies the `signal` that is its one wall-clock escape. A wedged Docker Engine therefore
+    // hung the launcher indefinitely rather than refusing — the hazard `CLAUDE.md` already records
+    // for the sibling swe-rebench stack. SIGTERM first, because both children this bounds stop
+    // their container on it and would leave a `--rm` container behind if killed outright: the OCI
+    // runner reaps its worker explicitly, and an attached `docker run` forwards the signal to the
+    // container through the CLI's default sig-proxy. SIGKILL is only the backstop for a child that
+    // ignores the first signal.
+    let expired = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const expiry = timeoutMs > 0
+      ? setTimeout(() => {
+        expired = true;
+        child.kill("SIGTERM");
+        killTimer = setTimeout(() => child.kill("SIGKILL"), OCI_TIMEOUT_TERMINATION_GRACE_MS);
+      }, timeoutMs)
+      : undefined;
+    const clearBounds = (): void => {
+      if (expiry !== undefined) clearTimeout(expiry);
+      if (killTimer !== undefined) clearTimeout(killTimer);
+    };
+    child.once("error", (cause) => {
+      clearBounds();
+      reject(cause);
+    });
     child.once("exit", (code, exitSignal) => {
+      clearBounds();
+      if (expired) {
+        reject(new InspectOciCommandTimeoutError(
+          `OCI runtime command timed out after ${String(timeoutMs)} ms: ${describeBoundedCommand(executable, args)}`,
+        ));
+        return;
+      }
       if (code !== 0) {
         const safeDetail = exposeStderr ? Buffer.concat(stderr).toString("utf8").trim() : "";
         reject(new Error(`OCI runtime command exited ${String(code ?? exitSignal)}${safeDetail === "" ? "" : `: ${safeDetail}`}`));
@@ -434,10 +510,10 @@ export async function probeInspectOciSelection(
   let workerResult: ProcessResult;
   try {
     workerResult = binding.sandboxExecution === undefined
-      ? await runBoundedProcess(binding.dockerPath, probeArgs, undefined, signal)
+      ? await runBoundedProcess(binding.dockerPath, probeArgs, undefined, signal, undefined, false, ociWorkerTimeoutMs())
       : await runBoundedProcess(process.execPath, [
         inspectOciRunnerPath(), "sandbox", binding.dockerPath, binding.sandboxExecution.imageDigest, ...probeArgs,
-      ], undefined, signal, { LANG: "C.UTF-8" });
+      ], undefined, signal, { LANG: "C.UTF-8" }, false, ociWorkerTimeoutMs());
   } finally {
     rmSync(probeConfigDir, { recursive: true, force: true });
   }
@@ -595,6 +671,7 @@ export async function assertInspectOciBrokerConnectionReady(
     signal,
     { LANG: "C.UTF-8", JINN_INSPECT_HOST_CONNECTION_DESCRIPTOR: hostConnectionDescriptor },
     true,
+    ociWorkerTimeoutMs(),
   );
 }
 
@@ -661,7 +738,7 @@ export async function catalogInspectOciSelection(input: {
   });
   let workerResult: ProcessResult;
   try {
-    workerResult = await runBoundedProcess(binding.dockerPath, catalogArgs, undefined, signal);
+    workerResult = await runBoundedProcess(binding.dockerPath, catalogArgs, undefined, signal, undefined, false, ociWorkerTimeoutMs());
   } finally {
     rmSync(probeConfigDir, { recursive: true, force: true });
   }
