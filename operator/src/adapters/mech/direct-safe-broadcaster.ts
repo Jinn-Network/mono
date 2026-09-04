@@ -27,6 +27,7 @@ import type { VenueBroadcaster } from './safe.js';
 import {
   decodeSafeInnerRevert,
   formatDecodedRevert,
+  SafeExecutionRevertedError,
   SafeInnerRevertError,
 } from './safe-revert.js';
 
@@ -163,6 +164,20 @@ export function createDirectSafeBroadcaster(
           throw error;
         }
         const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+        // viem resolves this receipt whatever its status, so a top-level revert would otherwise
+        // be reported as a successful broadcast with `logs: []` -- surfacing downstream as
+        // venue-base's "no canonical EvaluationAttemptCreated", which names the decoding miss
+        // rather than the cause, or (on the legs that decode nothing) as a `settled` result
+        // pointing at a transaction that did nothing (issue #3733).
+        if (receipt.status !== 'success') {
+          throw new SafeExecutionRevertedError(
+            `Safe execTransaction reverted on chain: tx ${txHash} for Safe ${safeAddress}`
+            + ` (${request.logicalTx}) mined with status "${receipt.status}"`,
+            txHash,
+            safeAddress,
+            request.logicalTx,
+          );
+        }
         return {
           txHash,
           blockNumber: receipt.blockNumber,

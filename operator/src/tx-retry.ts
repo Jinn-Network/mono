@@ -59,6 +59,11 @@ export function isRecoverableTransactionError(error: unknown): boolean {
   if (
     errorName === 'SafeBroadcastFenceError'
     || errorName === 'SafePostBroadcastHookError'
+    // A Safe execTransaction that MINED with status 'reverted' (issue #3733). A top-level revert
+    // does not consume the Safe nonce, so the same signed call reverts identically on resubmission
+    // -- retrying only burns the budget. Matched here, ahead of the substring checks below,
+    // because the message carries a hex tx hash that can contain '502'/'503'/'429'.
+    || errorName === 'SafeExecutionRevertedError'
   ) {
     return false;
   }

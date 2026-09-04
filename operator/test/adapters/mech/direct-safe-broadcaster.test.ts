@@ -3,7 +3,9 @@ import { encodeAbiParameters, encodeErrorResult, encodeEventTopics, parseAbi, pa
 import { JINN_ROUTER_V3_ABI } from '@jinn-network/marketplace-binding';
 import { createVerdictPorts } from '@jinn-network/marketplace-venue-base';
 import { createDirectSafeBroadcaster } from '../../../src/adapters/mech/direct-safe-broadcaster.js';
+import { SafeExecutionRevertedError } from '../../../src/adapters/mech/safe-revert.js';
 import { SafeInnerRevertError } from '../../../src/adapters/mech/safe-revert.js';
+import { isRecoverableTransactionError } from '../../../src/tx-retry.js';
 
 const SAFE = '0x1111111111111111111111111111111111111111' as const;
 const ROUTER = '0x2222222222222222222222222222222222222222' as const;
@@ -234,5 +236,88 @@ describe('direct Safe broadcaster drives venue-base verdict ports (#2665)', () =
     // This broadcaster has no already-settled reconciliation path: an inner revert throws
     // `SafeInnerRevertError` (see the GS013 case above) rather than resolving as a replay.
     expect(receipt.alreadySettled).toBe(false);
+  });
+});
+
+// Issue #3733. `waitForTransactionReceipt` resolves for a mined-but-reverted transaction, so a
+// broadcaster that never reads `receipt.status` reports success with `logs: []`. On the decoding
+// legs that surfaced as venue-base's "no canonical EvaluationAttemptCreated" (a symptom, not the
+// cause); on `deliverVerdictToMarketplace` / `claimVerdictDelivery`, which decode nothing, it was
+// reported as `settled` against a transaction that did nothing.
+describe('direct Safe broadcaster rejects a mined-but-reverted execTransaction (#3733)', () => {
+  const TX_HASH = `0x${'77'.repeat(32)}` as const;
+
+  function revertingClients() {
+    return {
+      publicClient: {
+        readContract: vi.fn()
+          .mockResolvedValueOnce(0n)
+          .mockResolvedValueOnce(`0x${'55'.repeat(32)}`),
+        waitForTransactionReceipt: vi.fn().mockResolvedValue({
+          transactionHash: TX_HASH,
+          blockNumber: 1234n,
+          blockHash: `0x${'99'.repeat(32)}`,
+          status: 'reverted',
+          logs: [],
+        }),
+      },
+      walletClient: {
+        account: { address: OWNER },
+        chain: { id: 8453 },
+        signMessage: vi.fn().mockResolvedValue(`0x${'66'.repeat(64)}1b`),
+        writeContract: vi.fn().mockResolvedValue(TX_HASH),
+      },
+    };
+  }
+
+  it('throws naming the tx hash, the Safe and the logical operation', async () => {
+    const { publicClient, walletClient } = revertingClients();
+    const broadcaster = createDirectSafeBroadcaster(
+      publicClient as never,
+      walletClient as never,
+      SAFE,
+    );
+
+    const error = await broadcaster.execute({
+      to: ROUTER,
+      value: 0n,
+      data: '0xdeadbeef',
+      logicalTx: 'verdict:openVerdictAttempt',
+    }).then(() => null, (e: unknown) => e as SafeExecutionRevertedError);
+
+    expect(error).toMatchObject({
+      name: 'SafeExecutionRevertedError',
+      txHash: TX_HASH,
+      safeAddress: SAFE,
+      logicalTx: 'verdict:openVerdictAttempt',
+    } satisfies Partial<SafeExecutionRevertedError>);
+    expect(error?.message).toContain(TX_HASH);
+    expect(error?.message).toContain(SAFE);
+    expect(error?.message).toContain('verdict:openVerdictAttempt');
+  });
+
+  it('does not retry: a top-level revert is deterministic, so writeContract is sent once', async () => {
+    const { publicClient, walletClient } = revertingClients();
+    // The single mock nonce/hash pair above would run out on a second attempt; asserting the
+    // send count is what pins the classification rather than the mock's arity.
+    await expect(createDirectSafeBroadcaster(
+      publicClient as never,
+      walletClient as never,
+      SAFE,
+    ).execute({ to: ROUTER, value: 0n, data: '0x', logicalTx: 'verdict:claimVerdictDelivery' }))
+      .rejects.toThrow(SafeExecutionRevertedError);
+
+    expect(walletClient.writeContract).toHaveBeenCalledTimes(1);
+  });
+
+  it('is classified terminal by the shared retry policy', () => {
+    expect(isRecoverableTransactionError(new SafeExecutionRevertedError(
+      // A tx hash is hex, so it can contain '502'/'503'/'429' -- substrings the classifier's
+      // fall-through reads as a transient RPC failure. The name check must win.
+      `Safe execTransaction reverted on chain: tx 0x502503429${'0'.repeat(55)} for Safe ${SAFE} (op) mined with status "reverted"`,
+      `0x502503429${'0'.repeat(55)}`,
+      SAFE,
+      'op',
+    ))).toBe(false);
   });
 });

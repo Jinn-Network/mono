@@ -28,6 +28,32 @@ export class SafeInnerRevertError extends Error {
   }
 }
 
+/**
+ * A Safe `execTransaction` that was mined but reverted at the TOP level (issue #3733).
+ *
+ * Distinct from `SafeInnerRevertError`: there the Safe itself succeeded and wrapped a failing
+ * inner call as `GS013`/`GS026`, which `decodeSafeInnerRevert` can re-simulate and name. Here the
+ * transaction is on chain with `status: 'reverted'` — out of gas, an EOA that is no longer a Safe
+ * owner, a reorg — so there is no inner selector to recover and `receipt.logs` is empty. viem's
+ * `waitForTransactionReceipt` resolves rather than throws for this, so without an explicit check
+ * the broadcaster reports success and the failure resurfaces one layer up as a decoding miss.
+ *
+ * Terminal, never retried: the same signed call reverts identically on resubmission (a top-level
+ * revert does not consume the Safe nonce). `isRecoverableTransactionError` matches this by `name`
+ * BEFORE its substring checks, because a tx hash is hex and can contain `502`/`503`/`429`.
+ */
+export class SafeExecutionRevertedError extends Error {
+  override readonly name = 'SafeExecutionRevertedError';
+  constructor(
+    message: string,
+    readonly txHash: Hex,
+    readonly safeAddress: Address,
+    readonly logicalTx: string,
+  ) {
+    super(message);
+  }
+}
+
 // Exported so the hermetic ABI/selector-conformance test (spec §5 — consumer-
 // contract pairing) can assert each hardcoded selector still matches the
 // keccak256 of its canonical error signature. A drifted entry silently
