@@ -176,6 +176,16 @@ export function isScannedSource(name: string): boolean {
     && !name.endsWith(".test.ts") && !name.endsWith(".test.tsx");
 }
 
+/**
+ * Quoted string contents blanked the same way, so a help string or an error message naming the
+ * emitter is not read as a reference to it. Single and double quotes only: a template literal can
+ * carry `${runBindingSentence(binding)}`, which is code, and blanking it would hide the very shape
+ * this file exists to see.
+ */
+function blankStringLiterals(text: string): string {
+  return text.replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/gu, (match) => `${match[0]}${" ".repeat(match.length - 2)}${match[0]}`);
+}
+
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     // `testing/` is scanned like any other source: a fixture builder that assembles a bundle is
@@ -254,37 +264,36 @@ function moduleForSpecifier(specifier: string, fromFile: string): string | undef
 }
 
 /**
- * The module that declares the `name` this file uses: the one it imports it from, followed through
- * re-exports (`@colophon-claims/verify` names the package entry, which re-exports the face from
- * `binding/report-face.ts`), or this file itself when it declares the name.
+ * The module that declares the `name` this file uses: followed from the statement that names it,
+ * through re-exports (`@colophon-claims/verify` names the package entry, which re-exports the face
+ * from `binding/report-face.ts`), until a module is reached that actually declares it.
  *
  * `undefined` means the origin could not be established, and the scan then treats the occurrence as
- * an emitter's -- the same loud direction the whole file takes. A name that resolves to some OTHER
- * module is the one case this exists to drop, and it is positive evidence rather than an absence:
- * the file said where the name came from and it was not the emitter's module (#3952).
+ * an emitter's -- the same loud direction the whole file takes. Incomplete resolution MUST return
+ * `undefined` rather than the last module reached: a barrel (`export * from ...`, which this does
+ * not follow) would otherwise resolve to the barrel, mismatch every emitter module, and silently
+ * drop the file's real calls. Dropping is reserved for positive evidence -- the chain ended at a
+ * declaration, and it was not the emitter's (#3952).
  */
 export function resolveOrigin(source: string, filePath: string, name: string): string | undefined {
+  const declared = new RegExp(
+    String.raw`(?:export\s+)?(?:declare\s+)?(?:async\s+)?(?:function|const|let|var|class)\s+${name}\b`,
+    "u",
+  );
   const specifier = importedFrom(source, name);
-  if (specifier === undefined) {
-    const declared = new RegExp(
-      String.raw`(?:export\s+)?(?:declare\s+)?(?:async\s+)?(?:function|const|let|var|class)\s+${name}\b`,
-      "u",
-    );
-    return declared.test(source) ? relative(productRoot, filePath) : undefined;
-  }
+  if (specifier === undefined) return declared.test(source) ? relative(productRoot, filePath) : undefined;
   let module = moduleForSpecifier(specifier, filePath);
   const seen = new Set<string>();
   while (module !== undefined && !seen.has(module)) {
     seen.add(module);
     const absolute = join(productRoot, module);
-    if (!existsSync(absolute)) return module;
-    const hop = importedFrom(readFileSync(absolute, "utf8"), name);
-    if (hop === undefined) return module;
-    const next = moduleForSpecifier(hop, absolute);
-    if (next === undefined) return module;
-    module = next;
+    if (!existsSync(absolute)) return undefined;
+    const hopSource = readFileSync(absolute, "utf8");
+    if (declared.test(hopSource)) return module;
+    const hop = importedFrom(hopSource, name);
+    module = hop === undefined ? undefined : moduleForSpecifier(hop, absolute);
   }
-  return module;
+  return undefined;
 }
 
 interface CallSite {
@@ -307,8 +316,14 @@ export function emitterCallSites(
   origins: ReadonlyMap<string, string | undefined> = new Map(),
 ): CallSite[] {
   const blanked = blankComments(source);
-  const references = blankModuleStatements(blanked);
+  const references = blankStringLiterals(blankModuleStatements(blanked));
   const rawLines = source.split("\n");
+  // `import * as face from ...` binds the emitter behind a namespace, so `face.runBindingSentence`
+  // IS the emitter rather than an unrelated object's property, and the member-access skip below
+  // must not swallow it. Read off the statements before they are blanked.
+  const namespaces = new Set(
+    [...blanked.matchAll(/^[ \t]*import\s+\*\s+as\s+(\w+)\s+from/gmu)].map((match) => match[1]!),
+  );
   const sites: CallSite[] = [];
   const marked = (index: number): boolean => {
     const line = blanked.slice(0, index).split("\n").length - 1;
@@ -328,11 +343,15 @@ export function emitterCallSites(
       const index = match.index!;
       const before = references.slice(Math.max(0, index - 24), index);
       const after = references.slice(index + name.length, index + name.length + 24);
-      // A call is already counted above. A member access (`report.runBindingSentence`) names
-      // someone else's property. A declaration introduces the emitter rather than passing it on.
+      // A call is already counted above. A declaration introduces the emitter rather than passing
+      // it on, and `typeof name` reads its type rather than the function.
       if (/^\s*\(/u.test(after)) continue;
-      if (/\.\s*$/u.test(before)) continue;
       if (/\b(?:function|const|let|var|class)\s+$/u.test(before)) continue;
+      if (/\btypeof\s+$/u.test(before)) continue;
+      // A member access names someone else's property -- unless the object is a namespace import,
+      // in which case it names this emitter.
+      const member = /(\w+)\s*\??\s*\.\s*$/u.exec(before);
+      if (member !== null && !namespaces.has(member[1]!)) continue;
       // A property KEY (`{ runBindingSentence: other }`) declares a name rather than reading one,
       // and is distinguished from a ternary branch (`flag ? runBindingSentence : other`, which IS
       // a reference) by what precedes it: a key opens its entry, a branch follows an operator.
@@ -405,8 +424,17 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     expect(emitterCallSites("const emit = flag ? runBindingSentence : other;\n", "fixture.ts")).toEqual([
       { site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false },
     ]);
-    // A member access names someone else's property, not the emitter this file imported.
+    // A member access names someone else's property, not the emitter this file imported -- but a
+    // namespace import binds the emitter itself behind exactly that shape.
     expect(emitterCallSites("const emit = report.runBindingSentence;\n", "fixture.ts")).toEqual([]);
+    const namespaced = 'import * as face from "@colophon-claims/verify";\nconst emit = face.runBindingSentence;\n';
+    expect(emitterCallSites(namespaced, "fixture.ts")).toEqual([
+      { site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false },
+    ]);
+    // Prose inside a string is not a reference, and a type position emits nothing at runtime.
+    expect(emitterCallSites('const help = "the sentence comes from runBindingSentence";\n', "fixture.ts"))
+      .toEqual([]);
+    expect(emitterCallSites("type Emitter = typeof runBindingSentence;\n", "fixture.ts")).toEqual([]);
   });
 
   // The bare name is not unique in this tree, so the key is proven to discriminate before the scan
@@ -424,6 +452,14 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     // A package specifier resolves through the entry's re-export to the module that declares it.
     const [statusCaller, statusPath] = read("core/src/operations/run-status.ts");
     expect(resolveOrigin(statusCaller, statusPath, "runBindingClass")).toBe("verify/src/binding/report-face.ts");
+
+    // A barrel is not a declaration: `export * from` is not followed, so the chain ends unresolved
+    // and the occurrence is counted rather than silently dropped against the barrel's own path.
+    const barrel = 'import { runBindingSentence } from "./bundle/schema.js";\n';
+    expect(resolveOrigin(barrel, join(productRoot, "core/src/plant.ts"), "runBindingSentence")).toBeUndefined();
+    expect(emitterCallSites(`${barrel}export const s = runBindingSentence(forged);\n`, "plant.ts",
+      new Map([["runBindingSentence", resolveOrigin(barrel, join(productRoot, "core/src/plant.ts"), "runBindingSentence")]]))[0]?.binding)
+      .toBe("forged");
 
     // And the resolved origin is what decides: the same call text is counted under the emitter's
     // module and dropped under the other's.
