@@ -1359,4 +1359,19 @@ test('a guard on a function definition does not reach the deferred body (#4000)'
     severities(['f () {', '  { producer | head -1', '  } || true', '}'].join('\n'), { shell: 'bash' }),
     [],
   );
+  // A subshell body is a definition's body too.
+  assert.deepEqual(
+    severities(['f () (', '  producer | head -1', ') || true', 'f'].join('\n'), { shell: 'bash' }),
+    ['error:head'],
+  );
+
+  // The guard still covers everything in the group that is *not* deferred: only the
+  // definition's own body escapes it.
+  assert.deepEqual(
+    severities(
+      ['{', '  f () {', '    producer | head -1', '  }', '  git tag | head -1', '} || true'].join('\n'),
+      { shell: 'bash' },
+    ),
+    ['error:head'],
+  );
 });
