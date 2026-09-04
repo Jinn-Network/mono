@@ -962,3 +962,125 @@ test("the usage block and the verdict agree on what this tool does to the npm by
   });
   assert.ok(verdict.includes(sentence), "the verdict must state the same sentence");
 });
+
+// ── The check-name gloss column (issue #3861, reader-facing-vocabulary spec §4.2) ───────────────
+//
+// The check names are contract — sealed into `claim-package.json`'s `verification.checks` and
+// asserted by the external verification path — so the spec rules them *keep + gloss*: the plain
+// words go beside the name, never in place of it. These tests hold both halves of that ruling.
+
+const V5_METADATA_FIRST = {
+  format: "benchmark-product-public-bundle/5",
+  identity: `sha256:${"a".repeat(64)}`,
+  checks: [
+    "manifest", "evidence-closure", "artifact-integrity", "signature-validity",
+    "matrix-rederivation", "report-verification", "claim-consistency",
+  ],
+  benchmarkDigest: `sha256:${"b".repeat(64)}`,
+  manifestDigest: `sha256:${"c".repeat(64)}`,
+  cohortDigest: `sha256:${"d".repeat(64)}`,
+  matrixDigest: `sha256:${"e".repeat(64)}`,
+  reportDigest: `sha256:${"f".repeat(64)}`,
+  evidenceRecords: 12,
+  artifacts: 5,
+  verifiedSignerKeyIds: [],
+  profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+  artifactContent: {
+    status: "not-fetched", verified: 2, notFetched: 3,
+    notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
+  },
+};
+
+const V8_SHAPE = {
+  format: "benchmark-product-public-bundle/8",
+  identity: "a".repeat(64),
+  checks: V8_CHECKS,
+  ...V6_IDENTITIES,
+  anchors: { anchors: [], subjects: [], invalid: [] },
+};
+
+/** The rendered check rows: every line that begins with one of the checks the shape declares. */
+function checkRows(output, checks) {
+  return checks.map((check) => {
+    const row = output.split("\n").find((line) => line.startsWith(`${check} `) || line === check);
+    assert.ok(row !== undefined, `no rendered row for ${check}`);
+    return { check, row };
+  });
+}
+
+test("every printed check name carries its plain-language gloss (issue #3861)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  // Two shapes cover all ten check names in the union: the disclosed `/8` closure carries `trust`,
+  // `integrity-anchors`, and `disclosure-specification`; the evidence-native `/5` carries
+  // `artifact-integrity` and `signature-validity`.
+  const glosses = {
+    "manifest": "every listed file is here, unaltered",
+    "evidence-closure": "every run's evidence is carried here",
+    "trust": "the signing keys match the identities",
+    "matrix-rederivation": "the run tally follows from the evidence",
+    "report-verification": "the result follows from the runs",
+    "claim-consistency": "the claim agrees with the records here",
+    "integrity-anchors": "the timestamp proofs are well formed",
+    "disclosure-specification": "what was pinned is recorded and matches",
+    "artifact-integrity": "each artifact matches its fingerprint",
+    "signature-validity": "each signature matches its key",
+  };
+  const seen = new Set();
+  for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
+    const output = renderVerifiedBundle(shape);
+    for (const { check, row } of checkRows(output, shape.checks)) {
+      seen.add(check);
+      // Name verbatim, then a state, then the gloss — the gloss never replaces the sealed name.
+      assert.match(
+        row,
+        new RegExp(`^${check} {2,}(passed|not fetched) +${glosses[check].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+        `wrong gloss row for ${check}: ${JSON.stringify(row)}`,
+      );
+    }
+  }
+  // The two shapes together must cover every check any supported closure can emit, so this test
+  // cannot drift narrower than the product. The exhaustiveness of the gloss map itself is a type
+  // obligation -- it is keyed by the check union, the same discipline `CHECK_SUBJECTS` uses.
+  const { PUBLIC_BUNDLE_VERIFICATION_CHECKS, PUBLIC_BUNDLE_V6_CHECKS, PUBLIC_BUNDLE_V7_CHECKS, PUBLIC_BUNDLE_V8_CHECKS } =
+    await import("../dist/index.js");
+  const { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } = await import("@jinn-network/benchmarking-evidence");
+  const everyCheck = new Set([
+    ...PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+    ...PUBLIC_BUNDLE_V6_CHECKS,
+    ...PUBLIC_BUNDLE_V7_CHECKS,
+    ...PUBLIC_BUNDLE_V8_CHECKS,
+    ...EVIDENCE_NATIVE_BUNDLE_V5_CHECKS,
+  ]);
+  assert.deepEqual([...seen].sort(), [...everyCheck].sort(), "both shapes must cover every check a closure can emit");
+  assert.deepEqual(Object.keys(glosses).sort(), [...everyCheck].sort(), "every emittable check needs a gloss");
+});
+
+test("the deferred check's gloss states what was not established, not that it held (issue #3861)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle(V5_METADATA_FIRST);
+  // The one row that prints a state other than `passed`. Its gloss is present-tense, so the line
+  // reads as the proposition this bundle did not establish — a past-tense gloss beside
+  // `not fetched` would assert exactly what the deferral denies.
+  assert.match(output, /^artifact-integrity {2,}not fetched {2,}each artifact matches its fingerprint$/m);
+});
+
+test("the gloss column is aligned and the rows stay inside 80 columns (issue #3861)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
+    const output = renderVerifiedBundle(shape);
+    const rows = checkRows(output, shape.checks).map(({ row }) => row);
+    const offsets = new Set(rows.map((row) => row.indexOf(row.trimEnd().split(/ {2,}/).at(-1))));
+    assert.equal(offsets.size, 1, `gloss column is ragged: ${JSON.stringify(rows)}`);
+    for (const row of rows) assert.ok(row.length <= 80, `row exceeds 80 columns: ${JSON.stringify(row)}`);
+  }
+});
+
+test("no check name is renamed by the gloss (issue #3861)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
+    const output = renderVerifiedBundle(shape);
+    for (const check of shape.checks) {
+      assert.match(output, new RegExp(`^${check} `, "m"), `${check} must print verbatim at the start of its row`);
+    }
+  }
+});

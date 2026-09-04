@@ -21,14 +21,27 @@
 // counts would depend on whether some earlier command happened to have built it -- 12 errors
 // appear and disappear with it. A ratchet whose baseline moves with the environment is worse
 // than no ratchet, so the build is part of the check.
+//
+// The converse — running this alone on a tree where `yarn typecheck` has NOT built the other four
+// portals — is caught up front by `findUnbuiltPortalPackages` (issue #3734) rather than reported
+// as several hundred spurious regressions.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findUnbuiltPortalPackages, formatUnbuiltPortalsMessage } from './lib/unbuilt-portals.mjs';
 
 const operatorDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const baselinePath = join(operatorDir, 'test-typecheck-baseline.json');
 const update = process.argv.includes('--update');
+
+// Before `--update` too: recording a baseline from an unbuilt tree is exactly the rot this
+// ratchet's drop-detection exists to catch, and it would land in the repository.
+const unbuilt = findUnbuiltPortalPackages(operatorDir);
+if (unbuilt.length > 0) {
+  console.error(formatUnbuiltPortalsMessage(unbuilt));
+  process.exit(1);
+}
 
 const tsc = spawnSync(
   process.execPath,

@@ -197,14 +197,54 @@ Use **Node 22** where possible (`engines` in `operator/package.json`). CI should
 ## CI gates
 
 - Every PR that touches the operator lane (the `changes` job in `ci.yml` gates
-  this): `yarn typecheck` + `yarn lint:no-late-mount` + `yarn lint:no-error-leak`
-  + `yarn lint:no-fixed-test-port` + `node --test
+  this): `yarn typecheck` + `yarn typecheck:test` + `yarn lint:no-late-mount`
+  + `yarn lint:no-error-leak` + `yarn lint:no-fixed-test-port` + `node --test
   scripts/check-no-fixed-test-port.test.mjs` + `yarn test`.
 - Nightly / release: all `yarn e2e*` scenarios serially.
 - The default suite already runs in parallel on CI — three forked workers over
   ~850 files. See [Worker parallelism and ports](#worker-parallelism-and-ports)
   for what that shares and the rules that follow from it, including the three
   sanctioned ways to get a port.
+
+### `yarn typecheck:test` is a ratchet, not a zero-error gate
+
+`yarn typecheck` compiles `tsconfig.json`, which excludes `test/` and
+`scripts/`. Nothing type-checked those trees, and defects survived a green
+required check because of it — an `as never` papering over a broken port
+contract, and calls passing 6 positional arguments to functions requiring 7.
+`yarn typecheck:test` (issue #2665) closes that hole.
+
+The tree does not compile clean today, so the check compares against
+`operator/test-typecheck-baseline.json`, which records a **known error count per
+file**. It fails when a file gains errors, and — this is the part that surprises
+people — **it also fails when a count drops**. An unrecorded improvement rots
+the baseline, and the drop-detection is what makes the ratchet
+non-bypassable: any path where `tsc` silently checks nothing yields an empty
+count set, which reads as an improvement and goes red. There is no false-green
+input.
+
+So an ordinary PR that happens to fix a type error under `operator/test/`, or
+adds a test file that carries one, turns this check red. The remedy either way
+is to re-record the baseline:
+
+```bash
+cd operator
+yarn typecheck          # builds the sdk/stack/plugin/core portal dist/ trees
+yarn typecheck:test --update
+git add test-typecheck-baseline.json
+```
+
+`yarn typecheck` first is not optional. `typecheck:test` builds only
+`@jinn-network/jinn-layer`; the other four portal trees the test compile
+resolves against come from `yarn typecheck`, which CI runs immediately before
+this gate. Recording a baseline without them would capture a different build
+state. Running `yarn typecheck:test` on an unbuilt tree stops with a message
+naming that prerequisite rather than printing a spurious regression list
+(issue #3734).
+
+Shrinking the baseline is tracked separately in issue #3735; casting errors
+away is explicitly not the remedy, since that is the defect class the gate
+exists to remove.
 
 ## Worker parallelism and ports
 

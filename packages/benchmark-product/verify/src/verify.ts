@@ -10,6 +10,7 @@ import {
   BENCHMARKING_METHOD_IDS,
   DISCLOSURE_SPECIFICATION_EXTENSION,
   cellIdempotencyKey,
+  compareCodeUnitStrings,
   expectedCellSet,
   parseBenchmark,
   parseMatrix,
@@ -118,6 +119,7 @@ import {
   verifyBinaryJudgmentAdmissionClosure,
   type AdmissionAuthorityRole,
   type AdmissionSha256,
+  type VerifiedBinaryJudgmentAdmissionExclusion,
 } from "./admission/verification.js";
 import { readAdmissionVerdictEnvelope } from "./admission/result-evaluation.js";
 import {
@@ -348,6 +350,36 @@ function exactCanonicalJsonl<T>(
 
 function sameCanonical(left: unknown, right: unknown): boolean {
   return equalBytes(canonicalJsonBytes(left as never), canonicalJsonBytes(right as never));
+}
+
+/**
+ * `qualification.exclusions` re-derived from the replayed admission closure, so the carried list is
+ * COMPARED rather than taken on the producer's word. Without this the exclusion list -- the record
+ * of exactly what was dropped from the slate and why -- is the one part of the qualification
+ * projection a cold verifier never re-derives: `BundleQualificationSchema` only proves each entry's
+ * two digests are reachable and carry the `source-item` role, never that the entry exists, names
+ * that replacement, or gives that reason (issue #3246).
+ *
+ * MIRROR of `benchmark-product/core/src/bundle/materialize.ts`'s qualification `exclusions`
+ * projection: same three fields, same `itemSha256` code-unit sort. The sort is not cosmetic on
+ * either side -- `admission.excluded` arrives in REPLACEMENT-LEDGER order, which carries no
+ * sortedness guarantee, while `BundleQualificationSchema` requires the projection sorted and
+ * unique, so a verifier that skipped the sort would refuse every published bundle whose ledger
+ * happened to be unsorted. The two sides are duplicated rather than shared because this is a
+ * standalone published verifier that deliberately re-states `core` instead of importing it (see
+ * `profile/claim-consistency.ts`'s own mirror note); `materialize.ts` carries the matching note
+ * naming this function, so neither side can be changed while believing it is the only one.
+ */
+function projectAdmissionExclusions(
+  excluded: readonly VerifiedBinaryJudgmentAdmissionExclusion[],
+): readonly { readonly itemSha256: string; readonly replacementItemSha256: string; readonly reason: string }[] {
+  return excluded
+    .map((entry) => ({
+      itemSha256: entry.itemSha256,
+      replacementItemSha256: entry.replacementItemSha256,
+      reason: entry.reason,
+    }))
+    .sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
 }
 
 function verifyEvidenceNativeSignature(input: EvidenceNativeSignatureVerificationInput): boolean {
@@ -826,6 +858,7 @@ export async function verifyPublicBundleSnapshot(
       || verifiedAdmission.manifest.truthAdmission !== qualification.truthAdmission
       || !sameCanonical(verifiedAdmission.classes, qualification.candidateClasses)
       || !sameCanonical(verifiedAdmission.strata, qualification.strata)
+      || !sameCanonical(qualification.exclusions, projectAdmissionExclusions(verifiedAdmission.excluded))
     ) refuse("record-integrity", "qualification.json", "qualification admission projection differs from portable replay");
     for (const record of verifiedAdmission.reachableRecords) {
       for (const role of record.roles) addRole(expectedRoles, record.sha256.slice("sha256:".length), role);

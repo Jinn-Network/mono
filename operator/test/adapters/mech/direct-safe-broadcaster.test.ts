@@ -3,7 +3,15 @@ import { encodeAbiParameters, encodeErrorResult, encodeEventTopics, parseAbi, pa
 import { JINN_ROUTER_V3_ABI } from '@jinn-network/marketplace-binding';
 import { createVerdictPorts } from '@jinn-network/marketplace-venue-base';
 import { createDirectSafeBroadcaster } from '../../../src/adapters/mech/direct-safe-broadcaster.js';
-import { SafeInnerRevertError } from '../../../src/adapters/mech/safe-revert.js';
+import {
+  SafeExecutionRevertedError,
+  SafeInnerRevertError,
+} from '../../../src/adapters/mech/safe-revert.js';
+import {
+  isRecoverableTransactionError,
+  SAFE_STALE_NONCE_ERROR_TOKEN,
+  TX_RETRY_DEFAULTS,
+} from '../../../src/tx-retry.js';
 
 const SAFE = '0x1111111111111111111111111111111111111111' as const;
 const ROUTER = '0x2222222222222222222222222222222222222222' as const;
@@ -234,5 +242,129 @@ describe('direct Safe broadcaster drives venue-base verdict ports (#2665)', () =
     // This broadcaster has no already-settled reconciliation path: an inner revert throws
     // `SafeInnerRevertError` (see the GS013 case above) rather than resolving as a replay.
     expect(receipt.alreadySettled).toBe(false);
+  });
+});
+
+// Issue #3733. `waitForTransactionReceipt` resolves for a mined-but-reverted transaction, so a
+// broadcaster that never reads `receipt.status` reports success with `logs: []`. On the decoding
+// legs that surfaced as venue-base's "no canonical EvaluationAttemptCreated" (a symptom, not the
+// cause); on `deliverVerdictToMarketplace` / `claimVerdictDelivery`, which decode nothing, it was
+// reported as `settled` against a transaction that did nothing.
+//
+// `safeTxGas` and `gasPrice` are both 0 on this path, so a failing inner call reverts
+// execTransaction at the top level. The receipt therefore gets the same two-branch treatment
+// venue-base's `createSafeBroadcaster` gives it: re-simulate to recover the reason, and treat a
+// clean re-simulation as the stale-nonce / signature race it is.
+describe('direct Safe broadcaster rejects a mined-but-reverted execTransaction (#3733)', () => {
+  const TX_HASH = `0x${'77'.repeat(32)}` as const;
+
+  function revertingClients(innerCall: { rejectWith?: unknown } = {}) {
+    return {
+      publicClient: {
+        readContract: vi.fn()
+          .mockResolvedValue(`0x${'55'.repeat(32)}`)
+          .mockResolvedValueOnce(0n)
+          .mockResolvedValueOnce(`0x${'55'.repeat(32)}`),
+        call: innerCall.rejectWith === undefined
+          ? vi.fn().mockResolvedValue({ data: '0x' })
+          : vi.fn().mockRejectedValue(innerCall.rejectWith),
+        waitForTransactionReceipt: vi.fn().mockResolvedValue({
+          transactionHash: TX_HASH,
+          blockNumber: 1234n,
+          blockHash: `0x${'99'.repeat(32)}`,
+          status: 'reverted',
+          logs: [],
+        }),
+      },
+      walletClient: {
+        account: { address: OWNER },
+        chain: { id: 8453 },
+        signMessage: vi.fn().mockResolvedValue(`0x${'66'.repeat(64)}1b`),
+        writeContract: vi.fn().mockResolvedValue(TX_HASH),
+      },
+    };
+  }
+
+  it('recovers the inner reason when re-simulation reverts, rather than reporting success', async () => {
+    const innerData = encodeErrorResult({
+      abi: parseAbi(['error RouterWrongRequestKind(bytes32 requestId, uint8 expected, uint8 actual)']),
+      errorName: 'RouterWrongRequestKind',
+      args: [REQUEST_ID, 1, 2],
+    });
+    const { publicClient, walletClient } = revertingClients({ rejectWith: { data: innerData } });
+
+    await expect(createDirectSafeBroadcaster(
+      publicClient as never,
+      walletClient as never,
+      SAFE,
+    ).execute({ to: ROUTER, value: 0n, data: '0xdeadbeef', logicalTx: 'verdict:openVerdictAttempt' }))
+      .rejects.toMatchObject({
+        name: 'SafeInnerRevertError',
+        decodedName: 'RouterWrongRequestKind',
+        // The receipt path knows the tx hash the write path does not.
+        txHash: TX_HASH,
+      } satisfies Partial<SafeInnerRevertError>);
+
+    // Terminal, so the write is not repeated: RouterWrongRequestKind is in the retry policy's
+    // permanent set and cannot clear within the budget.
+    expect(walletClient.writeContract).toHaveBeenCalledTimes(1);
+
+    // A CLI log line on this branch must still say which logical operation failed; the decoded
+    // cause replaces the status text, not the context around it.
+    const second = revertingClients({ rejectWith: { data: innerData } });
+    await expect(createDirectSafeBroadcaster(
+      second.publicClient as never,
+      second.walletClient as never,
+      SAFE,
+    ).execute({ to: ROUTER, value: 0n, data: '0xdeadbeef', logicalTx: 'verdict:openVerdictAttempt' }))
+      .rejects.toThrow(/verdict:openVerdictAttempt/u);
+
+  });
+
+  it('retries the whole sign-and-send, then throws naming the tx hash, Safe and operation', async () => {
+    const { publicClient, walletClient } = revertingClients();
+    // Fake timers so the retry policy's exponential backoff (~13s of real sleeping across the
+    // six attempts) does not become this file's runtime.
+    vi.useFakeTimers();
+
+    const pending = createDirectSafeBroadcaster(
+      publicClient as never,
+      walletClient as never,
+      SAFE,
+    ).execute({
+      to: ROUTER,
+      value: 0n,
+      data: '0xdeadbeef',
+      logicalTx: 'verdict:openVerdictAttempt',
+    }).then(() => null, (e: unknown) => e as SafeExecutionRevertedError);
+    await vi.runAllTimersAsync();
+    const error = await pending;
+    vi.useRealTimers();
+
+    // The point of classifying this retryable: every attempt re-reads the Safe nonce and
+    // re-signs, which is what heals a stale-nonce race. An exhausted budget still throws.
+    expect(walletClient.writeContract).toHaveBeenCalledTimes(TX_RETRY_DEFAULTS.maxAttempts);
+    expect(error).toMatchObject({
+      name: 'SafeExecutionRevertedError',
+      txHash: TX_HASH,
+      safeAddress: SAFE,
+      logicalTx: 'verdict:openVerdictAttempt',
+    } satisfies Partial<SafeExecutionRevertedError>);
+    expect(error?.message).toContain(TX_HASH);
+    expect(error?.message).toContain(SAFE);
+    expect(error?.message).toContain('verdict:openVerdictAttempt');
+  });
+
+  it('lets the retry closure re-read the nonce and re-sign, since that race self-heals', () => {
+    // The message carries the retry policy's marker for this exact receipt path, so the
+    // broadcaster does not have to reach into the classifier to say "retry me".
+    const error = new SafeExecutionRevertedError(
+      `Safe execTransaction mined with status "reverted" — ${SAFE_STALE_NONCE_ERROR_TOKEN}:`
+      + ` tx ${TX_HASH} for Safe ${SAFE} (verdict:claimVerdictDelivery)`,
+      TX_HASH,
+      SAFE,
+      'verdict:claimVerdictDelivery',
+    );
+    expect(isRecoverableTransactionError(error)).toBe(true);
   });
 });
