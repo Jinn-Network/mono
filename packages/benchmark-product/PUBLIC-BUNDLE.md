@@ -313,9 +313,9 @@ since been cut: `0.2.1` is the registry's `latest` for
 `@colophon-claims/verify`, so `@0.2.1` resolves exactly, and `@0.2` — a range,
 not a pin — now resolves to `0.2.1` rather than to `0.2.0`. The compatible line
 therefore reads a v7 bundle. An explicit `@0.2.0`, and any line at `@0.1`, still
-refuses one with the version-mismatch described in
-[Reading a bundle with a reader that is too old](#reading-a-bundle-with-a-reader-that-is-too-old),
-which is a fact about the reader and not a verdict about the bundle.
+refuses one with the version-mismatch described in [Reading a bundle with a
+reader that is too old](#reading-a-bundle-with-a-reader-that-is-too-old), which
+is a fact about the reader and not a verdict about the bundle.
 
 The installed product exposes the same reader implementation,
 
@@ -557,20 +557,19 @@ Report's own method claim is correct. That remains what the Report's signature a
 **This binding is a `0.2.1` guarantee**, and `0.2.1` is the published `latest` — see the note
 below. An earlier reader does not make the relabeled bundle verify: `0.1.0` and `0.2.0` still stop
 the `.../7` and `.../4` downgrades, because their presentation projection dispatches on the sealed
-Report's method too and finds a binary Report where the comparison profile was expected. But they stop it as
-an untyped crash from the last step of the run rather than as this named refusal, so do not read a
-missing `record-integrity`-at-`bundle.json` signature on an older line as the check not having
-fired.
+Report's method too and finds a binary Report where the comparison profile was expected. But they
+stop it as an untyped crash from the last step of the run rather than as this named refusal, so do
+not read a missing `record-integrity`-at-`bundle.json` signature on an older line as the check not
+having fired.
 
 **`0.2.1` is published, and `@0.2` moved with it.** The `0.2.1` reader that public-bundle/7,
 public-bundle/8, and every prompted bundle pin has since been cut, and `0.2.1` is the registry's
-`latest` for `@colophon-claims/verify`. `@0.2.1`
-resolves exactly, and `@0.2` is a range rather than a pin, so it resolves to `0.2.1` too and no
-longer stops at the `0.2.0` support set. Both lines read public-bundle/2, /4, /5, /6, /7, and /8.
-`colophon bundle verify --bundle <bundle-dir> --json` wraps the same reader and remains available,
-but it is no longer the only route: `@colophon-claims/cli` and `@colophon-claims/core` are
-implemented and still unpublished, so the product verb needs a mono checkout that the `npx` line
-does not.
+`latest` for `@colophon-claims/verify`. `@0.2.1` resolves exactly, and `@0.2` is a range rather
+than a pin, so it resolves to `0.2.1` too and no longer stops at the `0.2.0` support set. Both
+lines read public-bundle/2, /4, /5, /6, /7, and /8. `colophon bundle verify --bundle <bundle-dir>
+--json` wraps the same reader and remains available, but it is no longer the only route:
+`@colophon-claims/cli` and `@colophon-claims/core` are implemented and still unpublished, so the
+product verb needs a mono checkout that the `npx` line does not.
 
 An explicitly pinned `@0.2.0` is now the reader too old for a `@0.2.1`-pinned bundle, and a
 prompted /4 fails differently under it from a /7 or /8. `0.2.0` supports the /4 format and carries
