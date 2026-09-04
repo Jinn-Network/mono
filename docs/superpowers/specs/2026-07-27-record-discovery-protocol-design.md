@@ -530,6 +530,18 @@ layouts are additional profiles over the same layout grammar (§22) — exposes:
    projections, declared substrate). The well-known document's schema is part of the
    protocol, not implementation-discretionary; it *introduces* sources, but acceptance is
    always policy plus `source-chain-verification` — introduction is never trust.
+
+   Every URL the document introduces is **contained**: a source's advertised archive root
+   MUST resolve inside the serving root that served the document — same origin, and under
+   that root's own path prefix — and a consumer MUST refuse one that does not, rather than
+   fetch it. This is what makes introduction safe to read at all: the document is written by
+   the peer, so without containment a `.well-known` read is an arbitrary-destination fetch
+   the consumer performs on the peer's instruction. Containment restricts the URL, not the
+   socket, so the guarantee is exactly this and no more: a peer may move a request only
+   within an origin the operator already chose. A consumer enforcing containment MUST apply
+   the same rule per redirect hop, or a peer simply posts a forwarding address instead. The
+   one origin change a consumer MAY permit is a same-host plain-to-TLS upgrade on default
+   ports, which moves neither host nor port and strictly increases assurance.
 4. **Announcement pings** — optional, unauthenticated hints ("head moved") over any transport
    (HTTP ping, webhook, gossip). IPNI's split, kept exactly: pings trigger a pull; all trust
    lives in the pulled, verified chain. Consumers MUST debounce pings and rate-limit

@@ -294,3 +294,126 @@ describe("createHttpTransport deadline (#3222)", () => {
     expect((await transport.fetch("https://peer.example/x")).status).toBe(200);
   });
 });
+
+// #3432: the guard trusted the primitive to obey `redirect: "manual"`. `FetchLike`
+// makes the flag optional, so an injected implementation that ignores it walks
+// the chain itself and every hop check below runs against an already-walked
+// chain. No production construction does that today; the point is that the
+// guard can now tell.
+describe("createHttpTransport redirect-manual enforcement (#3432)", () => {
+  /** A primitive that ignores `redirect: "manual"` and hands back the final response. */
+  function followsAnyway(finalUrl: string, redirected = true): FetchLike {
+    return async () => {
+      const response = new Response(encoder.encode("internal-secret"), { status: 200 });
+      Object.defineProperty(response, "redirected", { value: redirected });
+      Object.defineProperty(response, "url", { value: finalUrl });
+      return response;
+    };
+  }
+
+  it("refuses a response the primitive reached by following a hop itself", async () => {
+    const transport = createHttpTransport("", followsAnyway("http://127.0.0.1:8545/"));
+    await expect(transport.fetch("https://peer.example/archive/0001.json"))
+      .rejects.toThrow(TransportRedirectError);
+  });
+
+  it("refuses even when the primitive follows without setting `redirected`", async () => {
+    const transport = createHttpTransport("", followsAnyway("http://127.0.0.1:8545/", false));
+    await expect(transport.fetch("https://peer.example/archive/0001.json"))
+      .rejects.toThrow(/settled on origin http:\/\/127\.0\.0\.1:8545/u);
+  });
+
+  it("accepts an honest primitive that reports the requested URL back", async () => {
+    const transport = createHttpTransport("", async (url) => {
+      const response = new Response(encoder.encode("page"), { status: 200 });
+      Object.defineProperty(response, "url", { value: url });
+      return response;
+    });
+    expect((await transport.fetch("https://peer.example/archive/0001.json")).status).toBe(200);
+  });
+
+  it("refuses a credentialed redirect target as a redirect error, not a raw TypeError", async () => {
+    const stub = stubFetch((url) => (url === "https://peer.example/archive/0001.json"
+      ? new Response(null, { status: 302, headers: { location: "https://user:secret@peer.example/x" } })
+      : new Response(encoder.encode("x"), { status: 200 })));
+    const transport = createHttpTransport("", stub.fetchLike);
+    const failure = await transport.fetch("https://peer.example/archive/0001.json").catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(TransportRedirectError);
+    expect((failure as Error).message).toMatch(/embedded credentials/u);
+    // Never requested -- the refusal is before the hop, not after it.
+    expect(stub.calls.map((call) => call.url)).toEqual(["https://peer.example/archive/0001.json"]);
+  });
+});
+
+// #3433: a scheme change is an origin change, so PR #3414 refused the
+// ubiquitous `http://peer.example -> https://peer.example` upgrade and turned a
+// self-healing operator misconfiguration into a hard failure. The carve-out is
+// narrow enough that the peer chooses neither the host nor the port.
+describe("createHttpTransport same-host TLS upgrade (#3433)", () => {
+  function upgrading(location: string): ReturnType<typeof stubFetch> {
+    return stubFetch((url) => (url === "http://peer.example/archive/0001.json"
+      ? new Response(null, { status: 301, headers: { location } })
+      : new Response(encoder.encode("page"), { status: 200 })));
+  }
+
+  it("follows a same-host http -> https upgrade", async () => {
+    const stub = upgrading("https://peer.example/archive/0001.json");
+    const transport = createHttpTransport("", stub.fetchLike);
+    const response = await transport.fetch("http://peer.example/archive/0001.json");
+    expect(new TextDecoder().decode(response.bytes)).toBe("page");
+    expect(stub.calls.map((call) => call.url)).toEqual([
+      "http://peer.example/archive/0001.json",
+      "https://peer.example/archive/0001.json",
+    ]);
+  });
+
+  it("holds the upgraded hop to its new https origin", async () => {
+    const stub = stubFetch((url) => {
+      if (url === "http://peer.example/archive/0001.json") {
+        return new Response(null, { status: 301, headers: { location: "https://peer.example/a" } });
+      }
+      if (url === "https://peer.example/a") {
+        return new Response(null, { status: 302, headers: { location: "http://peer.example/b" } });
+      }
+      return new Response(encoder.encode("page"), { status: 200 });
+    });
+    const transport = createHttpTransport("", stub.fetchLike);
+    // The upgrade is one-way: once on https, dropping back to http is a
+    // downgrade and refused like any other origin change.
+    await expect(transport.fetch("http://peer.example/archive/0001.json"))
+      .rejects.toThrow(TransportRedirectError);
+  });
+
+  const stillRefused = [
+    ["a different host", "https://evil.example/archive/0001.json"],
+    ["an explicit non-default https port", "https://peer.example:9443/archive/0001.json"],
+    ["a host change dressed as an upgrade", "https://127.0.0.1/archive/0001.json"],
+  ] as const;
+
+  for (const [label, location] of stillRefused) {
+    it(`still refuses ${label}`, async () => {
+      const stub = upgrading(location);
+      const transport = createHttpTransport("", stub.fetchLike);
+      await expect(transport.fetch("http://peer.example/archive/0001.json"))
+        .rejects.toThrow(TransportRedirectError);
+      expect(stub.calls.map((call) => call.url)).toEqual(["http://peer.example/archive/0001.json"]);
+    });
+  }
+
+  it("treats an explicitly written default port as the default it is", async () => {
+    const stub = stubFetch((url) => (url === "http://peer.example/archive/0001.json"
+      ? new Response(null, { status: 301, headers: { location: "https://peer.example:443/archive/0001.json" } })
+      : new Response(encoder.encode("page"), { status: 200 })));
+    const transport = createHttpTransport("", stub.fetchLike);
+    expect((await transport.fetch("http://peer.example:80/archive/0001.json")).status).toBe(200);
+  });
+
+  it("refuses an upgrade from an explicit non-default http port", async () => {
+    const stub = stubFetch((url) => (url === "http://peer.example:8080/archive/0001.json"
+      ? new Response(null, { status: 301, headers: { location: "https://peer.example/archive/0001.json" } })
+      : new Response(encoder.encode("page"), { status: 200 })));
+    const transport = createHttpTransport("", stub.fetchLike);
+    await expect(transport.fetch("http://peer.example:8080/archive/0001.json"))
+      .rejects.toThrow(TransportRedirectError);
+  });
+});
