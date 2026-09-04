@@ -132,8 +132,9 @@ npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
 
 `@0.1.0` is the exact producer-side release inside that line. A v4 whose
-screening was prompted pins `@0.2.1` instead, with `@0.2` compatible and `@0.2.0`
-on bundles materialized before `0.2.1` existed:
+screening was prompted pins `@0.2.1` instead, with `@0.2` compatible only for a
+bundle pinning `@0.2.0` — the line a prompted v4 materialized before `0.2.1`
+existed carries — and `@0.1` refusing outright:
 
 ```bash
 npx @colophon-claims/verify@0.2.1 <bundle-dir>
@@ -144,7 +145,11 @@ fourth axis, and only anchoring, qualification, and disclosure select the format
 — so take the line from the claim package's own `verification.command`, or read
 `method.parameters.promptedScreeningProfile`, which is
 `"prompted-codex-screening/v1"` on a prompted bundle and absent otherwise. The
-publication caveat stated for v7 below applies to a prompted v4's `@0.2.1` too.
+publication caveat stated for v7 below applies to a prompted v4's `@0.2.1` too,
+but the refusal a prompted v4 earns is not v7's: v7 is refused on the format,
+before the claim is read, while a prompted v4 is a format `0.1.0` and `0.2.0`
+both support and is refused on the claim inside it. That case is described in
+[A listed format is not on its own a verdict either](#reading-a-bundle-with-a-reader-that-is-too-old).
 
 V4 carries no anchors, so the anchor trust-material flags below do not apply to
 it. It returns the same **six checks** as v2 on both lines: the qualification
@@ -317,7 +322,10 @@ colophon bundle verify --bundle <bundle-dir> --json
 ```
 
 which wraps the same reader implementation, or with a reader built from the
-`0.2.1` source. The product verb takes no trust-material flags and passes none,
+`0.2.1` source. The product route is not the easier of the two: `@colophon-claims/cli`
+and `@colophon-claims/core` are implemented but unpublished as well, so it needs
+the same mono checkout the source build does. A reader who cannot build from the
+repository has no route to a v7 bundle until the `0.2.1` cut. The product verb takes no trust-material flags and passes none,
 so under it a well-formed anchor reports `present` and never `verified`; only
 the `npx` reader can carry an anchor further, and only once the release exists.
 
@@ -488,7 +496,8 @@ v6. The publication caveat stated for v7 applies here unchanged: `0.2.1` is not
 published yet, `@0.2` resolves to `0.2.0`, and `0.2.0` refuses a v8 bundle with
 the same version-mismatch refusal it gives a v7 one. Until the release is cut,
 read a v8 bundle with `colophon bundle verify --bundle <bundle-dir> --json` or
-with a reader built from the `0.2.1` source.
+with a reader built from the `0.2.1` source — and, as for v7, the product CLI is
+itself unpublished, so both routes need a mono checkout.
 
 ## Portable verification
 
@@ -556,7 +565,10 @@ public-bundle/8, and every prompted bundle pin is cut by a manual, demand-gated 
 not been fired, so no `0.2.1` exists on the registry today. `@0.2.1` does not resolve, and `@0.2`
 resolves to `0.2.0`, which supports public-bundle/2, /4, /5, and /6 and refuses /7 and /8. Until the
 release is cut, read anything that pins `@0.2.1` with `colophon bundle verify --bundle <bundle-dir>
---json`, which wraps the same reader, or with a reader built from the `0.2.1` source.
+--json`, which wraps the same reader, or with a reader built from the `0.2.1` source. Both routes
+require a mono checkout: `@colophon-claims/cli` and `@colophon-claims/core` are implemented but
+unpublished as well, so the product verb is not an easier path than the source build. A reader who
+cannot build from the repository has no route to a `@0.2.1`-pinned bundle today.
 
 A prompted /4 bundle fails differently from a /7 or /8 one under `@0.2`, and the distinction
 matters when you read the refusal. `0.2.0` supports the format and carries the prompted-screening
