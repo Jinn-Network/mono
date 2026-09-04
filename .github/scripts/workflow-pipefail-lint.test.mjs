@@ -117,6 +117,108 @@ test('a function definition is a group too, so a guard written inside its body c
   assert.deepEqual(severities('f { producer | head -1; }', { shell: 'bash' }), ['error:head']);
 });
 
+test('a `||` guard on a multi-line compound is the guard it is on one line', () => {
+  // The fold used to end a logical line on `{`, `if …; then` or `for …; do`, because none
+  // of them ends on a continuation operator — so the opener, the pipeline and the
+  // `} || true` closer were walked as three separate statements and the guard was never
+  // seen beside the pipeline it guards. Inside a `run: |` block the folded spelling is
+  // the one people actually write, so the idiom reported a red on a genuinely guarded
+  // compound (#3923).
+  for (const guarded of [
+    ['{', '  producer | head -1', '} || true'],
+    ['if true; then', '  producer | head -1', 'fi || true'],
+    ['for f in a b; do', '  producer | head -1', 'done || true'],
+    ['while read -r f; do', '  producer | head -1', 'done || true'],
+    ['case $v in', '  a) producer | head -1 ;;', 'esac || true'],
+  ]) {
+    assert.deepEqual(severities(guarded.join('\n'), { shell: 'bash' }), [], guarded.join(' / '));
+  }
+
+  // Unfolding is not silencing: drop the guard and each one is still exactly one error.
+  for (const unguarded of [
+    ['{', '  producer | head -1', '}'],
+    ['if true; then', '  producer | head -1', 'fi'],
+    ['for f in a b; do', '  producer | head -1', 'done'],
+    ['while read -r f; do', '  producer | head -1', 'done'],
+    ['case $v in', '  a) producer | head -1 ;;', 'esac'],
+  ]) {
+    assert.deepEqual(
+      severities(unguarded.join('\n'), { shell: 'bash' }),
+      ['error:head'],
+      unguarded.join(' / '),
+    );
+  }
+
+  // A guard written inside the folded body still covers the inside only.
+  assert.deepEqual(
+    severities(['if true; then', '  producer | head -1 || true', '  git tag | head -1', 'fi'].join('\n'), {
+      shell: 'bash',
+    }),
+    ['error:head'],
+  );
+});
+
+test('a folded compound still ends where its closer does', () => {
+  // The fold must reopen the list at the closer, or everything after a compound would be
+  // swallowed into it — including the statements the gate exists to report.
+  assert.deepEqual(
+    severities(['if true; then', '  echo y', 'fi', 'producer | head -1'].join('\n'), { shell: 'bash' }),
+    ['error:head'],
+  );
+  // A heredoc written inside a compound must not close the fold at its terminator.
+  assert.deepEqual(
+    severities(
+      ['{', "  cat <<'EOF'", '  literal', '  EOF', '  producer | head -1', '} || true'].join('\n'),
+      { shell: 'bash' },
+    ),
+    [],
+  );
+});
+
+test('a case pattern closes a pattern, not the `case` itself', () => {
+  // `splitStatementUnits` lowered the nesting depth on any `)` operator, and a case
+  // pattern is terminated by exactly that `)`. So `case $v in a)` netted back to depth 0,
+  // the `|| true` after `esac` terminated a unit holding only `esac`, and a guarded
+  // pipeline reported (#3925).
+  assert.deepEqual(severities('case $v in a) producer | head -1 ;; esac || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('case $v in (a) producer | head -1 ;; esac || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('case $v in a) producer | head -1 ;; esac', { shell: 'bash' }), ['error:head']);
+  // The guard inside one branch covers that branch only.
+  assert.deepEqual(
+    severities('case $v in a) echo x || true ;; b) producer | head -1 ;; esac', { shell: 'bash' }),
+    ['error:head'],
+  );
+});
+
+test('a command substitution is a nested list, not a hole in the statement', () => {
+  // `syntaxMask` leaves `$(` and its `)` out of the mask so a pipe inside a substitution
+  // is still a pipe. They are therefore not operators either, so a `||` written inside one
+  // separated units as if it were top level and the reported `statement` started
+  // mid-substitution (#3926).
+  const garbled = findings('foo $(a || true) | head -1', { shell: 'bash' });
+  assert.equal(garbled.length, 1);
+  assert.equal(garbled[0].severity, 'error');
+  assert.equal(garbled[0].consumer, 'head');
+  assert.equal(garbled[0].statement, 'foo $(a || true) | head -1');
+
+  // A guard written inside the substitution guards what is inside it — the same shape as
+  // a brace group, now that the interior is walked as its own list.
+  assert.deepEqual(severities('X="$({ producer | head -1; } || true)"', { shell: 'bash' }), []);
+  assert.deepEqual(severities('X="$(if true; then producer | head -1; fi || true)"', { shell: 'bash' }), []);
+
+  // And the substitution is still transparent to the pipe hunt it was made transparent
+  // for: an unguarded pipeline inside one still reports, against the whole statement.
+  const inner = findings('X="$(producer | head -1)"', { shell: 'bash' });
+  assert.deepEqual(
+    inner.map((finding) => `${finding.severity}:${finding.consumer}`),
+    ['error:head'],
+  );
+  assert.equal(inner[0].statement, 'X="$(producer | head -1)"');
+  // A `||` inside a substitution spares only what precedes it there, never a later
+  // top-level pipeline.
+  assert.deepEqual(severities('echo $(a || true); producer | head -1', { shell: 'bash' }), ['error:head']);
+});
+
 test('a redirection is not a list separator: the pipe on its right is still a pipe', () => {
   // `2>&1` and `&>` carry an `&` that only looks like the background operator. Reading it
   // as one would cut the pipeline in two and lose the producer entirely — a silent hole
@@ -372,6 +474,16 @@ test('the advisory names the shell GitHub actually invokes', () => {
   assert.match(findings('git tag | head -1', { shell: 'sh' })[0].detail, /`sh -e \{0\}`/u);
   assert.doesNotMatch(findings('git tag | head -1', { shell: 'sh' })[0].detail, /bash/u);
   assert.match(findings('git tag | head -1', { shell: 'zsh -e {0}' })[0].detail, /`zsh -e \{0\}`/u);
+
+  // Only GitHub's built-in `shell:` keywords get GitHub's own `<name> -e {0}` template.
+  // Any other value is a custom shell command, run as written with the script path
+  // appended and no `-e` — so claiming one for `dash` or `zsh` sent a reader looking for
+  // a flag that is not there (#3965).
+  for (const shell of ['dash', 'zsh']) {
+    const detail = findings('git tag | head -1', { shell })[0].detail;
+    assert.ok(detail.includes(`\`${shell}\``), `${shell}: ${detail}`);
+    assert.doesNotMatch(detail, /-e/u, shell);
+  }
 });
 
 test('a non-shell `shell:` is skipped whole', () => {

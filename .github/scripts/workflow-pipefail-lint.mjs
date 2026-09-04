@@ -48,6 +48,10 @@ const WORKFLOWS_DIR = resolve(import.meta.dirname, '../workflows');
 // `python`, `node`, …) has no `|` semantics this lint models, and is skipped whole.
 const PIPELINE_SHELLS = new Set(['bash', 'sh', 'dash', 'zsh']);
 
+// GitHub's built-in `shell:` keywords. Only these are given GitHub's own invocation
+// template; any other value is passed through as a custom shell command.
+const GITHUB_BUILTIN_SHELLS = new Set(['bash', 'pwsh', 'python', 'sh', 'cmd', 'powershell']);
+
 // grep options that consume the following argument, so a pattern that happens to look
 // like `-q` is never read as a flag.
 const GREP_ARG_TAKING = new Set(['-e', '-f', '-m', '--regexp', '--file', '--max-count']);
@@ -74,27 +78,37 @@ const ANNOTATION = /#\s*pipefail-lint:\s*allow\b(?<rest>.*)$/u;
 // `X="$(producer | head -1)"` is seen for what it is rather than hidden by the outer
 // double quotes. That exact shape is `release-notes-scaffold.yml`'s, so treating `$( … )`
 // as literal would have made this lint blind to the sites it exists to find.
+// `substDepth` records how many `$( … )` frames are open at each index. The mask keeps a
+// substitution transparent; the depth is what lets the tokeniser still know where one
+// begins and ends, so a `||` written inside one is not read as a top-level separator.
 function syntaxMask(text, initial = { quote: null, frames: [] }) {
   const mask = new Array(text.length).fill(false);
+  const substDepth = new Array(text.length).fill(0);
   const frames = [...initial.frames];
   let quote = initial.quote;
 
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
     if (quote !== "'" && char === '\\') {
+      substDepth[index] = frames.length;
       index += 1;
+      if (index < text.length) substDepth[index] = frames.length;
       continue;
     }
     if (quote !== "'" && char === '$' && text[index + 1] === '(') {
       frames.push(quote);
       quote = null;
+      substDepth[index] = frames.length;
       index += 1;
+      substDepth[index] = frames.length;
       continue;
     }
     if (quote === null && char === ')' && frames.length > 0) {
       quote = frames.pop();
+      substDepth[index] = frames.length;
       continue;
     }
+    substDepth[index] = frames.length;
     if (quote === null && (char === "'" || char === '"')) {
       quote = char;
       continue;
@@ -105,7 +119,38 @@ function syntaxMask(text, initial = { quote: null, frames: [] }) {
     }
     mask[index] = quote === null;
   }
-  return { mask, quote, frames };
+  return { mask, substDepth, quote, frames };
+}
+
+// The interiors of `text`'s outermost `$( … )`, as `[start, end)` offsets. A run of
+// non-zero substitution depth opens on the `$` and ends on the index of the closing `)`,
+// which is back at the enclosing depth.
+function substitutionSpans(text) {
+  const { substDepth } = syntaxMask(text);
+  const spans = [];
+  let start = null;
+  const close = (end) => {
+    if (start !== null && text.startsWith('$(', start)) spans.push({ start: start + 2, end });
+    start = null;
+  };
+  for (let index = 0; index < text.length; index += 1) {
+    if (substDepth[index] > 0) {
+      start ??= index;
+      continue;
+    }
+    close(index);
+  }
+  close(text.length);
+  return spans;
+}
+
+// `text` with the given spans replaced by spaces, so offsets outside them are unmoved.
+function blankSpans(text, spans) {
+  let masked = text;
+  for (const span of spans) {
+    masked = masked.slice(0, span.start) + ' '.repeat(span.end - span.start) + masked.slice(span.end);
+  }
+  return masked;
 }
 
 // Split `text` on shell-syntax occurrences of the operators in `separators`.
@@ -132,6 +177,10 @@ function splitUnquoted(text, separators) {
 // written after the closer guards everything inside, so the separators nested in the
 // compound are not top-level separators at all — reading them as such is what lost the
 // guard in `{ producer | head -1; } || true`.
+//
+// `case` is the one opener whose body is reached through a `)`: a pattern is terminated
+// by exactly the operator that closes a subshell. Nesting is therefore tracked as a stack
+// of what is open rather than a counter, so that `)` pops only a `(` — see `applyNesting`.
 const COMPOUND_OPENERS = new Set(['if', 'for', 'while', 'until', 'case', 'select', '{']);
 const COMPOUND_CLOSERS = new Set(['fi', 'done', 'esac', '}']);
 // Keywords that separate the parts of a compound command's body.
@@ -143,7 +192,7 @@ const LIST_OPERATORS = new Set([';', ';;', '&&', '||', '&']);
 // which is exactly the rule bash uses: it opens a group only when it stands alone, so
 // `a{b,c}` and `${VAR}` are left as the single words they are.
 function shellTokens(text) {
-  const { mask } = syntaxMask(text);
+  const { mask, substDepth } = syntaxMask(text);
   // `2>&1` and `cmd &> log` carry an `&` that is part of a redirection, not the
   // background operator — reading it as a list separator would cut a pipeline in two and
   // lose the pipe entirely.
@@ -162,13 +211,25 @@ function shellTokens(text) {
     if (isOperator(index)) {
       const pair = text.slice(index, index + 2);
       const value = ['&&', '||', ';;', '|&'].includes(pair) ? pair : text[index];
-      tokens.push({ operator: true, value, start: index, end: index + value.length });
+      tokens.push({
+        operator: true,
+        value,
+        start: index,
+        end: index + value.length,
+        subst: substDepth[index] > 0,
+      });
       index += value.length;
       continue;
     }
     let end = index;
     while (end < text.length && !isBreak(end)) end += 1;
-    tokens.push({ operator: false, value: text.slice(index, end), start: index, end });
+    tokens.push({
+      operator: false,
+      value: text.slice(index, end),
+      start: index,
+      end,
+      subst: substDepth[index] > 0,
+    });
     index = end;
   }
   return tokens;
@@ -184,7 +245,7 @@ function shellTokens(text) {
 function splitStatementUnits(tokens) {
   const units = [];
   let current = [];
-  let depth = 0;
+  const stack = [];
 
   const flush = (terminator) => {
     units.push({ tokens: current, terminator });
@@ -193,25 +254,44 @@ function splitStatementUnits(tokens) {
 
   for (const token of tokens) {
     const separates =
-      depth === 0 &&
+      stack.length === 0 &&
+      !token.subst &&
       ((token.operator && LIST_OPERATORS.has(token.value)) ||
         (!token.operator && BODY_SEPARATORS.has(token.value)));
     if (separates) {
       flush(token.operator ? token.value : ';');
       continue;
     }
-    if (token.operator) {
-      if (token.value === '(') depth += 1;
-      if (token.value === ')') depth = Math.max(0, depth - 1);
-    } else if (COMPOUND_OPENERS.has(token.value)) {
-      depth += 1;
-    } else if (COMPOUND_CLOSERS.has(token.value)) {
-      depth = Math.max(0, depth - 1);
-    }
+    applyNesting(stack, token);
     current.push(token);
   }
   flush(null);
   return units;
+}
+
+// `token`'s effect on the stack of compound commands still open. A substitution's tokens
+// have no effect: `walkStatement` walks the interior as its own list, and letting an inner
+// `(`, `{` or `esac` move this stack would cut the outer statement in the wrong place.
+function applyNesting(stack, token) {
+  if (token.subst) return;
+  if (token.operator) {
+    if (token.value === '(') stack.push('(');
+    // A `)` closes a subshell only when one is open. Inside a `case` it terminates a
+    // pattern instead — popping there is what dropped the depth before the body was
+    // reached and lost the guard in `case … esac || true`.
+    else if (token.value === ')' && stack.at(-1) === '(') stack.pop();
+    return;
+  }
+  if (COMPOUND_OPENERS.has(token.value)) stack.push(token.value);
+  else if (COMPOUND_CLOSERS.has(token.value) && stack.length > 0) stack.pop();
+}
+
+// How many compound commands `text` leaves open. A logical line that ends inside one is
+// not finished, however few continuation operators it carries.
+function openCompounds(text) {
+  const stack = [];
+  for (const token of shellTokens(text)) applyNesting(stack, token);
+  return stack.length;
 }
 
 // Whether the operator following each unit guards it. `||` guards the unit to its left,
@@ -594,12 +674,18 @@ function shellSetsPipefail(shell) {
   return trimmed === 'bash' || /\bpipefail\b/u.test(trimmed);
 }
 
-// How GitHub invokes the shell, for the advisory that reports a laundered producer. A
-// bare shell name is run `<name> -e {0}`; a custom string is run as written.
+// How GitHub invokes the shell, for the advisory that reports a laundered producer. Only
+// a built-in keyword gets GitHub's own `<name> -e {0}` template; every other value —
+// bare name or full string — is a custom shell command, run as written with the script
+// path appended and no `-e` added. `PIPELINE_SHELLS` admits `dash` and `zsh`, neither of
+// which is built in, so claiming `-e` for them sent a reader looking for a flag that is
+// not there.
 function invokedShell(shell) {
   if (shell === null) return 'default shell (`bash -e`)';
   const trimmed = shell.trim();
-  return /\s/u.test(trimmed) ? `custom shell (\`${trimmed}\`)` : `\`${trimmed} -e {0}\``;
+  const bare = !/\s/u.test(trimmed);
+  if (bare && GITHUB_BUILTIN_SHELLS.has(trimmed)) return `\`${trimmed} -e {0}\``;
+  return `custom shell (\`${trimmed}\`)`;
 }
 
 function pipefailToggle(statement) {
@@ -656,10 +742,10 @@ function logicalLines(body) {
     pending.annotation ??= annotationReason(entry.text);
 
     if (heredoc !== null) {
-      heredocOpenerOpen = statementIsOpen(scanned.code, state);
+      heredocOpenerOpen = statementIsOpen(scanned.code, state) || openCompounds(pending.text) > 0;
       continue;
     }
-    if (statementIsOpen(scanned.code, state)) continue;
+    if (statementIsOpen(scanned.code, state) || openCompounds(pending.text) > 0) continue;
     lines.push(pending);
     pending = null;
   }
@@ -746,7 +832,22 @@ function walkStatement(text, tokens, context, topLevel = true) {
       continue;
     }
 
-    for (const segment of splitUnquoted(statement, ['|&', '|']).slice(1)) {
+    // A command substitution is its own list: `$( … )` runs in a subshell, so a guard
+    // written inside one covers the inside only, and a `||` written inside one is not a
+    // separator of the statement that holds it. Walking the interior separately keeps
+    // both true while the finding still names the whole statement a reader sees.
+    const spans = substitutionSpans(statement);
+    for (const span of spans) {
+      const interior = statement.slice(span.start, span.end);
+      walkStatement(
+        interior,
+        shellTokens(interior),
+        { ...context, report: (_inner, consumer) => context.report(statement.trim(), consumer) },
+        false,
+      );
+    }
+
+    for (const segment of splitUnquoted(blankSpans(statement, spans), ['|&', '|']).slice(1)) {
       const consumer = earlyExitConsumer(segment);
       if (consumer !== null) context.report(statement.trim(), consumer);
     }
