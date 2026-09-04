@@ -59,11 +59,6 @@ export function isRecoverableTransactionError(error: unknown): boolean {
   if (
     errorName === 'SafeBroadcastFenceError'
     || errorName === 'SafePostBroadcastHookError'
-    // A Safe execTransaction that MINED with status 'reverted' (issue #3733). A top-level revert
-    // does not consume the Safe nonce, so the same signed call reverts identically on resubmission
-    // -- retrying only burns the budget. Matched here, ahead of the substring checks below,
-    // because the message carries a hex tx hash that can contain '502'/'503'/'429'.
-    || errorName === 'SafeExecutionRevertedError'
   ) {
     return false;
   }
@@ -166,9 +161,10 @@ export function isRecoverableTransactionError(error: unknown): boolean {
   if (msg.includes('GS026')) return false;
   if (msg.includes('GS013')) return false;
 
-  // Receipt path from safe.ts: inner re-simulation succeeded but the mined
-  // execTransaction reverted — a stale Safe nonce / signature race that
-  // re-read + re-sign self-heals within executeSafeTransaction's retry loop.
+  // Receipt path: inner re-simulation succeeded but the mined execTransaction
+  // reverted — a stale Safe nonce / signature race that re-read + re-sign
+  // self-heals within the broadcaster's retry loop. Produced by
+  // `createDirectSafeBroadcaster` (issue #3733).
   if (msg.includes(SAFE_STALE_NONCE_ERROR_TOKEN)) return true;
 
   if (

@@ -29,18 +29,20 @@ export class SafeInnerRevertError extends Error {
 }
 
 /**
- * A Safe `execTransaction` that was mined but reverted at the TOP level (issue #3733).
+ * A Safe `execTransaction` that MINED with `status: 'reverted'` and whose inner call, on
+ * re-simulation, does not revert (issue #3733).
  *
- * Distinct from `SafeInnerRevertError`: there the Safe itself succeeded and wrapped a failing
- * inner call as `GS013`/`GS026`, which `decodeSafeInnerRevert` can re-simulate and name. Here the
- * transaction is on chain with `status: 'reverted'` — out of gas, an EOA that is no longer a Safe
- * owner, a reorg — so there is no inner selector to recover and `receipt.logs` is empty. viem's
- * `waitForTransactionReceipt` resolves rather than throws for this, so without an explicit check
- * the broadcaster reports success and the failure resurfaces one layer up as a decoding miss.
+ * Distinct from `SafeInnerRevertError`, which carries a recovered inner reason. Reaching here
+ * means there is nothing to recover: the inner call succeeds now, so the mined failure was a
+ * stale Safe nonce or a signature race. viem's `waitForTransactionReceipt` resolves rather than
+ * throws for a reverted transaction, so without an explicit check the broadcaster reported this
+ * as a successful broadcast with `logs: []`, and the failure resurfaced one layer up as a
+ * decoding miss.
  *
- * Terminal, never retried: the same signed call reverts identically on resubmission (a top-level
- * revert does not consume the Safe nonce). `isRecoverableTransactionError` matches this by `name`
- * BEFORE its substring checks, because a tx hash is hex and can contain `502`/`503`/`429`.
+ * Retryable, not terminal: the broadcaster's retry closure re-reads the Safe nonce and re-signs
+ * on every attempt, so this self-heals the way venue-base's `createSafeBroadcaster` heals the
+ * same receipt path. Carry `SAFE_STALE_NONCE_ERROR_TOKEN` in the message — that is the retry
+ * policy's marker for it — and let the retry budget bound the loop.
  */
 export class SafeExecutionRevertedError extends Error {
   override readonly name = 'SafeExecutionRevertedError';

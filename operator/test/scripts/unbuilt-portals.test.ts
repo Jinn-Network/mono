@@ -93,5 +93,15 @@ describe('findUnbuiltPortalPackages', () => {
     ]);
     expect(message).toContain('@jinn-network/sdk: missing dist/index.d.ts');
     expect(message).toContain('yarn typecheck');
+    // `yarn typecheck` builds this one, so do not send the reader through an install first.
+    expect(message).not.toContain('yarn install');
+  });
+
+  it('names `yarn install` when a portal is absent, which `yarn typecheck` cannot fix', () => {
+    const message = formatUnbuiltPortalsMessage([
+      { name: '@jinn-network/sdk', reason: 'not installed' },
+    ]);
+    expect(message).toContain('yarn install');
+    expect(message).toContain('yarn typecheck');
   });
 });

@@ -52,14 +52,22 @@ export function findUnbuiltPortalPackages(dir) {
   return unbuilt;
 }
 
-/** The message `check-test-typecheck.mjs` prints instead of a spurious regression list. */
+/**
+ * The message `check-test-typecheck.mjs` prints instead of a spurious regression list.
+ *
+ * The remedy depends on the reason: `yarn typecheck` builds an installed-but-unbuilt portal, and
+ * cannot do anything at all about one that is not installed. Naming the wrong one sends the reader
+ * to a command that re-fails.
+ */
 export function formatUnbuiltPortalsMessage(unbuilt) {
+  const uninstalled = unbuilt.some(({ reason }) => !reason.startsWith('missing '));
   return [
-    'typecheck:test cannot run — the portal packages the test tree compiles against are not built:',
+    'typecheck:test cannot run — the portal packages the test tree compiles against are not ready:',
     '',
     ...unbuilt.map(({ name, reason }) => `  ${name}: ${reason}`),
     '',
-    'Run `yarn typecheck` first (it builds sdk/stack/plugin/core), then `yarn typecheck:test`,',
-    'which builds jinn-layer itself. That is the order .github/workflows/ci.yml uses.',
+    ...(uninstalled ? ['Run `yarn install` in operator/ first.'] : []),
+    'Run `yarn typecheck` (it builds sdk/stack/plugin/core), then `yarn typecheck:test`, which',
+    'builds jinn-layer itself. That is the order .github/workflows/ci.yml uses.',
   ].join('\n');
 }
