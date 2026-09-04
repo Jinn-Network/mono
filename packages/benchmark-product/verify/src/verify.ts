@@ -530,10 +530,9 @@ export async function verifyPublicBundleSnapshot(
   // no mandatory MEMBER: the sealed disclosure record travels at the already-allowlisted
   // `records/<sha256>.bin` path, so its list is v7's, which is v4's.
   const carriesDisclosure = checked.manifest.format === BUNDLE_V8_FORMAT;
-  const { carriesQualification, carriesAnchors, mandatoryFiles } =
-    checked.manifest.format === BUNDLE_V8_FORMAT
-      ? { carriesQualification: true, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_V4_FILES }
-      : legacyClosure(checked.manifest.format);
+  const { carriesQualification, carriesAnchors, mandatoryFiles } = carriesDisclosure
+    ? { carriesQualification: true, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_V4_FILES }
+    : legacyClosure(checked.manifest.format);
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
