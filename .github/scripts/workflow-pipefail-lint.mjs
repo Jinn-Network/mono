@@ -470,20 +470,50 @@ function matchCompounds(tokens) {
     }
     const depth = open.findLastIndex((entry) => entry.kind === compound.kind);
     if (depth === -1) {
-      // A closer with no opener on this line either closes a compound that began on an
-      // earlier body line, or is a `case` arm's `)`. Whether a `||` follows it is what
-      // says the compound it closes is guarded; the kind is what says which one.
+      // A `)` with no `(` before it, written where a `case` is the innermost thing open,
+      // is that `case`'s arm terminator — the only unmatched `)` a `case` can hold. It
+      // closes nothing, so reporting it let it pop an enclosing subshell instead, and the
+      // subshell's real `)` then closed nothing in turn and its guard never reached the
+      // arm. A subshell opened *inside* the arm is matched by kind above and never
+      // reaches here.
+      if (compound.kind === 'paren' && open.at(-1)?.kind === 'case') continue;
+      // A closer with no opener on this line closes a compound that began on an earlier
+      // body line. Whether a `||` follows it is what says that compound is guarded; the
+      // kind is what says which one; and `start` is what says which of this line's own
+      // findings stand before it and are therefore inside it.
       const next = tokens[position + 1];
       unmatchedClosers.push({
         kind: compound.kind,
         guarded: next !== undefined && next.type === 'operator' && next.value === '||',
+        start: token.start,
       });
       continue;
     }
     for (let inner = open[depth].position + 1; inner < position; inner += 1) enclosed[inner] = true;
     open.length = depth;
   }
-  return { enclosed, unmatchedClosers, unmatchedOpeners: open.map((entry) => entry.kind) };
+  return { enclosed, unmatchedClosers, unmatchedOpeners: open };
+}
+
+/**
+ * Whether the opener at `position` is the group of a function *definition* — `f () {`,
+ * `f() (`, `function f {`. A `||` written after a definition guards defining the
+ * function, which cannot fail; the body runs unguarded whenever the function is later
+ * called, so the guard must not reach into it.
+ */
+function opensDefinition(text, tokens, position) {
+  let statementStart = 0;
+  for (let index = position - 1; index >= 0; index -= 1) {
+    if (tokens[index].type === 'operator') {
+      statementStart = tokens[index].end;
+      break;
+    }
+  }
+  const prefix = text.slice(statementStart, tokens[position].start);
+  // `definitionPrefixLength` only counts a prefix that a group actually opens behind, so
+  // the opener token is stood in for by a `{`; the prefix is a definition's when the
+  // match consumes all of it.
+  return prefix.trim() !== '' && definitionPrefixLength(`${prefix}{`) === prefix.length;
 }
 
 /**
@@ -499,7 +529,10 @@ function lineNesting(text) {
   const first = tokens[0];
   return {
     unmatchedClosers,
-    unmatchedOpeners,
+    unmatchedOpeners: unmatchedOpeners.map((entry) => ({
+      kind: entry.kind,
+      definition: opensDefinition(text, tokens, entry.position),
+    })),
     openerFirst: first !== undefined && tokenCompound(first)?.role === 'open',
   };
 }
@@ -512,10 +545,10 @@ function splitTopLevel(text) {
   let start = 0;
   for (const [position, token] of tokens.entries()) {
     if (token.type !== 'operator' || enclosed[position]) continue;
-    units.push({ text: text.slice(start, token.start), separator: token.value });
+    units.push({ text: text.slice(start, token.start), separator: token.value, offset: start });
     start = token.end;
   }
-  units.push({ text: text.slice(start), separator: null });
+  units.push({ text: text.slice(start), separator: null, offset: start });
   return units;
 }
 
@@ -563,7 +596,15 @@ function compoundBody(statement) {
     const closer = close.exec(text);
     const bodyStart = opener.index + opener[0].length;
     if (closer === null || closer.index < bodyStart) continue;
-    return { body: text.slice(bodyStart, closer.index), carries: skip === 0 && carries };
+    return {
+      body: text.slice(bodyStart, closer.index),
+      carries: skip === 0 && carries,
+      // A definition's body does not run where it is written, so a guard on the
+      // definition does not cover it. `deferred` is what stops that guard being handed
+      // down; `offset` places the body back in the line it was cut from.
+      deferred: skip > 0,
+      offset: skip + bodyStart,
+    };
   }
   return null;
 }
@@ -930,16 +971,19 @@ function guardFlags(units) {
  *
  * @param {string} text
  * @param {boolean} guarded
- * @param {{pipefail: boolean, report: (statement: string, consumer: string) => void}} context
+ * @param {{pipefail: boolean, report: (statement: string, consumer: string, offset: number) => void}} context
  * @param {'top'|'carry'|'sealed'} [scope]
+ * @param {number} [base] where `text` starts in the logical line, so a finding can be
+ *   placed against the compound closers written on that line
  */
-function scanStatements(text, guarded, context, scope = 'top') {
+function scanStatements(text, guarded, context, scope = 'top', base = 0) {
   const units = splitTopLevel(text);
   const guards = guardFlags(units);
 
   for (const [index, unit] of units.entries()) {
     const statement = unit.text;
     if (statement.trim() === '') continue;
+    const offset = base + unit.offset;
     const unitGuarded = guarded || guards[index];
 
     const toggle = pipefailToggle(statement);
@@ -951,14 +995,20 @@ function scanStatements(text, guarded, context, scope = 'top') {
     const compound = compoundBody(statement);
     if (compound !== null) {
       const nestedScope = scope !== 'sealed' && compound.carries ? 'carry' : 'sealed';
-      scanStatements(compound.body, unitGuarded, context, nestedScope);
+      scanStatements(
+        compound.body,
+        compound.deferred ? false : unitGuarded,
+        context,
+        nestedScope,
+        offset + compound.offset,
+      );
       continue;
     }
     if (unitGuarded) continue;
 
     for (const segment of splitUnquoted(statement, ['|&', '|']).slice(1)) {
       const consumer = earlyExitConsumer(segment);
-      if (consumer !== null) context.report(statement.trim(), consumer);
+      if (consumer !== null) context.report(statement.trim(), consumer, offset);
     }
   }
 }
@@ -992,10 +1042,24 @@ export function analyzeWorkflow(file, source, { defaultShell = null } = {}) {
     // is guarded, which is the defect this sweep exists to remove.
     /** @type {Finding[]} */
     const blockFindings = [];
-    /** @type {{kind: string, findingIndex: number}[]} */
+    // How many function definitions each finding was written inside, so a guard on a
+    // compound *outside* one cannot retract it while a guard inside one still can.
+    /** @type {number[]} */
+    const findingDepths = [];
+    // This logical line's findings and where on it they stand, so a closer written
+    // mid-line retracts what precedes it and leaves what follows it alone.
+    /** @type {{index: number, offset: number}[]} */
+    let lineFindings = [];
+    /** @type {{kind: string, definition: boolean, findingIndex: number}[]} */
     const openCompounds = [];
-    /** @type {[number, number][]} */
+    /** @type {[number, number, number][]} */
     const guardedRanges = [];
+
+    const pushFinding = (finding, offset) => {
+      lineFindings.push({ index: blockFindings.length, offset });
+      findingDepths.push(openCompounds.filter((entry) => entry.definition).length);
+      blockFindings.push(finding);
+    };
 
     // One logical line's effect on the compounds the *block* is inside. Run after the
     // line is scanned, so `openerFirst` decides whether this line's own findings sit
@@ -1005,13 +1069,28 @@ export function analyzeWorkflow(file, source, { defaultShell = null } = {}) {
       const nesting = lineNesting(text);
       for (const closer of nesting.unmatchedClosers) {
         const depth = openCompounds.findLastIndex((entry) => entry.kind === closer.kind);
-        if (depth === -1) continue; // a `case` arm's `)`, or a closer with no opener
+        if (depth === -1) continue; // a closer with no opener
+        // A `case` opened after the innermost open `(` makes this `)` that `case`'s arm
+        // terminator rather than the subshell's closer.
+        if (closer.kind === 'paren' && openCompounds.findLastIndex((entry) => entry.kind === 'case') > depth) {
+          continue;
+        }
         const opened = openCompounds[depth];
+        const definitionsBelow = openCompounds.slice(0, depth).filter((entry) => entry.definition).length;
         openCompounds.length = depth;
-        if (closer.guarded) guardedRanges.push([opened.findingIndex, blockFindings.length]);
+        if (!closer.guarded) continue;
+        // The range ends at the closer, not at the end of its line: a statement written
+        // after the closer is outside the compound — it is the `||` fallback itself —
+        // and retracting it lost a genuinely unguarded pipeline.
+        const end = lineFindings.find((entry) => entry.offset >= closer.start)?.index ?? blockFindings.length;
+        guardedRanges.push([opened.findingIndex, end, definitionsBelow]);
       }
-      for (const kind of nesting.unmatchedOpeners) {
-        openCompounds.push({ kind, findingIndex: nesting.openerFirst ? beforeEntry : blockFindings.length });
+      for (const { kind, definition } of nesting.unmatchedOpeners) {
+        openCompounds.push({
+          kind,
+          definition,
+          findingIndex: nesting.openerFirst ? beforeEntry : blockFindings.length,
+        });
       }
     };
 
@@ -1022,21 +1101,25 @@ export function analyzeWorkflow(file, source, { defaultShell = null } = {}) {
     let carried;
     for (const entry of logical) {
       const beforeEntry = blockFindings.length;
+      lineFindings = [];
       if (entry.annotation !== undefined) {
         carried = entry.annotation;
         // The hatch may never be used without a reason. Reporting this only from inside
         // the finding loop left it unenforced in the one placement where the annotation
         // is inert — written above a statement that has nothing to silence.
         if (entry.annotation === '') {
-          blockFindings.push({
-            file,
-            line: entry.line,
-            kind: 'annotation',
-            severity: 'error',
-            consumer: null,
-            statement: entry.text.trim() === '' ? '# pipefail-lint: allow' : entry.text.trim(),
-            detail: 'pipefail-lint: allow annotation carries no reasoning',
-          });
+          pushFinding(
+            {
+              file,
+              line: entry.line,
+              kind: 'annotation',
+              severity: 'error',
+              consumer: null,
+              statement: entry.text.trim() === '' ? '# pipefail-lint: allow' : entry.text.trim(),
+              detail: 'pipefail-lint: allow annotation carries no reasoning',
+            },
+            0,
+          );
         }
       }
       if (entry.text.trim() === '') {
@@ -1046,19 +1129,22 @@ export function analyzeWorkflow(file, source, { defaultShell = null } = {}) {
       const allowReason = carried;
       carried = undefined;
 
-      context.report = (statement, consumer) => {
+      context.report = (statement, consumer, offset) => {
         if (allowReason !== undefined) return;
-        blockFindings.push({
-          file,
-          line: entry.line,
-          kind: 'pipe',
-          severity: context.pipefail ? 'error' : 'warning',
-          consumer,
-          statement,
-          detail: context.pipefail
-            ? 'pipefail is in scope: the producer takes SIGPIPE once its output outruns the pipe buffer, and the pipeline reports 141'
-            : `${invokedShellLabel(shell)}: the pipeline reports only the consumer, so a failed producer is laundered`,
-        });
+        pushFinding(
+          {
+            file,
+            line: entry.line,
+            kind: 'pipe',
+            severity: context.pipefail ? 'error' : 'warning',
+            consumer,
+            statement,
+            detail: context.pipefail
+              ? 'pipefail is in scope: the producer takes SIGPIPE once its output outruns the pipe buffer, and the pipeline reports 141'
+              : `${invokedShellLabel(shell)}: the pipeline reports only the consumer, so a failed producer is laundered`,
+          },
+          offset,
+        );
       };
       scanStatements(entry.text, false, context);
       trackNesting(entry.text, beforeEntry);
@@ -1068,7 +1154,11 @@ export function analyzeWorkflow(file, source, { defaultShell = null } = {}) {
       // A reasonless annotation is a violation of the hatch itself, not a pipeline a
       // guard can excuse, so it is never retracted.
       const guarded =
-        finding.kind === 'pipe' && guardedRanges.some(([start, end]) => index >= start && index < end);
+        finding.kind === 'pipe' &&
+        guardedRanges.some(
+          ([start, end, definitionsBelow]) =>
+            index >= start && index < end && findingDepths[index] <= definitionsBelow,
+        );
       if (!guarded) findings.push(finding);
     }
   }
