@@ -153,6 +153,16 @@
       }
     },
     {
+      "operation": "identityBind",
+      "cliVerb": "identity bind",
+      "authorityGated": false,
+      "description": "Binds the workspace's report-signing key to a domain the operator controls, minting the colophon-domain-binding/1 document a reader supplies to the verifier and naming the exact record to publish at that domain (issue #2983).",
+      "gui": {
+        "status": "unavailable",
+        "reason": "the operator publishes the proof at their own domain, outside any Colophon surface"
+      }
+    },
+    {
       "operation": "importBinaryItemBank",
       "cliVerb": "import item-bank",
       "authorityGated": false,
@@ -286,7 +296,7 @@
       "operation": "runBind",
       "cliVerb": "bind",
       "authorityGated": false,
-      "description": "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976).",
+      "description": "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976). On a scheduled source the seal names exactly one admissible round -- the first published strictly after it -- and every other round is refused (issue #3322).",
       "gui": {
         "status": "shipped",
         "action": "run.bind"
@@ -456,6 +466,10 @@
   "exclusions": [
     {
       "name": "unverifiableAxisCounts",
+      "reason": "facade export is a helper re-export, not an operation invoked directly (see src/cli/parity-map.ts)"
+    },
+    {
+      "name": "draftSampleSizeAdvisory",
       "reason": "facade export is a helper re-export, not an operation invoked directly (see src/cli/parity-map.ts)"
     },
     {

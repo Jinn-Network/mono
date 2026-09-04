@@ -132,7 +132,7 @@ const suite = quoted.presentation?.suite;
 if (suite?.protocol !== "terminal-bench-3.0" || suite?.executionConformance !== true || suite?.coverage !== "one_task" || suite?.leaderboardSubmitReady !== false) {
   fail(`quote suite bits were not 3.0/one_task/conforming/not-leaderboard-ready: ${JSON.stringify(suite)}`);
 }
-await colophon(["lock", ...common, "--draft", draftId]);
+await colophon(["lock", "--ack-sample-size", ...common, "--draft", draftId]);
 await colophon(["launch", ...common, "--draft", draftId]);
 await colophon(["collect", ...common, "--draft", draftId, "--json"]);
 const exportA = parseEnvelope(await colophon(["export", ...common, "--draft", draftId, "--arm", "oracle-a", "--json"]));

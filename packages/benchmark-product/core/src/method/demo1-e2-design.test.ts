@@ -294,7 +294,7 @@ describe("Demo-1 E2 evidence and official sizing", () => {
       results: fixture.results,
       emptyLoadoutEvidence: structural("match"),
     })).toThrow(/does not recompute/u);
-  }, 30_000);
+  });
 
   it("routes secondary variance and sensitivity through the accepted official control", () => {
     expect(controlRoutingFixture.schema).toBe("jinn.demo1.e2-control-routing.synthetic.v1");
@@ -323,7 +323,7 @@ describe("Demo-1 E2 evidence and official sizing", () => {
     expect(accepted.estimates?.primaryVarianceModel).toEqual(fallback.estimates?.primaryVarianceModel);
     expect(accepted.estimates?.secondaryManipulationVarianceModel)
       .not.toEqual(fallback.estimates?.secondaryManipulationVarianceModel);
-  }, 30_000);
+  });
 
   it("falls back to true no-file and marks the loadout axis unverifiable when structure fails", () => {
     const rehearsalPlan = plan({ officialTaskOrder: tasks("official", 5, 2) });
@@ -341,7 +341,7 @@ describe("Demo-1 E2 evidence and official sizing", () => {
       ]),
     });
     expect(decision.officialDesign?.arms).toEqual(["skill", "claude-md", "true-no-file"]);
-  }, 30_000);
+  });
 
   it("rejects empty loadout when the paired interval escapes the ±0.10 margin", () => {
     const rehearsalPlan = plan({ officialTaskOrder: tasks("official", 5, 2) });
@@ -364,7 +364,7 @@ describe("Demo-1 E2 evidence and official sizing", () => {
       rejectionReasons: ["paired-interval-not-wholly-within-plus-or-minus-0.10"],
     });
     expect(Number(decision.emptyLoadoutEquivalence?.pairedInterval.low)).toBeGreaterThan(0.1);
-  }, 30_000);
+  });
 
   it("stops rather than claims power when repository clustering is not estimable", () => {
     const rehearsalPlan = plan({ e2Tasks: tasks("e2", 10, 10) });
@@ -418,7 +418,7 @@ describe("Demo-1 E2 evidence and official sizing", () => {
       .toMatch(/^0\.[0-9]{4}$|^1\.0000$|^greater-than-1\.0000$/u);
     expect(Number(decision.officialDesign?.simulatedPowerAtTarget)).toBeLessThan(0.8);
     expectCoherentPrimaryPowerClassification(decision);
-  }, 30_000);
+  });
 });
 
 function candidate(

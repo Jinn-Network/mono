@@ -65,6 +65,10 @@ function runtimeExecutable(runtime: "docker" | "podman", override?: string): str
 function defaultSpawn(command: string, args: readonly string[]): GraderChildProcess {
   return nodeSpawn(command, [...args], {
     stdio: "ignore",
+    // temp-env: a floor-level allowlist for the host-owned runtime CLI, which must receive
+    // nothing else from the daemon's environment and never any task material. Whatever scratch
+    // the CLI keeps for itself is the container runtime's concern; the attempt's write surface
+    // is the mounts the grading invocation declares, not this process's temp directory.
     env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
   }) as GraderChildProcess;
 }

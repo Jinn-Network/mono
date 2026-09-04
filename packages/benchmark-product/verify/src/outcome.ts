@@ -1,7 +1,8 @@
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
+import { isMetadataFirstBundleProfile } from "@jinn-network/benchmarking-protocol";
 import { legacyClosure } from "./legacy-closures.js";
 import { PUBLIC_BUNDLE_V8_CHECKS } from "./reader-instructions.js";
-import type { PublicBundleVerificationResult } from "./verify.js";
+import type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./verify.js";
 
 /**
  * The one check a metadata-first `benchmark-product-public-bundle/5` defers (issue #2986): its
@@ -11,8 +12,17 @@ export const NOT_FETCHED_CHECK = "artifact-integrity" as const;
 
 export type VerificationCheckState = "passed" | "not fetched";
 
+/**
+ * Every check name either lineage's closure can carry: the legacy/disclosed line's union and the
+ * evidence-native `/5` list. Composed here because this module is where both lineages already meet
+ * to produce one denominator.
+ */
+export type VerificationCheckName =
+  | PublicBundleVerificationCheck
+  | (typeof EVIDENCE_NATIVE_BUNDLE_V5_CHECKS)[number];
+
 export interface VerificationCheckOutcome {
-  readonly check: string;
+  readonly check: VerificationCheckName;
   readonly state: VerificationCheckState;
 }
 
@@ -31,6 +41,61 @@ export interface VerificationOutcome {
 }
 
 /**
+ * What each check recomputes, in the words the reader's caveat uses. It lives beside the
+ * denominator derivation and is keyed by the check union, so a closure that adds a check cannot
+ * add to the `of N` total without also naming what that check recomputed -- the caveat's
+ * enumeration was previously a second hand-maintained list and had drifted a whole check behind
+ * the six-check closure it described (issue #3691).
+ */
+const CHECK_SUBJECTS: { readonly [C in VerificationCheckName]: string } = {
+  "manifest": "the bundle's integrity",
+  "evidence-closure": "evidence closure",
+  "trust": "signing trust",
+  "matrix-rederivation": "calculations",
+  "report-verification": "the report",
+  "claim-consistency": "claim consistency",
+  "integrity-anchors": "anchor well-formedness",
+  "disclosure-specification": "the disclosure specification",
+  "artifact-integrity": "artifact integrity",
+  "signature-validity": "signature validity",
+};
+
+/**
+ * The caveat's enumeration of what this bundle's verification actually recomputed. Deferred checks
+ * are excluded: a metadata-first bundle carries artifact digests without their bytes, so naming
+ * artifact integrity here would claim exactly the thing the deferred-check disclosure denies.
+ */
+export function describeRecomputedChecks(outcome: VerificationOutcome): string {
+  const subjects = outcome.outcomes
+    .filter(({ state }) => state === "passed")
+    .map(({ check }) => CHECK_SUBJECTS[check]);
+  if (subjects.length === 0) return "nothing";
+  if (subjects.length === 1) return subjects[0]!;
+  if (subjects.length === 2) return `${subjects[0]!} and ${subjects[1]!}`;
+  return `${subjects.slice(0, -1).join(", ")}, and ${subjects.at(-1)!}`;
+}
+
+/**
+ * The bundle identity in the one shape a reader quotes and compares: exactly one `sha256:` prefix.
+ * The evidence-native line returns an already-prefixed `documentDigest`, the legacy line returns a
+ * bare digest, so a surface that spells the prefix itself renders `sha256:sha256:...` for half the
+ * formats it supports (issue #3312). Every reader surface calls this rather than concatenating.
+ */
+export function bundleIdentityLabel(result: Pick<PublicBundleVerificationResult, "identity">): string {
+  return result.identity.startsWith("sha256:") ? result.identity : `sha256:${result.identity}`;
+}
+
+/**
+ * True exactly for a bundle whose own manifest declares the metadata-first profile. Keyed on the
+ * declared profile, never on whether a body happened to be deferred: a metadata-first bundle whose
+ * declared artifacts are all carried reports `artifactContent.status === "verified"`, and a reader
+ * that keys on that side effect hands out a command no released reader line can run (issue #3313).
+ */
+export function isMetadataFirstBundle(result: PublicBundleVerificationResult): boolean {
+  return result.format === "benchmark-product-public-bundle/5" && isMetadataFirstBundleProfile(result.profile);
+}
+
+/**
  * The single derivation of what a verification result may be said to have proved. Every reader
  * surface -- the standalone CLI, the product CLI, the local viewer, the web action -- reads this
  * rather than counting `checks` itself, because a surface that counts for itself is a surface that
@@ -46,7 +111,7 @@ export function summarizeVerificationOutcome(result: PublicBundleVerificationRes
     && result.artifactContent.status === "not-fetched"
     ? result.artifactContent
     : undefined;
-  const outcomes = result.checks.map((check) => ({
+  const outcomes: readonly VerificationCheckOutcome[] = result.checks.map((check) => ({
     check,
     state: (deferred !== undefined && check === NOT_FETCHED_CHECK ? "not fetched" : "passed") as VerificationCheckState,
   }));

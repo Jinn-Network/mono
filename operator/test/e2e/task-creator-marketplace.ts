@@ -54,14 +54,12 @@
  * `HarnessRegistry`, so the canned patch is served by a launcher-shaped stub injected
  * through `buildOperatorComposition`'s `extraLaunchers` seam.
  *
- * KNOWN BLOCKER — issue #2665. Assertions 4 and 5 cannot pass yet. `submitSelfEvaluation`
- * hands `createDirectSafeBroadcaster` to venue-base's `createVerdictPorts`, but the
- * operator's `VenueBroadcaster.execute` returns `{ txHash }` alone while
- * `BaseVenueSafeBroadcaster.execute` must return the block identity and logs
- * `openVerdictAttempt` decodes, and the object must also carry `classify()`. That shim
- * is #2665's deliverable and is deliberately not duplicated here; the script fails with
- * a named error at that boundary and goes green on its own once #2665 lands. Assertions
- * 1-3 run to completion before it.
+ * Former blocker, now cleared by issue #2665: `submitSelfEvaluation` hands
+ * `createDirectSafeBroadcaster` to venue-base's `createVerdictPorts`, which used to demand a
+ * whole `BaseVenueSafeBroadcaster`. #2665 gave the direct broadcaster the block identity and
+ * logs `openVerdictAttempt` decodes, and narrowed the port's own input to
+ * `VerdictSafeBroadcaster` (`Pick<..., 'execute'>`) — the surface it actually consumes; it
+ * never calls `classify()`. Assertions 4 and 5 therefore run.
  *
  * Public command: `yarn e2e:task-creator`.
  */
@@ -110,10 +108,7 @@ import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
 import { getMechDeliveryRate, getTimeoutBounds, claimDelivery, callDeliverToMarketplace } from '../../src/adapters/mech/contracts.js';
 // Wave-4 D2: `contracts.ts`'s `claimEvaluation` retired with the mech adapter's
 // evaluation half; venue-base's verdict port is the surviving verdict tx path.
-import {
-  createVerdictPorts,
-  type BaseVenueSafeBroadcaster,
-} from '@jinn-network/marketplace-venue-base';
+import { createVerdictPorts } from '@jinn-network/marketplace-venue-base';
 import { createDirectSafeBroadcaster } from '../../src/adapters/mech/direct-safe-broadcaster.js';
 import { createClients } from '../../src/adapters/mech/safe.js';
 import { VerdictCode } from '../../src/adapters/mech/verdict-code.js';
@@ -306,39 +301,6 @@ async function attemptIndexFromClaimTx(fixture: DaemonHarnessFixture, txHash: `0
 }
 
 /**
- * The verdict port's broadcaster, or a named failure pointing at the blocker.
- *
- * `createDirectSafeBroadcaster` returns the operator's `VenueBroadcaster`, whose `execute`
- * resolves to `{ txHash }` alone and which carries no `classify()`. venue-base's
- * `BaseVenueSafeBroadcaster` requires both, and `openVerdictAttempt` decodes `receipt.logs`
- * to recover the requestId — so handing the direct broadcaster over unchanged fails at
- * runtime. Issue #2665 owns that shim; duplicating it here would fork its deliverable.
- *
- * The check is structural rather than a hard throw so this script needs no further edit once
- * #2665 lands: the moment the direct broadcaster satisfies the port, the verdict leg runs.
- */
-function resolveVerdictBroadcaster(
-  publicClient: ReturnType<typeof createClients>['publicClient'],
-  walletClient: ReturnType<typeof createClients>['walletClient'],
-  safeAddress: Address,
-): BaseVenueSafeBroadcaster {
-  const candidate = createDirectSafeBroadcaster(
-    publicClient,
-    walletClient,
-    safeAddress,
-  ) as unknown as Partial<BaseVenueSafeBroadcaster>;
-  if (typeof candidate.classify !== 'function') {
-    throw new Error(
-      'task-creator-marketplace e2e: createDirectSafeBroadcaster does not satisfy venue-base\'s ' +
-      'BaseVenueSafeBroadcaster (no classify(); execute() resolves to { txHash } alone, while ' +
-      'openVerdictAttempt decodes receipt.logs). The verdict leg — assertions 4 and 5 — is ' +
-      'BLOCKED ON ISSUE #2665, which owns that shim. Assertions 1-3 above have passed.',
-    );
-  }
-  return candidate as BaseVenueSafeBroadcaster;
-}
-
-/**
  * Self-evaluate a solved swe-rebench-v2.v1 attempt via REAL on-chain, Safe-
  * mediated production calls (`claimEvaluation` → `callDeliverToMarketplace` →
  * `claimDelivery`), with a deterministic score chosen by the caller instead
@@ -354,18 +316,22 @@ async function submitSelfEvaluation(args: {
 }): Promise<{ verdictCode: number; verdictTxHash: Hex }> {
   const { fixture, v3Env, evaluator, posted } = args;
   const { publicClient, walletClient } = createClients(fixture.anvil.rpcUrl, evaluator.agentPrivateKey, base);
-  const verdictBroadcaster = resolveVerdictBroadcaster(
-    publicClient,
-    walletClient,
-    evaluator.safeAddress as Address,
-  );
 
   const evaluationTaskCidDigest = keccak256(
     toBytes(`evaluation:${posted.taskCid}:${posted.taskId}:${args.attemptIndex}`),
   ) as Hex;
+  // One broadcaster per Safe (finding E5 / composition design §6.1): the verdict port and both
+  // legacy Safe writes below share it, so they never open independent nonce stacks against the
+  // evaluator Safe. Issue #2665: those two writes previously omitted `broadcaster` entirely,
+  // which is the 3rd of 7-9 positional parameters -- every later argument was shifted one place.
+  const evaluatorBroadcaster = createDirectSafeBroadcaster(
+    publicClient,
+    walletClient,
+    evaluator.safeAddress as Address,
+  );
   const claimEvalResult = await createVerdictPorts({
     publicClient,
-    broadcaster: verdictBroadcaster,
+    broadcaster: evaluatorBroadcaster,
     safeAddress: evaluator.safeAddress as Address,
     routerAddress: v3Env.routerAddress as Address,
     mechAddress: v3Env.mockMechAddress as Address, // self-eval: same mech the solver claimed with
@@ -399,6 +365,7 @@ async function submitSelfEvaluation(args: {
   await callDeliverToMarketplace(
     publicClient,
     walletClient,
+    evaluatorBroadcaster,
     evaluator.safeAddress as Address,
     v3Env.mockMechAddress as Address,
     [claimEvalResult.requestId as Hex],
@@ -409,6 +376,7 @@ async function submitSelfEvaluation(args: {
   const verdictTxHash = await claimDelivery(
     publicClient,
     walletClient,
+    evaluatorBroadcaster,
     evaluator.safeAddress as Address,
     v3Env.routerAddress as Address,
     claimEvalResult.requestId as Hex,

@@ -460,6 +460,42 @@ describe("durable Record Discovery source writer", () => {
     expect(receipt).toMatchObject({ announcementId: "ann-1", sequence: "0000000000000001" });
   });
 
+  // #3569: the bound governs minting a new head, never acknowledging one that already
+  // exists. A backwards clock correction of more than one window (an NTP fix on a host
+  // that was badly fast -- exactly the population this bound exists for) must not stop a
+  // durably committed announcement from returning its receipt, or the publish path's
+  // unconditional-append-plus-idempotency contract retries a committed publication until
+  // wall clock catches up.
+  it("returns a committed announcement's receipt however far ahead of the clock its timestamp is", async () => {
+    const harness = makeHarness();
+    const first = await writer(harness).append(command());
+    const signCount = harness.signCount();
+
+    // Two days behind command()'s timestamp -- past the 24h window, so minting is refused.
+    const replay = await writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).append(command());
+
+    expect(replay).toEqual(first);
+    expect(harness.signCount()).toBe(signCount);
+  });
+
+  // The carve-out is idempotency, not a clock special case: a writer whose window has
+  // since collapsed refuses to mint, but must still acknowledge what it already minted.
+  it("returns a committed announcement's receipt from a writer whose window now collapses", async () => {
+    const harness = makeHarness();
+    const first = await writer(harness).append(command());
+    const collapsed = createDurableSourceWriter({
+      source: SOURCE,
+      signer: harness.signer,
+      blobs: harness.blobs,
+      states: harness.states,
+      intents: harness.intents,
+      clock: DEFAULT_TEST_CLOCK,
+      refreshWithinMs: 0.5,
+    });
+
+    await expect(collapsed.append(command())).resolves.toEqual(first);
+  });
+
   it("accepts a past-dated timestamp however far behind its own clock", async () => {
     const harness = makeHarness();
     const receipt = await writer(harness, undefined, clockAt("2031-01-01T00:00:00.000Z")).append(command());
@@ -476,6 +512,7 @@ describe("durable Record Discovery source writer", () => {
       blobs: harness.blobs,
       states: harness.states,
       intents: harness.intents,
+      clock: DEFAULT_TEST_CLOCK,
       refreshWithinMs: 0.5,
     });
 
@@ -498,7 +535,13 @@ describe("durable Record Discovery source writer", () => {
     // Recovery replays frozen, already-signed bytes. Re-bounding here would strand a head
     // that was in-window when it was minted, and `recover()` runs at the top of every
     // append, so the source would be wedged rather than merely delayed.
-    await expect(writer(harness, undefined, clockAt("2031-01-01T00:00:00.000Z")).recover())
+    //
+    // The clock must be *behind* the intent's timestamp for this to discriminate (#3570):
+    // `checkRefreshWindow` rule 3 only refuses a head issued ahead of `now`, so a clock
+    // ahead of it passes the bound whether or not recovery applies it. Two days behind
+    // command()'s 2026-08-03T12:00:00Z stamp is past the 24h window, so an implementation
+    // that re-bounded during recovery fails here.
+    await expect(writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).recover())
       .resolves.toMatchObject({ status: "recovered" });
   });
 });

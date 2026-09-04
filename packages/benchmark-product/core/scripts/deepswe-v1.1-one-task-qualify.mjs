@@ -126,7 +126,7 @@ const suite = quoted.presentation?.suite;
 if (suite?.executionConformance !== true || suite?.coverage !== "one_task" || suite?.leaderboardSubmitReady !== false || suite?.replicates !== 4) {
   fail(`quote suite bits were not one_task/conforming/k=4/not-leaderboard-ready: ${JSON.stringify(suite)}`);
 }
-await colophon(["lock", ...common, "--draft", draftId]);
+await colophon(["lock", "--ack-sample-size", ...common, "--draft", draftId]);
 await colophon(["launch", ...common, "--draft", draftId]);
 await colophon(["collect", ...common, "--draft", draftId, "--json"]);
 const exportA = parseEnvelope(await colophon(["deepswe", "export", ...common, "--draft", draftId, "--arm", "mini-a", "--json"]));

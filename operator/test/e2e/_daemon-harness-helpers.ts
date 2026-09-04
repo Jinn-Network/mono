@@ -1492,14 +1492,14 @@ export async function startDaemon(
         implStateDirRoot: join(fixture.implStateRoot, `${label}-impl-state`),
       },
       implRegistry,
-      // Production (main.ts:2654) always wires operatorSafeAddress into the
-      // engine so the synthetic-task claim guard (syntheticClaimBlocked,
-      // engine.ts:1134) can compare `task.eligibility.syntheticProvenance`
-      // against the running daemon's own Safe. This test rig previously never
-      // set it, which silently no-oped that guard for every e2e daemon built
-      // here. Setting it unconditionally is safe for existing consumers: the
-      // guard is a no-op unless a task carries `syntheticProvenance` (only
-      // task-creator-marketplace.ts does).
+      // The daemon's own Safe, so the synthetic-task claim guard
+      // (`syntheticClaimBlocked`, `solver-types/_swe-rebench-v2-synthetic-claim.ts`)
+      // can compare `task.eligibility.syntheticProvenance` against it. The TaskEngine
+      // that enforced this at claim time is gone with Wave-4 D1 (production no longer
+      // wires it at all); the guard's surviving live consumer is
+      // `LearnerHarness.canAttempt` (`harnesses/impls/learner/harness.ts`). Setting it
+      // unconditionally is safe for existing consumers: the guard is a no-op unless a
+      // task carries `syntheticProvenance` (only task-creator-marketplace.ts does).
       operatorSafeAddress: operator.safeAddress,
       // Optional registry: undefined for the prediction consumer (no change);
       // the jinn-repo driver passes one so the engine resolves the
@@ -1566,6 +1566,10 @@ export async function startDaemon(
  * sibling evaluator daemon started afterwards does not pick the stub up. The
  * evaluation role is never handled by the stub (StubHarness.supports() returns
  * false for role === 'evaluation').
+ *
+ * That describes callers omitting `opts.composition` only. A caller that passes it is served
+ * by the launcher-shaped canned-patch stub through the composition `WorkLoop` instead — see
+ * that option's own JSDoc below.
  */
 export async function startSweRebenchSolverDaemon(
   fixture: DaemonHarnessFixture,

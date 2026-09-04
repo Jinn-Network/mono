@@ -636,7 +636,7 @@ describe("binary public-bundle/4 standalone-reader rejection boundaries", () => 
       truthAdmission: "operator-only",
       mutateIntake,
     })).rejects.toThrow(/binary item-bank import/iu);
-  }, 30_000);
+  });
 
   test.each([
     ["operator-only", ["roster-attestor", "truth-reveal-attestor"]],

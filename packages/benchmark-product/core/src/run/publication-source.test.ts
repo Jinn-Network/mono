@@ -2,7 +2,11 @@ import { mkdtempSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import { WELL_KNOWN_PATH } from "@jinn-network/record-discovery-protocol";
+import { parseWellKnownDocument } from "@jinn-network/record-discovery-serve";
+import { createFsBlobStore } from "@jinn-network/record-discovery-transport-http";
 import { createWorkspaceLayout } from "../workspace/workspace.js";
+import { publicationServeRoot } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import { createPublicationState } from "./state.js";
 import {
@@ -10,6 +14,7 @@ import {
   createWorkspacePublicationSource,
   normalizePublicArchiveBaseUrl,
   publicArchiveUrl,
+  refreshWorkspacePublicationWellKnown,
   withWorkspacePublicationSourceLock,
 } from "./publication-source.js";
 
@@ -138,6 +143,42 @@ describe("workspace public source composition", () => {
       expect(observed).not.toEqual(secret);
       if (response.status === 200) expect(observed).toEqual(inside);
     }
+  });
+
+
+  test("a second source name joins the well-known document instead of hiding the first", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "publication-well-known-merge-"));
+    createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
+    const announce = async (sourceName: string, label: string, timestamp: string): Promise<void> => {
+      await withWorkspacePublicationSourceLock(workspaceDir, async () => {
+        const source = createWorkspacePublicationSource(workspaceDir, sourceName);
+        await source.writer.recover();
+        const bytes = new TextEncoder().encode(label);
+        await source.writer.append({
+          timestamp,
+          announcement: {
+            announcementId: label,
+            action: "available",
+            record: { kind: "https://spec.jinn.network/records/task/v1", digest: `sha256:${sha256Hex(bytes)}`, mediaType: "text/plain" },
+          },
+          record: { bytes, contentType: "text/plain" },
+        });
+      });
+    };
+    await announce("house-benchmarks", "house", "2026-08-13T12:00:00Z");
+    await announce("guest-benchmarks", "guest", "2026-08-13T12:01:00Z");
+
+    const read = async (): Promise<readonly string[]> => {
+      const stored = await createFsBlobStore(publicationServeRoot(workspaceDir)).get(WELL_KNOWN_PATH);
+      const document = parseWellKnownDocument(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stored!.bytes)));
+      return document.sources.map((entry) => entry.name);
+    };
+    // The second source must not have made the first undiscoverable.
+    expect(await read()).toEqual(["guest-benchmarks", "house-benchmarks"]);
+
+    // A refresh for one source is likewise a merge, not a rewrite of the whole document.
+    expect(await refreshWorkspacePublicationWellKnown(workspaceDir, "house-benchmarks")).toBe(true);
+    expect(await read()).toEqual(["guest-benchmarks", "house-benchmarks"]);
   });
 
   test("reads source-writer records from their exact recordPath namespace", async () => {

@@ -97,7 +97,7 @@ const quoted = parseEnvelope(await colophon(["quote", ...common, "--draft", draf
 if (quoted.presentation?.suite?.coverage !== "one_task") fail(`expected one_task, got ${quoted.presentation?.suite?.coverage}`);
 if (quoted.presentation?.suite?.executionConformance !== true) fail("expected executionConformance true");
 if (quoted.presentation?.suite?.leaderboardSubmitReady !== false) fail("one_task must not be leaderboardSubmitReady");
-parseEnvelope(await colophon(["lock", ...common, "--draft", draftId, "--json"]));
+parseEnvelope(await colophon(["lock", "--ack-sample-size", ...common, "--draft", draftId, "--json"]));
 const exported = parseEnvelope(await colophon(["export", ...common, "--draft", draftId, "--arm", "one", "--json"]));
 if (exported.mode !== "inspection-upload") fail(`expected inspection-upload, got ${exported.mode}`);
 if (!String(exported.instructions).includes(SWE_BENCH_VERIFIED_SUBMIT_CLOSED_SENTENCE)) {

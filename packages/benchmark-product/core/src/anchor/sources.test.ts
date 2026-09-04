@@ -509,6 +509,12 @@ describe("the acquisition bound covers the whole operation", () => {
   /** Honours the signal, so a bound that is never passed through simply rejects on its own terms. */
   function slowTransport(delayMs: number): AnchorHttpFetch {
     return (request) => new Promise((resolve, reject) => {
+      // A signal that aborted before the call never fires `abort` again, so without this the
+      // request would sit out its full delay for a deadline that has already passed.
+      if (request.signal?.aborted === true) {
+        reject(new Error("aborted"));
+        return;
+      }
       const timer = setTimeout(() => resolve({ status: 200, bytes: new Uint8Array(0) }), delayMs);
       request.signal?.addEventListener("abort", () => {
         clearTimeout(timer);
@@ -518,15 +524,36 @@ describe("the acquisition bound covers the whole operation", () => {
   }
 
   test("every request of one stamp shares a single deadline", async () => {
-    // Three calendars at 40ms each against a 60ms operation bound: a per-request bound would let
-    // all three through, and the lock verb's worst case would grow with configuration.
-    const source = createOpenTimestampsProofSource({ fetch: slowTransport(40), timeoutMs: 60 });
-    const started = Date.now();
+    // The deadline is one object: `operationSignal` is called once per `obtainProof`, outside the
+    // calendar loop, and every request is handed that same signal. Its identity across the
+    // recorded requests is therefore the proof — a per-request bound, the regression this guards,
+    // would give each calendar a signal of its own and the lock verb's worst case would grow with
+    // configuration. This used to be asserted as elapsed wall clock (`< 120ms`), which made the
+    // proof depend on the runner not being descheduled mid-test; object identity does not, and it
+    // also catches a per-request bound that a fast machine would have let through (#3354).
+    // The 40ms delay against a 60ms bound keeps the scenario the honest one — the deadline really
+    // does fire mid-operation — but nothing here is asserted through the clock any more.
+    const transport = slowTransport(40);
+    const signals: (AbortSignal | undefined)[] = [];
+    const source = createOpenTimestampsProofSource({
+      fetch: (request) => {
+        signals.push(request.signal);
+        return transport(request);
+      },
+      timeoutMs: 60,
+    });
     await expect(source.obtainProof({
       subjectSha256: SUBJECT,
       endpoint: `${KIT_CALENDAR_URI},${KIT_SECOND_CALENDAR_URI},https://third-calendar.invalid`,
     })).rejects.toMatchObject({ code: "venue-unavailable" });
-    expect(Date.now() - started).toBeLessThan(120);
+
+    const distinct = new Set(signals);
+    expect(signals).toHaveLength(3);
+    expect(signals.every((signal) => signal instanceof AbortSignal), "a calendar request carried no signal at all").toBe(true);
+    expect(
+      distinct.size,
+      `each calendar got its own deadline: ${signals.length} requests, ${distinct.size} distinct signals`,
+    ).toBe(1);
   });
 
   test("the RFC 3161 source is bounded the same way", async () => {

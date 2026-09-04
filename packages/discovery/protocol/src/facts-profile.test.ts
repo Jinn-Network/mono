@@ -32,6 +32,17 @@ describe("parseFactsProfile", () => {
     expect(parseFactsProfile(profile)).toEqual(profile);
   });
 
+  it("rejects a field name declared more than once", () => {
+    // Two entries for one field are two possibly contradictory labelings of it, and a consumer
+    // reading the list literally emits the same edge twice.
+    const repeated = baseProfile([
+      { name: "taskDigest", class: "record", referenceBearing: true },
+      { name: "escrowTerms", class: "substrate" },
+      { name: "taskDigest", class: "substrate" },
+    ]);
+    expect(() => parseFactsProfile(repeated)).toThrow(/more than once/u);
+  });
+
   it("rejects a cloudEvents.attribute that violates CloudEvents attribute-naming rules", () => {
     const uppercase = baseProfile([
       { name: "taskDigest", class: "record", cloudEvents: { attribute: "TaskDigest", scalar: "string" } },

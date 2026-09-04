@@ -240,7 +240,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     expect(selected.ok).toBe(false);
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/maxPerCell of at least 3/u);
-  }, 30_000);
+  });
 
   test("official suite refuses binary-instrument majority-k", async () => {
     const context = await prepareDraft("binary");
@@ -252,7 +252,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     expect(selected.ok).toBe(false);
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/binary-instrument/u);
-  }, 30_000);
+  });
 
   test("explicit full coverage on a 1-task snapshot stays full and is not quote-ready", async () => {
     writeFileSync(metadataPath, JSON.stringify({

@@ -73,7 +73,14 @@ test("human success names all six checks and states the verification limit", asy
   for (const check of orderedChecks) {
     assert.match(output, new RegExp(`${check}\\s+passed`));
   }
-  assert.deepEqual(orderedChecks.map((check) => output.indexOf(check)), [...orderedChecks.map((check) => output.indexOf(check))].sort((a, b) => a - b));
+  // Ordering is asserted over the per-check list, not the whole report: the caveat above it now
+  // names what each check recomputed ("signing trust", issue #3691), so a whole-output `indexOf`
+  // would find prose rather than the list row it means to order.
+  const checkList = output.slice(output.indexOf("\nmanifest  "));
+  assert.deepEqual(
+    orderedChecks.map((check) => checkList.indexOf(check)),
+    [...orderedChecks.map((check) => checkList.indexOf(check))].sort((a, b) => a - b),
+  );
   assert.match(output, /Format: benchmark-product-public-bundle\/4/);
   assert.match(output, /Not checked by this tool: whether the machine that produced this bundle was/);
   assert.match(output, /No files were uploaded/);
@@ -96,16 +103,46 @@ test("human summary reports the actual passed count against the fixed six-check 
 
 test("the verdict names the operation and its limits print directly under it (issue #2982)", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
-  // Both the complete and the deferred-check shape: the caveats are unconditional, so neither
-  // bundle shape may render a verdict without them immediately beneath it.
-  for (const checks of [["manifest"], ["manifest", "evidence-closure"]]) {
-    const output = renderVerifiedBundle({
+  // The two shapes whose rendering genuinely differs, not two check counts of one shape: the
+  // complete six-check `/4` closure, and the `/5` metadata-first bundle, which is the only shape
+  // `summarizeVerificationOutcome` defers a check for and so the only one that also emits the
+  // `Artifact content` block and its limit paragraph. The caveats are unconditional, so neither may
+  // render a verdict without them immediately beneath it (issue #3690).
+  const shapes = [
+    {
       format: "benchmark-product-public-bundle/4",
       identity: "a".repeat(64),
-      checks,
+      checks: [
+        "manifest", "evidence-closure", "trust", "matrix-rederivation",
+        "report-verification", "claim-consistency",
+      ],
       benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
       reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
-    });
+    },
+    {
+      format: "benchmark-product-public-bundle/5",
+      identity: `sha256:${"a".repeat(64)}`,
+      checks: [
+        "manifest", "evidence-closure", "artifact-integrity", "signature-validity",
+        "matrix-rederivation", "report-verification", "claim-consistency",
+      ],
+      benchmarkDigest: `sha256:${"b".repeat(64)}`,
+      manifestDigest: `sha256:${"c".repeat(64)}`,
+      cohortDigest: `sha256:${"d".repeat(64)}`,
+      matrixDigest: `sha256:${"e".repeat(64)}`,
+      reportDigest: `sha256:${"f".repeat(64)}`,
+      evidenceRecords: 12,
+      artifacts: 5,
+      verifiedSignerKeyIds: [],
+      profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+      artifactContent: {
+        status: "not-fetched", verified: 2, notFetched: 3,
+        notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
+      },
+    },
+  ];
+  for (const shape of shapes) {
+    const output = renderVerifiedBundle(shape);
     const [verdict, ...rest] = output.split("\n");
     assert.match(verdict, /^Recomputed: \d+ of \d+ checks passed/);
     assert.doesNotMatch(verdict, /verified|certified|validated|audited/i);
@@ -116,6 +153,10 @@ test("the verdict names the operation and its limits print directly under it (is
     assert.ok(caveatIndex < output.indexOf("manifest"), "caveats must precede the check list");
     assert.equal(rest.slice(0, 2).filter((line) => line.startsWith("Bundle:") || line.startsWith("Format:")).length, 2);
   }
+  // The second shape really is the deferred one, so the loop above is not two spellings of the
+  // same rendering.
+  assert.match(renderVerifiedBundle(shapes[1]), /artifact-integrity\s+not fetched/);
+  assert.doesNotMatch(renderVerifiedBundle(shapes[0]), /not fetched/);
 });
 
 const V6_IDENTITIES = {
@@ -468,7 +509,12 @@ test("the golden bundle's default output carries no identifier while --json carr
   assert.equal(human.code, undefined);
   assert.doesNotMatch(human.stdout, /urn:/);
   assert.doesNotMatch(human.stdout, /did:key/);
-  assert.match(human.stdout, /\nSigned by\n {2}publisher · 1 key\n {2}automated grader — same operator · 1 key\n/);
+  // The publisher line now carries the bare key fingerprint (issue #2983): with no binding supplied
+  // that digest is the only name this key has, and printing nothing would read as nothing to say.
+  assert.match(
+    human.stdout,
+    /\nSigned by\n {2}publisher · 1 key\n {4}key sha256:[a-f0-9]{64} — no domain bound\n {2}automated grader — same operator · 1 key\n/,
+  );
 
   const json = await invoke([golden, "--json"]);
   assert.equal(json.code, undefined);
@@ -479,8 +525,13 @@ test("the golden bundle's default output carries no identifier while --json carr
       identity: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
       keyId: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
       custody: "same-operator",
+      // The digest of the key the did:key carries, so a reader can name the publisher without the
+      // identifier (issue #2983).
+      keyFingerprint: "sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4",
     },
     {
+      // The verdict key's identifier is not a did:key, so it carries no key material to digest and
+      // gets no fingerprint rather than a fabricated one.
       role: "automated-grader",
       identity: "urn:jinn:benchmark-product:local-venue:evaluator-1",
       keyId: "benchmark-product-verdict-dc8dbb6d84571890",
@@ -580,4 +631,334 @@ test("a metadata-first bundle with one deferred body says body, not bodies", asy
     },
   });
   assert.match(output, /1 artifact body was not fetched/);
+});
+
+// ---------------------------------------------------------------------------
+// Reader-legible publisher identity (issue #2983)
+// ---------------------------------------------------------------------------
+
+const { generateKeyPairSync, sign: edSign } = await import("node:crypto");
+
+const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+function base58btc(bytes) {
+  let value = 0n;
+  for (const byte of bytes) value = (value << 8n) | BigInt(byte);
+  let digits = "";
+  while (value > 0n) {
+    digits = BASE58[Number(value % 58n)] + digits;
+    value /= 58n;
+  }
+  let leading = "";
+  for (const byte of bytes) {
+    if (byte !== 0) break;
+    leading += "1";
+  }
+  return leading + digits;
+}
+
+/** A real key, its did:key, and a signed binding document for it. */
+async function mintDomainBinding(domain = "example.com", mechanism = "dns-txt") {
+  const { canonicalJsonBytes } = await import("@jinn-network/trust-core");
+  const { domainBindingStatementBytes } = await import("../dist/index.js");
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const raw = Buffer.from(publicKey.export({ format: "jwk" }).x, "base64url");
+  const keyId = `did:key:z${base58btc(Uint8Array.from([0xed, 0x01, ...raw]))}`;
+  const statement = {
+    format: "colophon-domain-binding/1",
+    domain,
+    keyId,
+    mechanism,
+    statedAt: "2026-09-02T00:00:00.000Z",
+  };
+  const signature = Buffer.from(
+    edSign(null, Buffer.from(domainBindingStatementBytes(statement)), privateKey),
+  ).toString("base64");
+  return { keyId, bytes: canonicalJsonBytes({ ...statement, signature }) };
+}
+
+const { keyFingerprintFromDidKey } = await import("../dist/index.js");
+
+function publisherResult(keyId) {
+  return {
+    format: "benchmark-product-public-bundle/6",
+    identity: "a".repeat(64),
+    checks: V6_CHECKS,
+    ...V6_IDENTITIES,
+    signers: [{
+      role: "publisher",
+      identity: "urn:jinn:agent:alpha",
+      keyId,
+      custody: "same-operator",
+      keyFingerprint: keyFingerprintFromDidKey(keyId),
+    }],
+  };
+}
+
+test("usage documents the identity-binding flag", async () => {
+  const result = await invoke([]);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /--identity-binding/);
+  assert.match(result.stderr, /the lookup at the domain itself stays yours/);
+});
+
+test("a verified binding renders the domain and names the proof mechanism plainly", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId, bytes } = await mintDomainBinding();
+  const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
+    readFile: () => bytes,
+    verify: async () => ({ verification: publisherResult(keyId) }),
+  });
+  assert.equal(result.exitCode, 0);
+  // Attributive, not assertive: only the key's signature was checked, so the line says so where a
+  // reader sees it rather than four lines below in the limits paragraph.
+  assert.match(result.stdout, /claims publication by example\.com — unconfirmed here; check the DNS TXT record at _colophon\.example\.com/);
+  assert.doesNotMatch(result.stdout, /published by example\.com/);
+  // The key's own established name is still there for a reader who declines to make the lookup.
+  assert.match(result.stdout, /key sha256:[a-f0-9]{64}/);
+  // The limits paragraph names the remaining step and what trusting its answer rests on.
+  assert.match(result.stdout, /DNS resolution/);
+  assert.match(result.stdout, /registrar/);
+  // #3024 keeps identifiers off the human surface because they are noise a reader has to decode.
+  // Here the identifier is the literal string to look for in the record, so it earns its place --
+  // and only there: it appears exactly once, inside the value to publish.
+  assert.equal(result.stdout.match(/did:key:/g).length, 1);
+  // Unwrapped and on its own line, because a reader compares it byte for byte.
+  assert.match(result.stdout, new RegExp(`\n {4}expect: colophon-domain-binding=1; key=${keyId}\n`));
+});
+
+test("without a binding the publisher is named by its bare key fingerprint", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const result = await runVerifierCli(["bundle"], { verify: async () => ({ verification: publisherResult(keyId) }) });
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /key sha256:[a-f0-9]{64} — no domain bound/);
+  assert.doesNotMatch(result.stdout, /claims publication/);
+  // No binding, no paragraph about what a binding would mean.
+  assert.doesNotMatch(result.stdout, /registrar/);
+});
+
+test("a binding for a key that did not sign the bundle exits 2 and is not rendered", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { bytes } = await mintDomainBinding();
+  const other = await mintDomainBinding();
+  const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
+    readFile: () => bytes,
+    verify: async () => ({ verification: publisherResult(other.keyId) }),
+  });
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /domain binding not applied/);
+  assert.match(result.stderr, /did not sign this bundle/);
+  // The bundle's own verdict is still reported, exactly as it is for a freeze-repo failure.
+  assert.match(result.stdout, /Recomputed: /);
+  assert.doesNotMatch(result.stdout, /published by/);
+});
+
+test("--json carries the verified binding, and the failure in its place", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId, bytes } = await mintDomainBinding("example.org", "well-known-url");
+  const ok = await runVerifierCli(["bundle", "--json", "--identity-binding", "b.json"], {
+    readFile: () => bytes,
+    verify: async () => ({ verification: publisherResult(keyId) }),
+  });
+  const parsed = JSON.parse(ok.stdout);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.identityBinding.ok, true);
+  assert.equal(parsed.identityBinding.domain, "example.org");
+  assert.equal(parsed.identityBinding.confirmation, "key-signature-only");
+  assert.equal(parsed.identityBinding.proof.location, "https://example.org/.well-known/colophon-domain-binding.txt");
+  // The bundle's own digest is untouched: a binding must never shadow the value a consumer pins by.
+  assert.equal(parsed.identity, "a".repeat(64));
+
+  const bad = await runVerifierCli(["bundle", "--json", "--identity-binding", "b.json"], {
+    readFile: () => new TextEncoder().encode("{"),
+    verify: async () => ({ verification: publisherResult(keyId) }),
+  });
+  const parsedBad = JSON.parse(bad.stdout);
+  assert.equal(parsedBad.ok, false);
+  assert.equal(parsedBad.identityBinding.ok, false);
+  assert.equal(parsedBad.identityBinding.code, "validation");
+  assert.equal(parsedBad.identity, "a".repeat(64));
+});
+
+test("--identity-binding requires a value and may be supplied only once", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  for (const args of [["bundle", "--identity-binding"], ["bundle", "--identity-binding", "a", "--identity-binding", "b"]]) {
+    const result = await runVerifierCli(args, { verify: async () => { throw new Error("must not be reached"); } });
+    assert.equal(result.exitCode, 2);
+    assert.match(result.stderr, /Usage: colophon-verify/);
+  }
+});
+
+test("a binding for a grader key never becomes the publisher's identity", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const publisher = await mintDomainBinding();
+  const grader = await mintDomainBinding("grader.example");
+  const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
+    readFile: () => grader.bytes,
+    verify: async () => ({
+      verification: {
+        format: "benchmark-product-public-bundle/6",
+        identity: "a".repeat(64),
+        checks: V6_CHECKS,
+        ...V6_IDENTITIES,
+        signers: [
+          { role: "publisher", identity: "urn:jinn:agent:alpha", keyId: publisher.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(publisher.keyId) },
+          { role: "automated-grader", identity: "urn:jinn:agent:beta", keyId: grader.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(grader.keyId) },
+        ],
+      },
+    }),
+  });
+  assert.equal(result.exitCode, 2);
+  assert.doesNotMatch(result.stdout, /grader\.example/);
+  // The real publisher is still named by its own fingerprint rather than suppressed.
+  assert.match(result.stdout, new RegExp(`key ${keyFingerprintFromDidKey(publisher.keyId)} — no domain bound`));
+});
+
+test("with no single publisher there is no identity to qualify, so neither line nor paragraph prints", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId, bytes } = await mintDomainBinding();
+  const second = await mintDomainBinding();
+  const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
+    readFile: () => bytes,
+    verify: async () => ({
+      verification: {
+        format: "benchmark-product-public-bundle/6",
+        identity: "a".repeat(64),
+        checks: V6_CHECKS,
+        ...V6_IDENTITIES,
+        signers: [
+          { role: "publisher", identity: "urn:jinn:agent:alpha", keyId, custody: "same-operator" },
+          { role: "publisher", identity: "urn:jinn:agent:beta", keyId: second.keyId, custody: "same-operator" },
+        ],
+      },
+    }),
+  });
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /2 publisher keys/);
+  assert.doesNotMatch(result.stdout, /claims publication/);
+  // The limits paragraph must not qualify a name the report never showed.
+  assert.doesNotMatch(result.stdout, /registrar/);
+});
+
+test("a drifted freeze repository still exits 1 when an unrelated binding also failed", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const result = await runVerifierCli(
+    ["bundle", "--freeze-repo", "repo", "--identity-binding", "binding.json"],
+    {
+      readFile: () => new TextEncoder().encode("{"),
+      verify: async () => ({ verification: publisherResult(keyId) }),
+      freezeRepo: async () => ({ ok: false, commitId: "c".repeat(40), fileCount: 3, executableBitChecked: true, differences: [{ kind: "changed", path: "README.md" }] }),
+    },
+  );
+  assert.equal(result.exitCode, 1);
+  // Both flags reported, neither swallowed.
+  assert.match(result.stdout, /freeze repository: DOES NOT match this bundle/);
+  assert.match(result.stderr, /domain binding not applied/);
+});
+
+// ── The promoted caveat's enumeration (issue #3691) ─────────────────────────────────────────────
+//
+// The sentence beneath the verdict says what was recomputed. It used to hand-list the v2/v4
+// closure — and not even all of it: `trust` was missing — so an anchored or disclosed bundle
+// printed `of 7` or `of 8` above a sentence that accounted for five checks.
+
+const V8_CHECKS = [...V6_CHECKS, "disclosure-specification"];
+
+function caveatOf(output) {
+  const start = output.indexOf("Not checked by this tool:");
+  assert.ok(start >= 0, "caveats must render");
+  const end = output.indexOf("\n\n", start);
+  return output.slice(start, end === -1 ? undefined : end).replace(/\n/g, " ");
+}
+
+test("the caveat enumerates the anchored closure's seventh check (issue #3691)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/6",
+    identity: "a".repeat(64),
+    checks: V6_CHECKS,
+    ...V6_IDENTITIES,
+    anchors: { anchors: [], subjects: [], invalid: [] },
+  });
+  assert.match(output, /^Recomputed: 7 of 7 checks passed$/m);
+  const caveat = caveatOf(output);
+  assert.match(caveat, /anchor well-formedness/);
+  // The check the pre-#3691 hand-list dropped.
+  assert.match(caveat, /signing trust/);
+  assert.doesNotMatch(caveat, /undefined/);
+});
+
+test("the caveat enumerates the disclosed closure's eighth check (issue #3691)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/8",
+    identity: "a".repeat(64),
+    checks: V8_CHECKS,
+    ...V6_IDENTITIES,
+    anchors: { anchors: [], subjects: [], invalid: [] },
+  });
+  assert.match(output, /^Recomputed: 8 of 8 checks passed$/m);
+  const caveat = caveatOf(output);
+  assert.match(caveat, /the disclosure specification/);
+  assert.match(caveat, /anchor well-formedness/);
+  assert.doesNotMatch(caveat, /undefined/);
+});
+
+test("the caveat never claims a deferred check was recomputed (issue #3691)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
+    artifactContent: {
+      status: "not-fetched", verified: 2, notFetched: 3,
+      notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
+    },
+  });
+  const caveat = caveatOf(output);
+  assert.doesNotMatch(caveat, /artifact integrity/);
+  assert.match(caveat, /signature validity/);
+  // The deferral is still disclosed, in the block that exists to disclose it.
+  assert.match(output, /artifact-integrity\s+not fetched/);
+});
+
+test("every closure's checks have a caveat phrase (issue #3691)", async () => {
+  const { describeRecomputedChecks } = await import("../dist/index.js");
+  const closures = [
+    ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
+    V6_CHECKS,
+    V8_CHECKS,
+    V5_CHECKS,
+  ];
+  for (const checks of closures) {
+    const sentence = describeRecomputedChecks({
+      outcomes: checks.map((check) => ({ check, state: "passed" })),
+      passed: checks.length,
+      notFetched: 0,
+      total: checks.length,
+    });
+    assert.doesNotMatch(sentence, /undefined/, `no phrase for a check in ${checks.join(", ")}`);
+    // One phrase per check: phrases carry no commas, so the joined sentence splits cleanly.
+    assert.equal(sentence.split(", ").length, checks.length);
+  }
+});
+
+test("the usage block and the verdict agree on what this tool does to the npm bytes (issue #3675)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const sentence = "Checks run against the exact platform bytes installed from npm.";
+  const result = await invoke([]);
+  assert.equal(result.code, 2);
+  // The pre-#3675 usage sentence was "Verification uses exact platform bytes from npm." -- the
+  // noun #2982 ruled overclaims, surviving on the one surface #2982 did not rewrite.
+  assert.doesNotMatch(result.stderr, /Verification uses/);
+  assert.ok(result.stderr.includes(sentence), "usage must state the platform-bytes sentence");
+  const verdict = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/4",
+    identity: "a".repeat(64),
+    checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
+    benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
+    reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
+  });
+  assert.ok(verdict.includes(sentence), "the verdict must state the same sentence");
 });

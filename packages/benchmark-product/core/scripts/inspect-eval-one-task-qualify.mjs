@@ -124,7 +124,7 @@ if (!officialInspectEvalConformance({
 })) {
   fail(`officialInspectEvalConformance was false: ${JSON.stringify(suite)}`);
 }
-await colophon(["lock", ...common, "--draft", draftId]);
+await colophon(["lock", "--ack-sample-size", ...common, "--draft", draftId]);
 await colophon(["launch", ...common, "--draft", draftId]);
 await colophon(["collect", ...common, "--draft", draftId, "--json"]);
 const exportControl = parseEnvelope(await colophon([

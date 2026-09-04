@@ -17,7 +17,7 @@ jobs:
   changes:
     # Push-lane dedup probe (#2996): a queue landing is the byte-identical
     # commit its merge_group build verified, so a completed successful
-    # `repo-structure-gate` check-run on this exact SHA proves all five
+    # `repo-structure-gate` check-run on this exact SHA proves all six
     # structure jobs already executed against this tree. Probing the GATE name
     # is sound HERE because this workflow has no merge-group selection: the
     # gate only reports success after every worker ran (if selection is ever
@@ -89,6 +89,12 @@ jobs:
         run: node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs
       - name: Vitest temp-directory sweep seam is wired everywhere
         run: node --test .github/scripts/vitest-tmp-isolation.test.mjs
+      # The spawn-site half of the same containment: a child handed an env
+      # allowlist naming no temp directory writes outside the root its parent
+      # was confined to. Repository-wide, so it belongs beside the suite-level
+      # seam gate rather than behind any one package lane's `paths:` filter.
+      - name: Every spawn site names a temp directory or says why not
+        run: node --test .github/scripts/child-temp-env-scan.test.mjs
       # Repository-wide, so it must not sit behind any one workflow's `paths:`
       # filter: the pull request that removes a cited workflow's restores has to
       # be the one that goes red (#3126).
@@ -154,6 +160,29 @@ jobs:
           node --test \
             .github/scripts/workflow-selection-shell.test.mjs \
             .github/scripts/heavy-lane-gate-mirror.test.mjs
+  workflow-pipefail:
+    name: Workflow pipefail lint
+    # Unguarded early-exit pipe consumers regrow as workflows are edited, and both known
+    # instances were caught by review rather than by a run: PR #2821 (fail-open on a
+    # required gate) and PR #2857 (spurious red). Like `workflow-selection` above, the
+    # lint reads every workflow, so it cannot sit behind any lane's diff-based selection
+    # — an edit to one workflow would otherwise go unchecked on the diffs that leave its
+    # own lane unselected. The one gate it sits behind is this workflow's SHA-identity
+    # push dedup probe (#2996).
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node --test .github/scripts/workflow-pipefail-lint.test.mjs
+      - name: No unguarded early-exit pipe consumers under pipefail
+        run: node .github/scripts/workflow-pipefail-lint.mjs
   skills-mirror:
     name: Skills mirror
     # Behind the same push-lane dedup probe as every other worker: the gate
@@ -185,6 +214,7 @@ jobs:
       - identifier-origin
       - evidence-architecture
       - workflow-selection
+      - workflow-pipefail
       - skills-mirror
     if: always()
     runs-on: ubuntu-latest
@@ -200,12 +230,13 @@ jobs:
           IDENTIFIER_ORIGIN_RESULT: ${{ needs.identifier-origin.result }}
           EVIDENCE_ARCHITECTURE_RESULT: ${{ needs.evidence-architecture.result }}
           WORKFLOW_SELECTION_RESULT: ${{ needs.workflow-selection.result }}
+          WORKFLOW_PIPEFAIL_RESULT: ${{ needs.workflow-pipefail.result }}
           SKILLS_MIRROR_RESULT: ${{ needs.skills-mirror.result }}
         run: |
           set -euo pipefail
           test "${CHANGES_RESULT}" = success
           # Empty must never be read as "unselected": a broken probe step would
-          # otherwise turn into a green gate over five skipped workers.
+          # otherwise turn into a green gate over six skipped workers.
           case "${SELECTED}" in
             true|false) ;;
             *)
@@ -221,4 +252,5 @@ jobs:
           test "${IDENTIFIER_ORIGIN_RESULT}" = "${expected}"
           test "${EVIDENCE_ARCHITECTURE_RESULT}" = "${expected}"
           test "${WORKFLOW_SELECTION_RESULT}" = "${expected}"
+          test "${WORKFLOW_PIPEFAIL_RESULT}" = "${expected}"
           test "${SKILLS_MIRROR_RESULT}" = "${expected}"

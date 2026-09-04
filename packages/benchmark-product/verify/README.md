@@ -6,11 +6,12 @@ Verify a public Colophon claim bundle without the Colophon app or any execution 
 npx @colophon-claims/verify@0.2 ./bundle
 ```
 
-Use `--json` for machine-readable output. The reader runs the checks declared by the
-bundle format, covering its manifest, evidence closure, calculations, report, and claim
-consistency. Exit status is `0` when the bundle is valid for the format and profile it
-declares, `1` for an invalid bundle, and `2` for usage or operational failures. A check a
-profile defers is reported as deferred, never as passed, and never as a failure.
+Use `--json` for machine-readable output. The reader runs the checks the bundle's declared
+format closes over, and its verdict names each one — different formats close over different
+checks, so the list is the bundle's, not this README's. Exit status is `0` when the bundle
+is valid for the format and profile it declares, `1` for an invalid bundle, and `2` for
+usage or operational failures. A check a profile defers is reported as deferred, never as
+passed, and never as a failure.
 
 This 0.2 reader supports public bundle formats v2, v4, v5, v6, v7, and v8. It
 intentionally rejects the unrelated accounting bundle v3. Formats v2 and v4 run six
@@ -32,9 +33,9 @@ For this release, `@jinn-network/*` is pinned to the exact
 It is not a floating `@canary` dependency and is not a stable stack release.
 
 Verification opens no network connection, reads no account or API credential, and uploads
-nothing. It checks the bundle's integrity, evidence closure, calculations, report, and claim
-consistency. It does not prove that the producing machine was honest or that the compared
-identities are independent parties.
+nothing. It recomputes the checks the bundle's declared format closes over, against the bytes
+the bundle carries and nothing else. It does not prove that the producing machine was honest
+or that the compared identities are independent parties.
 
 ## Freeze-artifact repositories
 
@@ -61,13 +62,16 @@ dual licence such as `Apache-2.0 OR MIT` outright; correcting those changes the 
 bytes, so it is a format bump rather than silent drift, and a tree published under `/1`
 reports drift against this version. Regenerate and republish it.
 
-Two API notes for anyone embedding this package rather than running its binary. `runVerifierCli`'s
+Three API notes for anyone embedding this package rather than running its binary. `runVerifierCli`'s
 `deps.verify` test seam now returns `VerifiedPublicBundleSnapshot` (the verification **and** the
 snapshot) rather than the verification alone, so `--freeze-repo` renders from the same
 authenticated snapshot the reported verdict came from instead of verifying the bundle a second
 time without the caller's trust material. A supplied `verify` stub must be updated. Alongside it,
 `verifyFreezeRepoSnapshot(snapshot, repoDir)` is exported for callers that already hold a verified
-snapshot; `verifyFreezeRepo(bundleDir, repoDir, deps)` is unchanged.
+snapshot; `verifyFreezeRepo(bundleDir, repoDir, deps)` is unchanged. For the same reason,
+`deps.freezeRepo` takes `(snapshot, repoDir)` rather than `(bundleDir, repoDir)`: the seam stands in
+for the snapshot-rendering path the CLI actually runs, so a seam typed against the directory would
+document a call the CLI no longer makes.
 
 Bundles are also verifiable without this package: `../EXTERNAL-VERIFICATION.md` specifies
 the external path (openssl plus a dependency-free script, shipped here as

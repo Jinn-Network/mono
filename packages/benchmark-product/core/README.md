@@ -46,7 +46,7 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **45 generated operations**, all shipped through the library and CLI
+contains **46 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -59,6 +59,7 @@ with an explicit shipped/deferred GUI disposition:
 | `authorityRevoke` | `colophon authority revoke` | Sponsor-only grant or membership revocation. |
 | `authorityShow` | `colophon authority show` | Read the authority policy. |
 | `anchoringConfigure` | `colophon anchoring configure` | Replace or clear the workspace anchor provider and endpoint configuration. |
+| `identityBind` | `colophon identity bind` | Bind the workspace report-signing key to a domain, and name the record to publish there. |
 | `disclosureDeclare` | `colophon disclosure declare` | Seal this run's six-variable disclosure-specification record over its sealed Matrix. |
 | `disclosureShow` | `colophon disclosure show` | Read the sealed disclosure-specification record back out of the workspace store. |
 | `createDraft` | `colophon draft create` | Create a draft, optionally from JSON. |
@@ -83,7 +84,7 @@ with an explicit shipped/deferred GUI disposition:
 | `runLaunch` | `colophon launch` | Drive the real local venue, serially by default or with `--concurrency 1-32`. |
 | `runLock` | `colophon lock` | Seal the preregistered Run. |
 | `runAnchor` | `colophon anchor` | Obtain, verify, and store third-party time evidence over the sealed Run or Matrix digest. |
-| `runBind` | `colophon bind` | Bind the sealed, not-yet-launched Run to a public beacon value that postdates its seal, sealing the derived execution order. |
+| `runBind` | `colophon bind` | Bind the sealed, not-yet-launched Run to a public beacon value that postdates its seal, sealing the derived execution order. On a scheduled source the seal names exactly one admissible round — the first published strictly after it — and every other is refused. |
 | `runPreview` | `colophon preview` | Run a disclosed, non-official rehearsal. |
 | `runPublish` | `colophon publish` | Verify and emit one immutable local bundle. |
 | `runQuote` | `colophon quote` | Present size, coverage, cap, and honest estimates. |

@@ -36,6 +36,7 @@ import {
   authorityRevoke,
   authorityShow,
   anchoringConfigure,
+  identityBind,
   runBind,
   createDraft,
   getDraft,
@@ -53,6 +54,7 @@ import {
   runCancel,
   runLaunch,
   runLock,
+  draftSampleSizeAdvisory,
   publicationAccounting,
   publicationConfigure,
   publicationRegister,
@@ -93,8 +95,9 @@ import {
 } from "../intake/external-run-records.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
-import type { BeaconReference } from "@colophon-claims/verify";
+import type { BeaconReference, DomainBindingMechanism, PublicBundleVerificationResult } from "@colophon-claims/verify";
 import {
+  DOMAIN_BINDING_MECHANISM_NAMES,
   exportFreezeRepo,
   spdxLicenseProblem,
   summarizeVerificationOutcome,
@@ -102,8 +105,10 @@ import {
 } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
+import { formatSampleSizeAdvisory } from "../run/sample-size-advisory.js";
 import { readRunJournalEntries } from "../run/journal.js";
-import { DEFAULT_PUBLICATION_SOURCE_NAME, requireRunState } from "../run/state.js";
+import { requireRunState } from "../run/state.js";
+import { resolveWorkspacePublicationSourceName } from "../run/publication-source.js";
 import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
 import { readDraftDocument } from "../operations/drafts.js";
 import { listMethodCatalog } from "../operations/method-catalog.js";
@@ -163,13 +168,15 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   quote            --workspace <dir> --principal <id> --draft <draftId>
                    [--ack-provider-network-costs]
   lock             --workspace <dir> --principal <id> --draft <draftId>
-                   [--ack-provider-network-costs] [--no-anchor]
+                   --ack-sample-size [--ack-provider-network-costs] [--no-anchor]
   anchor           --workspace <dir> --principal <id> --draft <draftId>
                    --subject lock|matrix [--provider <profileUri>] [--endpoint <url>]
   bind             --workspace <dir> --principal <id> --draft <draftId>
                    --beacon-source <id> --beacon-round <n> --beacon-value <64 hex>
   anchoring configure --workspace <dir> --principal <id>
                    (--provider <profileUri> --endpoint <url> | --file <anchoring.json> | --clear)
+  identity bind    --workspace <dir> --principal <id> --domain <domain>
+                   [--mechanism dns-txt|well-known-url]
   disclosure declare --workspace <dir> --principal <id> --draft <draftId>
                    --file <disclosure.json>
   disclosure show    --workspace <dir> --principal <id> --draft <draftId>
@@ -284,11 +291,15 @@ const PREVIEW_FLAGS = ["workspace", "principal", "json", "draft", "items"] as co
 const PROVIDER_ACK_FLAG = "ack-provider-network-costs" as const;
 const QUOTE_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
 const NO_ANCHOR_FLAG = "no-anchor" as const;
-const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG, NO_ANCHOR_FLAG] as const;
+const SAMPLE_SIZE_ACK_FLAG = "ack-sample-size" as const;
+const LOCK_FLAGS = [
+  "workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG, NO_ANCHOR_FLAG, SAMPLE_SIZE_ACK_FLAG,
+] as const;
 const ANCHOR_FLAGS = ["workspace", "principal", "json", "draft", "subject", "provider", "endpoint"] as const;
 const BIND_FLAGS = ["workspace", "principal", "json", "draft", "beacon-source", "beacon-round", "beacon-value"] as const;
 const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider", "endpoint", "file", "clear"] as const;
 const DISCLOSURE_DECLARE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const IDENTITY_BIND_FLAGS = ["workspace", "principal", "json", "domain", "mechanism"] as const;
 const DISCLOSURE_SHOW_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
@@ -405,6 +416,44 @@ function requireProviderNetworkCostAcknowledgement(
   }
   if (!jsonMode) context.progress?.(PROVIDER_NETWORK_COST_DISCLOSURE);
   return true;
+}
+
+/**
+ * The seal-time sample-size advisory gate (issue #2978).
+ *
+ * The lock is irreversible and, until this gate, accepted any replicate and item count without
+ * comment — while the interval those counts imply was computable before a single cell was
+ * dispatched. Refusing until the operator repeats the command with the flag is the same shape as
+ * the provider-cost gate above, and for the same reason: this CLI is non-interactive, so a flag is
+ * the only honest way to ask a question and get an answer. The refusal detail carries the whole
+ * advisory, so the first refused invocation is where the operator reads the width.
+ *
+ * Returns the acknowledged advisory line, or `undefined` when there is none to acknowledge. The
+ * caller prints it on the success path rather than this gate streaming it: `--json` already
+ * carries the advisory in the lock envelope, and stdout — beside the `locked draft ...` receipt —
+ * is that field's human analogue. `context.progress` is the launch verb's channel (nothing else
+ * streams before launch), and the width an operator sealed belongs in the same captured output as
+ * the digest they sealed it into.
+ */
+function requireSampleSizeAdvisoryAcknowledgement(
+  args: ParsedArgs,
+  workspaceDir: string,
+  draftId: string,
+): string | undefined {
+  const planned = draftSampleSizeAdvisory(workspaceDir, draftId);
+  // No advisory means no lock could seal this draft right now; `runLock` below says why, and
+  // demanding an acknowledgement of a width that does not exist would bury that answer.
+  if (planned === undefined) return undefined;
+  const advisory = formatSampleSizeAdvisory(planned);
+  if (!present(args, SAMPLE_SIZE_ACK_FLAG)) {
+    refuse(
+      "invalid-invocation",
+      `--${SAMPLE_SIZE_ACK_FLAG}`,
+      `${advisory}\nThe lock is irreversible. Change the sample size now, or repeat the command with `
+        + `--${SAMPLE_SIZE_ACK_FLAG} to seal at this n.`,
+    );
+  }
+  return advisory;
 }
 
 function withProviderAcknowledgement<T>(
@@ -1055,13 +1104,24 @@ async function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boole
   const acknowledged = requireProviderNetworkCostAcknowledgement(
     args, context, opContext.workspaceDir, draftId, jsonMode,
   );
+  // Only an advisory the operator was actually shown is sealed as acknowledged; when there was
+  // none to show, the lock below refuses and nothing is sealed either way.
+  const sampleSizeAdvisory = requireSampleSizeAdvisoryAcknowledgement(
+    args, opContext.workspaceDir, draftId,
+  );
 
-  const locked = runLock(opContext, { draftId });
+  const locked = runLock(opContext, {
+    draftId,
+    acknowledgedSampleSizeAdvisory: sampleSizeAdvisory !== undefined,
+  });
   const result = withProviderAcknowledgement(locked, acknowledged);
   const rendered = renderResult(
     result,
     jsonMode,
-    (value) => `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
+    // The acknowledged width prints above the receipt, so human-mode stdout says at what n the
+    // digest below it was sealed. `--json` carries the same pair in the envelope.
+    (value) => (sampleSizeAdvisory === undefined ? "" : `${sampleSizeAdvisory}\n`)
+      + `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
   );
   if (!locked.ok || present(args, NO_ANCHOR_FLAG)) return rendered;
 
@@ -1174,6 +1234,29 @@ function handleAnchoringConfigure(args: ParsedArgs, context: CliContext, jsonMod
 
 
 /**
+ * `identity bind` (issue #2983). The mechanism defaults rather than being required: `dns-txt` needs
+ * no web host and survives one moving, so it is the answer for a claimant who has not thought about
+ * it. The printed proof is the whole point of the verb — the document this writes is inert until the
+ * operator publishes that record at the domain themselves.
+ */
+function handleIdentityBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, IDENTITY_BIND_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const mechanism = optional(args, "mechanism");
+  const result = identityBind(opContext, {
+    domain: required(args, "domain"),
+    ...(mechanism === undefined ? {} : { mechanism: mechanism as DomainBindingMechanism }),
+  });
+  return renderResult(result, jsonMode, (value) => `bound ${value.keyId}\n`
+    + `  to ${value.domain} by ${DOMAIN_BINDING_MECHANISM_NAMES[value.mechanism]}\n`
+    + `  document ${value.documentPath}\n`
+    + `Publish this at ${value.proof.location}:\n`
+    + `  ${value.proof.expectedValue}\n`
+    + `Until it is published the binding names a domain that has not answered; a reader who supplies\n`
+    + `the document to colophon-verify is told exactly that.\n`);
+}
+
+/**
  * `disclosure declare` (issue #2839). The declaration always comes from a file: six honest sentences
  * about an experiment are not a thing anyone types onto a command line, and a partially typed one is
  * exactly the shape the record exists to make impossible.
@@ -1279,16 +1362,23 @@ async function handlePublicationServe(args: ParsedArgs, context: CliContext, jso
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
     refuse("invalid-invocation", "--port", "--port must be an integer from 0 to 65535");
   }
-  // Present-but-empty is a typo, not an omission, so it falls back to the default exactly as an
-  // absent flag does rather than binding to the empty string.
+  // Present-but-empty is a typo, not an omission, so it is resolved from the workspace exactly as
+  // an absent flag is rather than binding to the empty string. An explicit name always wins:
+  // `resolveWorkspacePublicationSourceName` refuses a workspace whose runs disagree, and passing
+  // the name is how an operator settles that.
   const sourceName = optional(args, "source");
   const host = optional(args, "host");
   const server = await startPublicationArchiveServer({
     workspaceDir,
-    sourceName: sourceName === undefined || sourceName === "" ? DEFAULT_PUBLICATION_SOURCE_NAME : sourceName,
+    sourceName: sourceName === undefined || sourceName === ""
+      ? resolveWorkspacePublicationSourceName(workspaceDir)
+      : sourceName,
     ...(host === undefined || host === "" ? {} : { host }),
     port,
-    ...(context.progress === undefined ? {} : { onError: (cause: unknown) => context.progress?.(`server error: ${cause instanceof Error ? cause.message : String(cause)}`) }),
+    ...(context.progress === undefined ? {} : {
+      onError: (cause: unknown) => context.progress?.(`server error: ${cause instanceof Error ? cause.message : String(cause)}`),
+      onProgress: (line: string) => context.progress?.(line),
+    }),
   });
   try {
     // Taken after the bind so a failure to serve is not preceded by hijacking the process's
@@ -1537,6 +1627,15 @@ function handleStatus(args: ParsedArgs, context: CliContext, jsonMode: boolean):
       `expected ${value.counts.expected}, dispatched ${value.counts.dispatched}, delivered ${value.counts.delivered}, `
         + `judged ${value.counts.judged}, failed ${value.counts.failed}, `
         + `awaiting evaluation ${value.counts.awaitingEvaluation}`,
+      // The binding halves, which `--json` has always carried and this surface did not (issue
+      // #3428). Exactly one can apply: `bindableBeaconRounds` is present only while the run is
+      // locked, unlaunched and unbound, and `binding` only once it has bound.
+      ...(value.binding === undefined ? [] : [`binding ${value.binding.class}: ${value.binding.statement}`]),
+      // Naming the round is the point: an operator who guesses one too low is refused for
+      // postdating, and that refusal does not name the round the seal requires.
+      ...(value.bindableBeaconRounds ?? []).map(
+        (entry) => `bindable\t${entry.source}\tround ${entry.round}\tpublished ${entry.publishedAt}`,
+      ),
     ];
     return `${lines.join("\n")}\n`;
   });
@@ -1602,15 +1701,22 @@ async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMod
   assertKnownFlags(args, BUNDLE_VERIFY_FLAGS);
   const bundleDir = pathFrom(context.cwd, required(args, "bundle"));
   const result = await verifyPublicBundle(bundleDir);
-  return renderResult(
-    { ok: true, result },
-    jsonMode,
-    // A deferred check is never printed as a bare check name: a metadata-first bundle carries its
-    // artifact digests without their bytes (issue #2986).
-    (value) => `verified public bundle ${value.identity}: ${summarizeVerificationOutcome(value).outcomes
-      .map(({ check, state }) => (state === "passed" ? check : `${check} (${state})`))
-      .join(", ")}\n`,
-  );
+  return renderResult({ ok: true, result }, jsonMode, renderBundleVerifyLine);
+}
+
+/**
+ * The human line for `bundle verify`. It names the operation rather than asserting a verified
+ * result: "verified" claims more than this does, which is to recompute the arithmetic, closure, and
+ * consistency of bytes it was handed (issue #2982, ruled for the standalone reader; issue #3689 for
+ * this third reader surface). `--json` is untouched -- it carries the checks, not a verb.
+ *
+ * A deferred check is never printed as a bare check name: a metadata-first bundle carries its
+ * artifact digests without their bytes (issue #2986).
+ */
+export function renderBundleVerifyLine(value: PublicBundleVerificationResult): string {
+  return `recomputed public bundle ${value.identity}: ${summarizeVerificationOutcome(value).outcomes
+    .map(({ check, state }) => (state === "passed" ? check : `${check} (${state})`))
+    .join(", ")}\n`;
 }
 
 async function handleFreezeRepoExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -1727,6 +1833,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["anchor", handleAnchor],
   ["bind", handleBind],
   ["anchoring configure", handleAnchoringConfigure],
+  ["identity bind", handleIdentityBind],
   ["disclosure declare", handleDisclosureDeclare],
   ["disclosure show", handleDisclosureShow],
   ["publication configure", handlePublicationConfigure],

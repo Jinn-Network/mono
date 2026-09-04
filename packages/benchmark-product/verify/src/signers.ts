@@ -1,4 +1,5 @@
 import { parseEvidenceNativeClaimPackageV3, type EvidenceNativeClaimPackageV3 } from "@jinn-network/benchmarking-protocol";
+import { keyFingerprintFromDidKey } from "./identity/did-key.js";
 import type { BundleTrust, BundleV4Trust } from "./schema.js";
 
 /**
@@ -24,6 +25,20 @@ export interface PublicBundleSigner {
    * a signer is an independent party -- no bundle format can establish that.
    */
   readonly custody: "same-operator" | "undeclared";
+  /**
+   * `sha256:<64 hex>` over the signer's raw Ed25519 public key, decoded from its `did:key` (issue
+   * #2983). This is the bare name a reader falls back to when no domain is bound, so it digests the
+   * KEY rather than the identifier that spells it and is therefore the same value in every bundle
+   * format. Absent where `keyId` is not a `did:key` -- there is no key material to digest, and a
+   * digest of the identifier string would not be a key fingerprint.
+   */
+  readonly keyFingerprint?: string;
+}
+
+/** Adds the fingerprint where the identifier carries the key, and nothing where it does not. */
+function withKeyFingerprint(signer: Omit<PublicBundleSigner, "keyFingerprint">): PublicBundleSigner {
+  const keyFingerprint = keyFingerprintFromDidKey(signer.keyId);
+  return keyFingerprint === undefined ? signer : { ...signer, keyFingerprint };
 }
 
 function deduplicate(signers: readonly PublicBundleSigner[]): readonly PublicBundleSigner[] {
@@ -59,14 +74,14 @@ export function legacyBundleSigners(
     "admission" in trust ? trust.admission.reviewers.map((entry) => entry.evaluator) : [],
   );
   return deduplicate([
-    { role: "publisher", identity: trust.report.author, keyId: trust.report.keyId, custody: "same-operator" },
+    withKeyFingerprint({ role: "publisher", identity: trust.report.author, keyId: trust.report.keyId, custody: "same-operator" }),
     ...trust.evaluators.flatMap((entry) => {
       const roles: PublicBundleSignerRole[] = [];
       // The trust set equals verdicts + reviewers, so "in neither" is unreachable; if a future
       // widening makes it reachable, a signer must still be shown rather than silently dropped.
       if (verdictEvaluators.has(entry.evaluator) || !reviewers.has(entry.evaluator)) roles.push("automated-grader");
       if (reviewers.has(entry.evaluator)) roles.push("human-reviewer");
-      return roles.map((role) => ({
+      return roles.map((role) => withKeyFingerprint({
         role,
         identity: entry.evaluator,
         keyId: entry.keyId,
@@ -105,7 +120,7 @@ export function evidenceNativeBundleSigners(
   const verified = new Set(verifiedSignerKeyIds);
   return deduplicate(parseEvidenceNativeClaimPackageV3(claimPackageBytes).trust.signers
     .filter((signer) => verified.has(signer.keyId))
-    .map((signer) => ({
+    .map((signer) => withKeyFingerprint({
       role: EVIDENCE_NATIVE_PURPOSE_ROLES[signer.purpose],
       identity: signer.identity,
       keyId: signer.keyId,

@@ -99,3 +99,23 @@ describe("evidence-native bundle signers", () => {
     expect(evidenceNativeBundleSigners(claim.bytes, [])).toEqual([]);
   });
 });
+
+describe("key fingerprints (issue #2983)", () => {
+  // A real did:key, so there is key material to digest. `REPORT`'s `did:key:zReport` above is not
+  // one -- which is why every assertion in this file's other tests still expects no fingerprint.
+  const REAL_DID_KEY = "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX";
+
+  test("a signer whose identifier carries its key gets the digest of that key", () => {
+    const trust = BundleTrustSchema.parse({
+      format: "benchmark-product-public-trust/2",
+      selfRun: { custody: "workspace-minted", evaluatorDistinctness: "agent-distinctness-only", partyIndependence: "not-established" },
+      report: { ...REPORT, keyId: REAL_DID_KEY, didKey: REAL_DID_KEY, author: REAL_DID_KEY },
+      evaluators: [evaluator("one", "benchmark-product-verdict-0001")],
+    });
+    const [publisher, grader] = legacyBundleSigners(trust, new Set(["urn:jinn:evaluator:one"]));
+    expect(publisher!.keyFingerprint).toMatch(/^sha256:[a-f0-9]{64}$/);
+    // A verdict keyId is not a did:key: no key material, so no fingerprint rather than a digest of
+    // the identifier string, which would not be a key fingerprint at all.
+    expect(grader!.keyFingerprint).toBeUndefined();
+  });
+});

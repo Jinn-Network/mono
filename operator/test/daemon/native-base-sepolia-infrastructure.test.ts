@@ -46,6 +46,9 @@ function requesterInput(): NativeInfrastructureFactoryInput {
       accountIndex: 7,
     },
     publicBaseUrl: 'https://requester.example.invalid',
+    recordSources: [
+      { role: 'solver', agent: 'urn:jinn:agent:solver-b', name: 'solver-records', baseUrl: 'https://solver-b.example.invalid' },
+    ],
     publicListen: { host: '127.0.0.1', port: 18_532 },
     ipfs: { apiUrl: 'https://ipfs.example.invalid' },
     chain: { chainId: 84532, generation: 'today', contracts: ADDRESSES },
@@ -587,6 +590,271 @@ describe('first-party Base Sepolia public record transport', () => {
   });
 });
 
+// #3704 sweep of the PR #3446 review follow-ups. Three refusal-diagnostic holes (#3457), the
+// fetch bound that stopped at the response headers (#3458), and the pins for behavior that was
+// already correct but unasserted (#3459).
+describe('native record transport refusal diagnostics and bounds (#3704)', () => {
+  const CONFIGURED = 'https://records.example.invalid/records/';
+
+  // #3457.1: `reportRefusedRecordDestination` matches on `NativeRecordDestinationError`, so a
+  // refusal thrown as a plain `Error` is swallowed by all three fallthrough sites exactly as every
+  // refusal was before #3446 — the one destination class #3431's criterion does not enumerate.
+  describe('a non-HTTP(S) destination is a named refusal (#3457)', () => {
+    it('refuses an announced non-HTTP(S) locator as a NativeRecordDestinationError', async () => {
+      const fetchImpl = vi.fn(async () => new Response('unreachable'));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl,
+      });
+
+      const refusal = await transport.byLocation('file:///private/operator.db').catch((cause: unknown) => cause);
+      expect(refusal).toBeInstanceOf(NativeRecordDestinationError);
+      expect((refusal as NativeRecordDestinationError).detail).toMatch(/scheme file: is not HTTP\(S\)/u);
+      expect(fetchImpl).not.toHaveBeenCalled();
+
+      // The half that matters: the log path now names it instead of returning false.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(reportRefusedRecordDestination('delivery card location', refusal)).toBe(true);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('refuses a redirect onto a non-HTTP(S) scheme as a named refusal', async () => {
+      const fetchImpl = vi.fn(async () => new Response(null, {
+        status: 302,
+        headers: { location: 'file:///etc/passwd' },
+      }));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl,
+      });
+
+      await expect(transport.byLocation(`${CONFIGURED}abc`))
+        .rejects.toBeInstanceOf(NativeRecordDestinationError);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // #3457.2: `containedByConfiguredRoot`'s blanket catch cannot tell "this candidate is outside
+  // the root" from "the OPERATOR's own root is unusable", so a `baseUrl` written without its
+  // scheme refuses every record from that peer while naming only the peer's destination.
+  describe('a malformed configured record origin is named (#3457)', () => {
+    it('warns once per unusable configured origin, at construction, naming the root', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        createBaseSepoliaRecordTransport({
+          ipfsApiUrl: 'https://ipfs.example.invalid',
+          recordOrigins: ['records.peer.example', 'ftp://archive.peer.example/records/', CONFIGURED],
+          fetchImpl: async () => new Response('unreachable'),
+        });
+
+        const lines = warn.mock.calls.map(([line]) => String(line));
+        expect(lines.filter((line) => line.includes('records.peer.example')
+          && !line.includes('ftp://'))).toHaveLength(1);
+        expect(lines.filter((line) => line.includes('ftp://archive.peer.example/records/'))).toHaveLength(1);
+        // The usable root is not warned about.
+        expect(lines.some((line) => line.includes(CONFIGURED))).toBe(false);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('does not re-warn per refused candidate', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const transport = createBaseSepoliaRecordTransport({
+          ipfsApiUrl: 'https://ipfs.example.invalid',
+          recordOrigins: ['records.peer.example'],
+          fetchImpl: async () => new Response('unreachable'),
+        });
+        const atConstruction = warn.mock.calls.length;
+
+        await expect(transport.byLocation('https://records.peer.example/records/a')).rejects.toThrow();
+        await expect(transport.byLocation('https://records.peer.example/records/b')).rejects.toThrow();
+
+        expect(warn.mock.calls.length).toBe(atConstruction);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
+  // #3457.3: the cap error was built from the raw `Location` header, which may be relative, so it
+  // was the one destination in the file that is not a resolved absolute URL.
+  it('names the resolved absolute redirect target when the chain hits the cap (#3457)', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, {
+      status: 302,
+      headers: { location: 'abc-next' },
+    }));
+    const transport = createBaseSepoliaRecordTransport({
+      ipfsApiUrl: 'https://ipfs.example.invalid',
+      recordOrigins: [CONFIGURED],
+      fetchImpl,
+    });
+
+    const refusal = await transport.byLocation(`${CONFIGURED}abc`).catch((cause: unknown) => cause);
+    expect(refusal).toBeInstanceOf(NativeRecordDestinationError);
+    expect((refusal as NativeRecordDestinationError).destination).toBe(`${CONFIGURED}abc-next`);
+    expect((refusal as NativeRecordDestinationError).detail).toMatch(/more than 5 redirects/u);
+  });
+
+  // #3458.1: the timeout was cleared when the RESPONSE HEADERS arrived, so a peer that answers 200
+  // and then trickles held the caller past the 30s fleet worker lease TTL — the same `loop 'work'
+  // stale` symptom the #30 bound exists to prevent, reached through the body instead of the
+  // headers. Mutation check: clear the timer at the headers again and this hangs to the vitest
+  // timeout rather than rejecting.
+  it('bounds the response body read, not only time-to-headers (#3458)', async () => {
+    const transport = createBaseSepoliaRecordTransport({
+      ipfsApiUrl: 'https://ipfs.example.invalid',
+      recordOrigins: [CONFIGURED],
+      httpFetchTimeoutMs: 30,
+      fetchImpl: async () => new Response(new ReadableStream({
+        start(controller) {
+          // Headers land immediately; the body then trickles one byte and stalls.
+          controller.enqueue(new Uint8Array([1]));
+        },
+      })),
+    });
+
+    await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toThrow(/timed out/u);
+  }, 5_000);
+
+  // #3458.2: a chunked response omits `content-length`, and the cap was applied only AFTER
+  // `arrayBuffer()` had already buffered the whole body.
+  it('abandons an oversized chunked body at the cap instead of buffering it (#3458)', async () => {
+    let pulled = 0;
+    const transport = createBaseSepoliaRecordTransport({
+      ipfsApiUrl: 'https://ipfs.example.invalid',
+      recordOrigins: [CONFIGURED],
+      maxBytes: 2_048,
+      fetchImpl: async () => new Response(new ReadableStream({
+        pull(controller) {
+          pulled += 1;
+          if (pulled > 100) { controller.close(); return; }
+          controller.enqueue(new Uint8Array(1_024));
+        },
+      })),
+    });
+
+    await expect(transport.byLocation(`${CONFIGURED}big`)).rejects.toThrow(/size limit/u);
+    // Asserted on the read count, not on the rejection: the pre-#3458 shape also rejected, it just
+    // drained all 100 chunks into memory first.
+    expect(pulled).toBeLessThanOrEqual(4);
+  });
+
+  it('still returns a whole body that arrives after its headers, inside the bound (#3458)', async () => {
+    const bytes = new TextEncoder().encode('{"record":"chunked"}');
+    const transport = createBaseSepoliaRecordTransport({
+      ipfsApiUrl: 'https://ipfs.example.invalid',
+      recordOrigins: [CONFIGURED],
+      httpFetchTimeoutMs: 2_000,
+      fetchImpl: async () => new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes.slice(0, 5));
+          setTimeout(() => {
+            controller.enqueue(bytes.slice(5));
+            controller.close();
+          }, 20);
+        },
+      })),
+    });
+
+    await expect(transport.byLocation(`${CONFIGURED}abc`)).resolves.toEqual(bytes);
+  });
+
+  // #3459.2: both halves of the split are exercised by existing tests, but the only `method`
+  // assertion in the file is on the initial IPFS POST — so deleting the split line left the suite
+  // green.
+  describe('the redirect method split is asserted (#3459)', () => {
+    it('downgrades a POST to GET across a 302', async () => {
+      const bytes = new TextEncoder().encode('{"record":"moved"}');
+      const seen: Array<string | undefined> = [];
+      const fetchImpl = vi.fn(async (request: string | URL, init?: RequestInit) => {
+        seen.push(init?.method);
+        return seen.length === 1
+          ? new Response(null, {
+            status: 302,
+            headers: { location: `${new URL(String(request)).origin}/api/v0/block/get-v2` },
+          })
+          : new Response(bytes);
+      });
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [],
+        fetchImpl,
+      });
+
+      await expect(transport.byRawCid('bafkreisweepredirectmethod')).resolves.toEqual(bytes);
+      expect(seen).toEqual(['POST', 'GET']);
+    });
+
+    it('preserves the method across a 308', async () => {
+      const bytes = new TextEncoder().encode('{"record":"moved"}');
+      const seen: Array<string | undefined> = [];
+      const fetchImpl = vi.fn(async (request: string | URL, init?: RequestInit) => {
+        seen.push(init?.method);
+        return seen.length === 1
+          ? new Response(null, {
+            status: 308,
+            headers: { location: `${new URL(String(request)).origin}/api/v0/block/get-v2` },
+          })
+          : new Response(bytes);
+      });
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [],
+        fetchImpl,
+      });
+
+      await expect(transport.byRawCid('bafkreisweepredirectmethod')).resolves.toEqual(bytes);
+      expect(seen).toEqual(['POST', 'POST']);
+    });
+  });
+
+  // #3459.3: substituting containment for same-origin deliberately admits a hop from one
+  // configured record origin to ANOTHER. Documented, but unpinned in either direction.
+  describe('cross-root redirect admission (#3459)', () => {
+    const SECOND = 'https://mirror.example.invalid/records/';
+
+    it('admits a redirect from one configured record origin to another', async () => {
+      const bytes = new TextEncoder().encode('{"record":"mirrored"}');
+      const fetchImpl = vi.fn(async (request: string | URL) => (
+        String(request) === `${CONFIGURED}abc`
+          ? new Response(null, { status: 302, headers: { location: `${SECOND}abc` } })
+          : new Response(bytes)
+      ));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED, SECOND],
+        fetchImpl,
+      });
+
+      await expect(transport.byLocation(`${CONFIGURED}abc`)).resolves.toEqual(bytes);
+      expect(fetchImpl.mock.calls.map(([request]) => String(request)))
+        .toEqual([`${CONFIGURED}abc`, `${SECOND}abc`]);
+    });
+
+    it('refuses a redirect to an origin that is configured for nobody', async () => {
+      const fetchImpl = vi.fn(async () => new Response(null, {
+        status: 302,
+        headers: { location: 'https://third.example.invalid/records/abc' },
+      }));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED, SECOND],
+        fetchImpl,
+      });
+
+      await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toThrow(/redirect leaves/u);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
 describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
   const requestId = `0x${'12'.repeat(32)}` as const;
   const transactionHash = `0x${'34'.repeat(32)}` as const;
@@ -617,12 +885,20 @@ describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
     readonly ipfsMiss?: boolean;
     /** What the HTTP serving plane (`byLocation`) returns; absent means the plane is never reachable. */
     readonly httpBytes?: Uint8Array;
+    /** When set, `byLocation` REFUSES the destination rather than missing on it (#3459). */
+    readonly refuseLocation?: boolean;
   } = {}) {
     const byDigest = vi.fn(async () => {
       if (options.ipfsMiss) throw new Error('block was not found locally');
       return options.bytes ?? deliveryBytes;
     });
     const byLocation = vi.fn(async () => {
+      if (options.refuseLocation) {
+        throw new NativeRecordDestinationError(
+          deliveryLocation,
+          'it is not contained by any configured record origin',
+        );
+      }
       if (options.httpBytes === undefined) throw new Error('no public replica in this fixture');
       return options.httpBytes;
     });
@@ -730,6 +1006,30 @@ describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
       deliveryPublicLocations: [deliveryLocation],
     })).rejects.toThrow(/not found locally/u);
     expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
+  });
+
+  // #3459.1: this is one of the two `reportRefusedRecordDestination` call sites PR #3446 added
+  // that no test reached — deleting the call left the whole suite green while restoring exactly
+  // the silent fallthrough #3431's acceptance criterion 1 was reopened over. The IPFS plane below
+  // never held a native record, so without the log the operator sees only "block was not found".
+  it('names a refused delivery-card location in the log and still falls through to IPFS', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { reads, byDigest } = fixture({ refuseLocation: true });
+      await expect(reads.readCanonicalSolutionDelivery({
+        ...expected,
+        deliveryPublicLocations: [deliveryLocation],
+      })).resolves.toMatchObject({ finalized: true });
+
+      const line = String(warn.mock.calls.at(-1)?.[0]);
+      expect(line).toContain('delivery card location');
+      expect(line).toContain(deliveryLocation);
+      expect(line).toContain('not contained');
+      // The refusal is not fatal: the IPFS plane is still tried, exactly as before.
+      expect(byDigest).toHaveBeenCalledWith(advertisedDeliveryDigest);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
