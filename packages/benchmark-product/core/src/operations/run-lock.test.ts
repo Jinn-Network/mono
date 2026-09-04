@@ -11,6 +11,7 @@ import {
   readRunAnchorIntentExtension,
   readRunSampleSizeAdvisory,
   sealRun,
+  withRunSampleSizeAdvisoryExtension,
 } from "@jinn-network/benchmarking-records";
 import { PREDICTION_FORECAST_PROFILE_DIGEST_HEX } from "@jinn-network/task-execution-profiles";
 import { readAuditEntries } from "../audit/journal.js";
@@ -408,17 +409,66 @@ describe("runLock — acknowledged sample-size advisory", () => {
     expect(readRunSampleSizeAdvisory(sealedRun())).toBeUndefined();
   });
 
-  test("an unacknowledged lock seals byte-identically to a lock before the advisory existed", async () => {
+  /**
+   * "Byte-identical to a lock before the advisory existed" is a claim about ONE key, so the test
+   * has to add that key and take it away again. Comparing an unacknowledged seal with itself
+   * (issue #3802) cannot fail for the reason it names and would keep passing if the extension ever
+   * started leaking into unacknowledged seals.
+   */
+  test("acknowledging adds one key and nothing else: strip it and the bytes come back exactly", async () => {
     const clock = makeClock();
     await setUpQuotedDraft(clock);
     expect(runLock(contextFor(clock), { draftId: "draft-1" }).ok).toBe(true);
     const plain = sealedRun();
-    // Sealing the same record with the extension removed is the only difference the acknowledgement
-    // makes: it does not re-shape the record.
-    const acknowledged = { ...plain };
     expect(Object.keys(plain)).not.toContain(SAMPLE_SIZE_ADVISORY_EXTENSION);
-    expect(Buffer.from(sealRun(acknowledged).bytes).toString("hex"))
-      .toBe(Buffer.from(sealRun(plain).bytes).toString("hex"));
+    const plainHex = Buffer.from(sealRun(plain).bytes).toString("hex");
+
+    const acknowledged = withRunSampleSizeAdvisoryExtension(plain, { n: 24, expectedIntervalWidth: "0.3928" });
+    expect(Buffer.from(sealRun(acknowledged).bytes).toString("hex")).not.toBe(plainHex);
+
+    const stripped = { ...acknowledged };
+    delete (stripped as Record<string, unknown>)[SAMPLE_SIZE_ADVISORY_EXTENSION];
+    expect(Buffer.from(sealRun(stripped).bytes).toString("hex")).toBe(plainHex);
+  });
+
+  /**
+   * Issue #3832. The advisory names the declared readouts its per-arm width does not bound, and
+   * that naming reaches the operator surfaces through the same object `runLock` returns — while the
+   * SEALED extension stays exactly the two fields it always carried.
+   */
+  test("names a declared comparison readout without sealing it", async () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(clock));
+    expect(createDraft(contextFor(clock), { draftId: "paired", name: "Paired" }).ok).toBe(true);
+    await sampleInit(contextFor(clock), { draftId: "paired" });
+    armAdd(contextFor(clock), { draftId: "paired", armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
+    armAdd(contextFor(clock), { draftId: "paired", armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+    expect(updateDraft(contextFor(clock), {
+      draftId: "paired",
+      patch: {
+        analysis: {
+          method: "jinn.benchmarking.method/paired-delta",
+          version: "1",
+          baseline: "baseline",
+          candidate: "sample",
+          parameters: { seed: 1, resamples: 10, alpha: "0.05" },
+        },
+      },
+    }).ok).toBe(true);
+    const quoted = await runQuote(contextFor(clock), { draftId: "paired" });
+    expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
+
+    const planned = draftSampleSizeAdvisory(workspaceDir, "paired");
+    expect(planned?.unboundedReadouts).toEqual(["paired-delta@1"]);
+
+    const outcome = runLock(contextFor(clock), { draftId: "paired", acknowledgedSampleSizeAdvisory: true });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    if (!outcome.ok) return;
+    // The surfaces show exactly what the draft advised, scope line included...
+    expect(outcome.result.sampleSizeAdvisory).toEqual(planned);
+    // ...and the seal still carries the two fields `sample-size-advisory/v1` admits, no more.
+    expect(readRunSampleSizeAdvisory(sealedRun("paired")))
+      .toEqual({ n: planned?.n, expectedIntervalWidth: planned?.expectedIntervalWidth });
   });
 });
 

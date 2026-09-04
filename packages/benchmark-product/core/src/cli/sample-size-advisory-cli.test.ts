@@ -108,8 +108,18 @@ describe("lock — the sample-size advisory gate", () => {
     expect(locked.exitCode, locked.stderr).toBe(0);
     // The width prints on stdout beside the digest it was sealed into, not on the progress
     // channel: `lock` streams nothing, which is what `cli-lifecycle.integration.test.ts` pins.
-    expect(locked.stdout).toContain(`n=${SAMPLED_TASKS}: interval width ${expectedIntervalWidth(SAMPLED_TASKS)}`);
-    expect(locked.stdout).toContain("locked draft advisory-draft");
+    //
+    // ORDER, not just co-occurrence (issue #3833). `main.ts` prints the width ABOVE the receipt so
+    // "human-mode stdout says at what n the digest below it was sealed", and `anchor-cli.test.ts`
+    // stopped pinning that when its receipt regex went multiline. This is where the ordering lives
+    // now. Matched on the structural `n=<N>: interval width <W>` row, never on the advisory's
+    // prose, so rewording the lead sentence does not touch this assertion.
+    const lines = locked.stdout.split("\n");
+    const advisoryLine = lines
+      .findIndex((line) => line.includes(`n=${SAMPLED_TASKS}: interval width ${expectedIntervalWidth(SAMPLED_TASKS)}`));
+    const receiptLine = lines.findIndex((line) => line.startsWith("locked draft advisory-draft"));
+    expect(advisoryLine, locked.stdout).toBeGreaterThanOrEqual(0);
+    expect(receiptLine, locked.stdout).toBeGreaterThan(advisoryLine);
     expect(progress).toEqual([]);
 
     const runSha256 = readRunState(workspaceDir, "advisory-draft")?.runSha256;
