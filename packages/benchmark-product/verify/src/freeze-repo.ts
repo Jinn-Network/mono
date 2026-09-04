@@ -20,7 +20,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import {
   BUNDLE_V5_FORMAT,
@@ -846,11 +846,12 @@ export interface FreezeRepoDifference {
 }
 
 /**
- * Why the mode dimension was dropped. The two are materially different to a reader — one is a
- * fact about their filesystem, the other is a fact about this run — so the check names which,
- * rather than reporting the filesystem's shape when all it established was its own reach.
+ * Why the mode dimension was dropped. The two are materially different to a reader — `not-recorded`
+ * is a fact about their filesystem that the probe established, `not-probed` is a fact about this
+ * run and says nothing about the filesystem at all — so the check names which, rather than
+ * reporting the filesystem's shape when all it established was its own reach.
  */
-export type ExecutableBitSkipReason = "constant-mode" | "not-probed";
+export type ExecutableBitSkipReason = "not-recorded" | "not-probed";
 
 export interface FreezeRepoVerificationResult {
   readonly ok: boolean;
@@ -884,64 +885,84 @@ interface TreeEntry {
 export type ExecutableBitProbe = "carried" | ExecutableBitSkipReason;
 
 /**
- * @internal Exported for this module's own tests; not part of the package's public surface.
+ * Where a probe may be written, best site first.
  *
- * Decide whether the filesystem under `dir` actually carries an executable bit, the way git
- * autodetects `core.fileMode`: write a probe file, and see whether the owner-execute bit reads
- * back the way it was set.
+ * The repository's own `.git` is preferred, because the walk skips root `.git`, so a probe
+ * stranded there by a SIGKILL between create and unlink cannot later read back as an unexpected
+ * member of the published tree. It is used only when it is a directory on the SAME DEVICE as the
+ * tree: `.git` is routinely a symlink (dotfile repositories, some container mounts), and a
+ * symlinked or bind-mounted one answers for a filesystem other than the published tree's, which is
+ * the one question this probe exists to ask (issue #3605).
  *
- * This exists because some filesystems report a fixed mode for every file — `0777` on an exFAT
- * or Windows-hosted mount, on some network filesystems — so reading the mode there says nothing
- * about the published tree. Without the probe a byte-perfect clone on such a machine reports
- * EVERY member as `changed`, which is the loudest possible false alarm for a tool whose whole
- * claim is that the tree matches.
- *
- * A refusal (a read-only mount, a permission refusal) answers `not-probed` rather than throwing.
- * Dropping the dimension is deliberate and matches git's direction: the byte comparison still runs
- * on every member, so the cost is one unreported mode bit against a total spurious failure the
- * other way. It stays DISTINCT from `constant-mode` because only one of the two is a fact about
- * the caller's filesystem, and the report repeats what was established, not what was assumed.
+ * The tree itself is always the last resort, and in a linked worktree or a submodule checkout —
+ * where `.git` is a regular FILE — it is the only site. There the guarantee above does not hold: a
+ * hard kill inside the probe window strands a `.colophon-filemode-probe-<hex>` that the next
+ * verification reports as `unexpected` (issue #3606). That is a loud, self-explaining, one-`rm`
+ * failure, and it is preferred to the alternative, which is teaching the check to skip
+ * probe-shaped names and so carry a permanent blind spot.
  */
-export function probeExecutableBit(dir: string): ExecutableBitProbe {
-  // Written inside the repository's own `.git` when that is a real directory on the same
-  // filesystem as the tree — the walk already skips root `.git`, so a probe stranded there by a
-  // SIGKILL between create and unlink cannot later read back as an unexpected member. `lstat`
-  // rather than `stat`, and the device comparison, are what make "same filesystem" true rather
-  // than assumed: a symlinked or bind-mounted `.git` answers for somewhere else (issue #3605).
-  //
-  // Everywhere else — no `.git`, an unreadable one, or the regular FILE a linked worktree and a
-  // submodule checkout carry — the probe goes in the tree itself, and the guarantee above does not
-  // hold: a hard kill inside that window strands a `.colophon-filemode-probe-<hex>` that the next
-  // verification reports as `unexpected` (issue #3606). That is a loud, self-explaining, one-`rm`
-  // failure, and it is preferred to the alternative, which is teaching the check to skip
-  // probe-shaped names and so carry a permanent blind spot.
-  const name = `.colophon-filemode-probe-${randomBytes(8).toString("hex")}`;
+function probeSites(dir: string): readonly string[] {
   const gitDir = join(dir, ".git");
-  let probeDir = dir;
   try {
-    const gitEntry = lstatSync(gitDir);
-    if (gitEntry.isDirectory() && gitEntry.dev === statSync(dir).dev) probeDir = gitDir;
+    const git = statSync(gitDir);
+    if (git.isDirectory() && git.dev === statSync(dir).dev) return [gitDir, dir];
   } catch {
-    // no `.git`, or an unreadable one: probe the tree itself
+    // no `.git`, or an unreadable one
   }
-  const probe = join(probeDir, name);
+  return [dir];
+}
+
+/** One probe, in one directory. `not-probed` means only that this site refused it. */
+function probeOnce(probeDir: string): ExecutableBitProbe {
+  const probe = join(probeDir, `.colophon-filemode-probe-${randomBytes(8).toString("hex")}`);
   try {
     writeFileSync(probe, "", { mode: 0o644, flag: "wx" });
-    // A filesystem that reports the bit on a file created without it is reporting a constant.
-    if ((statSync(probe).mode & 0o111) !== 0) return "constant-mode";
+    // A filesystem that reports the bit on a file created without it is not recording what it was
+    // given, so reading a mode there says nothing about the published tree.
+    if ((statSync(probe).mode & 0o111) !== 0) return "not-recorded";
     chmodSync(probe, 0o755);
-    return (statSync(probe).mode & 0o100) !== 0 ? "carried" : "constant-mode";
+    return (statSync(probe).mode & 0o100) !== 0 ? "carried" : "not-recorded";
   } catch {
     return "not-probed";
   } finally {
     // The probe answers a question; it never raises one. A cleanup refusal (EPERM on an unusual
-    // mount) must not escape as the caller's failure — at worst it strands the file note below.
+    // mount) must not escape as the caller's failure — at worst it strands the file noted above.
     try {
       rmSync(probe, { force: true });
     } catch {
       // deliberately ignored
     }
   }
+}
+
+/**
+ * @internal Exported for this module's own tests; not part of the package's public surface.
+ *
+ * Decide whether the filesystem under `dir` actually carries an executable bit, the way git
+ * autodetects `core.fileMode`: write a probe file, and see whether the owner-execute bit reads
+ * back the way it was set.
+ *
+ * This exists because some filesystems do not record the bit they are given — `0777` for every
+ * file on an exFAT or Windows-hosted mount, a masking `fmask` on a vfat one — so reading the mode
+ * there says nothing about the published tree. Without the probe a byte-perfect clone on such a
+ * machine reports EVERY member as `changed`, which is the loudest possible false alarm for a tool
+ * whose whole claim is that the tree matches.
+ *
+ * A site that refuses the write is not an answer about the filesystem, so the next site is tried
+ * before the dimension is dropped: a read-only `.git` under a writable tree still gets an answer,
+ * and every site is on the one device by construction, so which of them answers cannot change what
+ * the answer is. Only when none of them can be written does this return `not-probed`, and dropping
+ * the dimension there is deliberate and matches git's direction — the byte comparison still runs on
+ * every member, so the cost is one unreported mode bit against a total spurious failure the other
+ * way. It stays DISTINCT from `not-recorded` because the report repeats what was established, not
+ * what was assumed (issue #3604).
+ */
+export function probeExecutableBit(dir: string): ExecutableBitProbe {
+  for (const site of probeSites(dir)) {
+    const answer = probeOnce(site);
+    if (answer !== "not-probed") return answer;
+  }
+  return "not-probed";
 }
 
 /**

@@ -853,22 +853,22 @@ test("a drifted freeze repository still exits 1 when an unrelated binding also f
 //
 // `executableBitChecked: false` has two materially different causes, and the note used to assert
 // the first one for both — telling a reader whose read-only mount refused the probe that their
-// filesystem carries no executable bit. The constant-mode filesystem is not reachable from CI, so
-// the injectable `freezeRepo` dep is the only place both strings can be exercised.
+// filesystem carries no executable bit. A filesystem that does not record the bit is not reachable
+// from CI, so the injectable `freezeRepo` dep is the only place that string can be exercised.
 
 function matchedTree(extra) {
   return { ok: true, commitId: "d".repeat(40), fileCount: 3, differences: [], ...extra };
 }
 
-test("a constant-mode filesystem is reported as one, not as a refused probe", async () => {
+test("a filesystem that does not record the bit is reported as one, not as a refused probe", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
     verify: async () => publisherResult(keyId),
-    freezeRepo: async () => matchedTree({ executableBitChecked: false, executableBitSkipped: "constant-mode" }),
+    freezeRepo: async () => matchedTree({ executableBitChecked: false, executableBitSkipped: "not-recorded" }),
   });
   assert.equal(result.exitCode, 0);
-  assert.match(result.stdout, /file modes were not checked \(this filesystem reports a constant mode\)/);
+  assert.match(result.stdout, /file modes were not checked \(this filesystem does not record an executable bit\)/);
 });
 
 test("a refused probe says so rather than describing the reader's filesystem", async () => {
@@ -881,7 +881,7 @@ test("a refused probe says so rather than describing the reader's filesystem", a
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /file modes were not checked \(the filesystem could not be probed\)/);
   // The claim the pre-#3604 string made for both causes.
-  assert.doesNotMatch(result.stdout, /does not carry an executable bit/);
+  assert.doesNotMatch(result.stdout, /does not (carry|record) an executable bit/);
 });
 
 test("a result carrying no reason claims neither cause", async () => {
@@ -893,7 +893,7 @@ test("a result carrying no reason claims neither cause", async () => {
   });
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /note: file modes were not checked\n/);
-  assert.doesNotMatch(result.stdout, /constant mode|could not be probed/);
+  assert.doesNotMatch(result.stdout, /does not record an executable bit|could not be probed/);
 });
 
 test("a checked mode dimension adds no note at all", async () => {

@@ -185,10 +185,10 @@ describe("freeze-repository export against a real v4 bundle", () => {
     expect(drifted.stdout).toContain("changed: README.md");
   });
 
-  // Issue #3607: the mode dimension is skipped on a filesystem that carries no executable bit or
-  // that the probe cannot interrogate. A constant-mode filesystem is unreachable in CI, but a
-  // read-only repository directory reaches the same branch — the probe write is refused — while
-  // leaving the tree readable, so the byte comparison still runs.
+  // Issue #3607: the mode dimension is skipped on a filesystem that does not record an executable
+  // bit, and on one no probe site could be written to. The first is unreachable in CI, but a
+  // read-only repository directory reaches the second — an exported tree has no `.git`, so the tree
+  // root is the only site — while leaving it readable, so the byte comparison still runs.
   test.skipIf(process.geteuid?.() === 0)(
     "a tree the probe cannot interrogate still matches, and the report says why it skipped the modes",
     async () => {
