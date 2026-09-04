@@ -171,6 +171,7 @@ export type {
   FreezeRepoSourceLicence,
   FreezeRepoTree,
   FreezeRepoVerificationResult,
+  ExecutableBitSkipReason,
 } from "./freeze-repo.js";
 // `beacon-binding/1` (issue #2976): the post-seal public-randomness binding, and the report face
 // that states which binding a run carries. Single-sourced here for the same reason the anchored

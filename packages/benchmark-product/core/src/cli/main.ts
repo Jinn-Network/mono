@@ -95,7 +95,7 @@ import {
 } from "../intake/external-run-records.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
-import type { BeaconReference, DomainBindingMechanism, PublicBundleVerificationResult } from "@colophon-claims/verify";
+import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/verify";
 import { DOMAIN_BINDING_MECHANISM_NAMES, exportFreezeRepo, summarizeVerificationOutcome, verifyFreezeRepo } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
@@ -1724,6 +1724,23 @@ async function handleFreezeRepoExport(args: ParsedArgs, context: CliContext, jso
   );
 }
 
+/**
+ * A match that rested on bytes and entry type alone says so. The mode dimension is consulted only
+ * where the filesystem records an executable bit, and `PUBLIC-BUNDLE.md` states that a dropped one
+ * is reported -- so this reader surface must give the signal the standalone verifier gives, or the
+ * specification promises it on one surface and withholds it on the other (issue #3608). It names
+ * only what the probe established (issue #3604).
+ */
+function skippedModeNote(value: FreezeRepoVerificationResult): string {
+  if (value.executableBitChecked) return "";
+  const reason = value.executableBitSkipped === "not-recorded"
+    ? " (this filesystem does not record an executable bit)"
+    : value.executableBitSkipped === "not-probed"
+      ? " (the filesystem could not be probed)"
+      : "";
+  return `  note: file modes were not checked${reason}\n`;
+}
+
 async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, FREEZE_REPO_VERIFY_FLAGS);
   const result = await verifyFreezeRepo(
@@ -1734,7 +1751,7 @@ async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jso
     return renderResult(
       { ok: true, result },
       jsonMode,
-      (value) => `freeze repository matches ${value.bundleIdentity}: ${value.fileCount} files, commit ${value.commitId}\n`,
+      (value) => `freeze repository matches ${value.bundleIdentity}: ${value.fileCount} files, commit ${value.commitId}\n${skippedModeNote(value)}`,
     );
   }
   // A drifted tree must not exit 0. `check && publish` is exactly how this verb gets used, and a

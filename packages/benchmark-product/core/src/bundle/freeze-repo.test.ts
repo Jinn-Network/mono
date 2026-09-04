@@ -296,6 +296,33 @@ describe("freeze-repo CLI verbs", () => {
     expect(verifyEnvelope.result.commitId).toBe(exportEnvelope.result.commitId);
   });
 
+  // Issue #3608: `PUBLIC-BUNDLE.md` states that a dropped mode dimension is reported, so the
+  // product's own reader surface has to give the signal the standalone verifier gives. Reached the
+  // same way as the standalone case, by a repository directory that refuses the probe.
+  test.skipIf(process.geteuid?.() === 0)(
+    "the product CLI names a match that rested on bytes alone",
+    async () => {
+      const bundleDir = licensedBundle;
+      const repoDir = join(tempDir("cli-unprobed"), "repo");
+      await exportFreezeRepo(bundleDir, repoDir);
+
+      const originalMode = statSync(repoDir).mode & 0o7777;
+      chmodSync(repoDir, 0o555);
+      try {
+        const verified = await runCli(
+          ["freeze-repo", "verify", "--bundle", bundleDir, "--repo", repoDir],
+          { cwd: process.cwd(), clock: () => "2026-08-29T00:00:00.000Z" },
+        );
+
+        expect(verified.exitCode).toBe(0);
+        expect(verified.stdout).toContain("freeze repository matches");
+        expect(verified.stdout).toContain("note: file modes were not checked (the filesystem could not be probed)");
+      } finally {
+        chmodSync(repoDir, originalMode);
+      }
+    },
+  );
+
   test("a drifted tree exits non-zero and names every drifted member", async () => {
     const bundleDir = licensedBundle;
     const repoDir = join(tempDir("cli-drift"), "repo");
