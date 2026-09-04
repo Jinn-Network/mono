@@ -408,7 +408,8 @@ export const PARALLELISM_PINS = [
  * comparison (`45_000` is port 45000), and anything that does not normalise to
  * a 4- or 5-digit run is not a port-shaped literal at all.
  */
-export function literalValue(raw) {
+/** The digits of a numeric literal as written, separators stripped, or null. */
+function literalValue(raw) {
   if (!/^\d(?:_?\d)*$/.test(raw)) return null;
   return raw.replace(/_/g, '');
 }
@@ -569,12 +570,16 @@ const REGEX_MAY_FOLLOW_KEYWORD =
 function regexMayStartAt(out, at) {
   let j = at - 1;
   while (j >= 0 && /\s/.test(out[j])) j -= 1;
-  if (j < 0) return true;
+  if (j < 0) return true; // the start of the file
   if (!REGEX_CANNOT_FOLLOW.test(out[j])) return true;
   if (!/[\w$]/.test(out[j])) return false; // `)`, `]`, or a closing quote
+  // A word: a keyword may precede a regex, an identifier may not. Only the
+  // trailing word is read — slicing the whole prefix here would make the scan
+  // quadratic in a file with many division operators.
   let start = j;
   while (start >= 0 && /[\w$]/.test(out[start])) start -= 1;
-  return REGEX_MAY_FOLLOW_KEYWORD.test(out.slice(0, j + 1).join(''));
+  if (start >= 0 && out[start] === '.') return false; // `obj.in`, a property
+  return REGEX_MAY_FOLLOW_KEYWORD.test((start >= 0 ? out[start] : '') + out.slice(start + 1, j + 1).join(''));
 }
 
 /**
