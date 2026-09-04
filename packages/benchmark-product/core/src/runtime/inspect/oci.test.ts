@@ -1,5 +1,8 @@
-import { describe, expect, test } from "vitest";
-import { buildInspectOciRunArgs, InspectOciHostBindingSchema } from "./oci.js";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
+import { buildInspectOciRunArgs, catalogInspectOciSelection, InspectOciHostBindingSchema } from "./oci.js";
 
 const binding = InspectOciHostBindingSchema.parse({
   kind: "oci",
@@ -57,4 +60,49 @@ describe("Inspect OCI driver", () => {
       imageDigest: "jinn-inspect:latest",
     })).toThrow();
   });
+});
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+
+/**
+ * A stand-in for the `docker` CLI that satisfies the engine-reachability check and then exits 0
+ * from `run` with nothing on stdout -- the state a worker whose output never reached the caller
+ * leaves behind.
+ */
+function writeSilentFakeDocker(directory: string): string {
+  const dockerPath = join(directory, "docker");
+  writeFileSync(dockerPath, [
+    `#!${process.execPath}`,
+    "if (process.argv[2] === 'version') process.stdout.write('{}');",
+  ].join("\n"), { mode: 0o755 });
+  chmodSync(dockerPath, 0o755);
+  return dockerPath;
+}
+
+/**
+ * #3720. Every OCI command below parses its own stdout, and a bare `JSON.parse` reported only
+ * V8's `Unexpected end of JSON input` -- a message `run-launch.ts` then wrapped as
+ * `venue-unavailable` at path `venue`, naming neither which command produced it nor what that
+ * command actually wrote. CI run 33686563879 recorded exactly that refusal and nothing else.
+ * The failure must name its own subject.
+ */
+test("an OCI command that exits 0 without parseable stdout names itself and what it wrote", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jinn-oci-silent-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "jinn-oci-project-"));
+  const datasetCacheDir = mkdtempSync(join(tmpdir(), "jinn-oci-dataset-"));
+  temporaryDirectories.push(directory, projectDir, datasetCacheDir);
+
+  await expect(catalogInspectOciSelection({
+    dockerPath: writeSilentFakeDocker(directory),
+    imageDigest: `sha256:${"a".repeat(64)}`,
+    projectDir,
+    datasetCacheDir,
+    taskReference: "hermetic_eval.py@fixture",
+  })).rejects.toThrow(
+    /the OCI Inspect worker catalog probe exited 0 without parseable JSON on stdout \(0 chars, empty\)/u,
+  );
 });
