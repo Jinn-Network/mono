@@ -132,9 +132,9 @@ npx @colophon-claims/verify@0.1 <bundle-dir>
 
 `@0.1.0` is the exact producer-side release inside that line. A v4 whose
 screening was prompted pins `@0.2.1` instead, with `@0.2` as the compatible line
-— `0.2.1` accepts the historical `@0.2.0` command a prompted v4 materialized
-before `0.2.1` existed carries, as well as its own — and `@0.1` refusing
-outright:
+and `@0.1` refusing outright. `0.2.1` accepts the historical `@0.2.0` command as
+well as its own, so the compatible line reads a prompted v4 materialized before
+`0.2.1` existed too:
 
 ```bash
 npx @colophon-claims/verify@0.2.1 <bundle-dir>
@@ -147,7 +147,8 @@ fourth axis, and only anchoring, qualification, and disclosure select the format
 `"prompted-codex-screening/v1"` on a prompted bundle and absent otherwise. The
 refusal a prompted v4 earns from a reader too old for it is not v7's: v7 is
 refused on the format, before the claim is read, while a prompted v4 is a format
-`0.1.0` and `0.2.0` both support and is refused on the claim inside it. That case is described in
+`0.1.0` and `0.2.0` both support and is refused on the claim inside it. That
+case is described in
 [A listed format is not on its own a verdict either](#reading-a-bundle-with-a-reader-that-is-too-old).
 
 V4 carries no anchors, so the anchor trust-material flags below do not apply to
@@ -307,8 +308,8 @@ stated for v6 above; supplying neither leaves a well-formed anchor at `present`
 rather than `verified`. V7 returns the same **seven checks** as v6, in the same
 order.
 
-**`0.2.1` is published, and both lines above resolve to it.** The demand-gated
-release workflow has been fired: `0.2.1` is the registry's `latest` for
+**`0.2.1` is published, and both lines above resolve to it.** That release has
+since been cut: `0.2.1` is the registry's `latest` for
 `@colophon-claims/verify`, so `@0.2.1` resolves exactly, and `@0.2` — a range,
 not a pin — now resolves to `0.2.1` rather than to `0.2.0`. The compatible line
 therefore reads a v7 bundle. An explicit `@0.2.0`, and any line at `@0.1`, still
@@ -553,17 +554,17 @@ not truth: it says the format literal describes the Report the bundle actually s
 Report's own method claim is correct. That remains what the Report's signature and the
 `report-verification` check are for.
 
-**This binding is a `0.2.1` guarantee**, and `0.2.1` is the published `latest` — see the note below. An
-earlier reader does not make the relabeled bundle verify: `0.1.0` and `0.2.0` still stop the `.../7`
-and `.../4` downgrades, because their presentation projection dispatches on the sealed Report's
-method too and finds a binary Report where the comparison profile was expected. But they stop it as
+**This binding is a `0.2.1` guarantee**, and `0.2.1` is the published `latest` — see the note
+below. An earlier reader does not make the relabeled bundle verify: `0.1.0` and `0.2.0` still stop
+the `.../7` and `.../4` downgrades, because their presentation projection dispatches on the sealed
+Report's method too and finds a binary Report where the comparison profile was expected. But they stop it as
 an untyped crash from the last step of the run rather than as this named refusal, so do not read a
 missing `record-integrity`-at-`bundle.json` signature on an older line as the check not having
 fired.
 
 **`0.2.1` is published, and `@0.2` moved with it.** The `0.2.1` reader that public-bundle/7,
-public-bundle/8, and every prompted bundle pin was cut by a manual, demand-gated workflow that has
-since been fired, and `0.2.1` is the registry's `latest` for `@colophon-claims/verify`. `@0.2.1`
+public-bundle/8, and every prompted bundle pin has since been cut, and `0.2.1` is the registry's
+`latest` for `@colophon-claims/verify`. `@0.2.1`
 resolves exactly, and `@0.2` is a range rather than a pin, so it resolves to `0.2.1` too and no
 longer stops at the `0.2.0` support set. Both lines read public-bundle/2, /4, /5, /6, /7, and /8.
 `colophon bundle verify --bundle <bundle-dir> --json` wraps the same reader and remains available,
@@ -662,9 +663,10 @@ too old for the claim inside it — a prompted-screening public-bundle/4 is a fo
 `0.2.0` support, while its claim pins `@0.2.1`, so each of those readers parses `bundle.json` and
 then refuses the claim: `binary claim package must pin verifier 0.1.0/@0.1` under `@0.1`, and
 `binary claim package must pin verifier 0.2.0/@0.2` under an explicitly pinned `@0.2.0`. The `@0.2`
-range is not one of them any more, since it resolves to `0.2.1`, which accepts that claim. A refusal that names the pinned
-verifier is that mismatch, not a fact about the bytes. Before treating any refusal as a failing
-bundle, check that the line you ran is the one the claim package's `verification.command` names.
+range is not one of them any more, since it resolves to `0.2.1`, which accepts that claim. A
+refusal that names the pinned verifier is that mismatch, not a fact about the bytes. Before
+treating any refusal as a failing bundle, check that the line you ran is the one the claim
+package's `verification.command` names.
 
 The reverse direction is safe. A newer reader keeps every earlier format in `supportedFormats`,
 so `0.2.1` reads a public-bundle/2 bundle exactly as `0.1.0` does; the line pinned inside the
