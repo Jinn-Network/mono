@@ -322,10 +322,11 @@ colophon bundle verify --bundle <bundle-dir> --json
 ```
 
 which wraps the same reader implementation, or with a reader built from the
-`0.2.1` source. The product route is not the easier of the two: `@colophon-claims/cli`
-and `@colophon-claims/core` are implemented but unpublished as well, so it needs
-the same mono checkout the source build does. A reader who cannot build from the
-repository has no route to a v7 bundle until the `0.2.1` cut. The product verb takes no trust-material flags and passes none,
+`0.2.1` source. The product route is not the easier of the two:
+`@colophon-claims/cli` and `@colophon-claims/core` are implemented but
+unpublished as well, so it needs the same mono checkout the source build does. A
+reader who cannot build from the repository has no route to a v7 bundle until
+the `0.2.1` cut. The product verb takes no trust-material flags and passes none,
 so under it a well-formed anchor reports `present` and never `verified`; only
 the `npx` reader can carry an anchor further, and only once the release exists.
 

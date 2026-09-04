@@ -243,8 +243,7 @@ describe("product documentation consistency", () => {
     // A published format whose reader line the guide never states is an uncheckable promise
     // (issue #2975): the pin and the claim-package version have to be readable here.
     expect(guide).toContain(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND);
-    const exactReaderRelease = /verify(@[0-9][^\s]*)/u.exec(PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND)?.[1];
-    expect(guide).toContain(`\`${exactReaderRelease}\``);
+    expect(guide).toContain(`\`${readerLine(PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND)}\``);
     expect(guide).toContain("`benchmark-product.claim-package/3`");
     // v5 closure is manifest-relative: the published bundle declares members this document does
     // not enumerate, so a reader told to expect a fixed list would reject the real artifact.
@@ -304,10 +303,11 @@ describe("product documentation consistency", () => {
         compatible: [readerLine(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND)],
         checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
       },
-      // The one row that does not read the instruction table's `command`: claim-package/3 has a
-      // single `command` field and no compatible-line field, so a `/5` claim pins the compatible
-      // major line and nothing else. Pinning `command` here would state a line no `/5` bundle
-      // carries.
+      // The one row that does not read the instruction table's `command`, because `/5` is the one
+      // asymmetric row: claim-package/3 states only the compatible major line, so the table's
+      // `/5.command` reproduces the producer rather than naming a line any `/5` bundle carries.
+      // The asymmetry is documented on `PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND` and on the
+      // instruction table itself (issue #3941); this row follows that documentation.
       [`\`${BUNDLE_V5_FORMAT}\``]: {
         pinned: [readerLine(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND)],
         compatible: [],
@@ -348,6 +348,61 @@ describe("product documentation consistency", () => {
     // only `bundle.json`, so every format that reader can hold must appear in it.
     for (const format of SUPPORTED_BUNDLE_FORMATS) {
       expect(rows.some((cells) => cells[0]!.startsWith(`\`${format}\``)), format).toBe(true);
+    }
+  });
+
+  it("pins every format section's reader commands to the lines that format pins", () => {
+    // Issue #3940, the third statement site #3519 named. The table above and the too-old refusal
+    // sample are pinned; the per-format sections that restate the same mapping were not, so a
+    // section could instruct a reader to run a line its format does not pin while the table stayed
+    // correct. A `0.2.1` publication flipping the "publication pending" notes is the concrete case.
+    const guide = read(bundleReadmePath);
+    // Keyed by heading because that is how the neighbouring tests locate regions of this guide, and
+    // because a renamed heading should fail loudly rather than silently match nothing. The record
+    // is total, so a ninth format has to be given a section before this file compiles. `/2` has no
+    // `###` of its own: it is described in the closure section every later format extends.
+    const sections: Record<(typeof SUPPORTED_BUNDLE_FORMATS)[number], string> = {
+      [BUNDLE_FORMAT]: "\n## Identity and closure\n",
+      [BUNDLE_V4_FORMAT]: "\n### Binary qualification bundle v4\n",
+      [BUNDLE_V5_FORMAT]: "\n### Evidence-native bundle v5 and its two profiles\n",
+      [BUNDLE_V6_FORMAT]: "\n### Anchored bundle v6\n",
+      [BUNDLE_V7_FORMAT]: "\n### Anchored binary qualification bundle v7\n",
+      [BUNDLE_V8_FORMAT]: "\n### Disclosed anchored binary qualification bundle v8\n",
+    };
+    // Prompted screening is the fourth axis the format string does not record, so the `/2` and
+    // `/4` sections state a second, later line beside the unprompted one.
+    const promptedLines = [
+      PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+      LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+      PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+    ].map(readerLine);
+
+    for (const format of SUPPORTED_BUNDLE_FORMATS) {
+      const heading = sections[format];
+      const start = guide.indexOf(heading);
+      expect(start, heading).toBeGreaterThan(-1);
+      const after = start + heading.length;
+      const next = /\n##+ /u.exec(guide.slice(after));
+      const section = guide.slice(start, next === null ? undefined : after + next.index);
+
+      // Only the fenced recipes are pinned. Prose in a section legitimately names lines the format
+      // does not use -- v7 contrasts against the `@0.1` line it cannot read, v4 explains which
+      // line refuses it -- so a "no foreign line anywhere" rule would be false. What a section
+      // must never do is instruct a reader to RUN a line the format does not pin.
+      const stated = [...section.matchAll(/```bash\n(.*?)```/gsu)]
+        .flatMap((fence) => [...fence[1]!.matchAll(/npx @colophon-claims\/verify\S*/gu)])
+        .map((command) => readerLine(command[0]));
+      expect(stated.length, `${format} states no reader command`).toBeGreaterThan(0);
+
+      const instruction = PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[format];
+      const pinned = new Set([
+        readerLine(instruction.command),
+        readerLine(instruction.compatibleCommand),
+        ...(format === BUNDLE_FORMAT || format === BUNDLE_V4_FORMAT ? promptedLines : []),
+      ]);
+      for (const line of stated) {
+        expect(pinned.has(line), `${format} section runs ${line}, which it does not pin`).toBe(true);
+      }
     }
   });
 
