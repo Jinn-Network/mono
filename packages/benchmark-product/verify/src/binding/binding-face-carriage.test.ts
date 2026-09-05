@@ -196,17 +196,36 @@ function blankComments(text: string): string {
 
 /**
  * The interiors of terminated same-line `'`/`"` strings blanked, so a call written inside a string
- * ("call runBindingSentence(binding) to render") is not read as one (#4020). Run over
- * comment-blanked text, so an apostrophe inside a comment cannot open a string here.
+ * ("call runBindingSentence(binding) to render") is not read as one (#4020). A delimiter is blanked
+ * only when its original line has an even number of unescaped occurrences. An odd count is
+ * ambiguous, so that delimiter stays visible and fails loud. Run over comment-blanked text, so an
+ * apostrophe inside a comment cannot open a string here.
  *
  * Applied only inside `emitterCallSites`, never folded into `blankComments`: `resolveOrigin` reads
  * the import SPECIFIER off that function's output, and blanking interiors there would resolve every
  * file's origin to the empty specifier and silently drop its real calls -- the barrel hole in a
- * third shape. Same narrowness as above: no backticks, and an unterminated quote blanks nothing.
+ * third shape. Same narrowness as above: no backticks, and no quote state crosses a newline.
  */
 function blankStringLiterals(text: string): string {
-  return text.replace(/(["'])((?:\\.|[^\\\n])*?)\1/gu, (_match, quote: string, body: string) =>
-    `${quote}${body.replace(/[^\n]/gu, " ")}${quote}`);
+  const countUnescaped = (line: string, delimiter: string): number => {
+    let count = 0;
+    for (let index = 0; index < line.length; index += 1) {
+      if (line[index] === "\\") index += 1;
+      else if (line[index] === delimiter) count += 1;
+    }
+    return count;
+  };
+  const blank = (body: string): string => body.replace(/[^\n]/g, " ");
+  return text.split("\n").map((line) => {
+    let blanked = line;
+    if (countUnescaped(line, '"') % 2 === 0) {
+      blanked = blanked.replace(/"((?:\\.|[^\\\n])*?)"/gu, (_match, body: string) => `"${blank(body)}"`);
+    }
+    if (countUnescaped(line, "'") % 2 === 0) {
+      blanked = blanked.replace(/'((?:\\.|[^\\\n])*?)'/gu, (_match, body: string) => `'${blank(body)}'`);
+    }
+    return blanked;
+  }).join("\n");
 }
 
 /**
@@ -612,6 +631,14 @@ describe("the binding face is never emitted from an unchecked binding", () => {
       justified: false,
     });
     expect(emitterCallSites(`${IMPORTED}const help = "call runBindingSentence(binding) to render";\n`, "fixture.ts"))
+      .toEqual([]);
+    const dangerous = `${IMPORTED}const media = /[']/u; const help = "call runBindingSentence(fake)"; const s = runBindingSentence(forged); const empty = '';\n`;
+    expect(emitterCallSites(dangerous, "fixture.ts")).toEqual([{
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    }]);
+    expect(emitterCallSites(`${IMPORTED}const help = 'don\\'t call runBindingSentence(fake)';\n`, "fixture.ts"))
       .toEqual([]);
     // A real comment is still blanked, including one carrying an apostrophe of its own.
     expect(emitterCallSites("// don't call runBindingSentence(forged) from here\n", "fixture.ts")).toEqual([]);
