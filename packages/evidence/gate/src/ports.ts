@@ -262,14 +262,15 @@ export function createInMemoryChallengeStore(
         if (soonest === undefined) break;
         outstanding.delete(soonest);
       }
-      const challenge: GateChallenge = {
+      // A direct caller receives this row too; it cannot rewrite a retained nonce.
+      const challenge: GateChallenge = Object.freeze({
         id: nonce(),
         nonce: nonce(),
         offerDigest: input.offerDigest,
         rail: input.rail,
         paymentReference: input.paymentReference,
         expiresAt: new Date(nowMs + ttlMs).toISOString(),
-      };
+      });
       outstanding.set(challenge.id, challenge);
       return challenge;
     },

@@ -281,6 +281,21 @@ function captureObservedPayment(observed: ObservedPayment): ObservedPayment {
 }
 
 /**
+ * Snapshot store rows on both boundaries: the caller cannot mutate the issued question,
+ * and the rail verifies the same consumed question whose pickup and expiry were checked.
+ */
+function captureChallenge(challenge: GateChallenge): GateChallenge {
+  return Object.freeze({
+    id: challenge.id,
+    nonce: challenge.nonce,
+    offerDigest: challenge.offerDigest,
+    rail: challenge.rail,
+    paymentReference: challenge.paymentReference,
+    expiresAt: challenge.expiresAt,
+  });
+}
+
+/**
  * A non-negative integer written in decimal. Deliberately wider than the offer schema's
  * amount rule, which forbids leading zeros because equal terms must seal to equal bytes: an
  * *observation* is not sealed, so an adapter that reports `"007"` is untidy rather than
@@ -492,8 +507,8 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
       );
     }
     const requested = parsedPayment.data;
-    const entry = offer.rails.find((rail) => rail.rail === requested.rail);
-    if (entry === undefined) {
+    const offeredEntry = offer.rails.find((rail) => rail.rail === requested.rail);
+    if (offeredEntry === undefined) {
       return refuse(
         "rail-not-offered",
         // Quoted by `JSON.stringify`, as the digest refusal is: a rail identifier is
@@ -502,6 +517,9 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
         `offer ${offerDigest} does not carry rail ${JSON.stringify(requested.rail)}`,
       );
     }
+    // The adapter receives the terms too. Freeze a capture before handing it the entry,
+    // so it cannot rewrite the amount or destination the observation is checked against.
+    const entry: OfferRail = Object.freeze({ ...offeredEntry });
     const rail = adapters.get(entry.rail);
     if (rail === undefined) {
       return refuse(
@@ -551,7 +569,7 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
       if (!parsedProof.success) {
         return {
           status: "challenge",
-          challenge: await store.issue(
+          challenge: captureChallenge(await store.issue(
             {
               offerDigest,
               rail: entry.rail,
@@ -559,21 +577,22 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
               now,
             },
             callOptions,
-          ),
+          )),
         };
       }
       const payerProof = parsedProof.data;
-      const challenge = await store.consume(
+      const consumed = await store.consume(
         payerProof.challengeId,
         now,
         callOptions,
       );
-      if (challenge === undefined) {
+      if (consumed === undefined) {
         return refuse(
           "challenge-unknown",
           "the proof answers no challenge this gate has outstanding; ask again",
         );
       }
+      const challenge = captureChallenge(consumed);
       // A challenge is bound to the exact pickup it was issued for. Without this, an answer
       // won for a cheap offer could be presented against an expensive one.
       if (
@@ -670,7 +689,7 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
       if (!Sha256DigestSchema.safeParse(offerDigest).success) {
         return refuse(
           "unknown-offer",
-          `this gate holds no offer ${JSON.stringify(offerDigest)}`,
+          "this request named no valid offer digest",
         );
       }
 
