@@ -165,11 +165,12 @@ function sameLineStringCloser(text: string, opener: number): number | undefined 
  * nesting forms and, on a stray backtick in a regex character class (the tree contains one, at
  * `core/src/run/publication-source.ts:476`), went into template mode to end of file and blanked a
  * whole tail silently. So: backticks are not parsed, quotes use the same narrow opener confidence as
- * `blankStringLiterals`, and quote state is dropped at every newline. Once a slash, backtick, or
- * rejected quote makes a line ambiguous, nothing later on that line is blanked. A quote that never
- * closes on its line therefore costs at most the comment blanking on the rest of THAT line -- a
- * comment read as code, which is the loud direction -- and can never reach the next line, let alone
- * the file's tail.
+ * `blankStringLiterals`, and quote state is dropped at every newline. A slash seen in ordinary code
+ * makes later recognition ambiguous only through the end of that statement; a semicolon starts the
+ * next statement cleanly. Once a backtick or rejected quote makes a line opaque, nothing later on
+ * that line is blanked. A quote that never closes on its line therefore costs at most the comment
+ * blanking on the rest of THAT line -- a comment read as code, which is the loud direction -- and
+ * can never reach the next line, let alone the file's tail.
  */
 function blankComments(text: string): string {
   // Split by UTF-16 unit, which is what `text[index]` reads: spreading would split by code
@@ -230,7 +231,8 @@ function blankComments(text: string): string {
     } else if (character === "`") {
       mode = "opaque";
     } else {
-      if (character === "/") slashSeen = true;
+      if (character === ";") slashSeen = false;
+      else if (character === "/") slashSeen = true;
       if (!/\s/u.test(character)) previousToken = character;
     }
   }
@@ -881,6 +883,26 @@ describe("the binding face is never emitted from an unchecked binding", () => {
       .toHaveLength(1);
     expect(emitterCallSites(call, "fixture.ts", new Map([["buildLocalVenueHonesty", otherModule]])))
       .toEqual([]);
+  });
+
+  test("a completed division statement cannot expose a commented-out same-named import", () => {
+    const emitterModule = "verify/src/profile/run-results.ts";
+    const source = `const ratio = 1 / 2; /*
+import { buildLocalVenueHonesty } from "../../core/src/operations/run-results.js";
+*/
+import { buildLocalVenueHonesty } from "./profile/run-results.js";
+const honesty = buildLocalVenueHonesty(cells, run, anchors, forged);
+`;
+    const filePath = join(productRoot, "verify/src/fixture.ts");
+    const origin = resolveOrigin(source, filePath, "buildLocalVenueHonesty");
+
+    expect(origin).toBe(emitterModule);
+    expect(emitterCallSites(source, "fixture.ts", new Map([["buildLocalVenueHonesty", origin]])))
+      .toEqual([{
+        site: "fixture.ts:buildLocalVenueHonesty",
+        binding: "forged",
+        justified: false,
+      }]);
   });
 
   // The tree walk is widened in the same act, and proven the same way: a predicate that silently
