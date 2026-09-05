@@ -195,12 +195,16 @@ function blankComments(text: string): string {
 }
 
 /**
- * The interiors of terminated same-line `'`/`"` strings blanked, so a call written inside a string
- * ("call runBindingSentence(binding) to render") is not read as one (#4020). A would-be quoted span
- * containing a semicolon may cross executable statement boundaries, so it stays visible and fails
- * loud. This deliberately treats a semicolon inside a genuine string as noise rather than risk
- * hiding code. Run over comment-blanked text, so an apostrophe inside a comment cannot open a string
- * here.
+ * The interiors of terminated same-line single- and double-quoted strings are blanked, so a call
+ * written inside a string is not read as one (#4020). A quote opens a span only at line start or
+ * after the preceding non-whitespace token =, (, comma, or colon. In particular, [, a backslash,
+ * another quote, identifier text, and backtick text cannot open one: those ambiguous candidates
+ * stay visible and fail loud.
+ *
+ * A would-be span containing a semicolon also stays visible because it may cross an executable
+ * statement boundary. The walker advances to that span's closer instead of retrying its suffix,
+ * and an unclosed eligible opener scans the rest of its line once, so total work is linear per
+ * line. Run over comment-blanked text, so an apostrophe inside a comment cannot open a string here.
  *
  * Applied only inside `emitterCallSites`, never folded into `blankComments`: `resolveOrigin` reads
  * the import SPECIFIER off that function's output, and blanking interiors there would resolve every
@@ -208,20 +212,40 @@ function blankComments(text: string): string {
  * third shape. Same narrowness as above: no backticks, and no quote state crosses a newline.
  */
 function blankStringLiterals(text: string): string {
-  const strings = /(["'])((?:\\.|[^\\\n])*?)\1/gu;
+  const openers = new Set(["=", "(", ",", ":"]);
   return text.split("\n").map((line) => {
     const out = line.split("");
-    let from = 0;
-    while (from < line.length) {
-      strings.lastIndex = from;
-      const match = strings.exec(line);
-      if (match === null) break;
-      if (match[2]!.includes(";")) {
-        from = match.index + 1;
+    let previousToken: string | undefined;
+    for (let index = 0; index < line.length; index += 1) {
+      const character = line[index]!;
+      if (character !== '"' && character !== "'") {
+        if (!/\s/u.test(character)) previousToken = character;
         continue;
       }
-      for (let index = match.index + 1; index < strings.lastIndex - 1; index += 1) out[index] = " ";
-      from = strings.lastIndex;
+      if (previousToken !== undefined && !openers.has(previousToken)) {
+        previousToken = character;
+        continue;
+      }
+
+      let closer = index + 1;
+      let crossesStatementBoundary = false;
+      while (closer < line.length) {
+        const candidate = line[closer]!;
+        if (candidate === "\\") {
+          if (line[closer + 1] === ";") crossesStatementBoundary = true;
+          closer += 2;
+          continue;
+        }
+        if (candidate === ";") crossesStatementBoundary = true;
+        if (candidate === character) break;
+        closer += 1;
+      }
+      if (closer >= line.length) break;
+      if (!crossesStatementBoundary) {
+        for (let blank = index + 1; blank < closer; blank += 1) out[blank] = " ";
+      }
+      previousToken = character;
+      index = closer;
     }
     return out.join("");
   }).join("\n");
@@ -661,6 +685,33 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     // as code, which is loud; the tail of the file is never silently blanked.
     const stray = `${IMPORTED}const media = /^[!#$%&'*+.^_\`|~0-9A-Za-z-]+$/u;\nconst s = runBindingSentence(forged);\n`;
     expect(emitterCallSites(stray, "fixture.ts")[0]?.binding).toBe("forged");
+  });
+
+  test("a quote in a regex character class cannot hide a comma-separated call", () => {
+    const source = 'const values = [/["]/u, runBindingSentence(forged), ""];\n';
+    expect(emitterCallSites(source, "fixture.ts")).toEqual([{
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    }]);
+  });
+
+  test("only narrow string-introducing contexts may open a blanked span", () => {
+    const call = "runBindingSentence(forged)";
+    for (const quote of ['"', "'"]) {
+      for (const prefix of ["", "= ", "( ", ", ", ": "]) {
+        expect(blankStringLiterals(prefix + quote + call + quote)).not.toContain(call);
+      }
+      for (const prefix of ["[ ", "\\", quote, "identifier ", "`template` "]) {
+        const source = prefix + quote + call + quote;
+        expect(blankStringLiterals(source)).toBe(source);
+      }
+    }
+  });
+
+  test("repeated rejected quote candidates are handled without suffix retries", { timeout: 1_000 }, () => {
+    const source = "const value = " + '\\";'.repeat(20_000) + "end";
+    expect(blankStringLiterals(source)).toBe(source);
   });
 
   // The bare name is not unique in this tree, so the key is proven to discriminate before the scan
