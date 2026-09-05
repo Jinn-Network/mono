@@ -46,10 +46,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@electric-sql/pglite@npm:^0.5.6":
-  version: 0.5.6
-  resolution: "@electric-sql/pglite@npm:0.5.6"
-  checksum: 10c0/502c7c071b2ac82efa0051c4cbf2af7693213ecd0e11ee59a6e346641a9af24a21af8be97d2f4be57112c989786a68d7557cdd1a53c40e493f4483eece2f0f0a
+"@electric-sql/pglite@npm:^0.5.8":
+  version: 0.5.8
+  resolution: "@electric-sql/pglite@npm:0.5.8"
+  checksum: 10c0/02af377bb73428c1fb4559683dac0a4236d62320d5cda62ad4fc45d662a74fb011f767a161cb52b9160df734066376fc80f0d1506c2bbe9506490753fa12b532
   languageName: node
   linkType: hard
 
@@ -867,14 +867,14 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/indexer-enrichment@workspace:."
   dependencies:
-    "@electric-sql/pglite": "npm:^0.5.6"
+    "@electric-sql/pglite": "npm:^0.5.8"
     "@jinn-network/indexer": "portal:../indexer"
     "@types/node": "npm:^25.9.5"
     "@types/pg": "npm:^8.23.1"
     drizzle-orm: "npm:0.45.2"
     esbuild: "npm:^0.28.2"
     pg: "npm:^8.23.0"
-    tsx: "npm:^4.23.12"
+    tsx: "npm:^4.23.13"
     typescript: "npm:^5.4.0"
     vitest: "npm:^4.1.11"
   bin:
@@ -3870,9 +3870,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tsx@npm:^4.23.12":
-  version: 4.23.12
-  resolution: "tsx@npm:4.23.12"
+"tsx@npm:^4.23.13":
+  version: 4.23.13
+  resolution: "tsx@npm:4.23.13"
   dependencies:
     esbuild: "npm:~0.28.0"
     fsevents: "npm:~2.3.3"
@@ -3881,7 +3881,7 @@ __metadata:
       optional: true
   bin:
     tsx: dist/cli.mjs
-  checksum: 10c0/cdd7f03754021fb337c13839f25f5f5edee01ed12e1e176da50cc34bc5c5fc4e7b533aeba89127055be969d4ff292c6accdb6b9d977ed022c524349eca6ff841
+  checksum: 10c0/dc99c8988b42ec2443963a0b9051f42d068bc7e2a44e82f3b94b40539a991c5c01ea3ee049cf317d1040b2245711dd4c64ace9ac875f3b07edee29f610702e3c
   languageName: node
   linkType: hard
 
