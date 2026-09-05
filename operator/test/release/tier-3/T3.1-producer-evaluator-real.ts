@@ -194,6 +194,46 @@ export function buildT31DaemonEnv(args: {
 }
 
 /**
+ * Refuse to spawn when the approved-override pair is half-declared.
+ *
+ * `parseT31ResolvedModelGuardPolicy` already rejects an approved provider with
+ * no approved model, but it does so inside the solver daemon's harness adapter,
+ * and its message carries no `RESOLVED_HERMES_MODEL_MISMATCH_MARKER` — so
+ * `createT31GuardMismatchScanner` cannot see it and the run presents as the
+ * observe loop exhausting its whole shared deadline. Checking here costs
+ * nothing and fails before any daemon starts.
+ *
+ * The check reads the inherited environment as well as the scenario's own
+ * override: `spawnMultiOpDaemons` builds each child env as
+ * `{ ...process.env, ...extraEnv }`, so a stray `JINN_T31_APPROVED_HERMES_PROVIDER`
+ * in the operator's shell reaches the daemon even though `buildT31DaemonEnv`
+ * emits neither half for a scenario that declares no override.
+ */
+export function assertT31ApprovedHermesOverridePair(args: {
+  approvedHermesOverride?: { model: string; provider?: string };
+  env?: NodeJS.ProcessEnv;
+}): void {
+  const env = args.env ?? process.env;
+  const model =
+    args.approvedHermesOverride?.model?.trim() ||
+    env[T31_APPROVED_HERMES_MODEL_ENV]?.trim() ||
+    undefined;
+  const provider =
+    args.approvedHermesOverride?.provider?.trim() ||
+    env[T31_APPROVED_HERMES_PROVIDER_ENV]?.trim() ||
+    undefined;
+  if (provider && !model) {
+    throw new Error(
+      `${T31_APPROVED_HERMES_PROVIDER_ENV} declares an approved provider ` +
+        `(${provider}) without an approved model (${T31_APPROVED_HERMES_MODEL_ENV} ` +
+        `is unset); set both or neither. Refusing to spawn the Tier-3 daemons: the ` +
+        `solver's spend guard rejects the same pairing after boot, where it reads as ` +
+        `the observe loop timing out minutes later.`,
+    );
+  }
+}
+
+/**
  * Where a Tier-3 daemon rooted at `homeDir` writes the task-local Hermes
  * `config.yaml` the solver's spend guard reads.
  *
@@ -224,6 +264,19 @@ export interface T31GuardMismatchHit {
 }
 
 /**
+ * Leading bytes remembered per log to notice an in-place truncation the size
+ * check misses. A restarted daemon's first line differs from the previous run's,
+ * so comparing the head of the file is enough to spot the replacement.
+ */
+const SIGNATURE_BYTES = 64;
+
+interface T31ScanState {
+  offset: number;
+  /** Leading bytes of the file as of the previous scan, hex; empty before the first. */
+  signature: string;
+}
+
+/**
  * Incremental scanner for the resolved-model guard's mismatch line in the
  * spawned daemons' stdio capture.
  *
@@ -234,12 +287,25 @@ export interface T31GuardMismatchHit {
  * observe poll: it reads only the bytes appended since the previous call, and
  * never advances past the last complete line, so a marker split across two
  * reads is still seen whole.
+ *
+ * What it guarantees about a truncated log: the offset resets when the file
+ * shrinks below the remembered offset, and when its leading bytes change over
+ * the `SIGNATURE_BYTES` the two polls have in common — which is what a
+ * restarted or rotated daemon writes. Both resets are
+ * persisted before any early-out, so a truncation observed while the
+ * replacement still has no complete line is not forgotten on the next poll. It
+ * cannot detect an in-place truncation whose replacement reproduces the same
+ * leading bytes and regrows past the old offset entirely between two polls;
+ * `spawnMultiOpDaemons` opens these logs append-only and nothing truncates
+ * them, so that sequence does not arise in a real Tier-3 run.
  */
 export function createT31GuardMismatchScanner(
   logPaths: readonly (string | null | undefined)[],
 ): () => Promise<T31GuardMismatchHit | null> {
   const paths = [...new Set(logPaths.filter((p): p is string => Boolean(p)))];
-  const offsets = new Map<string, number>(paths.map((p) => [p, 0]));
+  const states = new Map<string, T31ScanState>(
+    paths.map((p) => [p, { offset: 0, signature: '' }]),
+  );
 
   return async function scan(): Promise<T31GuardMismatchHit | null> {
     for (const logPath of paths) {
@@ -251,15 +317,39 @@ export function createT31GuardMismatchScanner(
       }
       try {
         const { size } = await handle.stat();
-        let from = offsets.get(logPath) ?? 0;
-        if (size < from) from = 0; // log rotated or truncated under us
-        if (size === from) continue;
+        const state = states.get(logPath) ?? { offset: 0, signature: '' };
+        const sigBuf = Buffer.alloc(Math.min(SIGNATURE_BYTES, size));
+        // An empty log has no signature to compare; `read` is skipped rather
+        // than issued with a zero-length buffer.
+        const signatureBytes =
+          sigBuf.length === 0 ? 0 : (await handle.read(sigBuf, 0, sigBuf.length, 0)).bytesRead;
+        const signature = sigBuf.subarray(0, signatureBytes).toString('hex');
+
+        // Log rotated or truncated under us: it shrank, or it was replaced in
+        // place with different leading bytes. Either way the remembered offset
+        // points into content that no longer exists. The signatures are compared
+        // over their common prefix, so a log that was shorter than
+        // `SIGNATURE_BYTES` on an earlier poll and has since grown is not
+        // mistaken for a replacement.
+        const shared = Math.min(state.signature.length, signature.length);
+        const truncated =
+          size < state.offset ||
+          (shared > 0 && state.signature.slice(0, shared) !== signature.slice(0, shared));
+        const from = truncated ? 0 : state.offset;
+        // Persist the reset (and the signature) before either early-out below,
+        // so a truncation observed on this poll survives into the next one.
+        states.set(logPath, { offset: from, signature });
+
+        if (size <= from) continue;
         const buf = Buffer.alloc(size - from);
-        await handle.read(buf, 0, buf.length, from);
-        const chunk = buf.toString('utf8');
+        const { bytesRead } = await handle.read(buf, 0, buf.length, from);
+        const chunk = buf.subarray(0, bytesRead).toString('utf8');
         const lastNewline = chunk.lastIndexOf('\n');
         if (lastNewline < 0) continue; // no complete line yet; re-read next pass
-        offsets.set(logPath, from + Buffer.byteLength(chunk.slice(0, lastNewline + 1), 'utf8'));
+        states.set(logPath, {
+          offset: from + Buffer.byteLength(chunk.slice(0, lastNewline + 1), 'utf8'),
+          signature,
+        });
         const hit = chunk
           .slice(0, lastNewline)
           .split('\n')
@@ -724,6 +814,12 @@ export async function runT31ProducerEvaluatorReal(
           ...(approvedOverrideProvider ? { provider: approvedOverrideProvider } : {}),
         }
       : undefined);
+  // Before anything is spawned or spent: a half-declared approved pair is a
+  // one-line config error, and the daemon-side guard can only report it as a
+  // multi-minute observe-loop timeout.
+  assertT31ApprovedHermesOverridePair({
+    ...(approvedHermesOverride ? { approvedHermesOverride } : {}),
+  });
   const budgetMs = opts.wallClockBudgetMs ?? WALL_CLOCK_BUDGET_MS;
   // Reserve a slice of the budget for setup + teardown so the on-chain polls
   // do not consume the entire window and leave nothing for cleanup.
