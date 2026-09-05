@@ -70,16 +70,35 @@ function stateDirFor(stateRoot: string, spec: DrillCheckpointSpec, lane: string)
   return join(stateRoot, `${spec.seed}-${lane}`);
 }
 
+/**
+ * Accept a completed run only when it is the run that was asked for. The checkpoint name is what
+ * the closure manifest keys its `recoveryReports` on, so a scenario that reported the wrong
+ * checkpoint, seed, or mode must fail here rather than be filed under a name it did not drill.
+ */
 function expectObservation(
-  checkpoint: DrillCheckpoint,
-  lane: string,
+  spec: DrillCheckpointSpec,
+  lane: 'uninterrupted' | 'recovery',
   result: RoleRunResult,
 ): RunObservation {
-  if (result.kind === 'observed') return RunObservationSchema.parse(result.observation);
+  const { checkpoint } = spec;
   if (result.kind === 'killed-at-boundary') {
     throw new DrillFailure(checkpoint, `${lane} run was killed at the boundary but should have completed`);
   }
-  throw new DrillFailure(checkpoint, `${lane} run failed: ${result.reason}`);
+  if (result.kind === 'failed') {
+    throw new DrillFailure(checkpoint, `${lane} run failed: ${result.reason}`);
+  }
+  const observation = RunObservationSchema.parse(result.observation);
+  const expectedMode = lane === 'uninterrupted' ? 'uninterrupted' : 'recovered';
+  if (observation.checkpoint !== checkpoint
+    || observation.seed !== spec.seed
+    || observation.mode !== expectedMode) {
+    throw new DrillFailure(
+      checkpoint,
+      `${lane} run reported ${observation.checkpoint}/${observation.seed}/${observation.mode}, `
+      + `expected ${checkpoint}/${spec.seed}/${expectedMode}`,
+    );
+  }
+  return observation;
 }
 
 /**
@@ -97,7 +116,7 @@ export async function drillCheckpoint(
   const oracleNode = await environment.openChain(`${seed}-oracle`);
   let uninterrupted: RunObservation;
   try {
-    uninterrupted = expectObservation(checkpoint, 'uninterrupted', await environment.launcher.launch(
+    uninterrupted = expectObservation(spec, 'uninterrupted', await environment.launcher.launch(
       {
         checkpoint,
         seed,
@@ -134,7 +153,7 @@ export async function drillCheckpoint(
     }
 
     environment.log?.(`${checkpoint}: recovery run (same run id, same state directory)`);
-    recovered = expectObservation(checkpoint, 'recovery', await environment.launcher.launch(
+    recovered = expectObservation(spec, 'recovery', await environment.launcher.launch(
       { ...recoveryBase, mode: 'resume' },
       { killAtBoundary: false },
     ));

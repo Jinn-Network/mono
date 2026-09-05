@@ -109,6 +109,25 @@ describe('restart-drill driver', () => {
       .rejects.toThrow(/effects\.duplicatePosts was not reported/u);
   });
 
+  it('refuses a run that reports a checkpoint it was not asked to drill', async () => {
+    const host = launcher((spec) => (spec.mode === 'resume'
+      ? {
+          kind: 'observed',
+          observation: { ...observationFor(spec), checkpoint: 'posting' as const, seed: 'B810' },
+        }
+      : undefined));
+    await expect(drillCheckpoint(environment(host), drillSpec('claim')))
+      .rejects.toThrow(/reported posting\/B810\/recovered, expected claim\/B811\/recovered/u);
+  });
+
+  it('refuses a recovery run that reports itself as uninterrupted', async () => {
+    const host = launcher((spec) => (spec.mode === 'resume'
+      ? { kind: 'observed', observation: { ...observationFor(spec), mode: 'uninterrupted' as const } }
+      : undefined));
+    await expect(drillCheckpoint(environment(host), drillSpec('claim')))
+      .rejects.toThrow(/expected claim\/B811\/recovered/u);
+  });
+
   it('fails when a role host dies without an observation', async () => {
     const host = launcher((spec) => (spec.mode === 'uninterrupted'
       ? { kind: 'failed', reason: 'exited with code 1' }
