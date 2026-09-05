@@ -196,10 +196,11 @@ function blankComments(text: string): string {
 
 /**
  * The interiors of terminated same-line `'`/`"` strings blanked, so a call written inside a string
- * ("call runBindingSentence(binding) to render") is not read as one (#4020). A delimiter is blanked
- * only when its original line has an even number of unescaped occurrences. An odd count is
- * ambiguous, so that delimiter stays visible and fails loud. Run over comment-blanked text, so an
- * apostrophe inside a comment cannot open a string here.
+ * ("call runBindingSentence(binding) to render") is not read as one (#4020). A would-be quoted span
+ * containing a semicolon may cross executable statement boundaries, so it stays visible and fails
+ * loud. This deliberately treats a semicolon inside a genuine string as noise rather than risk
+ * hiding code. Run over comment-blanked text, so an apostrophe inside a comment cannot open a string
+ * here.
  *
  * Applied only inside `emitterCallSites`, never folded into `blankComments`: `resolveOrigin` reads
  * the import SPECIFIER off that function's output, and blanking interiors there would resolve every
@@ -207,27 +208,22 @@ function blankComments(text: string): string {
  * third shape. Same narrowness as above: no backticks, and no quote state crosses a newline.
  */
 function blankStringLiterals(text: string): string {
-  const countUnescaped = (line: string, delimiter: string): number => {
-    let count = 0;
-    for (let index = 0; index < line.length; index += 1) {
-      if (line[index] === "\\") index += 1;
-      else if (line[index] === delimiter) count += 1;
-    }
-    return count;
-  };
-  const blank = (body: string): string => body.replace(/[^\n]/g, " ");
+  const strings = /(["'])((?:\\.|[^\\\n])*?)\1/gu;
   return text.split("\n").map((line) => {
-    const doubleEven = countUnescaped(line, '"') % 2 === 0;
-    const singleEven = countUnescaped(line, "'") % 2 === 0;
-    const strings = doubleEven
-      ? singleEven ? /(["'])((?:\\.|[^\\\n])*?)\1/gu : /"(?:\\.|[^\\\n])*?"|'/gu
-      : singleEven ? /'(?:\\.|[^\\\n])*?'|"/gu : /["']/gu;
-    return line.replace(strings, (match) => {
-      const quote = match[0]!;
-      return countUnescaped(line, quote) % 2 === 0
-        ? `${quote}${blank(match.slice(1, -1))}${quote}`
-        : match;
-    });
+    const out = line.split("");
+    let from = 0;
+    while (from < line.length) {
+      strings.lastIndex = from;
+      const match = strings.exec(line);
+      if (match === null) break;
+      if (match[2]!.includes(";")) {
+        from = match.index + 1;
+        continue;
+      }
+      for (let index = match.index + 1; index < strings.lastIndex - 1; index += 1) out[index] = " ";
+      from = strings.lastIndex;
+    }
+    return out.join("");
   }).join("\n");
 }
 
@@ -647,6 +643,14 @@ describe("the binding face is never emitted from an unchecked binding", () => {
       binding: "forged",
       justified: false,
     }]);
+    for (const regex of ["/[']/u", "/['\"]/u", "/[\"']/u"]) {
+      const repeated = `${IMPORTED}const left = ${regex}; const s = runBindingSentence(forged); const right = ${regex};\n`;
+      expect(emitterCallSites(repeated, "fixture.ts")).toEqual([{
+        site: "fixture.ts:runBindingSentence",
+        binding: "forged",
+        justified: false,
+      }]);
+    }
     expect(emitterCallSites(`${IMPORTED}const help = 'don\\'t call runBindingSentence(fake)';\n`, "fixture.ts"))
       .toEqual([]);
     // A real comment is still blanked, including one carrying an apostrophe of its own.
