@@ -197,9 +197,12 @@ function blankComments(text: string): string {
 /**
  * The interiors of terminated same-line single- and double-quoted strings are blanked, so a call
  * written inside a string is not read as one (#4020). A quote opens a span only at line start or
- * after the preceding non-whitespace token =, (, comma, or colon. In particular, [, a backslash,
- * another quote, identifier text, and backtick text cannot open one: those ambiguous candidates
- * stay visible and fail loud.
+ * after the preceding non-whitespace token =, (, comma, or colon, and only before an unblanked
+ * slash has appeared on that line. Once a slash appears outside a recognized string, every later
+ * quote candidate stays visible: slash-bearing lines may be noisy, but cannot hide a real call.
+ * A slash inside a recognized string does not taint later code because the scan advances over the
+ * whole string body. [, a backslash, another quote, identifier text, and backtick text likewise
+ * cannot open a span: those ambiguous candidates stay visible and fail loud.
  *
  * A would-be span containing a semicolon also stays visible because it may cross an executable
  * statement boundary. The walker advances to that span's closer instead of retrying its suffix,
@@ -216,13 +219,15 @@ function blankStringLiterals(text: string): string {
   return text.split("\n").map((line) => {
     const out = line.split("");
     let previousToken: string | undefined;
+    let slashSeen = false;
     for (let index = 0; index < line.length; index += 1) {
       const character = line[index]!;
       if (character !== '"' && character !== "'") {
+        if (character === "/") slashSeen = true;
         if (!/\s/u.test(character)) previousToken = character;
         continue;
       }
-      if (previousToken !== undefined && !openers.has(previousToken)) {
+      if (slashSeen || (previousToken !== undefined && !openers.has(previousToken))) {
         previousToken = character;
         continue;
       }
@@ -645,7 +650,7 @@ describe("the binding face is never emitted from an unchecked binding", () => {
   // blanking the rest of its line, which HID a call; a call inside a string was read as one, which
   // forged a site. The fix stays narrower than the character walker that was reverted here: no
   // backtick tracking, and string state resets at every newline, so nothing can run past a line.
-  test("a same-line string literal neither hides a call nor forges one", () => {
+  test("a recognized same-line string literal neither hides a call nor forges one", () => {
     const IMPORTED = 'import { runBindingSentence } from "./report-face.js";\n';
     const url = `${IMPORTED}const u = "https://example.com"; const s = runBindingSentence(forged);\n`;
     expect(emitterCallSites(url, "fixture.ts")[0]).toEqual({
@@ -653,14 +658,17 @@ describe("the binding face is never emitted from an unchecked binding", () => {
       binding: "forged",
       justified: false,
     });
+    const slashInString = `${IMPORTED}const u = "https://example.com"; const help = "call runBindingSentence(fake)";\n`;
+    expect(emitterCallSites(slashInString, "fixture.ts")).toEqual([]);
     expect(emitterCallSites(`${IMPORTED}const help = "call runBindingSentence(binding) to render";\n`, "fixture.ts"))
       .toEqual([]);
     const dangerous = `${IMPORTED}const media = /[']/u; const help = "call runBindingSentence(fake)"; const s = runBindingSentence(forged); const empty = '';\n`;
-    expect(emitterCallSites(dangerous, "fixture.ts")).toEqual([{
-      site: "fixture.ts:runBindingSentence",
-      binding: "forged",
-      justified: false,
-    }]);
+    // Once the regex's slash makes the line ambiguous, later strings stay visible. The fake site
+    // is accepted noise; critically, the real site after it cannot be blanked.
+    expect(emitterCallSites(dangerous, "fixture.ts")).toEqual([
+      { site: "fixture.ts:runBindingSentence", binding: "fake", justified: false },
+      { site: "fixture.ts:runBindingSentence", binding: "forged", justified: false },
+    ]);
     const mixed = `${IMPORTED}const media = /['"']/u; const s = runBindingSentence(forged); const other = /["]/u;\n`;
     expect(emitterCallSites(mixed, "fixture.ts")).toEqual([{
       site: "fixture.ts:runBindingSentence",
@@ -694,6 +702,20 @@ describe("the binding face is never emitted from an unchecked binding", () => {
       binding: "forged",
       justified: false,
     }]);
+  });
+
+  test("a quote after an opener inside a regex cannot hide a later call", () => {
+    for (const source of [
+      'const values = [/(")/u, runBindingSentence(forged), ""];\n',
+      'const values = [/(?:")/u, runBindingSentence(forged), ""];\n',
+      'const values = [/,"/u, runBindingSentence(forged), ""];\n',
+    ]) {
+      expect(emitterCallSites(source, "fixture.ts")).toEqual([{
+        site: "fixture.ts:runBindingSentence",
+        binding: "forged",
+        justified: false,
+      }]);
+    }
   });
 
   test("only narrow string-introducing contexts may open a blanked span", () => {
