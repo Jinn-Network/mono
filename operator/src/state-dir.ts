@@ -71,6 +71,18 @@ export function resolveDefaultStateDir(options?: {
   return value;
 }
 
+/**
+ * Where a daemon rooted at `stateDir` keeps its per-harness impl state, absent an
+ * explicit `engine.implStateDirRoot` / `JINN_ENGINE_IMPL_STATE_DIR_ROOT`. Lives
+ * here rather than in `config.ts` because the T3.1 real-network gate has to
+ * resolve a *spawned* daemon's Hermes config from the outside, and a second
+ * hand-written copy of this join is exactly the drift that made its resolver
+ * silently stale.
+ */
+export function defaultImplStateDirRoot(stateDir: string): string {
+  return join(stateDir, 'engine', 'impl-state');
+}
+
 export function joinDefaultStateDir(...segments: string[]): string {
   return join(resolveDefaultStateDir(), ...segments);
 }

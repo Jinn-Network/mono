@@ -9,6 +9,8 @@ interface RunOptions {
   candidateVersion?: string;
   mode?: 'human-invoked' | 'autonomous';
   hermesModel?: string;
+  hermesProvider?: string;
+  approvedHermesOverride?: { model: string; provider?: string };
 }
 
 export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: ScenarioVerdict[]; allPassed: boolean }> {
@@ -25,6 +27,8 @@ export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: Scena
     evidencePath: path.join(outputDir, 'T3.1.log'),
     mode,
     hermesModel: opts.hermesModel,
+    hermesProvider: opts.hermesProvider,
+    approvedHermesOverride: opts.approvedHermesOverride,
     wallClockBudgetMs: 25 * 60 * 1000,   // real solve (~6 min) + Docker verdict eval — see T3.1 WALL_CLOCK_BUDGET_MS
   });
 

@@ -466,9 +466,16 @@ function renderFreezeRepoCheck(check: FreezeRepoVerificationResult): string {
     : `\nfreeze repository: DOES NOT match this bundle (${check.differences.length} of ${check.fileCount} members)`;
   const pin = `\n  commit ${check.commitId}`;
   const drift = check.differences.map((difference) => `\n  ${difference.kind}: ${difference.path}`).join("");
+  // Naming which of the two it was: a claim about the reader's filesystem is only printed where the
+  // probe established one, and a refused probe establishes nothing about it (issue #3604). A result
+  // carrying no reason gets the bare sentence for the same rule — what was skipped, nothing more.
   const modes = check.executableBitChecked
     ? ""
-    : "\n  note: this filesystem does not carry an executable bit, so file modes were not checked";
+    : check.executableBitSkipped === "not-recorded"
+      ? "\n  note: file modes were not checked (this filesystem does not record an executable bit)"
+      : check.executableBitSkipped === "not-probed"
+        ? "\n  note: file modes were not checked (the filesystem could not be probed)"
+        : "\n  note: file modes were not checked";
   return `${head}${pin}${modes}${drift}\n`;
 }
 

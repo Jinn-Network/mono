@@ -27,9 +27,41 @@
  *
  * The interval itself is the shipped `wilsonInterval` — the same function `wilson@1` reports
  * through — so the advisory cannot drift from the method it is advising about.
+ *
+ * ## Why the width is not extended to the comparison readouts (issue #3832)
+ *
+ * A published claim does not have to be a per-arm rate: `report/claim.ts` admits `wilson@1`'s
+ * `headline` or one of three comparisons. An operator who is going to publish a delta reads this
+ * width while deciding sample size, and it does not bound the thing they will publish.
+ *
+ * A seal-time bound on those comparisons was considered and rejected as **not computable**.
+ * `paired-delta@1`'s interval comes from `clusteredPairedDeltaInterval`, a clustered BCa bootstrap
+ * over the observed per-task discordance and the source-cluster manifest — neither of which exists
+ * before a cell is dispatched. `pairwise-disagreement@1` and `paired-majority-delta@1` share that
+ * shape. The only quantity that IS a function of n alone is the trivial ±1 envelope, and printing
+ * a width of 2.0000 beside an honest Wilson ceiling would bound nothing anyone would act on while
+ * looking like it did. That is the self-deception this gate exists to prevent, so nothing is
+ * printed.
+ *
+ * What is printed instead is the scope: when the draft declares a readout this width does not
+ * cover, the advisory names it, so the operator is not left to infer which of their numbers the
+ * ceiling applies to. Naming is free and needs no unknown — the declared analyses are readable off
+ * the draft at the lock.
+ *
+ * The scope line says only that, deliberately (issue #3907). The three comparisons are not the only
+ * readouts a draft may declare, and no one mechanism covers the rest: `avg-at-k@1` reports per-task
+ * rates and a mean with no interval at all; `binary-instrument@1` does report intervals — five
+ * Wilson intervals, through the same `wilsonInterval` this advisory uses — but on `wrong`,
+ * `correct`, item-count and call-count denominators, none of which is this advisory's per-arm
+ * `items x replicates`; `clean-subset@1` reports whatever its delegate reports, over a task set
+ * not known until the cutoff is applied. A line that explained WHY the width does not reach them
+ * would have to explain a different mechanism for each, and would be false for some of them however
+ * it was worded. Naming what the width does not bound is true for every registered readout;
+ * explaining their uncertainty is not this line's job.
  */
 
 import { wilsonInterval } from "@jinn-network/benchmarking-aggregate";
+import { BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 
 /** One row of the advisory: a sample size and the widest 95% interval that many scored trials give. */
 export interface SampleSizeWidth {
@@ -44,6 +76,37 @@ export interface SampleSizeAdvisory extends SampleSizeWidth {
    * "half of 1" as a second row saying the same thing.
    */
   readonly references: readonly SampleSizeWidth[];
+  /**
+   * The draft's declared readouts this width does NOT bound (issue #3832), spelled the way
+   * `report/claim.ts` spells them — `paired-delta@1`, not the method URI.
+   *
+   * Absent rather than empty when the draft declares nothing but `wilson@1`, which is every draft
+   * that existed before this field: an absent key keeps the advisory object, the CLI's `--json`
+   * envelope, and the printed text byte-identical for those drafts.
+   */
+  readonly unboundedReadouts?: readonly string[];
+}
+
+/** A declared analysis-plan entry, structurally: the draft's `analysis` and `additionalAnalyses`. */
+export interface DeclaredAnalysis {
+  readonly method: string;
+  readonly version: string;
+}
+
+/**
+ * The declared readouts whose uncertainty is not the per-arm Wilson width — every declared method
+ * that is not `wilson@1`. Deduplicated and in declaration order, so the line reads the way the
+ * plan does.
+ *
+ * Named the way `report/claim.ts` names them: the last segment of the method id plus the registry
+ * version. The namespace is dropped rather than matched against a hand-typed prefix, so this stays
+ * correct for any registered id and never restates a §9.2 identifier in shipped source.
+ */
+function unboundedReadoutsOf(declared: readonly DeclaredAnalysis[]): readonly string[] {
+  const named = declared
+    .filter((analysis) => analysis.method !== BENCHMARKING_METHOD_IDS.wilson)
+    .map((analysis) => `${analysis.method.slice(analysis.method.lastIndexOf("/") + 1)}@${analysis.version}`);
+  return [...new Set(named)];
 }
 
 /**
@@ -73,13 +136,21 @@ function width(n: number): SampleSizeWidth {
 export function sampleSizeAdvisory(input: {
   readonly items: number;
   readonly replicates: number;
+  /**
+   * The draft's declared analysis-plan entries, primary first. Used only to name the readouts this
+   * width does not bound (issue #3832); it never changes n or the width, and it never reaches the
+   * sealed `sample-size-advisory/v1` extension.
+   */
+  readonly declaredAnalyses?: readonly DeclaredAnalysis[];
 }): SampleSizeAdvisory {
   const n = input.items * input.replicates;
   const declared = width(n);
   const referenceSizes = [n, n * 2, Math.max(1, Math.round(n / 2))];
+  const unbounded = unboundedReadoutsOf(input.declaredAnalyses ?? []);
   return {
     ...declared,
     references: [...new Set(referenceSizes)].map(width),
+    ...(unbounded.length === 0 ? {} : { unboundedReadouts: unbounded }),
   };
 }
 
@@ -94,8 +165,16 @@ export function formatSampleSizeAdvisory(advisory: SampleSizeAdvisory): string {
   const rows = advisory.references
     .map((reference) => `  n=${reference.n}: interval width ${reference.expectedIntervalWidth}`)
     .join("\n");
+  // Scope, when the draft declares a readout this width does not cover (issue #3832). No width is
+  // offered for those: none is computable at the seal, and a fabricated one would be worse than
+  // silence. Naming them is what stops the operator reading this ceiling as covering their delta.
+  const scope = advisory.unboundedReadouts === undefined
+    ? ""
+    : `\nThis bounds a per-arm pass rate only. It does not bound the declared readouts `
+      + `${advisory.unboundedReadouts.join(", ")}: nothing stated here constrains what each of `
+      + `those reports on its own terms.`;
   return `At the declared n=${advisory.n} per arm, no pass rate this run can have gives a 95% `
     + `interval wider than ${advisory.expectedIntervalWidth}. At this and neighboring sample sizes:`
     + `\n${rows}\nCells that do not score (excluded, or conflicted across replicates) lower the `
-    + `denominator and widen the interval past this.`;
+    + `denominator and widen the interval past this.${scope}`;
 }

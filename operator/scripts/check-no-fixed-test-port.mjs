@@ -39,25 +39,30 @@
  *      `port` — the same `PORTISH_NAME` test rule 1c applies to a binding
  *      name, not an enumerated list) including every element of an array
  *      literal in that position, or the initializer of a `const` / `let` /
- *      `var` whose name is port-ish (`const apiPort = 45000`, and the
- *      defaulted form `const portBase = opts.portBase ?? 45000`). The array
- *      form is matched against the whole file text rather than line by line,
- *      so a `ports: [\n  60001,\n]` spread over several lines is caught too.
+ *      `var` whose name is port-ish — scalar (`const apiPort = 45000`), the
+ *      defaulted form (`const portBase = opts.portBase ?? 45000`), or an array
+ *      (`const ports = [60001, 60002]`, every element). The `.listen(` and
+ *      array forms are matched against the WHOLE FILE TEXT rather than line by
+ *      line, because both are routinely written across lines: `ports: [\n
+ *      60001,\n]` and `srv.listen(\n  45007,\n)` are ordinary formatter
+ *      output, and a per-line scan can never see across those newlines.
  *   2. No randomly-guessed port — a `Math.random` or `randomInt(` call whose
- *      line, or whose
- *      nearest enclosing `function <name>` / `const <name> =` declaration
- *      within 10 lines, is named something port-ish. Guessing is the same race
- *      as hard-coding, just with a wider blast radius and a lower reproduction
- *      rate.
+ *      own line, or whose nearest enclosing `function <name>` / `const <name>
+ *      =` declaration within 10 lines, is named something port-ish. The walk
+ *      up stops at a declaration whose line already ENDED IN `;`: a completed
+ *      statement cannot contain a call written below it, so a correct sub-band
+ *      reservation no longer adopts an unrelated `Math.random` nearby.
+ *      Guessing is the same race as hard-coding, just with a wider blast
+ *      radius and a lower reproduction rate.
  *   3. No parallelism pin, and no isolation opt-out, in
  *      `operator/vitest.config.ts`.
  *
- * Rules 1 and 2 read CODE, not raw text: comments and string contents are
- * blanked (offsets preserved) before they run, so prose about the band and a
- * port array quoted inside a fixture string are both invisible to them. This is
- * the same treatment rule 3 has always had, and for the same reason — the
- * runbook this guard ships with actively teaches contributors to write about
- * in-band ports.
+ * Rules 1 and 2 read CODE, not raw text: comments, string contents and regex
+ * bodies are blanked (offsets preserved) before they run, so prose about the
+ * band, a port array quoted inside a fixture string, and a port shape written
+ * into a pattern are all invisible to them. This is the same treatment rule 3
+ * has always had, and for the same reason — the runbook this guard ships with
+ * actively teaches contributors to write about in-band ports.
  *
  * Rules 1 and 2 deliberately test POSITION ∧ VALUE-BAND, never either alone.
  * `operator/test/**` holds ~1,900 numeric literals that fall inside the band
@@ -79,7 +84,11 @@
  * thousand lines (`10_000`, `30_000`), including inside this very change. A
  * digit-run pattern that cannot cross the `_` would let one underscore walk
  * straight through every rule above while the gate stayed green, so every
- * literal is normalised (separators stripped) before its band is tested.
+ * literal is normalised (separators stripped) before its band is tested. Rule
+ * 3's worker-count pins get the same treatment, for the opposite failure: a
+ * pin spelled `1` could not cross the `_` either, so `maxWorkers: 1_0` — ten
+ * workers — matched the one-worker pin, on a required gate, with a message
+ * that contradicted the value it was reading.
  *
  * "Port-ish name" is matched at a word or camelCase boundary, NOT as a bare
  * substring: `portBase`, `apiPort`, `pickPort`, `API_PORT` are port-ish;
@@ -149,17 +158,37 @@
  * them), and the jinn-repo corpus fixtures embed real gold-test files from
  * other checkouts that this guard has no standing over.
  *
+ * Inside a root, the walk collects `.ts`, `.tsx`, `.mts`, `.cts`, `.js`,
+ * `.jsx`, `.mjs` and `.cjs`, minus declaration files (`.d.ts` and friends).
+ * The ROOT decides what is policed; an extension filter that quietly drops a
+ * file inside a root the guard did successfully find is the same silent
+ * under-scan as a moved test tree, one level down, and it is the one form of
+ * it with no failure path. Collecting `.ts` alone skipped exactly two files —
+ * `test/acceptance/_fixtures/spa-harness.tsx` and
+ * `scripts/release/post-check-run-verdict.mjs` — neither of which holds an
+ * in-band literal today; `.tsx` is the one that could bite, since the
+ * acceptance tree already holds a React fixture and a `.tsx` harness binding a
+ * fixed port is not an exotic shape.
+ *
  * The guard fails loudly rather than passing vacuously when its subject is
  * missing: a renamed or moved `vitest.config.ts`, an absent `operator/test/`,
- * or a scan that collects zero files all exit non-zero. A guard that silently
- * polices nothing is worse than no guard, because the green check still reads
- * as coverage.
+ * an `operator/test/` that is not a directory, or a scan that collects zero
+ * files all exit non-zero. A guard that silently polices nothing is worse than
+ * no guard, because the green check still reads as coverage. `runGuard` takes
+ * the operator root as an argument and returns its exit code and output rather
+ * than calling `process.exit` itself, so those paths and both exit codes are
+ * pinned in `check-no-fixed-test-port.test.mjs` over throwaway directory trees.
+ * The root is an argument and NOT an env override on purpose: an env override
+ * would be a way to make a required gate vacuous from a workflow edit, which
+ * is precisely what these paths exist to stop.
  *
  * Suppression: a line carrying the inline comment
  * `lint:no-fixed-test-port-allow` is skipped, matching the house
  * `lint:no-error-leak-allow` convention. It applies to all three rules. For
- * the multi-line array form the marker is per-ELEMENT line, not on the
- * `ports: [` header — the header line is not where the literal is reported.
+ * every form written across lines — a multi-line array, a multi-line
+ * `.listen(` — the marker goes on the LITERAL's line, not on the `ports: [` or
+ * `.listen(` line above it, because the literal is where the violation is
+ * reported.
  * For rule 3 the marker is read off the raw line rather than the blanked one,
  * since a marker only ever lives inside a comment. It is expected to have ZERO
  * consumers on landing: it exists for a future case nobody has met yet, not
@@ -169,20 +198,24 @@
  *
  * Named so that the doc, the runbook, and this file agree on the size of the
  * claim. Each is a known gap, not an oversight; none has a live instance in
- * the tree today.
+ * the tree today. The FALSE POSITIVES block at the end of the list is the one
+ * that costs a contributor time rather than coverage, so it is named too —
+ * this list used to enumerate false negatives only, which understated the
+ * shape of the residual risk on a required gate.
  *
- *   - Anything inside a comment or a string literal. Rules 1 and 2 match
- *     against comment- and string-blanked text, so a port inside a URL string
- *     (`fetch('http://127.0.0.1:45020/health')`), a port array quoted into a
- *     YAML fixture (`const yaml = 'ports: [45000]'`), and a commented-out
- *     `srv.listen(45000)` are all invisible to them. The stated invariant is
- *     about port-shaped *syntactic positions*, which neither a comment nor a
- *     string literal is; a rule that read them would flag ports behind a fully
- *     mocked `fetch` (there is one such literal in the tree today) and prose
- *     that merely discusses the band, i.e. it would condemn code carrying no
- *     hazard and redden a required gate. Rule 3 blanks comments only — its
- *     subject is one config object literal, where a pin written inside a
- *     string does not occur.
+ *   - Anything inside a comment, a string literal, or a regex literal. Rules 1
+ *     and 2 match against comment-, string- and regex-blanked text, so a port
+ *     inside a URL string (`fetch('http://127.0.0.1:45020/health')`), a port
+ *     array quoted into a YAML fixture (`const yaml = 'ports: [45000]'`), a
+ *     commented-out `srv.listen(45000)` and a `/apiPort: 45000/` pattern are
+ *     all invisible to them. The stated invariant is about port-shaped
+ *     *syntactic positions*, which none of those is; a rule that read them
+ *     would flag ports behind a fully mocked `fetch` (there is one such
+ *     literal in the tree today) and prose that merely discusses the band,
+ *     i.e. it would condemn code carrying no hazard and redden a required
+ *     gate. Rule 3 blanks comments and regex bodies but not string contents —
+ *     its subject is one config object literal, where `exclude: [/…/]` is an
+ *     ordinary idiom and a pin written inside a string is not.
  *   - A port position inside a template literal's `${…}` interpolation. The
  *     blanking does not parse interpolations back out; the failure is a missed
  *     literal, never a spurious one.
@@ -199,6 +232,9 @@
  *   - A ternary default — `const apiPort = cond ? x : 45000`. Rule 1c's
  *     optional prefix covers `??` and `||` only, which are how a default port
  *     is actually written in this tree.
+ *   - A defaulted ARRAY initializer — `const ports = opts.ports ?? [45000]`.
+ *     Rule 1e wants the `[` adjacent to the `=`, where rule 1c's `??` / `||`
+ *     prefix applies to a scalar only.
  *   - A quoted object key — `{ 'port': 45000 }`. The key pattern is unquoted.
  *   - An arithmetic expression whose literal does not lead — `{ apiPort: BASE +
  *     45000 }`. Rule 1b needs the literal adjacent to the key, so the
@@ -213,12 +249,26 @@
  *     `test` script in `package.json` rather than written in the config. Rule 3
  *     reads one file and matches literals; it is a speed bump against a silent
  *     edit, not a sandbox against a determined one.
- *   - A pin sharing a line with a regex literal containing `/` — rule 3's
- *     comment blanking does not resolve the regex/division ambiguity, so
- *     `exclude: [/a\/\//]` blanks the rest of its line. The failure is a
- *     MISSED pin, never a spurious one, and vitest's `exclude` does accept a
- *     `RegExp`; it is left unresolved because a pin and such a regex on one
- *     line does not occur in a config object literal.
+ *
+ * ── …and the false positives it can still produce ───────────────────────────
+ *
+ * Neither has a live instance either, and `lint:no-fixed-test-port-allow` on
+ * the reported line is the resolution for both. They are named because a
+ * failure on a required gate that points at a line carrying no port sends a
+ * contributor looking for a bug that is not there.
+ *
+ *   - Rule 2 attributing a random call by PROXIMITY. The walk up now stops at
+ *     a declaration that already ended in `;`, which is the class that used to
+ *     hit a correct sub-band reservation. What remains is a port-ish
+ *     declaration whose block has already CLOSED within the 10-line lookback —
+ *     `function pickPort() { … }` followed by an unrelated `Math.random()`.
+ *     Closing that needs brace tracking, which is more machine than a
+ *     heuristic rule warrants.
+ *   - A regex literal read as division. `blankComments` decides from the
+ *     preceding significant character, so `if (x) /re/.test(y)` reads as
+ *     division and the pattern body is scanned as code. It takes an in-band
+ *     literal in a port shape INSIDE such a pattern to bite. The reverse
+ *     mistake — division read as a regex — only blanks, so it can only miss.
  */
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
@@ -229,10 +279,6 @@ import { fileURLToPath } from 'node:url';
 // direct `node operator/scripts/...` from the repo root must work too).
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const OPERATOR_ROOT = join(SCRIPT_DIR, '..');
-const TEST_ROOT = join(OPERATOR_ROOT, 'test');
-const RELEASE_SCRIPTS_ROOT = join(OPERATOR_ROOT, 'scripts', 'release');
-const FIXTURES_DIR = join(TEST_ROOT, 'fixtures');
-const VITEST_CONFIG = join(OPERATOR_ROOT, 'vitest.config.ts');
 
 // The UNION of the two ephemeral ranges this suite runs on: Linux's
 // `ip_local_port_range` default (32768–60999) and macOS's (49152–65535).
@@ -276,10 +322,19 @@ const ARRAY_ELEMENT = new RegExp(NUM_FREE, 'g');
 // file and otherwise breaks the name-to-`=` adjacency; the second is the
 // defaulted form `const portBase = opts.portBase ?? 45000`, which is how a
 // helper's default port is actually written in this tree.
+const PORT_DECL = `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=;\\n]+)?\\s*=\\s*`;
 const PORT_DECL_LITERAL = new RegExp(
-  `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=;\\n]+)?\\s*=\\s*(?:[^;\\n]*?(?:\\?\\?|\\|\\|)\\s*)?${NUM}`,
+  `${PORT_DECL}(?:[^;\\n]*?(?:\\?\\?|\\|\\|)\\s*)?${NUM}`,
   'g',
 );
+// Rule 1e — `const ports = [45000, 45001]`, where rule 1c's initializer and
+// rule 1d's array meet. Neither reached it: the `[` stops 1c's literal, and a
+// `const` binding is not the `name:` object key 1d wants. Hoisting a `ports:
+// [...]` argument to a named const above the call is an ordinary refactor, so
+// this is the shape a future author writes naturally rather than an exotic
+// one. Same whole-file treatment and same 400-character bound as 1d, for the
+// same reasons.
+const PORT_DECL_ARRAY = new RegExp(`${PORT_DECL}\\[([^\\]]{0,${PORT_KEY_ARRAY_MAX}})\\]`, 'g');
 
 // `randomInt` as well as `Math.random`: the failure text advertises this rule
 // as catching a "randomly guessed" port, and `crypto.randomInt(40000, 60000)`
@@ -304,9 +359,18 @@ const PORTISH_NAME = /(?:^|[^A-Za-z])ports?(?![a-z])|Ports?(?![a-z])|(?:^|[^A-Z]
 // declaration happened to be called.
 const DECLARATION_LOOKBACK_LINES = 10;
 
+// A worker-count pin as vitest actually accepts it: a bare or quoted integer.
+// The literal is CAPTURED rather than spelled `1`, because `\d` cannot cross a
+// separator and `1_0` — ten workers — otherwise matched the one-worker pin, on
+// a required gate, with a message contradicting the value it was reading.
+// Rules 1 and 2 have normalised separators since the first round of review;
+// this is the same treatment, applied where it was missed.
+const PIN_COUNT = `['"]?${NUM}['"]?`;
+
 // Rule 3: a parallelism pin or isolation opt-out in vitest.config.ts. Each
 // pattern carries the sentence that explains why it is rejected — see the doc
-// block for the long form.
+// block for the long form. A pin carrying `pinnedValue` matches only when its
+// captured literal NORMALISES to that value.
 export const PARALLELISM_PINS = [
   {
     re: /\bisolate\s*:\s*false\b/,
@@ -321,15 +385,18 @@ export const PARALLELISM_PINS = [
     why: '`fileParallelism: false` is the top-level off switch: files run one after another, every cross-worker port collision disappears locally, and CI wall-clock roughly triples.',
   },
   {
-    re: /\bmaxWorkers\s*:\s*['"]?1['"]?(?![\d.])/,
+    re: new RegExp(`\\bmaxWorkers\\s*:\\s*${PIN_COUNT}`),
+    pinnedValue: 1,
     why: '`maxWorkers: 1` leaves a single worker, which is `fileParallelism: false` by another name.',
   },
   {
-    re: /\b(?:maxForks|minForks|maxThreads|minThreads)\s*:\s*['"]?1['"]?(?![\d.])/,
+    re: new RegExp(`\\b(?:maxForks|minForks|maxThreads|minThreads)\\s*:\\s*${PIN_COUNT}`),
+    pinnedValue: 1,
     why: '`maxForks` / `minForks` / `maxThreads` / `minThreads` pinned to 1 is the pool-level worker-count off switch — same effect as `maxWorkers: 1`, one nesting level down under `poolOptions`.',
   },
   {
-    re: /\bmaxConcurrency\s*:\s*['"]?1['"]?(?![\d.])/,
+    re: new RegExp(`\\bmaxConcurrency\\s*:\\s*${PIN_COUNT}`),
+    pinnedValue: 1,
     why: '`maxConcurrency: 1` caps concurrent tests within a file. It does not by itself serialize files, but it is a parallelism pin in the same config and removes the intra-file contention the load-sensitive budget rules exist to survive.',
   },
   {
@@ -343,10 +410,15 @@ export const PARALLELISM_PINS = [
  * comparison (`45_000` is port 45000), and anything that does not normalise to
  * a 4- or 5-digit run is not a port-shaped literal at all.
  */
-export function portValue(raw) {
+/** The digits of a numeric literal as written, separators stripped, or null. */
+function literalValue(raw) {
   if (!/^\d(?:_?\d)*$/.test(raw)) return null;
-  const digits = raw.replace(/_/g, '');
-  if (digits.length < 4 || digits.length > 5) return null;
+  return raw.replace(/_/g, '');
+}
+
+export function portValue(raw) {
+  const digits = literalValue(raw);
+  if (digits === null || digits.length < 4 || digits.length > 5) return null;
   return Number(digits);
 }
 
@@ -383,14 +455,25 @@ function lineNumberAt(text, offset) {
  * A template literal's `${…}` interpolations are blanked along with its text.
  * The failure that buys is a MISSED port position inside an interpolation,
  * never a spurious one, and a port literal written inside `${…}` does not
- * occur. A regex/division ambiguity is not resolved here: a regex
- * literal is not tracked, so `/a\\/\\//` reads as a line comment and blanks the
- * rest of its line, and a `'` or `"` inside a regex reads as a string opener.
- * Both are bounded to the line that starts them -- the comment form by
- * construction, the quote form by the newline test in the quote state below --
- * so the worst case is a missed port position on that one line, never an
- * inverted classification for the rest of the file. A backtick may still span
- * lines, as it must.
+ * occur.
+ *
+ * REGEX LITERALS are tracked, and their bodies are blanked in BOTH modes — a
+ * pattern is data, like a string, and a port shape or a rule-3 pin written
+ * inside one is not the thing either rule is looking for. Tracking them is not
+ * cosmetic: an untracked regex leaks its own delimiters into the machine. A
+ * `'` or `"` inside one opened a string state, and a BACKTICK inside one
+ * opened a template state that nothing bounded — a template literal may span
+ * lines, so the span ran to the next backtick anywhere in the file and every
+ * line between was blanked and never scanned. That was live in the tree, over
+ * four real lines. A regex literal, unlike a template literal, cannot contain
+ * a raw newline, so tracking it bounds the state by construction.
+ *
+ * The regex/division ambiguity is resolved by the preceding significant
+ * character (see `REGEX_CANNOT_FOLLOW`), and it is resolved in the SAFE
+ * direction: reading a division as a regex start blanks the rest of that line,
+ * which can only MISS a port position, while the newline bound stops any
+ * mistake escaping the line that made it. Reading a regex as division is the
+ * behaviour this function had all along.
  */
 export function blankComments(text, { strings = false } = {}) {
   // `split('')`, not `Array.from`: the latter splits by code POINT while every
@@ -419,12 +502,13 @@ export function blankComments(text, { strings = false } = {}) {
       }
       // A `'` or `"` literal cannot contain a raw newline, so an apparent
       // opener that reaches one was never a string: it is a `'` or `"` inside
-      // a regex literal (`/from ['"]\\w+/`, `/don't/`), which this machine
-      // does not track. Closing the state at the newline bounds the resulting
-      // desync to the line that started it, instead of inverting code/string
-      // classification for the rest of the file. A backslash-newline line
-      // continuation still works: the `\\` branch above consumes the newline
-      // before this test ever sees it.
+      // something this machine misread — a regex whose opening `/` was taken
+      // for division, say. Regex literals ARE tracked now, so this is a
+      // backstop rather than the primary defence, but it stays: it bounds any
+      // such desync to the line that started it instead of inverting
+      // code/string classification for the rest of the file. A
+      // backslash-newline line continuation still works: the `\\` branch above
+      // consumes the newline before this test ever sees it.
       if (ch === '\n' && quote !== '`') {
         quote = null;
         i += 1;
@@ -452,17 +536,102 @@ export function blankComments(text, { strings = false } = {}) {
       for (; i < stop; i += 1) if (text[i] !== '\n') out[i] = ' ';
       continue;
     }
+    // A regex literal, but only where one may begin. Both comment forms are
+    // tested first, exactly as the lexer does: `//` after an `=` is a line
+    // comment, not an empty regex, and a regex cannot start with `*`.
+    if (ch === '/' && regexMayStartAt(out, i)) {
+      const end = regexEnd(text, i);
+      if (end !== -1) {
+        // Blanked in both modes: `exclude: [/…/]` is a real vitest idiom, so a
+        // rule-3 pin written inside a pattern is a shape that actually occurs.
+        // The delimiters are kept, as a string's quotes are.
+        for (let k = i + 1; k < end; k += 1) out[k] = ' ';
+        i = end + 1;
+        while (i < text.length && /[a-z]/.test(text[i])) i += 1; // flags
+        continue;
+      }
+      // Unterminated before the newline, so it was never a regex literal
+      // (a stray `/`, JSX's `</`, a half-written edit). Read it as code and
+      // let the scan carry on down the line.
+    }
     i += 1;
   }
   return out.join('');
 }
 
-/** Rule 2: the name this `Math.random` line belongs to, or null. */
+// Characters after which a `/` is DIVISION, not the start of a regex literal:
+// the end of a value. Everything else — an operator, `(`, `,`, `:`, `=>`, the
+// start of the file — may be followed by one. `)` and `]` are listed with the
+// value characters, so `if (x) /re/.test(y)` reads as division; that is the
+// pre-existing behaviour and it errs towards scanning, not towards blanking.
+const REGEX_CANNOT_FOLLOW = /[\w$)\]'"`]/;
+// …except after a keyword, which ends in word characters but is not a value.
+const REGEX_MAY_FOLLOW_KEYWORD =
+  /(?:^|[^\w$])(?:return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)$/;
+
+/** Whether the `/` at `at` opens a regex literal, judged from what precedes it. */
+function regexMayStartAt(out, at) {
+  let j = at - 1;
+  while (j >= 0 && /\s/.test(out[j])) j -= 1;
+  if (j < 0) return true; // the start of the file
+  if (!REGEX_CANNOT_FOLLOW.test(out[j])) return true;
+  if (!/[\w$]/.test(out[j])) return false; // `)`, `]`, or a closing quote
+  // A word: a keyword may precede a regex, an identifier may not. Only the
+  // trailing word is read — slicing the whole prefix here would make the scan
+  // quadratic in a file with many division operators.
+  let start = j;
+  while (start >= 0 && /[\w$]/.test(out[start])) start -= 1;
+  if (start >= 0 && out[start] === '.') return false; // `obj.in`, a property
+  return REGEX_MAY_FOLLOW_KEYWORD.test((start >= 0 ? out[start] : '') + out.slice(start + 1, j + 1).join(''));
+}
+
+/**
+ * The offset of the `/` closing the regex literal opened at `at`, or -1 if the
+ * line ends first — a regex literal cannot contain a raw newline, which is what
+ * bounds every mistake this machine can make about one.
+ */
+function regexEnd(text, at) {
+  let inClass = false;
+  for (let j = at + 1; j < text.length; j += 1) {
+    const c = text[j];
+    if (c === '\n') return -1;
+    if (c === '\\') {
+      if (text[j + 1] === '\n' || j + 1 >= text.length) return -1;
+      j += 1;
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') inClass = false;
+      continue;
+    }
+    if (c === '[') inClass = true;
+    else if (c === '/') return j;
+  }
+  return -1;
+}
+
+/**
+ * Rule 2: the name this `Math.random` line belongs to, or null.
+ *
+ * The walk up is bounded (an unbounded one attributes a random call to the
+ * file's first declaration), and it stops at a declaration whose line already
+ * ENDED IN `;`. Proximity alone was enough before, so a correct sub-band
+ * reservation — `const apiPort = 7331;` — adopted any unrelated `Math.random`
+ * written within ten lines below it and reddened a required gate on a line
+ * that has nothing to do with a port. A completed statement cannot contain
+ * something written after it; an unterminated one (`function pickPort() {`,
+ * `const pickPort = () => {`, a continued `const apiPort =`) still can, which
+ * is every shape this rule is actually aimed at.
+ */
 function enclosingName(lines, idx) {
+  const own = DECLARATION.exec(lines[idx]);
+  if (own) return own[1] ?? own[2];
   const floor = Math.max(0, idx - DECLARATION_LOOKBACK_LINES);
-  for (let i = idx; i >= floor; i -= 1) {
+  for (let i = idx - 1; i >= floor; i -= 1) {
     const m = DECLARATION.exec(lines[i]);
-    if (m) return m[1] ?? m[2];
+    if (!m) continue;
+    if (lines[i].trimEnd().endsWith(';')) return null;
+    return m[1] ?? m[2];
   }
   return null;
 }
@@ -483,14 +652,22 @@ export function scanText(text) {
   const lines = text.split('\n');
   const codeLines = code.split('\n');
 
+  // Report a violation at the line holding the offset, honouring the marker on
+  // that line. Used by every rule that matches over the whole file text: the
+  // literal, not the shape that introduced it, is where the marker goes.
+  const reportAt = (offset) => {
+    const lineNo = lineNumberAt(code, offset);
+    const snippet = lines[lineNo - 1] ?? '';
+    if (snippet.includes(ALLOW_MARKER)) return;
+    violations.push({ line: lineNo, snippet: snippet.trim() });
+  };
+
   codeLines.forEach((line, idx) => {
     const raw = lines[idx] ?? '';
     if (raw.includes(ALLOW_MARKER)) return;
 
     let flagged = false;
 
-    // Rule 1a — bind position: `.listen(<port>, …)`.
-    for (const m of line.matchAll(LISTEN_LITERAL)) if (inBand(m[1])) flagged = true;
     // Rule 1b — port-key position, bare literal, key filtered by name.
     for (const m of line.matchAll(PORT_KEY_LITERAL)) {
       if (PORTISH_NAME.test(m[1]) && inBand(m[2])) flagged = true;
@@ -508,29 +685,42 @@ export function scanText(text) {
     if (flagged) violations.push({ line: idx + 1, snippet: raw.trim() });
   });
 
-  // Rule 1d — port-key position, array literal: EVERY element counts. Run
-  // over the whole file text, not line by line, because the array form is
-  // routinely written multi-line and a per-line scan can never see across
-  // the newline between the `ports: [` and its elements.
-  for (const m of code.matchAll(PORT_KEY_ARRAY)) {
-    if (!PORTISH_NAME.test(m[1])) continue;
-    const contentStart = m.index + m[0].indexOf('[') + 1;
-    for (const el of m[2].matchAll(ARRAY_ELEMENT)) {
-      if (!inBand(el[1])) continue;
-      const lineNo = lineNumberAt(code, contentStart + el.index);
-      const snippet = lines[lineNo - 1] ?? '';
-      if (snippet.includes(ALLOW_MARKER)) continue;
-      violations.push({ line: lineNo, snippet: snippet.trim() });
+  // Rule 1a — bind position: `.listen(<port>, …)`. Run over the whole file
+  // text for the same reason rules 1d and 1e are: `srv.listen(\n  45007,\n)`
+  // is ordinary formatter output, and a per-line scan can never see across the
+  // newline between the call and its argument.
+  for (const m of code.matchAll(LISTEN_LITERAL)) {
+    if (inBand(m[1])) reportAt(m.index + m[0].length - m[1].length);
+  }
+
+  // Rules 1d and 1e — an array literal in a port position: EVERY element
+  // counts. Both capture the name in group 1 and the bracket contents in
+  // group 2, so one loop drives them: 1d from a port-ish object key, 1e from a
+  // port-ish `const` / `let` / `var` binding.
+  for (const re of [PORT_KEY_ARRAY, PORT_DECL_ARRAY]) {
+    for (const m of code.matchAll(re)) {
+      if (!PORTISH_NAME.test(m[1])) continue;
+      // The match ends `[` + group 2 + `]`, so the contents start there. An
+      // `indexOf('[')` would find the wrong bracket in `const ports: number[]
+      // = [45000]` and in a nested `ports: [[45004], …]`.
+      const contentStart = m.index + m[0].length - m[2].length - 1;
+      for (const el of m[2].matchAll(ARRAY_ELEMENT)) {
+        if (inBand(el[1])) reportAt(contentStart + el.index);
+      }
     }
   }
 
-  // One report line per line, however many rules fired on it.
+  // One report line per line, however many rules fired on it, and in file
+  // order — three of the rules run over the whole file after the per-line
+  // pass, so insertion order is not reading order.
   const seen = new Set();
-  return violations.filter((v) => {
-    if (seen.has(v.line)) return false;
-    seen.add(v.line);
-    return true;
-  });
+  return violations
+    .sort((a, b) => a.line - b.line)
+    .filter((v) => {
+      if (seen.has(v.line)) return false;
+      seen.add(v.line);
+      return true;
+    });
 }
 
 /**
@@ -548,14 +738,45 @@ export function scanVitestConfig(text) {
     .forEach((line, idx) => {
       if ((raw[idx] ?? '').includes(ALLOW_MARKER)) return;
       for (const pin of PARALLELISM_PINS) {
-        if (!pin.re.test(line)) continue;
-        found.push({ line: idx + 1, snippet: (raw[idx] ?? line).trim(), why: pin.why });
+        for (const m of line.matchAll(new RegExp(pin.re, 'g'))) {
+          // Check every count: a non-pin such as maxForks: 10 must not hide
+          // a later minForks: 1 on the same line.
+          if (pin.pinnedValue !== undefined && Number(literalValue(m[1])) !== pin.pinnedValue) continue;
+          found.push({ line: idx + 1, snippet: (raw[idx] ?? line).trim(), why: pin.why });
+          break; // One report per pin rule per line.
+        }
       }
     });
   return found;
 }
 
-function walk(dir, out = []) {
+// Every extension the TypeScript/JavaScript toolchain compiles, minus
+// declaration files. The SCAN ROOT decides what is policed; an extension
+// filter that quietly drops a file inside a root the guard did successfully
+// find is the same silent under-scan the bail paths below exist to prevent,
+// one level down. `.ts` alone skipped `test/acceptance/_fixtures/spa-harness.tsx`
+// and `scripts/release/post-check-run-verdict.mjs`, both inside declared roots.
+const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
+const DECLARATION_EXTENSIONS = ['.d.ts', '.d.mts', '.d.cts'];
+
+function isSourceFile(entry) {
+  if (DECLARATION_EXTENSIONS.some((ext) => entry.endsWith(ext))) return false;
+  return SOURCE_EXTENSIONS.some((ext) => entry.endsWith(ext));
+}
+
+function isDirectory(path) {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Every source file under `dir`, skipping `skipDir` entirely. Exported so the
+ * fixture table can drive it over a throwaway tree.
+ */
+export function walk(dir, skipDir = null, out = []) {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     // `lstatSync`, not `statSync`: a symlinked directory under the test tree
@@ -567,9 +788,9 @@ function walk(dir, out = []) {
     if (s.isSymbolicLink()) continue;
     if (s.isDirectory()) {
       if (entry === 'node_modules' || entry === 'dist') continue;
-      if (full === FIXTURES_DIR) continue; // fixtures are data, not tests
-      walk(full, out);
-    } else if (entry.endsWith('.ts') && !entry.endsWith('.d.ts')) {
+      if (full === skipDir) continue; // fixtures are data, not tests
+      walk(full, skipDir, out);
+    } else if (isSourceFile(entry)) {
       out.push(full);
     }
   }
@@ -577,49 +798,67 @@ function walk(dir, out = []) {
 }
 
 /**
- * The test trees vitest actually collects from. `plugins/` and `packages/` are
- * workspace globs and not every workspace has a `test/` dir, so each candidate
- * is probed rather than assumed; `scripts/release/` is probed the same way.
+ * The test trees vitest actually collects from, under `operatorRoot`.
+ * `plugins/` and `packages/` are workspace globs and not every workspace has a
+ * `test/` dir, so each candidate is probed rather than assumed;
+ * `scripts/release/` is probed the same way. Exported for the fixture table.
  */
-function scanRoots() {
+export function scanRoots(operatorRoot) {
   const roots = [];
-  if (existsSync(TEST_ROOT)) roots.push(TEST_ROOT);
+  const testRoot = join(operatorRoot, 'test');
+  if (isDirectory(testRoot)) roots.push(testRoot);
   // `scripts/release/**/*.test.ts` is in `nodeInclude` too — five real test
   // files in the default suite — so the guard has to look there as well.
-  if (existsSync(RELEASE_SCRIPTS_ROOT)) roots.push(RELEASE_SCRIPTS_ROOT);
+  const releaseRoot = join(operatorRoot, 'scripts', 'release');
+  if (isDirectory(releaseRoot)) roots.push(releaseRoot);
   for (const group of ['plugins', 'packages']) {
-    const groupDir = join(OPERATOR_ROOT, group);
-    if (!existsSync(groupDir)) continue;
+    const groupDir = join(operatorRoot, group);
+    if (!isDirectory(groupDir)) continue;
     for (const entry of readdirSync(groupDir)) {
       if (entry === 'node_modules' || entry === 'dist') continue;
       const candidate = join(groupDir, entry, 'test');
-      if (existsSync(candidate) && lstatSync(candidate).isDirectory()) roots.push(candidate);
+      if (isDirectory(candidate)) roots.push(candidate);
     }
   }
   return roots;
 }
 
-/** The guard is useless if it cannot find what it polices. Say so, loudly. */
-function bail(...message) {
-  for (const line of message) console.error(line);
-  process.exit(1);
-}
+/**
+ * The whole guard over one operator root, as data: `{ exitCode, stdout,
+ * stderr }`. `main` is a print-and-exit wrapper over this, so the fixture
+ * table can drive every bail path and both exit codes over a throwaway tree
+ * instead of the real one — those paths carry the guard's central safety claim
+ * and were the only part of it with no regression guard.
+ *
+ * Taking the root as an argument rather than reading an env override is
+ * deliberate: an env override would be a way to make a required gate vacuous
+ * from a workflow edit, which is exactly what the bail paths exist to stop.
+ */
+export function runGuard(operatorRoot) {
+  const stdout = [];
+  const stderr = [];
+  /** The guard is useless if it cannot find what it polices. Say so, loudly. */
+  const bail = (...message) => {
+    stderr.push(...message);
+    return { exitCode: 1, stdout, stderr };
+  };
 
-function main() {
-  const roots = scanRoots();
-  if (!existsSync(TEST_ROOT)) {
-    bail(
+  const testRoot = join(operatorRoot, 'test');
+  const vitestConfig = join(operatorRoot, 'vitest.config.ts');
+  const roots = scanRoots(operatorRoot);
+
+  if (!existsSync(testRoot)) {
+    return bail(
       '✗ operator/test/ does not exist, so this guard scanned nothing.',
       '  That is the tree it exists to police. If the test tree moved,',
-      '  move TEST_ROOT in operator/scripts/check-no-fixed-test-port.mjs with it.',
-      '  Failing loudly rather than reporting a vacuous pass. See issue #1627.',
+      '  move the paths in scanRoots() in operator/scripts/check-no-fixed-test-port.mjs',
+      '  with it. Failing loudly rather than reporting a vacuous pass. See issue #1627.',
     );
   }
-  if (roots.length === 0) {
-    bail(
-      '✗ This guard found no test tree to scan.',
-      '  A green check from a guard that policed nothing reads as coverage it did',
-      '  not provide, so this is a failure. See issue #1627.',
+  if (!isDirectory(testRoot)) {
+    return bail(
+      '✗ operator/test/ is not a directory, so the primary test tree was not scanned.',
+      '  Other scan roots cannot substitute for that tree. See issue #1627.',
     );
   }
 
@@ -627,9 +866,9 @@ function main() {
   let scannedFiles = 0;
 
   for (const root of roots) {
-    for (const file of walk(root)) {
+    for (const file of walk(root, join(testRoot, 'fixtures'))) {
       scannedFiles += 1;
-      const rel = relative(OPERATOR_ROOT, file).split('\\').join('/');
+      const rel = relative(operatorRoot, file).split('\\').join('/');
       const display = `operator/${rel}`;
       for (const v of scanText(readFileSync(file, 'utf8'))) {
         violations.push({ file: display, ...v });
@@ -638,9 +877,9 @@ function main() {
   }
 
   if (scannedFiles === 0) {
-    bail(
-      '✗ This guard walked its scan roots and collected zero .ts files.',
-      `  Roots walked: ${roots.map((r) => relative(OPERATOR_ROOT, r)).join(', ')}`,
+    return bail(
+      '✗ This guard walked its scan roots and collected zero source files.',
+      `  Roots walked: ${roots.map((r) => relative(operatorRoot, r)).join(', ')}`,
       '  A green check from a guard that policed nothing reads as coverage it did',
       '  not provide, so this is a failure. See issue #1627.',
     );
@@ -648,71 +887,80 @@ function main() {
 
   // Rule 3 — vitest.config.ts only. vitest.hermetic.config.ts is deliberately
   // sequential and is never read here.
-  if (!existsSync(VITEST_CONFIG)) {
-    bail(
+  if (!existsSync(vitestConfig)) {
+    return bail(
       '✗ operator/vitest.config.ts not found, so the parallelism rule (rule 3)',
       '  checked nothing. That file IS the subject of rule 3: the port rules are',
       '  load-bearing only while it leaves parallelism and isolation at their',
-      '  defaults. If the config was renamed or moved, move VITEST_CONFIG in',
-      '  operator/scripts/check-no-fixed-test-port.mjs with it. See issue #1627.',
+      '  defaults. If the config was renamed or moved, move the vitest.config.ts',
+      '  path in runGuard() in operator/scripts/check-no-fixed-test-port.mjs with',
+      '  it. See issue #1627.',
     );
   }
-  const parallelismViolations = scanVitestConfig(readFileSync(VITEST_CONFIG, 'utf8')).map((v) => ({
+  const parallelismViolations = scanVitestConfig(readFileSync(vitestConfig, 'utf8')).map((v) => ({
     file: 'operator/vitest.config.ts',
     ...v,
   }));
 
   if (violations.length === 0 && parallelismViolations.length === 0) {
-    console.log('✓ No fixed ephemeral-range test ports, and suite parallelism is unpinned.');
-    process.exit(0);
+    stdout.push('✓ No fixed ephemeral-range test ports, and suite parallelism is unpinned.');
+    return { exitCode: 0, stdout, stderr };
   }
 
   if (violations.length > 0) {
-    console.error('✗ Fixed (or randomly guessed) 127.0.0.1 port inside the OS ephemeral');
-    console.error('  range 32768–65535 detected in a test file. That band is the union of the');
-    console.error('  Linux ip_local_port_range default (32768–60999) and the macOS ephemeral');
-    console.error('  range (49152–65535). Vitest runs ~850 test files across 3 forked workers');
-    console.error('  on CI, and those workers share one kernel-global port space, so a');
-    console.error("  sibling's listen(0) can take this port between the moment the test picks");
-    console.error('  it and the moment it binds. See issue #1627.\n');
-    console.error('  Use one of the three sanctioned forms instead:');
-    console.error('    1. The TEST ITSELF binds it: `listen(0, \'127.0.0.1\')`, then read the');
-    console.error('       assigned port off `server.address().port`. This is atomic — there is');
-    console.error('       no allocate-then-rebind window for a sibling worker to win. Always');
-    console.error('       preferred where it is available.');
-    console.error('    2. A CHILD PROCESS binds it (Anvil, Ponder, a spawned daemon): either a');
-    console.error('       fixed port BELOW 32768, reserved in the port registry in');
-    console.error('       test/release/tier-1/T1.2-harness-readiness-contract.ts (no window at');
-    console.error('       all, but the number must be unique repo-wide), or');
-    console.error("       `await allocateAnvilPort()` from '@test/chain/port-allocator.js' when");
-    console.error('       a fixed reservation is impractical (many ports, or several instances');
-    console.error('       inside one file) — that has a narrow allocate-then-rebind window.');
-    console.error('    3. The assertion is "NOTHING is listening here": use a fixed port BELOW');
-    console.error('       32768, with a comment saying why that port is expected to be free.\n');
-    console.error('  Violations:');
-    for (const v of violations) {
-      console.error(`    ${v.file}:${v.line}  ${v.snippet}`);
-    }
+    stderr.push(
+      '✗ Fixed (or randomly guessed) 127.0.0.1 port inside the OS ephemeral',
+      '  range 32768–65535 detected in a test file. That band is the union of the',
+      '  Linux ip_local_port_range default (32768–60999) and the macOS ephemeral',
+      '  range (49152–65535). Vitest runs ~850 test files across 3 forked workers',
+      '  on CI, and those workers share one kernel-global port space, so a',
+      "  sibling's listen(0) can take this port between the moment the test picks",
+      '  it and the moment it binds. See issue #1627.\n',
+      '  Use one of the three sanctioned forms instead:',
+      "    1. The TEST ITSELF binds it: `listen(0, '127.0.0.1')`, then read the",
+      '       assigned port off `server.address().port`. This is atomic — there is',
+      '       no allocate-then-rebind window for a sibling worker to win. Always',
+      '       preferred where it is available.',
+      '    2. A CHILD PROCESS binds it (Anvil, Ponder, a spawned daemon): either a',
+      '       fixed port BELOW 32768, reserved in the port registry in',
+      '       test/release/tier-1/T1.2-harness-readiness-contract.ts (no window at',
+      '       all, but the number must be unique repo-wide), or',
+      "       `await allocateAnvilPort()` from '@test/chain/port-allocator.js' when",
+      '       a fixed reservation is impractical (many ports, or several instances',
+      '       inside one file) — that has a narrow allocate-then-rebind window.',
+      '    3. The assertion is "NOTHING is listening here": use a fixed port BELOW',
+      '       32768, with a comment saying why that port is expected to be free.\n',
+      '  Violations:',
+      ...violations.map((v) => `    ${v.file}:${v.line}  ${v.snippet}`),
+    );
   }
 
   if (parallelismViolations.length > 0) {
-    if (violations.length > 0) console.error('');
-    console.error('✗ Test-suite parallelism or per-file process isolation is pinned in');
-    console.error('  operator/vitest.config.ts.');
-    console.error('  The port rules above are load-bearing only while vitest actually runs test');
-    console.error('  files in parallel, each in its own fresh process. Turning either off makes');
-    console.error('  every cross-worker collision vanish locally and silently retires the reason');
-    console.error('  those rules exist. If parallelism genuinely must change, that is a');
-    console.error('  deliberate decision that should edit this guard in the same commit.');
-    console.error('  See issue #1627.\n');
-    console.error('  Violations:');
+    if (violations.length > 0) stderr.push('');
+    stderr.push(
+      '✗ Test-suite parallelism or per-file process isolation is pinned in',
+      '  operator/vitest.config.ts.',
+      '  The port rules above are load-bearing only while vitest actually runs test',
+      '  files in parallel, each in its own fresh process. Turning either off makes',
+      '  every cross-worker collision vanish locally and silently retires the reason',
+      '  those rules exist. If parallelism genuinely must change, that is a',
+      '  deliberate decision that should edit this guard in the same commit.',
+      '  See issue #1627.\n',
+      '  Violations:',
+    );
     for (const v of parallelismViolations) {
-      console.error(`    ${v.file}:${v.line}  ${v.snippet}`);
-      console.error(`      → ${v.why}`);
+      stderr.push(`    ${v.file}:${v.line}  ${v.snippet}`, `      → ${v.why}`);
     }
   }
 
-  process.exit(1);
+  return { exitCode: 1, stdout, stderr };
+}
+
+function main() {
+  const { exitCode, stdout, stderr } = runGuard(OPERATOR_ROOT);
+  for (const line of stdout) console.log(line);
+  for (const line of stderr) console.error(line);
+  process.exit(exitCode);
 }
 
 // Run only when invoked as the CLI, so the test file can import the rules.

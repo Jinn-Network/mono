@@ -373,7 +373,7 @@ openssl subprocess calls — read it, or reimplement it; it holds no secrets.
 The reference verifier covers the remaining rows of the table:
 
 ```bash
-npx @colophon-claims/verify@1 <bundle-dir>
+npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
 
 Exit 0 with `Recomputed: 6 of 6 checks passed` (`manifest`, `evidence-closure`,

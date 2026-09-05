@@ -33,7 +33,7 @@ import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { compileDraft } from "../run/compile.js";
-import { sampleSizeAdvisory, type SampleSizeAdvisory } from "../run/sample-size-advisory.js";
+import { sampleSizeAdvisory, type DeclaredAnalysis, type SampleSizeAdvisory } from "../run/sample-size-advisory.js";
 import {
   inspectRuntimeMethodForBinding,
   type InspectRuntimeMethodDisclosure,
@@ -91,7 +91,20 @@ export function draftSampleSizeAdvisory(
   if (document.state !== "quoted" || document.spec.taskSet.kind !== "benchmark") return undefined;
   const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
   if (benchmark.items.length < 1) return undefined;
-  return sampleSizeAdvisory({ items: benchmark.items.length, replicates: document.spec.replicates });
+  return sampleSizeAdvisory({
+    items: benchmark.items.length,
+    replicates: document.spec.replicates,
+    declaredAnalyses: declaredAnalyses(document.spec),
+  });
+}
+
+/**
+ * The draft's declared analysis-plan entries, primary first — the same order `buildAnalysisPlan`
+ * seals them in. Read only so the advisory can name the readouts its width does not bound
+ * (issue #3832); it never reaches the sealed extension.
+ */
+function declaredAnalyses(spec: DraftDocument["spec"]): readonly DeclaredAnalysis[] {
+  return [...(spec.analysis === undefined ? [] : [spec.analysis]), ...(spec.additionalAnalyses ?? [])];
 }
 
 function computeCloseAt(at: string, closeAfterMs: number): string {
@@ -283,6 +296,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         : sampleSizeAdvisory({
           items: compiled.benchmarkRecord.items.length,
           replicates: document.spec.replicates,
+          declaredAnalyses: declaredAnalyses(document.spec),
         });
       const runWithSampleSizeAdvisory = input.acknowledgedSampleSizeAdvisory !== true || advisory === undefined
         ? runWithBeaconSource

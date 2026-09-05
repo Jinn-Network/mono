@@ -283,10 +283,13 @@ can have it taken mid-run. Three sanctioned forms, in preference order:
 
 The invariant under all three: **never a literal inside 32768–65535 in a
 port-shaped position** — a `.listen(` argument, a port-shaped object key, or a
-port-ish `const`. Those are the positions the lint can see; a port buried in a
+port-ish `const`, and in the last two cases every element of an array bound
+there. Those are the positions the lint can see; a port buried in a
 URL string (`fetch('http://127.0.0.1:45020/health')`) is outside it, and so are
 the other gaps listed under "What this guard does not catch" in the header of
-[`operator/scripts/check-no-fixed-test-port.mjs`](../../operator/scripts/check-no-fixed-test-port.mjs).
+[`operator/scripts/check-no-fixed-test-port.mjs`](../../operator/scripts/check-no-fixed-test-port.mjs),
+which also names the two false positives the guard can still produce and the
+marker that resolves them.
 The rule still applies to them; only the enforcement stops. The registry of
 fixed below-band ports currently in use lives in the header of
 [`operator/test/release/tier-1/T1.2-harness-readiness-contract.ts`](../../operator/test/release/tier-1/T1.2-harness-readiness-contract.ts) —
@@ -304,16 +307,19 @@ property that [the measurement](#the-measurement-1627-2026-08-27) rests on,
 and it does so while leaving the suite green.
 
 A line carrying `lint:no-fixed-test-port-allow` is skipped, on all three rules.
-For the multi-line array form the marker goes on the **element** line, not on
-the `ports: [` header — the header is not where the literal is reported.
+For any form written across lines — a multi-line array, a multi-line
+`.listen(` — the marker goes on the **literal's** line, not on the `ports: [`
+or `.listen(` line above it: the literal is where the violation is reported.
 Suppressing a parallelism pin is the one use that should give you pause: the
 guard's premise is that changing parallelism is a deliberate decision that
 edits the guard in the same commit, so a marker there is a note to the next
-reader that you chose not to. The guard is seven
+reader that you chose not to. The guard is a stack of
 regexes over source text and both of its failure modes are expensive on a
 required gate, so its behaviour is pinned by a fixture table,
 `operator/scripts/check-no-fixed-test-port.test.mjs`, which CI runs under
-`node --test` in the same job. Change a rule and change the table with it.
+`node --test` in the same job — including its traversal, its bail paths and
+its exit codes, driven over throwaway directory trees. Change a rule and change
+the table with it.
 
 ### Beware fixed time and iteration budgets
 
@@ -395,11 +401,12 @@ Results:
   pass/fail evidence that proves a flake rather than a moving base).
 - **No broad serialization was added**, and none is warranted: nothing measured
   was cross-worker *state* leakage, so `isolate: true` is doing its job.
-- **Confirmed 2026-08-28.** Five further full-suite runs at `--maxWorkers=3` on
-  the same host: 841 files / 7512 tests passed on each, exit 0, zero
-  `EADDRINUSE`. The home stat manifest below was taken once before the first
-  run and re-compared against that same baseline afterwards, so its unchanged
-  result covers the five runs cumulatively.
+- **Confirmed 2026-08-28.** Six further full-suite runs at `--maxWorkers=3` on
+  the same host — three on the review session's starting head and one on each
+  of the three heads its fixes produced: 841 files / 7512 tests passed on each,
+  exit 0, zero `EADDRINUSE`. The home stat manifest below was taken once before
+  the first run and re-compared against that same baseline afterwards, so its
+  unchanged result covers the six runs cumulatively.
 
 Named but not fixed here, both load-sensitive budgets with CI evidence and no
 local reproduction: `test/cli/native-identity.test.ts` (18 real process boots

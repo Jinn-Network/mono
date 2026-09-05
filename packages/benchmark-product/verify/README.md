@@ -51,10 +51,12 @@ npx @colophon-claims/verify@0.2 ./bundle --freeze-repo ./published-repo
 
 Exit status is `1` when the tree does not match, and every missing, unexpected, or changed
 member is named. The check is byte-for-byte and also reports the git-visible drift that
-leaves bytes untouched — an executable bit, or a member replaced by a symlink — because
-those move the commit oid a freeze announcement pins. Rendering a repository from a bundle
-is `colophon freeze-repo export` in the product CLI; the layout and the licence scaffolding
-are specified in `../PUBLIC-BUNDLE.md`.
+leaves bytes untouched — a member replaced by a symlink, and an executable bit wherever the
+filesystem holding the tree carries one — because those move the commit oid a freeze
+announcement pins. `executableBitChecked` reports whether that second dimension was read,
+and where it was not the report names which of the two reasons applied. Rendering a
+repository from a bundle is `colophon freeze-repo export` in the product CLI; the layout
+and the licence scaffolding are specified in `../PUBLIC-BUNDLE.md`.
 
 The rendered tree's format is `colophon-freeze-repo/2`. The `/1` renderer stated a source
 `downloadLocation` and a `supplier` its record did not support, and refused an ordinary

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import importlib
 import json
+import pathlib
+import re
 import threading
 
 import pytest
@@ -160,3 +163,406 @@ def test_a_write_failure_is_swallowed_so_a_session_never_breaks(feed_path):
     writer = feed.SessionFeed(feed_path / "not-a-directory" / "feed.ndjson")
     writer.user_turn("this must not raise")
     assert writer.line_count == 0
+
+
+def test_open_session_carries_the_hosted_model_service_identity(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-1",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+        model_service={
+            "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+            "version": "claude-opus-5-20260514",
+            "unknown": "dropped",
+            "deployment": "",
+        },
+    )
+    model = read_lines(feed_path)[0]["model"]
+    assert model["service"] == {
+        "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+        "version": "claude-opus-5-20260514",
+    }
+
+
+def test_open_session_omits_the_service_when_none_is_reported(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-1",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+    )
+    assert read_lines(feed_path)[0]["model"] == {
+        "provider": "anthropic",
+        "name": "claude-opus-5",
+    }
+
+
+def test_repository_state_binds_the_base_commit_and_tree(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(
+        repository="https://github.com/Jinn-Network/mono",
+        branch="autopilot/3223",
+        target_base="next",
+        base_commit="a" * 40,
+        base_tree="b" * 40,
+    )
+    event = read_lines(feed_path)[0]
+    assert event["type"] == "repository-state"
+    assert event["baseCommit"] == "a" * 40
+    assert event["baseTree"] == "b" * 40
+    assert event["targetBase"] == "next"
+    assert event["atUnixNano"].isdigit()
+
+
+def test_controlled_input_carries_the_exact_bytes(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    writer.controlled_input(
+        role="workflow",
+        name="implement-issue/SKILL.md",
+        media_type="text/markdown",
+        content=b"# implement-issue\n",
+    )
+    event = read_lines(feed_path)[0]
+    assert event["type"] == "controlled-input"
+    assert event["role"] == "workflow"
+    assert base64.b64decode(event["contentBase64"]) == b"# implement-issue\n"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"role": "secrets", "content": b"x"},
+        {"role": "config", "content": b""},
+        {"role": "config", "content": b"x" * (feed.CONTROLLED_INPUT_MAX_BYTES + 1)},
+    ],
+)
+def test_controlled_input_drops_what_the_runtime_would_refuse(feed_path, kwargs):
+    writer = feed.SessionFeed(feed_path)
+    writer.controlled_input(name="n", media_type="text/plain", **kwargs)
+    assert feed_path.read_text(encoding="utf-8") == ""
+
+
+def test_controlled_input_stops_at_the_per_session_budget(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    for index in range(feed.CONTROLLED_INPUT_MAX_COUNT + 3):
+        writer.controlled_input(
+            role="skill",
+            name=f"skill-{index}.md",
+            media_type="text/markdown",
+            content=b"x",
+        )
+    assert len(read_lines(feed_path)) == feed.CONTROLLED_INPUT_MAX_COUNT
+
+
+def test_controlled_input_bounds_match_the_runtime_that_enforces_them():
+    """The runtime refuses the whole feed past these bounds, so drift here loses sessions."""
+    source = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "runtime"
+        / "src"
+        / "capture"
+        / "feed.ts"
+    ).read_text(encoding="utf-8")
+
+    def constant(name):
+        match = re.search(rf"{name}\s*=\s*([^;]+);", source)
+        assert match, name
+        return eval(match.group(1).strip(), {"__builtins__": {}})  # noqa: S307 - literal arithmetic
+
+    assert constant("CONTROLLED_INPUT_MAX_BYTES") == feed.CONTROLLED_INPUT_MAX_BYTES
+    assert constant("CONTROLLED_INPUT_MAX_COUNT") == feed.CONTROLLED_INPUT_MAX_COUNT
+
+    # Both directions: a role added on either side and not the other is drift either way.
+    roles = re.search(r"CONTROLLED_INPUT_ROLES = \[([^\]]+)\]", source)
+    assert roles
+    assert tuple(re.findall(r'"([^"]+)"', roles.group(1))) == feed.CONTROLLED_INPUT_ROLES
+
+
+def test_field_length_bounds_match_the_runtime_that_enforces_them():
+    """An over-long field refuses the whole feed there, so drift here loses whole sessions."""
+    source = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "runtime"
+        / "src"
+        / "capture"
+        / "feed.ts"
+    ).read_text(encoding="utf-8")
+
+    for schema, expected in feed.FIELD_MAX_LENGTHS.items():
+        block = re.search(rf"const {schema} = z\.strictObject\(\{{(.*?)\n\}}\)", source, re.S)
+        assert block, schema
+        # Both directions: a bounded field added on either side and not the other is drift.
+        found = dict(re.findall(r"(\w+): nonBlank\((\d+)\)", block.group(1)))
+        assert {name: int(value) for name, value in found.items()} == expected, schema
+
+
+def test_derive_model_service_names_a_deployment_rather_than_a_label():
+    assert feed.derive_model_service("anthropic", "claude-opus-5") == {
+        "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+        "name": "anthropic claude-opus-5",
+    }
+    assert feed.derive_model_service("anthropic", "claude-opus-5", "2026-05-14")["version"] == (
+        "2026-05-14"
+    )
+
+
+@pytest.mark.parametrize("args", [("", "claude"), ("anthropic", ""), ("...", "claude")])
+def test_derive_model_service_returns_nothing_it_cannot_name(args):
+    assert feed.derive_model_service(*args) is None
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"repository": "Jinn-Network/mono"},
+        {"base_commit": "4f0e2b7"},
+        {"base_commit": "a" * 40 + "\n"},
+        {"base_tree": ""},
+    ],
+)
+def test_repository_state_drops_what_the_runtime_would_refuse(feed_path, over):
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(
+        **{
+            "repository": "https://github.com/Jinn-Network/mono",
+            "base_commit": "a" * 40,
+            "base_tree": "b" * 40,
+            **over,
+        }
+    )
+    assert feed_path.read_text(encoding="utf-8") == ""
+
+
+def test_repository_state_is_written_once(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    for _ in range(3):
+        writer.repository_state(
+            repository="https://github.com/Jinn-Network/mono",
+            base_commit="a" * 40,
+            base_tree="b" * 40,
+        )
+    assert len(read_lines(feed_path)) == 1
+
+
+def test_repository_state_omits_context_it_cannot_name(feed_path):
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(
+        repository="https://github.com/Jinn-Network/mono",
+        base_commit="a" * 40,
+        base_tree="b" * 40,
+        branch="HEAD",
+        target_base="  ",
+    )
+    event = read_lines(feed_path)[0]
+    assert "branch" not in event and "targetBase" not in event
+    assert event["baseCommit"] == "a" * 40
+
+
+@pytest.mark.parametrize(
+    "service",
+    [
+        {"iri": "claude-opus-5"},
+        {"name": "Anthropic"},
+        {"iri": "https://x.test/s", "providerIri": "https://x.test/s"},
+    ],
+)
+def test_open_session_drops_a_service_identity_the_runtime_would_refuse(feed_path, service):
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-1",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+        model_service=service,
+    )
+    assert "service" not in read_lines(feed_path)[0]["model"]
+
+
+def _fixture_events():
+    path = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "runtime"
+        / "fixtures"
+        / "capture"
+        / "session-autopilot.ndjson"
+    )
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_the_writer_still_produces_the_shape_the_runtime_fixture_pins(feed_path):
+    """The fixture is adapter output the runtime parses; drift on either side breaks capture."""
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-autopilot",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+        conversation_id="s-autopilot",
+        model_service={
+            "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+            "name": "Anthropic Messages API",
+            "version": "claude-opus-5-20260514",
+            "deployment": "api.anthropic.com",
+            "providerIri": "https://spec.jinn.network/organizations/anthropic",
+        },
+    )
+    writer.repository_state(
+        repository="https://github.com/Jinn-Network/mono",
+        branch="autopilot/3223",
+        target_base="next",
+        base_commit="4f0e2b7c1a9d8e3f5b6a7c8d9e0f1a2b3c4d5e6f",
+        base_tree="0a1b2c3d4e5f60718293a4b5c6d7e8f901234567",
+    )
+    writer.controlled_input(
+        role="workflow",
+        name=".claude/skills/implement-issue/SKILL.md",
+        media_type="text/markdown",
+        content=b"# implement-issue\n",
+    )
+
+    written = read_lines(feed_path)
+    pinned = _fixture_events()[: len(written)]
+    for actual, expected in zip(written, pinned):
+        assert set(actual) == set(expected), actual["type"]
+        for key, value in expected.items():
+            if key in ("atUnixNano", "startedAt"):
+                continue
+            assert actual[key] == value, key
+
+
+@pytest.mark.parametrize("content", ["not bytes", None, 7])
+def test_controlled_input_never_raises_into_a_host_hook(feed_path, content):
+    """A caller that hands over text instead of bytes costs one input, not the session."""
+    writer = feed.SessionFeed(feed_path)
+    writer.controlled_input(
+        role="prompt", name="p.md", media_type="text/markdown", content=content
+    )
+    assert feed_path.read_text(encoding="utf-8") == ""
+    # The budget is not spent by a dropped input.
+    writer.controlled_input(role="prompt", name="p.md", media_type="text/markdown", content=b"x")
+    assert len(read_lines(feed_path)) == 1
+
+
+@pytest.mark.parametrize("service", ["a string", 7, ["iri"]])
+def test_open_session_never_raises_on_a_malformed_service(feed_path, service):
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-1",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+        model_service=service,
+    )
+    assert "service" not in read_lines(feed_path)[0]["model"]
+
+
+@pytest.mark.parametrize(
+    "repository",
+    ["https://exa mple.com/x", "https://example.com/x y", "not-an-iri", " "],
+)
+def test_repository_state_drops_an_iri_the_runtime_would_refuse_whole(feed_path, repository):
+    """The Python check must be no laxer than the runtime's, or the whole feed is lost."""
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(
+        repository=repository, base_commit="a" * 40, base_tree="b" * 40
+    )
+    assert feed_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize(
+    "repository",
+    [
+        # Both match the IRI shape and both throw in the runtime's `new URL()`, which then
+        # refuses every event in the session rather than this one.
+        "https://github.com:99999999/Jinn-Network/mono",
+        "https://ex[ample.com/Jinn-Network/mono",
+        "https:///Jinn-Network/mono",
+    ],
+)
+def test_repository_state_drops_an_iri_the_runtime_cannot_parse(feed_path, repository):
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(repository=repository, base_commit="a" * 40, base_tree="b" * 40)
+    assert feed_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize("field", ["branch", "target_base"])
+@pytest.mark.parametrize(
+    "value", ["x" * 257, "\U0001f600" * 128 + "x"], ids=["ascii", "astral"]
+)
+def test_repository_state_keeps_the_binding_when_context_is_over_long(feed_path, field, value):
+    """A branch name longer than the bound is reachable; it must not cost the commit and tree."""
+    writer = feed.SessionFeed(feed_path)
+    writer.repository_state(
+        repository="https://github.com/Jinn-Network/mono",
+        base_commit="a" * 40,
+        base_tree="b" * 40,
+        **{field: value},
+    )
+    event = read_lines(feed_path)[0]
+    assert event["baseCommit"] == "a" * 40
+    assert "branch" not in event and "targetBase" not in event
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"name": "n" * 257},
+        {"media_type": "text/" + "x" * 124},
+        {"name": "\U0001f600" * 128 + "x"},
+        {"media_type": "\U0001f600" * 64 + "x"},
+    ],
+)
+def test_controlled_input_drops_an_over_long_required_field(feed_path, over):
+    writer = feed.SessionFeed(feed_path)
+    writer.controlled_input(
+        **{"role": "skill", "name": "s.md", "media_type": "text/markdown", **over},
+        content=b"x",
+    )
+    assert feed_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize("character, repetitions", [("n", 256), ("\U0001f600", 128)])
+def test_open_session_keeps_the_service_identity_when_a_label_is_over_long(
+    feed_path, character, repetitions
+):
+    """The descriptive fields are optional there, so an over-long one costs only itself."""
+    writer = feed.SessionFeed(feed_path)
+    writer.open_session(
+        session_id="s-1",
+        host_name="hermes-agent",
+        host_version="1.2.3",
+        model_provider="anthropic",
+        model_name="claude-opus-5",
+        model_service={
+            "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+            "name": character * repetitions + "x",
+            "version": character * (repetitions // 2) + "x",
+            "deployment": character * repetitions + "x",
+        },
+    )
+    assert read_lines(feed_path)[0]["model"]["service"] == {
+        "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+    }
+
+
+@pytest.mark.parametrize("extra", ["", "x"])
+def test_controlled_input_enforces_utf16_boundary_without_spending_a_dropped_input(feed_path, extra):
+    """Zod counts UTF-16 units: astral characters use two, although Python len counts one."""
+    writer = feed.SessionFeed(feed_path)
+    name = "\U0001f600" * 128 + extra
+    writer.controlled_input(role="skill", name=name, media_type="text/plain", content=b"x")
+    events = read_lines(feed_path)
+    assert len(events) == (0 if extra else 1)
+    if not extra:
+        assert events[0]["name"] == name
+    for _ in range(feed.CONTROLLED_INPUT_MAX_COUNT):
+        writer.controlled_input(role="skill", name="valid", media_type="text/plain", content=b"x")
+    assert len(read_lines(feed_path)) == feed.CONTROLLED_INPUT_MAX_COUNT

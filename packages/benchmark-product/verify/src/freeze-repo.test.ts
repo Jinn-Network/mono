@@ -27,7 +27,7 @@ import {
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
   FREEZE_REPO_ROLES,
-  execBitIsCarried,
+  probeExecutableBit,
   freezeRepoCommitId,
   isSpdxLicenseExpression,
   spdxLicenseProblem,
@@ -891,7 +891,7 @@ describe("published-tree enumeration", () => {
   test("the filesystem probe answers for a real POSIX temp directory and leaves nothing behind", () => {
     const dir = treeDir();
 
-    expect(execBitIsCarried(dir)).toBe(true);
+    expect(probeExecutableBit(dir)).toBe("carried");
     expect(listTree(dir, true)).toEqual([]);
   });
 
@@ -900,12 +900,57 @@ describe("published-tree enumeration", () => {
     mkdirSync(join(dir, ".git"));
     writeFileSync(join(dir, "README.md"), "text\n");
 
-    expect(execBitIsCarried(dir)).toBe(true);
+    expect(probeExecutableBit(dir)).toBe("carried");
     expect(readdirSync(join(dir, ".git"))).toEqual([]);
     expect(listTree(dir, true).map((entry) => entry.path)).toEqual(["README.md"]);
   });
 
-  test("the probe answers no rather than throwing when it cannot write", () => {
-    expect(execBitIsCarried(join(treeDir(), "does-not-exist"))).toBe(false);
+  // A linked worktree and a submodule checkout carry a regular FILE at `.git`, which is the
+  // configuration the root-`.git` skip exists to support, so the probe has nowhere but the tree.
+  test("a .git file leaves the tree as the only probe site, and the tree is left clean", () => {
+    const dir = treeDir();
+    writeFileSync(join(dir, ".git"), "gitdir: /elsewhere/.git/worktrees/tree\n");
+    writeFileSync(join(dir, "README.md"), "text\n");
+
+    expect(probeExecutableBit(dir)).toBe("carried");
+    expect(listTree(dir, true).map((entry) => entry.path)).toEqual(["README.md"]);
+  });
+
+  // A site that refuses the write says nothing about the filesystem, so the dimension must not be
+  // dropped while another site on the same device is still writable. Skipped under root, which
+  // writes through a read-only directory and so would pass either way — a green assertion that
+  // proves nothing is worse than an honest skip.
+  test.skipIf(process.geteuid?.() === 0)("a .git that refuses the probe falls back to the tree", () => {
+    const dir = treeDir();
+    mkdirSync(join(dir, ".git"));
+    writeFileSync(join(dir, "README.md"), "text\n");
+    chmodSync(join(dir, ".git"), 0o555);
+
+    try {
+      expect(probeExecutableBit(dir)).toBe("carried");
+      expect(readdirSync(join(dir, ".git"))).toEqual([]);
+      expect(listTree(dir, true).map((entry) => entry.path)).toEqual(["README.md"]);
+    } finally {
+      chmodSync(join(dir, ".git"), 0o755);
+    }
+  });
+
+  // The cross-device rejection that issue #3605 is about cannot be built in a unit test: it needs a
+  // second filesystem. The device comparison in `probeSites` is what enforces it.
+
+  test.skipIf(process.geteuid?.() === 0)("no writable site at all drops the dimension rather than throwing", () => {
+    const dir = treeDir();
+    writeFileSync(join(dir, "README.md"), "text\n");
+    chmodSync(dir, 0o555);
+
+    try {
+      expect(probeExecutableBit(dir)).toBe("not-probed");
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+  });
+
+  test("the probe reports that it could not be run rather than throwing", () => {
+    expect(probeExecutableBit(join(treeDir(), "does-not-exist"))).toBe("not-probed");
   });
 });

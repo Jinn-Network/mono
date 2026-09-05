@@ -125,6 +125,9 @@ export type {
 export { VERIFIER_VERSION, renderVerifiedBundle, runVerifierCli } from "./cli.js";
 export type { VerifierCliDeps, VerifierCliResult } from "./cli.js";
 export {
+  LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_VERIFICATION_COMMAND,
@@ -174,6 +177,7 @@ export type {
   FreezeRepoSourceLicence,
   FreezeRepoTree,
   FreezeRepoVerificationResult,
+  ExecutableBitSkipReason,
 } from "./freeze-repo.js";
 // `beacon-binding/1` (issue #2976): the post-seal public-randomness binding, and the report face
 // that states which binding a run carries. Single-sourced here for the same reason the anchored

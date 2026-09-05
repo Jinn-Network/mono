@@ -456,24 +456,39 @@ function requireProviderAcknowledgement(draftId: string, formData: FormData): Gu
  * rather than only in the CLI is the point of the gate -- this is the surface reached by the
  * operator least likely to have worked the interval out for themselves.
  *
- * `undefined` when there is no advisory to show: the draft is unquoted or carries no benchmark, and
+ * `absent` when there is no advisory to show: the draft is unquoted or carries no benchmark, and
  * `runLock` below is the one place that says so. A context that cannot even be built is the same
  * case for the same reason -- it fails loudly in the operation, not silently in the gate.
+ *
+ * The result is discriminated rather than `GuiActionState | undefined` so the caller DERIVES
+ * `acknowledgedSampleSizeAdvisory` from what this gate actually showed (issue #3803). Asserting the
+ * flag beside the call made a swallowed throw indistinguishable from a satisfied gate: the seal
+ * would then claim an operator was shown a width they were never shown, which is the one thing this
+ * feature exists to prevent. `absent` seals no advisory, which is the honest reading of "nothing
+ * was displayed", and it holds by construction rather than by an argument across two files.
  */
-function requireSampleSizeAcknowledgement(draftId: string, formData: FormData): GuiActionState | undefined {
+type SampleSizeGate =
+  | { readonly kind: "absent" }
+  | { readonly kind: "acknowledged" }
+  | { readonly kind: "refused"; readonly state: GuiActionState };
+
+function requireSampleSizeAcknowledgement(draftId: string, formData: FormData): SampleSizeGate {
   let planned;
   try {
     planned = draftSampleSizeAdvisory(createProductOperationContext().workspaceDir, draftId);
   } catch {
-    return undefined;
+    return { kind: "absent" };
   }
-  if (planned === undefined) return undefined;
-  if (field(formData, "ack-sample-size") === "acknowledged") return undefined;
+  if (planned === undefined) return { kind: "absent" };
+  if (field(formData, "ack-sample-size") === "acknowledged") return { kind: "acknowledged" };
   return {
-    status: "error",
-    error: {
-      code: "invalid-invocation",
-      detail: `${formatSampleSizeAdvisory(planned)}\nThe lock is irreversible. Change the sample size now, or check the sample-size acknowledgement to seal at this n.`,
+    kind: "refused",
+    state: {
+      status: "error",
+      error: {
+        code: "invalid-invocation",
+        detail: `${formatSampleSizeAdvisory(planned)}\nThe lock is irreversible. Change the sample size now, or check the sample-size acknowledgement to seal at this n.`,
+      },
     },
   };
 }
@@ -499,9 +514,12 @@ export async function runLockAction(_previous: GuiActionState, formData: FormDat
   const acknowledgement = requireProviderAcknowledgement(draftId, formData);
   if (acknowledgement !== undefined) return acknowledgement;
   const sampleSize = requireSampleSizeAcknowledgement(draftId, formData);
-  if (sampleSize !== undefined) return sampleSize;
+  if (sampleSize.kind === "refused") return sampleSize.state;
   return executeOperation(async (context) => {
-    const locked = runLock(context, { draftId, acknowledgedSampleSizeAdvisory: true });
+    const locked = runLock(context, {
+      draftId,
+      acknowledgedSampleSizeAdvisory: sampleSize.kind === "acknowledged",
+    });
     if (locked.ok) await anchorAfterLockIfConfigured(context, draftId);
     return locked;
   }, { revalidate: ["/workspace", `/workspace/${draftId}`] });

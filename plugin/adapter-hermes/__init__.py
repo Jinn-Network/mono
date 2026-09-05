@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -32,6 +35,28 @@ logger = logging.getLogger(__name__)
 
 _FIRST_SESSION_MARKER = "first-session-done"
 _SEAL_TIMEOUT_S = 60.0
+
+#: A session start must not feel like a hang, so the whole observation shares one deadline
+#: rather than giving each read its own: an unreachable repository costs the base state, not the
+#: first turn. The capture proceeds without it rather than late.
+_GIT_BUDGET_S = 2.0
+
+#: scp-style `git@host:path`, where `:` separates the path — a port cannot appear.
+_SCP_REMOTE = re.compile(r"\A(?P<user>[^@/]+)@(?P<host>[^:/]+):(?P<path>.+?)(?:\.git)?\Z")
+#: An explicit URL, where `:NNNN` after the host is unambiguously a port, not a path segment.
+_URL_REMOTE = re.compile(
+    r"\A(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]*)://"
+    # `[^/]*` is greedy so the group backtracks to the LAST `@` before the host, which is where
+    # RFC 3986 puts the boundary. Stopping at the first would leave a password fragment behind.
+    r"(?:(?P<userinfo>[^/]*)@)?"
+    r"(?P<host>[^/:]+)(?::(?P<port>\d+))?"
+    r"(?P<path>/.*?)(?:\.git)?\Z"
+)
+_NETWORK_SCHEMES = ("https", "http", "git", "ssh")
+#: `_URL_REMOTE`'s userinfo group backtracks to the last `@`, which is quadratic on a remote with
+#: many of them. No real remote approaches this, and the read happens at session start rather than
+#: under `_GIT_BUDGET_S`, so the shape is refused by length before the matcher ever sees it.
+_MAX_REMOTE_LENGTH = 2048
 
 _lock = threading.Lock()
 _sessions: Dict[str, "_SessionState"] = {}
@@ -124,8 +149,148 @@ def _ensure_capture(state: "_SessionState", model: str) -> None:
         host_version=host_version,
         model_provider=provider,
         model_name=model_name,
+        model_service=feed_module.derive_model_service(provider, model_name),
     )
+    observed = _observe_repository_state(state.cwd)
+    if observed is not None:
+        state.feed.repository_state(**observed)
     state.feed.environment(tools=[], skills=[])
+
+
+def _git(cwd: str, deadline: float, *args: str) -> str:
+    """One short read from *cwd*'s repository, or "" if anything goes wrong.
+
+    `-C cwd` is load-bearing, not tidiness: the process directory is not the session's. An
+    orchestrator dispatches a session into a worktree while sitting elsewhere, and reading the
+    wrong repository would seal a confident, wrong answer to the one question this record
+    exists to answer.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        logger.debug("jinn: git budget spent before %s", args[0])
+        return ""
+    try:
+        done = subprocess.run(
+            ("git", "-C", cwd, *args),
+            capture_output=True,
+            text=True,
+            timeout=remaining,
+            stdin=subprocess.DEVNULL,
+            check=False,
+        )
+    except Exception as exc:
+        logger.debug("jinn: git %s failed: %s", args[0], exc)
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def _repository_iri(remote: str) -> str:
+    """Normalize a Git remote to a credential-free network IRI, which is what the record needs.
+
+    Two things are dropped rather than carried, for the same reason: the record they land in is
+    durable, never deleted, and publicly projectable.
+
+    * **Userinfo.** `https://x-access-token:ghs_…@github.com/o/r` is the remote every GitHub
+      Actions checkout writes. A token sealed into an append-only archive cannot be withdrawn
+      from it, so it is stripped here — at the source, which is the discipline this capture
+      path is supposed to hold rather than leave to a later scrub.
+    * **Local remotes.** `file:///Users/<name>/…` is a well-formed IRI naming a filesystem path,
+      usually with a username in it, and it resolves for nobody. An `ssh_config` `Host` alias —
+      `git@myhost:owner/repo.git` — is the same case wearing a plausible hostname: it names a
+      repository only on the machine holding that alias, and it does not join with the identity
+      every other operator seals for the same repository. `_repository_host` refuses both.
+
+    An absent field is what the record accepts gracefully; a confident wrong one is not.
+    """
+    remote = (remote or "").strip()
+    # Whitespace anywhere makes it not an IRI, and the runtime refuses the whole feed for one.
+    if not remote or len(remote) > _MAX_REMOTE_LENGTH or re.search(r"\s", remote):
+        return ""
+
+    url = _URL_REMOTE.match(remote)
+    if url is not None:
+        if url.group("scheme").lower() not in _NETWORK_SCHEMES:
+            logger.debug("jinn: remote scheme %r is not a network repository", url.group("scheme"))
+            return ""
+        if url.group("userinfo"):
+            logger.debug("jinn: dropped credentials from the origin remote")
+        # ssh:// is a transport, not a way to fetch; https names the same repository publicly.
+        # The port does not survive that rewrite: 22 (or Gerrit's 29418) names the SSH daemon,
+        # not the web endpoint. Keep a port only where the scheme it belongs to is kept.
+        observed = url.group("scheme").lower()
+        scheme = "https" if observed == "ssh" else observed
+        host = _repository_host(url.group("host"))
+        if not host:
+            return ""
+        port = f":{url.group('port')}" if url.group("port") and scheme == observed else ""
+        return _network_iri(f"{scheme}://{host}{port}{url.group('path')}")
+
+    scp = _SCP_REMOTE.match(remote)
+    if scp is not None:
+        host = _repository_host(scp.group("host"))
+        # `host` binds after the first `@` and `path` admits one, so a hand-written
+        # `git@x-access-token:ghs_…@github.com/o/r` would otherwise carry its token through this
+        # branch. The URL branch drops userinfo at the last `@`; this one has no userinfo to drop,
+        # so a surviving `@` means the remote is not the shape this branch claims to read.
+        if not host or "@" in scp.group("path"):
+            logger.debug("jinn: remote %r is not a network repository", remote)
+            return ""
+        return _network_iri(f"https://{host}/{scp.group('path')}")
+
+    logger.debug("jinn: remote %r is not a network repository", remote)
+    return ""
+
+
+def _repository_host(host: str) -> str:
+    """The lowercased host when it can name a repository for anyone, "" when it names one for us.
+
+    Two rules, one reason. A host without a dot is a local alias — an `ssh_config` `Host` entry,
+    or `localhost` — and resolves for nobody else. A host is also case-insensitive, so
+    `GitHub.com` and `github.com` must not seal as two identities for one repository.
+    """
+    host = (host or "").lower()
+    if "." not in host or "@" in host:
+        logger.debug("jinn: remote host %r names no repository outside this machine", host)
+        return ""
+    return host
+
+
+def _network_iri(candidate: str) -> str:
+    """*candidate* when the runtime would accept it as an absolute IRI, "" otherwise.
+
+    The host and port groups above are permissive — `ex[ample.com`, or a port of any length — and
+    the runtime refuses the whole feed for one malformed IRI. This is the last gate before a
+    value assembled here reaches the writer.
+    """
+    if feed_module.absolute_iri(candidate):
+        return candidate
+    logger.debug("jinn: remote normalized to %r, which is not an absolute IRI", candidate)
+    return ""
+
+
+def _observe_repository_state(cwd: Optional[str]) -> Optional[Dict[str, str]]:
+    """Read the base commit and tree the session in *cwd* starts from.
+
+    The commit and tree are the content binding; branch and target base are context this may
+    legitimately fail to find (a detached head, a repository with no upstream).
+    """
+    if not cwd:
+        return None
+    deadline = time.monotonic() + _GIT_BUDGET_S
+    commit = _git(cwd, deadline, "rev-parse", "HEAD")
+    tree = _git(cwd, deadline, "rev-parse", "HEAD^{tree}")
+    repository = _repository_iri(_git(cwd, deadline, "config", "--get", "remote.origin.url"))
+    if not commit or not tree or not repository:
+        return None
+    upstream = _git(cwd, deadline, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+    return {
+        "repository": repository,
+        "base_commit": commit,
+        "base_tree": tree,
+        "branch": _git(cwd, deadline, "rev-parse", "--abbrev-ref", "HEAD"),
+        # "origin/next" names the same base as "next"; the remote prefix is local bookkeeping.
+        "target_base": upstream.split("/", 1)[1] if "/" in upstream else upstream,
+    }
 
 
 def _host_identity() -> tuple[str, str]:
@@ -246,8 +411,6 @@ def _on_post_tool_call(
         return
     started = None
     if duration_ms:
-        import time
-
         started = time.time_ns() - int(duration_ms) * 1_000_000
     state.feed.tool_call(
         tool_name=tool_name,

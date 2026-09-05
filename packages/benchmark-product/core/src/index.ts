@@ -706,7 +706,7 @@ export {
   formatSampleSizeAdvisory,
   sampleSizeAdvisory,
 } from "./run/sample-size-advisory.js";
-export type { SampleSizeAdvisory, SampleSizeWidth } from "./run/sample-size-advisory.js";
+export type { DeclaredAnalysis, SampleSizeAdvisory, SampleSizeWidth } from "./run/sample-size-advisory.js";
 export { recordPublicationOrigin } from "./run/publication-authority.js";
 export { foldRunJournalLineage } from "./run/journal.js";
 export type { DispatchLineageFold } from "./run/journal.js";
@@ -911,7 +911,7 @@ export type { BeaconReference, BeaconSourceId, RunBindingClass, VerifiedRunBindi
 // reason as the two surfaces above: the product's GUI imports only this package, and a second copy
 // of the derivation would be a second place the two numbers could disagree.
 export { armDenominators } from "@colophon-claims/verify";
-export type { ArmDenominators } from "@colophon-claims/verify";
+export type { ArmDenominators, PlannedSlotAccounting } from "@colophon-claims/verify";
 
 // PUB-13b: an additive publication-profile projection. This is intentionally not wired into the
 // v2 `publish` operation or CLI: callers opt into its accounting-first, report-optional contract.

@@ -31,10 +31,18 @@ export const DEFAULT_SKIP_DIRECTORIES = new Set(['node_modules', 'dist', '.git']
  *
  * `packages/**` is narrowed to the three public-surface directory kinds, since a package's
  * `fixtures/` holds sealed pre-re-seal bytes that are never retro-edited.
+ *
+ * `operator/deployments/` is enforced whole (not just a `src/` subtree) because every file in
+ * it is a deployment artifact that mints real identifiers -- evaluation-method URIs, profile
+ * references -- which flow into sealed records shipped to operators. A retired-origin literal
+ * there defeats the DR-2026-08-04 migration at exactly the surface operators consume, and it
+ * was a near-miss on PR #2439 precisely because the directory sat outside every enforced
+ * prefix. It holds no pre-re-seal sealed bytes, so nothing in it needs the `fixtures/` carve-out.
  */
 export const ENFORCED_SCOPE_PREFIXES = [
   '.github/scripts/',
   'operator/src/',
+  'operator/deployments/',
   'plugin/runtime/src/',
 ];
 const ENFORCED_PACKAGE_DIRECTORIES = /\/(?:src|schemas|profiles)\//u;

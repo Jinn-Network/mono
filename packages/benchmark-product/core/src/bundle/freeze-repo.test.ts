@@ -11,7 +11,7 @@
  * acceptance is proved here, against a bundle a real disclosed run actually materialized.
  */
 
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -215,6 +215,38 @@ describe("freeze-repository export against a real v4 bundle", () => {
     expect((JSON.parse(result.stdout) as { freezeRepo: { ok: boolean } }).freezeRepo.ok).toBe(true);
   });
 
+  // Issue #3607: the mode dimension is skipped on a filesystem that does not record an executable
+  // bit, and on one no probe site could be written to. The first is unreachable in CI, but a
+  // read-only repository directory reaches the second — an exported tree has no `.git`, so the tree
+  // root is the only site — while leaving it readable, so the byte comparison still runs.
+  test.skipIf(process.geteuid?.() === 0)(
+    "a tree the probe cannot interrogate still matches, and the report says why it skipped the modes",
+    async () => {
+      const bundleDir = licensedBundle;
+      const repoDir = join(tempDir("unprobed"), "tree");
+      await exportFreezeRepo(bundleDir, repoDir);
+
+      const originalMode = statSync(repoDir).mode & 0o7777;
+      chmodSync(repoDir, 0o555);
+      try {
+        const checked = await verifyFreezeRepo(bundleDir, repoDir);
+        // The dropped dimension does not fail an otherwise faithful tree; it is reported instead.
+        expect(checked.ok).toBe(true);
+        expect(checked.differences).toEqual([]);
+        expect(checked.executableBitChecked).toBe(false);
+        expect(checked.executableBitSkipped).toBe("not-probed");
+
+        const human = await runVerifierCli([bundleDir, "--freeze-repo", repoDir]);
+        expect(human.exitCode).toBe(0);
+        // Not "this filesystem does not carry an executable bit": it may well carry one (issue #3604).
+        expect(human.stdout).toContain("file modes were not checked (the filesystem could not be probed)");
+      } finally {
+        // Before the suite's own cleanup, which cannot remove a read-only directory's contents.
+        chmodSync(repoDir, originalMode);
+      }
+    },
+  );
+
   test("refuses to write into a directory that already holds files", async () => {
     const repoDir = join(tempDir("occupied"), "tree");
     mkdirSync(repoDir, { recursive: true });
@@ -293,6 +325,33 @@ describe("freeze-repo CLI verbs", () => {
     expect(verifyEnvelope.result.differences).toEqual([]);
     expect(verifyEnvelope.result.commitId).toBe(exportEnvelope.result.commitId);
   });
+
+  // Issue #3608: `PUBLIC-BUNDLE.md` states that a dropped mode dimension is reported, so the
+  // product's own reader surface has to give the signal the standalone verifier gives. Reached the
+  // same way as the standalone case, by a repository directory that refuses the probe.
+  test.skipIf(process.geteuid?.() === 0)(
+    "the product CLI names a match that rested on bytes alone",
+    async () => {
+      const bundleDir = licensedBundle;
+      const repoDir = join(tempDir("cli-unprobed"), "repo");
+      await exportFreezeRepo(bundleDir, repoDir);
+
+      const originalMode = statSync(repoDir).mode & 0o7777;
+      chmodSync(repoDir, 0o555);
+      try {
+        const verified = await runCli(
+          ["freeze-repo", "verify", "--bundle", bundleDir, "--repo", repoDir],
+          { cwd: process.cwd(), clock: () => "2026-08-29T00:00:00.000Z" },
+        );
+
+        expect(verified.exitCode).toBe(0);
+        expect(verified.stdout).toContain("freeze repository matches");
+        expect(verified.stdout).toContain("note: file modes were not checked (the filesystem could not be probed)");
+      } finally {
+        chmodSync(repoDir, originalMode);
+      }
+    },
+  );
 
   test("a drifted tree exits non-zero and names every drifted member", async () => {
     const bundleDir = licensedBundle;

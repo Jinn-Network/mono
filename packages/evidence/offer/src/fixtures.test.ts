@@ -4,9 +4,11 @@ import {
   GOLDEN_OFFERS,
   INVALID_OFFERS,
   listInvalidFixtureNames,
+  listUnsealableFixtureNames,
   loadGoldenDocument,
   loadGoldenEnvelope,
   offerFixtureUrl,
+  UNSEALABLE_OFFERS,
 } from "./fixtures.js";
 import { parseOfferEnvelope } from "./seal.js";
 
@@ -34,6 +36,10 @@ describe("the shipped fixture corpus", () => {
   // Without this the conformance kit could silently stop covering a shipped refusal case.
   test("every refused case on disk is one the conformance kit runs, and vice versa", async () => {
     expect(await listInvalidFixtureNames()).toEqual([...INVALID_OFFERS].sort());
+  });
+
+  test("every unsealable case on disk is one the conformance kit runs, and vice versa", async () => {
+    expect(await listUnsealableFixtureNames()).toEqual([...UNSEALABLE_OFFERS].sort());
   });
 
   test("the superseding fixture names the priced fixture it replaces", async () => {

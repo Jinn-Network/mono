@@ -39,7 +39,10 @@
 // guarantee is: a peer cannot move a request to an origin the operator did not
 // choose. Whether the operator chose an origin worth trusting is the operator's
 // call. The transport enforces the same rule per redirect hop, which is the
-// other half of that promise (`transport-http`'s `fetchWithinOrigin`).
+// other half of that promise (`transport-http`'s `requestWithinOrigin`), with
+// one carve-out: a same-host plain-to-TLS upgrade (`http://h` -> `https://h`,
+// both on their scheme's default port) is admitted, because it strictly
+// increases assurance and cannot move the request to a new host (#3433).
 
 /** A peer-introduced URL that does not stay inside the configured serving root. */
 export class ContainedOriginError extends Error {

@@ -27,6 +27,12 @@
  *     `createViemBaseSepoliaReadClients(...).settlementOwnership`, and a Safe the ceremony never
  *     declared is refused. Until PR2 this rig passed the ceremony EOA as the "Safe", which was the
  *     only reason the pre-amendment address-equality check ever verified.
+ *   - The FULL `buildFleetNativeRuntime` boot for BOTH operators (#2490), not just the identity
+ *     opens: the same ~250-statement assembly `main.ts` runs on the native branch — trust catalog,
+ *     merged role identities, claim runtime, projector ports, discovery consumer, and (for A) the
+ *     requester WRITE authority over its distinct admission custody. It runs here because the
+ *     runtime now takes an injected `now`; on a fork the anchor's block time drifts ahead of
+ *     wall-clock, so booting at the catalog's `validFrom` is the only self-consistent instant.
  *
  *  SEEDED-fixture / DEPLOY-TIME (documented, not asserted here — see the leg table this prints and
  *  the M7 PR body):
@@ -53,6 +59,8 @@ import {
   createViemBaseSepoliaReadClients,
 } from '../../src/daemon/native-base-sepolia-infrastructure.js';
 import { openRoleIdentitySet } from '../../src/daemon/role-identities.js';
+import { buildFleetNativeRuntime } from '../../src/daemon/native-fleet-runtime.js';
+import { Store } from '../../src/store/store.js';
 import { ANVIL_PRIVATE_KEYS } from './_daemon-harness-helpers.js';
 import { buildTwoOperatorNativeSetup } from './fixtures/native-fleet/config.js';
 import { createForkAnchorSubmitter } from './fixtures/native-fleet/anchor.js';
@@ -90,6 +98,13 @@ export async function runNativeFleetLoop(): Promise<void> {
   console.log('\n=== native-fleet G-loop rig — fork Base Sepolia 84532 ===');
   const anvil = await spawnAnvilFork({ forkUrl: rpcUrl, chain: baseSepolia, silent: true });
   const root = await mkdtemp(join(tmpdir(), 'native-fleet-rig-'));
+  // The runtime boots below take a Store each; the rig owns closing them.
+  const stores: Store[] = [];
+  const openRigStore = (dir: string): Store => {
+    const store = new Store(join(dir, 'jinn.db'));
+    stores.push(store);
+    return store;
+  };
   try {
     console.log(`anvil rpc: ${anvil.rpcUrl}`);
     const publicClient = createPublicClient({ chain: baseSepolia, transport: http(anvil.rpcUrl) });
@@ -250,10 +265,64 @@ export async function runNativeFleetLoop(): Promise<void> {
       + `via real isOwner(${account.address}) (true for its own Safe, false for a foreign one); `
       + 'an undeclared Safe is refused');
 
+    // ── LEG 1c: the FULL native runtime assembly, on the fork, at the injected effective time ─
+    // The seam #2490 added: without an injectable `now` this rig could only open identity sets by
+    // hand (LEG 1) and had to defer the real boot to deploy time. `bootTime` is the catalog's
+    // `validFrom` — the anchor's own on-chain block time — which is the instant every window check
+    // in this assembly is self-consistent at. Construction resolves no source and fetches no
+    // record (#2521), so this needs neither operator's serving plane to be up.
+    const runtimeA = await buildFleetNativeRuntime({
+      config: setup.operatorA.config,
+      store: openRigStore(join(root, 'runtime-a')),
+      publicClient,
+      safeAddress: serviceSafe.address,
+      stateRoot: join(root, 'runtime-a'),
+      password: PASSWORD,
+      workerOwnerId: 'native-fleet-rig-a',
+      now,
+    });
+    // B is solver-only: a real second operator, its own agent, its own custody, and — because it
+    // provisioned no admission store — the M5d fail-closed no-post seam rather than write authority.
+    const runtimeB = await buildFleetNativeRuntime({
+      config: setup.operatorB.config,
+      store: openRigStore(join(root, 'runtime-b')),
+      publicClient,
+      safeAddress: foreignSafe.address,
+      stateRoot: join(root, 'runtime-b'),
+      password: PASSWORD,
+      workerOwnerId: 'native-fleet-rig-b',
+      now,
+    });
+    if (runtimeA.identities.get('solver-delivery').keyId !== aSolver.get('solver-delivery').keyId) {
+      throw new Error('full runtime boot resolved a different solver key than the hand-opened set');
+    }
+    if (runtimeA.requesterWrite === undefined) {
+      throw new Error('operator A provisioned admission custody but booted without write authority');
+    }
+    if (runtimeA.requesterWrite.admissionAgent === runtimeA.requesterWrite.requesterAgent) {
+      throw new Error('admission authority is not a distinct Agent from the requester');
+    }
+    if (runtimeB.requesterWrite !== undefined) {
+      throw new Error('operator B provisioned no admission custody but booted with write authority');
+    }
+    if (runtimeA.identities.get('solver-delivery').keyId === runtimeB.identities.get('solver-delivery').keyId) {
+      throw new Error('the two booted runtimes share a solver key — not honestly separate');
+    }
+    // Each runtime is bound to ITS operator, not to whichever config was assembled last.
+    if (runtimeA.agentIri !== setup.operatorA.agentIri || runtimeB.agentIri !== setup.operatorB.agentIri) {
+      throw new Error('a booted runtime carries the wrong operator agent');
+    }
+    if (runtimeA.nativeRequesterStateDir === runtimeB.nativeRequesterStateDir) {
+      throw new Error('both runtimes share one requester state directory');
+    }
+    console.log('  ✓ LEG 1c PROVEN — full buildFleetNativeRuntime boot on the fork for A + B '
+      + '(A carries requester write authority; B fail-closed no-post)');
+
     // ── LEG 2+: the marketplace + serving legs the fork can seed but not fully self-provide ───
     printLegTable();
     console.log('\n=== native-fleet rig: boot legs PROVEN on fork; loop legs are seeded/deploy-time (table above) ===');
   } finally {
+    for (const store of stores) store.close();
     await anvil.teardown();
   }
 }
@@ -264,6 +333,7 @@ function printLegTable(): void {
     ['LEG 0  boot gate (assertNativeDeployment + forked code)', 'PROVEN-on-fork'],
     ['LEG 1  trust anchor + role-identity boot (A + B)', 'PROVEN-on-fork'],
     ['LEG 1b settlement authority vs a real Safe (Safe != EOA)', 'PROVEN-on-fork'],
+    ['LEG 1c full buildFleetNativeRuntime boot (A + B)', 'PROVEN-on-fork'],
     ['LEG 2  requester source .well-known serving (M6)', 'SEEDED (deploy-time serves it live)'],
     ['LEG 3  operator Safe funded + mech-registered', 'DEPLOY-TIME (FleetBootstrapper on live Sepolia)'],
     ['LEG 4  requester post (M5e) — escrowed createTask', 'DEPLOY-TIME (needs funded Safe)'],
