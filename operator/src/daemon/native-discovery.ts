@@ -28,6 +28,12 @@ import {
 } from '@jinn-network/record-discovery-client';
 import type { Store } from '../store/store.js';
 import type { AnnouncedSubmissionCard } from './native-submission-facts.js';
+import {
+  NATIVE_DISCOVERY_QUARANTINE_SCHEMA,
+  clearPoisonFailures,
+  isPoisonQuarantined,
+  recordPoisonFailure,
+} from './native-discovery-quarantine.js';
 
 const BIGINT_TAG = '$bigint';
 
@@ -93,7 +99,7 @@ CREATE TABLE IF NOT EXISTS native_discovery_withdrawals (
 );
 CREATE INDEX IF NOT EXISTS idx_native_discovery_withdrawals_pending
   ON native_discovery_withdrawals (acknowledged_at, id);
-`;
+${NATIVE_DISCOVERY_QUARANTINE_SCHEMA}`;
 
 export interface SignedSourceHighWater {
   readonly sequence: string;
