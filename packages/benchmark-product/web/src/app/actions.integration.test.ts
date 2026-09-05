@@ -749,6 +749,7 @@ describe.sequential("server action layer against a real workspace", () => {
     workspaces.push(workspace);
     process.env[WORKSPACE_ENV] = workspace;
     process.env[PRINCIPAL_ENV] = "sponsor-1";
+    await invoke("workspace.init");
     await prepareLockedDraft("bind-round");
 
     const bind = (beaconRound: string): Promise<GuiActionState> => invoke("run.bind", {
