@@ -109,7 +109,13 @@ export * from "./profile/binary-qualification.js";
 export { ClaimPackageSchema, DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID } from "./profile/claim.js";
 export type { ClaimPackage } from "./profile/claim.js";
 export { firstDifference } from "./profile/claim-consistency.js";
-export { NOT_FETCHED_CHECK, describeRecomputedChecks, summarizeVerificationOutcome } from "./outcome.js";
+export {
+  NOT_FETCHED_CHECK,
+  bundleIdentityLabel,
+  describeRecomputedChecks,
+  isMetadataFirstBundle,
+  summarizeVerificationOutcome,
+} from "./outcome.js";
 export type {
   VerificationCheckName,
   VerificationCheckOutcome,
@@ -119,6 +125,9 @@ export type {
 export { VERIFIER_VERSION, renderVerifiedBundle, runVerifierCli } from "./cli.js";
 export type { VerifierCliDeps, VerifierCliResult } from "./cli.js";
 export {
+  LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_VERIFICATION_COMMAND,
@@ -165,6 +174,7 @@ export type {
   FreezeRepoSourceLicence,
   FreezeRepoTree,
   FreezeRepoVerificationResult,
+  ExecutableBitSkipReason,
 } from "./freeze-repo.js";
 // `beacon-binding/1` (issue #2976): the post-seal public-randomness binding, and the report face
 // that states which binding a run carries. Single-sourced here for the same reason the anchored
@@ -199,6 +209,38 @@ export type {
 } from "./binding/beacon-binding.js";
 export { runBindingClass, runBindingSentence, runBoundVenueLimits } from "./binding/report-face.js";
 export type { RunBindingClass } from "./binding/report-face.js";
+// Reader-legible publisher identity (issue #2983): a signing key bound to a domain by a proof the
+// key holder serves themselves. The document is reader-supplied trust material, like an RFC 3161
+// root -- no bundle format carries it -- and the sentences live here so the producer that mints a
+// binding and the reader that checks one render the same words.
+export {
+  DOMAIN_BINDING_FORMAT,
+  DOMAIN_BINDING_MECHANISMS,
+  DOMAIN_BINDING_MECHANISM_NAMES,
+  DomainBindingDocumentSchema,
+  DomainBindingStatementSchema,
+  domainBindingProof,
+  domainBindingStatementBytes,
+  verifyDomainBinding,
+} from "./identity/domain-binding.js";
+export type {
+  DomainBindingDocument,
+  DomainBindingMechanism,
+  DomainBindingProof,
+  DomainBindingStatement,
+  VerifiedDomainBinding,
+} from "./identity/domain-binding.js";
+export {
+  ed25519PublicKeyBytesFromDidKey,
+  ed25519PublicKeyFromDidKey,
+  keyFingerprintFromDidKey,
+} from "./identity/did-key.js";
+export {
+  publisherIdentityClass,
+  publisherIdentityLines,
+  publisherIdentitySentence,
+} from "./identity/report-face.js";
+export type { PublisherIdentityClass } from "./identity/report-face.js";
 // The declared denominator beside the strict all-slots one (issue #2977). Exported for the same
 // single-sourcing reason as the binding report face above: the product core depends on this
 // package, so every surface that shows the pair derives it from one function.

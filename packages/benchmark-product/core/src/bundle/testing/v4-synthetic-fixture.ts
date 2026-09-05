@@ -153,7 +153,7 @@ export function syntheticDisclosureDeclaration(instrumentSha256s: readonly strin
 }
 
 export type SyntheticV4TruthAdmission = "operator-only" | "two-human-unanimous" | "screened-operator-sampled";
-export type SyntheticV4Scenario = "minimal" | "qualification-144";
+export type SyntheticV4Scenario = "minimal" | "qualification-144" | "two-exclusions";
 
 export interface SyntheticV4BundleFixture {
   readonly workspaceDir: string;
@@ -310,6 +310,52 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
   ] as const satisfies readonly SyntheticFixtureItem[];
   if (scenario === "minimal") return minimal;
 
+  // Two excluded items, each replaced by a later admitted item in its own stratum (issue #3247).
+  // The accepted set is two items in the same two strata as `minimal`, and outcomes outside the
+  // 144 scenario are arm-agnostic, so the run, the cells and the Matrix behave exactly as
+  // `minimal`'s do -- the only difference is that the replacement ledger carries TWO entries
+  // instead of zero. That is the point: every other qualification-carrying fixture yields zero or
+  // one exclusion, where sorting the projection is a no-op.
+  //
+  // Pool order is the array order here, and the item bank additionally requires the array to be
+  // sorted by `itemId`, so the excluded pair must occupy the first two ids. For the two-human path
+  // the ledger is emitted in pool order, and the `itemSha256` digests of these two fall in the
+  // OPPOSITE order (a property of their exact payload bytes, verified by the fixture's own test
+  // rather than asserted here) -- which is what makes replacement-ledger order differ from the
+  // sorted order `materialize.ts` applies. A fixture whose two orders agreed would exercise the
+  // sort vacuously, so `v4-materialize.test.ts` asserts the disagreement directly; if a payload
+  // field ever changes and the digests reorder, that assertion fails loudly instead of the
+  // coverage quietly evaporating.
+  if (scenario === "two-exclusions") {
+    const item = (
+      index: number,
+      stratum: "core" | "stress",
+      truthLabel: "CORRECT" | "WRONG",
+      role: "excluded" | "reserve",
+    ): SyntheticFixtureItem => ({
+      itemId: qualificationItemId(index),
+      question: `Does the ${role} synthetic ${stratum} statement match its reference?`,
+      referenceAnswer: `The ${role} synthetic ${stratum} statement is correct.`,
+      candidateAnswer: truthLabel === "CORRECT"
+        ? `The ${role} synthetic ${stratum} statement is correct.`
+        : `The ${role} synthetic ${stratum} statement is deliberately wrong.`,
+      sourceDigestHex: sourceDigestForPosition(index),
+      truthLabel,
+      stratum,
+      // An excluded item is one the two reviewers split on, which is what makes it excluded and
+      // replaced; a reserve is unanimous, like every `minimal` item.
+      reviewLabels: role === "excluded"
+        ? (truthLabel === "CORRECT" ? ["CORRECT", "WRONG"] : ["WRONG", "CORRECT"])
+        : [truthLabel, truthLabel],
+    });
+    return [
+      item(0, "core", "CORRECT", "excluded"),
+      item(1, "stress", "WRONG", "excluded"),
+      { ...item(2, "core", "CORRECT", "reserve"), replacesItemId: qualificationItemId(0) },
+      { ...item(3, "stress", "WRONG", "reserve"), replacesItemId: qualificationItemId(1) },
+    ];
+  }
+
   const truthLabels = [
     "CORRECT", "WRONG", "CORRECT", "WRONG", "CORRECT", "WRONG",
     "CORRECT", "WRONG", "CORRECT", "WRONG", "CORRECT", "WRONG",
@@ -364,7 +410,7 @@ function syntheticCellOutcome(
   armId: string,
   replicate: number,
 ): SyntheticCellOutcome {
-  if (scenario === "minimal") return "A";
+  if (scenario !== "qualification-144") return "A";
   const itemIndex = Array.from({ length: 12 }, (_, index) => qualificationItemId(index)).indexOf(itemId);
   const armIndex = qualificationArms.indexOf(armId as typeof qualificationArms[number]);
   const token = qualificationOutcomes[itemIndex]?.[armIndex]?.[replicate - 1];

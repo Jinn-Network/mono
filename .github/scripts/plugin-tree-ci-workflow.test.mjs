@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { restoredArtifactNames } from './workflow-artifact-steps.mjs';
+import { restoredArtifactNames, uploadedArtifactNames } from './workflow-artifact-steps.mjs';
 import { citedPrecedents } from './workflow-precedent-citations.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -21,23 +21,6 @@ const workflow = readFileSync(
   resolve(root, '.github/workflows/plugin-tree-ci.yml'),
   'utf8',
 );
-
-function uploadedArtifactNames(source) {
-  const names = [];
-  const lines = source.split('\n');
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].includes('uses: actions/upload-artifact')) continue;
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      const name = lines[cursor].match(/^\s+name: (\S+)$/);
-      if (name) {
-        names.push(name[1]);
-        break;
-      }
-      if (/^\s+- /.test(lines[cursor])) break;
-    }
-  }
-  return names;
-}
 
 test('every uploaded distribution is restored by name, never by pattern', () => {
   const uploaded = uploadedArtifactNames(workflow);

@@ -9,7 +9,7 @@ import {
 
 import { catalogIoError } from "./errors.js";
 
-export const SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION = 3 as const;
+export const SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION = 4 as const;
 
 const SCHEMA_SQL = `
 CREATE TABLE catalog_metadata (
@@ -218,9 +218,19 @@ CREATE INDEX announcement_keys_kind_idx
   ON announcement_keys(event_kind, source_id, announcement_id);
 CREATE INDEX announcement_edges_record_idx
   ON announcement_edges(record_digest, source_id, field, ordinal);
+-- The outbound shape narrowed to one field. SQLite only uses equality terms on an index prefix,
+-- so with source_id unconstrained the index above cannot apply the field filter, and it will not
+-- credit a filtered-but-unapplied column for the ORDER BY either -- leading field is what lets it.
+CREATE INDEX announcement_edges_record_field_idx
+  ON announcement_edges(record_digest, field, source_id, ordinal);
 -- The referrers inversion (design section 8): which records point at this digest.
 CREATE INDEX announcement_edges_target_idx
   ON announcement_edges(target_digest, source_id, record_digest, field, ordinal);
+-- The same inversion narrowed to one field, which is the referrers shape the README advertises,
+-- and the same reason as above. Both target indexes are kept: a target-only query has no equality
+-- on field, so it needs the ordering the index above gives it.
+CREATE INDEX announcement_edges_target_field_idx
+  ON announcement_edges(target_digest, field, source_id, record_digest, ordinal);
 `;
 
 interface MetadataRow {

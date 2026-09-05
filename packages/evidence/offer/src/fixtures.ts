@@ -30,6 +30,20 @@ export const INVALID_OFFERS: readonly string[] = [
   "spoofable-rail-destination",
 ];
 
+/**
+ * Offer documents the schema accepts and the canonicalizer refuses; each name is the
+ * fixture's `unsealable-<name>.json`. A separate group from `INVALID_OFFERS` because it
+ * proves a separate thing: `INVALID_OFFERS` is refused by the schema, these get past it and
+ * are refused at the sealing boundary. They cannot be merged — zod accepts a non-integral
+ * number and a lone surrogate under a namespaced key by design, so a case from this list
+ * would fail the refused corpus's schema assertion.
+ */
+export const UNSEALABLE_OFFERS: readonly string[] = [
+  "non-finite-extension-number",
+  "non-integral-extension-number",
+  "unpaired-surrogate-extension-string",
+];
+
 const FIXTURES_ROOT = new URL("../fixtures/", import.meta.url);
 
 /**
@@ -76,15 +90,28 @@ export async function loadInvalidDocument(name: string): Promise<unknown> {
   return json(`offer/invalid-${name}.json`);
 }
 
+export async function loadUnsealableDocument(name: string): Promise<unknown> {
+  return json(`offer/unsealable-${name}.json`);
+}
+
 /**
  * The refused cases actually present on disk. `INVALID_OFFERS` is what the conformance kit
  * runs; this is what the generator wrote. A test pins them equal, so a case added to the
  * generator and forgotten here cannot sit in the corpus untested.
  */
 export async function listInvalidFixtureNames(): Promise<readonly string[]> {
+  return listFixtureNames("invalid-");
+}
+
+/** The unsealable cases actually present on disk, pinned the same way. */
+export async function listUnsealableFixtureNames(): Promise<readonly string[]> {
+  return listFixtureNames("unsealable-");
+}
+
+async function listFixtureNames(prefix: string): Promise<readonly string[]> {
   const entries = await readdir(offerFixtureUrl("offer"));
   return entries
-    .filter((entry) => entry.startsWith("invalid-") && entry.endsWith(".json"))
-    .map((entry) => entry.slice("invalid-".length, -".json".length))
+    .filter((entry) => entry.startsWith(prefix) && entry.endsWith(".json"))
+    .map((entry) => entry.slice(prefix.length, -".json".length))
     .sort();
 }

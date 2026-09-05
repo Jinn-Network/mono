@@ -310,7 +310,14 @@ export function createInMemoryMarketplaceObserveStore(
         resolveAttempt(ref);
         return { classification: "matching", retained: true };
       } catch {
-        return { classification: "absent", retained: false, detail: `no durable record for ref "${ref}"` };
+        // A posting crash can leave the reservation pending, before an attempt is indexed.
+        const retained = [...pendingScopes.values(), ...scopes.values()]
+          .some((scope) => scope.submissionUri === ref);
+        return {
+          classification: "absent",
+          retained,
+          detail: retained ? `no attempt for retained ref "${ref}"` : `no durable record for ref "${ref}"`,
+        };
       }
     },
 

@@ -57,6 +57,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import { isEvaluationOperationalError } from "@jinn-network/task-execution-evaluation-harness";
 import { refuse } from "../errors.js";
+import { reconcileReplayedSubmission } from "./replayed-submission-recovery.js";
 import {
   EVALUATION_HARNESS_PIN,
   EVALUATOR_REQUIREMENT_KEY,
@@ -596,10 +597,11 @@ async function dispatchEvaluation(
     // evalIndex and loses the verdict for good. Exact resubmission is idempotent, never the
     // backend's recovery operation: `recover` is. It settles the attempt (durable delivery
     // checkpoint -> delivered; orphaned/absent -> an infrastructure terminal the retry ladder can
-    // classify) BEFORE `observe` reads it. Mirrors the solve leg's reconciliation in
-    // `../operations/run-launch.ts`, including its ref discipline — the recovery ref is read out of
-    // the replayed bytes, never recomputed from the idempotency key, so a drift between the two
-    // refuses here rather than reconciling nothing and silently degrading to the loss above.
+    // classify) BEFORE `observe` reads it. Shares one preamble with the solve leg's reconciliation
+    // (`./replayed-submission-recovery.ts`, called from `../operations/run-launch.ts`), so the ref
+    // discipline cannot drift between them — the recovery ref is read out of the replayed bytes,
+    // never recomputed from the idempotency key, so a drift refuses here rather than reconciling
+    // nothing and silently degrading to the loss above.
     //
     // The seam is HERE, not beside that solve loop in `runResume`: `recover` can re-enter
     // `completeAttempt` -> the evaluation provisioner's `harvest()` (it does so for every
@@ -632,38 +634,18 @@ async function dispatchEvaluation(
     // in that residual: the recovered harvest binds its materials lazily and re-seals the raw
     // statement it stashed under the attempt's meta/, so the verdict survives — see
     // `./run-resume-evaluation-harvest.integration.test.ts`.
-    const replayedSubmission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
-      replayed,
-    )) as { readonly submission?: unknown };
-    if (
-      typeof replayedSubmission.submission !== "string"
-      || !replayedSubmission.submission.startsWith("urn:uuid:")
-    ) {
-      refuse(
-        "record-integrity",
-        `runs.${deps.draftId}.${cellKey}.${dispatch}`,
-        `replayed evaluation Submission carries no valid Submission URI (e${evalIndex}, `
-          + `attempt ${evaluationAttempt})`,
-      );
-    }
-    const reconciliation = await deps.backend.recover(replayedSubmission.submission as SubmissionUri);
-    if (reconciliation.classification === "contradictory") {
-      refuse(
-        "record-integrity",
-        `runs.${deps.draftId}.${cellKey}.${dispatch}`,
-        `backend recovery contradicted the accepted evaluation Submission (e${evalIndex}, `
-          + `attempt ${evaluationAttempt})${
-            reconciliation.detail === undefined ? "" : `: ${reconciliation.detail}`
-          }`,
-      );
-    }
+    const { submissionUri: replayedUri, reconciliation } = await reconcileReplayedSubmission({
+      backend: deps.backend,
+      submissionBytes: replayed,
+      refusalPath: `runs.${deps.draftId}.${cellKey}.${dispatch}`,
+      invalidUriMessage: `replayed evaluation Submission carries no valid Submission URI (e${evalIndex}, `
+        + `attempt ${evaluationAttempt})`,
+      contradictionMessage: `backend recovery contradicted the accepted evaluation Submission (e${evalIndex}, `
+        + `attempt ${evaluationAttempt})`,
+    });
     if (
       reconciliation.classification === "absent"
-      && !(await submissionKeyStillHeld(
-        deps.backend,
-        replayedSubmission.submission as SubmissionUri,
-        reconciliation,
-      ))
+      && !(await submissionKeyStillHeld(deps.backend, replayedUri, reconciliation))
     ) {
       // The backend retains no record of this Submission, so it never accepted these bytes: the
       // capture below is written before `submit`, so a kill in that gap leaves a capture the

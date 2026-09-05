@@ -115,6 +115,12 @@ export interface RunStatusResult {
     readonly class: RunBindingClass;
     readonly beacon: VerifiedRunBinding["beacon"];
     readonly postSeal: VerifiedRunBinding["postSeal"];
+    /**
+     * Whether the seal named this round or the operator picked it (issue #3322). Carried beside
+     * `postSeal` because it is the field that decides which claim the report face may make, and a
+     * machine consumer that had only `statement` could recover it only by matching English.
+     */
+    readonly roundBasis: VerifiedRunBinding["roundBasis"];
     readonly poolDigest: string;
     readonly statement: string;
   };
@@ -320,10 +326,18 @@ export function runStatus(
         ...(runState.closeAt !== undefined ? { closeAt: runState.closeAt } : {}),
         ...(binding === undefined ? {} : {
           binding: {
+            // binding-carriage: `readRunBindingCarriage` above, which resolves the record out of
+            // the sealed store and refuses one whose `sealDigest`, `sealedAt` or `declaredSource`
+            // is not this run's own. Stated again here rather than shared with the `statement`
+            // marker below: the class label is its own emission of the face (#3953).
             class: runBindingClass(binding),
             beacon: binding.beacon,
             postSeal: binding.postSeal,
+            roundBasis: binding.roundBasis,
             poolDigest: binding.poolDigest,
+            // binding-carriage: `readRunBindingCarriage` above, which resolves the record out of
+            // the sealed store and refuses one whose `sealDigest`, `sealedAt` or `declaredSource`
+            // is not this run's own.
             statement: runBindingSentence(binding),
           },
         }),

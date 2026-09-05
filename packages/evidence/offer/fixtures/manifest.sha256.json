@@ -92,6 +92,18 @@
     {
       "id": "offer/superseding.sha256",
       "sha256": "e94f15765c58922a31c1aa343c67753ac05ca34782d7a21eb2e112e9721ec34d"
+    },
+    {
+      "id": "offer/unsealable-non-finite-extension-number.json",
+      "sha256": "04680abc5563f91b4f9b2611a9674d5c63878dbd01804734026b254890339fd1"
+    },
+    {
+      "id": "offer/unsealable-non-integral-extension-number.json",
+      "sha256": "349644755c7bc73f826273970901cfb53361fc032b20e4a887f3f554775092ac"
+    },
+    {
+      "id": "offer/unsealable-unpaired-surrogate-extension-string.json",
+      "sha256": "59a3b51bcc6f2848fade068eac4d05db1aa714110c8b251e2dc25b4a6f3d841a"
     }
   ],
   "errata": []

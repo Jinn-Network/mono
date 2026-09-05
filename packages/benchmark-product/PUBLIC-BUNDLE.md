@@ -132,8 +132,9 @@ npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
 
 `@0.1.0` is the exact producer-side release inside that line. A v4 whose
-screening was prompted pins `@0.2.1` instead, with `@0.2` compatible and `@0.2.0`
-on bundles materialized before `0.2.1` existed:
+screening was prompted pins `@0.2.1` instead, with `@0.2` compatible only for a
+bundle pinning `@0.2.0` — the line a prompted v4 materialized before `0.2.1`
+existed carries — and `@0.1` refusing outright:
 
 ```bash
 npx @colophon-claims/verify@0.2.1 <bundle-dir>
@@ -144,7 +145,11 @@ fourth axis, and only anchoring, qualification, and disclosure select the format
 — so take the line from the claim package's own `verification.command`, or read
 `method.parameters.promptedScreeningProfile`, which is
 `"prompted-codex-screening/v1"` on a prompted bundle and absent otherwise. The
-publication caveat stated for v7 below applies to a prompted v4's `@0.2.1` too.
+publication caveat stated for v7 below applies to a prompted v4's `@0.2.1` too,
+but the refusal a prompted v4 earns is not v7's: v7 is refused on the format,
+before the claim is read, while a prompted v4 is a format `0.1.0` and `0.2.0`
+both support and is refused on the claim inside it. That case is described in
+[A listed format is not on its own a verdict either](#reading-a-bundle-with-a-reader-that-is-too-old).
 
 V4 carries no anchors, so the anchor trust-material flags below do not apply to
 it. It returns the same **six checks** as v2 on both lines: the qualification
@@ -317,7 +322,11 @@ colophon bundle verify --bundle <bundle-dir> --json
 ```
 
 which wraps the same reader implementation, or with a reader built from the
-`0.2.1` source. The product verb takes no trust-material flags and passes none,
+`0.2.1` source. The product route is not the easier of the two:
+`@colophon-claims/cli` and `@colophon-claims/core` are implemented but
+unpublished as well, so it needs the same mono checkout the source build does. A
+reader who cannot build from the repository has no route to a v7 bundle until
+the `0.2.1` cut. The product verb takes no trust-material flags and passes none,
 so under it a well-formed anchor reports `present` and never `verified`; only
 the `npx` reader can carry an anchor further, and only once the release exists.
 
@@ -488,7 +497,8 @@ v6. The publication caveat stated for v7 applies here unchanged: `0.2.1` is not
 published yet, `@0.2` resolves to `0.2.0`, and `0.2.0` refuses a v8 bundle with
 the same version-mismatch refusal it gives a v7 one. Until the release is cut,
 read a v8 bundle with `colophon bundle verify --bundle <bundle-dir> --json` or
-with a reader built from the `0.2.1` source.
+with a reader built from the `0.2.1` source — and, as for v7, the product CLI is
+itself unpublished, so both routes need a mono checkout.
 
 ## Portable verification
 
@@ -529,12 +539,37 @@ rather than from the format.
 Every row runs as `npx @colophon-claims/verify<line> <bundle-dir>`, with the anchor flags appended
 where the row lists them.
 
+The qualification axis, unlike prompted screening, is not left to the format string's word. Across
+the legacy lineage and v8 — every row above but `.../5`, whose evidence-native closure is read by a
+different path — a reader binds that axis to the sealed Report: the Report's method is
+`binary-instrument@1` exactly when the format literal is a qualifying one (`.../4`, `.../7`,
+`.../8`), and any disagreement refuses under `record-integrity` at path `bundle.json`. The binding
+runs in both directions, so it closes the relabeling of a qualifying bundle down to its
+non-qualifying sibling — `.../7` presented as `.../6`, `.../4` as `.../2`, which otherwise passes
+every admission-bearing check, because dropping `qualification.json` and the admission-only evidence
+records leaves `claim-package.json` byte-unchanged and `claim-consistency` still passing — and the
+inverse smuggle of a non-binary Report onto a qualifying format. What it establishes is agreement,
+not truth: it says the format literal describes the Report the bundle actually seals, never that the
+Report's own method claim is correct. That remains what the Report's signature and the
+`report-verification` check are for.
+
+**This binding is a `0.2.1` guarantee**, and `0.2.1` is not published — see the note below. An
+earlier reader does not make the relabeled bundle verify: `0.1.0` and `0.2.0` still stop the `.../7`
+and `.../4` downgrades, because their presentation projection dispatches on the sealed Report's
+method too and finds a binary Report where the comparison profile was expected. But they stop it as
+an untyped crash from the last step of the run rather than as this named refusal, so do not read a
+missing `record-integrity`-at-`bundle.json` signature on an older line as the check not having
+fired.
+
 **Publication pending is not a formality.** The `0.2.1` reader that public-bundle/7,
 public-bundle/8, and every prompted bundle pin is cut by a manual, demand-gated workflow that has
 not been fired, so no `0.2.1` exists on the registry today. `@0.2.1` does not resolve, and `@0.2`
 resolves to `0.2.0`, which supports public-bundle/2, /4, /5, and /6 and refuses /7 and /8. Until the
 release is cut, read anything that pins `@0.2.1` with `colophon bundle verify --bundle <bundle-dir>
---json`, which wraps the same reader, or with a reader built from the `0.2.1` source.
+--json`, which wraps the same reader, or with a reader built from the `0.2.1` source. Both routes
+require a mono checkout: `@colophon-claims/cli` and `@colophon-claims/core` are implemented but
+unpublished as well, so the product verb is not an easier path than the source build. A reader who
+cannot build from the repository has no route to a `@0.2.1`-pinned bundle today.
 
 A prompted /4 bundle fails differently from a /7 or /8 one under `@0.2`, and the distinction
 matters when you read the refusal. `0.2.0` supports the format and carries the prompted-screening
@@ -851,6 +886,10 @@ Every member is mode `100644`. An executable bit, or a member replaced by a
 symlink, changes what git records and therefore the pinned commit even though the
 bytes read back identical — so `freeze-repo verify` reports both as drift, and it
 treats a nested `.git` directory as ordinary content, skipping only the root one.
+The symlink half holds everywhere. The executable-bit half holds wherever the
+filesystem carries the bit, which the check establishes by probe rather than
+assumption; where it does not, or where the probe cannot be run, the mode
+dimension is dropped and `executableBitChecked` says so.
 
 The standalone verifier package checks a published tree with no product install:
 `colophon-verify <bundle> --freeze-repo <dir>`, exit `1` on drift.

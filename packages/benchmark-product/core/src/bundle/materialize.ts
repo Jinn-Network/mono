@@ -569,6 +569,12 @@ function recordClosure(input: MaterializeBundleInput): {
       // whose ledger happened to be unsorted refused at the schema instead of publishing. No
       // previously producible bundle moves: an unsorted projection never got past this parse, so
       // the only lists this sort can reorder are ones that could not be published at all.
+      //
+      // MIRRORED by `verify/src/verify.ts`'s `projectAdmissionExclusions`, which re-derives these
+      // exact three fields with this exact sort from its own admission replay and refuses a bundle
+      // whose carried list differs (issue #3246). The two sides are duplicated rather than shared
+      // because the verifier is a standalone published package that re-states `core` instead of
+      // importing it; change one and the other refuses every bundle, so change both.
       exclusions: admission.excluded
         .map((entry) => ({
           itemSha256: entry.itemSha256,

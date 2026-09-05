@@ -926,6 +926,9 @@ The exact 75-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/manifest.sha256.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/broken-linkage-previous-mismatch/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/competing-head-rotated-out-key/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/consumer-archive-root-escaping-serving-root/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/consumer-archive-root-inside-serving-root/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/consumer-archive-root-outside-serving-root/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/consumer-cold-start-mirror-disagreement/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/consumer-head-vs-delivered-divergence/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/consumer-hostile-locator-oversize/vector.json | — | — | — |
@@ -1176,6 +1179,9 @@ The exact 75-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/superseding.document.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/superseding.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/superseding.sha256 | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/unsealable-non-finite-extension-number.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/unsealable-non-integral-extension-number.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/unsealable-unpaired-surrogate-extension-string.json | — | — | — |
 | conformance | @jinn-network/evidence-offer | packages/evidence/offer/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
 | fixtures | @jinn-network/evidence-protocol | packages/evidence/protocol/fixtures/autopilot-issue-1697/artifacts/executor.observed.json | — | — | — |
 | fixtures | @jinn-network/evidence-protocol | packages/evidence/protocol/fixtures/autopilot-issue-1697/artifacts/repository-input.observed.json | — | — | — |

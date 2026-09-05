@@ -322,6 +322,41 @@ describe("createProjectorObservePort (design §7, Task 16 -- retires the in-memo
       }, claim.ownerToken);
     }
 
+    test("retains a pending scope across restart before any chain engagement", async () => {
+      const makePort = () => createProjectorObservePort({
+        chain: CHAIN, state, logSource: fakeLogSource(), observations: async () => [],
+      });
+      const submissionBytes = new TextEncoder().encode("pending-submission");
+      const scope = {
+        requester: "urn:uuid:requester",
+        idempotencyKey: "pending-key",
+        submissionUri: SUBMISSION_A,
+        digest: documentDigest(submissionBytes),
+        submissionBytes,
+        taskDigest: TASK_DIGEST,
+        creatorSafe: CHAIN.taskCoordinator,
+        venueNamespace: "test:venue",
+        commandDigest: TASK_DIGEST,
+        postingIntentKey: "pending-intent",
+      };
+      await expect(makePort().claimSubmissionScope(scope)).resolves.toMatchObject({ kind: "owner" });
+      state.close();
+      state = openVenueState(join(root, "venue.db"));
+      const reopened = makePort();
+      // Changed bytes conflict, while byte-exact recovery can still continue the pending post.
+      await expect(reopened.claimSubmissionScope({
+        ...scope,
+        submissionBytes: new TextEncoder().encode("changed-submission"),
+      })).resolves.toEqual({ kind: "conflict" });
+      await expect(reopened.claimSubmissionScope(scope)).resolves.toEqual({ kind: "pending" });
+      await expect(reopened.recover(SUBMISSION_A)).resolves.toMatchObject({
+        classification: "absent", retained: true,
+      });
+      await expect(reopened.recover(SUBMISSION_B)).resolves.toMatchObject({
+        classification: "absent", retained: false,
+      });
+    });
+
     test("returns matching when the chain-derived fold agrees with the durable scope record", async () => {
       const engaged = engagedObservation({
         attempt: ATTEMPT_A, submission: SUBMISSION_A, sequence: "0000000000000001", derivation: derivation(),
@@ -352,6 +387,9 @@ describe("createProjectorObservePort (design §7, Task 16 -- retires the in-memo
       // The durable scope means the idempotency key is still HELD, which `absent` alone cannot
       // say and a caller must not re-seal under (#3634).
       expect(report.retained).toBe(true);
+      await expect(port.recover(ATTEMPT_B)).resolves.toMatchObject({
+        classification: "absent", retained: true,
+      });
     });
 
     test("returns contradictory when the chain shows an attempt bound to a different Submission", async () => {
@@ -370,6 +408,7 @@ describe("createProjectorObservePort (design §7, Task 16 -- retires the in-memo
       const report = await port.recover(SUBMISSION_A);
 
       expect(report.classification).toBe("contradictory");
+      expect(report.retained).toBe(true);
     });
   });
 

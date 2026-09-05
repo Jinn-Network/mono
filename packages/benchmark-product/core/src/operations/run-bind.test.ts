@@ -336,6 +336,27 @@ describe("runBind", () => {
       if (!after.ok) throw new Error("status failed");
       expect(after.result.bindableBeaconRounds).toBeUndefined();
     });
+
+    /**
+     * Issue #3428. `roundBasis` is the field that decides which claim the report face may make, so
+     * a machine consumer of `status` that had only `statement` could branch on it only by matching
+     * English. It is projected beside `postSeal`, on both of its values.
+     */
+    test.each([
+      ["drand/quicknet", "seal-derived"],
+      ["bitcoin/mainnet", "operator-chosen"],
+    ] as const)("status projects roundBasis alongside postSeal (%s)", async (source, expected) => {
+      const clock = makeClock();
+      await setUpLockedDraft(clock);
+      const round = source === "drand/quicknet" ? sealDerivedRound : 900_000;
+      expect(runBind(contextFor(clock), { draftId: "draft-1", beacon: { source, round, value: VALUE } }).ok).toBe(true);
+      const status = runStatus(contextFor(clock), { draftId: "draft-1" });
+      if (!status.ok) throw new Error("status failed");
+      expect(status.result.binding?.roundBasis).toBe(expected);
+      expect(status.result.binding?.postSeal).toBe(
+        source === "drand/quicknet" ? "proven-offline" : "attributive",
+      );
+    });
   });
 
   test("appends exactly one audit entry per call", async () => {

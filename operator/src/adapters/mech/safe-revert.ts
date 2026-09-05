@@ -28,6 +28,34 @@ export class SafeInnerRevertError extends Error {
   }
 }
 
+/**
+ * A Safe `execTransaction` that MINED with `status: 'reverted'` and whose inner call, on
+ * re-simulation, does not revert (issue #3733).
+ *
+ * Distinct from `SafeInnerRevertError`, which carries a recovered inner reason. Reaching here
+ * means there is nothing to recover: the inner call succeeds now, so the mined failure was a
+ * stale Safe nonce or a signature race. viem's `waitForTransactionReceipt` resolves rather than
+ * throws for a reverted transaction, so without an explicit check the broadcaster reported this
+ * as a successful broadcast with `logs: []`, and the failure resurfaced one layer up as a
+ * decoding miss.
+ *
+ * Retryable, not terminal: the broadcaster's retry closure re-reads the Safe nonce and re-signs
+ * on every attempt, so this self-heals the way venue-base's `createSafeBroadcaster` heals the
+ * same receipt path. Carry `SAFE_STALE_NONCE_ERROR_TOKEN` in the message — that is the retry
+ * policy's marker for it — and let the retry budget bound the loop.
+ */
+export class SafeExecutionRevertedError extends Error {
+  override readonly name = 'SafeExecutionRevertedError';
+  constructor(
+    message: string,
+    readonly txHash: Hex,
+    readonly safeAddress: Address,
+    readonly logicalTx: string,
+  ) {
+    super(message);
+  }
+}
+
 // Exported so the hermetic ABI/selector-conformance test (spec §5 — consumer-
 // contract pairing) can assert each hardcoded selector still matches the
 // keccak256 of its canonical error signature. A drifted entry silently

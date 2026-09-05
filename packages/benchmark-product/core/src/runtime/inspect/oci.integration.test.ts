@@ -404,6 +404,10 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     if (rejected.ok) throw new Error("unreachable");
     expect(rejected.error).toMatchObject({ code: "record-integrity" });
     expect(rejected.error.issues?.[0]?.path).toBe("matrix-rederivation");
+    // The sweeping `afterEach` below removes a leaked container and only warns, so without this
+    // assertion a leak from this test leaves no red anywhere -- and container leaks are what this
+    // suite exists to catch. Every other test in the file asserts the same thing.
+    await expectNoInspectContainers();
   }, 180_000);
 
   test("cancellation reaps the OCI worker without leaving a container", async () => {
