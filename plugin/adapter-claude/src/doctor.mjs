@@ -11,7 +11,7 @@
 
 import { readPin, resolveSessionRuntime } from "./runtime.mjs";
 import { modelIdentity } from "./identity.mjs";
-import { runtimeHome, stateDir } from "./paths.mjs";
+import { pluginDir, runtimeHome, stateDir } from "./paths.mjs";
 
 export function checks(env = process.env) {
   const results = [];
@@ -43,7 +43,7 @@ export function checks(env = process.env) {
           remedy:
             pin === undefined
               ? null
-              : `npm install --prefix "$(dirname "$0")/.." ${pin.package}@${pin.version}`,
+              : `npm install --prefix "${pluginDir()}" ${pin.package}@${pin.version}`,
         }
       : {
           name: "runtime-available",

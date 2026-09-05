@@ -80,6 +80,9 @@ export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   const entries = Object.keys(value)
     .sort()
+    // `JSON.stringify(undefined)` is the value `undefined`, which would interpolate as the
+    // bare word and make the line unparseable. `JSON.stringify` drops such a key; so does this.
+    .filter((key) => value[key] !== undefined)
     .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`);
   return `{${entries.join(",")}}`;
 }

@@ -7,9 +7,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-import { run } from "../src/hook.mjs";
+import { HOOK_PAYLOAD_MAX_BYTES, run } from "../src/hook.mjs";
 import { CONTROLLED_INPUT_SELECTION_RULE } from "../src/identity.mjs";
-import { readState, sessionStatePath } from "../src/state.mjs";
+import { readState, sessionStatePath, writeState } from "../src/state.mjs";
 import { fakeEnv, toolCalls } from "./fake.mjs";
 import { feedEvents, stdinOf, temp } from "./helpers.mjs";
 
@@ -263,6 +263,54 @@ test("an unreadable, shapeless, unnamed, or unknown hook payload does nothing", 
   await run([], { stdin: stdinOf({ hook_event_name: "SessionStart" }), env });
   await run([], { stdin: stdinOf({ hook_event_name: "SessionStart", session_id: "" }), env });
   assert.deepEqual(toolCalls(env), []);
+});
+
+test("a payload past the bound is dropped whole rather than buffered or truncated", async () => {
+  const env = fakeEnv();
+  await withFakeMode("ok", () => hook("SessionStart", env));
+  const { feedPath } = stateOf(env);
+  const before = feedEvents(feedPath).length;
+
+  // Valid JSON, so only the bound can reject it: a payload that merely fails to parse would
+  // pass this test with the bound deleted.
+  const { Readable } = await import("node:stream");
+  const huge = JSON.stringify(
+    payload("PostToolUse", {
+      tool_name: "Bash",
+      tool_input: {},
+      tool_response: { stdout: "x".repeat(HOOK_PAYLOAD_MAX_BYTES) },
+    }),
+  );
+  assert.ok(Buffer.byteLength(huge) > HOOK_PAYLOAD_MAX_BYTES);
+  await run([], { stdin: Readable.from([Buffer.from(huge)]), env });
+  assert.equal(feedEvents(feedPath).length, before);
+
+  // A payload comfortably inside the bound is still recorded, so the bound is a bound and not
+  // a refusal of large tool results in general.
+  await hook("PostToolUse", env, {
+    tool_name: "Bash",
+    tool_input: {},
+    tool_response: { stdout: "y".repeat(1024) },
+  });
+  assert.equal(feedEvents(feedPath).length, before + 1);
+});
+
+test("a stored feed path that is not absolute is refused at every later hook", async () => {
+  const env = fakeEnv();
+  await withFakeMode("ok", () => hook("SessionStart", env));
+  const statePath = sessionStatePath(SESSION, env);
+  const { feedPath } = stateOf(env);
+  const before = feedEvents(feedPath).length;
+  writeState(statePath, { ...stateOf(env), feedPath: "relative/feed.ndjson" });
+
+  await hook("UserPromptSubmit", env, { prompt: "x" });
+  await hook("PostToolUse", env, { tool_name: "Bash", tool_input: {}, tool_response: {} });
+  await withFakeMode("ok", () => hook("SessionEnd", env, { reason: "other" }));
+
+  assert.equal(feedEvents(feedPath).length, before);
+  assert.equal(existsSync("relative/feed.ndjson"), false);
+  // The seal is never asked for either: there is no session this process can vouch for.
+  assert.equal(toolCalls(env).some((call) => call.name === "capture_seal"), false);
 });
 
 test("the event name may come from argv when the payload omits it", async () => {

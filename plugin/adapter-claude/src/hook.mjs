@@ -56,10 +56,27 @@ function debug(env, message) {
   }
 }
 
+/**
+ * A hook payload carries the host's own tool arguments and results, so its size is the host's
+ * to choose, not this adapter's. It is bounded anyway: a hook is a short-lived process the
+ * session waits on, and buffering an unbounded payload is the one way this module could cost
+ * a session something. Past the bound the event is dropped whole rather than truncated —
+ * half a tool result binds to nothing a verifier can check.
+ */
+export const HOOK_PAYLOAD_MAX_BYTES = 16 * 1024 * 1024;
+
 async function readAll(stream) {
   const chunks = [];
-  for await (const chunk of stream) chunks.push(chunk);
-  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
+  let size = 0;
+  for await (const chunk of stream) {
+    const buffer = Buffer.from(chunk);
+    size += buffer.byteLength;
+    if (size > HOOK_PAYLOAD_MAX_BYTES) {
+      throw new Error(`the hook payload exceeds ${HOOK_PAYLOAD_MAX_BYTES} bytes`);
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 /** A live session-role runtime, or `undefined`. Never throws. */
@@ -80,6 +97,17 @@ async function openRuntime(env) {
 
 function persist(statePath, state, feed) {
   writeState(statePath, { ...state, lastNano: feed.lastNano.toString() });
+}
+
+/**
+ * The stored session, or `undefined`. The feed path is re-asserted here rather than only where
+ * `capture_open` minted it, so the boundary holds at every point a path reaches the filesystem
+ * instead of only at the one where it was first checked.
+ */
+function openStoredFeed(statePath) {
+  const state = readState(statePath);
+  if (typeof state?.feedPath !== "string" || !isAbsolute(state.feedPath)) return undefined;
+  return { state, feed: new SessionFeed(state.feedPath, state.lastNano) };
 }
 
 async function onSessionStart(payload, env) {
@@ -146,9 +174,9 @@ async function onSessionStart(payload, env) {
 
 function onUserPromptSubmit(payload, env) {
   const statePath = sessionStatePath(payload.session_id, env);
-  const state = readState(statePath);
-  if (state?.feedPath === undefined) return;
-  const feed = new SessionFeed(state.feedPath, state.lastNano);
+  const stored = openStoredFeed(statePath);
+  if (stored === undefined) return;
+  const { state, feed } = stored;
   const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
   let promptBound = state.promptBound === true;
   // The first prompt is the instruction that drove the session. Its bytes are already in the
@@ -168,9 +196,9 @@ function onUserPromptSubmit(payload, env) {
 
 function onPostToolUse(payload, env) {
   const statePath = sessionStatePath(payload.session_id, env);
-  const state = readState(statePath);
-  if (state?.feedPath === undefined) return;
-  const feed = new SessionFeed(state.feedPath, state.lastNano);
+  const stored = openStoredFeed(statePath);
+  if (stored === undefined) return;
+  const { state, feed } = stored;
   const response = payload.tool_response;
   const failed =
     response !== null && typeof response === "object" && !Array.isArray(response)
@@ -192,9 +220,9 @@ function onPostToolUse(payload, env) {
 
 async function onSessionEnd(payload, env) {
   const statePath = sessionStatePath(payload.session_id, env);
-  const state = readState(statePath);
-  if (state?.feedPath === undefined) return;
-  const feed = new SessionFeed(state.feedPath, state.lastNano);
+  const stored = openStoredFeed(statePath);
+  if (stored === undefined) return;
+  const { state, feed } = stored;
   feed.closeSession({
     outcome: OUTCOME_BY_REASON[String(payload.reason ?? "other")] ?? "completed",
     summary: "",

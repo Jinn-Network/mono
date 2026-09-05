@@ -15,6 +15,7 @@ import { readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { CONTROLLED_INPUT_MAX_BYTES, FEED_VERSION, canonicalJson } from "./feed.mjs";
+import { GIT_BUDGET_MS } from "./repo.mjs";
 
 /** Constant, never read from the environment: it is what the executor IRI is derived from. */
 export const HOST_NAME = "claude-code";
@@ -133,7 +134,7 @@ export function effectiveCaptureConfig({ model, host, runtimePin }) {
     host: { name: host.name, version: host.version },
     model,
     controlledInputBounds: { maxBytes: CONTROLLED_INPUT_MAX_BYTES },
-    gitObservationBudgetMs: 2_000,
+    gitObservationBudgetMs: GIT_BUDGET_MS,
   };
   if (runtimePin !== undefined) {
     document.runtime = { package: runtimePin.package, version: runtimePin.version };
@@ -152,6 +153,9 @@ export function readWorkflowInstruction(cwd) {
   if (typeof cwd !== "string" || cwd.trim() === "") return undefined;
   const path = join(cwd, WORKFLOW_INPUT_NAME);
   try {
+    // `statSync` follows a symlink, deliberately: a monorepo that symlinks its instruction
+    // file is a real shape, and the host itself already loads whatever this path resolves to.
+    // Binding it therefore adds no disclosure the session did not already have.
     const stats = statSync(path);
     if (!stats.isFile() || stats.size === 0 || stats.size > CONTROLLED_INPUT_MAX_BYTES) {
       return undefined;
