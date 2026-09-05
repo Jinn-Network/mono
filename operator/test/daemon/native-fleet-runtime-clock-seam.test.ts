@@ -79,8 +79,14 @@ function anchorOnlyPublicClient(anchorDigest: `sha256:${string}`) {
   } as unknown as Parameters<typeof buildFleetNativeRuntime>[0]['publicClient'];
 }
 
+/**
+ * Builds the two-operator fixture and returns it alongside the anchor digest the fixture actually
+ * asked to be anchored — captured from `submitAnchor` rather than recomputed here, so the stub
+ * below cannot drift out of agreement with the catalog it is meant to answer for.
+ */
 async function twoOperatorSetup(root: string) {
-  return buildTwoOperatorNativeSetup({
+  let anchorDigest: `sha256:${string}` | undefined;
+  const setup = await buildTwoOperatorNativeSetup({
     rootDir: root,
     password: PASSWORD,
     rpcUrl: 'http://127.0.0.1:0',
@@ -88,16 +94,21 @@ async function twoOperatorSetup(root: string) {
     ceremonyAccount: CEREMONY_ACCOUNT,
     // Supplying `submitAnchor` takes the fixture's REAL-anchor path, so the catalog carries a
     // locator the production anchor client resolves — against the stub above rather than a fork.
-    submitAnchor: async () => ({
-      transactionHash: ANCHOR_TX,
-      contractAddress: ANCHOR_CONTRACT,
-      inputByteOffset: 0,
-      anchorTime: ANCHOR_TIME,
-    }),
+    submitAnchor: async (digest) => {
+      anchorDigest = digest;
+      return {
+        transactionHash: ANCHOR_TX,
+        contractAddress: ANCHOR_CONTRACT,
+        inputByteOffset: 0,
+        anchorTime: ANCHOR_TIME,
+      };
+    },
     aPublicBaseUrl: 'http://127.0.0.1:7401/a',
     bPublicBaseUrl: 'http://127.0.0.1:7402/b',
     aSafeAddress: SETTLEMENT_SAFE,
   });
+  if (anchorDigest === undefined) throw new Error('fixture anchored nothing');
+  return { setup, anchorDigest };
 }
 
 describe('buildFleetNativeRuntime effective-time seam', () => {
@@ -109,18 +120,13 @@ describe('buildFleetNativeRuntime effective-time seam', () => {
 
   async function boot(now?: () => Date) {
     const root = await mkdtemp(join(tmpdir(), 'native-fleet-clock-'));
-    const setup = await twoOperatorSetup(root);
+    const { setup, anchorDigest } = await twoOperatorSetup(root);
     const store = new Store(join(root, 'jinn.db'));
     stores.push(store);
     return buildFleetNativeRuntime({
       config: setup.operatorA.config,
       store,
-      publicClient: anchorOnlyPublicClient(
-        // The digest the fixture anchored; recomputed the same way the fixture does.
-        (await import('@jinn-network/trust-core')).recordDigest(
-          new TextEncoder().encode('native-fleet-e2e-shared-anchor'),
-        ),
-      ),
+      publicClient: anchorOnlyPublicClient(anchorDigest),
       safeAddress: SETTLEMENT_SAFE,
       stateRoot: join(root, 'state'),
       password: PASSWORD,
@@ -130,7 +136,7 @@ describe('buildFleetNativeRuntime effective-time seam', () => {
   }
 
   it('boots the full runtime at an injected effective time', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(WALL_CLOCK);
     const runtime = await boot(() => new Date(ANCHOR_TIME));
 
@@ -145,14 +151,17 @@ describe('buildFleetNativeRuntime effective-time seam', () => {
   });
 
   it('refuses when the injected clock falls outside the binding window', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date'] });
     // Wall-clock is INSIDE the window, so only the injected clock can produce this refusal.
     vi.setSystemTime(WALL_CLOCK);
-    await expect(boot(() => BEFORE_VALID_FROM)).rejects.toThrow();
+    // The role-binding effective-time check itself, by name. (Which role is named first is not
+    // fixed — the solver and requester stores open concurrently — so only the check is matched.)
+    await expect(boot(() => BEFORE_VALID_FROM))
+      .rejects.toThrow(/has no effective binding at boot/u);
   });
 
   it('defaults to wall-clock when no clock is injected', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(WALL_CLOCK);
     const runtime = await boot();
     expect(runtime.identities.get('solver-delivery').keyId).toMatch(/^did:key:/u);
@@ -160,6 +169,6 @@ describe('buildFleetNativeRuntime effective-time seam', () => {
     // And the default really is wall-clock, not a hidden constant: move the host clock before
     // `validFrom` and the identical call refuses.
     vi.setSystemTime(BEFORE_VALID_FROM);
-    await expect(boot()).rejects.toThrow();
+    await expect(boot()).rejects.toThrow(/has no effective binding at boot/u);
   });
 });
