@@ -2,10 +2,10 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalPolicy": 2,
-    "implementationsV1": 61,
-    "inventory": 98,
+    "implementationsV1": 62,
+    "inventory": 99,
     "otherPackagesRootEntries": 15,
-    "packagesRootEntries": 92,
+    "packagesRootEntries": 93,
     "sealedPlatformV1": 14
   },
   "graph": {
@@ -651,6 +651,11 @@
         "to": "@jinn-network/benchmarking-records"
       },
       {
+        "from": "@jinn-network/indexer",
+        "kind": "runtime",
+        "to": "@jinn-network/contract-abis"
+      },
+      {
         "from": "@jinn-network/indexer-enrichment",
         "kind": "runtime",
         "to": "@jinn-network/indexer"
@@ -664,6 +669,11 @@
         "from": "@jinn-network/jinn-layer",
         "kind": "runtime",
         "to": "@jinn-network/plugin"
+      },
+      {
+        "from": "@jinn-network/marketplace-binding",
+        "kind": "runtime",
+        "to": "@jinn-network/contract-abis"
       },
       {
         "from": "@jinn-network/marketplace-binding",
@@ -789,6 +799,11 @@
         "from": "@jinn-network/operator",
         "kind": "runtime",
         "to": "@jinn-network/attestation-issuer"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/contract-abis"
       },
       {
         "from": "@jinn-network/operator",
@@ -1595,6 +1610,7 @@
       "@jinn-network/chain-only-gate-harness",
       "@jinn-network/chain-scenarios",
       "@jinn-network/chain-state-extraction",
+      "@jinn-network/contract-abis",
       "@jinn-network/core",
       "@jinn-network/environment-record",
       "@jinn-network/environment-verification",
@@ -1691,6 +1707,7 @@
           ],
           "@jinn-network/benchmarking-marketplace": [
             "@jinn-network/benchmarking-run",
+            "@jinn-network/contract-abis",
             "@jinn-network/marketplace-binding",
             "@jinn-network/marketplace-projector",
             "@jinn-network/record-discovery-serve",
@@ -1713,6 +1730,7 @@
           "@jinn-network/chain-state-extraction": [
             "@jinn-network/chain-environment-verification"
           ],
+          "@jinn-network/contract-abis": [],
           "@jinn-network/environment-verification": [],
           "@jinn-network/evidence-catalog-sqlite": [
             "@jinn-network/evidence-discovery",
@@ -1764,16 +1782,19 @@
           ],
           "@jinn-network/information-world": [],
           "@jinn-network/marketplace-binding": [
+            "@jinn-network/contract-abis",
             "@jinn-network/task-execution-backend",
             "@jinn-network/trust-resolve"
           ],
           "@jinn-network/marketplace-projector": [
+            "@jinn-network/contract-abis",
             "@jinn-network/marketplace-binding",
             "@jinn-network/record-discovery-serve",
             "@jinn-network/task-execution-backend",
             "@jinn-network/trust-resolve"
           ],
           "@jinn-network/marketplace-testing": [
+            "@jinn-network/contract-abis",
             "@jinn-network/evidence-discovery",
             "@jinn-network/evidence-repository",
             "@jinn-network/execution-evidence-builder",
@@ -1792,6 +1813,7 @@
             "@jinn-network/trust-testing"
           ],
           "@jinn-network/marketplace-venue-base": [
+            "@jinn-network/contract-abis",
             "@jinn-network/marketplace-binding",
             "@jinn-network/marketplace-projector",
             "@jinn-network/record-discovery-serve",
@@ -1888,6 +1910,7 @@
           ],
           "@jinn-network/task-execution-workspace": [],
           "@jinn-network/task-posting": [
+            "@jinn-network/contract-abis",
             "@jinn-network/marketplace-binding",
             "@jinn-network/task-execution-backend",
             "@jinn-network/trust-resolve"
@@ -1904,6 +1927,7 @@
             "@jinn-network/benchmarking-interop",
             "@jinn-network/benchmarking-run",
             "@jinn-network/chain-environment-verification",
+            "@jinn-network/contract-abis",
             "@jinn-network/environment-verification",
             "@jinn-network/evidence-derivation",
             "@jinn-network/evidence-repository",
@@ -2196,6 +2220,7 @@
           "@hono/node-server",
           "@huggingface/transformers",
           "@jinn-network/attestation-issuer",
+          "@jinn-network/contract-abis",
           "@jinn-network/core",
           "@jinn-network/environment-record",
           "@jinn-network/evidence-catalog-sqlite",
@@ -2994,6 +3019,40 @@
       "stability": "candidate",
       "supersedes": [],
       "tier": null,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/contracts-ci.yml"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": []
+      },
+      "domain": "contracts",
+      "name": "@jinn-network/contract-abis",
+      "ownerGroup": "architecture-control",
+      "path": "packages/contract-abis",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "implementations-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "contracts-ci"
+      ],
+      "role": "authoritative generated contract ABIs and consumer slices",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 2,
       "transition": null,
       "version": "0.1.0"
     },
@@ -4643,6 +4702,7 @@
         "runtime": [
           "@hono/node-server",
           "@jinn-network/benchmarking-records",
+          "@jinn-network/contract-abis",
           "drizzle-orm",
           "hono",
           "ponder",
@@ -4851,6 +4911,7 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/contract-abis",
           "@jinn-network/task-execution-backend",
           "@jinn-network/task-execution-profiles",
           "@jinn-network/task-execution-protocol",
@@ -15906,6 +15967,15 @@
       {
         "conformance": [],
         "fixtures": [],
+        "name": "@jinn-network/contract-abis",
+        "path": "packages/contract-abis",
+        "profiles": [],
+        "releaseGroup": "implementations-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [],
         "name": "@jinn-network/core",
         "path": "packages/core",
         "profiles": [],
@@ -17299,6 +17369,7 @@
             "@jinn-network/chain-environment-verification",
             "@jinn-network/chain-scenarios",
             "@jinn-network/chain-state-extraction",
+            "@jinn-network/contract-abis",
             "@jinn-network/environment-verification",
             "@jinn-network/evidence-catalog-sqlite",
             "@jinn-network/evidence-contribution",
@@ -17404,6 +17475,7 @@
         "@jinn-network/chain-environment-verification",
         "@jinn-network/chain-scenarios",
         "@jinn-network/chain-state-extraction",
+        "@jinn-network/contract-abis",
         "@jinn-network/environment-record",
         "@jinn-network/environment-verification",
         "@jinn-network/evidence-catalog-sqlite",
@@ -17647,6 +17719,17 @@
           "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/chain-state-extraction",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
+          "package": "@jinn-network/contract-abis",
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
@@ -18396,7 +18479,7 @@
         "sealed-platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 61,
+      "expectedPackageCount": 62,
       "packages": [
         "@jinn-network/attestation-issuer",
         "@jinn-network/benchmarking-aggregate",
@@ -18411,6 +18494,7 @@
         "@jinn-network/chain-environment-verification",
         "@jinn-network/chain-scenarios",
         "@jinn-network/chain-state-extraction",
+        "@jinn-network/contract-abis",
         "@jinn-network/environment-verification",
         "@jinn-network/evidence-catalog-sqlite",
         "@jinn-network/evidence-contribution",
@@ -18465,6 +18549,7 @@
       ],
       "requiredGateIds": [
         "benchmarking-ci",
+        "contracts-ci",
         "environments-ci",
         "evidence-ci",
         "marketplace-ci",

@@ -54,6 +54,7 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
+    "@jinn-network/contract-abis": "portal:../../contract-abis",
     "@jinn-network/marketplace-binding": "portal:../binding",
     "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
     "@jinn-network/record-discovery-serve": "portal:../../discovery/serve",

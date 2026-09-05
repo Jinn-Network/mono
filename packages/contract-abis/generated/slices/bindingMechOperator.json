@@ -1,0 +1,17 @@
+{
+  "export": "MECH_OPERATOR_ABI",
+  "items": [
+    {
+      "type": "function",
+      "name": "getOperator",
+      "stateMutability": "view",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "address",
+          "name": ""
+        }
+      ]
+    }
+  ]
+}

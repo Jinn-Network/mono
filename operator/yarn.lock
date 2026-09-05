@@ -825,6 +825,12 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/contract-abis@portal:../packages/contract-abis::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/contract-abis@portal:../packages/contract-abis::locator=%40jinn-network%2Foperator%40workspace%3A."
+  languageName: node
+  linkType: soft
+
 "@jinn-network/core@portal:../packages/core::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/core@portal:../packages/core::locator=%40jinn-network%2Foperator%40workspace%3A."
@@ -976,6 +982,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/marketplace-binding@portal:../packages/marketplace/binding::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
+    "@jinn-network/contract-abis": "npm:0.1.0"
     "@jinn-network/task-execution-backend": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
@@ -1035,6 +1042,7 @@ __metadata:
     "@hono/node-server": "npm:^2.0.5"
     "@huggingface/transformers": "npm:^4.2.0"
     "@jinn-network/attestation-issuer": "npm:0.1.0"
+    "@jinn-network/contract-abis": "npm:0.1.0"
     "@jinn-network/core": "npm:0.1.2"
     "@jinn-network/environment-record": "npm:0.1.0"
     "@jinn-network/evidence-catalog-sqlite": "npm:0.1.0"

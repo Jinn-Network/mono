@@ -1,0 +1,148 @@
+export const MECH_MARKETPLACE_ABI = [
+  {
+    "type": "function",
+    "name": "request",
+    "stateMutability": "payable",
+    "inputs": [
+      {
+        "type": "bytes",
+        "name": "requestData"
+      },
+      {
+        "type": "uint256",
+        "name": "maxDeliveryRate"
+      },
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      },
+      {
+        "type": "address",
+        "name": "priorityMech"
+      },
+      {
+        "type": "uint256",
+        "name": "responseTimeout"
+      },
+      {
+        "type": "bytes",
+        "name": "paymentData"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapRequestCounts",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "minResponseTimeout",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "maxResponseTimeout",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "mapRequestIdInfos",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "address",
+        "name": "priorityMech"
+      },
+      {
+        "type": "address",
+        "name": "deliveryMech"
+      },
+      {
+        "type": "address",
+        "name": "requester"
+      },
+      {
+        "type": "uint256",
+        "name": "responseTimeout"
+      },
+      {
+        "type": "uint256",
+        "name": "deliveryRate"
+      },
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "MarketplaceRequest",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "priorityMech",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "requester",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "numRequests",
+        "indexed": false
+      },
+      {
+        "type": "bytes32[]",
+        "name": "requestIds",
+        "indexed": false
+      },
+      {
+        "type": "bytes[]",
+        "name": "requestDatas",
+        "indexed": false
+      }
+    ]
+  }
+] as const;

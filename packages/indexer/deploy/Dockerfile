@@ -2,13 +2,14 @@
 #
 # Build context is the monorepo `packages/` directory (NOT packages/indexer/),
 # because the indexer depends on @jinn-network/benchmarking-records via
-# `portal:../benchmarking/records`, which resolves to a sibling directory
+# `portal:../benchmarking/records` and on @jinn-network/contract-abis via
+# `portal:../contract-abis`, both of which resolve to sibling directories
 # outside packages/indexer/ (records itself depends on
 # @jinn-network/task-execution-protocol via `portal:../../task-execution/protocol`
 # and @jinn-network/trust-core via `portal:../../trust/core`).
-# Both packages' exports maps point at compiled dist/*.js, and dist/ is
-# gitignored, so both are built inside this image, in dependency order,
-# before the indexer install resolves the portal symlink.
+# Every one of those packages' exports maps points at compiled dist/*.js, and
+# dist/ is gitignored, so they are all built inside this image, in dependency
+# order, before the indexer install resolves the portal symlinks.
 #
 # Build (from packages/):
 #   docker build -t jinn-indexer:latest -f indexer/deploy/Dockerfile .
@@ -65,6 +66,20 @@ COPY benchmarking/records/scripts ./scripts
 COPY benchmarking/records/src ./src
 RUN yarn build
 
+# Build @jinn-network/contract-abis. The indexer's `portal:../contract-abis`
+# dependency is a symlink to /app/contract-abis, so its dist/ must exist before
+# the indexer install (ponder.config.ts → abis/JinnRouter.ts imports
+# @jinn-network/contract-abis/indexer during `yarn codegen`) and must survive
+# into the runtime stage. `generated/` is committed but is served through the
+# `./generated/full/*` export, so it is copied alongside src/.
+WORKDIR /app/contract-abis
+COPY contract-abis/package.json contract-abis/yarn.lock contract-abis/.yarnrc.yml ./
+RUN corepack enable && yarn install --immutable
+COPY contract-abis/tsconfig.json ./
+COPY contract-abis/generated ./generated
+COPY contract-abis/src ./src
+RUN yarn build
+
 # ── Indexer ──
 WORKDIR /app/indexer
 
@@ -99,13 +114,14 @@ ENV YARN_NODE_LINKER=node-modules
 WORKDIR /app/indexer
 
 # Copy the built cross-tree portal dependencies so the indexer's
-# `portal:../benchmarking/records` symlink, and records' own
-# `portal:../../task-execution/protocol` symlink, resolve at runtime
-# (node_modules/@jinn-network/benchmarking-records → ../benchmarking/records
-# → /app/benchmarking/records/dist).
+# `portal:../benchmarking/records` and `portal:../contract-abis` symlinks, and
+# records' own `portal:../../task-execution/protocol` symlink, resolve at
+# runtime (node_modules/@jinn-network/benchmarking-records →
+# ../benchmarking/records → /app/benchmarking/records/dist).
 COPY --from=build /app/task-execution/protocol /app/task-execution/protocol
 COPY --from=build /app/trust/core /app/trust/core
 COPY --from=build /app/benchmarking/records /app/benchmarking/records
+COPY --from=build /app/contract-abis /app/contract-abis
 
 # Copy built tree from build stage.
 COPY --from=build /app/indexer/node_modules ./node_modules

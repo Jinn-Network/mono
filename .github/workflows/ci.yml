@@ -145,6 +145,7 @@ jobs:
             '^packages/sdk/'
             '^packages/core/'
             '^packages/plugin/'
+            '^packages/contract-abis/'
             '^packages/.*/package\.json$'
             '^\.github/workflows/ci\.yml$'
             '^\.github/workflows/npm-publish\.yml$'

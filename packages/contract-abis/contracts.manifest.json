@@ -1,0 +1,14 @@
+{
+  "contractsDir": "../../contracts",
+  "artifactsSubdir": "artifacts",
+  "contracts": {
+    "JinnRouterV3": "src/staking/JinnRouterV3.sol/JinnRouterV3.json",
+    "JinnRouterV4": "src/staking/JinnRouterV4.sol/JinnRouterV4.json",
+    "TaskCoordinator": "src/tasks/TaskCoordinator.sol/TaskCoordinator.json",
+    "TaskCoordinatorV4": "src/tasks/TaskCoordinatorV4.sol/TaskCoordinatorV4.json",
+    "MechMarketplace": "src/vendor/mech/MechMarketplace.sol/MechMarketplace.json",
+    "OlasMech": "src/vendor/mech/OlasMech.sol/OlasMech.json",
+    "ExternalStakingDistributor": "src/vendor/stolas/ExternalStakingDistributor.sol/ExternalStakingDistributor.json",
+    "StakingTokenLocked": "src/vendor/stolas/l2/StakingTokenLocked.sol/StakingTokenLocked.json"
+  }
+}
