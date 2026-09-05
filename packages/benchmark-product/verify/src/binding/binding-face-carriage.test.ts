@@ -37,7 +37,7 @@
  *   the binding, so it is required to carry the marker unconditionally and be pinned.
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 
@@ -142,16 +142,71 @@ const CONSTRAINT = [
  * Comments blanked to same-length runs, so offsets and line numbers survive and prose about a
  * binding is not read as one.
  *
- * Two known residues, both pre-existing and neither present in the tree today. A `//` inside a
- * string literal (`"https://example.com"`) blanks the rest of THAT line, so a call sharing the
- * line is missed; and conversely a call written inside a string ("call runBindingSentence(binding)
- * to render") is read as one, since only the reference scan knows about prose. Both are same-line
- * and predate this file's widenings; stated rather than fixed, because a real string lexer here
- * cost more than it bought -- a stray backtick in a regex character class, which the tree does
- * contain, put it in template mode to end of file and blanked a whole tail silently.
+ * A `//` inside a string literal (`"https://example.com"`) is not a comment opener, so a call
+ * sharing that line is still seen (#4020). That was the residue worth closing, because it HID a
+ * site; the walker below is deliberately narrower than the one reverted here, which lexed all three
+ * nesting forms and, on a stray backtick in a regex character class (the tree contains one, at
+ * `core/src/run/publication-source.ts:476`), went into template mode to end of file and blanked a
+ * whole tail silently. So: backticks are not tracked at all, and quote state is dropped at every
+ * newline. A quote that never closes on its line therefore costs at most the comment blanking on
+ * the rest of THAT line -- a comment read as code, which is the loud direction -- and can never
+ * reach the next line, let alone the file's tail.
+ *
+ * The residue that remains is the template literal: a backtick-quoted string carrying a comment
+ * opener still blanks the rest of its line. That is precisely the form that cost the last attempt a
+ * whole file, and it is the noise-direction half of the pair anyway, since `blankStringLiterals`
+ * closes the forging direction over the quoted forms.
  */
 function blankComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, (match) => match.replace(/[^\n]/gu, " "));
+  // Split by UTF-16 unit, which is what `text[index]` reads: spreading would split by code
+  // point and desync every offset after the first astral character.
+  const out = text.split("");
+  const blank = (from: number, to: number): void => {
+    for (let index = from; index < to; index += 1) if (out[index] !== "\n") out[index] = " ";
+  };
+  let mode: "code" | "line" | "block" | "string" = "code";
+  let quote = "";
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (mode === "line") {
+      if (character === "\n") { blank(start, index); mode = "code"; }
+      continue;
+    }
+    if (mode === "block") {
+      // An unterminated block comment is left as written, which is what the regex this replaced
+      // did: only a closed comment is blanked.
+      if (character === "*" && text[index + 1] === "/") { blank(start, index + 2); index += 1; mode = "code"; }
+      continue;
+    }
+    if (mode === "string") {
+      // An escape consumes the next character, but never the newline: state is dropped at every
+      // line break, so nothing this walker gets wrong can reach the line after it.
+      if (character === "\\" && text[index + 1] !== "\n") index += 1;
+      else if (character === quote || character === "\n") mode = "code";
+      continue;
+    }
+    if (character === "/" && text[index + 1] === "/") { mode = "line"; start = index; index += 1; }
+    else if (character === "/" && text[index + 1] === "*") { mode = "block"; start = index; index += 1; }
+    else if (character === '"' || character === "'") { mode = "string"; quote = character; }
+  }
+  if (mode === "line") blank(start, text.length);
+  return out.join("");
+}
+
+/**
+ * The interiors of terminated same-line `'`/`"` strings blanked, so a call written inside a string
+ * ("call runBindingSentence(binding) to render") is not read as one (#4020). Run over
+ * comment-blanked text, so an apostrophe inside a comment cannot open a string here.
+ *
+ * Applied only inside `emitterCallSites`, never folded into `blankComments`: `resolveOrigin` reads
+ * the import SPECIFIER off that function's output, and blanking interiors there would resolve every
+ * file's origin to the empty specifier and silently drop its real calls -- the barrel hole in a
+ * third shape. Same narrowness as above: no backticks, and an unterminated quote blanks nothing.
+ */
+function blankStringLiterals(text: string): string {
+  return text.replace(/(["'])((?:\\.|[^\\\n])*?)\1/gu, (_match, quote: string, body: string) =>
+    `${quote}${body.replace(/[^\n]/gu, " ")}${quote}`);
 }
 
 /**
@@ -160,11 +215,13 @@ function blankComments(text: string): string {
  * neither a call nor a declaration lives -- `verify/src/index.ts` re-exports all three off the face
  * -- and counting those would make the reference scan report the export list rather than any site.
  * Blanked after comments, and only where the statement starts a line, so an `export const` or an
- * ordinary object literal is untouched.
+ * ordinary object literal is untouched. A default clause before the brace
+ * (`import defaultThing, { runBindingSentence } from ...`) is part of the same statement (#4017);
+ * left unmatched, the statement itself read as a value reference.
  */
 function blankModuleStatements(text: string): string {
   return text.replace(
-    /^[ \t]*(?:import|export)\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*(?:from\s*["'][^"']*["'])?\s*;?/gmu,
+    /^[ \t]*(?:import|export)\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|(?:\w+\s*,\s*)?\{[^}]*\})\s*(?:from\s*["'][^"']*["'])?\s*;?/gmu,
     (match) => match.replace(/[^\n]/gu, " "),
   );
 }
@@ -176,9 +233,13 @@ function blankModuleStatements(text: string): string {
  *
  * A declaration file is excluded for the stronger reason that it cannot commit the offence at all:
  * it declares a signature and calls nothing (#3955). Left admitted it would be a false-positive
- * source rather than a hole, because the declaration-skip lookback below covers only the `function`
- * form -- an interface member `readonly runBindingSentence: (binding: VerifiedRunBinding) => string`
- * would read as a call supplying a binding.
+ * source rather than a hole, and the shape that fires is an interface member such as `readonly
+ * runBindingSentence: (binding: VerifiedRunBinding) => string`. Not as a call -- the call regex is
+ * `\bname\s*\(`, and the member puts a `:` between the name and the paren, so no call matches and
+ * the declaration-skip lookback never comes into it (#4019). It fires through the VALUE-REFERENCE
+ * scan: the file's `declare function` form makes `bindsEmitter` true, which opens that scan, and the
+ * member then escapes its property-key skip, because the skip requires nothing but whitespace before
+ * the name since a `{`, `,` or newline, and `readonly ` is not nothing.
  */
 export function isScannedSource(name: string): boolean {
   return (name.endsWith(".ts") || name.endsWith(".tsx"))
@@ -239,14 +300,21 @@ function topLevelArguments(text: string, openParen: number): string[] | undefine
  * a caller reaches the face through re-exports it, so following a hop reads the same statement
  * shape the caller wrote.
  *
- * An aliased binding (`import { runBindingSentence as emit }`) is not matched, and the scan then
- * sees neither the origin nor any occurrence of the name -- a bypass of the same family as #3954,
- * pre-existing for every emitter and not narrowed by it. Stated rather than left to be discovered.
+ * The LOCAL name comes back with the specifier, because it is the name the file's own text uses:
+ * `import { runBindingSentence as emit }` binds the emitter as `emit`, and a scan searching the
+ * declared name sees neither the call nor the reference. A default clause before the brace is read
+ * as part of the same statement for the same reason -- unmatched, it made `bindsEmitter` false and
+ * skipped the value-reference scan for the whole file (#4017).
+ *
+ * Matched on either side of an `as`, since a re-export renames in the other direction.
  */
-function importedFrom(source: string, name: string): string | undefined {
-  for (const match of source.matchAll(/^[ \t]*(?:import|export)\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/gmu)) {
-    const bound = match[1]!.split(",").map((entry) => entry.trim().split(/\s+as\s+/u).at(-1)!.trim());
-    if (bound.includes(name)) return match[2]!;
+function importedFrom(source: string, name: string): { specifier: string; local: string } | undefined {
+  for (const match of source.matchAll(/^[ \t]*(?:import|export)\s+(?:type\s+)?(?:\w+\s*,\s*)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/gmu)) {
+    for (const entry of match[1]!.split(",")) {
+      const parts = entry.trim().split(/\s+as\s+/u).map((part) => part.trim());
+      const local = parts.at(-1)!;
+      if (parts[0] === name || local === name) return { specifier: match[2]!, local };
+    }
   }
   return undefined;
 }
@@ -276,19 +344,31 @@ function declarationPattern(name: string): RegExp {
   );
 }
 
-/** The product-relative module a specifier names, for a relative path or a member package name. */
+function isFile(path: string): boolean {
+  return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+}
+
+/**
+ * The product-relative module a specifier names, for a relative path or a member package name.
+ *
+ * A FILE, not merely something that exists: a directory-style specifier (`from "../binding"`) is not
+ * valid NodeNext ESM, but it satisfied `existsSync`, and `resolveOrigin`'s hop loop then read the
+ * directory and failed with `EISDIR` instead of the guard's own constraint message (#4018). It
+ * belongs in the documented unresolved lane, alongside an extensionless specifier: return
+ * `undefined`, and the occurrence is counted loudly.
+ */
 function moduleForSpecifier(specifier: string, fromFile: string): string | undefined {
   if (specifier.startsWith(".")) {
     const target = resolve(dirname(fromFile), specifier.replace(/\.js$/u, ".ts"));
     const module = relative(productRoot, target);
     // A specifier that climbs out of the product is not a module this scan can key on, and
     // following one would read a file the scan never walked.
-    return existsSync(target) && !module.startsWith("..") ? module : undefined;
+    return isFile(target) && !module.startsWith("..") ? module : undefined;
   }
   const member = memberByPackageName.get(specifier);
   if (member === undefined) return undefined;
   const entry = join(productRoot, member, "src", "index.ts");
-  return existsSync(entry) ? relative(productRoot, entry) : undefined;
+  return isFile(entry) ? relative(productRoot, entry) : undefined;
 }
 
 /**
@@ -309,9 +389,9 @@ export function resolveOrigin(source: string, filePath: string, name: string): s
   // emitter would otherwise resolve the origin to a module this file never reaches, and a wrong
   // origin drops the file's real calls -- the same silent-hole shape the barrel case had.
   const code = blankComments(source);
-  const specifier = importedFrom(code, name);
-  if (specifier === undefined) return declared.test(code) ? relative(productRoot, filePath) : undefined;
-  let module = moduleForSpecifier(specifier, filePath);
+  const imported = importedFrom(code, name);
+  if (imported === undefined) return declared.test(code) ? relative(productRoot, filePath) : undefined;
+  let module = moduleForSpecifier(imported.specifier, filePath);
   const seen = new Set<string>();
   while (module !== undefined && !seen.has(module)) {
     seen.add(module);
@@ -320,7 +400,7 @@ export function resolveOrigin(source: string, filePath: string, name: string): s
     const hopSource = blankComments(readFileSync(absolute, "utf8"));
     if (declared.test(hopSource)) return module;
     const hop = importedFrom(hopSource, name);
-    module = hop === undefined ? undefined : moduleForSpecifier(hop, absolute);
+    module = hop === undefined ? undefined : moduleForSpecifier(hop.specifier, absolute);
   }
   return undefined;
 }
@@ -344,7 +424,7 @@ export function emitterCallSites(
   label: string,
   origins: ReadonlyMap<string, string | undefined> = new Map(),
 ): CallSite[] {
-  const blanked = blankComments(source);
+  const blanked = blankStringLiterals(blankComments(source));
   const references = blankModuleStatements(blanked);
   const rawLines = source.split("\n");
   // `import * as face from ...` binds the emitter behind a namespace, so `face.runBindingSentence`
@@ -361,7 +441,15 @@ export function emitterCallSites(
   for (const [module, name, position] of EMITTERS) {
     const origin = origins.get(name);
     if (origin !== undefined && origin !== module) continue;
-    for (const match of blanked.matchAll(new RegExp(String.raw`\b${name}\s*\(`, "gu"))) {
+    // The names this FILE spells the emitter as: an alias binds it under another one, and
+    // searching only the declared name finds neither the call nor the reference (#4017). Both are
+    // searched rather than the alias alone, since a file may also reach the emitter under its own
+    // name -- through a declaration or a namespace import -- in the same breath. The site is
+    // reported under the declared name either way, which is what `EXPECTED_JUSTIFIED_SITES` keys
+    // on: the alias is how this file spells the emitter, not a different one.
+    const alias = importedFrom(blanked, name)?.local;
+    const spelled = alias === undefined || alias === name ? name : `(?:${name}|${alias})`;
+    for (const match of blanked.matchAll(new RegExp(String.raw`\b${spelled}\s*\(`, "gu"))) {
       const index = match.index!;
       if (/\b(?:function|const|let|var)\s+$/u.test(blanked.slice(Math.max(0, index - 24), index))) continue;
       const args = topLevelArguments(blanked, index + match[0].length - 1);
@@ -371,10 +459,11 @@ export function emitterCallSites(
     // A value reference is counted only in a file that has the emitter in hand. Everywhere else a
     // bare name match is prose, and this gate is what lets the scan read strings as ordinary text.
     if (!bindsEmitter(blanked, name, declarationPattern(name))) continue;
-    for (const match of references.matchAll(new RegExp(String.raw`\b${name}\b`, "gu"))) {
+    for (const match of references.matchAll(new RegExp(String.raw`\b${spelled}\b`, "gu"))) {
       const index = match.index!;
+      const spelling = match[0].length;
       const before = references.slice(Math.max(0, index - 24), index);
-      const after = references.slice(index + name.length, index + name.length + 24);
+      const after = references.slice(index + spelling, index + spelling + 24);
       // A call is already counted above. A declaration introduces the emitter rather than passing
       // it on, and `typeof name` reads its type rather than the function.
       if (/^\s*\(/u.test(after)) continue;
@@ -466,6 +555,32 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     expect(emitterCallSites(`${IMPORTED}type Emitter = typeof runBindingSentence;\n`, "fixture.ts")).toEqual([]);
   });
 
+  // The scan searches the name the FILE uses, not the name the emitter was declared under: an
+  // aliased import and a default clause are ordinary import shapes, and reading only
+  // `import { name }` let either hand the face on unseen (#4017).
+  test("follows an aliased import, and reads a default clause as part of the same statement", () => {
+    const aliased = 'import { runBindingSentence as emit } from "./report-face.js";\n';
+    // The site is still reported under the emitter's declared name -- the alias is how this file
+    // spells it, not a different emitter.
+    expect(emitterCallSites(`${aliased}const s = emit(forged);\n`, "fixture.ts")[0]).toEqual({
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    });
+    expect(emitterCallSites(`${aliased}export const send = emit;\n`, "fixture.ts")[0])
+      .toEqual({ site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false });
+    // The import statement itself is still a module statement, under either shape.
+    expect(emitterCallSites(aliased, "fixture.ts")).toEqual([]);
+    const withDefault = 'import defaultThing, { runBindingSentence } from "./report-face.js";\n';
+    expect(emitterCallSites(withDefault, "fixture.ts")).toEqual([]);
+    expect(emitterCallSites(`${withDefault}export const emit = runBindingSentence;\n`, "fixture.ts")[0])
+      .toEqual({ site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false });
+    // And the origin is resolved off the same statement, so the emitter is keyed by its module.
+    expect(importedFrom(aliased, "runBindingSentence")).toEqual({ specifier: "./report-face.js", local: "emit" });
+    expect(importedFrom(withDefault, "runBindingSentence"))
+      .toEqual({ specifier: "./report-face.js", local: "runBindingSentence" });
+  });
+
   // Prose is read as prose without lexing it, because a file that never took the emitter in hand
   // cannot be referencing it. This is what a string walker was doing before, at the cost of a
   // stray backtick in a regex literal blanking a whole file's tail.
@@ -482,6 +597,30 @@ describe("the binding face is never emitted from an unchecked binding", () => {
       + "const s = runBindingSentence(forged);\n";
     expect(emitterCallSites(afterRegex, "fixture.ts")[0])
       .toEqual({ site: "fixture.ts:runBindingSentence", binding: "forged", justified: false });
+  });
+
+  // The two residues #4020 names, closed in the direction each one runs. A `//` inside a string was
+  // blanking the rest of its line, which HID a call; a call inside a string was read as one, which
+  // forged a site. The fix stays narrower than the character walker that was reverted here: no
+  // backtick tracking, and string state resets at every newline, so nothing can run past a line.
+  test("a same-line string literal neither hides a call nor forges one", () => {
+    const IMPORTED = 'import { runBindingSentence } from "./report-face.js";\n';
+    const url = `${IMPORTED}const u = "https://example.com"; const s = runBindingSentence(forged);\n`;
+    expect(emitterCallSites(url, "fixture.ts")[0]).toEqual({
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    });
+    expect(emitterCallSites(`${IMPORTED}const help = "call runBindingSentence(binding) to render";\n`, "fixture.ts"))
+      .toEqual([]);
+    // A real comment is still blanked, including one carrying an apostrophe of its own.
+    expect(emitterCallSites("// don't call runBindingSentence(forged) from here\n", "fixture.ts")).toEqual([]);
+    expect(emitterCallSites("/* don't call\n   runBindingSentence(forged) */\n", "fixture.ts")).toEqual([]);
+    // When it cannot tell -- a quote that never closes, as a regex character class writes one -- it
+    // blanks nothing further on that line and starts the next line clean. The cost is a comment read
+    // as code, which is loud; the tail of the file is never silently blanked.
+    const stray = `${IMPORTED}const media = /^[!#$%&'*+.^_\`|~0-9A-Za-z-]+$/u;\nconst s = runBindingSentence(forged);\n`;
+    expect(emitterCallSites(stray, "fixture.ts")[0]?.binding).toBe("forged");
   });
 
   // The bare name is not unique in this tree, so the key is proven to discriminate before the scan
@@ -512,6 +651,17 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     expect(resolveOrigin(barrel, join(productRoot, "core/src/plant.ts"), "runBindingSentence")).toBeUndefined();
     expect(emitterCallSites(`${barrel}export const s = runBindingSentence(forged);\n`, "plant.ts",
       new Map([["runBindingSentence", resolveOrigin(barrel, join(productRoot, "core/src/plant.ts"), "runBindingSentence")]]))[0]?.binding)
+      .toBe("forged");
+
+    // A directory is not a module: a specifier naming one lands in the same unresolved lane an
+    // extensionless specifier does, rather than walking the hop loop onto a directory read (#4018).
+    expect(moduleForSpecifier("../binding", join(productRoot, "verify/src/binding/report-face.ts")))
+      .toBeUndefined();
+    const directoryImport = 'import { runBindingSentence } from "../binding";\n';
+    const directoryPlant = join(productRoot, "verify/src/binding/plant.ts");
+    expect(resolveOrigin(directoryImport, directoryPlant, "runBindingSentence")).toBeUndefined();
+    expect(emitterCallSites(`${directoryImport}export const s = runBindingSentence(forged);\n`, "plant.ts",
+      new Map([["runBindingSentence", resolveOrigin(directoryImport, directoryPlant, "runBindingSentence")]]))[0]?.binding)
       .toBe("forged");
 
     // And the resolved origin is what decides: the same call text is counted under the emitter's
