@@ -62,3 +62,32 @@ export function passwordFileIsStale(
     return false;
   }
 }
+
+/**
+ * Whether `earningDir` holds the very keystore the host-wide password file is
+ * for — i.e. this is a default-operator rotation. Only then may a rotation
+ * *create* that file: an absent file proves nothing about ownership, so
+ * `passwordFileIsStale` cannot answer, but a rotation of the default keystore
+ * is the one case where writing it can harm no other operator (`JINN_PASSWORD`
+ * outranks the file for everyone else). Filesystem uncertainty answers "no".
+ *
+ * Call AFTER the new keystore is saved, so the rotated file is known to exist.
+ */
+export function isDefaultOperatorKeystore(
+  defaultEarningDir: string,
+  earningDir: string,
+  warn: (message: string) => void,
+): boolean {
+  try {
+    return (
+      realpathSync(mnemonicKeystorePath(defaultEarningDir)) ===
+      realpathSync(mnemonicKeystorePath(earningDir))
+    );
+  } catch (err) {
+    warn(
+      `[warn] Could not tell whether ${earningDir} is the default operator's keystore ` +
+        `(${err instanceof Error ? err.message : String(err)}); not writing a password file.`,
+    );
+    return false;
+  }
+}
