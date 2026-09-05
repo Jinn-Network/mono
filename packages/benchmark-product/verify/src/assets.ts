@@ -11,7 +11,7 @@ import { COLOPHON_MARK_SVG } from "./profile/branding-assets.js";
 import type { ClaimPackage } from "./profile/claim.js";
 import type { PublicComparisonCell, PublicComparisonView } from "./comparison.js";
 import { armDenominators, type ArmDenominators, type PlannedSlotAccounting } from "./denominators.js";
-import { BUNDLE_V9_FORMAT, SUPPORTED_BUNDLE_FORMATS, type SupportedBundleFormat } from "./manifest.js";
+import type { SupportedBundleFormat } from "./manifest.js";
 
 export interface PublicAssetInput {
   /**
@@ -566,13 +566,7 @@ const RENDERS_DENOMINATOR_PAIR: Record<SupportedBundleFormat, boolean> = {
   "benchmark-product-public-bundle/6": false,
   "benchmark-product-public-bundle/7": false,
   "benchmark-product-public-bundle/8": false,
-  [BUNDLE_V9_FORMAT]: true,
-};
-
-/** No per-arm accounting this derivation can read, so every arm withholds its strict number.
- * Prototype-free because arm ids are opaque wire keys and `armDenominators` reads own keys only. */
-const NO_PLANNED_SLOTS: PlannedSlotAccounting = {
-  perArm: Object.freeze(Object.create(null) as Record<string, { readonly expected: number }>),
+  "benchmark-product-public-bundle/9": true,
 };
 
 /**
@@ -750,8 +744,9 @@ function binaryFactsHtml(facts: BinaryFacts): string {
   return `<p class="neutral">Qualification facts are presented per instrument without comparative conclusions.</p><h3>Registered configuration</h3><pre>${escapeMarkup(canonicalText(facts.qualification.configuration))}</pre>${arms}<h3>Per-item decisions and instability</h3><pre>${escapeMarkup(canonicalText(facts.qualification.itemDecisions))}</pre><h3>Parser-invalid, infrastructure, and other exclusions</h3><pre>${escapeMarkup(canonicalText(facts.qualification.excluded))}</pre>`;
 }
 
-/** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6). The wilson branch is
- * byte-identical to before this dispatch existed -- `armResultTable` itself is untouched. */
+/** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6). Every branch but wilson
+ * is byte-identical to before this dispatch existed; the wilson branch gains the denominator pair,
+ * and only on the format that renders it (issue #3698). */
 function armResultsHtml(
   facts: MethodFacts,
   wilsonCaption: string,
@@ -1195,7 +1190,7 @@ function pairedMajorityDeltaFactsMarkdown(facts: PairedMajorityDeltaFacts): stri
 }
 
 /** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6), markdown counterpart
- * to `armResultsHtml`. The wilson branch is byte-identical to before this dispatch existed. */
+ * to `armResultsHtml`, and gated the same way. */
 function armResultsMarkdown(
   facts: MethodFacts,
   denominators: readonly ArmDenominators[] | undefined,

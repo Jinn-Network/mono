@@ -13,14 +13,17 @@ is valid for the format and profile it declares, `1` for an invalid bundle, and 
 usage or operational failures. A check a profile defers is reported as deferred, never as
 passed, and never as a failure.
 
-This 0.2 reader supports public bundle formats v2, v4, v5, v6, v7, and v8. It
+This 0.2 reader supports public bundle formats v2, v4, v5, v6, v7, v8, and v9. It
 intentionally rejects the unrelated accounting bundle v3. Formats v2 and v4 run six
-checks; the evidence-native v5 and the two anchored formats, v6 and v7, run seven; the
-disclosed v8 runs eight. The v7 format is the anchored binary-qualification closure —
-v4's members plus v6's anchors — and v8 is v7 plus a sealed six-variable
-disclosure-specification record and the `disclosure-specification` check. Both exist
-only from this 0.2.1 release, so their bundles pin `@0.2.1` rather than the `@0.1` line
-every earlier closure stamps.
+checks; the evidence-native v5 and the three anchored non-disclosed formats, v6, v7,
+and v9, run seven; the disclosed v8 runs eight. The v7 format is the anchored
+binary-qualification closure — v4's members plus v6's anchors — and v8 is v7 plus a
+sealed six-variable disclosure-specification record and the `disclosure-specification`
+check. V9 is v6's closure exactly, with one difference on the page rather than in the
+records: it states, beside each arm's declared denominator, every slot the run planned
+for that arm and the count the declared denominator leaves out. All three read on this
+`@0.2` line rather than the `@0.1` line every earlier closure stamps — v7 and v8 because
+no earlier reader knows their closures, v9 because no earlier reader renders its page.
 The evidence-native v5 has two declared profiles, full-evidence and metadata-first;
 this reader supports both. A metadata-first bundle carries the artifact digests without
 the artifact bodies, so `artifact-integrity` reports `not fetched` rather than passing,
