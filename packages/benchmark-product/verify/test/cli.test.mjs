@@ -849,6 +849,64 @@ test("a drifted freeze repository still exits 1 when an unrelated binding also f
   assert.match(result.stderr, /domain binding not applied/);
 });
 
+// ── The dropped mode dimension names its own reason (issue #3604) ──────────────────────────────
+//
+// `executableBitChecked: false` has two materially different causes, and the note used to assert
+// the first one for both — telling a reader whose read-only mount refused the probe that their
+// filesystem carries no executable bit. A filesystem that does not record the bit is not reachable
+// from CI, so the injectable `freezeRepo` dep is the only place that string can be exercised.
+
+function matchedTree(extra) {
+  return { ok: true, commitId: "d".repeat(40), fileCount: 3, differences: [], ...extra };
+}
+
+test("a filesystem that does not record the bit is reported as one, not as a refused probe", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
+    verify: async () => publisherResult(keyId),
+    freezeRepo: async () => matchedTree({ executableBitChecked: false, executableBitSkipped: "not-recorded" }),
+  });
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /file modes were not checked \(this filesystem does not record an executable bit\)/);
+});
+
+test("a refused probe says so rather than describing the reader's filesystem", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
+    verify: async () => publisherResult(keyId),
+    freezeRepo: async () => matchedTree({ executableBitChecked: false, executableBitSkipped: "not-probed" }),
+  });
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /file modes were not checked \(the filesystem could not be probed\)/);
+  // The claim the pre-#3604 string made for both causes.
+  assert.doesNotMatch(result.stdout, /does not (carry|record) an executable bit/);
+});
+
+test("a result carrying no reason claims neither cause", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
+    verify: async () => publisherResult(keyId),
+    freezeRepo: async () => matchedTree({ executableBitChecked: false }),
+  });
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /note: file modes were not checked\n/);
+  assert.doesNotMatch(result.stdout, /does not record an executable bit|could not be probed/);
+});
+
+test("a checked mode dimension adds no note at all", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
+    verify: async () => publisherResult(keyId),
+    freezeRepo: async () => matchedTree({ executableBitChecked: true }),
+  });
+  assert.equal(result.exitCode, 0);
+  assert.doesNotMatch(result.stdout, /file modes were not checked/);
+});
+
 // ── The promoted caveat's enumeration (issue #3691) ─────────────────────────────────────────────
 //
 // The sentence beneath the verdict says what was recomputed. It used to hand-list the v2/v4

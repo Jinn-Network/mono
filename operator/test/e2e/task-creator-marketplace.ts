@@ -59,7 +59,15 @@
  * whole `BaseVenueSafeBroadcaster`. #2665 gave the direct broadcaster the block identity and
  * logs `openVerdictAttempt` decodes, and narrowed the port's own input to
  * `VerdictSafeBroadcaster` (`Pick<..., 'execute'>`) — the surface it actually consumes; it
- * never calls `classify()`. Assertions 4 and 5 therefore run.
+ * never calls `classify()`. Assertions 4 and 5 therefore reach the chain.
+ *
+ * Remaining blocker (issue #3715): they do not yet pass. The first full run of this lane
+ * (CI `workflow_dispatch`, 2026-09-04) cleared assertions 1-3 and then reverted on the first
+ * verdict settlement with `TCAttemptNotSubmitted(1, 0)`. `TaskCoordinator.claimEvaluation`
+ * requires the attempt to be `AttemptStatus.Submitted`, which only the router's solution-side
+ * `claimDelivery` sets. That call is `MechAdapter.submitSolutionDelivery`, and after Wave-4
+ * D1/D2 nothing invokes it: the composition `WorkLoop` delivers to the mech but never settles
+ * the solution on the router, so every attempt stays `Claimed`/`RequestRegistered`.
  *
  * Public command: `yarn e2e:task-creator`.
  */

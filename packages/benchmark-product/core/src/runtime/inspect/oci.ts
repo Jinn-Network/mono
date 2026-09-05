@@ -288,6 +288,37 @@ async function runBoundedProcess(
   });
 }
 
+/**
+ * #3720: name the subject when a process that exited 0 did not put parseable JSON on stdout.
+ *
+ * Every call below runs a `docker` subcommand or the OCI runner and immediately parses its
+ * stdout. A bare `JSON.parse(result.stdout)` reports only V8's own message -- most often
+ * `Unexpected end of JSON input`, which is what an empty or truncated stdout produces -- and
+ * that message travels all the way out as `venue-unavailable` at path `venue`, because
+ * `run-launch.ts` wraps any throw out of `venue.preflightRun()` (the launcher probe reaches
+ * here through `assertInspectSelectionUndrifted`). The refusal then names neither which of
+ * these commands failed nor what it actually received, which is the second failure mode
+ * #2832 recorded and #3678 could only make visible one layer up.
+ *
+ * The excerpt is bounded and taken from stdout only. Both producers reserve stdout for their
+ * own bounded machine envelope -- `worker.py` redirects task and model output to stderr for
+ * exactly this reason -- so a prefix of unparseable stdout carries no provider payload, while
+ * stderr (which may) is still never echoed.
+ */
+function parseProcessJson(result: ProcessResult, command: string): unknown {
+  try {
+    return JSON.parse(result.stdout);
+  } catch (cause) {
+    const excerpt = result.stdout.slice(0, 200);
+    throw new Error(
+      `${command} exited 0 without parseable JSON on stdout`
+      + ` (${String(result.stdout.length)} chars`
+      + `${result.stdout === "" ? ", empty" : `, starting ${JSON.stringify(excerpt)}`}): `
+      + (cause instanceof Error ? cause.message : String(cause)),
+    );
+  }
+}
+
 const DockerServerSchema = z.object({
   Version: z.string().min(1),
   ApiVersion: z.string().min(1),
@@ -364,11 +395,11 @@ export async function probeInspectOciSelection(
       ? Promise.resolve(undefined)
       : runBoundedProcess(binding.dockerPath, ["image", "inspect", "--format", "{{json .}}", binding.sandboxExecution.imageDigest], undefined, signal),
   ]);
-  const server = DockerServerSchema.parse(JSON.parse(serverResult.stdout));
-  const image = DockerImageSchema.parse(JSON.parse(imageResult.stdout));
+  const server = DockerServerSchema.parse(parseProcessJson(serverResult, "docker version (selection probe)"));
+  const image = DockerImageSchema.parse(parseProcessJson(imageResult, "docker image inspect of the worker image (selection probe)"));
   if (image.Id !== binding.imageDigest) throw new TypeError("OCI image ID does not match the selected digest");
   if (sandboxImageResult !== undefined) {
-    const sandboxImage = DockerImageSchema.parse(JSON.parse(sandboxImageResult.stdout));
+    const sandboxImage = DockerImageSchema.parse(parseProcessJson(sandboxImageResult, "docker image inspect of the sandbox image (selection probe)"));
     if (sandboxImage.Id !== binding.sandboxExecution?.imageDigest) throw new TypeError("sandbox image ID does not match the selected digest");
   }
 
@@ -410,7 +441,7 @@ export async function probeInspectOciSelection(
   } finally {
     rmSync(probeConfigDir, { recursive: true, force: true });
   }
-  const envelope = WorkerEnvelopeSchema.parse(JSON.parse(workerResult.stdout));
+  const envelope = WorkerEnvelopeSchema.parse(parseProcessJson(workerResult, "the OCI Inspect worker probe"));
   if (!envelope.ok) throw new Error("OCI Inspect worker probe failed");
   const runtime = envelope.value.runtime;
   if (runtime.inspectEvalsVersion !== SUPPORTED_INSPECT_EVALS_VERSION) throw new TypeError("Inspect Evals version drifted in the OCI image");
@@ -509,9 +540,9 @@ export async function assertInspectOciHostUndrifted(
       ? Promise.resolve(undefined)
       : runBoundedProcess(binding.dockerPath, ["image", "inspect", "--format", "{{json .}}", binding.sandboxExecution.imageDigest], undefined, signal),
   ]);
-  const server = DockerServerSchema.parse(JSON.parse(serverResult.stdout));
-  const image = DockerImageSchema.parse(JSON.parse(imageResult.stdout));
-  const sandboxImage = sandboxImageResult === undefined ? undefined : DockerImageSchema.parse(JSON.parse(sandboxImageResult.stdout));
+  const server = DockerServerSchema.parse(parseProcessJson(serverResult, "docker version (post-lock drift check)"));
+  const image = DockerImageSchema.parse(parseProcessJson(imageResult, "docker image inspect of the worker image (post-lock drift check)"));
+  const sandboxImage = sandboxImageResult === undefined ? undefined : DockerImageSchema.parse(parseProcessJson(sandboxImageResult, "docker image inspect of the sandbox image (post-lock drift check)"));
   if (
     (binding.sandboxExecution === undefined) !== (execution.sandbox === undefined)
     ||
@@ -634,7 +665,7 @@ export async function catalogInspectOciSelection(input: {
   } finally {
     rmSync(probeConfigDir, { recursive: true, force: true });
   }
-  const envelope = CatalogWorkerEnvelopeSchema.parse(JSON.parse(workerResult.stdout));
+  const envelope = CatalogWorkerEnvelopeSchema.parse(parseProcessJson(workerResult, "the OCI Inspect worker catalog probe"));
   if (!envelope.ok) throw new Error("OCI Inspect worker catalog failed");
   return envelope.value;
 }

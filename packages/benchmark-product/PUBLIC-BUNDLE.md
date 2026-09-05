@@ -322,10 +322,11 @@ colophon bundle verify --bundle <bundle-dir> --json
 ```
 
 which wraps the same reader implementation, or with a reader built from the
-`0.2.1` source. The product route is not the easier of the two: `@colophon-claims/cli`
-and `@colophon-claims/core` are implemented but unpublished as well, so it needs
-the same mono checkout the source build does. A reader who cannot build from the
-repository has no route to a v7 bundle until the `0.2.1` cut. The product verb takes no trust-material flags and passes none,
+`0.2.1` source. The product route is not the easier of the two:
+`@colophon-claims/cli` and `@colophon-claims/core` are implemented but
+unpublished as well, so it needs the same mono checkout the source build does. A
+reader who cannot build from the repository has no route to a v7 bundle until
+the `0.2.1` cut. The product verb takes no trust-material flags and passes none,
 so under it a well-formed anchor reports `present` and never `verified`; only
 the `npx` reader can carry an anchor further, and only once the release exists.
 
@@ -885,6 +886,10 @@ Every member is mode `100644`. An executable bit, or a member replaced by a
 symlink, changes what git records and therefore the pinned commit even though the
 bytes read back identical — so `freeze-repo verify` reports both as drift, and it
 treats a nested `.git` directory as ordinary content, skipping only the root one.
+The symlink half holds everywhere. The executable-bit half holds wherever the
+filesystem carries the bit, which the check establishes by probe rather than
+assumption; where it does not, or where the probe cannot be run, the mode
+dimension is dropped and `executableBitChecked` says so.
 
 The standalone verifier package checks a published tree with no product install:
 `colophon-verify <bundle> --freeze-repo <dir>`, exit `1` on drift.
