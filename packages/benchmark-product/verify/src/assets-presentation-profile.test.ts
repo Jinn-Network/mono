@@ -54,9 +54,14 @@ function legacyAssetInput(bundleDir: string): PublicAssetInput {
     readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
   };
   const manifest = JSON.parse(readFileSync(join(bundleDir, "bundle.json"), "utf8")) as {
+    readonly format: PublicAssetInput["format"];
     readonly files: readonly { readonly path: string }[];
   };
   return {
+    // Read from the fixture's own manifest, not hand-stated: which page these bytes are is a
+    // property of the format, so a test that named a different one would be asserting some other
+    // format's page against this bundle's bytes.
+    format: manifest.format,
     claim,
     matrix: parseMatrix(read("matrix.json")),
     report: parseReport(read("report.json")),

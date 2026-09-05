@@ -215,8 +215,16 @@ never used to validate. Verification never contacts an anchor provider and
 never upgrades a pending proof.
 
 V6 pins the same first public line as v2 and v4. It is the only anchored format
-that does: v7 and v8 are anchored too and read on a later line, named in their
-own sections.
+that does: v7, v8, and v9 are anchored too and read on a later line, named in
+their own sections.
+
+**No new bundle is materialized on this format.** A run that is anchored and
+projects no binary qualification now emits `benchmark-product-public-bundle/9`,
+whose closure is this one exactly and whose page states the strict all-slots
+denominator beside the declared one. Every v6 bundle already published keeps its
+own page, its own claim, and this line, forever — that immutability is the
+property that makes a published claim citable, and it is why the render needed a
+number of its own rather than an edit here.
 
 ```bash
 npx @colophon-claims/verify@0.1 <bundle-dir>
@@ -266,6 +274,53 @@ The closing paragraph gains the anchor's own limit: an anchor dates the bytes it
 covers and says nothing else about the run — not that results were produced
 after it, and not that the anchoring authority is independent of the bundle's
 owner.
+
+### Anchored bundle v9
+
+`benchmark-product-public-bundle/9` is v6's closure with one difference, and the
+difference is on the page rather than in the records: its report states, beside
+each arm's declared denominator, every slot the run planned for that arm and the
+count of planned slots the declared denominator leaves out.
+
+The closure is untouched. The member list, the `anchors/<sha256>.bin`
+allowlist, the seven checks, the `benchmark-product.claim-package/4` claim
+package, and every anchor rule in the v6 section above apply here word for word.
+No record schema changes and no sealed field is added: both numbers were already
+sealed — the declared one in the Report's own per-arm facts, the strict one in
+the Matrix's per-arm accounting — so stating them side by side recomputes
+nothing and cannot disagree with the sealed judgment.
+
+The allocation is not optional bookkeeping. A published page is not editable:
+`verifyPublicBundleSnapshot` byte-compares every presentation asset against its
+own rebuild, so a bundle that rendered a new element under an existing format
+would carry an instruction to run a verifier that refuses it, and every report
+already published under that format would fail. Which elements render is
+therefore a property of the format, and a new element is a new number
+(`spec/2026-09-02-report-page-information-architecture.md` §8).
+
+Only a `wilson@1` report states a per-arm declared denominator, so only such a
+report gains the columns. A v9 bundle whose report is a paired, panel, or
+evidence-contrast method renders exactly what v6 renders for the same records.
+
+V9 reads on the `@0.3` line. `@0.2.1` reads v2 through v8 and has never heard of
+v9, so a v9 bundle pinning it would send its reader to a verifier that rebuilds
+the old page and refuses these bytes:
+
+```bash
+npx @colophon-claims/verify@0.3 <bundle-dir>
+```
+
+Supply your own trust material to reach `verified`, exactly as on v6:
+
+```bash
+npx @colophon-claims/verify@0.3 <bundle-dir> \
+  --tsa-root ./authority-root.pem \
+  --ots-headers ./bitcoin-headers.txt
+```
+
+V9 returns **seven checks**, v6's list in v6's order. A page that states a
+denominator adds nothing to check: the pair is a subtraction over two integers
+the closure already carries and already verifies.
 
 ### Anchored binary qualification bundle v7
 
@@ -527,6 +582,7 @@ out where it applies.
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1`, publication pending | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/8` | `@0.2.1`, publication pending | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
+| `benchmark-product-public-bundle/9` | `@0.3.0`, publication pending | `@0.3` | seven | `--tsa-root`, `--ots-headers` |
 
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a

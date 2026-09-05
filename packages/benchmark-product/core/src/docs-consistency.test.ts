@@ -11,6 +11,7 @@ import {
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
   BUNDLE_V8_FORMAT,
+  BUNDLE_V9_FORMAT,
   FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
@@ -368,6 +369,7 @@ describe("product documentation consistency", () => {
       [BUNDLE_V6_FORMAT]: "\n### Anchored bundle v6\n",
       [BUNDLE_V7_FORMAT]: "\n### Anchored binary qualification bundle v7\n",
       [BUNDLE_V8_FORMAT]: "\n### Disclosed anchored binary qualification bundle v8\n",
+      [BUNDLE_V9_FORMAT]: "\n### Anchored bundle v9\n",
     };
     // Prompted screening is the fourth axis the format string does not record, so the `/2` and
     // `/4` sections state a second, later line beside the unprompted one.

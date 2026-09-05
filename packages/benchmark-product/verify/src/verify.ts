@@ -158,8 +158,8 @@ export type PublicBundleVerificationCheck =
   | "matrix-rederivation"
   | "report-verification"
   | "claim-consistency"
-  /** Always present for the anchored closures, `benchmark-product-public-bundle/6`, `/7`, and `/8`,
-   * never for any earlier one (anchor-evidence design §8, §12). */
+  /** Always present for the anchored closures, `benchmark-product-public-bundle/6`, `/7`, `/8`, and
+   * `/9`, never for any earlier one (anchor-evidence design §8, §12). */
   | "integrity-anchors"
   /** Always present for `benchmark-product-public-bundle/8`, never for any earlier closure
    * (disclosure-specification-record design §7, issue #2839). Runs last: the claim's `disclosure`
@@ -167,7 +167,7 @@ export type PublicBundleVerificationCheck =
   | "disclosure-specification";
 
 export interface LegacyPublicBundleVerificationResult extends PublicBundleSignerDisclosure {
-  readonly format: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT;
+  readonly format: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT | typeof BUNDLE_V9_FORMAT;
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
