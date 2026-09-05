@@ -67,7 +67,10 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     boundary: 'after the execution evidence and Delivery are sealed, before publication completes',
     proof: 'Every Delivery.evidenceRecords digest resolves; publication resumes once; Delivery '
       + 'bytes do not change',
-    requiredEffects: { publishedRecords: 4, duplicatePublications: 0 },
+    // Four records: the solution output, its execution evidence, the Delivery, and the Delivery
+    // envelope. Pinned, so a change in what the solution path publishes fails this drill rather
+    // than quietly redefining what "publication resumes once" was measured against.
+    requiredEffects: { publishedRecords: 4 },
   },
   {
     checkpoint: 'solution-settlement',

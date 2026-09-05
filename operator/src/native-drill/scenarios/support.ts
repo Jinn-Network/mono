@@ -58,13 +58,38 @@ export function unreachablePort<T extends object>(name: string): T {
 }
 
 /**
+ * Broadcast an operation exactly once, reconciling canonical history first.
+ *
+ * Every real broadcaster in the native stack is idempotent through its own scope/WAL: it resolves
+ * whether the operation already reached the chain before it signs anything. The drill's ports must
+ * be too, because the product deliberately re-drives a broadcast whose outcome it never learned
+ * (`reconcile()` in `native-requester/requester.ts` calls `post` again for a durable draft with no
+ * recorded outcome). A port that broadcast unconditionally would turn that correct behaviour into
+ * a duplicate — and the duplicate would be the harness's, not the product's.
+ *
+ * `onBroadcast` runs only on the call that actually reached the chain, which is where a boundary
+ * belongs: after the wallet returns and before the operator records anything.
+ */
+export async function broadcastOnce(
+  context: ScenarioContext,
+  key: string,
+  onBroadcast?: () => Promise<void>,
+): Promise<{ readonly txHash: `0x${string}`; readonly broadcast: boolean }> {
+  const existing = (await context.chain.findByDigest(key))[0];
+  if (existing !== undefined) return { txHash: existing.hash, broadcast: false };
+  const txHash = await context.chain.broadcast(key);
+  await onBroadcast?.();
+  return { txHash, broadcast: true };
+}
+
+/**
  * A single port member the drilled phase must never call. Used where a port interface is only
  * partly exercised by a checkpoint and a whole-object proxy would not typecheck.
  */
 export function unreachableMember<T extends (...args: never[]) => unknown>(name: string): T {
   return ((): never => {
     throw new Error(`restart drill called ${name}, which this checkpoint does not exercise`);
-  }) as T;
+  }) as unknown as T;
 }
 
 /**

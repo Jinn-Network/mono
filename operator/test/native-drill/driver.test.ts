@@ -52,8 +52,12 @@ function launcher(
 }
 
 function environment(host: RoleHostLauncher): DrillEnvironment {
+  let opened = 0;
   return {
-    rpcUrl: 'http://127.0.0.1:8545',
+    openChain: async (label) => {
+      opened += 1;
+      return { rpcUrl: `http://127.0.0.1:${8545 + opened}/${label}`, close: async () => {} };
+    },
     chain: { chainId: 84532, mode: 'hermetic' },
     stateRoot: '/drill/state',
     launcher: host,
@@ -70,6 +74,10 @@ describe('restart-drill driver', () => {
     expect(crash!.stateDir).toBe(resume!.stateDir);
     expect(oracle!.stateDir).not.toBe(crash!.stateDir);
     expect(new Set(host.launched.map(({ runId }) => runId)).size).toBe(1);
+    // The uninterrupted lane runs on its own chain; the crash and recovery lanes share one, so the
+    // recovery reconciles the transaction the killed process actually left behind.
+    expect(oracle!.rpcUrl).not.toBe(crash!.rpcUrl);
+    expect(crash!.rpcUrl).toBe(resume!.rpcUrl);
     expect(sealed.report.injectedBoundary.injection).toBe('SIGKILL');
     expect(sealed.report.comparison.equalToUninterrupted).toBe(true);
   });
@@ -91,10 +99,12 @@ describe('restart-drill driver', () => {
     expect(String(error)).toMatch(/finalState: uninterrupted=settled recovered=failed/u);
   });
 
-  it('fails when a required no-duplicate effect is missing rather than passing silently', async () => {
-    const host = launcher((spec) => (spec.mode === 'uninterrupted'
-      ? { kind: 'observed', observation: observationFor(spec, { effects: { posting: 1 } }) }
-      : undefined));
+  it('fails when a required no-duplicate effect is missing on both runs, rather than passing silently', async () => {
+    // Both runs stop reporting the counter, so they still compare equal — a drill that stopped
+    // counting duplicates must not read as clean just because it stopped counting consistently.
+    const host = launcher((spec) => (spec.mode === 'crash'
+      ? undefined
+      : { kind: 'observed', observation: observationFor(spec, { effects: { posting: 1, signedSourceEntries: 1 } }) }));
     await expect(drillCheckpoint(environment(host), drillSpec('posting')))
       .rejects.toThrow(/effects\.duplicatePosts was not reported/u);
   });

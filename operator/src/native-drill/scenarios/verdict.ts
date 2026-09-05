@@ -19,12 +19,13 @@ import type { VerdictPorts } from '@jinn-network/marketplace-venue-base';
 import type { TaskExecutionBackend } from '@jinn-network/task-execution-backend';
 import { Store } from '../../store/store.js';
 import { NativeEvaluatorStateRepository } from '../../daemon/native-evaluator-state.js';
+import type { NativeOperationId } from '../../daemon/native-operation-identity.js';
 import { NativeEvaluatorCoordinator } from '../../daemon/native-evaluator-coordinator.js';
 import type { RunObservation } from '../observation.js';
 import {
   DRILL_CLOCK,
+  broadcastOnce,
   digestOf,
-  journal,
   observedMode,
   storePath,
   unreachableMember,
@@ -91,7 +92,7 @@ function opportunity() {
  * the exact state the `verdict-settlement` boundary interrupts. Idempotent, so the resume process
  * re-opens the seeded state rather than rebuilding it.
  */
-function seedPublishedVerdict(path: string): string {
+function seedPublishedVerdict(path: string): NativeOperationId {
   const store = new Store(path);
   try {
     const state = new NativeEvaluatorStateRepository(store, { now: () => DRILL_CLOCK });
@@ -174,14 +175,11 @@ function seedPublishedVerdict(path: string): string {
   }
 }
 
-interface SettlementEntry { readonly key: string; readonly txHash: string }
-
 export async function runVerdictScenario(context: ScenarioContext): Promise<RunObservation | undefined> {
   const path = storePath(context, 'evaluator.sqlite');
   const evaluationId = seedPublishedVerdict(path);
   const deliveryKey = `${context.runId}:verdict-delivery`;
   const settlementKey = `${context.runId}:verdict-settlement`;
-  const settlementJournal = journal<SettlementEntry>(context, 'verdict-settlement');
   const invocations = { marketplaceDeliver: 0, verdictClaim: 0, canonicalRead: 0 };
 
   const store = new Store(path);
@@ -202,10 +200,9 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
       canOpenVerdictAttempt: unreachableMember('canOpenVerdictAttempt'),
       readCanonicalVerdictAttempt: unreachableMember('readCanonicalVerdictAttempt'),
       deliverVerdictToMarketplace: async ({ operationId }) => {
-        invocations.marketplaceDeliver += 1;
-        const hash = await context.chain.broadcast(deliveryKey);
-        const finalized = await context.chain.awaitFinalized(hash);
-        return { operationId, transaction: finalized };
+        const sent = await broadcastOnce(context, deliveryKey);
+        if (sent.broadcast) invocations.marketplaceDeliver += 1;
+        return { operationId, transaction: await context.chain.awaitFinalized(sent.txHash) };
       },
       readCanonicalVerdictDelivery: async () => {
         const canonical = await canonicalOf(deliveryKey);
@@ -216,14 +213,15 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
         };
       },
       claimVerdictDelivery: async ({ operationId }) => {
-        invocations.verdictClaim += 1;
-        const hash = await context.chain.broadcast(settlementKey);
-        settlementJournal.appendOnce(settlementKey, { key: settlementKey, txHash: hash });
-        // The settlement transaction is on the node; reconciling it into the operation is what
-        // the injected boundary interrupts.
-        await context.boundary();
-        const finalized = await context.chain.awaitFinalized(hash);
-        return { operationId, status: 'settled' as const, transaction: finalized };
+        // The settlement transaction is on the node once the boundary fires; reconciling it into
+        // the operation is what the injected boundary interrupts.
+        const sent = await broadcastOnce(context, settlementKey, () => context.boundary());
+        if (sent.broadcast) invocations.verdictClaim += 1;
+        return {
+          operationId,
+          status: 'settled' as const,
+          transaction: await context.chain.awaitFinalized(sent.txHash),
+        };
       },
       readVerdictSettlement: async () => {
         const canonical = await canonicalOf(settlementKey);
@@ -269,12 +267,14 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
     }
 
     const evaluation = state.getEvaluation(evaluationId)!;
+    // The graph digest deliberately excludes transaction hashes. The oracle lane and the recovery
+    // lane broadcast their own independent transactions, so their hashes differ by construction;
+    // what must match is the record graph. The hashes themselves are retained in the report's
+    // `transactionHashes`, and duplicate-freedom is asserted from canonical chain history.
     const operations = state.listEvaluationOperations(evaluationId).map((operation) => ({
       id: operation.operationId,
       kind: operation.kind,
       status: operation.status,
-      tx: operation.txHash,
-      prior: operation.priorTxHash,
     }));
     const settlementHistory = await context.chain.findByDigest(settlementKey);
     const deliveryHistory = await context.chain.findByDigest(deliveryKey);

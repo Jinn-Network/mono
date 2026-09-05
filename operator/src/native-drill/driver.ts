@@ -33,8 +33,22 @@ export interface RoleHostLauncher {
   launch(spec: RoleRunSpec, options: { readonly killAtBoundary: boolean }): Promise<RoleRunResult>;
 }
 
-export interface DrillEnvironment {
+/** One Anvil node, owned by the caller that opened it. */
+export interface DrillChainNode {
   readonly rpcUrl: string;
+  close(): Promise<void>;
+}
+
+export interface DrillEnvironment {
+  /**
+   * Open a node for one lane. Every lane gets its own chain: the uninterrupted run and the
+   * recovered run are two independent universes, and on a shared node the uninterrupted run's own
+   * transactions would show up in the recovered run's canonical history as duplicates. Separate
+   * chains also make the two lanes' transactions byte-identical — same nonce, same fees, same
+   * deterministic signature — so the recovered record graph can be compared to the oracle's
+   * exactly, including the signed source entries that commit to the transaction hash.
+   */
+  readonly openChain: (label: string) => Promise<DrillChainNode>;
   readonly chain: DrillRecoveryReport['chain'];
   /** Absolute directory under which each run pair gets its own durable state directory. */
   readonly stateRoot: string;
@@ -77,39 +91,55 @@ export async function drillCheckpoint(
 ): Promise<SealedDrillReport> {
   const { checkpoint, seed } = spec;
   const runId = `${seed}-${checkpoint}`;
-  const base = {
-    checkpoint,
-    seed,
-    runId,
-    rpcUrl: environment.rpcUrl,
-  } as const;
 
   environment.log?.(`${checkpoint}: uninterrupted run`);
-  const uninterrupted = expectObservation(checkpoint, 'uninterrupted', await environment.launcher.launch(
-    { ...base, mode: 'uninterrupted', stateDir: stateDirFor(environment.stateRoot, spec, 'oracle') },
-    { killAtBoundary: false },
-  ));
-
-  const recoveryStateDir = stateDirFor(environment.stateRoot, spec, 'recovery');
-  environment.log?.(`${checkpoint}: crash run (SIGKILL at ${spec.boundary})`);
-  const crashed = await environment.launcher.launch(
-    { ...base, mode: 'crash', stateDir: recoveryStateDir },
-    { killAtBoundary: true },
-  );
-  if (crashed.kind !== 'killed-at-boundary') {
-    throw new DrillFailure(
-      checkpoint,
-      crashed.kind === 'observed'
-        ? 'the crash run completed without reaching the injected boundary'
-        : `the crash run failed before the boundary: ${crashed.reason}`,
-    );
+  const oracleNode = await environment.openChain(`${seed}-oracle`);
+  let uninterrupted: RunObservation;
+  try {
+    uninterrupted = expectObservation(checkpoint, 'uninterrupted', await environment.launcher.launch(
+      {
+        checkpoint,
+        seed,
+        runId,
+        rpcUrl: oracleNode.rpcUrl,
+        mode: 'uninterrupted',
+        stateDir: stateDirFor(environment.stateRoot, spec, 'oracle'),
+      },
+      { killAtBoundary: false },
+    ));
+  } finally {
+    await oracleNode.close();
   }
 
-  environment.log?.(`${checkpoint}: recovery run (same run id, same state directory)`);
-  const recovered = expectObservation(checkpoint, 'recovery', await environment.launcher.launch(
-    { ...base, mode: 'resume', stateDir: recoveryStateDir },
-    { killAtBoundary: false },
-  ));
+  const recoveryStateDir = stateDirFor(environment.stateRoot, spec, 'recovery');
+  // The crash and the recovery run share one node: the recovery must reconcile the transaction the
+  // killed process actually left on chain.
+  const recoveryNode = await environment.openChain(`${seed}-recovery`);
+  let recovered: RunObservation;
+  try {
+    const recoveryBase = { checkpoint, seed, runId, rpcUrl: recoveryNode.rpcUrl, stateDir: recoveryStateDir } as const;
+    environment.log?.(`${checkpoint}: crash run (SIGKILL at ${spec.boundary})`);
+    const crashed = await environment.launcher.launch(
+      { ...recoveryBase, mode: 'crash' },
+      { killAtBoundary: true },
+    );
+    if (crashed.kind !== 'killed-at-boundary') {
+      throw new DrillFailure(
+        checkpoint,
+        crashed.kind === 'observed'
+          ? 'the crash run completed without reaching the injected boundary'
+          : `the crash run failed before the boundary: ${crashed.reason}`,
+      );
+    }
+
+    environment.log?.(`${checkpoint}: recovery run (same run id, same state directory)`);
+    recovered = expectObservation(checkpoint, 'recovery', await environment.launcher.launch(
+      { ...recoveryBase, mode: 'resume' },
+      { killAtBoundary: false },
+    ));
+  } finally {
+    await recoveryNode.close();
+  }
 
   const comparison = compareRuns(uninterrupted, recovered);
   if (!comparison.equal) {

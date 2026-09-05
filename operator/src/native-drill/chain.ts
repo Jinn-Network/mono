@@ -12,14 +12,7 @@
  * digest as transaction calldata, because what a restart must reconcile is transaction identity,
  * receipt, replacement, and finality -- none of which needs a contract to be real.
  */
-import {
-  createPublicClient,
-  createWalletClient,
-  http,
-  type Hex,
-  type PublicClient,
-  type WalletClient,
-} from 'viem';
+import { createPublicClient, createTestClient, createWalletClient, http, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { baseSepolia } from 'viem/chains';
 
@@ -68,27 +61,38 @@ function digestToCalldata(digest: string): Hex {
  * native vertical refuses any other chain, and a drill on the wrong chain would prove nothing.
  */
 export async function createAnvilDrillChain(rpcUrl: string): Promise<DrillChain> {
-  const publicClient: PublicClient = createPublicClient({
+  // Client types are inferred deliberately: the portal-linked workspace resolves more than one
+  // copy of viem's types, and an explicit annotation binds this file to whichever copy it names.
+  //
+  // `cacheTime: 0` is load-bearing. viem caches the block height for 4s by default, and the drill
+  // broadcasts and then immediately rescans canonical history — with the default a scan issued
+  // seconds after a broadcast walks up to a stale head and reports the transaction absent, which
+  // reads exactly like a lost operation.
+  const publicClient = createPublicClient({
     chain: baseSepolia,
     transport: http(rpcUrl),
+    cacheTime: 0,
   });
   const chainId = await publicClient.getChainId();
   if (chainId !== baseSepolia.id) {
     throw new Error(`restart drill requires an Anvil reporting chain id ${baseSepolia.id}, got ${chainId}`);
   }
-  const account = privateKeyToAccount(DRILL_PRIVATE_KEY);
-  const walletClient: WalletClient = createWalletClient({
-    account,
-    chain: baseSepolia,
-    transport: http(rpcUrl),
-  });
+  // On a fork, blocks below the fork point live on the remote chain: scanning into them would be
+  // both pointless (the drill wrote none of them) and ruinously slow. The floor is the first block
+  // this node produced itself, and it is read from the node rather than passed in, so every role
+  // host derives the same floor without the driver having to thread it through.
+  const nodeInfo = await publicClient.request({
+    method: 'anvil_nodeInfo' as never,
+    params: [] as never,
+  }) as { forkConfig?: { forkBlockNumber?: number | string | null } };
+  const forkBlock = nodeInfo.forkConfig?.forkBlockNumber;
+  const scanFloor = forkBlock === undefined || forkBlock === null ? 0n : BigInt(forkBlock) + 1n;
 
-  const mine = async (blocks: number): Promise<void> => {
-    await publicClient.request({
-      method: 'anvil_mine' as never,
-      params: [`0x${blocks.toString(16)}`] as never,
-    });
-  };
+  const account = privateKeyToAccount(DRILL_PRIVATE_KEY);
+  const walletClient = createWalletClient({ account, chain: baseSepolia, transport: http(rpcUrl) });
+
+  const testClient = createTestClient({ chain: baseSepolia, mode: 'anvil', transport: http(rpcUrl) });
+  const mine = (blocks: number): Promise<void> => testClient.mine({ blocks });
 
   const readHash = async (hash: `0x${string}`): Promise<DrillCanonicalRead> => {
     const latest = await publicClient.getBlockNumber();
@@ -127,7 +131,7 @@ export async function createAnvilDrillChain(rpcUrl: string): Promise<DrillChain>
       const found: DrillTransaction[] = [];
       // Anvil mines one transaction per block here, and the drill's chains are tens of blocks
       // long, so an exhaustive scan is both cheap and exact — no log filter to get wrong.
-      for (let height = 0n; height <= latest; height += 1n) {
+      for (let height = scanFloor; height <= latest; height += 1n) {
         const block = await publicClient.getBlock({ blockNumber: height, includeTransactions: true });
         for (const transaction of block.transactions) {
           if (typeof transaction === 'string') continue;
@@ -143,7 +147,13 @@ export async function createAnvilDrillChain(rpcUrl: string): Promise<DrillChain>
       return found;
     },
     async awaitFinalized(hash) {
-      // Advance past Anvil's finality depth, then let the node's own `finalized` tag decide.
+      // Advance past Anvil's finality depth only when the node does not already consider the
+      // transaction final. Mining unconditionally would grow the chain on every reconciliation
+      // read and make the canonical-history scan quadratic across a drill.
+      const current = await readHash(hash);
+      if (current.kind === 'mined' && current.finalized) {
+        return { hash, blockHash: current.blockHash, blockNumber: current.blockNumber };
+      }
       await mine(ANVIL_FINALITY_DEPTH + 1);
       const read = await readHash(hash);
       if (read.kind !== 'mined') {

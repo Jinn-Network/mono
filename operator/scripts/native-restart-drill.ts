@@ -33,7 +33,12 @@ import {
   OBSERVATION_MARKER,
   main as roleHostMain,
 } from '../src/native-drill/role-host.js';
-import { runRestartDrill, type RoleHostLauncher, type RoleRunResult } from '../src/native-drill/driver.js';
+import {
+  runRestartDrill,
+  type DrillChainNode,
+  type RoleHostLauncher,
+  type RoleRunResult,
+} from '../src/native-drill/driver.js';
 import type { DrillRecoveryReport } from '../src/native-drill/report.js';
 
 const HERE = fileURLToPath(import.meta.url);
@@ -88,12 +93,7 @@ async function freePort(): Promise<number> {
   });
 }
 
-interface AnvilProcess {
-  readonly rpcUrl: string;
-  stop(): Promise<void>;
-}
-
-async function startAnvil(options: Options): Promise<AnvilProcess> {
+async function startAnvil(options: Options): Promise<DrillChainNode> {
   const port = await freePort();
   const args = ['--port', String(port), '--silent', '--chain-id', '84532'];
   if (options.forkUrl !== undefined) {
@@ -120,7 +120,7 @@ async function startAnvil(options: Options): Promise<AnvilProcess> {
   }
   return {
     rpcUrl,
-    async stop() {
+    async close() {
       if (child.exitCode !== null) return;
       child.kill('SIGKILL');
       await new Promise((wait) => child.once('exit', wait));
@@ -222,36 +222,35 @@ async function main(): Promise<void> {
 
   mkdirSync(options.out, { recursive: true });
   const workspace = mkdtempSync(join(tmpdir(), 'jinn-native-restart-drill-'));
-  const anvil = await startAnvil(options);
-  try {
-    console.log(`[drill] anvil ${chain.mode} at ${anvil.rpcUrl} (chain id 84532)`);
-    const reports = await runRestartDrill({
-      rpcUrl: anvil.rpcUrl,
-      chain,
-      stateRoot: join(workspace, 'runs'),
-      launcher: createLauncher(workspace),
-      now: () => new Date(),
-      log: (message) => console.log(`[drill] ${message}`),
-    });
-    const index: Array<{ checkpoint: string; digest: string; file: string }> = [];
-    for (const [checkpoint, sealed] of reports) {
-      const file = `${checkpoint}.json`;
-      writeFileSync(join(options.out, file), Buffer.from(sealed.bytes));
-      index.push({ checkpoint, digest: sealed.digest, file });
-      console.log(`[drill] ${checkpoint} PASSED — ${sealed.digest}`);
-    }
-    writeFileSync(
-      join(options.out, 'recovery-reports.json'),
-      `${JSON.stringify({ recoveryReports: index.map(({ checkpoint, digest }) => ({ checkpoint, digest })) }, null, 2)}\n`,
-      'utf8',
-    );
-    console.log(
-      `\n[drill] six recovery reports written to ${options.out}; `
-      + 'recovery-reports.json carries the closure-manifest `recoveryReports` entries.',
-    );
-  } finally {
-    await anvil.stop();
+  console.log(`[drill] anvil ${chain.mode}, one node per lane (chain id 84532)`);
+  const reports = await runRestartDrill({
+    openChain: async (label) => {
+      const node = await startAnvil(options);
+      console.log(`[drill] ${label}: anvil at ${node.rpcUrl}`);
+      return node;
+    },
+    chain,
+    stateRoot: join(workspace, 'runs'),
+    launcher: createLauncher(workspace),
+    now: () => new Date(),
+    log: (message) => console.log(`[drill] ${message}`),
+  });
+  const index: Array<{ checkpoint: string; digest: string; file: string }> = [];
+  for (const [checkpoint, sealed] of reports) {
+    const file = `${checkpoint}.json`;
+    writeFileSync(join(options.out, file), Buffer.from(sealed.bytes));
+    index.push({ checkpoint, digest: sealed.digest, file });
+    console.log(`[drill] ${checkpoint} PASSED — ${sealed.digest}`);
   }
+  writeFileSync(
+    join(options.out, 'recovery-reports.json'),
+    `${JSON.stringify({ recoveryReports: index.map(({ checkpoint, digest }) => ({ checkpoint, digest })) }, null, 2)}\n`,
+    'utf8',
+  );
+  console.log(
+    `\n[drill] six recovery reports written to ${options.out}; `
+    + 'recovery-reports.json carries the closure-manifest `recoveryReports` entries.',
+  );
 }
 
 main().catch((error: unknown) => {

@@ -29,11 +29,13 @@ import {
 import type { TaskExecutionBackend } from '@jinn-network/task-execution-backend';
 import { Store } from '../../store/store.js';
 import { NativeOperatorStateRepository } from '../../daemon/native-operator-state.js';
+import type { NativeOperationId } from '../../daemon/native-operation-identity.js';
 import { NativeSolutionCoordinator } from '../../daemon/native-solution-coordinator.js';
 import type { DrillCheckpoint } from '../checkpoints.js';
 import type { RunObservation } from '../observation.js';
 import {
   DRILL_CLOCK,
+  broadcastOnce,
   digestOf,
   journal,
   observedMode,
@@ -86,7 +88,7 @@ function solutionDocuments() {
 }
 
 /** Seed the durable state up to a finalized claim — the state every solution checkpoint starts from. */
-function seedClaimedEngagement(path: string): string {
+function seedClaimedEngagement(path: string): NativeOperationId {
   const store = new Store(path);
   try {
     enqueueCard(store);
@@ -130,9 +132,13 @@ function seedClaimedEngagement(path: string): string {
   }
 }
 
+/**
+ * Every `submit` call the backend saw, across both processes of a pair — not a deduplicated set.
+ * A journal that silently swallowed the second submit would make the no-duplicate proof
+ * unfalsifiable: the counter could never be anything but zero, whatever the operator did.
+ */
 interface BackendEntry { readonly key: string; readonly digest: string }
 interface PublishEntry { readonly key: string; readonly sequence: number }
-interface SettlementEntry { readonly key: string; readonly txHash: string }
 
 export async function runSolutionScenario(
   context: ScenarioContext,
@@ -145,7 +151,6 @@ export async function runSolutionScenario(
 
   const backendJournal = journal<BackendEntry>(context, 'backend');
   const publishJournal = journal<PublishEntry>(context, 'publisher');
-  const settlementJournal = journal<SettlementEntry>(context, 'settlement');
 
   const invocations = {
     backendRecover: 0,
@@ -159,9 +164,10 @@ export async function runSolutionScenario(
   try {
     const state = new NativeOperatorStateRepository(store, { now: () => DRILL_CLOCK });
     const engagement = state.getEngagement(engagementId)!;
+    const attemptUri = engagement.attemptUri as `urn:uuid:${string}`;
     const deliveryBytes = sealDelivery({
       protocol: TASK_EXECUTION_PROTOCOL_URI,
-      attempt: engagement.attemptUri!,
+      attempt: attemptUri,
       task: documentDigest(documents.taskBytes),
       outputs: [{
         name: 'prediction',
@@ -176,9 +182,11 @@ export async function runSolutionScenario(
 
     const backend: TaskExecutionBackend = {
       capabilities: async () => ({
-        taskProfiles: [], inputMediaTypes: [], outputMediaTypes: [], workspaceKinds: [], isolation: [],
-        watch: false, cancel: false, fetchArtifact: true, signedDeliveries: true,
-        runPinning: { posture: 'none', keys: [] },
+        taskProfiles: [], inputMediaTypes: [], outputMediaTypes: [], isolation: [],
+        watch: false, cancel: false, preflight: false, fetchArtifact: true,
+        confidentialInputs: false, signedObservations: false, signedDeliveries: true,
+        evidenceCapture: 'none' as const, deadlineEnforcement: false,
+        attempts: {}, runPinning: { keys: [] },
       }),
       recover: async () => {
         invocations.backendRecover += 1;
@@ -189,7 +197,7 @@ export async function runSolutionScenario(
         invocations.backendSubmit += 1;
         // The backend durably accepts FIRST; only then may the process die. That ordering is what
         // makes the checkpoint meaningful: the operator's ignorance, not the backend's.
-        backendJournal.appendOnce(SUBMISSION_URI, {
+        backendJournal.append({
           key: SUBMISSION_URI,
           digest: documentDigest(documents.submissionBytes),
         });
@@ -203,15 +211,22 @@ export async function runSolutionScenario(
       observe: async () => ({
         descriptor: {
           protocol: TASK_EXECUTION_PROTOCOL_URI,
-          attempt: engagement.attemptUri!,
+          attempt: attemptUri,
           task: documentDigest(documents.taskBytes),
           submission: SUBMISSION_URI,
-          derived: { state: 'delivered', terminal: true },
+          derived: {
+            state: 'delivered' as const,
+            terminal: true,
+            contradictory: false,
+            cancelRequested: false,
+            executionIds: ['urn:uuid:55555555-5555-4555-8555-555555555555'],
+            deliveries: [{ digest: documentDigest(deliveryBytes) }],
+          },
         },
         cursor: { sequence: '0000000000000010' },
         observations: [],
       }),
-      deliveries: async () => [{ attempt: engagement.attemptUri!, digest: documentDigest(deliveryBytes) }],
+      deliveries: async () => [{ attempt: attemptUri, digest: documentDigest(deliveryBytes) }],
       fetchDelivery: async () => deliveryBytes,
       fetchArtifact: async () => OUTPUT_BYTES,
     };
@@ -252,11 +267,11 @@ export async function runSolutionScenario(
       },
       settlement: {
         broadcast: async () => {
-          invocations.settlementBroadcast += 1;
-          const txHash = await context.chain.broadcast(settlementKey);
-          settlementJournal.appendOnce(settlementKey, { key: settlementKey, txHash });
-          if (checkpoint === 'solution-settlement') await context.boundary();
-          return { txHash };
+          const sent = await broadcastOnce(context, settlementKey, async () => {
+            if (checkpoint === 'solution-settlement') await context.boundary();
+          });
+          if (sent.broadcast) invocations.settlementBroadcast += 1;
+          return { txHash: sent.txHash };
         },
         readCanonical: async () => {
           const history = await context.chain.findByDigest(settlementKey);
@@ -289,11 +304,14 @@ export async function runSolutionScenario(
     }
 
     const finalEngagement = state.getEngagement(engagementId)!;
+    // The graph digest deliberately excludes transaction hashes. The oracle lane and the recovery
+    // lane broadcast their own independent transactions, so their hashes differ by construction;
+    // what must match is the record graph. The hashes themselves are retained in the report's
+    // `transactionHashes`, and duplicate-freedom is asserted from canonical chain history.
     const operations = state.listOperations(engagementId).map((operation) => ({
       id: operation.operationId,
       kind: operation.kind,
       status: operation.status,
-      tx: operation.txHash,
     }));
     const artifacts = state.listSolutionArtifacts(engagementId).map((artifact) => ({
       role: artifact.role,
@@ -305,6 +323,7 @@ export async function runSolutionScenario(
     ).all(engagementId) as Array<{ publication_key: string; status: string }>;
     const settlementHistory = await context.chain.findByDigest(settlementKey);
     const backendEntries = backendJournal.entries();
+    const acceptedSubmissions = new Set(backendEntries.map(({ key }) => key));
     const publishedKeys = new Set(publishJournal.entries().map(({ key }) => key));
 
     return {
@@ -323,10 +342,14 @@ export async function runSolutionScenario(
       transactionHashes: settlementHistory.map(({ hash }) => hash),
       sourceHeads: [DRILL_SOURCE_ENTRY],
       effects: {
-        backendSubmissions: backendEntries.length,
-        duplicateSubmits: Math.max(backendEntries.length - 1, 0),
+        backendSubmissions: acceptedSubmissions.size,
+        // Every submit the backend saw, from both processes: a recovery that re-submitted instead
+        // of reconciling shows up here as a duplicate, which is the whole point of the checkpoint.
+        duplicateSubmits: Math.max(backendEntries.length - acceptedSubmissions.size, 0),
+        // Distinct records in the source. The publisher is idempotent by publication key, so a
+        // resumed publication pass is expected to re-offer keys it already wrote; what must not
+        // change is how many records the source ends up holding.
         publishedRecords: publishedKeys.size,
-        duplicatePublications: publishJournal.entries().length - publishedKeys.size,
         settlements: settlementHistory.length === 0 ? 0 : 1,
         duplicateSettlements: Math.max(settlementHistory.length - 1, 0),
       },

@@ -22,6 +22,7 @@ import { NativeOperatorStateRepository } from '../../daemon/native-operator-stat
 import type { RunObservation } from '../observation.js';
 import {
   DRILL_CLOCK,
+  broadcastOnce,
   digestOf,
   observedMode,
   storePath,
@@ -127,12 +128,12 @@ export async function runClaimScenario(context: ScenarioContext): Promise<RunObs
       claim: {
         priorityMech: BASE_SEPOLIA_TODAY.mechMarketplace,
         broadcast: async () => {
-          broadcasts += 1;
-          const txHash = await context.chain.broadcast(claimKey);
-          // The transaction is on the node. Attaching it to the operation is what the boundary
-          // interrupts, so the restarted process must find it by reconciling canonical history.
-          await context.boundary();
-          return { txHash, attemptIndex: 0, requestId: DRILL_REQUEST_ID };
+          // The transaction is on the node once the boundary fires. Attaching it to the operation
+          // is what the boundary interrupts, so the restarted process must find it by reconciling
+          // canonical history.
+          const sent = await broadcastOnce(context, claimKey, () => context.boundary());
+          if (sent.broadcast) broadcasts += 1;
+          return { txHash: sent.txHash, attemptIndex: 0, requestId: DRILL_REQUEST_ID };
         },
       },
       canonical: {
@@ -173,8 +174,12 @@ export async function runClaimScenario(context: ScenarioContext): Promise<RunObs
     const engagements = state.listEngagements().map((value) => ({
       id: value.engagementId, state: value.state, attempt: value.attemptUri,
     }));
+    // The graph digest deliberately excludes transaction hashes. The oracle lane and the recovery
+    // lane broadcast their own independent transactions, so their hashes differ by construction;
+    // what must match is the record graph. The hashes themselves are retained in the report's
+    // `transactionHashes`, and duplicate-freedom is asserted from canonical chain history.
     const operations = state.listOperations().map((value) => ({
-      id: value.operationId, kind: value.kind, status: value.status, tx: value.txHash,
+      id: value.operationId, kind: value.kind, status: value.status,
     }));
     const history = await context.chain.findByDigest(claimKey);
     return {

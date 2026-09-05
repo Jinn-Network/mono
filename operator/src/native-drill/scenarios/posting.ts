@@ -10,58 +10,54 @@
  * calldata and the sender's nonce history), posts nothing a second time, and signs its association
  * over the original Submission and the original posting terms.
  */
-import {
-  createPrivateKey,
-  createPublicKey,
-  generateKeyPairSync,
-  sign as cryptoSign,
-} from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { BASE_SEPOLIA_TODAY } from '@jinn-network/marketplace-binding';
 import {
   createNativeRequester,
+  type NativeRequesterDeps,
   type NativeRequesterRoles,
 } from '../../native-requester/requester.js';
 import type { RunObservation } from '../observation.js';
-import { DRILL_CLOCK, digestOf, observedMode, type ScenarioContext } from './support.js';
+import {
+  DRILL_CLOCK,
+  broadcastOnce,
+  digestOf,
+  observedMode,
+  type ScenarioContext,
+} from './support.js';
 
 const CREATOR_SAFE = '0x1111111111111111111111111111111111111111' as const;
-const REQUESTER_TERMS = {
+const REQUESTER_TERMS: NativeRequesterDeps['posting']['terms'] = {
   solutionMaxDeliveryRateWei: 2n,
   verdictMaxDeliveryRateWei: 3n,
   responseTimeoutSeconds: 60n,
   allowSolverSelfEvaluation: false,
-} as const;
+};
 /** Anvil's deterministic accounts make the posted task id a constant of the drill, not of a run. */
 const POSTED_TASK_ID = 17n;
 
 /**
- * Role keys must be byte-identical across the crash and resume processes, or the association the
- * restarted requester signs would differ for a reason that has nothing to do with recovery. They
- * are generated once per pair and persisted inside the pair's own state directory.
+ * Role keys are derived from the drill seed, not generated.
+ *
+ * The oracle lane and the recovery lane run in separate state directories, so a generated key pair
+ * would differ between them — and because the requester's association digests are signed, that
+ * difference alone would make the two runs diverge for a reason having nothing to do with recovery.
+ * Ed25519 signing is deterministic (RFC 8032), so seed-derived keys make the whole association
+ * byte-stable across both lanes and across re-runs.
  */
-function durableRoles(stateDir: string): NativeRequesterRoles {
-  const path = join(stateDir, 'roles', 'requester-roles.json');
-  mkdirSync(join(stateDir, 'roles'), { recursive: true });
-  let stored: Record<string, string>;
-  try {
-    stored = JSON.parse(readFileSync(path, 'utf8')) as Record<string, string>;
-  } catch {
-    stored = {};
-    for (const role of ['requester-submission', 'admission', 'requester-discovery']) {
-      stored[role] = generateKeyPairSync('ed25519', {
-        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-        publicKeyEncoding: { type: 'spki', format: 'pem' },
-      }).privateKey;
-    }
-    writeFileSync(path, JSON.stringify(stored), 'utf8');
-  }
+function drillRoles(seed: string): NativeRequesterRoles {
+  /** The fixed PKCS#8 prefix for a raw 32-byte Ed25519 private key. */
+  const PKCS8_ED25519_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
   return {
     get(role) {
-      const pem = stored[role];
-      if (pem === undefined) throw new Error(`restart drill has no requester role key for ${role}`);
-      const privateKey = createPrivateKey(pem);
+      const material = createHash('sha256').update(`jinn-restart-drill:${seed}:${role}`).digest();
+      const privateKey = createPrivateKey({
+        key: Buffer.concat([PKCS8_ED25519_PREFIX, material]),
+        format: 'der',
+        type: 'pkcs8',
+      });
       return {
         keyId: `did:key:drill-${role}`,
         publicKey: createPublicKey(privateKey),
@@ -72,7 +68,7 @@ function durableRoles(stateDir: string): NativeRequesterRoles {
 }
 
 export async function runPostingScenario(context: ScenarioContext): Promise<RunObservation | undefined> {
-  const roles = durableRoles(context.stateDir);
+  const roles = drillRoles(context.seed);
   const stateDir = join(context.stateDir, 'requester');
   mkdirSync(stateDir, { recursive: true });
 
@@ -82,7 +78,7 @@ export async function runPostingScenario(context: ScenarioContext): Promise<RunO
   /** The exact calldata identity of this posting, and the key its recovery reconciles on. */
   const postingKey = `${context.runId}:posting`;
 
-  const deps = {
+  const deps: NativeRequesterDeps = {
     stateDir,
     requesterAgent: `urn:jinn:requester:${context.seed}`,
     admissionAgent: `urn:jinn:admission:${context.seed}`,
@@ -103,12 +99,11 @@ export async function runPostingScenario(context: ScenarioContext): Promise<RunO
         resolvedScopes: [], uncertainScopes: [], retryableScopes: [], conflicts: [],
       }),
       post: async () => {
-        broadcasts += 1;
-        const txHash = await context.chain.broadcast(postingKey);
-        // The wallet has returned. Everything after this line is hash persistence, which is
-        // exactly what the injected boundary must interrupt.
-        await context.boundary();
-        return { taskId: POSTED_TASK_ID, txHash };
+        // The wallet has returned by the time the boundary fires. Everything after it is hash
+        // persistence, which is exactly what the injected boundary must interrupt.
+        const posted = await broadcastOnce(context, postingKey, () => context.boundary());
+        if (posted.broadcast) broadcasts += 1;
+        return { taskId: POSTED_TASK_ID, txHash: posted.txHash };
       },
       recover: async () => {
         recoveries += 1;
@@ -116,11 +111,7 @@ export async function runPostingScenario(context: ScenarioContext): Promise<RunO
         const first = history[0];
         return first === undefined ? null : { taskId: POSTED_TASK_ID, txHash: first.hash };
       },
-      canonicalTaskCreated: async (expected: {
-        chainId: number; coordinator: string; creator: string; taskId: bigint;
-        taskDigest: `sha256:${string}`; txHash: `0x${string}`;
-        terms: typeof REQUESTER_TERMS; maxClaims: 1;
-      }) => ({ canonical: true as const, ...expected }),
+      canonicalTaskCreated: async (expected) => ({ canonical: true as const, ...expected }),
     },
     now: () => DRILL_CLOCK,
   };
