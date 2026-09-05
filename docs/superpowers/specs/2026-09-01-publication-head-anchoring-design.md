@@ -2,14 +2,15 @@
 
 | | |
 |---|---|
-| **Version** | 0.1 |
-| **Date** | 2026-09-01 |
+| **Version** | 0.2 |
+| **Date** | 2026-09-01 (v0.1); 2026-09-05 (v0.2 applies the operator ruling) |
 | **Shape** | `design` |
-| **Status** | proposed; awaiting product-owner decision |
+| **Status** | adopted — operator ruling 2026-09-05; §10's four decisions D1–D4 are closed as recommended ([PR #3476 comment 5554840223](https://github.com/Jinn-Network/mono/pull/3476#issuecomment-5554840223)) |
 | **Issue** | [#3400](https://github.com/Jinn-Network/mono/issues/3400) |
 | **Executes** | [neutral freeze-announcement surface](./2026-08-29-neutral-freeze-announcement-surface.md) §8 and §10 item 3, including its two open questions |
 | **Depends on** | [pluggable integrity providers / anchor evidence](./2026-08-17-pluggable-integrity-providers-design.md) §5, §6.1–§6.4, §7.1–§7.4; [record discovery](../plans/2026-07-28-record-discovery.md) §5.1–§5.3, §5.5, §7; [publication interoperability profile](./2026-08-13-benchmark-publication-interoperability-profile.md) §9.3 |
-| **Outcome** | both open questions settled, one mechanism specified, four decisions put to the product owner, and an explicit statement of the ceiling this buys |
+| **Outcome** | both open questions settled, one mechanism specified, four decisions ruled by the product owner, and an explicit statement of the ceiling this buys |
+| **v0.2 changes** | Ruling erratum only. §10 flips from four open decisions to four operator rulings; the D3 skew allowance becomes configurable in §4.4 and §7; §5.3 records that the bundle does not cite `(origin, sequence)` in v1; §11 is released for filing at low priority. **The design itself (§0–§9) is otherwise unchanged**, and no analysis is rewritten. |
 
 ## 0. Decision in plain language
 
@@ -294,7 +295,9 @@ OTS upgrade exception (`core/src/run/state.ts`). A source is not a run: it has n
   than a stated skew allowance, because a publisher whose entry post-dates its own anchor
   has written a self-contradiction that would later read as stronger evidence than it is.
   Default allowance: 5 minutes. This is producer-side only; it introduces **no** verifier
-  rule and no new verifier posture. Decision D3 in §10 asks whether to keep it.
+  rule and no new verifier posture. Ruled kept (D3, §10), with one amendment: the
+  allowance is a configured value with that default, not a constant, so an operator whose
+  provider or clock discipline warrants a different figure sets it without a code change.
 
 ## 5. Open question 2 — carriage
 
@@ -364,10 +367,12 @@ source `origin` and the `sequence` at which this run's publication was announced
 run-scoped facts fixed at publication time, both are single short strings, and together
 they let a reader go and check the chain themselves.
 
-Whether the bundle should carry that pointer *at all* is Decision D4 in §10, because it
+Whether the bundle should carry that pointer *at all* was Decision D4 in §10, because it
 touches the sealed publication closure and this design's default is to touch nothing there.
-The safe default is no: `publication-register` already announces on the chain, and a reader
+**Ruled: no, for v1.** `publication-register` already announces on the chain, and a reader
 who has the archive base URL can find the run's announcement without a new bundle field.
+The implementing `feat` adds no bundle field, and the sealed publication closure is left
+exactly as it is. Revisit only if a consumer actually needs the pointer.
 
 ### 5.4 The reader's procedure
 
@@ -438,8 +443,9 @@ shape, not so it is pre-decided.
 4. **Operation** — `anchorSourceEntry(context, {entryDigest, providerProfile?, endpoint?})`,
    reusing `resolveAnchorConfiguration`, `buildSource`, `verifyAcquiredProof`,
    `requireVerifiable`, `sealAnchorEvidence`, and `putSealedBytes` verbatim. It resolves the
-   subject from the source's committed position, refuses on the §4.4 sanity rule, re-reads
-   the ledger after the network round trip exactly as `runAnchor` re-reads `RunState`, and
+   subject from the source's committed position, refuses on the §4.4 sanity rule — whose
+   skew allowance is configured, defaulting to 5 minutes, per ruling D3 — re-reads the
+   ledger after the network round trip exactly as `runAnchor` re-reads `RunState`, and
    stores.
 5. **Announcement** — the next substantive append (or a dedicated append when none is
    pending) announces the record with an `https` location into the served archive.
@@ -486,30 +492,54 @@ approximation are:
 Until then, this is the strongest thing obtainable with zero new trust machinery, and it
 should be presented as exactly that.
 
-## 10. Decisions for the product owner
+## 10. Operator rulings
 
-This design is complete enough to implement, and four calls are the operator's rather
-than the author's.
+v0.1 put four calls to the product owner rather than the author. They are **ruled**, all
+four as recommended. Source: the operator comment on
+[PR #3476](https://github.com/Jinn-Network/mono/pull/3476#issuecomment-5554840223)
+(comment 5554840223), 2026-09-05. The implementing work proceeds from these rulings; none
+of the four remains a question, and none of them blocks anything already shipped.
 
-- **D1 — Build it at all.** §8 of the neutral-freeze design filed head anchoring as
-  explicitly optional and non-blocking, and nothing has changed that. The case for
-  building now is that it is cheap, additive, and invariant to the open head-freshness
-  work; the case for waiting is that no second publisher exists yet, so nobody is
-  cross-comparing chains and the tripwire has few holders. **Recommended: build, at low
-  priority.**
-- **D2 — Announce-on-chain (§5.2) versus a sidecar.** The design rules announce-on-chain
-  and states the rejected alternative. This is the one ruling that changes the chain's own
-  content, so it is worth an explicit yes. **Recommended: announce on chain.**
-- **D3 — Keep the producer-side post-dating sanity rule (§4.4) and its 5-minute skew
-  allowance.** It is small and one-directional; the argument against is that it is a rule
-  no verifier mirrors, and the neutral-freeze design's own §7.1-rule-4 discussion shows
-  producer-side rules that no verifier shares are a maintenance liability.
-  **Recommended: keep, with the allowance configurable.**
-- **D4 — Whether the bundle cites `(origin, sequence)` (§5.3).** Default is no. It touches
-  the sealed publication closure, which this design otherwise leaves alone.
-  **Recommended: no, for v1.**
+Each block restates the v0.1 question so the mapping is unambiguous, then records the
+ruling. The ruling is the operator's meaning; the v0.1 recommendation is historical
+context and is not restated as if it were still a pick.
 
-## 11. Follow-ups (file only on approval)
+**D1 — Build it at all?**
+§8 of the neutral-freeze design filed head anchoring as explicitly optional and
+non-blocking, and nothing has changed that. The case for building was that it is cheap,
+additive, and invariant to the open head-freshness work; the case for waiting was that no
+second publisher exists yet, so nobody is cross-comparing chains and the tripwire has few
+holders.
+**Ruling: build, at low priority.** It was filed optional and stays optional; the design is
+now written and the cost is known. §11's follow-ups are released for filing at low
+priority; they are not filed by this document.
+
+**D2 — Announce-on-chain (§5.2) versus a sidecar?**
+This is the one call that changes the chain's own content, so it wanted an explicit yes
+rather than an inherited default.
+**Ruling: announce on chain**, as an ordinary `AnchorEvidence` entry. §5.2 stands as
+written, including its stopping rule, and the rejected sidecar alternative stays rejected.
+
+**D3 — Keep the producer-side post-dating sanity rule (§4.4) and its 5-minute skew
+allowance?**
+It is small and one-directional; the argument against was that it is a rule no verifier
+mirrors, and the neutral-freeze design's own §7.1-rule-4 discussion shows producer-side
+rules that no verifier shares are a maintenance liability.
+**Ruling: keep it, and make the allowance configurable rather than a constant.** 5 minutes
+remains the default. §4.4 and §7 item 4 carry the amendment. It stays producer-side: no
+verifier rule and no new verifier posture.
+
+**D4 — Does the bundle cite `(origin, sequence)` (§5.3)?**
+It touches the sealed publication closure, which this design otherwise leaves alone.
+**Ruling: no, for v1.** The bundle gains no field, `RunState`, `deriveClaimAnchors`, the
+claim `anchors` section, the `integrity-anchors` check, and the standalone verifier's
+offline property are all untouched, and a bundle produced before and after this ships is
+byte-identical. Revisit only if a consumer actually needs the pointer.
+
+## 11. Follow-ups (approved for filing, low priority)
+
+Ruling D1 releases these for filing. They carry the priority that ruling names — low — and
+item 1 implements §7 under rulings D2, D3, and D4.
 
 1. **`feat(benchmark-product|discovery)` — implement §7.** The identifier, facts profile,
    ledger, operation, announcement, never-blocks hook, and operator line. One PR is
@@ -541,6 +571,9 @@ than the author's.
 
 - Origin: follow-up 3 of `docs/superpowers/specs/2026-08-29-neutral-freeze-announcement-surface.md`
   §8 and §10, filed as #3400 on operator ratification of PR #3344.
+- Adoption: operator ruling on
+  [PR #3476](https://github.com/Jinn-Network/mono/pull/3476#issuecomment-5554840223),
+  2026-09-05, recorded in §10. v0.2 applies it; §0–§9 are otherwise unchanged from v0.1.
 - Ground truth re-derived from the tree on 2026-09-01: `packages/discovery/protocol`,
   `packages/discovery/serve`, `packages/benchmark-product/core/src/anchor`,
   `core/src/operations/run-anchor.ts`, `core/src/run/state.ts`, and
