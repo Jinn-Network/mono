@@ -137,7 +137,9 @@ export function reviewReportProse(html: string): readonly ReportProseFinding[] {
   const occurrences = new Map<string, number>();
   const order: string[] = [];
   for (const block of blocks) {
-    for (const statement of new Set(statements(block))) {
+    // Counted per occurrence rather than per block: a paragraph that makes the same statement
+    // twice is the defect, not an exemption from it.
+    for (const statement of statements(block)) {
       const seen = occurrences.get(statement);
       if (seen === undefined) order.push(statement);
       occurrences.set(statement, (seen ?? 0) + 1);

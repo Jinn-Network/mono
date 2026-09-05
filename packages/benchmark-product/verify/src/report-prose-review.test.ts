@@ -67,6 +67,13 @@ describe("reviewReportProse", () => {
     expect(findings.map((finding) => finding.text)).toEqual(["no comparative winner is stated"]);
   });
 
+  test("reports a statement one block makes twice", () => {
+    const findings = reviewReportProse(page("<p>Lower is better. The interval is Wilson. Lower is better.</p>"));
+    expect(findings).toEqual([
+      { rule: "repeated-statement", text: "lower is better", detail: "stated 2 times; issue #3016 requires each fact to appear once" },
+    ]);
+  });
+
   test("does not report a statement the page makes once", () => {
     expect(reviewReportProse(page("<p>Lower is better.</p><p>Sealed Report facts</p>"))).toEqual([]);
   });
