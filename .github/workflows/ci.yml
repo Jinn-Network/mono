@@ -286,9 +286,11 @@ jobs:
       # a test picks it and the moment it binds, producing an EADDRINUSE that
       # only ever reproduces under parallel CI load. See issue #1627.
       - run: yarn lint:no-fixed-test-port
-      # The guard above is seven regexes over source text, and both of its
-      # failure modes are expensive on a required gate: a false negative reads
-      # as coverage it does not provide, a false positive reddens unrelated PRs.
+      # The guard above is a stack of regexes over source text, and both of
+      # its failure modes are expensive on a required gate: a false negative
+      # reads as coverage it does not provide, a false positive reddens
+      # unrelated PRs. The table drives the guard's traversal and bail paths
+      # over throwaway trees as well as its rules.
       # Its fixture table is a node:test file, not a vitest one — it lives in
       # scripts/, which no `nodeInclude` glob collects — so it needs its own
       # step, the same way npm-publish-workflow.test.mjs below does.
