@@ -198,11 +198,11 @@ function blankComments(text: string): string {
  * The interiors of terminated same-line single- and double-quoted strings are blanked, so a call
  * written inside a string is not read as one (#4020). A quote opens a span only at line start or
  * after the preceding non-whitespace token =, (, comma, or colon, and only before an unblanked
- * slash has appeared on that line. Once a slash appears outside a recognized string, every later
- * quote candidate stays visible: slash-bearing lines may be noisy, but cannot hide a real call.
- * A slash inside a recognized string does not taint later code because the scan advances over the
- * whole string body. [, a backslash, another quote, identifier text, and backtick text likewise
- * cannot open a span: those ambiguous candidates stay visible and fail loud.
+ * slash has appeared on that line. After any quote candidate is rejected -- whether because of a
+ * prior slash or an unsafe opener context -- blanking stops for the remainder of that line. Earlier
+ * recognized strings stay blanked, while every character at and after the ambiguity stays visible
+ * and fails loud. A slash inside a recognized string does not taint later code because the scan
+ * advances over the whole string body.
  *
  * A would-be span containing a semicolon also stays visible because it may cross an executable
  * statement boundary. The walker advances to that span's closer instead of retrying its suffix,
@@ -228,8 +228,7 @@ function blankStringLiterals(text: string): string {
         continue;
       }
       if (slashSeen || (previousToken !== undefined && !openers.has(previousToken))) {
-        previousToken = character;
-        continue;
+        break;
       }
 
       let closer = index + 1;
@@ -704,6 +703,15 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     }]);
   });
 
+  test("a rejected quote cannot let a later quote hide a call", () => {
+    const source = `const values = ['x="', runBindingSentence(forged), ""];\n`;
+    expect(emitterCallSites(source, "fixture.ts")).toEqual([{
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    }]);
+  });
+
   test("a quote after an opener inside a regex cannot hide a later call", () => {
     for (const source of [
       'const values = [/(")/u, runBindingSentence(forged), ""];\n',
@@ -731,7 +739,7 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     }
   });
 
-  test("repeated rejected quote candidates are handled without suffix retries", { timeout: 1_000 }, () => {
+  test("the first rejected quote stops the line without suffix retries", { timeout: 1_000 }, () => {
     const source = "const value = " + '\\";'.repeat(20_000) + "end";
     expect(blankStringLiterals(source)).toBe(source);
   });
