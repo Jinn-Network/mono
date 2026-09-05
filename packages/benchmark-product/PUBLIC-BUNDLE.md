@@ -808,7 +808,7 @@ source of truth; what the projection adds is that the derivation is a function
 rather than a hand assembly, so a published tree cannot drift from the bundle
 without the check saying so.
 
-The format is `colophon-freeze-repo/1`, and the determinism claim is stated for
+The format is `colophon-freeze-repo/2`, and the determinism claim is stated for
 it exactly: for a given format version the rendered tree is a pure function of the
 bundle bytes. No clock, no locale, no filesystem enumeration order, and no tool
 version reaches the tree. A renderer change is therefore a format bump, not silent
@@ -845,19 +845,30 @@ The layout:
   data, never hand-written. The publication licence is the SPDX identifier the
   sealed Benchmark record declares; the per-source attribution and licence
   descriptors come from the sealed source-manifest rows. `LICENSE` states the
-  identifier and its canonical SPDX URL rather than reproducing licence text the
-  bundle does not carry. `NOTICE` carries the modification notice, and it states the
+  identifier, and where the SPDX list can carry it the list address for that
+  identifier, rather than reproducing licence text the bundle does not carry.
+  `NOTICE` carries the modification notice, and it states the
   fact rather than inverting it: the bundle carries no upstream source bytes at
   all, so no member is an unmodified upstream copy. Every member under
   `artifacts/` is a Colophon-authored or Colophon-derived sealed record over
-  sources the manifest names by URI and digest. The licence identifier must be an
-  SPDX short identifier: the export checks it against the SPDX 2.3 Annex A
+  sources the manifest names by URI and digest. The declared licence must be an
+  SPDX licence expression: the export checks it against the SPDX 2.3 Annex D
   grammar, so free text is a refusal rather than a rendered
-  `SPDX-License-Identifier:` line. The grammar is not the SPDX licence list, and
+  `SPDX-License-Identifier:` line, while an ordinary dual licence
+  (`Apache-2.0 OR MIT`) is accepted. The grammar is not the SPDX licence list, and
   the export deliberately does not carry a list that would date — so `LICENSE`
-  cites the SPDX list address for the identifier and says in as many words that
-  an identifier the list does not carry will not resolve there. A `LicenseRef-`
-  identifier, which SPDX defines as off-list, gets no address at all.
+  cites the SPDX list address for a single identifier and says in as many words
+  that an identifier the list does not carry will not resolve there. A
+  `LicenseRef-` identifier, which SPDX defines as off-list, gets no address at
+  all, and neither does a compound expression, which names no one list entry. The
+  publication's `name`, `version`, `author`, and `citation` are spliced into these
+  generated files verbatim, so each is refused if it carries a control character
+  or line separator — C0, DEL, all of C1, `U+2028` and `U+2029`, since a
+  licence scanner breaks lines on more of those than JavaScript does — or a line
+  that would read as a second `SPDX-…:` tag. In `metadata/spdx.json` a
+  source `downloadLocation` that is not a remote URL, and an `author` that is a
+  scheme-qualified machine identifier rather than a supplier name, both report
+  `NOASSERTION` rather than stating something the record does not support.
 - `README.md` — the doctrine, the layout, and the check.
 
 The tree's **git commit hash is the value a freeze announcement pins**. It is

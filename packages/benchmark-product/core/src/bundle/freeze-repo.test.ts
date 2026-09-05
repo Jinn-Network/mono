@@ -21,6 +21,7 @@ import {
   exportFreezeRepo,
   runVerifierCli,
   verifyFreezeRepo,
+  verifyPublicBundleSnapshot,
 } from "@colophon-claims/verify";
 import { runCli } from "../cli/main.js";
 import { createSyntheticV4BundleFixture } from "./testing/v4-synthetic-fixture.js";
@@ -185,6 +186,35 @@ describe("freeze-repository export against a real v4 bundle", () => {
     expect(drifted.stdout).toContain("changed: README.md");
   });
 
+  test("verifies the bundle once, and renders the freeze tree from that same snapshot", async () => {
+    // The freeze check used to call `verifyFreezeRepo(bundleDir, repoDir)`, which re-opened the
+    // bundle and ran a second full verification -- outside the `deps.verify` seam, and so without
+    // the caller's `--tsa-root` / `--ots-headers` material, leaving its anchor outcomes free to
+    // differ from the reported ones with nothing saying so (issue #3352).
+    //
+    // Counting seam calls cannot see that: the second pass bypassed the seam, which is the whole
+    // defect. So the bundle directory the CLI is given does not exist on disk, and the snapshot
+    // comes only from the seam. A second pass has nothing to read and throws; one pass renders the
+    // tree from the snapshot it was handed.
+    const bundleDir = licensedBundle;
+    const repoDir = join(tempDir("single-verify"), "tree");
+    await exportFreezeRepo(bundleDir, repoDir);
+    const verified = await verifyPublicBundleSnapshot(bundleDir);
+
+    let calls = 0;
+    const result = await runVerifierCli([join(tempDir("absent"), "no-such-bundle"), "--freeze-repo", repoDir, "--json"], {
+      verify: async () => {
+        calls += 1;
+        return verified;
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect((JSON.parse(result.stdout) as { freezeRepo: { ok: boolean } }).freezeRepo.ok).toBe(true);
+  });
+
   // Issue #3607: the mode dimension is skipped on a filesystem that does not record an executable
   // bit, and on one no probe site could be written to. The first is unreachable in CI, but a
   // read-only repository directory reaches the second — an exported tree has no `.git`, so the tree
@@ -343,6 +373,22 @@ describe("freeze-repo CLI verbs", () => {
     expect(envelope.ok).toBe(false);
     expect(envelope.error.code).toBe("record-integrity");
     expect(envelope.error.issues).toEqual([{ path: "README.md", message: "changed" }]);
+    // The oid the bundle renders to is reported on the drift path too, not only on the matching
+    // one (issue #3352): a reader deciding whether the tree they hold is the one an announcement
+    // pinned cannot answer that from a difference list alone.
+    const rendered = await verifyFreezeRepo(bundleDir, repoDir);
+    expect(envelope.error.detail).toContain(`commit ${rendered.commitId}`);
+  });
+
+  test("the roles an export reports are the frozen catalog order, not an alphabetical one", async () => {
+    // `freeze.json` renders role groups in the frozen order; the export result used to present the
+    // same list alphabetically, so one list appeared in two orders on two surfaces (issue #3352).
+    const repoDir = join(tempDir("cli-roles"), "repo");
+    const exported = await exportFreezeRepo(licensedBundle, repoDir);
+    const manifest = JSON.parse(readFileSync(join(repoDir, "freeze.json"), "utf8")) as {
+      roles: readonly { readonly role: string }[];
+    };
+    expect(exported.roles).toEqual(manifest.roles.map((group) => group.role));
   });
 });
 

@@ -138,8 +138,31 @@ describe("colophon import item-bank", () => {
     expect(freeText.exitCode).toBe(2);
     expect(JSON.parse(freeText.stdout)).toMatchObject({
       ok: false,
-      error: { code: "invalid-invocation", detail: expect.stringContaining("SPDX short identifier") },
+      error: { code: "invalid-invocation", detail: expect.stringContaining("SPDX licence expression") },
     });
+
+    // The grammar tokenizes on whitespace, so it admits values the export refuses when it renders
+    // them onto the tag line exactly as declared. The flag applies the export's whole check, not
+    // the grammar alone, or these seal a record that can never be rendered (issue #3878).
+    for (const [index, padded] of ["Apache-2.0  OR  MIT", "MIT\tOR Apache-2.0", " MIT"].entries()) {
+      const refused = await runCli([
+        "import", "item-bank",
+        "--workspace", workspaceDir,
+        "--principal", "sponsor-1",
+        "--profile", "binary-judgment@2",
+        "--draft", "d1",
+        "--items", itemsPath,
+        "--sources", sourcesPath,
+        "--admissions", admissionsPath,
+        "--license", padded,
+        "--json",
+      ], { cwd: root, clock: () => `2026-08-15T11:01:${String(10 + index).padStart(2, "0")}.000Z` });
+      expect(refused.exitCode, padded).toBe(2);
+      expect(JSON.parse(refused.stdout), padded).toMatchObject({
+        ok: false,
+        error: { code: "invalid-invocation", detail: expect.stringContaining("single spaces") },
+      });
+    }
 
     writeFileSync(itemsPath, `\uFEFF${renderCanonicalJsonl([{
       protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL,

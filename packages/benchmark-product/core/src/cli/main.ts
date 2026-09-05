@@ -96,7 +96,13 @@ import {
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
 import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/verify";
-import { DOMAIN_BINDING_MECHANISM_NAMES, exportFreezeRepo, summarizeVerificationOutcome, verifyFreezeRepo } from "@colophon-claims/verify";
+import {
+  DOMAIN_BINDING_MECHANISM_NAMES,
+  exportFreezeRepo,
+  spdxLicenseProblem,
+  summarizeVerificationOutcome,
+  verifyFreezeRepo,
+} from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { formatSampleSizeAdvisory } from "../run/sample-size-advisory.js";
@@ -601,15 +607,17 @@ function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: b
   const description = optional(args, "description");
   const version = optional(args, "version");
   const license = optional(args, "license");
-  if (license !== undefined && !/^[A-Za-z0-9][A-Za-z0-9.+-]*$/u.test(license)) {
-    // The same SPDX 2.3 Annex A short-identifier grammar the freeze-repository export applies when
-    // it renders `SPDX-License-Identifier:`. Refusing here makes free text a one-second failure at
-    // the flag rather than a refusal after the record is sealed and published.
-    refuse(
-      "invalid-invocation",
-      "--license",
-      "--license must be an SPDX short identifier (SPDX 2.3 Annex A grammar), not free text",
-    );
+  const licenseProblem = license !== undefined ? spdxLicenseProblem(license) : undefined;
+  if (licenseProblem !== undefined) {
+    // The whole check the freeze-repository export applies before it renders
+    // `SPDX-License-Identifier:` — imported rather than restated, so the flag and the export
+    // cannot come to disagree about what a licence is. Importing the grammar alone would not do
+    // that: the grammar tokenizes on whitespace, so it admits padding and tabs the export refuses
+    // (issue #3878). Refusing here makes such a value a one-second failure at the flag rather than
+    // a refusal after the record is sealed and published — at which point the licence can no
+    // longer be corrected. It is an expression, not a bare identifier: `Apache-2.0 OR MIT` is an
+    // ordinary dual licence, and the narrower check refused it outright.
+    refuse("invalid-invocation", "--license", `--license ${licenseProblem}`);
   }
   const citation = optional(args, "citation");
   const parserInvalidPolicy = optional(args, "parser-invalid-policy");
@@ -1757,7 +1765,10 @@ async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jso
   // A drifted tree must not exit 0. `check && publish` is exactly how this verb gets used, and a
   // zero exit there publishes the drift. The typed envelope still carries every difference, so a
   // machine caller reads WHICH members drifted from `issues`, not from prose.
-  const detail = `freeze repository does not match ${result.bundleIdentity}: ${result.differences
+  // The commit id is reported on this path too, not only on the matching one: a drift report whose
+  // reader is deciding whether the tree they hold is the one an announcement pinned needs the oid
+  // the bundle renders to in order to answer that at all.
+  const detail = `freeze repository does not match ${result.bundleIdentity} (bundle renders commit ${result.commitId}): ${result.differences
     .map((difference) => `${difference.path} (${difference.kind})`)
     .join(", ")}`;
   return renderResult(

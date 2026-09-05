@@ -325,11 +325,15 @@ test("the trust-material flags reach the verifier; a malformed header file exits
       readFile: (path) => files.get(path),
       verify: async (_dir, options) => {
         seen = options;
-        return { format: "benchmark-product-public-bundle/6", identity: "a".repeat(64), checks: V6_CHECKS, ...V6_IDENTITIES };
+        return { verification: { format: "benchmark-product-public-bundle/6", identity: "a".repeat(64), checks: V6_CHECKS, ...V6_IDENTITIES } };
       },
     },
   );
   assert.equal(ok.exitCode, 0);
+  // The seam returns the verification AND the snapshot the freeze check renders from, so the
+  // reported body must still be the verification. A stub returning the bare verification spreads
+  // to nothing rather than throwing, which would empty this body with nothing said.
+  assert.equal(JSON.parse(ok.stdout).identity, "a".repeat(64));
   assert.equal(seen.anchorTrust.rfc3161.trustAnchorsDer.length, 1);
   assert.deepEqual([...seen.anchorTrust.opentimestamps.blockHeaders].map((entry) => entry.height), [880017]);
   assert.equal(seen.anchorTrust.opentimestamps.blockHeaders[0].header.length, 80);
@@ -346,10 +350,11 @@ test("the trust-material flags reach the verifier; a malformed header file exits
     readFile: () => { throw new Error("must not be reached"); },
     verify: async (_dir, options) => {
       seen = options;
-      return { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES };
+      return { verification: { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES } };
     },
   });
   assert.equal(bare.exitCode, 0);
+  assert.deepEqual(JSON.parse(bare.stdout).checks, ["manifest"]);
   assert.deepEqual(seen, {});
 });
 
@@ -362,7 +367,7 @@ test("a PEM trust anchor file is decoded into one DER root per block", async () 
     readFile: () => new TextEncoder().encode(pem + pem),
     verify: async (_dir, options) => {
       seen = options;
-      return { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES };
+      return { verification: { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES } };
     },
   });
   assert.equal(result.exitCode, 0);
@@ -702,7 +707,7 @@ test("a verified binding renders the domain and names the proof mechanism plainl
   const { keyId, bytes } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
     readFile: () => bytes,
-    verify: async () => publisherResult(keyId),
+    verify: async () => ({ verification: publisherResult(keyId) }),
   });
   assert.equal(result.exitCode, 0);
   // Attributive, not assertive: only the key's signature was checked, so the line says so where a
@@ -725,7 +730,7 @@ test("a verified binding renders the domain and names the proof mechanism plainl
 test("without a binding the publisher is named by its bare key fingerprint", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
-  const result = await runVerifierCli(["bundle"], { verify: async () => publisherResult(keyId) });
+  const result = await runVerifierCli(["bundle"], { verify: async () => ({ verification: publisherResult(keyId) }) });
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /key sha256:[a-f0-9]{64} — no domain bound/);
   assert.doesNotMatch(result.stdout, /claims publication/);
@@ -739,7 +744,7 @@ test("a binding for a key that did not sign the bundle exits 2 and is not render
   const other = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
     readFile: () => bytes,
-    verify: async () => publisherResult(other.keyId),
+    verify: async () => ({ verification: publisherResult(other.keyId) }),
   });
   assert.equal(result.exitCode, 2);
   assert.match(result.stderr, /domain binding not applied/);
@@ -754,7 +759,7 @@ test("--json carries the verified binding, and the failure in its place", async 
   const { keyId, bytes } = await mintDomainBinding("example.org", "well-known-url");
   const ok = await runVerifierCli(["bundle", "--json", "--identity-binding", "b.json"], {
     readFile: () => bytes,
-    verify: async () => publisherResult(keyId),
+    verify: async () => ({ verification: publisherResult(keyId) }),
   });
   const parsed = JSON.parse(ok.stdout);
   assert.equal(parsed.ok, true);
@@ -767,7 +772,7 @@ test("--json carries the verified binding, and the failure in its place", async 
 
   const bad = await runVerifierCli(["bundle", "--json", "--identity-binding", "b.json"], {
     readFile: () => new TextEncoder().encode("{"),
-    verify: async () => publisherResult(keyId),
+    verify: async () => ({ verification: publisherResult(keyId) }),
   });
   const parsedBad = JSON.parse(bad.stdout);
   assert.equal(parsedBad.ok, false);
@@ -792,14 +797,16 @@ test("a binding for a grader key never becomes the publisher's identity", async 
   const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
     readFile: () => grader.bytes,
     verify: async () => ({
-      format: "benchmark-product-public-bundle/6",
-      identity: "a".repeat(64),
-      checks: V6_CHECKS,
-      ...V6_IDENTITIES,
-      signers: [
-        { role: "publisher", identity: "urn:jinn:agent:alpha", keyId: publisher.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(publisher.keyId) },
-        { role: "automated-grader", identity: "urn:jinn:agent:beta", keyId: grader.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(grader.keyId) },
-      ],
+      verification: {
+        format: "benchmark-product-public-bundle/6",
+        identity: "a".repeat(64),
+        checks: V6_CHECKS,
+        ...V6_IDENTITIES,
+        signers: [
+          { role: "publisher", identity: "urn:jinn:agent:alpha", keyId: publisher.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(publisher.keyId) },
+          { role: "automated-grader", identity: "urn:jinn:agent:beta", keyId: grader.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(grader.keyId) },
+        ],
+      },
     }),
   });
   assert.equal(result.exitCode, 2);
@@ -815,14 +822,16 @@ test("with no single publisher there is no identity to qualify, so neither line 
   const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
     readFile: () => bytes,
     verify: async () => ({
-      format: "benchmark-product-public-bundle/6",
-      identity: "a".repeat(64),
-      checks: V6_CHECKS,
-      ...V6_IDENTITIES,
-      signers: [
-        { role: "publisher", identity: "urn:jinn:agent:alpha", keyId, custody: "same-operator" },
-        { role: "publisher", identity: "urn:jinn:agent:beta", keyId: second.keyId, custody: "same-operator" },
-      ],
+      verification: {
+        format: "benchmark-product-public-bundle/6",
+        identity: "a".repeat(64),
+        checks: V6_CHECKS,
+        ...V6_IDENTITIES,
+        signers: [
+          { role: "publisher", identity: "urn:jinn:agent:alpha", keyId, custody: "same-operator" },
+          { role: "publisher", identity: "urn:jinn:agent:beta", keyId: second.keyId, custody: "same-operator" },
+        ],
+      },
     }),
   });
   assert.equal(result.exitCode, 2);
@@ -839,7 +848,7 @@ test("a drifted freeze repository still exits 1 when an unrelated binding also f
     ["bundle", "--freeze-repo", "repo", "--identity-binding", "binding.json"],
     {
       readFile: () => new TextEncoder().encode("{"),
-      verify: async () => publisherResult(keyId),
+      verify: async () => ({ verification: publisherResult(keyId) }),
       freezeRepo: async () => ({ ok: false, commitId: "c".repeat(40), fileCount: 3, executableBitChecked: true, differences: [{ kind: "changed", path: "README.md" }] }),
     },
   );
@@ -864,7 +873,7 @@ test("a filesystem that does not record the bit is reported as one, not as a ref
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
-    verify: async () => publisherResult(keyId),
+    verify: async () => ({ verification: publisherResult(keyId) }),
     freezeRepo: async () => matchedTree({ executableBitChecked: false, executableBitSkipped: "not-recorded" }),
   });
   assert.equal(result.exitCode, 0);
@@ -875,7 +884,7 @@ test("a refused probe says so rather than describing the reader's filesystem", a
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
-    verify: async () => publisherResult(keyId),
+    verify: async () => ({ verification: publisherResult(keyId) }),
     freezeRepo: async () => matchedTree({ executableBitChecked: false, executableBitSkipped: "not-probed" }),
   });
   assert.equal(result.exitCode, 0);
@@ -888,7 +897,7 @@ test("a result carrying no reason claims neither cause", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
-    verify: async () => publisherResult(keyId),
+    verify: async () => ({ verification: publisherResult(keyId) }),
     freezeRepo: async () => matchedTree({ executableBitChecked: false }),
   });
   assert.equal(result.exitCode, 0);
@@ -900,7 +909,7 @@ test("a checked mode dimension adds no note at all", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
-    verify: async () => publisherResult(keyId),
+    verify: async () => ({ verification: publisherResult(keyId) }),
     freezeRepo: async () => matchedTree({ executableBitChecked: true }),
   });
   assert.equal(result.exitCode, 0);
