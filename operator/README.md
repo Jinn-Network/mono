@@ -120,10 +120,11 @@ Any verb that touches private keys resolves its password in this order:
 The password is never read from config files. `jinn keys change-password`
 rotates the keystore of the earning dir it targets — `JINN_EARNING_DIR`,
 else the `--config` file's `earningDir`, else the default one. The
-auto-generated password file is host-wide rather than per-operator, so it
-is deleted only once it no longer opens the default keystore: rotating a
-second operator on the same host leaves the default operator's password
-file intact. After a deletion, set `JINN_PASSWORD` yourself.
+auto-generated password file is deleted only if it contains the authenticated
+old password and the default keystore is the rotated file or absent. Rotating
+a second operator leaves an existing default operator's password file intact,
+even if that keystore is damaged. An unchanged password is retained. After a
+deletion, set `JINN_PASSWORD` yourself.
 
 **Security note:** when `jinn run` auto-generates the password, it lives
 in plaintext next to the encrypted keystore. That's convenient for tester

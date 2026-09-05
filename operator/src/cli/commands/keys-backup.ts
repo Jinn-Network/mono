@@ -1,12 +1,12 @@
 import { parseArgs } from 'node:util';
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
-import { FleetStateStore } from '../../earning/store.js';
+import { FleetStateStore, mnemonicKeystorePath } from '../../earning/store.js';
 import { decryptMnemonic, encryptMnemonic } from '../../earning/wallet.js';
 import { resolveCliPassword, resolveNewPassword } from '../password.js';
 import { defaultConfigPath, resolveDefaultStateDir } from '../../state-dir.js';
@@ -26,68 +26,46 @@ interface EarningTarget {
 }
 
 /**
- * Is the auto-generated password file stale — i.e. does it no longer open the
- * default operator's keystore?
+ * Delete only a password proven stale by this successful rotation. The file must
+ * contain the authenticated old password, and the default keystore must be either
+ * the rotated file or absent (the supported single-operator custom-dir case).
  *
- * `change-password` deletes that file so a wrong password cannot mislead the next
- * run, but the file is host-wide: on a multi-operator host it may still be the
- * password another operator's daemon boots with, and deleting it then locks that
- * operator out of its own keystore (#2515). Deleting only once it has stopped
- * opening the default keystore resolves that:
+ * Never infer staleness from a failed decryption of another keystore: damaged
+ * mnemonic metadata can fail reconstruction while its V3 private key remains
+ * recoverable with this password. Preserve any other existing default keystore's
+ * password, including corrupt or unfamiliar payloads, without decrypting it.
+ * Canonical file paths recognize directory aliases while atomic replacement of a
+ * file symlink correctly leaves its former target protected.
  *
- * - rotated the default operator → the keystore now needs the new password, so the
- *   file is stale and goes, exactly as before;
- * - rotated another operator while the default operator still uses the file → the
- *   file still opens the default keystore, so it stays (this is #2515), and it stays
- *   even when both operators happened to share one password;
- * - rotated a custom earning dir on a host with no default keystore → the file opens
- *   nothing this command can see, so it goes, which keeps single-operator rotation
- *   working.
- *
- * The third bullet is a judgement, not a proof: two custom-dir operators that both
- * boot from this one file share its value, and nothing here can tell them apart, so
- * rotating one still costs the other its password. `ceremony.ts` already refuses that
- * setup — a non-default operator dir has no password-file fallback, so JINN_PASSWORD
- * must be exported for every daemon start — and answering "keep" instead would strand
- * the supported single-operator case with a file that opens nothing. Deleting here is
- * no worse than the unconditional delete it replaces.
- *
- * Every failure this cannot classify answers "not stale", so an unreadable file, a
- * corrupt default keystore, or a keystore shape this build does not understand keeps
- * the one artifact that could still open a keystore restored from backup. Callers
- * must run this AFTER the new keystore is saved: against the old keystore the old
- * password still decrypts, and the file would wrongly survive its own rotation.
+ * Call AFTER the new keystore is saved. Filesystem uncertainty keeps the file.
+ * Two custom-dir operators sharing this file still cannot be distinguished when
+ * no default keystore exists; ceremony.ts already requires explicit passwords
+ * for non-default operator directories.
  */
-async function passwordFileIsStale(
+function passwordFileIsStale(
   passwordFilePath: string,
   defaultEarningDir: string,
+  earningDir: string,
+  currentPassword: string,
+  newPassword: string,
   warn: (message: string) => void,
-): Promise<boolean> {
+): boolean {
   if (!existsSync(passwordFilePath)) return false;
   try {
     const value = readFileSync(passwordFilePath, 'utf-8').trim();
-    if (value.length === 0) return true;
-    const defaultStore = new FleetStateStore(defaultEarningDir);
-    if (!defaultStore.hasMnemonicKeystore()) return true;
-    const encrypted = await defaultStore.loadMnemonicKeystore();
-    // `hasMnemonicKeystore` is only an existence check, and `decryptMnemonic` throws
-    // the same way for a corrupt or unrecognized payload as for a wrong password.
-    // Rule out everything but a wrong password first, so a broken default keystore
-    // never costs the operator this file too.
-    const payload = JSON.parse(encrypted) as { type?: string; keystore?: unknown };
-    if (payload.type !== 'hd-mnemonic' || !payload.keystore) {
-      warn(
-        `[warn] ${defaultEarningDir} holds a keystore this build does not recognize; ` +
-          `leaving ${passwordFilePath} in place.`,
-      );
-      return false;
-    }
+    if (value !== currentPassword || value === newPassword) return false;
+    const defaultKeystorePath = mnemonicKeystorePath(defaultEarningDir);
     try {
-      await decryptMnemonic(encrypted, value);
-      return false;
-    } catch {
-      return true;
+      lstatSync(defaultKeystorePath);
+    } catch (err) {
+      // Only absence establishes the custom-dir case. Permission or other errors
+      // do not prove that another operator's keystore is absent.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return true;
+      throw err;
     }
+    // A dangling symlink exists but cannot be classified: realpath then throws
+    // into the conservative catch below rather than treating it as absent.
+    return realpathSync(defaultKeystorePath) === realpathSync(mnemonicKeystorePath(earningDir));
   } catch (err) {
     warn(
       `[warn] Could not tell whether ${passwordFilePath} is still in use ` +
@@ -362,13 +340,13 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
   // 8. Save new keystore
   await store.saveMnemonicKeystore(newKeystore);
 
-  // 9. Delete the auto-generated password file, but only once it has stopped
-  //    opening the default operator's keystore — see `passwordFileIsStale` (#2515).
+  // 9. Delete only a password proven stale by this rotation (#2515).
   let passwordFileDeleted = false;
   if (
-    await passwordFileIsStale(passwordFilePath, defaultEarningDir, (m) => {
-      process.stderr.write(`${m}\n`);
-    })
+    passwordFileIsStale(
+      passwordFilePath, defaultEarningDir, earningDir, current.password, newPass.password,
+      (m) => { process.stderr.write(`${m}\n`); },
+    )
   ) {
     unlinkSync(passwordFilePath);
     passwordFileDeleted = true;
@@ -455,11 +433,11 @@ change-password:
   --password-fd, JINN_PASSWORD, or the auto-generated
   ~/.jinn-operator/keystore-password file, in that order) and
   re-encrypts it with JINN_NEW_PASSWORD (min 8 characters).
-  The auto-generated password file is host-wide, not per-operator, so
-  it is deleted only once it no longer opens the default keystore:
-  rotating a second operator on the same host leaves the default
-  operator's password file intact. After a deletion, set JINN_PASSWORD
-  yourself for subsequent commands.
+  The auto-generated password file is deleted only if it contains the
+  authenticated old password and the default keystore is the rotated
+  file or absent. Rotating another operator preserves an existing
+  default operator's password file, even if its keystore is damaged.
+  After a deletion, set JINN_PASSWORD yourself for subsequent commands.
 
 Examples:
   JINN_PASSWORD=secret jinn keys backup --output ~/backup/jinn.txt

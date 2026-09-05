@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import keysCmd from '../../../src/cli/commands/keys-backup.js';
@@ -405,6 +405,125 @@ describe('keys change-password command', () => {
 
     expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(false);
     expect(existsSync(passwordFile)).toBe(true);
+  });
+
+  it.each(['mnemonic_obfuscated', 'master_address', 'keystore'] as const)(
+    'preserves another operator password when its %s payload is damaged',
+    async (field) => {
+      const { home, defaultEarningDir, passwordFile, password: defaultPassword } = await makeDefaultOperator();
+      const keystorePath = join(defaultEarningDir, 'master_keystore.json');
+      const payload = JSON.parse(readFileSync(keystorePath, 'utf-8'));
+      // Damage outside the V3 key still leaves the private key recoverable with
+      // this password. A failed mnemonic reconstruction is not a stale password.
+      if (field === 'keystore') payload.keystore = {};
+      else payload[field] = '00';
+      if (field !== 'keystore') {
+        const { Wallet } = await import('@ethereumjs/wallet');
+        await expect(Wallet.fromV3(payload.keystore, defaultPassword)).resolves.toBeTruthy();
+      }
+      writeFileSync(keystorePath, JSON.stringify(payload));
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-keys-cp-op-b-'));
+      const { FleetStateStore } = await import('../../../src/earning/store.js');
+      const { generateMnemonic, encryptMnemonic } = await import('../../../src/earning/wallet.js');
+      await new FleetStateStore(dir).saveMnemonicKeystore(
+        await encryptMnemonic(generateMnemonic(), defaultPassword),
+      );
+      const { ctx, writes } = makeCtx(['change-password', '--json'], {
+        HOME: home, JINN_EARNING_DIR: dir, JINN_PASSWORD: defaultPassword,
+        JINN_NEW_PASSWORD: 'brand-new-password',
+      });
+
+      await keysCmd.run(ctx);
+
+      expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(false);
+      expect(readFileSync(passwordFile, 'utf-8').trim()).toBe(defaultPassword);
+      await expectDecryptsWith(dir, 'brand-new-password');
+    },
+  );
+
+  it('recognizes a directory symlink to the default earning dir during rotation', async () => {
+    const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
+    const alias = join(home, 'earning-alias');
+    symlinkSync(defaultEarningDir, alias, 'dir');
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home, JINN_EARNING_DIR: alias, JINN_PASSWORD: password,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(true);
+    expect(existsSync(passwordFile)).toBe(false);
+    await expectDecryptsWith(defaultEarningDir, 'brand-new-password');
+  });
+
+  it('preserves a default keystore reached through a file symlink replaced by rotation', async () => {
+    const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
+    const aliasDir = join(home, 'other-earning');
+    mkdirSync(aliasDir);
+    symlinkSync(join(defaultEarningDir, 'master_keystore.json'), join(aliasDir, 'master_keystore.json'));
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home, JINN_EARNING_DIR: aliasDir, JINN_PASSWORD: password,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(false);
+    expect(readFileSync(passwordFile, 'utf-8').trim()).toBe(password);
+    await expectDecryptsWith(defaultEarningDir, password);
+    await expectDecryptsWith(aliasDir, 'brand-new-password');
+  });
+
+  it('preserves the password when the default keystore is a dangling symlink', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-keys-cp-home-'));
+    const defaultEarningDir = join(home, '.jinn-operator', 'earning');
+    mkdirSync(defaultEarningDir, { recursive: true });
+    symlinkSync(join(home, 'unavailable-keystore'), join(defaultEarningDir, 'master_keystore.json'));
+    const { dir, password } = await makeKeystore();
+    const passwordFile = join(home, '.jinn-operator', 'keystore-password');
+    writeFileSync(passwordFile, password + '\n', { mode: 0o600 });
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home, JINN_EARNING_DIR: dir, JINN_PASSWORD: password,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(false);
+    expect(readFileSync(passwordFile, 'utf-8').trim()).toBe(password);
+    await expectDecryptsWith(dir, 'brand-new-password');
+  });
+
+  it('preserves a password file when the new password is unchanged', async () => {
+    const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home, JINN_EARNING_DIR: defaultEarningDir, JINN_PASSWORD: password,
+      JINN_NEW_PASSWORD: password,
+    });
+
+    await keysCmd.run(ctx);
+
+    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(false);
+    expect(readFileSync(passwordFile, 'utf-8').trim()).toBe(password);
+  });
+
+  it('preserves an unrelated password file when the default keystore is absent', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-keys-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    mkdirSync(stateDir, { recursive: true });
+    const passwordFile = join(stateDir, 'keystore-password');
+    writeFileSync(passwordFile, 'another-operator-password\n', { mode: 0o600 });
+    const { dir, password } = await makeKeystore();
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home, JINN_EARNING_DIR: dir, JINN_PASSWORD: password,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(false);
+    expect(readFileSync(passwordFile, 'utf-8').trim()).toBe('another-operator-password');
   });
 
   it('rejects an explicit --config that cannot be loaded', async () => {
