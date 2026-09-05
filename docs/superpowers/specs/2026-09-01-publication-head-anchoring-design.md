@@ -531,10 +531,9 @@ verifier rule and no new verifier posture.
 
 **D4 — Does the bundle cite `(origin, sequence)` (§5.3)?**
 It touches the sealed publication closure, which this design otherwise leaves alone.
-**Ruling: no, for v1.** The bundle gains no field, `RunState`, `deriveClaimAnchors`, the
-claim `anchors` section, the `integrity-anchors` check, and the standalone verifier's
-offline property are all untouched, and a bundle produced before and after this ships is
-byte-identical. Revisit only if a consumer actually needs the pointer.
+**Ruling: no, for v1.** The bundle gains no field, so §5.1's list of specifically
+unchanged surfaces holds without exception and its byte-identical property stands.
+Revisit only if a consumer actually needs the pointer.
 
 ## 11. Follow-ups (approved for filing, low priority)
 
