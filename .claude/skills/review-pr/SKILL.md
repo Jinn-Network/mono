@@ -14,7 +14,7 @@ own shared lifecycle state and you never push to the PR branch.
 Before doing work, read
 [`autopilot-runtime`](../autopilot-runtime/SKILL.md) completely. It selects the
 mechanics for the one process-wide
-`JINN_AUTOPILOT_RUNTIME=claude|hermes` setting. Never switch runtime within the
+`JINN_AUTOPILOT_RUNTIME=claude|hermes|cursor|codex` setting. Never switch runtime within the
 attempt.
 
 Also read:
