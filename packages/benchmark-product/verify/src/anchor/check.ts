@@ -125,6 +125,12 @@ const SUBJECT_KINDS: ReadonlyMap<ClaimAnchorSubject, string> = new Map([
   ["matrix", MATRIX_RECORD_KIND],
 ]);
 
+/** Plain nouns keep a human refusal intelligible after its declared protocol kind is aliased. */
+const SUBJECT_NAMES: ReadonlyMap<ClaimAnchorSubject, string> = new Map([
+  ["lock", "Run"],
+  ["matrix", "Matrix"],
+]);
+
 function compareCodeUnits(left: string, right: string): -1 | 0 | 1 {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -175,7 +181,7 @@ export function evaluateIntegrityAnchors(input: EvaluateIntegrityAnchorsInput): 
       if (record.subject.kind !== resolvedKind) {
         return invalidEntry(
           carried.recordSha256,
-          `subject.kind is ${record.subject.kind}, but the record its digest resolves to is ${resolvedKind}`,
+          `subject.kind is ${record.subject.kind}, but its digest resolves to this bundle's sealed ${SUBJECT_NAMES.get(subject)!}`,
           { provider: record.provider, subject },
         );
       }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -25,8 +25,10 @@ test("usage exits 2 and states the exit contract", async () => {
   // A bundle that cannot be rendered as a freeze repository is not an invalid bundle, and the
   // usage text has to say which exit code that is.
   assert.match(result.stderr, /could not be\n {5}rendered from the bundle/);
-  assert.match(result.stderr, /spec\.jinn\.network/);
-  assert.match(result.stderr, /not hosted/);
+  assert.match(result.stderr, /Protocol identifiers are names, not addresses/);
+  assert.match(result.stderr, /platform bytes installed from npm/);
+  assert.doesNotMatch(result.stderr, /jinn\.network/);
+  assert.doesNotMatch(result.stderr, /not hosted/);
 });
 
 test("a missing bundle exits 1 with machine-readable invalid-bundle output", async () => {
@@ -84,8 +86,10 @@ test("human success names all six checks and states the verification limit", asy
   assert.match(output, /Format: benchmark-product-public-bundle\/4/);
   assert.match(output, /Not checked by this tool: whether the machine that produced this bundle was/);
   assert.match(output, /No files were uploaded/);
-  assert.match(output, /spec\.jinn\.network/);
-  assert.match(output, /not hosted/);
+  assert.match(output, /Protocol identifiers are names, not addresses/);
+  assert.match(output, /platform bytes installed from npm/);
+  assert.doesNotMatch(output, /jinn\.network/);
+  assert.doesNotMatch(output, /not hosted/);
 });
 
 test("human summary reports the actual passed count against the fixed six-check catalog", async () => {
@@ -259,7 +263,8 @@ test("the default human surface names an absent and a declared-but-absent subjec
     },
   });
   assert.match(output, /no anchor records carried/);
-  assert.match(output, /lock: declared-but-absent — this run declared .*rfc3161-tsa\/v1 and the bundle carries no matching anchor/);
+  assert.match(output, /lock: declared-but-absent — this run declared rfc3161-tsa\/v1 and the bundle carries no matching anchor/);
+  assert.doesNotMatch(output, /jinn\.network/);
   assert.match(output, /matrix: absent — no anchor was carried and none was declared/);
 });
 
@@ -287,6 +292,42 @@ test("a pending anchor prints its own status and reason, never a completed one's
   assert.match(output, /lock anchor · chain-time · pending\n/);
   assert.match(output, /the proof carries only calendar promises/);
   assert.doesNotMatch(output, /block \d/);
+});
+
+test("accepted anchor reasons alias raw identifiers for humans while JSON keeps them", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const urn = "urn:jinn:anchor:calendar-a";
+  const keyId = "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX";
+  const reason = `calendar promise ${urn} was signed by ${keyId}`;
+  const report = {
+    format: "benchmark-product-public-bundle/6",
+    identity: "a".repeat(64),
+    checks: V6_CHECKS,
+    ...V6_IDENTITIES,
+    anchors: {
+      anchors: [{
+        recordSha256: "3".repeat(64),
+        status: "pending",
+        provider: "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        subject: "lock",
+        timeBasis: "chain-time",
+        reason,
+        trustMaterial: "none",
+      }],
+      subjects: [{ subject: "lock", outcome: "anchored" }, { subject: "matrix", outcome: "absent" }],
+      invalid: [],
+    },
+  };
+
+  const human = await runVerifierCli(["bundle"], { verify: async () => report });
+  assert.equal(human.exitCode, 0);
+  assert.match(human.stdout, /calendar promise <identifier: see --json> was signed by <identifier: see --json>/);
+  assert.doesNotMatch(human.stdout, /urn:|did:key/);
+  assert.doesNotMatch(human.stdout, /jinn\.network|jinn\.benchmarking/);
+
+  const machine = await runVerifierCli(["bundle", "--json"], { verify: async () => report });
+  assert.equal(machine.exitCode, 0);
+  assert.equal(JSON.parse(machine.stdout).anchors.anchors[0].reason, reason);
 });
 
 test("an unanchored bundle's human surface is unchanged — no anchor section at all", async () => {
@@ -628,6 +669,112 @@ test("a metadata-first bundle with one deferred body says body, not bodies", asy
   assert.match(output, /1 artifact body was not fetched/);
 });
 
+const INTERNAL_NAMESPACE = /jinn\.network|jinn\.benchmarking|urn:|did:key/;
+
+test("the golden bundle's human surface names no internal protocol namespace", async () => {
+  const golden = fileURLToPath(new URL("../fixtures/public-bundle-conformance-v1/golden", import.meta.url));
+  const human = await invoke([golden]);
+  assert.equal(human.code, undefined);
+  assert.doesNotMatch(human.stdout, INTERNAL_NAMESPACE);
+  assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
+});
+
+test("no tampered variant's refusal names an internal protocol namespace", async () => {
+  const tamperedDir = fileURLToPath(new URL("../fixtures/public-bundle-conformance-v1/tampered", import.meta.url));
+  const variants = (await readdir(tamperedDir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.ok(variants.length > 0, "the tampered corpus is empty");
+  for (const variant of variants) {
+    const refused = await invoke([join(tamperedDir, variant)]);
+    assert.notEqual(refused.code, undefined, `${variant} was not refused`);
+    assert.doesNotMatch(refused.stderr, INTERNAL_NAMESPACE, `${variant} stderr`);
+    assert.doesNotMatch(refused.stdout, INTERNAL_NAMESPACE, `${variant} stdout`);
+  }
+});
+
+test("verify refusals keep protocol identifiers in --json and alias them for a human", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const kind = "https://spec.jinn.network/records/benchmark-matrix/v1";
+  const deps = {
+    verify: () => {
+      const error = new Error(`disclosure-specification: the record's subject kind must be ${kind}`);
+      error.code = "record-integrity";
+      return Promise.reject(error);
+    },
+  };
+
+  const human = await runVerifierCli(["bundle"], deps);
+  assert.equal(human.exitCode, 1);
+  assert.match(human.stderr, /the record's subject kind must be <identifier: see --json>/);
+  assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
+
+  const json = await runVerifierCli(["bundle", "--json"], deps);
+  assert.equal(json.exitCode, 1);
+  assert.equal(JSON.parse(json.stdout).message, `disclosure-specification: the record's subject kind must be ${kind}`);
+});
+
+test("a kind-mismatch refusal remains a readable contrast after aliasing", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const declared = "https://spec.jinn.network/records/benchmark-matrix/v1";
+  const deps = {
+    verify: () => {
+      const error = new Error(
+        `carried anchor is invalid: subject.kind is ${declared}, but its digest resolves to this bundle's sealed Run`,
+      );
+      error.code = "record-integrity";
+      return Promise.reject(error);
+    },
+  };
+
+  const human = await runVerifierCli(["bundle"], deps);
+  assert.equal(human.exitCode, 1);
+  assert.match(human.stderr, /but its digest resolves to this bundle's sealed Run/);
+  assert.equal(human.stderr.match(/<identifier: see --json>/gu)?.length, 1);
+  assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
+
+  const json = await runVerifierCli(["bundle", "--json"], deps);
+  assert.match(JSON.parse(json.stdout).message, /https:\/\/spec\.jinn\.network\/records\/benchmark-matrix\/v1/);
+});
+
+test("freeze-repo failures keep identifiers in --json and alias them for a human", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const method = "https://registry.jinn.benchmarking/methods/freeze/v1";
+  const deps = {
+    verify: async () => ({ format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"] }),
+    freezeRepo: () => {
+      const error = new Error(`freeze-repo-render: no licence declared for ${method}`);
+      error.code = "freeze-repo-render";
+      return Promise.reject(error);
+    },
+  };
+
+  const json = await runVerifierCli(["bundle", "--json", "--freeze-repo", "repo"], deps);
+  assert.equal(json.exitCode, 2);
+  assert.equal(JSON.parse(json.stdout).freezeRepo.message, `freeze-repo-render: no licence declared for ${method}`);
+
+  const human = await runVerifierCli(["bundle", "--freeze-repo", "repo"], deps);
+  assert.equal(human.exitCode, 2);
+  assert.match(human.stderr, /freeze repository not checked: .*<identifier: see --json>/);
+  assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
+});
+
+test("non-Jinn URLs survive the human refusal surface", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const calendar = "https://alice.btc.calendar.opentimestamps.org/";
+  const human = await runVerifierCli(["bundle"], {
+    verify: () => {
+      const error = new Error(`integrity-anchors: the calendar at ${calendar} did not answer`);
+      error.code = "environment";
+      return Promise.reject(error);
+    },
+  });
+  assert.equal(human.exitCode, 2);
+  assert.match(human.stderr, /https:\/\/alice\.btc\.calendar\.opentimestamps\.org\//);
+  assert.doesNotMatch(human.stderr, /<identifier: see --json>/);
+});
+
 // ---------------------------------------------------------------------------
 // Reader-legible publisher identity (issue #2983)
 // ---------------------------------------------------------------------------
@@ -714,12 +861,10 @@ test("a verified binding renders the domain and names the proof mechanism plainl
   // The limits paragraph names the remaining step and what trusting its answer rests on.
   assert.match(result.stdout, /DNS resolution/);
   assert.match(result.stdout, /registrar/);
-  // #3024 keeps identifiers off the human surface because they are noise a reader has to decode.
-  // Here the identifier is the literal string to look for in the record, so it earns its place --
-  // and only there: it appears exactly once, inside the value to publish.
+  // This is the one actionable raw identifier on the human surface: the exact TXT value to compare.
   assert.equal(result.stdout.match(/did:key:/g).length, 1);
-  // Unwrapped and on its own line, because a reader compares it byte for byte.
   assert.match(result.stdout, new RegExp(`\n {4}expect: colophon-domain-binding=1; key=${keyId}\n`));
+  assert.doesNotMatch(result.stdout, /jinn\.network|jinn\.benchmarking/);
 });
 
 test("without a binding the publisher is named by its bare key fingerprint", async () => {
@@ -762,6 +907,7 @@ test("--json carries the verified binding, and the failure in its place", async 
   assert.equal(parsed.identityBinding.domain, "example.org");
   assert.equal(parsed.identityBinding.confirmation, "key-signature-only");
   assert.equal(parsed.identityBinding.proof.location, "https://example.org/.well-known/colophon-domain-binding.txt");
+  assert.equal(parsed.identityBinding.proof.expectedValue, `colophon-domain-binding=1; key=${keyId}`);
   // The bundle's own digest is untouched: a binding must never shadow the value a consumer pins by.
   assert.equal(parsed.identity, "a".repeat(64));
 
@@ -774,6 +920,29 @@ test("--json carries the verified binding, and the failure in its place", async 
   assert.equal(parsedBad.identityBinding.ok, false);
   assert.equal(parsedBad.identityBinding.code, "validation");
   assert.equal(parsedBad.identity, "a".repeat(64));
+});
+
+test("identity-binding failures keep identifiers in --json and alias them for a human", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const kind = "https://spec.jinn.network/records/domain-binding/v1";
+  const deps = {
+    verify: async () => publisherResult(keyId),
+    readFile: () => {
+      const error = new Error(`binding document uses unsupported kind ${kind}`);
+      error.code = "validation";
+      throw error;
+    },
+  };
+
+  const json = await runVerifierCli(["bundle", "--json", "--identity-binding", "binding.json"], deps);
+  assert.equal(json.exitCode, 2);
+  assert.equal(JSON.parse(json.stdout).identityBinding.message, `binding document uses unsupported kind ${kind}`);
+
+  const human = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], deps);
+  assert.equal(human.exitCode, 2);
+  assert.match(human.stderr, /domain binding not applied: .*<identifier: see --json>/);
+  assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
 });
 
 test("--identity-binding requires a value and may be supplied only once", async () => {
