@@ -63,23 +63,22 @@ export const PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND =
 export const PUBLIC_BUNDLE_V9_CHECKS = PUBLIC_BUNDLE_V6_CHECKS;
 
 /**
- * The first line that cannot be an earlier one. `/7` and `/8` pin `@0.2.1`, which is published and
- * reads `/2` through `/8`; it has never heard of `/9`, and a claim naming a reader that cannot read
- * its own bundle is an instruction to fail. `/9` therefore pins the next line — the one this
- * verifier source becomes — exactly as `/7` pinned `@0.2.1` before that release existed. Publishing
- * it is the release train's own step, not this allocation's.
+ * Like v8 and for v8's own reason: `/9` ships in the same `0.2` reader line as `/7` and `/8` rather
+ * than minting a third. What it must not do is inherit the first public `@0.1` line that `/6`
+ * stamps — no `0.1` reader has heard of a page that states the denominator pair, and a claim naming
+ * a reader that rebuilds a different page is an instruction to fail. The compatible `@0.2` line is
+ * the one a reader runs; which patch release under it actually serves this format is the release
+ * train's step, not this allocation's, exactly as it was for `/7` and `/8`.
  */
-export const PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.3.0 <bundle-dir>" as const;
+export const PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND = PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND;
 export const PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND =
-  "npx @colophon-claims/verify@0.3 <bundle-dir>" as const;
+  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND;
 
 /**
  * Spans every lineage, so it is composed here rather than frozen in `legacy-closures.ts`: the four
  * legacy rows come from the frozen closures, the `/5` row is the evidence-native line, the `/8` row
  * is the disclosed closure, and the `/9` row is the denominator-pair page. Every format through v6 stamps the same first public 0.1 line; v7
- * is the first that cannot, v8 pins the same 0.2.1 line as v7, and v9 is the first to pin the 0.3
- * line.
+ * is the first that cannot, and v8 and v9 pin the same 0.2.1 line as v7.
  *
  * `command` is the exact producer-side release and `compatibleCommand` the compatible major line.
  * On every row but `/5` the claim states both. The `/5` row is asymmetric (issue #3941): its

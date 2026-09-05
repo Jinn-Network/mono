@@ -302,18 +302,18 @@ Only a `wilson@1` report states a per-arm declared denominator, so only such a
 report gains the columns. A v9 bundle whose report is a paired, panel, or
 evidence-contrast method renders exactly what v6 renders for the same records.
 
-V9 reads on the `@0.3` line. `@0.2.1` reads v2 through v8 and has never heard of
-v9, so a v9 bundle pinning it would send its reader to a verifier that rebuilds
-the old page and refuses these bytes:
+V9 reads on the `@0.2` line, with v7 and v8. What it cannot inherit is v6's
+first public `@0.1` line: no `0.1` reader has heard of a page that states the
+denominator pair, so it would rebuild v6's page and refuse these bytes.
 
 ```bash
-npx @colophon-claims/verify@0.3 <bundle-dir>
+npx @colophon-claims/verify@0.2 <bundle-dir>
 ```
 
 Supply your own trust material to reach `verified`, exactly as on v6:
 
 ```bash
-npx @colophon-claims/verify@0.3 <bundle-dir> \
+npx @colophon-claims/verify@0.2 <bundle-dir> \
   --tsa-root ./authority-root.pem \
   --ots-headers ./bitcoin-headers.txt
 ```
@@ -582,7 +582,7 @@ out where it applies.
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1`, publication pending | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/8` | `@0.2.1`, publication pending | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
-| `benchmark-product-public-bundle/9` | `@0.3.0`, publication pending | `@0.3` | seven | `--tsa-root`, `--ots-headers` |
+| `benchmark-product-public-bundle/9` | `@0.2.1`, publication pending | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a

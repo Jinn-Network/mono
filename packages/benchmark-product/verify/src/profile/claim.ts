@@ -420,7 +420,7 @@ const ClaimPackageWireSchema = z.object({
         || claim.verification.compatibleCommand !== PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND
       )
     ) {
-      ctx.addIssue({ code: "custom", message: "anchored claim package must pin verifier 0.1.0/@0.1 (a /6 bundle) or 0.3.0/@0.3 (a /9 bundle)", path: ["verification"] });
+      ctx.addIssue({ code: "custom", message: "anchored claim package must pin verifier 0.1.0/@0.1 (a /6 bundle) or 0.2.1/@0.2 (a /9 bundle)", path: ["verification"] });
     }
     if (
       claim.verification.checks.length !== READER_ANCHORED_VERIFICATION_CHECKS.length
