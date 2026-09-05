@@ -7,6 +7,7 @@
  * Process control is injected as a port so the driver is testable without a process table; the
  * concrete spawner lives in `operator/scripts/native-restart-drill.ts`.
  */
+import { join } from 'node:path';
 import { DRILL_SPECS, type DrillCheckpoint, type DrillCheckpointSpec } from './checkpoints.js';
 import {
   RunObservationSchema,
@@ -15,7 +16,7 @@ import {
   type RunObservation,
 } from './observation.js';
 import { buildDrillReport, type DrillRecoveryReport, type SealedDrillReport } from './report.js';
-import { BOUNDARY_MARKER, OBSERVATION_MARKER, type RoleRunSpec } from './role-host.js';
+import type { RoleRunSpec } from './role-host.js';
 
 /** What a launched role-host process reported back. */
 export type RoleRunResult =
@@ -66,7 +67,7 @@ export class DrillFailure extends Error {
 }
 
 function stateDirFor(stateRoot: string, spec: DrillCheckpointSpec, lane: string): string {
-  return `${stateRoot}/${spec.seed}-${lane}`;
+  return join(stateRoot, `${spec.seed}-${lane}`);
 }
 
 function expectObservation(
@@ -189,5 +190,3 @@ export async function runRestartDrill(
   }
   return reports;
 }
-
-export { BOUNDARY_MARKER, OBSERVATION_MARKER };

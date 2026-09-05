@@ -142,7 +142,7 @@ export async function runClaimScenario(context: ScenarioContext): Promise<RunObs
           const history = await context.chain.findByDigest(claimKey);
           const first = history[0];
           if (first === undefined) {
-            return { kind: 'absent', checkedAtBlock: BigInt(await context.chain.senderNonce()) };
+            return { kind: 'absent', checkedAtBlock: await context.chain.latestBlock() };
           }
           const finalized = await context.chain.awaitFinalized(first.hash);
           return {

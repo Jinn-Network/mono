@@ -18,11 +18,11 @@ const OPERATOR_DIR = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 async function runHarness(out: string): Promise<{ code: number | null; output: string }> {
   return new Promise((resolveWith) => {
-    const child = spawn(
-      'yarn',
-      ['tsx', join(OPERATOR_DIR, 'scripts', 'native-restart-drill.ts'), '--out', out],
-      { cwd: OPERATOR_DIR, stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+    // Deliberately the documented invocation, so this test fails if the runbook's command breaks.
+    const child = spawn('yarn', ['drill:native-restart', '--out', out], {
+      cwd: OPERATOR_DIR,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let output = '';
     child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
     child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
@@ -34,7 +34,7 @@ describe('Phase B restart-drill harness', () => {
   it('emits the six named, sanitized, distinctly digested recovery reports', async () => {
     const out = mkdtempSync(join(tmpdir(), 'jinn-drill-e2e-'));
     const { code, output } = await runHarness(out);
-    expect(output.length > 0 ? code : code).toBe(0);
+    expect(code, output).toBe(0);
 
     const files = readdirSync(out).filter((name) => name !== 'recovery-reports.json');
     expect(files.sort()).toEqual(
@@ -59,4 +59,22 @@ describe('Phase B restart-drill harness', () => {
       .toEqual([...PHASE_B_RESTART_CHECKPOINT_SET].sort());
     expect(new Set(index.recoveryReports.map(({ digest }) => digest))).toEqual(digests);
   }, 900_000);
+
+  it('is deterministic: a second run reproduces every report apart from its timestamp', async () => {
+    const first = mkdtempSync(join(tmpdir(), 'jinn-drill-det-a-'));
+    const second = mkdtempSync(join(tmpdir(), 'jinn-drill-det-b-'));
+    expect((await runHarness(first)).code).toBe(0);
+    expect((await runHarness(second)).code).toBe(0);
+    for (const checkpoint of PHASE_B_RESTART_CHECKPOINT_SET) {
+      const read = (out: string): unknown => {
+        const { createdAt: _stamp, ...rest } = parseDrillReport(
+          readFileSync(join(out, `${checkpoint}.json`)),
+        ).report;
+        return rest;
+      };
+      // `createdAt` is provenance and is expected to move; everything a manifest reasons about --
+      // the graphs, the operation ids, the transaction hashes, the effect counters -- must not.
+      expect(read(second), checkpoint).toEqual(read(first));
+    }
+  }, 1_800_000);
 });

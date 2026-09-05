@@ -37,8 +37,6 @@ export type DrillCanonicalRead =
 export interface DrillChain {
   /** Broadcast a real transaction carrying `digest` as calldata and return its hash. */
   broadcast(digest: string): Promise<`0x${string}`>;
-  /** Read a transaction back from the node, including whether its block is finalized. */
-  read(hash: `0x${string}`): Promise<DrillCanonicalRead>;
   /**
    * Reconcile canonical history for one operation: every transaction the drill sender broadcast
    * carrying `digest` as calldata, oldest first. A restarted process finds its lost broadcast this
@@ -49,7 +47,8 @@ export interface DrillChain {
   awaitFinalized(hash: `0x${string}`): Promise<DrillTransaction>;
   /** Confirmed transaction count for the drill sender — the nonce history a posting recovery reads. */
   senderNonce(): Promise<number>;
-  readonly senderAddress: `0x${string}`;
+  /** Current canonical head, for a reconciliation that must report where it looked. */
+  latestBlock(): Promise<bigint>;
 }
 
 function digestToCalldata(digest: string): Hex {
@@ -114,7 +113,6 @@ export async function createAnvilDrillChain(rpcUrl: string): Promise<DrillChain>
   };
 
   return {
-    senderAddress: account.address,
     async broadcast(digest) {
       return walletClient.sendTransaction({
         account,
@@ -124,7 +122,6 @@ export async function createAnvilDrillChain(rpcUrl: string): Promise<DrillChain>
         data: digestToCalldata(digest),
       });
     },
-    read: readHash,
     async findByDigest(digest) {
       const calldata = digestToCalldata(digest).toLowerCase();
       const latest = await publicClient.getBlockNumber();
@@ -166,6 +163,9 @@ export async function createAnvilDrillChain(rpcUrl: string): Promise<DrillChain>
     },
     async senderNonce() {
       return publicClient.getTransactionCount({ address: account.address, blockTag: 'latest' });
+    },
+    async latestBlock() {
+      return publicClient.getBlockNumber();
     },
   };
 }

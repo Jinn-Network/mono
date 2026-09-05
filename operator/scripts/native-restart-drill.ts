@@ -93,6 +93,27 @@ async function freePort(): Promise<number> {
   });
 }
 
+/**
+ * Every Anvil this process started. The drill closes each node as its lane finishes, but a crash
+ * or an interrupt between lanes would otherwise leave a listening node behind for the user to hunt.
+ */
+const openNodes = new Set<ChildProcess>();
+
+function killOpenNodes(): void {
+  for (const node of openNodes) {
+    if (node.exitCode === null) node.kill('SIGKILL');
+  }
+  openNodes.clear();
+}
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    killOpenNodes();
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  });
+}
+process.once('exit', killOpenNodes);
+
 async function startAnvil(options: Options): Promise<DrillChainNode> {
   const port = await freePort();
   const args = ['--port', String(port), '--silent', '--chain-id', '84532'];
@@ -101,9 +122,18 @@ async function startAnvil(options: Options): Promise<DrillChainNode> {
     if (options.forkBlock !== undefined) args.push('--fork-block-number', String(options.forkBlock));
   }
   const child = spawn('anvil', args, { stdio: ['ignore', 'ignore', 'inherit'] });
+  // A missing binary surfaces asynchronously as an 'error' event, not a non-zero exit, so without
+  // this the readiness loop would spend 30s before reporting something unrelated to the cause.
+  let spawnError: Error | undefined;
+  child.on('error', (error) => { spawnError = error; });
+  openNodes.add(child);
+  child.once('exit', () => openNodes.delete(child));
   const rpcUrl = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 30_000;
   for (;;) {
+    if (spawnError !== undefined) {
+      throw new Error(`could not start anvil (is Foundry installed and on PATH?): ${spawnError.message}`);
+    }
     if (child.exitCode !== null) throw new Error('anvil exited before becoming ready');
     try {
       const response = await fetch(rpcUrl, {

@@ -277,7 +277,7 @@ export async function runSolutionScenario(
           const history = await context.chain.findByDigest(settlementKey);
           const first = history[0];
           if (first === undefined) {
-            return { kind: 'absent' as const, checkedAtBlock: 0n };
+            return { kind: 'absent' as const, checkedAtBlock: await context.chain.latestBlock() };
           }
           const finalized = await context.chain.awaitFinalized(first.hash);
           return {

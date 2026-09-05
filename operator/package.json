@@ -165,7 +165,7 @@
     "e2e:daemon-harness": "tsx test/e2e/daemon-harness-cycle.ts",
     "e2e:daemon-harness:native": "JINN_E2E_MODE=native tsx test/e2e/daemon-harness-cycle.ts",
     "drill:native-restart": "tsx scripts/native-restart-drill.ts",
-    "drill:native-restart:verify": "vitest run --exclude 'node_modules/**' test/native-drill/restart-drill.e2e.test.ts",
+    "drill:native-restart:verify": "vitest run --config vitest.drill.config.ts",
     "e2e:archive-second-daemon": "tsx test/e2e/archive-second-daemon.ts",
     "e2e:archive-second-daemon:separate-process": "tsx test/e2e/archive-second-daemon-separate-process.ts",
     "e2e:task-creator": "tsx test/e2e/task-creator-marketplace.ts",
