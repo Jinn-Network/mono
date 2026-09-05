@@ -50,6 +50,13 @@ export function assertClaimConsistency(input: {
   /** disclosure-specification-record design §7 step 10 (issue #2839): the disclosure section
    * re-derived from the sealed record's own bytes, never read from the claim under test. */
   readonly disclosure?: ClaimDisclosureSection;
+  /** Issue #3698: which anchored, non-qualifying allocation this bundle is, `/6` or `/9`. The two
+   * carry the same claim shape and differ only in the reader line they pin, so a `/6` bundle
+   * published before `/9` existed must rebuild to `/6`'s own immutable pin rather than failing
+   * against a line it predates. Unset means the current allocation. */
+  readonly anchoredBundleFormat?:
+    | "benchmark-product-public-bundle/6"
+    | "benchmark-product-public-bundle/9";
   readonly suiteComparability?: {
     readonly executionConformance: boolean;
     readonly coverage: "one_task" | "ten_task" | "full" | "custom";
@@ -98,6 +105,7 @@ export function assertClaimConsistency(input: {
     ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }),
     ...(input.anchors === undefined ? {} : { anchors: input.anchors }),
     ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }),
+    ...(input.anchoredBundleFormat === undefined ? {} : { anchoredBundleFormat: input.anchoredBundleFormat }),
     ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   });
   if (!bytesEqual(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) {

@@ -1966,6 +1966,13 @@ export async function verifyPublicBundleSnapshot(
     ...(assembly.header.rehearsal === undefined ? {} : { rehearsal: assembly.header.rehearsal }),
     ...(claimAnchors === undefined ? {} : { anchors: claimAnchors }),
     ...(claimDisclosure === undefined ? {} : { disclosure: claimDisclosure }),
+    // The rebuild has to pin the line THIS bundle's format pins (issue #3698). `/6` and `/9` carry
+    // the same claim-package/4 shape, so a rebuild that always produced the current allocation's
+    // line would fail every `/6` bundle published before `/9` existed -- against a pin those bytes
+    // can never change and were never wrong.
+    ...(checked.manifest.format === BUNDLE_V6_FORMAT || checked.manifest.format === BUNDLE_V9_FORMAT
+      ? { anchoredBundleFormat: checked.manifest.format }
+      : {}),
   });
   checks.push("claim-consistency");
   // Always present for the anchored closure versions, and never for any earlier one: an anchored
