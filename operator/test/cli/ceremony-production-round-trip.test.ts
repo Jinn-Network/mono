@@ -27,6 +27,10 @@ import {
   type NativeFinalizedAnchorReadClient,
   type NativeSettlementOwnershipReadClient,
 } from '../../src/daemon/native-trust-catalog.js';
+import {
+  createBaseSepoliaFinalizedAnchorClient,
+  type NativeBaseSepoliaAnchorReadClient,
+} from '../../src/daemon/native-base-sepolia-infrastructure.js';
 import { RoleIdentitySet, type NativeRoleIdentityRole } from '../../src/daemon/role-identities.js';
 
 const PASSWORD = 'ceremony-two-operator-round-trip';
@@ -72,11 +76,17 @@ function lastEnvelope(writes: string[]): Record<string, unknown> {
  * (two homes, one machine, one binary) and it is what makes an accidental cross-wiring — operator B
  * signing with A's EOA, or declaring A's Safe — a thing this rig can actually express and then fail.
  */
+interface SubmittedAnchor {
+  readonly digest: string;
+  readonly transactionHash: `0x${string}`;
+  readonly anchorTime: string;
+}
+
 function twoOperatorDeps(operators: readonly Operator[]): {
   readonly deps: CeremonyCommandDeps;
-  readonly submitted: { digest: string; transactionHash: `0x${string}`; anchorTime: string }[];
+  readonly submitted: SubmittedAnchor[];
 } {
-  const submitted: { digest: string; transactionHash: `0x${string}`; anchorTime: string }[] = [];
+  const submitted: SubmittedAnchor[] = [];
   const forDir = (dir: string): Operator => {
     const found = operators.find((operator) => operator.dir === dir);
     if (found === undefined) throw new Error(`no operator configured for ${dir}`);
@@ -136,7 +146,7 @@ function twoOperatorDeps(operators: readonly Operator[]): {
 
 /** Stand-in #1: the finalized-anchor read. Every anchor the CLI actually submitted reads back final. */
 function anchorClientFor(
-  submitted: readonly { digest: string; transactionHash: `0x${string}`; anchorTime: string }[],
+  submitted: readonly SubmittedAnchor[],
 ): NativeFinalizedAnchorReadClient {
   return {
     async lookupFinalizedAnchor({ digest }) {
@@ -190,6 +200,7 @@ interface RoundTrip {
   readonly admissionAgentA: string;
   readonly agentB: string;
   readonly anchorClient: NativeFinalizedAnchorReadClient;
+  readonly submitted: readonly SubmittedAnchor[];
   readonly newestPolicyVersion: number;
 }
 
@@ -254,6 +265,7 @@ async function twoOperatorCeremony(): Promise<RoundTrip> {
     admissionAgentA: String(initResult.admissionAgent),
     agentB: String(joinResult.agentIri),
     anchorClient: anchorClientFor(submitted),
+    submitted,
     newestPolicyVersion: Number(joinResult.newestPolicyVersion),
   };
 }
@@ -266,11 +278,15 @@ function honestOwnership(trip: RoundTrip): NativeSettlementOwnershipReadClient {
   ]);
 }
 
-function openCatalog(trip: RoundTrip, ownership: NativeSettlementOwnershipReadClient) {
+function openCatalog(
+  trip: RoundTrip,
+  ownership: NativeSettlementOwnershipReadClient,
+  anchorClient: NativeFinalizedAnchorReadClient = trip.anchorClient,
+) {
   return openNativeTrustCatalog({
     path: trip.catalogPath,
     expectedPolicyGenesisDigest: trip.genesis,
-    anchorClient: trip.anchorClient,
+    anchorClient,
     settlementOwnershipClient: ownership,
     now: new Date(ANCHOR_TIME_B),
   });
@@ -475,5 +491,160 @@ describe('jinn ceremony → production verifiers, two operators, distinct EOAs a
       key: await solverKey(trip.b.dir, trip.agentB), agent: trip.agentB, address: trip.b.safe,
       atTime: ANCHOR_TIME_B, purpose: 'native:solver-settlement',
     })).resolves.toBeDefined();
+  });
+});
+
+/**
+ * The one seam the two round-trip rigs above leave open (issue #2432 acceptance criterion 2).
+ *
+ * Everywhere else in this file the finalized-anchor lookup is a hand-written stand-in that answers
+ * "yes, final" for every digest the CLI submitted — so nothing here has ever exercised the
+ * `base-sepolia-calldata-v1` locator RULE itself. The rule lives in the production
+ * `createBaseSepoliaFinalizedAnchorClient`, and its own unit tests
+ * (`test/daemon/native-base-sepolia-infrastructure.test.ts`) drive it against synthetic digests that
+ * no ceremony ever produced. The fork rig (`test/e2e/fixtures/native-fleet/anchor.ts`) does join the
+ * two, but only under Anvil, so ordinary `yarn test` never covers the join.
+ *
+ * This block closes it in CI: a catalog the CLI actually authored, opened by the production
+ * verifier path with the production anchor client, fed injected chain facts whose calldata really
+ * does carry each anchor digest at the byte offset the catalog declares — and then booted through
+ * `RoleIdentitySet.open`. The two negatives are the controls that prove the calldata and finality
+ * checks are load-bearing rather than incidentally satisfied.
+ */
+describe('produced catalog over the production calldata-locator verifier (#2432)', () => {
+  /** The catalog's own declarations — the locator the verifier is handed for each anchor digest. */
+  function declaredLocators(trip: RoundTrip): Map<string, {
+    readonly contractAddress: `0x${string}`;
+    readonly inputByteOffset: number;
+  }> {
+    const catalog = JSON.parse(readFileSync(trip.catalogPath, 'utf-8')) as {
+      anchors: { digest: string; locator: { contractAddress: `0x${string}`; inputByteOffset: number } }[];
+    };
+    return new Map(catalog.anchors.map(({ digest, locator }) => [digest, locator]));
+  }
+
+  interface ChainFactOverrides {
+    /** Put bytes that are NOT the anchor digest at the declared offset. */
+    readonly corruptCalldata?: boolean;
+    /** Hold the finalized head below the anchor's block. */
+    readonly unfinalized?: boolean;
+  }
+
+  /**
+   * Base Sepolia facts for exactly the anchors this ceremony submitted: one block per anchor, its
+   * timestamp the very `anchorTime` the bindings' `validFrom` was sealed against (§6 law 2), and
+   * calldata carrying the digest at the catalog's declared offset.
+   */
+  function chainFacts(trip: RoundTrip, overrides: ChainFactOverrides = {}): NativeBaseSepoliaAnchorReadClient {
+    const locators = declaredLocators(trip);
+    const blocks = new Map(trip.submitted.map(({ digest }, index) => [digest, BigInt(100 + index)]));
+    const blockHashOf = (number: bigint) => `0x${number.toString(16).padStart(64, '0')}` as `0x${string}`;
+    const byHash = new Map(trip.submitted.map((entry) => [entry.transactionHash.toLowerCase(), entry]));
+    const byBlock = new Map(trip.submitted.map((entry) => [blocks.get(entry.digest)!, entry]));
+    const highest = trip.submitted.reduce((max, { digest }) => {
+      const number = blocks.get(digest)!;
+      return number > max ? number : max;
+    }, 0n);
+
+    return {
+      async transaction(hash) {
+        const entry = byHash.get(hash.toLowerCase());
+        if (entry === undefined) return null;
+        const locator = locators.get(entry.digest)!;
+        const digestHex = entry.digest.slice('sha256:'.length);
+        const payload = overrides.corruptCalldata === true
+          ? `${'aa'.repeat(31)}bb`
+          : digestHex;
+        const blockNumber = blocks.get(entry.digest)!;
+        return {
+          hash,
+          to: locator.contractAddress,
+          input: `0x${'11'.repeat(locator.inputByteOffset)}${payload}${'22'.repeat(4)}` as `0x${string}`,
+          blockHash: blockHashOf(blockNumber),
+          blockNumber,
+        };
+      },
+      async receipt(hash) {
+        const entry = byHash.get(hash.toLowerCase());
+        if (entry === undefined) return null;
+        const blockNumber = blocks.get(entry.digest)!;
+        return { status: 'success', blockHash: blockHashOf(blockNumber), blockNumber };
+      },
+      async block(number) {
+        const entry = byBlock.get(number);
+        if (entry === undefined) return null;
+        return {
+          number,
+          hash: blockHashOf(number),
+          // Whole seconds: the ceremony's `anchorTime` IS this block time, and §6 law 2 requires the
+          // binding's `validFrom` to be that exact string.
+          timestamp: BigInt(Date.parse(entry.anchorTime) / 1_000),
+        };
+      },
+      async finalizedBlockNumber() {
+        return overrides.unfinalized === true ? highest - 1n : highest + 10n;
+      },
+    };
+  }
+
+  function productionAnchorClient(trip: RoundTrip, overrides: ChainFactOverrides = {}) {
+    return createBaseSepoliaFinalizedAnchorClient(chainFacts(trip, overrides));
+  }
+
+  it('boots every role family of both operators over anchors the calldata verifier resolved', async () => {
+    const trip = await twoOperatorCeremony();
+    expect(trip.submitted.length).toBeGreaterThanOrEqual(2);
+
+    const trust = await openCatalog(trip, honestOwnership(trip), productionAnchorClient(trip));
+    expect(trust.conflicts).toEqual([]);
+
+    const now = () => new Date(ANCHOR_TIME_B);
+    const open = (dir: string, agent: string, family: keyof typeof FAMILIES) => RoleIdentitySet.open({
+      agent,
+      requiredRoles: FAMILIES[family]!,
+      storePath: join(dir, 'identity', `${family}.enc.json`),
+      password: PASSWORD,
+      bindingResolver: trust.bindingResolver,
+      verifyRoleBinding: trust.verifyRoleBinding,
+      now,
+    });
+
+    for (const [dir, agent, family] of [
+      [trip.a.dir, trip.agentA, 'requester'],
+      [trip.a.dir, trip.admissionAgentA, 'admission'],
+      [trip.a.dir, trip.agentA, 'solver'],
+      [trip.a.dir, trip.agentA, 'evaluator'],
+      [trip.b.dir, trip.agentB, 'requester'],
+      [trip.b.dir, trip.agentB, 'solver'],
+      [trip.b.dir, trip.agentB, 'evaluator'],
+    ] as const) {
+      const set = await open(dir, agent, family);
+      for (const role of FAMILIES[family]!) expect(set.get(role).keyId).toMatch(/^did:key:z/u);
+    }
+  });
+
+  it('serves the four evaluator-consumed purposes off those same verified anchors', async () => {
+    const trip = await twoOperatorCeremony();
+    const trust = await openCatalog(trip, honestOwnership(trip), productionAnchorClient(trip));
+    for (const purpose of [
+      'admission-agent',
+      'evaluator-eligibility',
+      'native:requester-submission',
+      'native:solver-delivery',
+    ]) {
+      expect(trust.policy(purpose)).toBeDefined();
+    }
+  });
+
+  it('refuses the catalog when the anchor calldata does not carry the declared digest', async () => {
+    const trip = await twoOperatorCeremony();
+    await expect(openCatalog(trip, honestOwnership(trip), productionAnchorClient(trip, { corruptCalldata: true })))
+      .rejects.toThrow(/is missing, non-finalized, or mismatched/u);
+  });
+
+  it('refuses the catalog while the anchor transaction sits above the finalized head', async () => {
+    const trip = await twoOperatorCeremony();
+    await expect(openCatalog(trip, honestOwnership(trip), productionAnchorClient(trip, { unfinalized: true })))
+      .rejects.toThrow(/is missing, non-finalized, or mismatched/u);
   });
 });
