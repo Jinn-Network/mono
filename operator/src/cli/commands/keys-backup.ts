@@ -9,7 +9,7 @@ import { emitEnvelope } from '../../errors/envelope.js';
 import { FleetStateStore } from '../../earning/store.js';
 import { decryptMnemonic, encryptMnemonic } from '../../earning/wallet.js';
 import { resolveCliPassword, resolveNewPassword } from '../password.js';
-import { resolveDefaultStateDir } from '../../state-dir.js';
+import { defaultConfigPath, resolveDefaultStateDir } from '../../state-dir.js';
 import { loadConfig } from '../../config.js';
 
 interface EarningTarget {
@@ -33,7 +33,7 @@ interface EarningTarget {
  * run, but the file is host-wide: on a multi-operator host it may still be the
  * password another operator's daemon boots with, and deleting it then locks that
  * operator out of its own keystore (#2515). Deleting only once it has stopped
- * opening the default keystore covers every case:
+ * opening the default keystore resolves that:
  *
  * - rotated the default operator → the keystore now needs the new password, so the
  *   file is stale and goes, exactly as before;
@@ -41,17 +41,27 @@ interface EarningTarget {
  *   file still opens the default keystore, so it stays (this is #2515), and it stays
  *   even when both operators happened to share one password;
  * - rotated a custom earning dir on a host with no default keystore → the file opens
- *   nothing, so it goes, which keeps single-operator rotation working.
+ *   nothing this command can see, so it goes, which keeps single-operator rotation
+ *   working.
  *
- * Every failure this cannot classify answers "not stale", so an unreadable file or a
- * corrupt default keystore keeps the one artifact that could still open a keystore
- * restored from backup. Callers must run this AFTER the new keystore is saved:
- * against the old keystore the old password still decrypts, and the file would
- * wrongly survive its own rotation.
+ * The third bullet is a judgement, not a proof: two custom-dir operators that both
+ * boot from this one file share its value, and nothing here can tell them apart, so
+ * rotating one still costs the other its password. `ceremony.ts` already refuses that
+ * setup — a non-default operator dir has no password-file fallback, so JINN_PASSWORD
+ * must be exported for every daemon start — and answering "keep" instead would strand
+ * the supported single-operator case with a file that opens nothing. Deleting here is
+ * no worse than the unconditional delete it replaces.
+ *
+ * Every failure this cannot classify answers "not stale", so an unreadable file, a
+ * corrupt default keystore, or a keystore shape this build does not understand keeps
+ * the one artifact that could still open a keystore restored from backup. Callers
+ * must run this AFTER the new keystore is saved: against the old keystore the old
+ * password still decrypts, and the file would wrongly survive its own rotation.
  */
 async function passwordFileIsStale(
   passwordFilePath: string,
   defaultEarningDir: string,
+  warn: (message: string) => void,
 ): Promise<boolean> {
   if (!existsSync(passwordFilePath)) return false;
   try {
@@ -61,16 +71,28 @@ async function passwordFileIsStale(
     if (!defaultStore.hasMnemonicKeystore()) return true;
     const encrypted = await defaultStore.loadMnemonicKeystore();
     // `hasMnemonicKeystore` is only an existence check, and `decryptMnemonic` throws
-    // the same way for a corrupt payload as for a wrong password. Rule out corruption
-    // first so a broken default keystore never costs the operator this file too.
-    JSON.parse(encrypted);
+    // the same way for a corrupt or unrecognized payload as for a wrong password.
+    // Rule out everything but a wrong password first, so a broken default keystore
+    // never costs the operator this file too.
+    const payload = JSON.parse(encrypted) as { type?: string; keystore?: unknown };
+    if (payload.type !== 'hd-mnemonic' || !payload.keystore) {
+      warn(
+        `[warn] ${defaultEarningDir} holds a keystore this build does not recognize; ` +
+          `leaving ${passwordFilePath} in place.`,
+      );
+      return false;
+    }
     try {
       await decryptMnemonic(encrypted, value);
       return false;
     } catch {
       return true;
     }
-  } catch {
+  } catch (err) {
+    warn(
+      `[warn] Could not tell whether ${passwordFilePath} is still in use ` +
+        `(${err instanceof Error ? err.message : String(err)}); leaving it in place.`,
+    );
     return false;
   }
 }
@@ -94,14 +116,22 @@ function resolveEarningTarget(
 
   const envEarningDir = ctx.env['JINN_EARNING_DIR'];
   let configEarningDir: string | undefined;
-  if (configPath !== undefined || envEarningDir === undefined) {
+  if (configPath !== undefined) {
     try {
       configEarningDir = loadConfig(configPath).earningDir;
     } catch (err) {
-      if (configPath !== undefined) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+  } else if (envEarningDir === undefined) {
+    // Resolve the implicit config path off `ctx.env` too — `loadConfig` would derive
+    // it from `process.env`, which is a different bag for any caller that injects HOME.
+    const implicitPath = defaultConfigPath({ home, env: ctx.env });
+    if (existsSync(implicitPath)) {
+      try {
+        configEarningDir = loadConfig(implicitPath).earningDir;
+      } catch {
+        // The default config file is optional; fall back to the default dir below.
       }
-      // Config file is optional; fall back to the default below.
     }
   }
 
@@ -335,7 +365,11 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
   // 9. Delete the auto-generated password file, but only once it has stopped
   //    opening the default operator's keystore — see `passwordFileIsStale` (#2515).
   let passwordFileDeleted = false;
-  if (await passwordFileIsStale(passwordFilePath, defaultEarningDir)) {
+  if (
+    await passwordFileIsStale(passwordFilePath, defaultEarningDir, (m) => {
+      process.stderr.write(`${m}\n`);
+    })
+  ) {
     unlinkSync(passwordFilePath);
     passwordFileDeleted = true;
   }
@@ -414,7 +448,7 @@ Target keystore:
 backup:
   Decrypts the local keystore using JINN_PASSWORD and writes the
   mnemonic to <path> with mode 0600. Idempotent: same mnemonic →
-  same output. No other side effects.
+  same output. Does not touch the keystore.
 
 change-password:
   Decrypts the keystore with the current password (resolved from

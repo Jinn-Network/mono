@@ -386,6 +386,27 @@ describe('keys change-password command', () => {
     expect(existsSync(passwordFile)).toBe(true);
   });
 
+  it('keeps the password file when the default keystore has an unrecognized shape', async () => {
+    const { home, defaultEarningDir, passwordFile } = await makeDefaultOperator();
+    writeFileSync(
+      join(defaultEarningDir, 'master_keystore.json'),
+      JSON.stringify({ type: 'some-future-format', keystore: {} }),
+    );
+    const { dir, password } = await makeKeystore();
+
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home,
+      JINN_EARNING_DIR: dir,
+      JINN_PASSWORD: password,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(false);
+    expect(existsSync(passwordFile)).toBe(true);
+  });
+
   it('rejects an explicit --config that cannot be loaded', async () => {
     const { home } = await makeDefaultOperator();
     const { ctx, writes, exits } = makeCtx(
