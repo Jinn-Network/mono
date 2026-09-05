@@ -46,7 +46,12 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-
+          cache: yarn
+          cache-dependency-path: |
+            packages/task-execution/protocol/yarn.lock
+            packages/trust/core/yarn.lock
+            packages/benchmarking/records/yarn.lock
+            packages/indexer/yarn.lock
       - run: corepack enable
 
       - name: Indexer boundary guard
@@ -90,7 +95,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-
+          cache: yarn
+          cache-dependency-path: packages/indexer/explorer/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       - run: yarn typecheck

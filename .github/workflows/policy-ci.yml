@@ -61,6 +61,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/task-execution/protocol/yarn.lock
+            packages/policy/identity/yarn.lock
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
@@ -100,6 +104,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/policy/identity/yarn.lock
+            packages/policy/outcomes/yarn.lock
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable

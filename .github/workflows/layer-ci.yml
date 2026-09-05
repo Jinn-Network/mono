@@ -217,6 +217,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/plugin/yarn.lock
+            packages/core/yarn.lock
+            packages/layer/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
         working-directory: packages/plugin
@@ -261,6 +266,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
         working-directory: operator

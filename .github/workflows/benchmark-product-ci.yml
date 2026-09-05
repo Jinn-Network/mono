@@ -157,6 +157,47 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/task-execution/protocol/yarn.lock
+            packages/trust/core/yarn.lock
+            packages/trust/testing/yarn.lock
+            packages/discovery/protocol/yarn.lock
+            packages/discovery/client/yarn.lock
+            packages/discovery/serve/yarn.lock
+            packages/discovery/transport-http/yarn.lock
+            packages/discovery/publication/yarn.lock
+            packages/environments/record/yarn.lock
+            packages/task-execution/profiles/yarn.lock
+            packages/benchmarking/records/yarn.lock
+            packages/benchmarking/aggregate/yarn.lock
+            packages/benchmarking/publication/yarn.lock
+            packages/task-execution/backend/yarn.lock
+            packages/task-execution/backend-local/supervisor/yarn.lock
+            packages/task-execution/backend-local/workspace/yarn.lock
+            packages/task-execution/backend-local/launchers/yarn.lock
+            packages/task-supply/admission/yarn.lock
+            packages/benchmarking/interop/yarn.lock
+            packages/evidence/protocol/yarn.lock
+            packages/evidence/repository/yarn.lock
+            packages/evidence/discovery/yarn.lock
+            packages/evidence/execution-evidence-builder/yarn.lock
+            packages/evidence/execution-recorder/yarn.lock
+            packages/evidence/attestation-issuer/yarn.lock
+            packages/benchmarking/protocol/yarn.lock
+            packages/benchmarking/evidence/yarn.lock
+            packages/benchmarking/native-capture/yarn.lock
+            packages/benchmarking/evaluation/yarn.lock
+            packages/task-execution/evaluation-harness/yarn.lock
+            packages/task-execution/evaluator-adapters/yarn.lock
+            packages/task-execution/oci-grader/yarn.lock
+            packages/task-execution/backend-local/assembly/yarn.lock
+            packages/benchmarking/run/yarn.lock
+            packages/benchmarking/local/yarn.lock
+            packages/benchmark-product/verify/yarn.lock
+            packages/benchmark-product/core/yarn.lock
+            packages/benchmark-product/web/yarn.lock
+            packages/benchmark-product/cli/yarn.lock
       - id: inspect-python
         name: Install the pinned optional Inspect runtime
         uses: actions/setup-python@v7
@@ -311,6 +352,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: packages/benchmark-product/web/yarn.lock
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable

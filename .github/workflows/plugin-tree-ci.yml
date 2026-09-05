@@ -72,6 +72,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: plugin/runtime/yarn.lock
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
@@ -94,6 +96,25 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/trust/core/yarn.lock
+            packages/discovery/protocol/yarn.lock
+            packages/discovery/client/yarn.lock
+            packages/discovery/serve/yarn.lock
+            packages/discovery/transport-http/yarn.lock
+            packages/evidence/protocol/yarn.lock
+            packages/evidence/derivation/yarn.lock
+            packages/evidence/repository/yarn.lock
+            packages/evidence/discovery/yarn.lock
+            packages/evidence/catalog-sqlite/yarn.lock
+            packages/evidence/execution-evidence-builder/yarn.lock
+            packages/evidence/execution-recorder/yarn.lock
+            packages/evidence/local-runtime/yarn.lock
+            packages/evidence/trace/yarn.lock
+            packages/evidence/trace-decode/yarn.lock
+            packages/evidence/retrieval/yarn.lock
+            plugin/runtime/yarn.lock
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable

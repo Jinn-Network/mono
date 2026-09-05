@@ -106,6 +106,33 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22.23.1
+          cache: yarn
+          cache-dependency-path: |
+            packages/trust/core/yarn.lock
+            packages/discovery/protocol/yarn.lock
+            packages/discovery/testing/yarn.lock
+            packages/discovery/serve/yarn.lock
+            packages/discovery/publication/yarn.lock
+            packages/discovery/client/yarn.lock
+            packages/discovery/transport-http/yarn.lock
+            packages/evidence/protocol/yarn.lock
+            packages/evidence/repository/yarn.lock
+            packages/evidence/discovery/yarn.lock
+            packages/task-execution/protocol/yarn.lock
+            packages/task-execution/profiles/yarn.lock
+            packages/benchmarking/records/yarn.lock
+            packages/environments/record/yarn.lock
+            packages/environments/chain-record/yarn.lock
+            packages/environments/information-world/yarn.lock
+            packages/evidence/offer/yarn.lock
+            packages/discovery/facts/evidence/yarn.lock
+            packages/discovery/facts/trust/yarn.lock
+            packages/discovery/facts/task-execution/yarn.lock
+            packages/discovery/facts/benchmarking/yarn.lock
+            packages/discovery/facts/environments/yarn.lock
+            packages/discovery/facts/chain-environments/yarn.lock
+            packages/discovery/facts/offers/yarn.lock
+            packages/discovery/sources/evidence-journal/yarn.lock
       # A freshly rolled runner image can regress the packed-consumer smoke:
       # node 22.23.2's bundled npm dies with "Cannot read properties of null
       # (reading 'edgesOut')" on yarn-packed tarballs (first seen on the

@@ -241,6 +241,12 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
+          cache: yarn
+          cache-dependency-path: |
+            operator/yarn.lock
+            packages/plugin/yarn.lock
+            packages/core/yarn.lock
+            packages/layer/yarn.lock
       - name: Enable Corepack
         working-directory: operator
         run: corepack enable

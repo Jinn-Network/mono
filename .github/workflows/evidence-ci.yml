@@ -107,6 +107,33 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22.23.1
+          cache: yarn
+          cache-dependency-path: |
+            packages/evidence/protocol/yarn.lock
+            packages/evidence/execution-evidence-builder/yarn.lock
+            packages/evidence/repository/yarn.lock
+            packages/trust/core/yarn.lock
+            packages/discovery/protocol/yarn.lock
+            packages/discovery/serve/yarn.lock
+            packages/discovery/publication/yarn.lock
+            packages/evidence/discovery/yarn.lock
+            packages/evidence/execution-recorder/yarn.lock
+            packages/evidence/attestation-issuer/yarn.lock
+            packages/evidence/publication/yarn.lock
+            packages/evidence/repository-oci/yarn.lock
+            packages/evidence/repository-ipfs/yarn.lock
+            packages/evidence/derivation/yarn.lock
+            packages/evidence/execution-recorder-bridge/yarn.lock
+            packages/evidence/retrieval/yarn.lock
+            packages/evidence/trace/yarn.lock
+            packages/evidence/trace-decode/yarn.lock
+            packages/evidence/offer/yarn.lock
+            packages/evidence/gate/yarn.lock
+            packages/evidence/contribution/yarn.lock
+            packages/evidence/catalog-sqlite/yarn.lock
+            packages/discovery/sources/evidence-journal/yarn.lock
+            packages/discovery/facts/offers/yarn.lock
+            packages/evidence/local-runtime/yarn.lock
       - name: Install npm 11.19.0 for pack-smoke
         run: |
           npm install -g npm@11.19.0
@@ -314,6 +341,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22.23.1
+          cache: yarn
+          cache-dependency-path: |
+            packages/evidence/protocol/yarn.lock
+            packages/evidence/repository/yarn.lock
+            packages/evidence/execution-evidence-builder/yarn.lock
+            packages/evidence/repository-oci/yarn.lock
+            packages/evidence/repository-ipfs/yarn.lock
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable

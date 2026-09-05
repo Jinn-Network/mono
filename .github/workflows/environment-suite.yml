@@ -166,6 +166,10 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            operator/yarn.lock
+            contracts/yarn.lock
       - if: steps.resolve.outputs.skip != 'true'
         run: corepack enable
       - if: steps.resolve.outputs.skip != 'true'

@@ -51,6 +51,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: packages/plugin/yarn.lock
       - run: npm install -g npm@11.5.1
       - run: corepack enable
       - run: yarn install --immutable
@@ -87,6 +89,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/plugin/yarn.lock
+            packages/core/yarn.lock
       - run: npm install -g npm@11.5.1
       - run: corepack enable
       - run: yarn --cwd ../plugin install --immutable
@@ -128,6 +134,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/plugin/yarn.lock
+            packages/core/yarn.lock
+            packages/layer/yarn.lock
       - run: npm install -g npm@11.5.1
       - run: corepack enable
       - run: yarn --cwd ../plugin install --immutable
@@ -221,6 +232,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/plugin/yarn.lock
+            packages/core/yarn.lock
+            packages/layer/yarn.lock
       - name: Verify exact stable pins
         run: |
           node .github/scripts/verify-layer-stable-version.mjs \

@@ -224,6 +224,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
       - run: corepack enable
       - name: Verify package inventory and portal graph
         run: node --test .github/scripts/operator-package-inventory.test.mjs
@@ -248,6 +250,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       # Foundry provides `anvil`, required by the test/_support/chain/*.test.ts
@@ -352,6 +356,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       - run: yarn build
@@ -405,6 +411,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/lifecycle-notifications/yarn.lock
+            apps/operator-console/yarn.lock
       - run: corepack enable
         working-directory: .
       - name: Enable Yarn 4.13.0
@@ -448,6 +458,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       - run: yarn e2e:degraded-daemon-guard
@@ -470,6 +482,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            operator/yarn.lock
+            contracts/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       # `@jinn-network/*` resolve through `portal:` to `packages/*`, whose
@@ -514,6 +530,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       - run: yarn build
