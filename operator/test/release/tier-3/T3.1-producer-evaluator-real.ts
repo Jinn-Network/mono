@@ -289,8 +289,9 @@ interface T31ScanState {
  * reads is still seen whole.
  *
  * What it guarantees about a truncated log: the offset resets when the file
- * shrinks below the remembered offset, and when its leading `SIGNATURE_BYTES`
- * change — which is what a restarted or rotated daemon writes. Both resets are
+ * shrinks below the remembered offset, and when its leading bytes change over
+ * the `SIGNATURE_BYTES` the two polls have in common — which is what a
+ * restarted or rotated daemon writes. Both resets are
  * persisted before any early-out, so a truncation observed while the
  * replacement still has no complete line is not forgotten on the next poll. It
  * cannot detect an in-place truncation whose replacement reproduces the same
