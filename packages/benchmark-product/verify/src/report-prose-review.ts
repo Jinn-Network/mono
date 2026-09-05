@@ -181,9 +181,9 @@ export function reviewReportProse(html: string): readonly ReportProseFinding[] {
  * A finding the published page still carries, with the wording that replaces it.
  *
  * These are not waivers. `verifyPublicBundleSnapshot` byte-compares every presentation asset
- * against its own rebuild, and every published claim advertises a compatible verifier as a minor
- * line (`npx @colophon-claims/verify@0.2 …`), so changing one of these strings in place would make
- * every already-published bundle fail under the command it printed. Adopting the rulings is
+ * against its own rebuild, and every published claim advertises its compatible verifier as a minor
+ * line (see `legacy-closures.ts`), so changing one of these strings in place would make every
+ * already-published bundle fail under the command it printed. Adopting the rulings is
  * therefore a bundle-format allocation, exactly as
  * `spec/2026-09-02-report-page-information-architecture.md` §8 rules for the reading order that
  * lands in the same revision.
