@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
@@ -84,4 +85,43 @@ test('operator-only and documentation-only changes skip verification', () => {
   ]);
   assert.equal(result.run, false);
   assert.deepEqual(result.selectedDomains, []);
+});
+
+// The CLI reads stdin as `buffer.split('\n')`, so an empty stream arrives as
+// `['']` — length 1, which slipped past a pre-normalization emptiness check and
+// unselected every lane. These pin the documented fail-safe through the entry
+// point that actually has the bug (spawn, not a direct function call).
+const cli = (stdin) => {
+  const result = spawnSync(
+    process.execPath,
+    [resolve(import.meta.dirname, 'platform-verification-selection.mjs'), '--repo-root', repoRoot],
+    { input: stdin, encoding: 'utf8' },
+  );
+  assert.equal(result.status, 0, `selector exited ${result.status}: ${result.stderr}`);
+  return JSON.parse(result.stdout);
+};
+
+test('empty stdin selects full verification through the CLI', () => {
+  const result = cli('');
+  assert.equal(result.run, true);
+  assert.match(result.reason, /no changed files reported/u);
+  assert.deepEqual(result.selectedDomains, [...new Set(GATE_DOMAINS.values())].sort());
+});
+
+test('blank-lines-only stdin selects full verification through the CLI', () => {
+  const result = cli('\n\n   \n\t\n');
+  assert.equal(result.run, true);
+  assert.match(result.reason, /no changed files reported/u);
+});
+
+test('the CLI still unselects for a genuinely irrelevant diff', () => {
+  // Control: the fail-safe must not have been widened into selecting everything.
+  const result = cli('docs/engineering/handbook.md\n');
+  assert.equal(result.run, false);
+});
+
+test('blank entries passed directly select full verification', () => {
+  const result = select(['', '   ']);
+  assert.equal(result.run, true);
+  assert.match(result.reason, /no changed files reported/u);
 });
