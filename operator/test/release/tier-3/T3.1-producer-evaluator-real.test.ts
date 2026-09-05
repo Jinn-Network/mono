@@ -162,15 +162,15 @@ describe('assertT31ApprovedHermesOverridePair', () => {
     ).toThrow(new RegExp(T31_APPROVED_HERMES_MODEL_ENV));
   });
 
-  it('rejects a stray inherited approved provider even when the scenario emits neither half', () => {
+  it('rejects a whitespace-only approved model against an inherited provider', () => {
     // spawnMultiOpDaemons builds each child env as { ...process.env, ...extraEnv },
-    // so the stray var reaches the daemon and trips the guard after boot.
+    // so the inherited provider reaches the daemon and trips the guard after boot.
     expect(() =>
       assertT31ApprovedHermesOverridePair({
-        approvedHermesOverride: { model: '', provider: '' },
+        approvedHermesOverride: { model: '   ' },
         env: { [T31_APPROVED_HERMES_PROVIDER_ENV]: '  openrouter  ' },
       }),
-    ).toThrow(/before .*spawn|Refusing to spawn/i);
+    ).toThrow(/Refusing to spawn the Tier-3 daemons/);
   });
 
   it('accepts an inherited provider once the scenario supplies the approved model', () => {
@@ -263,6 +263,20 @@ describe('createT31GuardMismatchScanner', () => {
       // that early-out, or this poll reads from byte 4108 of the replacement
       // and misses the marker.
       await fs.appendFile(logPath, `\n${mismatchLine}\n${'b'.repeat(8192)}\n`);
+      expect(await scan()).toEqual({ logPath, line: mismatchLine });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('tolerates an empty log file', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 't31-scan-'));
+    try {
+      const logPath = path.join(dir, 'op-b-daemon.log');
+      await fs.writeFile(logPath, '');
+      const scan = createT31GuardMismatchScanner([logPath]);
+      expect(await scan()).toBeNull();
+      await fs.appendFile(logPath, `${mismatchLine}\n`);
       expect(await scan()).toEqual({ logPath, line: mismatchLine });
     } finally {
       await fs.rm(dir, { recursive: true, force: true });

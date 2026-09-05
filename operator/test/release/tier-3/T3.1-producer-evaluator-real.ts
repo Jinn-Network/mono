@@ -207,7 +207,7 @@ export function buildT31DaemonEnv(args: {
  * override: `spawnMultiOpDaemons` builds each child env as
  * `{ ...process.env, ...extraEnv }`, so a stray `JINN_T31_APPROVED_HERMES_PROVIDER`
  * in the operator's shell reaches the daemon even though `buildT31DaemonEnv`
- * never emits that half alone.
+ * emits neither half for a scenario that declares no override.
  */
 export function assertT31ApprovedHermesOverridePair(args: {
   approvedHermesOverride?: { model: string; provider?: string };
@@ -264,6 +264,19 @@ export interface T31GuardMismatchHit {
 }
 
 /**
+ * Leading bytes remembered per log to notice an in-place truncation the size
+ * check misses. A restarted daemon's first line differs from the previous run's,
+ * so comparing the head of the file is enough to spot the replacement.
+ */
+const SIGNATURE_BYTES = 64;
+
+interface T31ScanState {
+  offset: number;
+  /** Leading bytes of the file as of the previous scan, hex; empty before the first. */
+  signature: string;
+}
+
+/**
  * Incremental scanner for the resolved-model guard's mismatch line in the
  * spawned daemons' stdio capture.
  *
@@ -285,19 +298,6 @@ export interface T31GuardMismatchHit {
  * `spawnMultiOpDaemons` opens these logs append-only and nothing truncates
  * them, so that sequence does not arise in a real Tier-3 run.
  */
-/**
- * Leading bytes remembered per log to notice an in-place truncation the size
- * check misses. A restarted daemon's first line differs from the previous run's,
- * so comparing the head of the file is enough to spot the replacement.
- */
-const SIGNATURE_BYTES = 64;
-
-interface T31ScanState {
-  offset: number;
-  /** Leading bytes of the file as of the previous scan; empty before the first. */
-  signature: string;
-}
-
 export function createT31GuardMismatchScanner(
   logPaths: readonly (string | null | undefined)[],
 ): () => Promise<T31GuardMismatchHit | null> {
@@ -318,13 +318,22 @@ export function createT31GuardMismatchScanner(
         const { size } = await handle.stat();
         const state = states.get(logPath) ?? { offset: 0, signature: '' };
         const sigBuf = Buffer.alloc(Math.min(SIGNATURE_BYTES, size));
-        const { bytesRead: signatureBytes } = await handle.read(sigBuf, 0, sigBuf.length, 0);
-        const signature = sigBuf.subarray(0, signatureBytes).toString('base64');
+        // An empty log has no signature to compare; `read` is skipped rather
+        // than issued with a zero-length buffer.
+        const signatureBytes =
+          sigBuf.length === 0 ? 0 : (await handle.read(sigBuf, 0, sigBuf.length, 0)).bytesRead;
+        const signature = sigBuf.subarray(0, signatureBytes).toString('hex');
 
         // Log rotated or truncated under us: it shrank, or it was replaced in
         // place with different leading bytes. Either way the remembered offset
-        // points into content that no longer exists.
-        const truncated = size < state.offset || (state.signature !== '' && signature !== state.signature);
+        // points into content that no longer exists. The signatures are compared
+        // over their common prefix, so a log that was shorter than
+        // `SIGNATURE_BYTES` on an earlier poll and has since grown is not
+        // mistaken for a replacement.
+        const shared = Math.min(state.signature.length, signature.length);
+        const truncated =
+          size < state.offset ||
+          (shared > 0 && state.signature.slice(0, shared) !== signature.slice(0, shared));
         const from = truncated ? 0 : state.offset;
         // Persist the reset (and the signature) before either early-out below,
         // so a truncation observed on this poll survives into the next one.
