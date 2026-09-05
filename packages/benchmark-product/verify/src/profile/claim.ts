@@ -620,21 +620,6 @@ export const ClaimPackageSchema = z.preprocess((input) => {
 export type ClaimPackage = z.infer<typeof ClaimPackageSchema>;
 
 export interface BuildClaimPackageInput {
-  /**
-   * Which reader line an anchored, non-qualifying claim pins.
-   *
-   * Two bundle formats carry `benchmark-product.claim-package/4` -- `/6` and `/9` -- and they
-   * differ only in the page they render and the release that renders it (issue #3698), so which
-   * line the claim pins is not derivable from any record this builder reads. The producer always
-   * builds the current allocation and leaves this unset; a reader rebuilding an ALREADY-SEALED
-   * claim states the format that claim belongs to, so a `/6` bundle published before `/9` existed
-   * keeps rebuilding to its own immutable pin instead of failing `claim-consistency` against a
-   * line it predates.
-   */
-  readonly anchoredBundleFormat?:
-    | "benchmark-product-public-bundle/6"
-    | "benchmark-product-public-bundle/9";
-
   readonly draftId: string;
   readonly benchmarkSha256: string;
   readonly runRecord: RunRecord;
@@ -674,6 +659,20 @@ export interface BuildClaimPackageInput {
    * from the sealed record's exact bytes by the shared `deriveDisclosureSpecification`. Absent for
    * every run with no declaration, which is what keeps every existing claim byte-identical. */
   readonly disclosure?: ClaimDisclosureSection;
+  /**
+   * Which reader line an anchored, non-qualifying claim pins.
+   *
+   * Two bundle formats carry `benchmark-product.claim-package/4` -- `/6` and `/9` -- and they
+   * differ only in the page they render and the release that renders it (issue #3698), so which
+   * line the claim pins is not derivable from any record this builder reads. The producer always
+   * builds the current allocation and leaves this unset; a reader rebuilding an ALREADY-SEALED
+   * claim states the format that claim belongs to, so a `/6` bundle published before `/9` existed
+   * keeps rebuilding to its own immutable pin instead of failing `claim-consistency` against a
+   * line it predates.
+   */
+  readonly anchoredBundleFormat?:
+    | "benchmark-product-public-bundle/6"
+    | "benchmark-product-public-bundle/9";
 }
 
 type Comparison = z.infer<typeof ComparisonSchema>;
@@ -1095,8 +1094,8 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
         ? PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND
         : anchored
           // Anchored and non-qualifying is `/9` now (issue #3698): the page states the
-          // denominator pair, and only the `0.3` line renders it. A reader rebuilding a `/6`
-          // claim says so and gets `/6`'s own immutable line back.
+          // denominator pair, and only the `0.2` line renders it -- `/6`'s `@0.1` reader rebuilds
+          // the old page. A reader rebuilding a `/6` claim says so and gets `/6`'s line back.
           ? input.anchoredBundleFormat === "benchmark-product-public-bundle/6"
             ? PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
             : PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND
