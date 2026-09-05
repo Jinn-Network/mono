@@ -30,7 +30,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc -p tsconfig.scripts.json",
     "test": "vitest run",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
