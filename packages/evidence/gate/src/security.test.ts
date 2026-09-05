@@ -190,4 +190,35 @@ describe("the paid pickup security boundary", () => {
     expect(Object.isFrozen(observedEntry)).toBe(true);
   });
 
+
+  test("a source cannot change the checked bytes while the rail delivery is pending", async () => {
+    const { options, request, rail } = await market();
+    const retained = BYTES.slice();
+    let releaseDelivery!: () => void;
+    let startedDelivery!: () => void;
+    const pending = new Promise<void>((resolve) => { releaseDelivery = resolve; });
+    const started = new Promise<void>((resolve) => { startedDelivery = resolve; });
+    const adapter: RailAdapter = {
+      observe: rail.observe,
+      description: { ...rail.description, paymentsArePubliclyVisible: false, settlement: "on-delivery" },
+      deliver: async () => {
+        startedDelivery();
+        await pending;
+        return { status: "ready" };
+      },
+    };
+    const gate = createRetrievalGate({
+      ...options, subjects: { read: async () => retained }, rails: [adapter],
+    });
+    const collecting = gate.request(request);
+    await started;
+    retained[0] = retained[0]! ^ 0xff;
+    releaseDelivery();
+    const outcome = await collecting;
+    if (outcome.status !== "delivered") throw new Error("expected delivery");
+    expect(outcome.bytes).toEqual(BYTES);
+    expect(outcome.bytes).not.toBe(retained);
+    expect(recordDigest(outcome.bytes)).toBe(outcome.subject);
+  });
+
 });

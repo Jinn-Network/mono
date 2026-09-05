@@ -456,21 +456,24 @@ export function createRetrievalGate(options: CreateRetrievalGateOptions): Retrie
     subject: Sha256Digest,
     callOptions: GateOperationOptions,
   ): Promise<{ readonly bytes: Uint8Array } | { readonly refusal: GateRefusal }> {
-    const bytes = await subjects.read(subject, callOptions);
-    if (bytes === null) {
+    const sourceBytes = await subjects.read(subject, callOptions);
+    if (sourceBytes === null) {
       return {
         refusal: refuse("subject-unavailable", `this gate holds no bytes for ${subject}`),
       };
     }
-    if (bytes.byteLength > hardLimits.maxSubjectBytes) {
+    if (sourceBytes.byteLength > hardLimits.maxSubjectBytes) {
       return {
         refusal: refuse(
           "subject-too-large",
-          `${subject} is ${bytes.byteLength} bytes and this gate serves at most `
+          `${subject} is ${sourceBytes.byteLength} bytes and this gate serves at most `
             + `${hardLimits.maxSubjectBytes}`,
         ),
       };
     }
+    // Own the checked bytes across the later delivery, claim, and signing awaits. A
+    // repository or custom source may reuse its retained buffer as soon as read returns.
+    const bytes: Uint8Array = Uint8Array.prototype.slice.call(sourceBytes);
     const actual = recordDigest(bytes);
     if (actual !== subject) {
       // The buyer's hash check would catch this too. Catching it here means a holder whose
