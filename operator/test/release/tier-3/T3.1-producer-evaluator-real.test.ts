@@ -5,15 +5,19 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import {
   buildT31DaemonEnv,
+  createT31GuardMismatchScanner,
   resolveT31SolverHermesConfigPath,
   runT31ProducerEvaluatorReal,
 } from './T3.1-producer-evaluator-real.js';
 import {
+  RESOLVED_HERMES_MODEL_MISMATCH_MARKER,
   T31_APPROVED_HERMES_MODEL_ENV,
   T31_APPROVED_HERMES_PROVIDER_ENV,
   T31_EXPECTED_HERMES_MODEL_ENV,
   T31_EXPECTED_HERMES_PROVIDER_ENV,
 } from '../../../src/harnesses/impls/hermes-agent/resolved-model-guard.js';
+import { defaultImplStateDirRoot } from '../../../src/state-dir.js';
+import { HERMES_AGENT_HARNESS, harnessStateDirName } from '../../../src/harnesses/names.js';
 
 describe('T3.1 producer-evaluator-real', () => {
   // Gated: this test spends real testnet ETH + real OpenRouter $. Only runs when
@@ -57,6 +61,17 @@ describe('T3.1 producer-evaluator-real', () => {
     });
   });
 
+  it('carries a non-default provider into both the daemon and the guard env', () => {
+    expect(buildT31DaemonEnv({
+      hermesModel: 'anthropic/claude-opus-4.6',
+      hermesProvider: 'anthropic',
+      onchainTaskId: '4249',
+    })).toMatchObject({
+      JINN_HERMES_PROVIDER: 'anthropic',
+      [T31_EXPECTED_HERMES_PROVIDER_ENV]: 'anthropic',
+    });
+  });
+
   it('records an approved explicit model/provider override in daemon env for the adapter guard', () => {
     expect(buildT31DaemonEnv({
       hermesModel: 'deepseek/deepseek-v4-flash',
@@ -74,17 +89,116 @@ describe('T3.1 producer-evaluator-real', () => {
     });
   });
 
-  it('resolves the solver task-local Hermes config under the gold home state dir', async () => {
+  it('resolves the solver task-local Hermes config from the same symbols the daemon uses', async () => {
     const solverHome = await fs.mkdtemp(path.join(os.tmpdir(), 't31-solver-home-'));
     try {
       const legacyState = path.join(solverHome, '.jinn-client');
-      mkdirSync(path.join(legacyState, 'engine', 'impl-state', 'hermes-agent'), { recursive: true });
+      mkdirSync(path.join(legacyState, 'engine', 'impl-state'), { recursive: true });
       writeFileSync(path.join(legacyState, 'config.json'), '{}\n');
-      expect(resolveT31SolverHermesConfigPath(solverHome)).toBe(
-        path.join(legacyState, 'engine', 'impl-state', 'hermes-agent', 'config.yaml'),
+      // Asserted against the production symbols, not against a literal path:
+      // if the daemon's impl-state layout or the hermes state-dir name moves,
+      // this expectation moves with it instead of quietly going stale.
+      expect(resolveT31SolverHermesConfigPath(solverHome, {})).toBe(
+        path.join(
+          defaultImplStateDirRoot(legacyState),
+          harnessStateDirName(HERMES_AGENT_HARNESS),
+          'config.yaml',
+        ),
       );
     } finally {
       await fs.rm(solverHome, { recursive: true, force: true });
+    }
+  });
+
+  it('honours the JINN_ENGINE_IMPL_STATE_DIR_ROOT the spawned daemon inherits', () => {
+    expect(
+      resolveT31SolverHermesConfigPath('/gold/op-b', {
+        JINN_ENGINE_IMPL_STATE_DIR_ROOT: '/elsewhere/impl-state',
+      }),
+    ).toBe(
+      path.join('/elsewhere/impl-state', harnessStateDirName(HERMES_AGENT_HARNESS), 'config.yaml'),
+    );
+  });
+});
+
+describe('resolveT31SolverHermesConfigPath env handling', () => {
+  it('treats a blank JINN_ENGINE_IMPL_STATE_DIR_ROOT as unset', () => {
+    expect(
+      resolveT31SolverHermesConfigPath('/gold/op-b', {
+        JINN_ENGINE_IMPL_STATE_DIR_ROOT: '   ',
+        JINN_STATE_DIR: '/state',
+      }),
+    ).toBe(
+      path.join(
+        defaultImplStateDirRoot('/state'),
+        harnessStateDirName(HERMES_AGENT_HARNESS),
+        'config.yaml',
+      ),
+    );
+  });
+});
+
+describe('createT31GuardMismatchScanner', () => {
+  const mismatchLine =
+    `[hermes-agent] ${RESOLVED_HERMES_MODEL_MISMATCH_MARKER}: ` +
+    'requested model=deepseek/deepseek-v4-flash provider=openrouter, ' +
+    'resolved model=anthropic/claude-opus-4.6 provider=anthropic, config=/tmp/config.yaml';
+
+  it('returns null while no daemon log carries the guard marker', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 't31-scan-'));
+    try {
+      const logPath = path.join(dir, 'op-b-daemon.log');
+      await fs.writeFile(logPath, 'ordinary daemon chatter\n');
+      const scan = createT31GuardMismatchScanner([logPath, null]);
+      expect(await scan()).toBeNull();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports the marker line appended after a previous clean scan', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 't31-scan-'));
+    try {
+      const logPath = path.join(dir, 'op-b-daemon.log');
+      await fs.writeFile(logPath, 'boot\n');
+      const scan = createT31GuardMismatchScanner([logPath]);
+      expect(await scan()).toBeNull();
+      await fs.appendFile(logPath, `${mismatchLine}\n`);
+      expect(await scan()).toEqual({ logPath, line: mismatchLine });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not consume a marker line that is still being written', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 't31-scan-'));
+    try {
+      const logPath = path.join(dir, 'op-b-daemon.log');
+      const split = mismatchLine.length - 20;
+      await fs.writeFile(logPath, mismatchLine.slice(0, split));
+      const scan = createT31GuardMismatchScanner([logPath]);
+      // The line has no terminating newline yet, so it is incomplete and must
+      // not be scanned — nor may the offset advance past it.
+      expect(await scan()).toBeNull();
+      await fs.appendFile(logPath, `${mismatchLine.slice(split)}\n`);
+      expect(await scan()).toEqual({ logPath, line: mismatchLine });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('tolerates a missing log file and a log truncated between scans', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 't31-scan-'));
+    try {
+      const logPath = path.join(dir, 'op-b-daemon.log');
+      const scan = createT31GuardMismatchScanner([logPath, path.join(dir, 'absent.log')]);
+      expect(await scan()).toBeNull();
+      await fs.writeFile(logPath, 'a'.repeat(4096) + '\n');
+      expect(await scan()).toBeNull();
+      await fs.writeFile(logPath, `${mismatchLine}\n`);
+      expect(await scan()).toEqual({ logPath, line: mismatchLine });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
     }
   });
 });
