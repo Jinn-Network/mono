@@ -738,12 +738,13 @@ export function scanVitestConfig(text) {
     .forEach((line, idx) => {
       if ((raw[idx] ?? '').includes(ALLOW_MARKER)) return;
       for (const pin of PARALLELISM_PINS) {
-        const m = pin.re.exec(line);
-        if (!m) continue;
-        // A counted pin compares the NORMALISED literal, so `maxWorkers: 1_0`
-        // is read as the ten workers it is rather than as the one-worker pin.
-        if (pin.pinnedValue !== undefined && Number(literalValue(m[1])) !== pin.pinnedValue) continue;
-        found.push({ line: idx + 1, snippet: (raw[idx] ?? line).trim(), why: pin.why });
+        for (const m of line.matchAll(new RegExp(pin.re, 'g'))) {
+          // Check every count: a non-pin such as maxForks: 10 must not hide
+          // a later minForks: 1 on the same line.
+          if (pin.pinnedValue !== undefined && Number(literalValue(m[1])) !== pin.pinnedValue) continue;
+          found.push({ line: idx + 1, snippet: (raw[idx] ?? line).trim(), why: pin.why });
+          break; // One report per pin rule per line.
+        }
       }
     });
   return found;
@@ -854,11 +855,10 @@ export function runGuard(operatorRoot) {
       '  with it. Failing loudly rather than reporting a vacuous pass. See issue #1627.',
     );
   }
-  if (roots.length === 0) {
+  if (!isDirectory(testRoot)) {
     return bail(
-      '✗ This guard found no test tree to scan.',
-      '  A green check from a guard that policed nothing reads as coverage it did',
-      '  not provide, so this is a failure. See issue #1627.',
+      '✗ operator/test/ is not a directory, so the primary test tree was not scanned.',
+      '  Other scan roots cannot substitute for that tree. See issue #1627.',
     );
   }
 

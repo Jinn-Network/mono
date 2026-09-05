@@ -436,6 +436,18 @@ test('rule 3 normalises separators before comparing a pin value', () => {
   assert.deepEqual(scanVitestConfig('test: { maxWorkers: 1.0 }'), [], 'a non-integer pin is still a non-catch');
 });
 
+test('rule 3 checks later pool counts on the same line', () => {
+  for (const config of [
+    'poolOptions: { forks: { maxForks: 10, minForks: 1 } }',
+    'poolOptions: { threads: { maxThreads: 1_0, minThreads: 1 } }',
+  ]) {
+    const found = scanVitestConfig(config);
+    assert.equal(found.length, 1, 'a non-pin must not hide a later one-worker pin');
+    assert.ok(found[0].why.includes('pool-level'));
+  }
+  assert.deepEqual(scanVitestConfig('poolOptions: { forks: { maxForks: 10, minForks: 2 } }'), []);
+});
+
 // ── Rule 1a over whole-file text (#3270) ────────────────────────────────────
 // Rule 1d was moved to whole-file text so a multi-line `ports: [` array is
 // caught; rule 1a was left per-line and the header did not say so.
@@ -541,7 +553,7 @@ test('runGuard fails loudly rather than passing vacuously', (t) => {
   const notADir = makeTree(t, { 'test': 'this is a file, not the test tree\n', 'vitest.config.ts': '' });
   const noRoots = runGuard(notADir);
   assert.equal(noRoots.exitCode, 1);
-  assert.ok(noRoots.stderr.join('\n').includes('no test tree to scan'));
+  assert.ok(noRoots.stderr.join('\n').includes('operator/test/ is not a directory'));
 
   const empty = makeTree(t, { 'test/.gitkeep': '', 'vitest.config.ts': '' });
   const zeroFiles = runGuard(empty);
@@ -552,6 +564,17 @@ test('runGuard fails loudly rather than passing vacuously', (t) => {
   const configGone = runGuard(noConfig);
   assert.equal(configGone.exitCode, 1, 'rule 3 checking nothing is a failure');
   assert.ok(configGone.stderr.join('\n').includes('vitest.config.ts not found'));
+});
+
+test('runGuard rejects a non-directory test root even when another scan root exists', (t) => {
+  const root = makeTree(t, {
+    'test': 'this is a file, not the test tree\n',
+    'scripts/release/a.test.ts': '',
+    'vitest.config.ts': '',
+  });
+  const result = runGuard(root);
+  assert.equal(result.exitCode, 1, 'release tests cannot substitute for the primary test tree');
+  assert.ok(result.stderr.join('\n').includes('operator/test/ is not a directory'));
 });
 
 test('runGuard skips test/fixtures/ but not a fixtures dir elsewhere', (t) => {
