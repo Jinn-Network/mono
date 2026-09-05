@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { BenchmarkProductError } from "./profile/errors.js";
 import {
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
@@ -151,6 +152,19 @@ describe("the four closure cells", () => {
     ]) {
       expect(() => legacyClosure(format as never), format).toThrow(/unknown legacy bundle format/u);
     }
+  });
+
+  test("a symbol key is refused through the typed envelope, not a bare TypeError", () => {
+    // `Object.hasOwn` answers a symbol correctly, so the guard reaches its refusal; naming the
+    // symbol in the refusal message is what must not throw first. Unreachable from bundle bytes
+    // -- `JSON.parse` produces no symbol keys -- but the untyped published caller this guard
+    // exists for can reach it, and a bare TypeError there is the exact escape it prevents.
+    const refused = () => legacyClosure(Symbol("benchmark-product-public-bundle/9") as never);
+    expect(refused).toThrow(BenchmarkProductError);
+    expect(refused).toThrow(expect.objectContaining({
+      code: "record-integrity",
+      issues: [expect.objectContaining({ path: "bundle.manifest.format" })],
+    }));
   });
 
   test("two independent axes: v6 is v2 plus anchors, v7 is v4 plus anchors", () => {

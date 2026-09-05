@@ -32,6 +32,11 @@ For this release, `@jinn-network/*` is pinned to the exact
 `0.1.0-canary.sha.0533a224cf99f06d7facf0c23455f2781a5b9e62` receipt.
 It is not a floating `@canary` dependency and is not a stable stack release.
 
+`summarizeVerificationOutcome` is new since the 0.2.1 cut. For a `result.format` it does not
+recognize it refuses rather than returning a check denominator: it throws with `.name`
+`BenchmarkProductError` and `.code` `record-integrity`. No published 0.2.x release exported
+this function, so there is no upgrade path on which its behavior changed.
+
 Verification opens no network connection, reads no account or API credential, and uploads
 nothing. It recomputes the checks the bundle's declared format closes over, against the bytes
 the bundle carries and nothing else. It does not prove that the producing machine was honest
