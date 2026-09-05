@@ -82,7 +82,28 @@ once for the digest narrowed to a single field, which is how a graph is walked
 a hop at a time. SQLite applies equality terms only across an index prefix, so
 one index cannot serve both shapes without falling back to a temporary b-tree
 for the page ordering. `announcement-edges.test.ts` asserts the query plan for
-each shape, so the coverage is proven rather than restated.
+each shape — first page and resumed page both, since every page after the first
+appends the cursor comparison — so the coverage is proven rather than restated.
+
+Two served filter shapes have no leading-column index behind them: `recordKind`
+alone and `field` alone. Nothing leads with either column — the four
+announcement-edge indexes lead with `record_digest` or `target_digest`, and the
+primary-key autoindex leads with `source_id` — so each scans its first page and
+seeks to its cursor on a resumed page rather than re-scanning to it.
+
+The ordering is where the two part. `recordKind` alone gets it free: the primary
+key spells the `ORDER BY` exactly. `field` alone does not, because SQLite treats
+the equality-constrained `field` as constant and drops it from the ordering,
+which leaves `ordinal` out of index order — so both of its pages add a temp
+b-tree for the last term, and a resumed page sorts everything still matching
+rather than reading a page off the cursor.
+
+Neither shape is indexed. A fifth or sixth index would buy a first-page seek and
+charge write amplification on every indexed card, and nothing in-tree queries
+either shape — so they stay as they are until something does. The temp b-tree is
+the sharper of the two costs and the one to revisit first when a caller appears.
+`announcement-edges.test.ts` pins both plans, so whichever conclusion holds
+cannot drift unnoticed.
 
 A card is a holder-authored claim and nothing here is checked against the
 record, so edges are scoped to the announcing source: a source replacing its own
