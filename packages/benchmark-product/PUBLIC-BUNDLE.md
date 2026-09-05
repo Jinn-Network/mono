@@ -434,13 +434,19 @@ bundle at manifest parse rather than misreading it as a full-evidence bundle wit
 Read a metadata-first bundle with a reader that lists the profile among the ones it supports.
 
 That is also the publication gate. `claim-package/3`'s `verification.command` names the reader a
-bundle instructs its readers to use, and no released reader line understands this profile yet, so
-**nothing may publish a metadata-first bundle until its claim package pins a reader release that
-declares the profile** — a claim naming a reader that cannot read it is an instruction to fail.
-Today the profile is a format definition and a local derivation of an already-published
-full-evidence bundle; no producer emits one. The local viewer, which is the one surface that can
-be pointed at a hand-derived metadata-first bundle, offers the local `colophon bundle verify`
-command instead of an `npx` line that would refuse.
+bundle instructs its readers to use, so **nothing may publish a metadata-first bundle until its
+claim package pins a reader release that declares the profile** — a claim naming a reader that
+cannot read it is an instruction to fail. That rule is satisfiable rather than closed:
+`@colophon-claims/verify@0.2.1`, the registry `latest` since 2026-09-01, lists the metadata-first
+profile among the ones its manifest parse accepts; `@0.2.0` and every earlier line refuse a
+metadata-first bundle there. What a `/5` producer writes today still does not satisfy the gate:
+`PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND` resolves to the `@0.1` line and there is no
+metadata-first-specific command constant, so a metadata-first bundle whose claim pins `@0.1`
+remains an instruction to fail. The gate is open and unexercised — the profile is a format
+definition and a local derivation of an already-published full-evidence bundle, and no producer
+emits one. The local viewer, which is the one surface that can be pointed
+at a hand-derived metadata-first bundle, offers the local `colophon bundle verify` command; a
+reader handed such a bundle can also run `npx @colophon-claims/verify@0.2.1 <bundle-dir>`.
 
 ### Disclosed anchored binary qualification bundle v8
 
