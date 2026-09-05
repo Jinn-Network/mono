@@ -209,9 +209,13 @@ function blankComments(text: string): string {
       continue;
     }
     if (character === "\n") { previousToken = undefined; slashSeen = false; }
-    if (character === "/" && text[index + 1] === "/") { mode = "line"; start = index; index += 1; }
-    else if (character === "/" && text[index + 1] === "*") { mode = "block"; start = index; index += 1; }
-    else if (character === '"' || character === "'") {
+    if (character === "/" && text[index + 1] === "/") {
+      if (slashSeen) mode = "opaque";
+      else { mode = "line"; start = index; index += 1; }
+    } else if (character === "/" && text[index + 1] === "*") {
+      if (slashSeen) mode = "opaque";
+      else { mode = "block"; start = index; index += 1; }
+    } else if (character === '"' || character === "'") {
       if (slashSeen || (previousToken !== undefined && !STRING_OPENERS.has(previousToken))) {
         mode = "opaque";
       } else {
@@ -714,6 +718,10 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     // A real comment is still blanked, including one carrying an apostrophe of its own.
     expect(emitterCallSites("// don't call runBindingSentence(forged) from here\n", "fixture.ts")).toEqual([]);
     expect(emitterCallSites("/* don't call\n   runBindingSentence(forged) */\n", "fixture.ts")).toEqual([]);
+    expect(emitterCallSites("const value = 1; // don't call runBindingSentence(forged)\n", "fixture.ts"))
+      .toEqual([]);
+    expect(emitterCallSites("const value = 1; /* don't call runBindingSentence(forged) */\n", "fixture.ts"))
+      .toEqual([]);
     // When it cannot tell -- a quote that never closes, as a regex character class writes one -- it
     // blanks nothing further on that line and starts the next line clean. The cost is a comment read
     // as code, which is loud; the tail of the file is never silently blanked.
@@ -787,6 +795,24 @@ describe("the binding face is never emitted from an unchecked binding", () => {
         justified: false,
       }]);
     }
+  });
+
+  test("a comment-shaped slash after regex ambiguity cannot hide a later call", () => {
+    const division = "const left = <any>/x// 1; const hidden = runBindingSentence(forged);";
+    expect(emitterCallSites(division, "fixture.ts")).toEqual([{
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    }]);
+
+    const multiplication = `const result = <any>/x/*
+  runBindingSentence(forged)
+*/x/.test("x");`;
+    expect(emitterCallSites(multiplication, "fixture.ts")).toEqual([{
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    }]);
   });
 
   test("only narrow string-introducing contexts may open a blanked span", () => {
