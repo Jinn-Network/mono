@@ -7,6 +7,9 @@ import {
   PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
+  bundleIdentityLabel,
+  isMetadataFirstBundle,
   summarizeVerificationOutcome,
   verifyPublicBundleSnapshot,
   type PublicComparisonCell,
@@ -87,17 +90,21 @@ function viewerHtml(
   // (issue #3205), so it is named before the fall-through rather than inheriting it.
   const verificationCommand = verification.format === "benchmark-product-public-bundle/5"
     ? PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND
-    : verification.format === "benchmark-product-public-bundle/7"
-      ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
-      : verification.format === "benchmark-product-public-bundle/4"
-        ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
-        : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
+    : verification.format === "benchmark-product-public-bundle/8"
+      ? PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND
+      : verification.format === "benchmark-product-public-bundle/7"
+        ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
+        : verification.format === "benchmark-product-public-bundle/4"
+          ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
+          : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
   // No released npx line understands the metadata-first profile -- an older reader refuses it at
   // manifest parse -- so this page offers the local command that does work instead of an
-  // instruction to fail.
-  const copyCommand = outcome.artifactContent === undefined
-    ? `${verificationCommand} ${JSON.stringify(bundleDir)}`
-    : `colophon bundle verify --bundle ${JSON.stringify(bundleDir)}`;
+  // instruction to fail. The key is the bundle's declared profile, not whether a body happened to
+  // be deferred: a metadata-first bundle with every declared artifact carried defers nothing and
+  // would otherwise be handed the npx line that refuses it (issue #3313).
+  const copyCommand = isMetadataFirstBundle(verification)
+    ? `colophon bundle verify --bundle ${JSON.stringify(bundleDir)}`
+    : `${verificationCommand} ${JSON.stringify(bundleDir)}`;
   const qualification = verification.format === "benchmark-product-public-bundle/5"
     ? undefined
     : verification.qualification;
@@ -114,7 +121,7 @@ function viewerHtml(
   const workspaceAction = canStartWorkspace
     ? '<form method="post" action="/use-my-work"><button class="primary" type="submit">Use my work</button></form>'
     : '<p><strong>Use my work:</strong> run <code>colophon open</code> from a terminal with the full product installed.</p>';
-  const identity = verification.identity.startsWith("sha256:") ? verification.identity : `sha256:${verification.identity}`;
+  const identity = bundleIdentityLabel(verification);
   const evidencePath = availablePaths.has("evidence.json") ? "evidence.json" : "claim-package.json";
   const reportSection = availablePaths.has("index.html")
     ? '<section><h2>Published report</h2><p>This script-free report is inside the immutable bundle. The live result above was computed from the exact authenticated bytes when this local viewer started.</p><iframe title="Published Colophon benchmark report" src="/bundle/index.html"></iframe></section>'

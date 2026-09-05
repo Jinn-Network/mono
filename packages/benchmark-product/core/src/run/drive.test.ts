@@ -9,6 +9,7 @@ import {
   type AttemptUri,
   type DeliveryRef,
   type ObservationSnapshot,
+  type ReconciliationReport,
   type SubmissionAck,
   type SubmissionUri,
 } from "@jinn-network/task-execution-backend";
@@ -21,7 +22,7 @@ import {
   driveEvaluationCatchUp,
   type ProxiedBackend,
 } from "./drive.js";
-import { evaluationGaps, foldRunJournal, readRunJournalEntries } from "./journal.js";
+import { evaluationGaps, foldRunJournal, readRunJournalEntries, type RunJournalEntry } from "./journal.js";
 import { requireWorkspaceAuthorship } from "./publication-authority.js";
 import { EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "../venue/venue.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
@@ -443,7 +444,13 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
     );
 
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
-    expect(entries.map((entry) => entry.kind)).toEqual(["cell-event", "delivery", "evaluation"]);
+    // The evaluation leg's pre-submit capture (#3237) sits between the delivery and the verdict.
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "cell-event",
+      "delivery",
+      "evaluation-submission-captured",
+      "evaluation",
+    ]);
 
     const deliveryEntry = entries.find((entry) => entry.kind === "delivery");
     expect(deliveryEntry).toMatchObject({ cellKey, dispatch: 1, attempt: "att-solve-1" });
@@ -1040,6 +1047,118 @@ describe("driveCellEvents — minVerdicts > 1 dispatches one evaluation leg per 
   });
 });
 
+describe("dispatchEvaluation — a replayed capture is re-sealed only when the key is free (#3237)", () => {
+  /**
+   * `recover` answers `absent` from two different states: a ref the backend cannot resolve at all
+   * (nothing retained, the idempotency key is free) and an attempt it fully remembers whose spawn
+   * intent left no recoverable shim or outcome (the key is HELD). Re-sealing under a held key is
+   * refused `submission-conflict`, which carries no retryable category and so completes the
+   * evalIndex could-not-grade forever — the very loss #3237 exists to close. The discriminator is
+   * `observe`, which resolves through the same durable ref index `submit`'s idempotency check
+   * reads.
+   */
+  function replayBackend(options: {
+    readonly retained: boolean | "unknown-error";
+    readonly calls: { submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] };
+  }): ProxiedBackend {
+    let observes = 0;
+    return {
+      async capabilities() {
+        throw new Error("not used");
+      },
+      async submit(taskBytes, submissionBytes) {
+        options.calls.submits.push({ taskBytes, submissionBytes });
+        return {
+          accepted: true,
+          submission: "urn:uuid:00000000-0000-4000-8000-000000000099" as SubmissionUri,
+          digest: `sha256:${"9".repeat(64)}`,
+        };
+      },
+      async observe() {
+        observes += 1;
+        // The FIRST observe is the discriminator's; later ones are the ordinary post-submit read.
+        if (observes === 1 && options.retained !== true) {
+          throw options.retained === "unknown-error"
+            ? new TaskExecutionError("backend-unavailable", { detail: "probe failed" })
+            : new TaskExecutionError("attempt-not-found", { detail: "no Attempt or Submission" });
+        }
+        return fakeSnapshot("att-eval-1", "failed");
+      },
+      async recover() {
+        return { classification: "absent", detail: "absent-never-executed" };
+      },
+      async deliveries() {
+        return [];
+      },
+      async fetchDelivery() {
+        throw new Error("not reached");
+      },
+      async drain() {},
+    };
+  }
+
+  function replayedBytes(): Uint8Array {
+    // Only the `submission` URI is read off the replayed bytes before `recover`; the deadline is
+    // what makes them distinguishable from a fresh seal.
+    return utf8({
+      submission: "urn:uuid:00000000-0000-4000-8000-0000000000aa",
+      deadline: "2020-01-01T00:00:00.000Z",
+    });
+  }
+
+  async function driveOneLeg(retained: boolean | "unknown-error"): Promise<{
+    readonly submitted: Uint8Array;
+    readonly replayed: Uint8Array;
+  }> {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const solveDeliveryBytes = utf8({ outputs: [{ name: "prediction", digest: { sha256: "e".repeat(64) } }] });
+    const deliverySha256 = putSealedBytes(workspaceDir, solveDeliveryBytes);
+    const predictionSha256 = putSealedBytes(workspaceDir, utf8({ probabilityYes: "0.5" }));
+    const replayed = replayedBytes();
+    const calls = { submits: [] as { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] };
+
+    await driveEvaluationCatchUp(
+      {
+        workspaceDir,
+        draftId: "draft-1",
+        venue: fakeVenue({ taskBytes: new Uint8Array([4, 5]), taskSha256: "4".repeat(64) }),
+        backend: replayBackend({ retained, calls }),
+        runSha256: "r".repeat(64),
+        owner: "urn:uuid:owner",
+        cellWindowMs: 3_600_000,
+        minVerdicts: 1,
+        liveClock: clock,
+        acceptedEvaluationSubmissionBytes: () => replayed,
+      },
+      [{ cellKey, lastDispatch: 1, deliverySha256, deliveryOutputs: [{ name: "prediction", sha256: predictionSha256 }], missingEvalIndexes: [1] }],
+    );
+
+    expect(calls.submits).toHaveLength(1);
+    return { submitted: calls.submits[0]!.submissionBytes, replayed };
+  }
+
+  test("a retained record keeps the byte-exact replay, so the held key is never re-minted", async () => {
+    const { submitted, replayed } = await driveOneLeg(true);
+    expect(submitted).toEqual(replayed);
+  });
+
+  test("a probe that fails for any other reason reports retained, so the replay is kept", async () => {
+    // Fail-safe direction: only `attempt-not-found` proves the key free. Anything else must not
+    // re-mint bytes under a key the backend may still hold.
+    const { submitted, replayed } = await driveOneLeg("unknown-error");
+    expect(submitted).toEqual(replayed);
+  });
+
+  test("an unresolvable ref proves the key is free, so the stale-deadline capture is re-sealed", async () => {
+    const { submitted, replayed } = await driveOneLeg(false);
+    expect(submitted).not.toEqual(replayed);
+    const doc = JSON.parse(new TextDecoder().decode(submitted)) as { readonly deadline?: string };
+    expect(Date.parse(doc.deadline ?? "")).toBeGreaterThan(Date.parse("2020-01-01T00:00:00.000Z"));
+  });
+});
+
 describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored delivery bytes", () => {
   test("re-derives and dispatches evaluation from an already-journaled delivery, no backend delivery re-fetch", async () => {
     const clock = makeClock();
@@ -1067,9 +1186,13 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
     );
 
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
-    // No "delivery" entry is re-written — only the evaluation leg runs.
-    expect(entries.map((entry) => entry.kind)).toEqual(["evaluation"]);
-    expect(entries[0]).toMatchObject({ cellKey, evalTaskSha256: sha256Hex(new Uint8Array([4, 5])) });
+    // No "delivery" entry is re-written — only the evaluation leg runs (preceded by its own
+    // pre-submit capture, #3237).
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "evaluation-submission-captured",
+      "evaluation",
+    ]);
+    expect(entries[1]).toMatchObject({ cellKey, evalTaskSha256: sha256Hex(new Uint8Array([4, 5])) });
   });
 
   test("heals a gap whose delivery entry was lost by re-harvesting the attempt, byte-exactly (#3081)", async () => {
@@ -1109,7 +1232,11 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
 
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
     // The lost delivery entry is written back FIRST, then the evaluation leg runs.
-    expect(entries.map((entry) => entry.kind)).toEqual(["delivery", "evaluation"]);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "delivery",
+      "evaluation-submission-captured",
+      "evaluation",
+    ]);
     expect(entries[0]).toMatchObject({
       cellKey,
       dispatch: 1,
@@ -1119,7 +1246,7 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
       outputs: [{ name: "prediction", sha256: sha256Hex(predictionBytes) }],
     });
     expect(getSealedBytes(workspaceDir, sha256Hex(solveDeliveryBytes))).toEqual(solveDeliveryBytes);
-    expect(entries[1]).toMatchObject({ kind: "evaluation", cellKey, evalIndex: 1 });
+    expect(entries[2]).toMatchObject({ kind: "evaluation", cellKey, evalIndex: 1 });
     // A second catch-up now takes the ordinary already-journaled path: healing converges.
     expect(evaluationGaps(foldRunJournal(entries), 1)).toEqual([]);
   });
@@ -1186,8 +1313,11 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
     expect(doc.requirements?.[EVALUATOR_REQUIREMENT_KEY]).toBe(evaluatorIri(2));
 
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
-    expect(entries.map((entry) => entry.kind)).toEqual(["evaluation"]);
-    expect(entries[0]).toMatchObject({ cellKey, evaluator: evaluatorIri(2), evalIndex: 2 });
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "evaluation-submission-captured",
+      "evaluation",
+    ]);
+    expect(entries[1]).toMatchObject({ cellKey, evaluator: evaluatorIri(2), evalIndex: 2 });
   });
 
   test("the same retryable failure terminalizes immediately at attempt 1 when maxInfrastructureRetries is 0 (the pin is load-bearing, spec §5.3's control)", async () => {
@@ -1236,6 +1366,7 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
     expect(entries.some((entry) => entry.kind === "evaluation-retryable-failure")).toBe(false);
     expect(entries).toEqual([
+      expect.objectContaining({ kind: "evaluation-submission-captured", cellKey, evalIndex: 1 }),
       expect.objectContaining({
         kind: "evaluation",
         cellKey,
@@ -1243,8 +1374,9 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
         failureCategory: "dependency-unavailable",
       }),
     ]);
-    // evaluationAttempt is only journaled when > 1 — this terminalized on attempt 1.
-    expect(entries[0] && "evaluationAttempt" in entries[0]).toBe(false);
+    // evaluationAttempt is only journaled when > 1 — this terminalized on attempt 1. (The
+    // capture at index 0 always carries one; the terminal at index 1 is the subject here.)
+    expect(entries[1] && "evaluationAttempt" in entries[1]).toBe(false);
   });
 
   test("a typed provider outage retries the same derived Task once without re-running solve", async () => {
@@ -1308,6 +1440,7 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
 
     await driveEvaluationCatchUp(deps, [gap]);
     expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual([
+      expect.objectContaining({ kind: "evaluation-submission-captured", cellKey, evalIndex: 1 }),
       expect.objectContaining({
         kind: "evaluation-retryable-failure",
         cellKey,
@@ -1402,5 +1535,130 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
 
     // The accounted unscorable cell: no third attempt is offered.
     expect(evaluationGaps(foldRunJournal(entries), deps.minVerdicts, 1)).toEqual([]);
+  });
+});
+
+/**
+ * #3236: the evaluation leg's two `refuse("record-integrity", ...)` branches in the replayed-
+ * Submission reconciliation preamble (`./replayed-submission-recovery.ts`).
+ *
+ * The solve leg's twin refusals are run-fatal ("fails closed when backend recovery contradicts a
+ * captured Submission", `../operations/run-launch.test.ts`). These are deliberately NOT: they sit
+ * inside `prepareAndDispatchEvaluation`'s per-leg catch, and a `BenchmarkProductError` is no
+ * `TaskExecutionError`, so `retryableFailureFromCause` returns undefined and the leg lands a
+ * non-retryable could-not-grade that completes that evalIndex while the run continues. That
+ * containment is what these tests pin — a change to the catch, to `retryableFailureFromCause`, or
+ * to the error type `refuse` raises would otherwise flip a per-leg terminal into a run abort, or
+ * the reverse, with nothing failing.
+ */
+describe("dispatchEvaluation — the replayed-Submission refusals are contained per leg (#3236)", () => {
+  /** Replays bytes for cell A's leg 1 only; every other leg seals fresh. */
+  async function driveWithReplayedLegOne(replayedBytes: Uint8Array, recover: () => Promise<ReconciliationReport>): Promise<{
+    readonly cellA: string;
+    readonly cellB: string;
+    readonly entries: readonly RunJournalEntry[];
+    readonly lines: readonly string[];
+  }> {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellA = `${taskSha256}/arm-a/1`;
+    const cellB = `${taskSha256}/arm-b/1`;
+    const submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] = [];
+    const inner = makeTwoLegBackend(submits);
+    const backend: ProxiedBackend = {
+      ...inner,
+      deliveries: async (attempt) =>
+        attempt === ("att-solve-2" as AttemptUri) ? inner.deliveries("att-solve-1" as AttemptUri) : inner.deliveries(attempt),
+      recover,
+    };
+    const venue = fakeVenue({ taskBytes: new Uint8Array([1, 2, 3]), taskSha256: sha256Hex(new Uint8Array([1, 2, 3])) }, 2);
+    const lines: string[] = [];
+
+    const events: CellStatusEvent[] = [
+      { cellKey: cellA, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
+      { cellKey: cellB, armId: "arm-b", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-2" },
+    ];
+    // Resolves rather than rejects: the run is not aborted by either refusal.
+    await driveCellEvents(
+      {
+        workspaceDir,
+        draftId: "draft-1",
+        venue,
+        backend,
+        runSha256: "r".repeat(64),
+        owner: "urn:uuid:owner-1",
+        cellWindowMs: 3_600_000,
+        minVerdicts: 2,
+        liveClock: clock,
+        onProgress: (line) => lines.push(line),
+        acceptedEvaluationSubmissionBytes: (cellKey, _dispatch, evalIndex) =>
+          cellKey === cellA && evalIndex === 1 ? replayedBytes : undefined,
+      },
+      (async function* () { for (const event of events) yield event; })(),
+    );
+
+    return { cellA, cellB, entries: readRunJournalEntries(workspaceDir, "draft-1"), lines };
+  }
+
+  function expectOnlyCellALegOneFailed(
+    result: Awaited<ReturnType<typeof driveWithReplayedLegOne>>,
+    detail: string,
+  ): void {
+    const evaluations = result.entries.filter((entry) => entry.kind === "evaluation");
+    expect(evaluations).toHaveLength(4);
+    expect(evaluations[0]).toMatchObject({
+      cellKey: result.cellA,
+      evalIndex: 1,
+      evaluationTerminal: "could-not-grade",
+      detail,
+    });
+    // Non-retryable: `retryableFailureFromCause` sees no `TaskExecutionError`, so the terminal
+    // carries no `failureCategory` and the evalIndex is completed for good.
+    expect(evaluations[0]).not.toHaveProperty("failureCategory");
+    // Every other leg — the same cell's second leg and both of the other cell's — still judged.
+    for (const other of evaluations.slice(1)) {
+      expect(other.kind === "evaluation" && other.verdictSha256 !== undefined).toBe(true);
+      expect(other).not.toHaveProperty("evaluationTerminal");
+    }
+    expect(result.lines).toEqual([
+      `${result.cellA} delivered`,
+      `${result.cellA} could-not-grade e1/2`,
+      `${result.cellA} judged e2/2`,
+      `${result.cellB} delivered`,
+      `${result.cellB} judged e1/2`,
+      `${result.cellB} judged e2/2`,
+    ]);
+  }
+
+  test("a contradictory reconciliation terminals only that leg could-not-grade; the run continues", async () => {
+    const replayed = utf8({
+      submission: "urn:uuid:00000000-0000-4000-8000-0000000000aa",
+      deadline: "2030-01-01T00:00:00.000Z",
+    });
+    const result = await driveWithReplayedLegOne(replayed, async () => ({
+      classification: "contradictory",
+      detail: "terminal state contradicted live survivors or durable terminals",
+    }));
+
+    expectOnlyCellALegOneFailed(
+      result,
+      "backend recovery contradicted the accepted evaluation Submission (e1, attempt 1): "
+        + "terminal state contradicted live survivors or durable terminals",
+    );
+  });
+
+  test("replayed bytes naming no Submission URI terminal only that leg, before `recover` is reached", async () => {
+    let recovers = 0;
+    const replayed = utf8({ submission: "not-a-urn", deadline: "2030-01-01T00:00:00.000Z" });
+    const result = await driveWithReplayedLegOne(replayed, async () => {
+      recovers += 1;
+      return { classification: "absent" };
+    });
+
+    expect(recovers).toBe(0);
+    expectOnlyCellALegOneFailed(
+      result,
+      "replayed evaluation Submission carries no valid Submission URI (e1, attempt 1)",
+    );
   });
 });

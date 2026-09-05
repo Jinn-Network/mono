@@ -54,6 +54,50 @@ export const ANCHOR_INTENT_EXTENSION =
 export const TASK_SELECTION_EXTENSION =
   "https://spec.jinn.network/extensions/task-selection/v1";
 
+/**
+ * The beacon source a run will bind to, sealed into the Run record (issue #3426). Fixing it at seal
+ * time is what leaves `beacon-binding/1` no source to choose: with the round already determined by
+ * `(source, sealedAt)`, naming the source in the seal determines the beacon outright.
+ */
+export const BEACON_SOURCE_EXTENSION =
+  "https://spec.jinn.network/extensions/beacon-source/v1";
+
+/**
+ * The sample-size advisory an operator acknowledged at lock (issue #2978): the per-arm n the seal
+ * commits to, and the widest 95% interval that n can produce. Both are derivable from the sealed
+ * plan; what is NOT derivable, and what this extension actually records, is that the operator was
+ * shown the width before the seal and locked anyway. A Run that carries no acknowledgement seals
+ * byte-identical bytes to before this existed.
+ */
+export const SAMPLE_SIZE_ADVISORY_EXTENSION =
+  "https://spec.jinn.network/extensions/sample-size-advisory/v1";
+
+/**
+ * The disclosure-specification record (design `2026-08-19-disclosure-specification-record.md` §4.1,
+ * issue #2839): one sealed record naming exactly one subject and exactly six variables, each
+ * carrying exactly one of three statuses. The record-kind URI follows the record-discovery grammar
+ * `${RECORDS_ROOT}/<segment>/<major>`, spelled `v1` the way every shipped sibling above spells it.
+ */
+export const DISCLOSURE_SPECIFICATION_RECORD_KIND =
+  "https://spec.jinn.network/records/disclosure-specification/v1";
+export const DISCLOSURE_SPECIFICATION_MEDIA_TYPE =
+  "application/vnd.jinn.disclosure-specification.v1+json";
+/**
+ * `specification` is a SEPARATE identifier from `kind` on purpose (design §4.1): `kind` names this
+ * record SHAPE, `specification` names the standard the record claims compliance with. A later
+ * standard revision that keeps the shape bumps only the second, and a reader can tell the two apart
+ * without a changelog.
+ */
+export const SIX_VARIABLE_DISCLOSURE_SPECIFICATION =
+  "https://spec.jinn.network/disclosure/six-variable/v1";
+/**
+ * The Report extension key that pulls the sealed record's digest under the report author's existing
+ * DSSE signature (design §6.3). The record carries no envelope of its own: attribution comes from
+ * the carrier, and a second signature over the same claim by the same key would add no fact.
+ */
+export const DISCLOSURE_SPECIFICATION_EXTENSION =
+  "https://spec.jinn.network/extensions/disclosure-specification/v1";
+
 export const ASSEMBLY_PROCEDURE = "jinn.benchmarking.assembly";
 export const ASSEMBLY_PROCEDURE_VERSION = "1.0";
 export const MATRIX_ASSEMBLY_PROCEDURE = ASSEMBLY_PROCEDURE;

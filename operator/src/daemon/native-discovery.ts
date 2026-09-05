@@ -191,6 +191,13 @@ export interface NativeDiscoverySource {
    * otherwise-dangerous same-head shortcut: freshness, key rotation and revocation remain a
    * gate even when no entry was appended. The host normally delegates this to its discovery
    * trust driver.
+   *
+   * The implementation MUST bind `head.origin` to `source`. `sameHead` compared the whole
+   * signature envelope, so byte equality bound the origin implicitly; the re-signed head #3468
+   * admits is a NEW envelope at the same `sequence`/`entry`, and `reSignedIdleHead` compares
+   * neither origin nor bytes. Origin binding therefore rests entirely here — a `verifyHead`
+   * that skipped it would let a head claiming another agent write this source's checkpoint.
+   * `verifySourceHead` (`native-discovery-trust.ts`) does it as `head-origin-mismatch`.
    */
   readonly verifyHead: (input: {
     readonly source: SourceIdentity;
@@ -223,8 +230,39 @@ export interface NativeDiscoveryDecodeInput {
  *   itself, so its own idle-lapsed head degrades this poll rather than refusing — otherwise a
  *   co-located requester+evaluator that idles >24h deadlocks its own boot. A PEER's lapsed head is
  *   NEVER this: it stays the hard `stale` refusal. See `pollSource` and `buildNativeDiscoverySources`.
+ * - `self-source-future-head` — the same #2547 deadlock, reached from the other end (#3467). §5.2
+ *   now bounds a head's `issuedAt` against the consumer's clock as well as its `refreshBy`, so a
+ *   publishing node with a fast clock mints a head every consumer refuses `head-issued-ahead` --
+ *   and stickily, since `refreshHead` carries the future `issuedAt` forward on every re-sign. For
+ *   the operator's OWN source that would abort `WorkLoop.initialize` over its own clock error, so
+ *   it degrades on exactly the #2547 reasoning: a self-hosted source cannot equivocate against
+ *   itself. A PEER's future-dated head still refuses, fail-closed.
+ * - `refused-destination` — the source named a destination outside the serving root the operator
+ *   configured, or moved a request off that origin with a redirect (#3433). This one is NOT a
+ *   softening: the source is refused exactly as before — it yields nothing, advances no
+ *   checkpoint, queues no card, and is reported loudly. What changes is only the blast radius.
+ *
+ *   The #2529 discriminator below draws its line at "did the source make a statement that failed a
+ *   check?", and a destination refusal plainly did. But the MECHANISM that implemented "refuse"
+ *   was `throw` out of `sync()`, which escapes the `for...of` over sources and so also refuses
+ *   every source AFTER this one in the list — and on the startup path
+ *   (`native-operator-host.ts`) fails the boot. That conflated "this source is not to be trusted"
+ *   with "no source is to be polled", which was never the intent: a statement about where THIS
+ *   peer's archive lives is a statement about this peer alone. One hostile — or merely
+ *   https-upgrading — peer must not deny discovery to every other peer configured.
+ *
+ *   Scoped to destination refusals only, and by construction: exactly two error shapes qualify
+ *   (`ContainedOriginError`, `TransportRedirectError`). Every trust, identity, freshness and
+ *   ordering refusal still propagates out of `sync()` untouched, so the fail-closed default is
+ *   unchanged for every shape nobody anticipated.
  */
-export type NativeDiscoveryDegradedReason = 'unpublished' | 'unreachable' | 'undecodable' | 'self-source-stale';
+export type NativeDiscoveryDegradedReason =
+  | 'unpublished'
+  | 'unreachable'
+  | 'undecodable'
+  | 'self-source-stale'
+  | 'self-source-future-head'
+  | 'refused-destination';
 
 export interface NativeDiscoveryDegradedSource {
   readonly source: SourceIdentity;
@@ -357,6 +395,47 @@ function sameHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): bool
     && JSON.stringify(checkpoint.signedHighWater.signature) === JSON.stringify(head.signature);
 }
 
+/**
+ * The same chain position, re-signed at a later instant (#3468).
+ *
+ * §5.2 obliges a live source to re-sign its idle head before `refreshBy` expires even when
+ * it announced nothing — an expired head is a withholding signal, not silence — and `serve`
+ * ships `maintainHead` for exactly that. The result is the same `sequence`, the same
+ * `entry`, a bumped `issuedAt` and `refreshBy`. That is not `sameHead`, and before this
+ * predicate it fell through to the sequence guard as `rewound-or-tampered-head`, so a
+ * conformant archive would go red the moment it re-signed and stay red until its next
+ * append (#2549). Nothing in this tree re-signs while idle yet — every in-tree publisher
+ * calls `maintainHead` only after an append — so the shape arrives from an external source.
+ * This is the same shape the plugin runtime's corpus mirror admits (`classifyIdleHead`,
+ * `plugin/runtime/src/corpus/mirror.ts`), with one difference: that consumer classifies only
+ * after its walk yielded nothing, this one from the head alone.
+ *
+ * `sequence` and `entry` must equal the stored high-water: a head naming any other chain
+ * position is a chain claim, judged by the chain path or refused by the sequence guard,
+ * never here. `issuedAt` must STRICTLY increase, and an unparseable instant yields NaN, whose
+ * every comparison is false — so a rollback, a backdated re-sign and a malformed head all keep
+ * the refusal they have today. What this admits is exactly the honest idle re-sign, onto
+ * `source-head-revalidation`, which re-checks signature, currently-valid key, the §5.2
+ * `refreshBy` window and freshness on every call. That window check is `checkRefreshWindow`
+ * inside `verifySourceHead` (#3467): it returns `refresh-by-ceiling` or `head-issued-ahead`
+ * when the head breaks the published-source profile's §5.2 rules. `refresh-by-ceiling` is a hard
+ * refusal on this path for every source — it is a writer fault, not a clock one.
+ * `head-issued-ahead` is a hard refusal for a PEER, and for a SELF-HOSTED source it degrades
+ * instead: the `self-source-future-head` branch below returns before the throw, on the #2547
+ * reasoning that a source this operator serves cannot equivocate against itself (see
+ * `NativeDiscoveryDegradedReason`). Neither is ADMITTED, which is the property that matters
+ * here: the degrade also returns before the checkpoint write, so no instant and no `refreshBy`
+ * is persisted. The far-future `refreshBy` a re-sign could otherwise install at an unchanged
+ * position is therefore refused rather than admitted: what this predicate opens is bounded, not
+ * a widening. The plugin runtime's mirror documents the same property the same way
+ * (`classifyIdleHead`, `plugin/runtime/src/corpus/mirror.ts`).
+ */
+function reSignedIdleHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): boolean {
+  const held = checkpoint.signedHighWater;
+  if (held.sequence !== head.head.sequence || held.entry !== head.head.entry) return false;
+  return new Date(head.head.issuedAt).getTime() > new Date(held.issuedAt).getTime();
+}
+
 function deduplicateEntries(entries: readonly SyncedEntry[]): SyncedEntry[] {
   const seen = new Set<string>();
   const result: SyncedEntry[] = [];
@@ -453,7 +532,51 @@ function degradedReason(cause: unknown): NativeDiscoveryDegradedReason | undefin
     && (cause as { readonly name?: unknown }).name !== 'NativeDiscoverySourceResolutionError'
     && isTransportSilence(cause)
   ) return 'unreachable';
+  // A destination refusal isolates to its own source rather than aborting the pass (#3433). Named
+  // by `name` along the `cause` chain, for the two reasons this module duck-types everything else:
+  // it is written against injected ports and must not import a transport implementation's types,
+  // and the containment refusal arrives WRAPPED — `native-discovery-trust.ts` re-throws it as a
+  // `NativeDiscoverySourceResolutionError` so the failure names agent/name/baseUrl.
+  // The two classes that MEAN "refused" are excluded first, exactly as the status-less-transport
+  // branch above excludes them. Without that, a genuine trust or local-authority refusal that
+  // happened to wrap a destination error anywhere in its `cause` chain would degrade instead of
+  // propagating — the chain walk is what makes the wrapped containment refusal reachable, and it
+  // is also what would make that mistake reachable.
+  if (
+    !(cause instanceof NativeDiscoverySyncError)
+    && !(cause instanceof NativeDiscoveryLocalAuthorityError)
+    && namedInCauseChain(cause, DESTINATION_REFUSAL_ERROR_NAMES)
+  ) return 'refused-destination';
   return undefined;
+}
+
+/**
+ * The two error names that mean "the source named a destination the operator did not choose".
+ *
+ * - `ContainedOriginError` — a peer-introduced `archiveRoot` (or locator) that does not resolve
+ *   inside the configured serving root (`discovery/client`'s `origin-policy`).
+ * - `TransportRedirectError` — a redirect hop that leaves the origin the request started on
+ *   (`transport-http`'s per-hop guard).
+ */
+const DESTINATION_REFUSAL_ERROR_NAMES: readonly string[] = [
+  'ContainedOriginError',
+  'TransportRedirectError',
+];
+
+/** Does `cause`, or anything it wraps, carry one of `names` as its `name`? */
+function namedInCauseChain(cause: unknown, names: readonly string[]): boolean {
+  // Bounded rather than merely cycle-guarded: a `cause` chain is built by the throwers in this
+  // repository and is a handful of links deep, so a depth ceiling is both sufficient and cheaper
+  // than tracking visited objects.
+  for (let current = cause, depth = 0; depth < 8; depth += 1) {
+    if (typeof current !== 'object' || current === null) return false;
+    const name = (current as { readonly name?: unknown }).name;
+    if (typeof name === 'string' && names.includes(name)) return true;
+    const inner: unknown = (current as { readonly cause?: unknown }).cause;
+    if (inner === current) return false;
+    current = inner;
+  }
+  return false;
 }
 
 /**
@@ -653,19 +776,40 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       throw new NativeDiscoverySyncError(source, 'unsigned-head');
     }
 
-    // A byte-identical signed head is a no-card-work cycle only after it is revalidated.
-    // A key can have been revoked or the source head can have crossed refreshBy since the
-    // last poll; cached acceptance is never enough to begin work.
-    if (prior !== undefined && sameHead(prior, syncedHead)) {
+    // A head at the chain position this consumer already holds — byte-identical, or re-signed
+    // at a later instant (#3468) — is a no-card-work cycle only after it is revalidated. A key
+    // can have been revoked or the source head can have crossed refreshBy since the last poll;
+    // cached acceptance is never enough to begin work.
+    const idleHead = prior === undefined
+      ? undefined
+      : sameHead(prior, syncedHead)
+        ? 'unchanged' as const
+        : reSignedIdleHead(prior, syncedHead)
+          ? 're-signed' as const
+          : undefined;
+    if (prior !== undefined && idleHead !== undefined) {
       const revalidated = await configured.verifyHead({
         source,
         head: syncedHead.head,
         signature: syncedHead.signature,
       });
+      // A self-hosted source whose own head is dated into the future degrades for the same
+      // reason a lapsed one does (#3467, #2547): it is this operator's clock error, not a peer's
+      // trust signal, and refusing would abort its own boot over it. A peer's future-dated head
+      // still throws below.
+      if (revalidated.status === 'head-issued-ahead' && configured.selfServed === true) {
+        return {
+          reason: 'self-source-future-head',
+          detail: `self-hosted source head issued at ${syncedHead.head.issuedAt}, further ahead `
+            + 'than the profile freshness window allows; degrading this poll rather than refusing '
+            + 'this operator its own boot',
+        };
+      }
       // A revalidation failure that is NOT freshness — a bad signature, a wrong or revoked key, a
       // head/payload mismatch — refuses for EVERY source, self-hosted or peer alike: a source
-      // serving a wrongly-signed head is a real fault, never idle staleness. Only `stale` is
-      // eligible for the self-source degrade below.
+      // serving a wrongly-signed head is a real fault, never idle staleness. Only `stale` and the
+      // future-dated head handled directly above are eligible for the self-source degrade; both
+      // are this operator's own clock, and every other status is a trust signal.
       if (revalidated.status !== 'ok' && revalidated.status !== 'stale') {
         throw new NativeDiscoverySyncError(source, revalidated.status);
       }
@@ -692,11 +836,13 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         // `publicBaseUrl` (`buildNativeDiscoverySources`). Delete it and the peer path degrades too,
         // which the peer-refusal test forbids.
         //
-        // (Refreshing the served head at boot instead — "make the head current" — does NOT work with
-        // this consumer: a re-signed head at the SAME sequence is not `sameHead` and trips the
-        // `rewound-or-tampered-head` guard below for every consumer already checkpointed at that
-        // sequence, self AND peer. Degrading the self-consume is the change that closes the deadlock
-        // without touching a byte of peer trust.)
+        // (Refreshing the served head at boot instead — "make the head current" — was not available
+        // when this degrade was written: a re-signed head at the SAME sequence is not `sameHead` and
+        // tripped the `rewound-or-tampered-head` guard below for every consumer already checkpointed
+        // at that sequence, self AND peer (#2549). #3468 admits that shape onto revalidation, so it
+        // is now a real option — but it is the SERVING side's change, and nothing in this tree
+        // re-signs an idle head yet, so this degrade still covers the operator that has not, which
+        // is the condition #2547 actually hit.)
         if (configured.selfServed === true) {
           return {
             reason: 'self-source-stale',
@@ -705,6 +851,19 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           };
         }
         throw new NativeDiscoverySyncError(source, 'stale');
+      }
+      if (idleHead === 're-signed') {
+        // Nothing was adopted, so the position does not move — but the stored instant,
+        // `refreshBy` and envelope do. Persisting them is what makes the head this re-sign
+        // replaced a REWIND at the next poll (its `issuedAt` is now lower than the stored
+        // one) rather than a byte-identical head this consumer would revalidate forever.
+        queue(source, {
+          sequence: syncedHead.head.sequence,
+          entry: syncedHead.head.entry,
+          issuedAt: syncedHead.head.issuedAt,
+          refreshBy: syncedHead.head.refreshBy,
+          signature: syncedHead.signature,
+        }, [], []);
       }
       return { accepted: 0 };
     }
@@ -789,9 +948,27 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       //
       // The discriminator is identical to #2548's: `configured.selfServed === true` only for a
       // source this operator serves from its own archive (`buildNativeDiscoverySources`), never
-      // for a peer. Only `status === 'stale'` degrades — every other verify failure (`forked`,
-      // `broken-chain` at any `at:`, `unauthorized-signer`, etc.) still throws, fail-closed, for
-      // self and peer alike, exactly as it always has.
+      // for a peer. Two statuses degrade, and only for a self-hosted source: `stale`, and the
+      // `broken-chain at: 'head-issued-ahead'` handled directly above (#3467) — the two shapes
+      // this operator's own clock produces. Every other verify failure (`forked`, `broken-chain`
+      // at any other `at:` — including `refresh-by-ceiling`, which is a writer fault rather than a
+      // clock one and should stay loud — `unauthorized-signer`, etc.) still throws, fail-closed,
+      // for self and peer alike, exactly as it always has.
+      // Same #3467 clock-error degrade as the revalidation branch, for a self-hosted source with
+      // no prior checkpoint: the chain procedure reports a future-dated head as `broken-chain`
+      // with `at: 'head-issued-ahead'`.
+      if (
+        outcome.status === 'broken-chain'
+        && outcome.at === 'head-issued-ahead'
+        && configured.selfServed === true
+      ) {
+        return {
+          reason: 'self-source-future-head',
+          detail: `self-hosted source head issued at ${syncedHead.head.issuedAt}, further ahead `
+            + 'than the profile freshness window allows, at cold verify (no prior checkpoint); '
+            + 'degrading this poll rather than refusing this operator its own boot',
+        };
+      }
       if (outcome.status === 'stale' && configured.selfServed === true) {
         return {
           reason: 'self-source-stale',

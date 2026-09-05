@@ -23,13 +23,17 @@ import {
   sealRun,
   withRunAnchorIntentExtension,
   withRunTaskSelectionExtension,
+  withRunBeaconSourceExtension,
   withRunPublicationExtension,
+  withRunSampleSizeAdvisoryExtension,
+  parseBenchmark,
 } from "@jinn-network/benchmarking-records";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { compileDraft } from "../run/compile.js";
+import { sampleSizeAdvisory, type DeclaredAnalysis, type SampleSizeAdvisory } from "../run/sample-size-advisory.js";
 import {
   inspectRuntimeMethodForBinding,
   type InspectRuntimeMethodDisclosure,
@@ -53,6 +57,12 @@ import type { OperationResult } from "./result.js";
 
 export interface RunLockInput {
   readonly draftId: string;
+  /**
+   * Set when the caller has been shown the seal-time sample-size advisory (issue #2978) and locked
+   * at the declared n anyway. Optional and defaulted off: a caller that does not acknowledge seals
+   * byte-identical Run bytes to before the advisory existed, so no stored record or fixture moves.
+   */
+  readonly acknowledgedSampleSizeAdvisory?: boolean;
 }
 
 export interface RunLockResult {
@@ -60,6 +70,41 @@ export interface RunLockResult {
   readonly runSha256: string;
   readonly closeAt: string;
   readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
+  /** Present exactly when the caller acknowledged it, which is exactly when the seal carries it. */
+  readonly sampleSizeAdvisory?: SampleSizeAdvisory;
+}
+
+/**
+ * The advisory a lock of this draft would print and seal (issue #2978), so an operator surface can
+ * show the width BEFORE the irreversible seal and `runLock` can seal the same numbers afterwards.
+ *
+ * `undefined` for a draft no lock could seal right now — not quoted, or carrying no benchmark, so
+ * there is no item count and therefore no n. Returning `undefined` rather than refusing keeps this
+ * a pure advisory: the caller gating on it does not have to restate the lock's own preconditions,
+ * and `runLock` stays the one place that says why a lock cannot happen.
+ */
+export function draftSampleSizeAdvisory(
+  workspaceDir: string,
+  draftId: string,
+): SampleSizeAdvisory | undefined {
+  const document = readDraftDocument(workspaceDir, draftId);
+  if (document.state !== "quoted" || document.spec.taskSet.kind !== "benchmark") return undefined;
+  const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
+  if (benchmark.items.length < 1) return undefined;
+  return sampleSizeAdvisory({
+    items: benchmark.items.length,
+    replicates: document.spec.replicates,
+    declaredAnalyses: declaredAnalyses(document.spec),
+  });
+}
+
+/**
+ * The draft's declared analysis-plan entries, primary first — the same order `buildAnalysisPlan`
+ * seals them in. Read only so the advisory can name the readouts its width does not bound
+ * (issue #3832); it never reaches the sealed extension.
+ */
+function declaredAnalyses(spec: DraftDocument["spec"]): readonly DeclaredAnalysis[] {
+  return [...(spec.analysis === undefined ? [] : [spec.analysis]), ...(spec.additionalAnalyses ?? [])];
 }
 
 function computeCloseAt(at: string, closeAfterMs: number): string {
@@ -226,11 +271,40 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       const runWithTaskSelection = declaredTaskSelection === undefined
         ? runWithDeclaredIntent
         : withRunTaskSelectionExtension(runWithDeclaredIntent, { mode: declaredTaskSelection });
+      // The beacon source this run will bind to (#3426), sealed on exactly the same terms. Naming
+      // it here — before any admissible beacon value exists — is what leaves `bind` no source to
+      // choose: with the round already determined by `(source, sealedAt)` (#3322), a sealed source
+      // determines the beacon outright. Declaring nothing stays legal and seals byte-identical
+      // bytes; it just leaves the choice where PR #3375 found it, and the report face says so.
+      const declaredBeaconSource = document.spec.beaconSource;
+      const runWithBeaconSource = declaredBeaconSource === undefined
+        ? runWithTaskSelection
+        : withRunBeaconSourceExtension(runWithTaskSelection, { source: declaredBeaconSource });
       // Check the declaration against the records BEFORE the irreversible seal, using the exact
       // rule the cold verifier applies afterwards. Left to publish time, a contradiction would
       // surface only once the run had been locked, executed, reported, and materialized -- a
       // bundle the workspace can never verify, and no way back. Same rule, earlier and cheaper.
-      const sealed = sealRun(runWithTaskSelection);
+      // Computed from the benchmark this lock just compiled, so the sealed width can never describe
+      // a different plan than the one being sealed. Sealed only on acknowledgement: n and the width
+      // are both derivable from the plan, and the fact worth recording is that the operator saw the
+      // width before the seal and locked at this n regardless.
+      // An itemless benchmark has no n and therefore no width. It cannot reach a lock through any
+      // shipped path, but guarding here keeps that a missing advisory rather than an untyped throw
+      // out of the arithmetic, one line before the irreversible seal.
+      const advisory = compiled.benchmarkRecord.items.length < 1
+        ? undefined
+        : sampleSizeAdvisory({
+          items: compiled.benchmarkRecord.items.length,
+          replicates: document.spec.replicates,
+          declaredAnalyses: declaredAnalyses(document.spec),
+        });
+      const runWithSampleSizeAdvisory = input.acknowledgedSampleSizeAdvisory !== true || advisory === undefined
+        ? runWithBeaconSource
+        : withRunSampleSizeAdvisoryExtension(runWithBeaconSource, {
+          n: advisory.n,
+          expectedIntervalWidth: advisory.expectedIntervalWidth,
+        });
+      const sealed = sealRun(runWithSampleSizeAdvisory);
       if (declaredTaskSelection !== undefined) {
         // Judged on the exact bytes just sealed, so the rule cannot be shown a different Run from
         // the one that gets stored. This is the only refusal after `sealRun`, and it is safe there
@@ -271,6 +345,9 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         runSha256,
         closeAt,
         ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
+        ...(input.acknowledgedSampleSizeAdvisory === true && advisory !== undefined
+          ? { sampleSizeAdvisory: advisory }
+          : {}),
       };
     },
   });

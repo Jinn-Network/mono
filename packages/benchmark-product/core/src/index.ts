@@ -689,6 +689,7 @@ export {
   normalizePublicArchiveBaseUrl,
   publicArchiveUrl,
   refreshWorkspacePublicationWellKnown,
+  resolveWorkspacePublicationSourceName,
 } from "./run/publication-source.js";
 export {
   DEFAULT_PUBLICATION_SERVE_HOST,
@@ -700,6 +701,12 @@ export type {
   PublicationArchiveServerOptions,
   PublicationWellKnownOutcome,
 } from "./run/publication-serve.js";
+export {
+  expectedIntervalWidth,
+  formatSampleSizeAdvisory,
+  sampleSizeAdvisory,
+} from "./run/sample-size-advisory.js";
+export type { DeclaredAnalysis, SampleSizeAdvisory, SampleSizeWidth } from "./run/sample-size-advisory.js";
 export { recordPublicationOrigin } from "./run/publication-authority.js";
 export { foldRunJournalLineage } from "./run/journal.js";
 export type { DispatchLineageFold } from "./run/journal.js";
@@ -730,6 +737,7 @@ export {
   createHumanReviewPackets,
   signHumanReviewResponse,
   initWorkspace,
+  importRunRecords,
   inspectDraft,
   listDrafts,
   publicationAccounting,
@@ -741,9 +749,13 @@ export {
   runCollect,
   runLaunch,
   runLock,
+  draftSampleSizeAdvisory,
   runAnchor,
   runBind,
   anchoringConfigure,
+  identityBind,
+  disclosureDeclare,
+  disclosureShow,
   runPreview,
   runPublish,
   runQuote,
@@ -808,6 +820,8 @@ export type {
   RunCancelResult,
   RunCollectInput,
   RunCollectResult,
+  RunImportInput,
+  RunImportResult,
   RunLaunchDeps,
   RunLaunchInput,
   RunLaunchResult,
@@ -875,7 +889,10 @@ export { verifyPublicBundle } from "./bundle/verify.js";
 // The one derivation of what a verification result may be said to have proved. Re-exported beside
 // `verifyPublicBundle` so every consumer of that result reaches the same counts and check states
 // rather than counting `checks` for itself (issue #2986).
-export { summarizeVerificationOutcome } from "@colophon-claims/verify";
+// `bundleIdentityLabel` rides beside it for the same reason: the identity a reader quotes is
+// normalized once, so a surface cannot render `sha256:sha256:...` for the format whose identity
+// already carries the prefix (issue #3312).
+export { bundleIdentityLabel, summarizeVerificationOutcome } from "@colophon-claims/verify";
 export type {
   VerificationCheckOutcome,
   VerificationCheckState,
@@ -889,6 +906,12 @@ export type { PublicBundleVerificationCheck, PublicBundleVerificationResult } fr
 // copy of the source registry would be a second place the admitted beacons could drift.
 export { BEACON_SOURCES, BEACON_SOURCE_IDS, MAX_BEACON_ROUND } from "@colophon-claims/verify";
 export type { BeaconReference, BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
+
+// The declared denominator beside the strict all-slots one (issue #2977). Re-exported for the same
+// reason as the two surfaces above: the product's GUI imports only this package, and a second copy
+// of the derivation would be a second place the two numbers could disagree.
+export { armDenominators } from "@colophon-claims/verify";
+export type { ArmDenominators, PlannedSlotAccounting } from "@colophon-claims/verify";
 
 // PUB-13b: an additive publication-profile projection. This is intentionally not wired into the
 // v2 `publish` operation or CLI: callers opt into its accounting-first, report-optional contract.
@@ -945,3 +968,5 @@ export type { CliContext, CliResult } from "./cli/result.js";
 
 /** The product core's own version, mirrored from package.json. */
 export const PRODUCT_VERSION = "0.1.0";
+// Reader-legible publisher identity (issue #2983).
+export type { IdentityBindInput, IdentityBindResult } from "./operations/index.js";

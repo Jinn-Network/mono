@@ -13,7 +13,7 @@ import {
   type SourceIdentity,
 } from "@jinn-network/record-discovery-protocol";
 
-import type { ReadableImmutableBlobStore, StoredBlob } from "./ports.js";
+import type { Clock, ReadableImmutableBlobStore, StoredBlob } from "./ports.js";
 import type { ArchivePage } from "./archive.js";
 import {
   SourceAnnouncementConflictError,
@@ -164,9 +164,17 @@ function makeHarness(keyId = "key-1") {
   };
 }
 
+function clockAt(iso: string): Clock {
+  return { now: () => new Date(iso) };
+}
+
+/** Pinned so the suite does not depend on wall clock now that appends are clock-bounded. */
+const DEFAULT_TEST_CLOCK = clockAt("2026-08-03T12:00:00.000Z");
+
 function writer(
   harness: ReturnType<typeof makeHarness>,
   faultBoundary?: SourceWriterFaultBoundary,
+  clock?: Clock,
 ) {
   let tripped = false;
   return createDurableSourceWriter({
@@ -175,6 +183,7 @@ function writer(
     blobs: harness.blobs,
     states: harness.states,
     intents: harness.intents,
+    clock: clock ?? DEFAULT_TEST_CLOCK,
     ...(faultBoundary === undefined ? {} : {
       faults: {
         async at(boundary: SourceWriterFaultBoundary) {
@@ -416,5 +425,123 @@ describe("durable Record Discovery source writer", () => {
     }).append(command());
 
     expect(new Set(seen)).toEqual(new Set([formatOrigin(SOURCE.agent, SOURCE.name)]));
+  });
+
+  // #3481: the head's `issuedAt` is the command's timestamp verbatim, and PR #3473 made
+  // that value load-bearing for acceptance (`checkRefreshWindow` rule 3). Without a
+  // matching write-side bound this writer mints, signs and publishes a head its own
+  // verifier permanently refuses `head-issued-ahead`.
+  it("refuses a timestamp further ahead of its own clock than one freshness window", async () => {
+    const harness = makeHarness();
+    // command() is stamped 2026-08-03T12:00:00Z; this clock is two days behind it.
+    const append = writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).append(command());
+
+    await expect(append).rejects.toThrow(SourceWriterIntegrityError);
+    await expect(append).rejects.toThrow(/clock/);
+  });
+
+  it("refuses a future-dated timestamp before it writes or signs anything", async () => {
+    const harness = makeHarness();
+
+    await expect(writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).append(command()))
+      .rejects.toThrow(SourceWriterIntegrityError);
+
+    expect(harness.blobs.values.size).toBe(0);
+    expect(await harness.intentCas.read()).toBeUndefined();
+    expect(await harness.stateCas.read()).toBeUndefined();
+    expect(harness.signCount()).toBe(0);
+  });
+
+  it("accepts a timestamp exactly one freshness window ahead of its own clock", async () => {
+    const harness = makeHarness();
+    // Exactly 24h behind command()'s timestamp: the reading side's bound is `<=`.
+    const receipt = await writer(harness, undefined, clockAt("2026-08-02T12:00:00.000Z")).append(command());
+
+    expect(receipt).toMatchObject({ announcementId: "ann-1", sequence: "0000000000000001" });
+  });
+
+  // #3569: the bound governs minting a new head, never acknowledging one that already
+  // exists. A backwards clock correction of more than one window (an NTP fix on a host
+  // that was badly fast -- exactly the population this bound exists for) must not stop a
+  // durably committed announcement from returning its receipt, or the publish path's
+  // unconditional-append-plus-idempotency contract retries a committed publication until
+  // wall clock catches up.
+  it("returns a committed announcement's receipt however far ahead of the clock its timestamp is", async () => {
+    const harness = makeHarness();
+    const first = await writer(harness).append(command());
+    const signCount = harness.signCount();
+
+    // Two days behind command()'s timestamp -- past the 24h window, so minting is refused.
+    const replay = await writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).append(command());
+
+    expect(replay).toEqual(first);
+    expect(harness.signCount()).toBe(signCount);
+  });
+
+  // The carve-out is idempotency, not a clock special case: a writer whose window has
+  // since collapsed refuses to mint, but must still acknowledge what it already minted.
+  it("returns a committed announcement's receipt from a writer whose window now collapses", async () => {
+    const harness = makeHarness();
+    const first = await writer(harness).append(command());
+    const collapsed = createDurableSourceWriter({
+      source: SOURCE,
+      signer: harness.signer,
+      blobs: harness.blobs,
+      states: harness.states,
+      intents: harness.intents,
+      clock: DEFAULT_TEST_CLOCK,
+      refreshWithinMs: 0.5,
+    });
+
+    await expect(collapsed.append(command())).resolves.toEqual(first);
+  });
+
+  it("accepts a past-dated timestamp however far behind its own clock", async () => {
+    const harness = makeHarness();
+    const receipt = await writer(harness, undefined, clockAt("2031-01-01T00:00:00.000Z")).append(command());
+
+    expect(receipt).toMatchObject({ announcementId: "ann-1", sequence: "0000000000000001" });
+  });
+
+  it("refuses a refresh window that truncates to nothing", async () => {
+    const harness = makeHarness();
+    // Sub-millisecond windows round to `refreshBy === issuedAt`, which §5.2 rule 1 refuses.
+    const collapsed = createDurableSourceWriter({
+      source: SOURCE,
+      signer: harness.signer,
+      blobs: harness.blobs,
+      states: harness.states,
+      intents: harness.intents,
+      clock: DEFAULT_TEST_CLOCK,
+      refreshWithinMs: 0.5,
+    });
+
+    await expect(collapsed.append(command())).rejects.toThrow(/no consumer accepts/);
+  });
+
+  it("refuses a timestamp whose freshness window overflows the representable range", async () => {
+    const harness = makeHarness();
+    const extreme: AppendAnnouncementCommand = { ...command(), timestamp: "+275760-09-13T00:00:00.000Z" };
+
+    await expect(writer(harness).append(extreme)).rejects.toThrow(SourceWriterIntegrityError);
+    await expect(writer(harness).append(extreme)).rejects.toThrow(/out of representable range/);
+  });
+
+  it("does not re-bound an already-signed recovery intent against the clock", async () => {
+    const harness = makeHarness();
+    await expect(writer(harness, "after-intent-before-page").append(command())).rejects.toThrow();
+    expect(await harness.intentCas.read()).toBeDefined();
+
+    // Recovery replays frozen, already-signed bytes. Re-bounding here would strand a head
+    // that was in-window when it was minted, and `recover()` runs at the top of every
+    // append, so the source would be wedged rather than merely delayed.
+    //
+    // The clock must be *behind* the intent's timestamp for this to discriminate (#3570):
+    // `checkRefreshWindow` rule 3 only refuses a head issued ahead of `now`, so a clock
+    // ahead of it passes the bound whether or not recovery applies it. Two days behind
+    // command()'s 2026-08-03T12:00:00Z stamp is past the 24h window, so an implementation
+    // that re-bounded during recovery fails here.
+    await expect(writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).recover())
+      .resolves.toMatchObject({ status: "recovered" });
   });
 });

@@ -45,6 +45,22 @@
  * reader does offline. A Bitcoin height does not: block times need headers, so that check is
  * attributive and this module says so instead of claiming an offline proof it cannot make.
  *
+ * Postdating alone would still leave the operator a choice, and issue #3322 closes it: admitting any
+ * round later than the seal makes the VALUE unpredictable but not WHICH realized value applies, so
+ * an operator could watch the rounds published between lock and launch and bind the one whose
+ * derivation they preferred. For a scheduled source the seal already names one round --
+ * `requiredBeaconRound`, the first published strictly after it -- so the commitment needs no
+ * separate record, the producer refuses any other round, and `roundBasis` reports which of the two
+ * situations a record is in so the report face can say only what is true of it.
+ *
+ * The SOURCE choice survived that, and issue #3426 closes it on the same terms. It was never a swap
+ * between equally constrained beacons: `bitcoin/mainnet` is `attributive-height`, so no round
+ * follows from a seal for it and the postdating refusal below is never reached on that branch --
+ * leaving the round rule one source selection away from having no effect. So the sealed record names
+ * the beacon the run will bind to, `declaredSource` restates that naming inside the binding, the
+ * producer refuses a binding naming any other source, and `sourceBasis` reports which of the two
+ * situations a record is in.
+ *
  * This module does no filesystem or network I/O and throws `RunBindingError` on any invalid input.
  */
 
@@ -131,11 +147,24 @@ const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/, "must match ^sha2
 const InstantSchema = z.string().datetime({ offset: true });
 
 /**
+ * The admitted-source registry as a schema: exactly the ids of `BEACON_SOURCES`, nothing wider.
+ * Exported on its own because the source is chosen once, before any binding record exists -- the
+ * draft spec declares it (`core/src/domain/draft.ts`) and the lock seals it into the Run -- so the
+ * declaration is validated against this one enum rather than against a second list free to drift
+ * from the registry the derivation actually reads. `records` deliberately does not narrow the
+ * sealed extension to this set: it cannot import the verifier that depends on it, and the producer
+ * refuses an inadmissible source at the draft, before it seals one.
+ */
+export const BeaconSourceIdSchema = z.enum(
+  Object.keys(BEACON_SOURCES) as [BeaconSourceId, ...BeaconSourceId[]],
+);
+
+/**
  * A public beacon reference: which beacon, which round or height, and the value it published
  * there. `round` is the source's own index -- a drand round number, a Bitcoin block height.
  */
 export const BeaconReferenceSchema = z.strictObject({
-  source: z.enum(Object.keys(BEACON_SOURCES) as [BeaconSourceId, ...BeaconSourceId[]]),
+  source: BeaconSourceIdSchema,
   round: z.number().int().positive().max(MAX_BEACON_ROUND),
   value: HexValueSchema,
 });
@@ -147,6 +176,16 @@ const CommonBindingFields = {
   sealDigest: DigestSchema,
   /** When that seal was taken. The beacon must postdate it. */
   sealedAt: InstantSchema,
+  /**
+   * The beacon source the SEALED record named (issue #3426), restated here the way `sealedAt` is
+   * restated: this record must be checkable on its own, and a reader who also holds the sealed Run
+   * checks the restatement against it (`beacon-source/v1`).
+   *
+   * Optional, because absence is a real and historical state: a run that declared no source left
+   * the beacon to the operator, and every record sealed before this field existed is exactly that
+   * run. Absence is reported as `operator-chosen`, never defaulted to a source.
+   */
+  declaredSource: BeaconSourceIdSchema.optional(),
   beacon: BeaconReferenceSchema,
 } as const;
 
@@ -207,7 +246,7 @@ function fail(path: string, detail: string): never {
  * verification. Guarding the arithmetic where the arithmetic happens makes the typed refusal a
  * property of this function, and therefore true for every source and every caller.
  */
-export function beaconRoundInstant(beacon: BeaconReference): string | undefined {
+export function beaconRoundInstant(beacon: Pick<BeaconReference, "source" | "round">): string | undefined {
   const source = BEACON_SOURCES[beacon.source];
   if (source.timeBasis !== "deterministic-round-time") return undefined;
   const { genesisTimeSeconds, periodSeconds } = source as BeaconSourceDefinition & {
@@ -223,6 +262,60 @@ export function beaconRoundInstant(beacon: BeaconReference): string | undefined 
     );
   }
   return new Date(instantMs).toISOString();
+}
+
+/** The one round a run sealed at a given instant may bind to, and when that round is published. */
+export interface RequiredBeaconRound {
+  readonly round: number;
+  /** RFC 3339 UTC, from the source's own schedule -- the same arithmetic `beaconRoundInstant` does. */
+  readonly publishedAt: string;
+}
+
+/**
+ * The one round a run sealed at `sealedAt` may bind to on a `deterministic-round-time` source: the
+ * first round that source publishes STRICTLY after the seal (issue #3322).
+ *
+ * The point is that the seal already fixes it. `verifyRunBinding` admits any round whose instant
+ * postdates the seal, which makes the beacon VALUE unpredictable but leaves the CHOICE among
+ * realized values open: between seal and binding an operator sees many published rounds, can derive
+ * what each would produce, and can bind the one they prefer. The standard construction is to commit
+ * at seal time to a specific future round -- and for a scheduled source no separate commitment
+ * record is needed, because `(source, sealedAt)` already determines exactly one such round, and both
+ * are fixed at seal time and carried by the binding itself.
+ *
+ * From `instant(r) = genesis + (r - 1) * period`, the smallest `r` with `instant(r) > sealedAt` is
+ * `floor((sealedAt - genesis) / period) + 2`, clamped to round 1 for a seal that predates genesis.
+ *
+ * `undefined` -- meaning no round is derivable, so the operator's choice remains and the report face
+ * says so -- when the source indexes by block height rather than by a schedule, when `sealedAt` is
+ * unparseable, or when the required round leaves `MAX_BEACON_ROUND` or the representable range.
+ */
+export function requiredBeaconRound(
+  source: BeaconSourceId,
+  sealedAt: string,
+): RequiredBeaconRound | undefined {
+  const definition = BEACON_SOURCES[source];
+  if (definition.timeBasis !== "deterministic-round-time") return undefined;
+  const { genesisTimeSeconds, periodSeconds } = definition as BeaconSourceDefinition & {
+    readonly genesisTimeSeconds: number;
+    readonly periodSeconds: number;
+  };
+  const sealedAtMs = Date.parse(sealedAt);
+  if (!Number.isFinite(sealedAtMs)) return undefined;
+  const round = Math.max(
+    1,
+    Math.floor((sealedAtMs - genesisTimeSeconds * 1000) / (periodSeconds * 1000)) + 2,
+  );
+  if (!Number.isSafeInteger(round) || round > MAX_BEACON_ROUND) return undefined;
+  // `beaconRoundInstant` owns the representability refusal; a round derived from a real seal is
+  // within one period of it, so this only ever throws on an input `Date` itself cannot represent.
+  let publishedAt: string | undefined;
+  try {
+    publishedAt = beaconRoundInstant({ source, round });
+  } catch {
+    return undefined;
+  }
+  return publishedAt === undefined ? undefined : { round, publishedAt };
 }
 
 export interface BeaconOrderParams {
@@ -279,6 +372,48 @@ export function computeBeaconOrder(params: BeaconOrderParams): BeaconOrderResult
 /** Whether the beacon's postdating of the seal was proven here, or only asserted by its chain. */
 export type BeaconPostSealBasis = "proven-offline" | "attributive";
 
+/**
+ * Whether the seal fixed WHICH post-seal value applied, or the operator picked it (issue #3322).
+ *
+ * `seal-derived` -- the named round is `requiredBeaconRound` for this source and seal, so there was
+ * exactly one round to bind to and no choosing happened. `operator-chosen` -- the round postdates
+ * the seal (that is still checked) but was selected afterwards from among those published since, so
+ * the derivation is one of several the operator could have realized. Every `attributive-height`
+ * source is `operator-chosen` by construction: a block height carries no schedule, so no round
+ * follows from the seal.
+ *
+ * This is derived and reported, never enforced here. A verifier states what the bytes are; the
+ * choosing happens in the producer, which is where the refusal belongs (`bind` refuses a round other
+ * than the derivable one). Refusing here would also make every already-sealed record unreadable.
+ */
+export type BeaconRoundBasis = "seal-derived" | "operator-chosen";
+
+/**
+ * Whether the seal fixed WHICH BEACON applied, or the operator picked it (issue #3426).
+ *
+ * `seal-declared` -- the record RESTATES a source the sealed Run named, so the binding had one
+ * beacon available and `bind` refuses a binding naming any other. `operator-chosen` -- the record
+ * declares no source, so the operator selected one from the admitted set after sealing.
+ *
+ * "Restates" is exact, and is the same standing the record's `sealedAt` and `sealDigest` have: this
+ * function never sees the Run, so it can check only that the restatement agrees with the beacon the
+ * binding itself names. Whether it agrees with the RUN is a separate check, made by whoever holds
+ * the sealed record -- `core/src/binding/carriage.ts` workspace-side, and step 2c of
+ * `EXTERNAL-VERIFICATION.md` for an external reader. Without that check a restatement is only a
+ * claim, and a face keyed on it says more than these bytes establish.
+ *
+ * The source residue is not a swap between equals, which is why it needed closing rather than only
+ * reporting: `bitcoin/mainnet` is `attributive-height`, so `requiredBeaconRound` derives nothing for
+ * it and `beaconRoundInstant` returns `undefined`, which means the postdating refusal in
+ * `verifyRunBinding` is never reached on that branch. Under `operator-chosen` the round rule is
+ * therefore one source selection away from having no effect at all.
+ *
+ * Like {@link BeaconRoundBasis} this is derived and reported here, never enforced: a verifier states
+ * what the bytes are, and refusing an undeclared source would make every already-sealed record
+ * unreadable. The refusal belongs to the producer, and `bind` makes it.
+ */
+export type BeaconSourceBasis = "seal-declared" | "operator-chosen";
+
 /** What every verified binding carries, whichever mode produced it. */
 export interface VerifiedRunBindingBase {
   readonly procedure: typeof BEACON_BINDING_PROCEDURE;
@@ -291,6 +426,12 @@ export interface VerifiedRunBindingBase {
   /** The recomputed full order. In census mode this is the execution order. */
   readonly order: readonly string[];
   readonly postSeal: BeaconPostSealBasis;
+  /** Whether the seal fixed which post-seal round applied, or the operator chose it. */
+  readonly roundBasis: BeaconRoundBasis;
+  /** Whether the seal fixed which beacon applied, or the operator chose it. */
+  readonly sourceBasis: BeaconSourceBasis;
+  /** The source the sealed record named, present exactly when it named one. */
+  readonly declaredSource?: BeaconSourceId;
   /** The beacon's own publication instant, when its source's round index determines one. */
   readonly beaconInstant?: string;
 }
@@ -341,6 +482,24 @@ export function verifyRunBinding(candidate: unknown): VerifiedRunBinding {
     itemSha256s: pool,
   });
 
+  // A record that restates a declaration contradicting its own beacon is refused rather than
+  // reported: the two fields would name two different runs' worth of intent, and no reading of the
+  // bytes is honest. The restatement's agreement with the SEALED record is checked by the reader
+  // who holds it (workspace-side: `core/src/binding/carriage.ts`).
+  if (binding.declaredSource !== undefined && binding.declaredSource !== binding.beacon.source) {
+    fail(
+      "declaredSource",
+      `the sealed record named ${BEACON_SOURCES[binding.declaredSource].displayName} as this run's beacon, but `
+      + `this binding names ${BEACON_SOURCES[binding.beacon.source].displayName} — a declared source the binding `
+      + "does not use fixes nothing",
+    );
+  }
+
+  const required = requiredBeaconRound(binding.beacon.source, binding.sealedAt);
+  const roundBasis: BeaconRoundBasis = required !== undefined && required.round === binding.beacon.round
+    ? "seal-derived"
+    : "operator-chosen";
+
   const common = {
     procedure: BEACON_BINDING_PROCEDURE,
     beacon: binding.beacon,
@@ -350,6 +509,11 @@ export function verifyRunBinding(candidate: unknown): VerifiedRunBinding {
     poolSize: pool.length,
     order: derived.order,
     postSeal,
+    roundBasis,
+    sourceBasis: binding.declaredSource === undefined
+      ? ("operator-chosen" as const)
+      : ("seal-declared" as const),
+    ...(binding.declaredSource === undefined ? {} : { declaredSource: binding.declaredSource }),
     ...(beaconInstant === undefined ? {} : { beaconInstant }),
   } as const;
 

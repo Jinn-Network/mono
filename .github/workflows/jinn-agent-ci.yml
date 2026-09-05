@@ -132,6 +132,13 @@ jobs:
           # translated faithfully from the deleted globs: `**` is a prefix match, a
           # single `*` matches within one path segment, and a literal path is anchored
           # at both ends.
+          #
+          # The trailing block is the transitive `portal:` closure of the trees above
+          # (#3573). Each of those packages is built from SOURCE into this lane's
+          # workspace by `yarn install`, so a change confined to one of them changes
+          # what this lane verifies — and until #3573 none of them selected it. The
+          # list is derived from the `portal:` graph and enforced by
+          # `.github/scripts/portal-path-filters.test.mjs`; it is not hand-curated.
           patterns=(
             '^plugin/frozen/'
             '^plugin/scripts/'
@@ -145,6 +152,47 @@ jobs:
             '^operator/package\.json$'
             '^operator/yarn\.lock$'
             '^\.github/workflows/jinn-agent-ci\.yml$'
+            '^packages/discovery/client/'
+            '^packages/discovery/facts/offers/'
+            '^packages/discovery/facts/task-execution/'
+            '^packages/discovery/protocol/'
+            '^packages/discovery/serve/'
+            '^packages/discovery/sources/evidence-journal/'
+            '^packages/discovery/testing/'
+            '^packages/discovery/transport-http/'
+            '^packages/environments/record/'
+            '^packages/evidence/attestation-issuer/'
+            '^packages/evidence/catalog-sqlite/'
+            '^packages/evidence/discovery/'
+            '^packages/evidence/execution-evidence-builder/'
+            '^packages/evidence/execution-recorder/'
+            '^packages/evidence/local-runtime/'
+            '^packages/evidence/offer/'
+            '^packages/evidence/protocol/'
+            '^packages/evidence/repository/'
+            '^packages/lifecycle-notifications/'
+            '^packages/marketplace/binding/'
+            '^packages/marketplace/pipeline/'
+            '^packages/marketplace/projector/'
+            '^packages/marketplace/venue-base/'
+            '^packages/policy/identity/'
+            '^packages/read-plane/'
+            '^packages/sdk/'
+            '^packages/task-execution/backend/'
+            '^packages/task-execution/backend-local/assembly/'
+            '^packages/task-execution/backend-local/launchers/'
+            '^packages/task-execution/backend-local/supervisor/'
+            '^packages/task-execution/backend-local/workspace/'
+            '^packages/task-execution/evaluation-harness/'
+            '^packages/task-execution/evaluator-adapters/'
+            '^packages/task-execution/profiles/'
+            '^packages/task-execution/protocol/'
+            '^packages/task-execution/testing/'
+            '^packages/task-supply/admission/'
+            '^packages/trust/authoring/'
+            '^packages/trust/core/'
+            '^packages/trust/observation/'
+            '^packages/trust/resolve/'
           )
           printf '%s\n' "${patterns[@]}" > "${RUNNER_TEMP}/selection.ere"
           # The changed list goes to a file and grep reads the file. Piping it into
@@ -172,11 +220,14 @@ jobs:
     # product journey, and the fast PR lane moves it onto the merge group where
     # the queue runs the full battery before anything lands (DR-2026-08-18-b D3).
     # PRs targeting `main` (the hotfix lane) keep it — main has no queue to
-    # backstop what the PR lane skips. Nightly schedule, dispatch, and push
-    # lanes are unchanged.
+    # backstop what the PR lane skips. The standing release-review PR
+    # (`base:main head:next`, issue #2831) is the exception: it resynchronizes on
+    # every push to `next`, and every commit it carries already ran this journey on
+    # the merge group that landed it, so `head_ref != 'next'` excludes it. Nightly
+    # schedule, dispatch, and push lanes are unchanged.
     if: >-
       needs.changes.outputs.run == 'true' &&
-      (github.event_name == 'push' || github.event_name == 'merge_group' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main'))
+      (github.event_name == 'push' || github.event_name == 'merge_group' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref != 'next'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     defaults:
@@ -246,14 +297,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
           # Empty on every event except pull_request; the cold-stock case below
-          # mirrors the job-level main-carve-out with it.
+          # mirrors the job-level main-carve-out with them.
           BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
           SELECTED: ${{ needs.changes.outputs.run }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           COLD_STOCK_RESULT: ${{ needs.cold-stock-e2e.result }}
         run: |
           set -euo pipefail
-          echo "event=${EVENT_NAME} ref=${REF} selected=${SELECTED} changes=${CHANGES_RESULT}"
+          echo "event=${EVENT_NAME} ref=${REF} base_ref=${BASE_REF:-none} head_ref=${HEAD_REF:-none} selected=${SELECTED} changes=${CHANGES_RESULT}"
           echo "cold-stock-e2e=${COLD_STOCK_RESULT}"
           test "${CHANGES_RESULT}" = success
           # The selection is read from a job output, which is the empty string when the
@@ -270,6 +322,9 @@ jobs:
           # queue-bound pull_request, where the fast PR lane moves its 60-minute
           # journey onto the merge group (DR-2026-08-18-b D3). PRs targeting `main`
           # (the hotfix lane) keep it: main has no queue to backstop the fast lane.
+          # The standing release-review PR (`base:main head:next`, issue #2831) is
+          # excluded from that carve-out — it mirrors merge-group runs that already
+          # ran this journey. This mirrors the job-level `if:` exactly.
           # On `schedule` and `workflow_dispatch` the changes job has no diff to
           # read and selects conservatively, which is what keeps the nightly run
           # running.
@@ -281,7 +336,7 @@ jobs:
               fi
               ;;
             pull_request)
-              if [ "${SELECTED}" = true ] && [ "${BASE_REF}" = main ]; then
+              if [ "${SELECTED}" = true ] && [ "${BASE_REF}" = main ] && [ "${HEAD_REF}" != next ]; then
                 cold_expected=success
               fi
               ;;

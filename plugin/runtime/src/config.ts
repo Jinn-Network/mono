@@ -164,12 +164,59 @@ const HttpsUrlSchema = z.string().refine(
   { message: "must be an absolute https URL" },
 );
 
+/**
+ * A local copy of `did:key`'s spelling from
+ * `@jinn-network/trust-core/src/spellings.ts`, copied for the same reason
+ * `SOURCE_NAME_PATTERN` above is: this module validates without depending on
+ * the packages that own the grammars.
+ */
+const DID_KEY_PATTERN = /^did:key:z[1-9A-HJ-NP-Za-km-z]+$/;
+
+/**
+ * One key an archive's agent may sign its announcement chain with.
+ *
+ * This is FILE-ONLY for the same reason the source list above is, and it is
+ * the sharper case of the rule: "which key may speak for this archive" is the
+ * whole of announcement-chain authority. An environment variable that could
+ * introduce a signer would let anything able to set the environment silently
+ * become a trusted publisher, which custody law C2 forbids and which no
+ * review would ever see.
+ *
+ * `validFrom` is both the binding's effective start and the instant the key
+ * catalog probes at when asking whether a key was EVER bound — the
+ * point-in-time probe `AgentKeyCatalog.probeAt` documents, so a key whose
+ * window has since elapsed still corroborates the history it signed.
+ */
+const MirrorSourceSigningKeySchema = z.strictObject({
+  keyid: z.string().regex(DID_KEY_PATTERN, "must be a did:key multibase identifier"),
+  /**
+   * Canonicalized to UTC on the way in, because every consumer of this value
+   * ORDERS IT AS A STRING: `createDeclaredBindingResolver` compares it against
+   * the probe instant, and `trust-adapter.ts` compares the binding's
+   * `effectiveStart` against `now.toISOString()`. An accepted offset spelling
+   * sorts by its written digits rather than its instant, so
+   * `2026-07-31T23:00:00-05:00` — actually `2026-08-01T04:00Z` — would compare
+   * as EARLIER than an `2026-08-01T00:00Z` probe and admit the key four hours
+   * before its window opened. Second-precision spellings mis-order the same
+   * way against a millisecond clock, since "Z" sorts after ".". Offsets are
+   * still accepted, they just stop being stored the way they were written.
+   */
+  validFrom: z.iso.datetime({ offset: true }).transform((value) => new Date(value).toISOString()),
+});
+
 const MirrorSourceConfigSchema = z.strictObject({
   agent: z.string().min(1),
   name: z.string().regex(SOURCE_NAME_PATTERN, "must match the record-discovery source-name grammar"),
   servingRoot: HttpsUrlSchema,
   archiveRootUrl: HttpsUrlSchema,
   repositoryId: z.string().min(1),
+  /**
+   * Absent (the default) means this archive has declared NO signer, so under
+   * the `verified` posture its head signature resolves against no key and the
+   * chain is refused `unauthorized-signer`. That is the fail-closed direction:
+   * following an archive is not the same act as trusting a key to speak for it.
+   */
+  signingKeys: z.array(MirrorSourceSigningKeySchema).default([]),
 });
 
 const CorpusTrustConfigSchema = z.strictObject({
@@ -194,6 +241,15 @@ const CorpusConfigSchema = z.strictObject({
   sources: z.array(MirrorSourceConfigSchema).default([]),
   maxEntriesPerSync: z.number().int().positive().max(10_000).default(500),
   syncTimeoutMs: z.number().int().positive().max(600_000).default(30_000),
+  /**
+   * How long the standing mirror service waits between sync cycles.
+   * File-only, with no environment override, for the same custody-law-C2
+   * reason the source list is: what this runtime syncs, and how hard it
+   * leans on a followed archive, is a written configuration decision, not
+   * something an ambient environment variable can retune under an
+   * operator who never edited a file.
+   */
+  syncIntervalMs: z.number().int().min(1_000).max(86_400_000).default(300_000),
   /** Absent means `verified`, unless `acknowledgeUnverifiedChain` says otherwise. */
   chainVerification: CorpusChainVerificationSchema.optional(),
   /**
@@ -208,6 +264,7 @@ const CorpusConfigSchema = z.strictObject({
 });
 
 export type MirrorSourceConfig = z.infer<typeof MirrorSourceConfigSchema>;
+export type MirrorSourceSigningKey = z.infer<typeof MirrorSourceSigningKeySchema>;
 export type CorpusTrustConfig = z.infer<typeof CorpusTrustConfigSchema>;
 export type CorpusChainVerificationMode = z.infer<typeof CorpusChainVerificationSchema>;
 export type CorpusConfig = Omit<z.infer<typeof CorpusConfigSchema>, "chainVerification"> & {

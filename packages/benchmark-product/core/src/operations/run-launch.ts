@@ -42,7 +42,6 @@ import {
   resumeRun,
   type LaunchOptions,
 } from "@jinn-network/benchmarking-run";
-import type { SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse, toErrorEnvelope } from "../errors.js";
@@ -57,6 +56,7 @@ import {
 } from "../run/drive.js";
 import { createProductLaunchCapture } from "../run/publication-capture.js";
 import { createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
+import { reconcileReplayedSubmission } from "../run/replayed-submission-recovery.js";
 import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import {
   appendRunJournalEntry,
@@ -685,6 +685,16 @@ export function runResume(
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
         } else if (entry.kind === "submission-accepted" && entry.leg !== "evaluation") {
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
+        } else if (entry.kind === "evaluation-submission-captured") {
+          // Pre-submit capture, one leg down (#3237). `submission-accepted` alone is written
+          // AFTER the backend has accepted, so a kill in that gap leaves the acceptance durable
+          // in the backend and invisible here — and re-minting under the same idempotency key
+          // loses the verdict permanently. This entry is written before the bytes are offered,
+          // so the map covers that gap the way `submission-captured` covers the solve leg's.
+          journaledEvaluationSubmissions.set(
+            `${entry.cellKey}::${entry.dispatch}::e${entry.evalIndex}::a${entry.evaluationAttempt}`,
+            entry.submissionSha256,
+          );
         } else if (entry.kind === "submission-accepted" && entry.evalIndex !== undefined) {
           journaledEvaluationSubmissions.set(
             `${entry.cellKey}::${entry.dispatch}::e${entry.evalIndex}::a${entry.evaluationAttempt ?? 1}`,
@@ -773,35 +783,19 @@ export function runResume(
                     `${cell.cellKey}::${cell.dispatch}`,
                   );
                   if (submissionSha256 === undefined) continue;
-                  const submissionBytes = getSealedBytes(
-                    clockedContext.workspaceDir,
-                    submissionSha256,
-                  );
-                  const submission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
-                    submissionBytes,
-                  )) as { readonly submission?: unknown };
-                  if (
-                    typeof submission.submission !== "string"
-                    || !submission.submission.startsWith("urn:uuid:")
-                  ) {
-                    refuse(
-                      "record-integrity",
-                      `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
-                      "captured outstanding Submission carries no valid Submission URI",
-                    );
-                  }
-                  const reconciliation = await backend.recover(
-                    submission.submission as SubmissionUri,
-                  );
-                  if (reconciliation.classification === "contradictory") {
-                    refuse(
-                      "record-integrity",
-                      `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
-                      `backend recovery contradicted the captured Submission${
-                        reconciliation.detail === undefined ? "" : `: ${reconciliation.detail}`
-                      }`,
-                    );
-                  }
+                  // One preamble, shared with the evaluation leg's replay block
+                  // (`../run/replayed-submission-recovery.ts`), so the ref discipline both
+                  // enforce cannot drift between them.
+                  await reconcileReplayedSubmission({
+                    backend,
+                    submissionBytes: getSealedBytes(
+                      clockedContext.workspaceDir,
+                      submissionSha256,
+                    ),
+                    refusalPath: `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
+                    invalidUriMessage: "captured outstanding Submission carries no valid Submission URI",
+                    contradictionMessage: "backend recovery contradicted the captured Submission",
+                  });
                 }
 
                 cancellation = createCancellationAwareBackend(backend, {

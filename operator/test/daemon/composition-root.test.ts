@@ -195,6 +195,91 @@ describe('native launcher executable inspection', () => {
       requirements: { harness: { id: 'claude-code' } },
     })).resolves.toMatchObject({ probe: { ready: false } });
   });
+
+  it('resolves a host-injected launcher and its supplied command, leaving the shipped set intact', async () => {
+    const { buildLauncherDeployments } = await import('../../src/daemon/composition-root.js');
+    const injected = {
+      id: 'e2e-injected-launcher',
+      capabilities: () => predictionV1BaselineLauncher.capabilities(),
+      probe: async () => ({ ready: true }),
+      plan: predictionV1BaselineLauncher.plan.bind(predictionV1BaselineLauncher),
+    };
+
+    // `resolveLauncherCommand` knows only the shipped ids, so an injected launcher gets no
+    // deployment unless its own supplied command is honored.
+    expect(buildLauncherDeployments([injected], {} as never)).toEqual({});
+
+    const deployments = buildLauncherDeployments(
+      [injected, predictionV1BaselineLauncher],
+      {} as never,
+      [{ launcher: injected, command: process.execPath }],
+    );
+    expect(Object.keys(deployments).sort()).toEqual([
+      'e2e-injected-launcher',
+      'prediction-v1-baseline',
+    ]);
+    expect(deployments['e2e-injected-launcher']?.executable.path).toBe(process.execPath);
+  });
+});
+
+describe('buildLaunchers selection (extraLaunchers seam)', () => {
+  const wiringFor = (harness: string) => [{ ...WIRING[0]!, harness }];
+  const injectedLauncher = (id: string) => ({
+    id,
+    capabilities: () => predictionV1BaselineLauncher.capabilities(),
+    probe: async () => ({ ready: true }),
+    plan: predictionV1BaselineLauncher.plan.bind(predictionV1BaselineLauncher),
+  });
+
+  it('leaves the shipped selection unchanged when extraLaunchers is omitted', async () => {
+    const { buildLaunchers } = await import('../../src/daemon/composition-root.js');
+    expect(buildLaunchers(wiringFor('claude-code'), 'native').map((l) => l.id))
+      .toEqual(['claude-code']);
+    // The legacy alias map is the only thing that rewrites a wiring harness name onto a
+    // launcher id; extras must not disturb it.
+    expect(buildLaunchers(wiringFor('hermes-agent'), 'native').map((l) => l.id))
+      .toEqual(['hermes']);
+  });
+
+  it('selects an injected launcher only when a wiring entry names its id', async () => {
+    const { buildLaunchers } = await import('../../src/daemon/composition-root.js');
+    const extra = [{ launcher: injectedLauncher('e2e-injected-launcher'), command: process.execPath }];
+
+    expect(buildLaunchers(wiringFor('e2e-injected-launcher'), 'native', extra).map((l) => l.id))
+      .toEqual(['e2e-injected-launcher']);
+
+    // Extras a wiring never asks for are inert: passing them must not widen the selection.
+    expect(buildLaunchers(wiringFor('claude-code'), 'native', extra).map((l) => l.id))
+      .toEqual(['claude-code']);
+  });
+
+  it('refuses an extraLaunchers id that collides with another launcher', async () => {
+    const { buildLaunchers } = await import('../../src/daemon/composition-root.js');
+    // Both contracts would otherwise survive the filter, and the two downstream consumers
+    // disagree about which wins — pairing a shipped launcher's plan() with an injected binary.
+    expect(() => buildLaunchers(
+      wiringFor('claude-code'),
+      'native',
+      [{ launcher: injectedLauncher('claude-code'), command: process.execPath }],
+    )).toThrow(/collides with another launcher/u);
+
+    // The refusal does not depend on the colliding id being selected by the wiring.
+    expect(() => buildLaunchers(
+      wiringFor('prediction-v1-baseline'),
+      'native',
+      [{ launcher: injectedLauncher('claude-code'), command: process.execPath }],
+    )).toThrow(/collides with another launcher/u);
+
+    // Two extras sharing an id collide with each other for the same reason.
+    expect(() => buildLaunchers(
+      wiringFor('e2e-injected-launcher'),
+      'native',
+      [
+        { launcher: injectedLauncher('e2e-injected-launcher'), command: process.execPath },
+        { launcher: injectedLauncher('e2e-injected-launcher'), command: process.execPath },
+      ],
+    )).toThrow(/collides with another launcher/u);
+  });
 });
 
 function stubVenue() {

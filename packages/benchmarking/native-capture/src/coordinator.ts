@@ -16,6 +16,9 @@ import {
 import { recordDigest, validateExecutionEvidence } from "@jinn-network/evidence-protocol";
 import { buildExecutionEvidence } from "@jinn-network/execution-evidence-builder";
 
+import { writeExecutionCommissioningLink } from "./commissioning.js";
+import { NativeCaptureError } from "./errors.js";
+import { sortedUnique as sortedUniqueOrThrow } from "./order.js";
 import type {
   CaptureAssurance,
   CaptureClock,
@@ -32,20 +35,13 @@ import type {
   PlanNativeCaptureInput,
 } from "./types.js";
 
-function compare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
+/** The capture path's duplicate classification over the shared helper. */
+function sortedUnique<T>(values: readonly T[], key: (value: T) => string): T[] {
+  return sortedUniqueOrThrow(values, key, "DUPLICATE_NATIVE_UNIT", "native inventory contains duplicate coordinates");
 }
 
 function descriptor(name: string, record: SealedRecord): DigestBearingResourceDescriptor {
   return { name, digest: { sha256: record.digest.slice(7) } };
-}
-
-function sortedUnique<T>(values: readonly T[], key: (value: T) => string): T[] {
-  const sorted = [...values].sort((left, right) => compare(key(left), key(right)));
-  if (sorted.some((value, index) => index > 0 && key(sorted[index - 1]!) === key(value))) {
-    throw new NativeCaptureError("DUPLICATE_NATIVE_UNIT", "native inventory contains duplicate coordinates");
-  }
-  return sorted;
 }
 
 function evidenceKey(reference: EvidenceRecordReference): string {
@@ -86,24 +82,6 @@ function assurance(
   };
 }
 
-export type NativeCaptureErrorCode =
-  | "UNKNOWN_ADAPTER"
-  | "INCOMPATIBLE_SOURCE"
-  | "LAUNCH_UNSUPPORTED"
-  | "SESSION_EXISTS"
-  | "SESSION_NOT_FOUND"
-  | "SESSION_PHASE_INVALID"
-  | "DUPLICATE_NATIVE_UNIT"
-  | "ATOM_COORDINATE_MISMATCH"
-  | "ARTIFACT_DESCRIPTOR_MISMATCH"
-  | "CAPTURE_NONCONFORMING";
-
-export class NativeCaptureError extends Error {
-  constructor(readonly code: NativeCaptureErrorCode, message: string) {
-    super(message);
-    this.name = "NativeCaptureError";
-  }
-}
 
 export class NativeCaptureCoordinator {
   private readonly adapters: ReadonlyMap<string, NativeExecutionAdapter>;
@@ -359,6 +337,18 @@ export class NativeCaptureCoordinator {
         adapterKey(probe, session.resultSnapshot, coordinate.unitKey),
         bytes,
       );
+      // Dual-write (#3339): the link is sealed over the evidence that was just stored and is a
+      // record of its own. `writeExecutionCommissioningLink` re-reads the evidence afterwards, so
+      // the "same exact bytes with or without a link" guarantee is enforced here, not just tested.
+      if (draft.commissioning !== undefined) {
+        writeExecutionCommissioningLink({
+          store: this.store,
+          clock: this.clock,
+          unitKey: coordinate.unitKey,
+          execution: executionEvidence,
+          lineage: draft.commissioning,
+        });
+      }
       return {
         unitKey: coordinate.unitKey,
         identifiers: sortedUnique(coordinate.identifiers, ({ scheme, value }) => `${scheme}\u0000${value}`),

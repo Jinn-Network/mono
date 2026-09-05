@@ -46,6 +46,7 @@
   },
   "devDependencies": {
     "@jinn-network/execution-recorder": "0.1.0",
+    "@jinn-network/record-discovery-facts-offers": "0.1.0",
     "@jinn-network/record-discovery-source-evidence-journal": "0.1.0",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "^22.0.0",
@@ -59,6 +60,8 @@
     "@jinn-network/evidence-protocol": "portal:../protocol",
     "@jinn-network/evidence-repository": "portal:../repository",
     "@jinn-network/execution-recorder": "portal:../execution-recorder",
+    "@jinn-network/evidence-offer": "portal:../offer",
+    "@jinn-network/record-discovery-facts-offers": "portal:../../discovery/facts/offers",
     "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
     "@jinn-network/record-discovery-serve": "portal:../../discovery/serve",
     "@jinn-network/record-discovery-source-evidence-journal": "portal:../../discovery/sources/evidence-journal",

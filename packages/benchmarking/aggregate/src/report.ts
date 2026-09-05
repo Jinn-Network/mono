@@ -135,6 +135,19 @@ export interface ProduceReportInput extends MethodPorts {
   readonly disclosures?: Disclosures;
   readonly limitations?: readonly string[];
   readonly author: string;
+  /**
+   * Extra namespaced top-level extension keys to seal into the Report payload BEFORE signing
+   * (disclosure-specification-record design §6.3, issue #2839). The extension's digest has to be
+   * inside the signed payload for the author's signature to cover it, and nothing in this module
+   * can re-sign after the fact, so the only honest seam is here.
+   *
+   * Strictly opt-in and strictly additive: absent -- which is every existing caller -- the sealed
+   * document is byte-for-byte what it was before this parameter existed. Keys are validated by
+   * `sealReport`'s own `topLevelRecordSchema`, which admits only absolute-URI or reverse-DNS names,
+   * so a bare key refuses at seal rather than being quietly written. A key that collides with a
+   * core Report field, or with the publication extension this module owns, refuses here.
+   */
+  readonly recordExtensions?: Readonly<Record<string, unknown>>;
 }
 
 export type DsseSigner = TrustDsseSigner;
@@ -435,7 +448,13 @@ async function produceReportWithExtension(
   }
   const methodTuple = { id: input.method.id, version: input.method.version, parameters };
   const preregistered = derivePreregistered(runs, methodTuple);
-  const document: Record<string, unknown> = {
+  // Every key this module owns is written here, the CONDITIONAL ones included, with `undefined`
+  // standing for "this call omits it". That is what makes `ownedKeys` below structurally complete:
+  // deriving it from the emitted document alone would miss `limitations` on any call that does not
+  // set it, and a caller could then supply `limitations` as an extension key and have it spread in.
+  // The undefined entries are stripped before sealing, so the emitted document is exactly what it
+  // was before this shape existed.
+  const coreDocument: Record<string, unknown> = {
     protocol: BENCHMARKING_PROTOCOL,
     subjects: exactSubjects.map((subject) => ({
       digest: { sha256: stripSha256Prefix(subject.digest) },
@@ -445,9 +464,26 @@ async function produceReportWithExtension(
     results,
     disclosures: derivedDisclosures,
     author: input.author,
-    ...(input.limitations === undefined ? {} : { limitations: input.limitations }),
-    ...(publicationExtension === undefined ? {} : { [BENCHMARK_PUBLICATION_EXTENSION]: publicationExtension }),
+    limitations: input.limitations,
+    [BENCHMARK_PUBLICATION_EXTENSION]: publicationExtension,
   };
+  // DERIVED, never a hand-kept list: a field added to `coreDocument` above is covered here without
+  // anyone remembering to add it, whether or not this particular call emits it.
+  const ownedKeys = new Set(Object.keys(coreDocument));
+  const document: Record<string, unknown> = Object.fromEntries(
+    Object.entries(coreDocument).filter(([, value]) => value !== undefined),
+  );
+  for (const key of Object.keys(input.recordExtensions ?? {})) {
+    // Refused rather than spread-over in either direction: a caller's key must not shadow a core
+    // field, and a core field must not silently win over a caller's key. Both are errors.
+    if (key === BENCHMARK_PUBLICATION_EXTENSION) {
+      throw new Error(`produceReport: ${BENCHMARK_PUBLICATION_EXTENSION} is owned by this module and cannot be supplied as a record extension`);
+    }
+    if (ownedKeys.has(key)) {
+      throw new Error(`produceReport: record extension key "${key}" collides with a core Report field`);
+    }
+    document[key] = (input.recordExtensions as Record<string, unknown>)[key];
+  }
 
   const sealed = sealReport(document);
   const preAuthEncoding = dssePreAuthEncoding(REPORT_MEDIA_TYPE, sealed.bytes);

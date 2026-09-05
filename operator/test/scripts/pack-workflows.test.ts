@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 
@@ -28,6 +29,13 @@ function workflowStep(path: string, name: string): string {
 // until DR-2026-08-18-b D3/D6 moved selection into the `changes` job — a required
 // merge-queue context must not sit behind a workflow-level filter, because a
 // filtered-out workflow never reports on the merge group and the entry hangs.
+//
+// This is only the DOCUMENTED half of `ci.yml`'s `patterns=(` array. The array
+// also carries a DERIVED half: the transitive `portal:` closure of the trees
+// below, which grows whenever a `portal:` edge is added (#3573). Ownership of
+// that half sits with `.github/scripts/portal-path-filters.mjs`, so the test
+// re-derives it from that module rather than pinning a count here — a count
+// would re-break on the next portal edge, in a lane whose own gate is green.
 const OPERATOR_CI_SELECTED_PATHS = [
   'operator/**',
   'apps/operator-console/**',
@@ -35,13 +43,19 @@ const OPERATOR_CI_SELECTED_PATHS = [
   'packages/sdk/**',
   'packages/core/**',
   'packages/plugin/**',
+  // Manifests only, and for a reason unrelated to the operator surface: a
+  // `portal:` edge is declared in a package.json and nowhere else, so a manifest
+  // under any `packages/` tree can add a portal target the operator image never
+  // COPYs. Without this the Dockerfile portal guard never runs on the pull
+  // request that added the edge (#3527).
+  'packages/**/package.json',
   '.github/workflows/ci.yml',
   '.github/workflows/npm-publish.yml',
   '.github/scripts/npm-publish-workflow.test.mjs',
   '.github/scripts/operator-*.test.mjs',
 ];
 
-function selectionPatterns(path: string): RegExp[] {
+function selectionEntries(path: string): string[] {
   const parsed = parseYaml(workflow(path)) as {
     jobs: Record<string, { steps: Array<{ id?: string; run?: string }> }>;
   };
@@ -68,14 +82,69 @@ function selectionPatterns(path: string): RegExp[] {
         throw new Error(`Unquoted selection pattern in ${path}: ${line}`);
       }
 
-      return new RegExp(quoted[1], 'u');
+      return quoted[1];
     });
+}
+
+function selectionPatterns(path: string): RegExp[] {
+  return selectionEntries(path).map((entry) => new RegExp(entry, 'u'));
+}
+
+interface PortalPathFilters {
+  readWorkspaceGraph: (root: string) => Map<string, string[]>;
+  portalClosure: (graph: Map<string, string[]>, workspace: string) => Set<string>;
+  erePrefix: (pattern: string) => string | null;
+  overlaps: (selectedPrefix: string, workspace: string) => boolean;
+  contains: (selectedPrefix: string, workspace: string) => boolean;
+}
+
+// Imported by URL rather than by specifier: the gate is an untyped `.mjs` file
+// outside this package, and a static import would need a declaration for it.
+async function portalPathFilters(): Promise<PortalPathFilters> {
+  return (await import(
+    pathToFileURL(resolve(repoRoot, '.github/scripts/portal-path-filters.mjs')).href
+  )) as PortalPathFilters;
+}
+
+// The derived half of the operator lane's selection array: for every workspace
+// the documented entries select, every workspace in its transitive `portal:`
+// closure that those entries do not already cover in full. This is the same
+// requirement `auditLane` enforces, evaluated against the documented entries
+// alone — it cannot call `auditLane` directly, because that reads the whole
+// array back out of `ci.yml` and would therefore derive the answer from the
+// thing under test. The reduction to prefixes goes through `erePrefix`, not
+// `globPrefix`: `packages/**/package.json` is manifests-only, and reducing it
+// to `packages` would make every package look selected.
+async function derivedPortalEntries(documented: string[]): Promise<string[]> {
+  const { readWorkspaceGraph, portalClosure, erePrefix, overlaps, contains } =
+    await portalPathFilters();
+  const graph = readWorkspaceGraph(repoRoot);
+  const prefixes = [
+    ...new Set(
+      documented.map(erePrefix).filter((prefix): prefix is string => prefix !== null),
+    ),
+  ];
+  const missing = new Set<string>();
+
+  for (const workspace of graph.keys()) {
+    if (!prefixes.some((prefix) => overlaps(prefix, workspace))) continue;
+
+    for (const target of portalClosure(graph, workspace)) {
+      if (!prefixes.some((prefix) => contains(prefix, target))) missing.add(target);
+    }
+  }
+
+  return [...missing].sort().map((workspace) => `^${workspace}/`);
 }
 
 // A file whose change the glob is meant to catch.
 function changedPathFor(glob: string): string {
   if (glob.endsWith('/**')) {
     return `${glob.slice(0, -2)}probe/file.ts`;
+  }
+
+  if (glob.includes('/**/')) {
+    return glob.replace('/**/', '/probe/');
   }
 
   if (glob.includes('*')) {
@@ -128,11 +197,31 @@ describe('packed client workflow coverage', () => {
     expect(source).toContain("'packages/plugin/**'");
   });
 
-  it('CI selects on client, SDK, core, plugin, and every other path it used to filter on', () => {
-    const patterns = selectionPatterns('.github/workflows/ci.yml');
+  it('CI selects on client, SDK, core, plugin, and every other path it used to filter on', async () => {
+    const entries = selectionEntries('.github/workflows/ci.yml');
+    const patterns = entries.map((entry) => new RegExp(entry, 'u'));
     const changedPaths = OPERATOR_CI_SELECTED_PATHS.map(changedPathFor);
 
-    expect(patterns).toHaveLength(OPERATOR_CI_SELECTED_PATHS.length);
+    // The array is exactly the documented set followed by the derived portal
+    // closure, and nothing else. An entry smuggled into the documented half
+    // pushes a documented one into the derived half, which fails this too.
+    expect(entries.slice(OPERATOR_CI_SELECTED_PATHS.length)).toEqual(
+      await derivedPortalEntries(entries.slice(0, OPERATOR_CI_SELECTED_PATHS.length)),
+    );
+    expect(selectionOf(patterns, changedPaths)).toEqual(
+      Object.fromEntries(changedPaths.map((path) => [path, true])),
+    );
+  });
+
+  it('CI selects on a portal-bearing manifest anywhere under packages/', () => {
+    const patterns = selectionPatterns('.github/workflows/ci.yml');
+    const changedPaths = [
+      // The two manifests whose portal edges ejected PR #3472 from the merge
+      // queue twice: neither tree is otherwise part of the operator lane.
+      'packages/evidence/local-runtime/package.json',
+      'packages/discovery/facts/offers/package.json',
+    ];
+
     expect(selectionOf(patterns, changedPaths)).toEqual(
       Object.fromEntries(changedPaths.map((path) => [path, true])),
     );

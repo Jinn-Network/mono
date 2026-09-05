@@ -49,6 +49,8 @@ import {
   informativeSubset,
   manipulationCheck,
   pairedDeltaEstimate,
+  SKILLSBENCH_DEMO1_METHOD_IDS,
+  SKILLSBENCH_DEMO1_METHOD_VERSION,
   varianceDecomposition,
 } from "../method/skillsbench-demo1-stats.js";
 
@@ -63,8 +65,17 @@ import {
  * Admission is fail-closed by construction: `admitDeclaredCells` throws on any missing,
  * unparseable, or wrong-model cell, so a report cannot be sealed over a shrunken denominator.
  *
- * Opt in with `SKILLSBENCH_DEMO1_REPORT=1`. Set `SKILLSBENCH_DEMO1_STAGE=final` once the final
- * declaration replaces the pilot.
+ * `yarn demo1:report` sets `SKILLSBENCH_DEMO1_REPORT=1` for you; set `SKILLSBENCH_DEMO1_STAGE=final`
+ * once the final declaration replaces the pilot. The variable is still what gates the suite,
+ * because this file sits in the default test include set of `vitest.config.ts` and must skip
+ * under an ordinary `yarn test`.
+ *
+ * Sealing is refused over an output that already exists, for the same reason
+ * `scripts/demo1-preregister.mjs` refuses: the committed bundle and report carry published digests
+ * (`docs/superpowers/plans/demo-report-1/demo1-report.md`) and every run signs with a keypair
+ * generated in that run, so re-sealing in place produces bytes that can never match what was
+ * published. Point `SKILLSBENCH_DEMO1_REPORT_OUT_DIR` at a scratch directory to exercise the chain
+ * without touching the seal.
  */
 const ENABLED = process.env.SKILLSBENCH_DEMO1_REPORT === "1";
 const REPO_ROOT = resolve(import.meta.dirname, "../../../../..");
@@ -74,8 +85,22 @@ const FINAL_STAGE = process.env.SKILLSBENCH_DEMO1_STAGE === "final";
 const CELLS = resolve(REPO_ROOT, FINAL_STAGE
   ? "docs/superpowers/plans/demo-report-1/E1-demo1-confirmatory-cells.v1.json"
   : "docs/superpowers/plans/demo-report-1/E1-arm-cells.v1.json");
-const BUNDLE_OUT = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/E1-demo1-evidence-bundle.v1.json");
-const REPORT_OUT = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/demo1-report.v1.json");
+const OUT_DIR = process.env.SKILLSBENCH_DEMO1_REPORT_OUT_DIR
+  ? resolve(process.env.SKILLSBENCH_DEMO1_REPORT_OUT_DIR)
+  : resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1");
+const BUNDLE_OUT = resolve(OUT_DIR, "E1-demo1-evidence-bundle.v1.json");
+const REPORT_OUT = resolve(OUT_DIR, "demo1-report.v1.json");
+
+/** Refuses to overwrite a sealed output; see this file's header. */
+const refuseSealedOverwrite = (): void => {
+  for (const out of [BUNDLE_OUT, REPORT_OUT]) {
+    if (!existsSync(out)) continue;
+    throw new Error(
+      `refusing to overwrite the sealed Demo-1 output at ${out}: `
+        + "set SKILLSBENCH_DEMO1_REPORT_OUT_DIR to seal somewhere else; see the header of this file",
+    );
+  }
+};
 
 const SEALED_AT = SKILLSBENCH_DEMO1_SEALED_AT;
 const SOURCE_COMMIT = SKILLSBENCH_DEMO1_SOURCE_COMMIT;
@@ -223,6 +248,9 @@ function evaluation(taskDigest: `sha256:${string}`, resultDigest: `sha256:${stri
 
 describe.skipIf(!ENABLED)("Demo-1 evidence-native report", () => {
   it("seals and verifies the report from admitted arm cells", { timeout: 600_000 }, async () => {
+    // Before any work: a run that cannot publish its outputs must say so up front, not after
+    // sealing the whole chain. See this file's header.
+    refuseSealedOverwrite();
     const stage = FINAL_STAGE ? "final" : "pilot";
     const declaration = FINAL_STAGE ? SKILLSBENCH_DEMO1_FINAL_DECLARATION : SKILLSBENCH_DEMO1_PILOT_DECLARATION;
     const document = JSON.parse(readFileSync(CELLS, "utf8")) as { cells: Record<string, SkillsBenchDemo1CellRecord> };
@@ -367,9 +395,15 @@ describe.skipIf(!ENABLED)("Demo-1 evidence-native report", () => {
       subjects: [descriptor("matrix-v2.json", matrix.record.digest)],
       manifest: descriptor("analysis-manifest.json", manifest.digest),
       cohort: descriptor("cohort.json", cohort.digest),
+      // The paired estimate is `pairedDeltaEstimate` above — a Student-t interval over continuous
+      // per-task reward deltas — so the report cites Demo-1's own identifier, not the registered
+      // `jinn.benchmarking.method/paired-delta@1` whose implementation is a clustered BCa
+      // bootstrap over binary pass rates (issue #2973). The records published on 2026-08-20 carry
+      // the registered identifier; see the erratum in `skillsbench-demo1-seal.ts` for why those
+      // sealed bytes are not rewritten.
       method: {
-        id: "jinn.benchmarking.method/paired-delta",
-        version: "1",
+        id: SKILLSBENCH_DEMO1_METHOD_IDS.pairedMeanDelta,
+        version: SKILLSBENCH_DEMO1_METHOD_VERSION,
         parameters: { pairedBy: "task", arms: ["A-native-skill", "B-flat-claude-md"], control: "C-no-instructions" },
         implementation,
       },

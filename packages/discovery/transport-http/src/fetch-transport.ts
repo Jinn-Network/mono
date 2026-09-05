@@ -1,6 +1,7 @@
-import type { Transport, TransportResponse } from "@jinn-network/record-discovery-client";
+import type { Transport, TransportFetchOptions, TransportResponse } from "@jinn-network/record-discovery-client";
 
 import type { FetchLike } from "./ports.js";
+import { requestWithinOrigin } from "./redirect-guard.js";
 
 // The client-side `Transport` plug (spec §6.2). One of the three modules
 // the discovery source-boundaries guard allows to name an ambient
@@ -44,6 +45,11 @@ export class TransportOversizeError extends Error {
   }
 }
 
+// Re-exported from the module that now owns the per-hop guard, so both GET
+// transports share one implementation without breaking any importer of this
+// module's long-standing name.
+export { TransportRedirectError } from "./redirect-guard.js";
+
 export interface HttpTransportOptions {
   /** Hard ceiling on a single response body. Defaults to 8 MiB. */
   maxBytes?: number;
@@ -75,7 +81,12 @@ function resolveUrl(baseUrl: string, url: string): string {
  * ceiling has to hold during the read, so this cancels the stream at the
  * first chunk that crosses it rather than after the last one arrives.
  */
-async function readBounded(response: Response, url: string, maxBytes: number): Promise<Uint8Array> {
+async function readBounded(
+  response: Response,
+  url: string,
+  maxBytes: number,
+  signal: AbortSignal | undefined,
+): Promise<Uint8Array> {
   const body = response.body;
   if (!body) {
     const whole = new Uint8Array(await response.arrayBuffer());
@@ -88,6 +99,11 @@ async function readBounded(response: Response, url: string, maxBytes: number): P
   let total = 0;
   try {
     for (;;) {
+      // The body read is the second place a peer can hold the caller: headers
+      // arrive, then the stream trickles or stalls. `fetch`'s own signal
+      // aborts the underlying request, but a signal that fires between chunks
+      // is only observed if the loop looks, so it looks.
+      signal?.throwIfAborted();
       const { value, done } = await reader.read();
       if (value !== undefined) {
         total += value.length;
@@ -120,7 +136,7 @@ export function createHttpTransport(
   let revalidations = 0;
 
   return {
-    async "fetch"(url: string): Promise<TransportResponse> {
+    async "fetch"(url: string, operation?: TransportFetchOptions): Promise<TransportResponse> {
       const target = resolveUrl(baseUrl, url);
       const cached = cache.get(target);
       const headers: Record<string, string> = {
@@ -129,7 +145,7 @@ export function createHttpTransport(
       };
 
       requests += 1;
-      const response = await fetchLike(target, { method: "GET", headers });
+      const response = await requestWithinOrigin(fetchLike, target, headers, operation?.signal);
 
       if (response.status === 304 && cached !== undefined) {
         revalidations += 1;
@@ -151,7 +167,7 @@ export function createHttpTransport(
         throw new TransportOversizeError(target, declaredLength, maxBytes);
       }
 
-      const bytes = await readBounded(response, target, maxBytes);
+      const bytes = await readBounded(response, target, maxBytes, operation?.signal);
 
       const contentType = response.headers.get("content-type") ?? undefined;
       const etag = response.headers.get("etag");

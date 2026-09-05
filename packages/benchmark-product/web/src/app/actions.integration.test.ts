@@ -17,7 +17,7 @@ import {
   WORKSPACE_ENV,
 } from "@/lib/server/product-context";
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
-import { readAuditEntries } from "@colophon-claims/core";
+import { getSealedBytes, readAuditEntries } from "@colophon-claims/core";
 import { agentProfileArmAddAction } from "@/app/actions";
 import { executeOperation } from "@/lib/server/action-support";
 import { executeBackgroundOperation } from "@/lib/server/background-operation";
@@ -32,6 +32,9 @@ vi.mock("next/server", () => ({
     afterState.tasks.push(typeof task === "function" ? Promise.resolve().then(task) : Promise.resolve(task));
   },
 }));
+
+/** The published `sample-size-advisory/v1` wire key (issue #2978), pinned here as a consumer. */
+const SAMPLE_SIZE_ADVISORY_EXTENSION = "https://spec.jinn.network/extensions/sample-size-advisory/v1";
 
 const IDLE: GuiActionState = { status: "idle" };
 const workspaces: string[] = [];
@@ -93,7 +96,10 @@ async function prepareLockedDraft(draftId: string): Promise<void> {
     pinning: JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } }),
   })).toMatchObject({ status: "success" });
   expect(await invoke("run.quote", { draftId })).toMatchObject({ status: "success" });
-  expect(await invoke("run.lock", { draftId })).toMatchObject({ status: "success" });
+  // The seal-time sample-size advisory is a gate on this surface too (issue #2978): an
+  // unacknowledged lock is refused, so every fixture that needs a locked draft acknowledges.
+  expect(await invoke("run.lock", { draftId, "ack-sample-size": "acknowledged" }))
+    .toMatchObject({ status: "success" });
 }
 
 async function waitForDurableStatus(
@@ -482,11 +488,55 @@ describe.sequential("server action layer against a real workspace", () => {
         status: "success",
         result: { presentation: { runSize: { solveCells: 6 } } },
       });
-      const locked = await invoke("run.lock", { draftId: "gui-walkthrough" });
+      // Submitting the lock without acknowledging the sample size is refused, and the refusal is
+      // where the operator reads the width the declared n can deliver (issue #2978).
+      const unacknowledged = await invoke("run.lock", { draftId: "gui-walkthrough" });
+      expect(unacknowledged, JSON.stringify(unacknowledged)).toMatchObject({
+        status: "error",
+        error: { code: "invalid-invocation" },
+      });
+      expect(unacknowledged.status === "error" ? unacknowledged.error.detail : "")
+        .toContain("interval width");
+      expect(await invoke("draft.show", { draftId: "gui-walkthrough" })).toMatchObject({
+        status: "success",
+        result: { draft: { state: "quoted" } },
+      });
+
+      const locked = await invoke("run.lock", {
+        draftId: "gui-walkthrough",
+        "ack-sample-size": "acknowledged",
+      });
       expect(locked, JSON.stringify(locked)).toMatchObject({
         status: "success",
         result: { draft: { state: "locked" } },
       });
+      // The second half of #2978's acceptance criterion on THIS surface (issue #3804): the lock the
+      // acknowledgement produced actually seals the advisory, and it seals the same width the
+      // refusal above quoted. Without this, `acknowledgedSampleSizeAdvisory` is a line in
+      // `runLockAction` whose effect no GUI test observes. Read off the stored bytes by their wire
+      // key rather than through a records reader -- web imports only `@colophon-claims/core`
+      // (`.github/scripts/benchmark-product-source-boundaries.test.mjs`), and a consumer pinning
+      // the published extension URI independently is the stronger end-to-end check anyway.
+      const lockedResult = locked.status === "success"
+        ? locked.result as { readonly runSha256: string }
+        : undefined;
+      expect(lockedResult?.runSha256).toMatch(/^[0-9a-f]{64}$/);
+      const sealedRun = JSON.parse(
+        Buffer.from(getSealedBytes(workspace, lockedResult!.runSha256)).toString("utf8"),
+      ) as Record<string, unknown>;
+      const sealedAdvisory = sealedRun[SAMPLE_SIZE_ADVISORY_EXTENSION] as
+        { readonly n: number; readonly expectedIntervalWidth: string } | undefined;
+      expect(sealedAdvisory, JSON.stringify(Object.keys(sealedRun))).toBeDefined();
+      // Matched against the advisory's LEAD sentence, never a reference row (issue #3906):
+      // `formatSampleSizeAdvisory` prints rows for [n, 2n, round(n/2)], so a row match is
+      // satisfied by a neighbour of the sealed n. If the gate and `runLock` ever computed n a
+      // factor of two apart -- the gate counting items while the seal counted items x replicates,
+      // say -- the sealed n's row would still be present verbatim, and the operator would have
+      // been shown a declared n the seal does not record. Only the lead sentence names that
+      // declared n, so only it can fail for the reason this assertion exists.
+      const refusal = unacknowledged.status === "error" ? unacknowledged.error.detail : "";
+      expect(refusal).toContain(`At the declared n=${sealedAdvisory!.n} per arm`);
+      expect(refusal).toContain(`wider than ${sealedAdvisory!.expectedIntervalWidth}`);
       expect(await invoke("draft.show", { draftId: "gui-walkthrough" })).toMatchObject({
         status: "success",
         result: { draft: { state: "locked" } },

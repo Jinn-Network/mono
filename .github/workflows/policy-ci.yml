@@ -6,16 +6,26 @@ on:
       - "packages/policy/**"
       - ".github/scripts/policy-*.test.mjs"
       - ".github/workflows/policy-ci.yml"
+      - ".github/scripts/workflow-artifact-steps.mjs"
       - "docs/superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md"
       - "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md"
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/task-execution/protocol/**"
   push:
     branches: [next]
     paths:
       - "packages/policy/**"
       - ".github/scripts/policy-*.test.mjs"
       - ".github/workflows/policy-ci.yml"
+      - ".github/scripts/workflow-artifact-steps.mjs"
       - "docs/superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md"
       - "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md"
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/task-execution/protocol/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -149,7 +159,8 @@ jobs:
       # consolidating the packages or gating either upload on a path filter
       # would have changed the layout with no gate to catch it. Restoring by
       # name has no such dependency, and `policy-ci-workflow.test.mjs` keeps it
-      # that way. Same shape as plugin-tree-ci.yml.
+      # that way.
+      # Precedent: plugin-tree-ci.yml.
       - name: Restore Policy Identity distribution
         uses: actions/download-artifact@v8
         with:

@@ -15,10 +15,13 @@ import {
   offerCards,
   offerCardsForSubject,
   readOfferCard,
+  type WithdrawnAnnouncement,
 } from "./listings.js";
 import { offerRecompute } from "./recompute.js";
 
 const SOURCE = { agent: "did:key:zOfferListingHolder", name: "offers" };
+// A second, unrelated announcer. Nothing stops it mirroring the holder's digests.
+const HOSTILE_SOURCE = { agent: "did:key:zHostileAnnouncer", name: "offers" };
 const SUBJECT = `sha256:${"a".repeat(64)}` as const;
 const OTHER_SUBJECT = `sha256:${"b".repeat(64)}` as const;
 const OLAS = "https://spec.jinn.network/rails/eip155-8453-erc20-olas/v1";
@@ -35,6 +38,7 @@ const noReferencedBytes = { async "fetch"() { return undefined; } };
 interface OfferTerms {
   readonly subject: string;
   readonly rails: readonly { rail: string; amount: string }[];
+  readonly source?: { agent: string; name: string };
 }
 
 let announcementCounter = 0;
@@ -60,7 +64,7 @@ async function announce(terms: OfferTerms): Promise<AnnouncedItem> {
     record: { kind: OFFER_RECORD_KIND, digest: sealed.digest },
     facts,
     provenance: {
-      source: SOURCE,
+      source: terms.source ?? SOURCE,
       entry: `sha256:${"e".repeat(64)}`,
       announcementId: `ann-${announcementCounter}`,
     },
@@ -69,6 +73,14 @@ async function announce(terms: OfferTerms): Promise<AnnouncedItem> {
 
 function digest(item: AnnouncedItem): string {
   return item.record.digest;
+}
+
+/** The withdrawal an index folds out of the feed when this item's announcement is retracted. */
+function withdrawalOf(item: AnnouncedItem): WithdrawnAnnouncement {
+  return {
+    source: item.provenance.source,
+    announcementId: item.provenance.announcementId,
+  };
 }
 
 describe("reading an offer card off an announced item", () => {
@@ -171,8 +183,9 @@ describe("offers for one subject", () => {
 
 describe("liveness comes from the chain, never from the card", () => {
   it("cannot be evaded by a card that misstates its own digest", async () => {
-    // Delist sha256:A, then re-announce A under a card claiming to be some other offer. Keying
-    // liveness on the card's own digest would let the withdrawn offer back into the catalog.
+    // Re-announce a delisted offer under a card claiming to be some other offer. The card is
+    // refused outright, because a card that misstates its own digest is the one a catalog
+    // would carry forward to fetch and verify the wrong record.
     const delisted = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "1" }] });
     const impostor: AnnouncedItem = {
       ...delisted,
@@ -185,16 +198,47 @@ describe("liveness comes from the chain, never from the card", () => {
       listOffersForSubject([impostor], {
         subject: SUBJECT,
         rail: USDC,
-        withdrawnOfferDigests: new Set([digest(delisted)]),
+        withdrawnAnnouncements: [withdrawalOf(delisted)],
       }),
     ).toEqual([]);
+  });
+
+  it("lets no announcer withdraw another announcer's offer", async () => {
+    // The censorship attack a digest-keyed withdrawn set would allow, and which the chain
+    // rules forbid: hostile announcer M forges nothing and needs no key of the holder's. It
+    // mirrors the holder's offer digest on its own chain -- an `available` announcement is a
+    // bare `RecordRef` bound to no holder, so this is chain-valid -- and then withdraws its
+    // own mirror, which is also chain-valid because it retracts M's own announcement. An index
+    // that folded both feeds' withdrawals together by record digest would drop the holder's
+    // live offer along with M's mirror, silently and indistinguishably from an honest delist.
+    const honest = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "100" }] });
+    const mirror: AnnouncedItem = {
+      ...honest,
+      provenance: { ...honest.provenance, source: HOSTILE_SOURCE, announcementId: "m-ann-2" },
+    };
+    const hostileOwnOffer = await announce({
+      subject: SUBJECT,
+      rails: [{ rail: USDC, amount: "900" }],
+      source: HOSTILE_SOURCE,
+    });
+
+    const catalog = listOffersForSubject([honest, mirror, hostileOwnOffer], {
+      subject: SUBJECT,
+      rail: USDC,
+      withdrawnAnnouncements: [withdrawalOf(mirror)],
+    });
+
+    // M's mirror is gone, because M withdrew it. The holder's own announcement of the same
+    // digest is untouched and still the cheapest row.
+    expect(catalog.map(digestOfCard)).toEqual([digest(honest), digest(hostileOwnOffer)]);
+    expect(catalog[0]!.item.provenance.source).toEqual(SOURCE);
   });
 
   it("drops offers the holder delisted or superseded", async () => {
     const kept = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
     const delisted = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "1" }] });
     const superseded = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "2" }] });
-    const withdrawn = new Set([digest(delisted), digest(superseded)]);
+    const withdrawn = [withdrawalOf(delisted), withdrawalOf(superseded)];
     expect(
       liveOfferCards(offerCards([kept, delisted, superseded]), withdrawn)
         .map((card) => card.offerRecordDigest),
@@ -291,7 +335,7 @@ describe("the whole listing query, from cards alone", () => {
       listOffersForSubject([dear, otherSubject, cheapestButDelisted, otherRail, cheap], {
         subject: SUBJECT,
         rail: USDC,
-        withdrawnOfferDigests: new Set([digest(cheapestButDelisted)]),
+        withdrawnAnnouncements: [withdrawalOf(cheapestButDelisted)],
       }).map(digestOfCard),
     ).toEqual([digest(cheap), digest(dear)]);
   });

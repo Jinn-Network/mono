@@ -69,6 +69,7 @@ import {
 import { importBinaryItemBank } from "../../operations/import-item-bank.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runAnchor } from "../../operations/run-anchor.js";
+import { disclosureDeclare } from "../../operations/disclosure-declare.js";
 import { runCollect } from "../../operations/run-collect.js";
 import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
@@ -112,8 +113,47 @@ import { materializePublicBundle, type MaterializedBundle } from "../materialize
 export const ANCHORED_V4_FIXTURE_GEN_TIME_DER = "20260101120000Z";
 export const ANCHORED_V4_FIXTURE_GEN_TIME = "2026-01-01T12:00:00Z";
 
+/**
+ * The fixture's six-variable declaration (issue #2839). Two variables are measured here and cite
+ * this run's own sealed judge instruments; two are carried as publisher assertions; two are
+ * undisclosed with the knowledge-gap token rather than the scope token, because the standard DOES
+ * apply to them and the answer is simply unknown.
+ *
+ * Every sentence is placeholder prose written for this fixture (design R7 / §12.3).
+ */
+export function syntheticDisclosureDeclaration(instrumentSha256s: readonly string[]): unknown {
+  const citations = [...new Set(instrumentSha256s.map((digest) => digest.replace(/^sha256:/u, "")))]
+    .sort()
+    .map((sha256) => ({ role: "pinned-configuration" as const, digest: { sha256 } }));
+  return {
+    variables: {
+      "ingestion-model": { status: "undisclosed", reason: "not-stated" },
+      "retrieval-config": { status: "undisclosed", reason: "not-stated" },
+      "answer-model": {
+        status: "disclosed-by-publisher",
+        statement: "Candidate answers were produced elsewhere and are described by their source; this venue executed none of them.",
+        sources: [{ uri: "https://example.invalid/placeholder-source-collection" }],
+      },
+      "answer-prompt": {
+        status: "disclosed-by-publisher",
+        statement: "The instructions the candidate answers were written under are described in the source collection and were not re-executed here.",
+      },
+      "judge-model": {
+        status: "measured-here",
+        statement: "One model configuration, fixed for every arm, with sampling frozen by the sealed instruments this bundle carries.",
+        evidence: citations,
+      },
+      "judge-prompt": {
+        status: "measured-here",
+        statement: "One sealed grading instrument per arm, each with its own frozen template digest and declared response parser.",
+        evidence: citations,
+      },
+    },
+  };
+}
+
 export type SyntheticV4TruthAdmission = "operator-only" | "two-human-unanimous" | "screened-operator-sampled";
-export type SyntheticV4Scenario = "minimal" | "qualification-144";
+export type SyntheticV4Scenario = "minimal" | "qualification-144" | "two-exclusions";
 
 export interface SyntheticV4BundleFixture {
   readonly workspaceDir: string;
@@ -270,6 +310,52 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
   ] as const satisfies readonly SyntheticFixtureItem[];
   if (scenario === "minimal") return minimal;
 
+  // Two excluded items, each replaced by a later admitted item in its own stratum (issue #3247).
+  // The accepted set is two items in the same two strata as `minimal`, and outcomes outside the
+  // 144 scenario are arm-agnostic, so the run, the cells and the Matrix behave exactly as
+  // `minimal`'s do -- the only difference is that the replacement ledger carries TWO entries
+  // instead of zero. That is the point: every other qualification-carrying fixture yields zero or
+  // one exclusion, where sorting the projection is a no-op.
+  //
+  // Pool order is the array order here, and the item bank additionally requires the array to be
+  // sorted by `itemId`, so the excluded pair must occupy the first two ids. For the two-human path
+  // the ledger is emitted in pool order, and the `itemSha256` digests of these two fall in the
+  // OPPOSITE order (a property of their exact payload bytes, verified by the fixture's own test
+  // rather than asserted here) -- which is what makes replacement-ledger order differ from the
+  // sorted order `materialize.ts` applies. A fixture whose two orders agreed would exercise the
+  // sort vacuously, so `v4-materialize.test.ts` asserts the disagreement directly; if a payload
+  // field ever changes and the digests reorder, that assertion fails loudly instead of the
+  // coverage quietly evaporating.
+  if (scenario === "two-exclusions") {
+    const item = (
+      index: number,
+      stratum: "core" | "stress",
+      truthLabel: "CORRECT" | "WRONG",
+      role: "excluded" | "reserve",
+    ): SyntheticFixtureItem => ({
+      itemId: qualificationItemId(index),
+      question: `Does the ${role} synthetic ${stratum} statement match its reference?`,
+      referenceAnswer: `The ${role} synthetic ${stratum} statement is correct.`,
+      candidateAnswer: truthLabel === "CORRECT"
+        ? `The ${role} synthetic ${stratum} statement is correct.`
+        : `The ${role} synthetic ${stratum} statement is deliberately wrong.`,
+      sourceDigestHex: sourceDigestForPosition(index),
+      truthLabel,
+      stratum,
+      // An excluded item is one the two reviewers split on, which is what makes it excluded and
+      // replaced; a reserve is unanimous, like every `minimal` item.
+      reviewLabels: role === "excluded"
+        ? (truthLabel === "CORRECT" ? ["CORRECT", "WRONG"] : ["WRONG", "CORRECT"])
+        : [truthLabel, truthLabel],
+    });
+    return [
+      item(0, "core", "CORRECT", "excluded"),
+      item(1, "stress", "WRONG", "excluded"),
+      { ...item(2, "core", "CORRECT", "reserve"), replacesItemId: qualificationItemId(0) },
+      { ...item(3, "stress", "WRONG", "reserve"), replacesItemId: qualificationItemId(1) },
+    ];
+  }
+
   const truthLabels = [
     "CORRECT", "WRONG", "CORRECT", "WRONG", "CORRECT", "WRONG",
     "CORRECT", "WRONG", "CORRECT", "WRONG", "CORRECT", "WRONG",
@@ -324,7 +410,7 @@ function syntheticCellOutcome(
   armId: string,
   replicate: number,
 ): SyntheticCellOutcome {
-  if (scenario === "minimal") return "A";
+  if (scenario !== "qualification-144") return "A";
   const itemIndex = Array.from({ length: 12 }, (_, index) => qualificationItemId(index)).indexOf(itemId);
   const armIndex = qualificationArms.indexOf(armId as typeof qualificationArms[number]);
   const token = qualificationOutcomes[itemIndex]?.[armIndex]?.[replicate - 1];
@@ -843,6 +929,11 @@ export async function createSyntheticV4BundleFixture(input: {
   readonly armIds?: readonly string[];
   /** Defaults to "gpt-5.6-luna" (the reasoning-2026-08 profile). */
   readonly judgeModel?: "gpt-5.6-luna" | "gpt-4o-mini-2024-07-18";
+  /** SPDX identifier and citation sealed onto the Benchmark record. Options-only and default off,
+   * so every existing caller's bytes are unchanged; the freeze-repository export needs a bundle
+   * that actually carries licence data (issue #2870). */
+  readonly license?: string;
+  readonly citation?: string;
   /**
    * Builds an EVIDENCE TWIN PAIR (packet P5): `declaring`'s instrument interpolates `evidence`,
    * `twin`'s is identical to it once that interpolation is stripped. OPTIONS-ONLY and defaults
@@ -866,6 +957,17 @@ export async function createSyntheticV4BundleFixture(input: {
    * `benchmark-product-public-bundle/7`.
    */
   readonly anchorLock?: true;
+  /**
+   * Seals a six-variable disclosure-specification record between `collect` and `report` through the
+   * real `disclosure declare` operation (issue #2839). OPTIONS-ONLY and defaults off, so every
+   * existing caller's bundle bytes and closure version are unchanged. With it on AND `anchorLock`,
+   * the run is anchored, qualification-projecting, and disclosed — the only cell
+   * `benchmark-product-public-bundle/8` occupies.
+   *
+   * The declaration is synthetic placeholder prose written for this fixture (design R7): no
+   * third-party prompt, dataset row, annotation, or audit-derived text appears in it.
+   */
+  readonly declareDisclosure?: true;
 }): Promise<SyntheticV4BundleFixture> {
   const scenario = input.scenario ?? "minimal";
   const withEvidence = input.withEvidence ?? false;
@@ -939,6 +1041,8 @@ export async function createSyntheticV4BundleFixture(input: {
     sourceManifestJsonl: intake.sourceManifestJsonl,
     admissionIndexJsonl: intake.admissionIndexJsonl,
     description: "Provider-free synthetic evidence; no benchmark dataset content.",
+    ...(input.license === undefined ? {} : { license: input.license }),
+    ...(input.citation === undefined ? {} : { citation: input.citation }),
   }), "binary item-bank import");
 
   const arms = armIds;
@@ -1081,6 +1185,19 @@ export async function createSyntheticV4BundleFixture(input: {
   }
   requireOk(await runLaunch(context, { draftId: DRAFT_ID }, { createVenue }), "launch");
   requireOk(await runCollect(context, { draftId: DRAFT_ID }), "collect");
+  if (input.declareDisclosure === true) {
+    // Through the real operation: the Matrix-subject requirement, the author binding, and the
+    // pre-report window all run. The judge citations name records this fixture's bundle actually
+    // carries — its own sealed judge instruments — so the §7 step 6 authentication has real
+    // evidence to authenticate rather than a placeholder digest.
+    requireOk(
+      disclosureDeclare(context, {
+        draftId: DRAFT_ID,
+        declaration: syntheticDisclosureDeclaration(instrumentSha256s),
+      }),
+      "disclosure declare",
+    );
+  }
   const reported = requireOk(await runReport(context, { draftId: DRAFT_ID }), "report");
   const runState = readRunState(input.workspaceDir, DRAFT_ID);
   if (runState === undefined) throw new Error("reported synthetic run has no RunState");

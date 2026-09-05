@@ -31,6 +31,12 @@ const matrixSha256 = "a".repeat(64);
 const reportSha256 = "b".repeat(64);
 const envelopeSha256 = "c".repeat(64);
 
+/** One arm's block in the per-arm accounting a sealed Matrix carries, and that each sealed
+ * Report per-subject disclosure carries again for that subject alone. */
+function armCounts(expected: number) {
+  return { expected, judged: expected, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 0, replacements: 0 };
+}
+
 function reportedView() {
   return {
     ok: true as const,
@@ -105,7 +111,7 @@ function reportedView() {
                 },
               }],
             },
-            disclosures: { perSubject: [{ independence: 0, evidence: "report-disclosure-" + "y".repeat(256) }] },
+            disclosures: { perSubject: [{ subjectSha256: matrixSha256, independence: 0, evidence: "report-disclosure-" + "y".repeat(256), attrition: { perArm: { baseline: armCounts(1) }, asymmetryFlags: [] } }] },
             limitations: ["Local self-run venue."],
           },
           claimPackage: {
@@ -350,5 +356,110 @@ describe("semantic results and report surface", () => {
     expect(markup).toContain(`artifacts/draft-1/public-bundles/${"9".repeat(64)}`);
     expect(markup).toContain("evidence-closure");
     expect(markup).toContain("Verify published bundle");
+  });
+});
+
+/** Issue #2977: both headline tables state the declared denominator, the strict all-slots one, and
+ * the planned slots the declared one leaves out. */
+describe("declared and all-slots denominators", () => {
+  beforeEach(() => loadResultsViewMock.mockReset());
+
+  function tableFrom(markup: string, caption: string): string {
+    const start = markup.indexOf(caption);
+    expect(start).toBeGreaterThan(0);
+    const end = markup.indexOf("</table>", start);
+    expect(end).toBeGreaterThan(start);
+    return markup.slice(start, end);
+  }
+
+  async function render(view: ReturnType<typeof reportedView>): Promise<string> {
+    loadResultsViewMock.mockReturnValue(view);
+    return renderToStaticMarkup(await ResultsPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+  }
+
+  test("prints both numbers and a zero delta when the declared denominator kept every planned slot", async () => {
+    const markup = await render(reportedView());
+    for (const caption of ["Headline results by arm", "Stored Report headline by arm"]) {
+      const table = tableFrom(markup, caption);
+      expect(table).toContain("All planned slots");
+      expect(table).toContain("Not in the denominator");
+      // baseline: declared 1, planned 1, nothing excluded.
+      expect(table).toContain("<td>1</td><td>1</td><td>0</td>");
+    }
+  });
+
+  test("prints the delta when the declared denominator drops planned slots", async () => {
+    const view = reportedView();
+    // The claim's table reads the Matrix's run-wide accounting; the Report's reads the subject's
+    // own disclosure. Both say four planned slots here, so both tables state the same delta.
+    const dropped = { expected: 4, judged: 1, unjudged: 0, unscorable: 0, expired: 3, invalidated: 0, excluded: 0, replacements: 0 };
+    Object.assign(view.results.result.attrition.perArm, { baseline: dropped });
+    Object.assign(view.results.result.report.record.disclosures.perSubject[0]!.attrition.perArm, { baseline: dropped });
+    const markup = await render(view);
+    for (const caption of ["Headline results by arm", "Stored Report headline by arm"]) {
+      // baseline: declared 1, planned 4, three planned slots outside the headline denominator.
+      expect(tableFrom(markup, caption)).toContain("<td>1</td><td>4</td><td>3</td>");
+    }
+  });
+
+  test("pairs each Report subject's headline against that subject's own planned slots", async () => {
+    const view = reportedView();
+    const secondSubject = "9".repeat(64);
+    const record = view.results.result.report.record;
+    // Two subjects, each with its own per-arm `n` and its own sealed attrition. The Matrix's
+    // run-wide accounting (one planned baseline slot) matches neither, so a table that reached for
+    // it would state the same wrong number twice.
+    record.results.perSubject.push({
+      subjectSha256: secondSubject,
+      results: {
+        arms: { baseline: { n: 5, passRate: "0.6000", wilsonInterval: { low: "0.2000", high: "0.9000" } } },
+        conflicted: { count: 0, cellKeys: [] },
+      },
+    });
+    record.disclosures.perSubject[0]!.attrition.perArm.baseline = armCounts(2);
+    record.disclosures.perSubject.push({
+      subjectSha256: secondSubject,
+      independence: 0,
+      evidence: "report-disclosure-" + "z".repeat(256),
+      attrition: { perArm: { baseline: armCounts(9) }, asymmetryFlags: [] },
+    });
+    const markup = await render(view);
+    const first = markup.indexOf(`Report subject ${matrixSha256}`);
+    const second = markup.indexOf(`Report subject ${secondSubject}`);
+    expect(first).toBeGreaterThan(0);
+    expect(second).toBeGreaterThan(first);
+    // first subject: declared 1 of its own 2 planned slots; second: declared 5 of its own 9.
+    expect(markup.slice(first, second)).toContain("<td>1</td><td>2</td><td>1</td>");
+    expect(markup.slice(second)).toContain("<td>5</td><td>9</td><td>4</td>");
+  });
+
+  test("withholds a Report subject's strict number when no sealed disclosure matches it", async () => {
+    const view = reportedView();
+    view.results.result.report.record.disclosures.perSubject[0]!.subjectSha256 = "8".repeat(64);
+    const markup = await render(view);
+    // The run-wide Matrix accounting does state a baseline count, and the Report table must not
+    // reach for it: an unmatched subject withholds rather than substituting a run-wide number.
+    expect(tableFrom(markup, "Stored Report headline by arm")).toContain("<td>1</td><td>Not stated</td><td>Not stated</td>");
+    expect(tableFrom(markup, "Headline results by arm")).toContain("<td>1</td><td>1</td><td>0</td>");
+  });
+
+  test("renders a negative delta as a disagreement between the sealed Report and Matrix", async () => {
+    const view = reportedView();
+    // Fewer planned slots than the declared denominator: the two sealed records disagree.
+    view.results.result.report.record.disclosures.perSubject[0]!.attrition.perArm.baseline = armCounts(0);
+    const markup = await render(view);
+    const table = tableFrom(markup, "Stored Report headline by arm");
+    expect(table).toContain("role=\"alert\"");
+    expect(table).toContain("-1");
+    expect(table).toMatch(/declared denominator[^<]*exceeds/i);
+  });
+
+  test("withholds both numbers for an arm the sealed Matrix carries no accounting for", async () => {
+    const view = reportedView();
+    Object.assign(view.results.result.report.claimPackage.headline, {
+      ghost: { n: 2, passRate: "0.5000", wilsonInterval: { low: "0.0947", high: "0.9053" } },
+    });
+    const markup = await render(view);
+    expect(tableFrom(markup, "Headline results by arm")).toContain("<td>2</td><td>Not stated</td><td>Not stated</td>");
   });
 });

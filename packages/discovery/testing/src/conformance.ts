@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CEILINGS,
   parseSourceHead,
+  splitOrigin,
 } from "@jinn-network/record-discovery-protocol";
 import type {
   DiscoveryQueryService,
@@ -127,6 +128,14 @@ export function runSourceChainConformance(verify: typeof verifySourceChain): voi
           keys: input.seed.keys as never,
           hwm: input.seed.hwm as never,
         });
+        // The seeded mark BEFORE the call, so a refusal can be checked to have
+        // left it alone (#3491). An accepted `issuedAt` is what a consumer
+        // persists as its strict-increase floor, and nothing in the protocol
+        // repairs one set beyond reach -- so "refused" is only half the
+        // contract for every non-`ok` vector here, and an implementation that
+        // writes the mark and THEN refuses would otherwise pass this kit green.
+        const source = splitOrigin(input.head.origin);
+        const markBefore = await ports.hwm.get(source);
         const outcome = await verify({
           head: input.head,
           headSignature: vectorEnvelopeToWire(input.headSignature),
@@ -144,6 +153,10 @@ export function runSourceChainConformance(verify: typeof verifySourceChain): voi
           },
         });
         assertSourceChainOutcome(outcome, vector);
+        if (outcome.status !== "ok") {
+          expect(await ports.hwm.get(source), `${vector.name}: a refusal must persist no high-water mark`)
+            .toEqual(markBefore);
+        }
       });
     }
   });
@@ -362,16 +375,41 @@ export function runSubscribeConformance(sub: SubscribeClientUnderTest): void {
 /** The minimal surface a discovery client must expose for `runConsumerConformance` (M6). */
 export interface ClientUnderTest {
   checkLocator(location: unknown): Promise<{ rejected: boolean; reason?: string }>;
+  /**
+   * Resolves a well-known `archiveRoot` against the serving root that served the
+   * document, refusing one that does not stay inside it (§7 item 3, #3434).
+   *
+   * OPTIONAL, deliberately. `checkLocator` guards a whole retrieval, which
+   * every HTTP consumer performs; containment is a pure URL decision that
+   * belongs to whichever layer holds the configured serving root, and an
+   * implementer that holds none has nothing to answer with. An implementer
+   * that supplies this method has the `consumer-archive-root-*` vectors
+   * asserted against it; one that omits it skips them, exactly as the
+   * non-locator consumer vectors skip today.
+   */
+  checkArchiveRoot?(servingRoot: string, archiveRoot: string): Promise<{ rejected: boolean; reason?: string }>;
 }
 
 export function runConsumerConformance(client: ClientUnderTest): void {
   describe("consumer conformance (§9.5/§7.4/§13.3/§5.1, §18 consumer vectors)", () => {
     for (const vector of loadVectorsByKind("consumer")) {
-      const input = vector.input as { location?: unknown };
+      const input = vector.input as { location?: unknown; servingRoot?: string; archiveRoot?: string };
+      const expected = vector.expect as { rejected: boolean; reason?: string };
+      // The well-known containment vectors (§7 item 3) name a serving root plus
+      // the `archiveRoot` introduced under it, not a locator.
+      if (input.servingRoot !== undefined && input.archiveRoot !== undefined) {
+        const check = client.checkArchiveRoot;
+        if (check === undefined) continue;
+        it(vector.name, async () => {
+          const result = await check.call(client, input.servingRoot!, input.archiveRoot!);
+          expect(result.rejected).toBe(expected.rejected);
+          if (expected.reason !== undefined) expect(result.reason).toBe(expected.reason);
+        });
+        continue;
+      }
       if (input.location === undefined) continue; // non-locator consumer vectors (debounce, divergence, cold-start, withdrawal) await a full ClientUnderTest surface at M6
       it(vector.name, async () => {
         const result = await client.checkLocator(input.location);
-        const expected = vector.expect as { rejected: boolean; reason?: string };
         expect(result.rejected).toBe(expected.rejected);
         if (expected.reason !== undefined) expect(result.reason).toBe(expected.reason);
       });

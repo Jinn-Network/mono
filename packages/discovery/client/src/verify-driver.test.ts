@@ -118,6 +118,63 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
     expect(outcome.status).toBe("unauthorized-signer");
   });
 
+  it("verifyHead is wired to the adapter's keys and the driver's clock (#3443)", async () => {
+    // The procedure itself is covered protocol-side; what this pins is the
+    // WIRING -- that revalidation reads the same key catalog and the same
+    // `now` as `verifySource`, so an unchanged head cannot outlive either the
+    // signer's validity window or the head's own `refreshBy`.
+    const agent = "did:key:zAgentSourceOne";
+    const seeds: FakeBindingSeed[] = [
+      { agent, keyid: "key-1", validFrom: "2026-07-01T00:00:00.000Z", validTo: null, scope: DISCOVERY_SIGNING_SCOPE },
+    ];
+    const trust = createTrustAdapter({
+      bindingResolver: makeFakeBindingResolver(seeds),
+      keyCatalog: {
+        async candidateKeys(): Promise<AgentKeyCatalogEntry[]> {
+          return seeds.map((k) => ({ keyid: k.keyid, probeAt: k.validFrom }));
+        },
+      },
+      verifier: acceptAllVerifier,
+    });
+    const head = parseSourceHead({
+      protocol: "https://spec.jinn.network/record-discovery/v1",
+      origin: `${agent}/feed`,
+      sequence: "0000000000000001",
+      entry: `sha256:${"c".repeat(64)}`,
+      issuedAt: "2026-07-28T12:00:00.000Z",
+      refreshBy: "2026-07-29T12:00:00.000Z",
+    });
+    const payload = sealJson(head).bytes;
+    let binary = "";
+    for (const byte of payload) binary += String.fromCharCode(byte);
+    const headSignature = {
+      payloadType: "application/vnd.jinn.record-discovery.head.v1+json",
+      payload: btoa(binary),
+      signatures: [{ keyid: "key-1", sig: btoa("anything") }],
+    } as never;
+
+    function driverAt(now: string) {
+      return createVerifyDriver({
+        trust,
+        hwm: createInMemoryHighWaterMarkStore(),
+        factsProfiles: { get: () => undefined },
+        factsRecompute: { get: () => undefined },
+        records: { "fetch": async () => new Uint8Array() },
+        entries: { "fetch": async () => new Uint8Array() },
+        now: () => new Date(now),
+      });
+    }
+    const source = { agent, name: "feed" };
+
+    expect(
+      (await driverAt("2026-07-28T13:00:00.000Z").verifyHead({ source, head, headSignature })).status,
+    ).toBe("ok");
+    // Same head, same signature, clock past refreshBy.
+    expect(
+      (await driverAt("2026-07-30T00:00:00.000Z").verifyHead({ source, head, headSignature })).status,
+    ).toBe("stale");
+  });
+
   it("verifyForDecision rejects an item citing an entry that was never verified onto the source's chain (unauthorized-provenance)", async () => {
     const vector = loadVectorsByKind("item").find((v) => v.name === "item-unauthorized-provenance");
     expect(vector).toBeDefined();
@@ -177,9 +234,11 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
 
     const trust = createTrustAdapter({
       bindingResolver: {
-        async resolveBinding(): Promise<ResolvedBinding | null> {
+        async resolveBinding(query): Promise<ResolvedBinding | null> {
           return {
-            binding: { scope: [DISCOVERY_SIGNING_SCOPE], key: { keyid: "key-1", publicKey: "pubkey-key-1", algorithm: "ed25519" } } as never,
+            // A conforming resolver never resolves by key alone, so the binding
+            // it returns carries the queried Agent IRI (issue #3629).
+            binding: { agent: query.agent, scope: [DISCOVERY_SIGNING_SCOPE], key: { keyid: "key-1", publicKey: "pubkey-key-1", algorithm: "ed25519" } } as never,
             envelopeBytes: new Uint8Array(),
             bindingDigest: `sha256:${"0".repeat(64)}`,
             effectiveStart: "2026-01-01T00:00:00.000Z",

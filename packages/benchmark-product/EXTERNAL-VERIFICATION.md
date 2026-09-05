@@ -20,6 +20,9 @@ Read this table first. It is the whole point of the document.
 | The full evidence graph closes (submissions, deliveries, evaluation tasks, roles) | | yes | |
 | Every verdict is a DSSE-signed in-toto statement verifying against its named evaluator key | yes | | |
 | `did:key` and evaluator key ids derive from the carried public keys | yes | | |
+| A supplied domain binding was signed by the key that signed this bundle | yes | | |
+| The bound domain actually publishes that binding | | | needs a DNS or HTTPS lookup you make yourself |
+| The party controlling the bound domain's zone is the party it appears to be | | | correct — no tool |
 | The claim package's stored headline mirrors the signed report's results (headline-shaped claims; a comparison-shaped claim has no headline to mirror and the check reports `skipped`) | yes | | |
 | The matrix is the correct aggregation of the evidence graph (re-derivation, byte-exact) | | yes | |
 | The report's statistics are the correct output of its named method (recompute) | | yes | |
@@ -55,8 +58,9 @@ a **public beacon value that did not exist when the seal was taken**
 the derivation below is the whole procedure — recompute it yourself.
 
 The binding record names the sealed digest it postdates (`sealDigest`), when that
-seal was taken (`sealedAt`), the beacon (`source`, `round`, `value`), and either a
-drawn `sample` or, for a census run, the derived `order`.
+seal was taken (`sealedAt`), the beacon (`source`, `round`, `value`), optionally the
+beacon source the sealed record declared (`declaredSource`), and either a drawn
+`sample` or, for a census run, the derived `order`.
 
 **Step 1 — check the beacon postdates the seal.** For a scheduled beacon the round
 index gives the instant by arithmetic, with no network access:
@@ -74,6 +78,59 @@ and the report face says so in those words.
 **Step 2 — check the beacon value against the beacon itself.** The `(round, value)`
 pair is public. Fetch it from the beacon and compare; a value the beacon never
 published binds nothing, and no Colophon code can tell you that.
+
+**Step 2b — check the round was not chosen.** Postdating the seal is not enough on
+its own. If a run could bind to *any* later round, an operator could watch the
+rounds published between sealing and launching, derive what each would produce,
+and bind the one they preferred: the value would be unpredictable, but the choice
+among realized values would not be. So for a scheduled beacon the seal names
+exactly one admissible round — the first published strictly after it:
+
+```text
+round = max(1, floor((sealedAt - genesis) / period) + 2)
+```
+
+with `sealedAt` and `genesis` in the same units. Recompute it from the record's
+own `sealedAt` and check the record names that round. Colophon's `bind` refuses
+any later round, so a bundle from this product will match; a record from anywhere
+else that names a different round tells you the operator chose which post-seal
+value applied, and its report face says so in those words.
+
+`bitcoin/mainnet` has no such round: a block height carries no schedule, so
+nothing derives one from the seal and the height stays the operator's choice.
+That residue is stated on the face rather than removed.
+
+**Step 2c — check the source was not chosen either.** A round rule binds only the
+round *within a source*. Choosing the source is choosing which rule applies, and
+one admitted source has no rule at all: `bitcoin/mainnet` derives no round from a
+seal, and nothing in the bundle places its value after the seal. So a run that
+left the source open left the round rule one selection away from having no
+effect. A run closes this by naming its beacon in the sealed Run record itself,
+under the extension key
+
+```text
+https://spec.jinn.network/extensions/beacon-source/v1
+```
+
+whose value is `{ "source": "<beacon source id>" }`. Two checks, and they are
+separate:
+
+1. **Inside the binding record.** If it carries `declaredSource`, it must equal
+   `beacon.source`. The reference verifier refuses a record where it does not.
+2. **Against the sealed Run.** Read the extension from the Run record the binding's
+   `sealDigest` names, and check it agrees with the binding's `declaredSource` —
+   *including when the binding carries none*. This second check is the one that
+   matters, and omission is why: a binding that simply drops the field verifies
+   clean on its own and reads as an operator-chosen source, which is exactly how a
+   run that declared a beacon would bind a different one and still look honest.
+
+A Run that declares no source is a legitimate and historical state — every run
+sealed before this extension existed is one — and its face says the beacon was the
+operator's choice. A Run that declares one gets the stronger sentence, and
+Colophon's `bind` refuses a binding naming any other source. Declaring a source
+does **not** rescue `bitcoin/mainnet`: the beacon is then fixed, but no round
+follows from a seal on a height-indexed source, so the height remains the
+operator's choice and the face keeps saying so.
 
 **Step 3 — recompute the derivation.** For each item identity — a
 `sha256:`-prefixed lowercase-hex task digest — compute
@@ -93,11 +150,32 @@ This is deliberately the same encoding as the reference verifier's
 `screening-sample/1` procedure, whose only difference is that it keys on a sealed
 seed rather than on post-seal randomness.
 
-**What each binding establishes.** A beacon-drawn slate could not have been
-selected after the fact without predicting the beacon. A census run's binding is
-weaker and is stated as such: it shows the run's ORDER was fixed by randomness
-postdating the seal, not that the population was — a census makes no population
-choice. A run with no binding establishes neither, and its report face says so.
+**What each binding establishes.** A beacon-drawn slate on the round the seal
+names could not have been selected after the fact: neither the value nor which
+post-seal value applied was the operator's to pick. On any other round of a
+*scheduled* source the value was still unpredictable, but the slate could have
+been selected after the fact by waiting and choosing among the rounds already
+published — the face says that instead of the stronger sentence. A
+height-indexed source derives no round from a seal at all, so on that branch the
+face makes no unpredictability claim either: the height was the operator's
+choice, and nothing in the bundle places it after the seal — it is the chain,
+not the bundle, that does that. A census run's binding is weaker again and is
+stated as such: on a scheduled source it shows the run's ORDER was fixed by
+randomness postdating the seal, not that the population was — a census makes no
+population choice — and on a height-indexed source it concedes the postdating
+too, showing the order was tied to a value the bundle cannot place after the
+seal. A run with no binding establishes neither, and its report face says so.
+
+Where the sealed Run declares no beacon source, one residue survives even a
+seal-derived round: the *source*. An operator could have bound a different beacon
+— and `bitcoin/mainnet` derives no round from a seal at all. The procedure runs no
+postdating check on a height-indexed source, so through that source every height
+the chain carries is an available alternative, including heights that predate the
+seal. The face names that residue. Where the Run does declare a source (step 2c),
+the face drops it: with the source fixed at the seal and the round determined by
+`(source, sealedAt)`, the beacon is fixed outright. On a height-indexed declared
+source the face states the narrower truth — the beacon was fixed, the height
+within it was not.
 
 ## The record family
 
@@ -128,6 +206,84 @@ Digest rules:
   this wrong.
 - `bundle.json` lists every file except itself. The bundle identity is the
   SHA-256 of `bundle.json`'s own bytes.
+
+## Reader-legible identity: `colophon-domain-binding/1`
+
+A bundle's publisher is a signing key, and a key is not an organization. A
+domain binding is how a publisher offers a name a reader can act on. It is
+**not carried in the bundle** — like an RFC 3161 trust root, it is trust
+material you supply:
+
+```bash
+npx @colophon-claims/verify <bundle-dir> --identity-binding ./binding.json
+```
+
+The document is small and self-describing:
+
+```json
+{
+  "format": "colophon-domain-binding/1",
+  "domain": "example.com",
+  "keyId": "did:key:z...",
+  "mechanism": "dns-txt",
+  "statedAt": "2026-09-02T00:00:00.000Z",
+  "signature": "<base64 Ed25519 over the canonical statement without `signature`>"
+}
+```
+
+**The proof location is derived, never asserted.** The document carries no
+"look here" field. Reader and producer both compute it from `domain`, `keyId`
+and `mechanism`:
+
+| `mechanism` | Where to look | What must be there |
+| --- | --- | --- |
+| `dns-txt` | TXT at `_colophon.<domain>` | `colophon-domain-binding=1; key=<keyId>` |
+| `well-known-url` | `https://<domain>/.well-known/colophon-domain-binding.txt` | the same line |
+
+Without that rule a publisher could point you at a host they control instead of
+the domain they claim.
+
+**What the verifier checks, offline:** that the document is well-formed, that
+`keyId` is an Ed25519 `did:key` (so the public key is in the identifier itself,
+with nothing to fetch), that the signature verifies under that key, and that the
+key is one that actually signed the bundle in hand. That establishes that *the
+key* named the domain.
+
+**What is left to you:** whether *the domain* names the key. Resolve the TXT
+record or fetch the URL and compare it to the derived value above. Trusting the
+answer means trusting DNS resolution, whoever controls that domain's zone, and
+its registrar — anyone who can change the zone can create the binding or remove
+it, and a lookup made now says nothing about what the zone held on the date the
+statement carries. That date is the statement's own field: the check establishes
+that the key signed a statement bearing it, not that it signed at it. The
+verifier says exactly this on its own report face rather than leaving you to
+infer it.
+
+Because only that first half was checked, the report face is **attributive**,
+never assertive, and always shows the key's own fingerprint beside the claim:
+
+```
+Signed by
+  publisher · 1 key
+    key sha256:fbf961e0…
+    claims publication by example.com — unconfirmed here; check the DNS TXT record at _colophon.example.com
+    expect: colophon-domain-binding=1; key=did:key:z6MknAAT…
+```
+
+With no binding supplied the second and third lines are replaced by
+`— no domain bound` on the fingerprint line. The `--json` surface carries the
+binding under `identityBinding` (never `identity`, which is the bundle's own
+digest) with `confirmation: "key-signature-only"` naming what was established.
+
+A binding is only ever read against the bundle's single publisher key. One
+naming a grader or reviewer key is refused, as is any bundle without exactly one
+publisher: there is no "published by" for such a binding to qualify.
+
+A binding that does not check out exits 2 and is not rendered; the bundle's own
+verdict is still reported, because a bad binding says nothing about the bundle.
+
+A publisher mints one with `colophon identity bind --domain <domain>
+[--mechanism dns-txt|well-known-url]`, which prints the exact record to publish.
 
 ## DSSE envelopes and keys
 
@@ -217,10 +373,10 @@ openssl subprocess calls — read it, or reimplement it; it holds no secrets.
 The reference verifier covers the remaining rows of the table:
 
 ```bash
-npx @colophon-claims/verify@1 <bundle-dir>
+npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
 
-Exit 0 with `Verified: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
+Exit 0 with `Recomputed: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
 `trust`, `matrix-rederivation`, `report-verification`, `claim-consistency`);
 exit 1 invalid; exit 2 usage. It opens no network connection and uploads
 nothing. Every bundle names its own compatible command in

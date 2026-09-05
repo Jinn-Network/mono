@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-import type { AnnouncedItem } from "@jinn-network/record-discovery-protocol";
+import type { AnnouncedItem, SourceIdentity } from "@jinn-network/record-discovery-protocol";
 
 import { OFFER_RECORD_KIND } from "./identifiers.js";
 
@@ -43,7 +43,9 @@ function stringArrayField(card: Record<string, unknown>, name: string): string[]
   if (!has(card, name)) return undefined;
   const value = card[name];
   if (!Array.isArray(value)) return undefined;
-  return value.every((entry) => typeof entry === "string") ? (value as string[]) : undefined;
+  // Copied, not aliased: the array lives on the caller's `item.facts`, and a validating
+  // reader must not hand back a reference whose contents can change after it checked them.
+  return value.every((entry) => typeof entry === "string") ? [...(value as string[])] : undefined;
 }
 
 /** An amount as the offer schema pins it: an exact positive integer, no sign, no leading zero. */
@@ -76,11 +78,11 @@ const DISPLAY_UNSAFE_CHARACTER =
  *
  * - **The card's `offerRecordDigest` must equal the announcement's own `record.digest`.** The
  *   item's digest is bound to the announcement entry; the card's copy is written by the
- *   announcer. Reading the announcer's copy is how a withdrawn offer walks back into a
- *   catalog: delist `sha256:A`, then announce `A` again under a card claiming to be `B`, and a
- *   liveness filter keyed on the card misses the withdrawn set. It is also how an announcer
- *   picks its own rank among equal prices, since the digest is the tie-break. The two values
- *   agree in every honest card, so binding them costs nothing and closes both.
+ *   announcer. Reading the announcer's copy is how an announcer picks its own rank among equal
+ *   prices, since the digest is the tie-break, and it is the digest a catalog carries forward
+ *   when it retrieves and verifies the offer a row stands for — so a misstated one sends the
+ *   buyer's verification at the wrong record. The two values agree in every honest card, so binding
+ *   them costs nothing and closes both.
  * - **The two rail arrays must be the same length**, because their alignment is what makes
  *   them one list.
  * - **`priced` must agree with the rail list**, since a free offer is exactly the empty list.
@@ -149,18 +151,69 @@ export function offerCardsForSubject(
 }
 
 /**
- * The cards whose offers the holder's own announcement chain has not withdrawn.
+ * One withdrawal as the announcing source published it: the source whose chain carried the
+ * `withdrawn` announcement, and the announcement it retracts.
+ *
+ * Both halves are mandatory, and that is the whole point of the type. Withdrawal is
+ * source-scoped by construction — `checkGlobalChainRules` resolves a `retracts` only against
+ * announcements earlier in the SAME chain, and retracting anything else is a
+ * `foreign-retraction` violation — so a source can only ever withdraw its own announcement.
+ * A withdrawn set keyed on the record digest alone would discard that dimension, and folding
+ * many sources' withdrawals into one such set applies each source's withdrawal to every other
+ * source's announcement of the same digest. Nothing binds an `available` announcement to the
+ * announced record's holder (it is a bare `RecordRef`), so any announcer may mirror a
+ * competitor's digest, withdraw its own mirror, and silently delist the competitor's live
+ * offer from every index that folded that way — the same hazard the `supersedes` edge carries
+ * and the README already refuses. Carrying the source makes that fold unexpressible rather
+ * than merely discouraged.
+ *
+ * `announcementId`, not a digest, because an announcementId is what a `withdrawn` announcement
+ * actually names. Keying on it also means a source that relists after delisting is live again
+ * under its new announcement, which is the honest reading of its own chain.
+ */
+export interface WithdrawnAnnouncement {
+  readonly source: SourceIdentity;
+  readonly announcementId: string;
+}
+
+/**
+ * The identity a withdrawal and an announced item are matched on: the `(agent, name)` source
+ * tuple plus the announcement ID. Encoded as JSON so no field's contents can be spelled to
+ * look like a boundary between two others.
+ */
+function withdrawalKey(source: SourceIdentity, announcementId: string): string {
+  return JSON.stringify([source.agent, source.name, announcementId]);
+}
+
+/**
+ * The cards whose offers the announcing source's own chain has not withdrawn.
  *
  * Liveness is not a card field and must not become one: an offer stops applying when its
  * holder delists or supersedes it, and both are `withdrawn` announcements with the existing
  * `"delisted"` / `"superseded"` reason codes. The index derives that set from the feeds it
  * follows and passes it here; the card never claims to be live about itself.
+ *
+ * Each withdrawal retires only the announcement its own source published (see
+ * `WithdrawnAnnouncement`), so an index following many feeds may hand the whole set over at
+ * once: one source's withdrawal can never reach another source's announcement, whatever
+ * digest the two carry.
+ *
+ * An array, not an `Iterable`, because a one-shot iterator drains on the first call and every
+ * later one reads as "nothing is withdrawn" — a silent fail-open showing withdrawn prices as
+ * live. Requiring a re-readable list makes that unexpressible rather than merely discouraged.
  */
 export function liveOfferCards(
   cards: readonly OfferCard[],
-  withdrawnOfferDigests: ReadonlySet<string>,
+  withdrawn: readonly WithdrawnAnnouncement[],
 ): OfferCard[] {
-  return cards.filter((card) => !withdrawnOfferDigests.has(card.offerRecordDigest));
+  const retired = new Set<string>();
+  for (const entry of withdrawn) {
+    retired.add(withdrawalKey(entry.source, entry.announcementId));
+  }
+  return cards.filter((card) => {
+    const { source, announcementId } = card.item.provenance;
+    return !retired.has(withdrawalKey(source, announcementId));
+  });
 }
 
 function amountOnRail(card: OfferCard, rail: string): bigint | undefined {
@@ -229,10 +282,11 @@ export interface OfferListingQuery {
   /** The rail the caller settles in; ordering only ever exists within one rail. */
   readonly rail: string;
   /**
-   * Record digests the followed feeds have withdrawn (`delisted` / `superseded`). Omitted
-   * means nothing is known to be withdrawn — never that nothing is live.
+   * The withdrawals (`delisted` / `superseded`) the followed feeds have published, each
+   * carrying the source that published it. Omitted means nothing is known to be withdrawn —
+   * never that nothing is live.
    */
-  readonly withdrawnOfferDigests?: ReadonlySet<string>;
+  readonly withdrawnAnnouncements?: readonly WithdrawnAnnouncement[];
 }
 
 /**
@@ -252,8 +306,9 @@ export interface OfferListingQuery {
  * Announcing `priced: false` is the cheapest lie available here, and it is caught the moment
  * anyone verifies — so a catalog that will take money on a row verifies before it does.
  *
- * `withdrawnOfferDigests` is keyed on announcement record digests, which is what a
- * `withdrawn` announcement names and what `readOfferCard` binds each card to.
+ * `withdrawnAnnouncements` is keyed on `(source, announcementId)` — what a `withdrawn`
+ * announcement actually names, scoped to the chain entitled to name it. A withdrawal never
+ * reaches another source's announcement of the same digest.
  */
 export function listOffersForSubject(
   items: readonly AnnouncedItem[],
@@ -261,7 +316,7 @@ export function listOffersForSubject(
 ): OfferCard[] {
   const live = liveOfferCards(
     offerCardsForSubject(offerCards(items), query.subject),
-    query.withdrawnOfferDigests ?? new Set<string>(),
+    query.withdrawnAnnouncements ?? [],
   );
   return cheapestFirstOnRail(live, query.rail);
 }

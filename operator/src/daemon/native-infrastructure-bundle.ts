@@ -69,6 +69,19 @@ export interface NativeInfrastructureFactoryInput {
   readonly marketplaceAgentAddress?: `0x${string}`;
   readonly evmCustody: NativeOperatorConfig['evmCustody'];
   readonly publicBaseUrl: string;
+  /**
+   * Every configured record serving root. With `publicBaseUrl` these are the destinations a
+   * peer-announced locator may name (#3431); the transport refuses anything outside them.
+   *
+   * Required, not optional (#3461). Optionality here defeated, one layer up, the required-ness
+   * deliberately given to the transport's own `recordOrigins`, whose whole point is that a new
+   * construction site must STATE its destination policy rather than silently inherit an empty one:
+   * a caller that omitted this typechecked clean and got a transport whose only admitted origin
+   * was its own `publicBaseUrl`, refusing every peer-announced locator and surfacing as an IPFS
+   * miss on a plane that never held the record. `NativeOperatorConfig['sources']` is itself
+   * required with `.min(1)`, so nothing is lost by saying so.
+   */
+  readonly recordSources: NativeOperatorConfig['sources'];
   readonly publicListen: NativeOperatorConfig['publicListen'];
   readonly ipfs: NativeOperatorConfig['ipfs'];
   readonly chain: {

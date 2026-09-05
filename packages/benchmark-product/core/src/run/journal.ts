@@ -8,7 +8,7 @@
  * `running --resume--> running`: "crash-safe resumption via the records' cell idempotency
  * keys"). One journal per draftId (`runJournalPath`), JSON Lines, entries never rewritten.
  *
- * Eleven entry kinds (driver start/terminals included):
+ * Twelve entry kinds (driver start/terminals included):
  * - `launched` — the run driver started (one per `runLaunch` call).
  * - `cell-event` — a solve-side `CellStatusEvent` from `launchAndWatch`/`resumeRun`, verbatim.
  *   Optionally carries `blame` (BP-22): for an "error" terminal, the platform-derived
@@ -16,6 +16,11 @@
  *   time (`"task" | "infrastructure"`, absent when unobservable — never a reason to fail the
  *   write it enriches).
  * - `submission-accepted` — the exact sealed Submission bytes were stored, keyed by dispatch.
+ * - `evaluation-submission-captured` — the evaluation leg's exact sealed Submission bytes were
+ *   stored BEFORE they were offered to the backend, keyed by the full evaluation coordinate. The
+ *   evaluation leg's counterpart to the solve leg's `submission-captured` (#3237): it is what
+ *   `runResume`'s replay map reads when a kill lands between backend acceptance and the
+ *   `submission-accepted` append that would otherwise be the only record of it.
  * - `delivery` — the exact sealed Delivery bytes were stored for a dispatch's accounted attempt.
  * - `evaluation` — the evaluation leg reached a terminal (a verdict, or a could-not-grade fact).
  * - `evaluation-retryable-failure` — one typed provider/transport outage left the exact
@@ -109,6 +114,28 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     publicationEntrySha256: Sha256HexSchema.optional(),
   }),
   z.object({
+    /** Persisted before `backend.submit` on the EVALUATION leg (#3237) — the solve leg's
+     * `submission-captured`, one leg down. It carries no accounting and participates in no fold:
+     * its sole consumer is `runResume`'s `journaledEvaluationSubmissions` replay map, which
+     * without it covers only legs whose `submission-accepted` append survived the crash. A
+     * capture with no later acceptance means the crash preceded backend acceptance; the backend
+     * then retains no record of the ref and `dispatchEvaluation` re-seals rather than replaying a
+     * deadline stamped before the crash.
+     *
+     * Kept a distinct kind rather than a `leg`-marked `submission-captured` deliberately: that
+     * kind sets the cell's SOLVE `submissionSha256` and dispatch count in `foldRunJournal`,
+     * feeds `foldRunJournalLineage`, and drives PUB-12 prospective publication capture — an
+     * evaluation entry flowing into any of those is the pre-BP-21 clobber `submission-accepted`
+     * still guards against. */
+    kind: z.literal("evaluation-submission-captured"),
+    at: Rfc3339Schema,
+    cellKey: z.string(),
+    dispatch: z.number().int().positive(),
+    evalIndex: z.number().int().positive(),
+    evaluationAttempt: z.number().int().positive(),
+    submissionSha256: Sha256HexSchema,
+  }),
+  z.object({
     kind: z.literal("submission-accepted"),
     at: Rfc3339Schema,
     cellKey: z.string(),
@@ -192,6 +219,22 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     category: z.enum(["backend-unavailable", "dependency-unavailable", "transport-failure"]),
     recoveryAdvice: z.literal("new-attempt-required"),
     detail: z.string(),
+  }),
+  /** `run.import` (#2979) wrote this run's evidence from an external harness's dump instead of
+   * driving it. Names the sealed `ExternalRunImportDeclaration` that carries the per-slot reasons
+   * and timings the protocol records have no field for, plus the harness it came from. Carries no
+   * per-cell accounting — the per-cell entries the importer writes alongside it are ordinary
+   * `cell-event` / `submission-accepted` / `delivery` / `evaluation` entries, so the fold below
+   * ignores this one exactly like "launched". */
+  z.object({
+    kind: z.literal("external-import"),
+    at: Rfc3339Schema,
+    declarationSha256: Sha256HexSchema,
+    source: z.object({
+      harness: z.string().min(1),
+      version: z.string().min(1).optional(),
+      note: z.string().min(1).optional(),
+    }),
   }),
   /** `run.cancel` recorded a cancellation request (BP-22) — written once per run, alongside the
    * durable cancel marker (`./cancel-marker.ts`). Carries no per-cell accounting; the fold below
@@ -513,7 +556,7 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       fold.evaluationLegs.set(entry.evalIndex, leg);
       fold.detail = entry.detail;
     }
-    // "launched", "cancel-requested", and "closed" carry no per-cell accounting.
+    // "launched", "external-import", "cancel-requested", and "closed" carry no per-cell accounting.
   }
 
   const result = new Map<string, CellJournalFold>();

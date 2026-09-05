@@ -220,6 +220,54 @@ describe("durable run monitor cancellation language", () => {
     expect(markup).not.toContain("Bind to this beacon value");
   });
 
+  test("shows the rounds the seal names, so the bind form is fillable (#3322)", async () => {
+    const view = status("running", false);
+    loadRunViewMock.mockReturnValue({
+      ...view,
+      status: { ...view.status, result: { ...view.status.result, bindableBeaconRounds: [
+        { source: "drand/default", round: 4_100_001, publishedAt: "2026-08-01T00:00:30.000Z" },
+        { source: "drand/quicknet", round: 111_111_111, publishedAt: "2026-08-01T00:00:03.000Z" },
+      ] } },
+    });
+    const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    // Pinned in the rendered form the negative guard below has to match, so that guard is not
+    // vacuous: JSX decodes the entity, so the markup carries a literal separator.
+    expect(markup).toContain("drand/quicknet \u00b7 round 111111111 \u00b7 2026-08-01T00:00:03.000Z");
+    // The height-indexed source derives no round from a seal, so it is offered as a beacon but
+    // never listed here -- listing one would imply a round the operator is held to. The exclusion
+    // is `runStatus`'s, not the page's: the page renders whatever `bindableBeaconRounds` hands it,
+    // and `run-bind.test.ts`'s exact `toEqual` owns the rule. This line only guards the page
+    // against inventing an entry the source never supplied.
+    expect(markup).not.toContain("bitcoin/mainnet \u00b7 round");
+
+    // A run that has bound has nothing left to bind to, so the list goes with the form.
+    loadRunViewMock.mockReturnValue(view);
+    expect(renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) })))
+      .not.toContain("111111111");
+  });
+
+  test("offers only the beacon the seal declares, and says so (#3426)", async () => {
+    const view = status("running", false);
+    loadRunViewMock.mockReturnValue({
+      ...view,
+      status: { ...view.status, result: { ...view.status.result, declaredBeaconSource: "drand/quicknet" } },
+    });
+    const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(markup).toContain('<option value="drand/quicknet">');
+    // `bind` refuses every other source, so offering one would be offering a refusal.
+    expect(markup).not.toContain('<option value="bitcoin/mainnet">');
+    expect(markup).not.toContain('<option value="drand/default">');
+    expect(markup).toContain("seal names the beacon below");
+  });
+
+  test("offers every admitted beacon, and adds no sentence, when the seal declares none (#3426)", async () => {
+    loadRunViewMock.mockReturnValue(status("running", false));
+    const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(markup).toContain('<option value="bitcoin/mainnet">');
+    expect(markup).toContain('<option value="drand/quicknet">');
+    expect(markup).not.toContain("seal names the beacon below");
+  });
+
   test("marks a cell stranded between its delivered event and its delivery record (#3084)", async () => {
     loadRunViewMock.mockReturnValue({
       ok: true,

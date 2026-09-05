@@ -67,9 +67,21 @@ mismatch.
 Liveness is not a card field and should not become one. An offer stops applying when its
 holder delists or supersedes it, and both are ordinary `withdrawn` announcements carrying
 the existing `"delisted"` / `"superseded"` reason codes. `liveOfferCards` takes the
-withdrawn set an index derived from the feeds it follows, keyed on each announcement's own
-`record.digest` rather than on the digest its card claims; a card never claims to be live
-about itself.
+withdrawals an index derived from the feeds it follows; a card never claims to be live about
+itself.
+
+**A withdrawal retires only announcements from the source that published it.** That is not
+advice to indexes, it is what the chain rules enforce: a `withdrawn` announcement names a
+`retracts` announcement ID, and the verifier resolves it only against announcements earlier
+in the *same* chain — retracting anything else is a `foreign-retraction` violation. Meanwhile
+an `available` announcement is a bare `RecordRef` bound to no holder, so any announcer may
+mirror a competitor's offer digest. An index that folded many feeds' withdrawals into one set
+of record digests would therefore hand every announcer a free censorship lever: mirror the
+competitor's digest, withdraw your own mirror, and their live offer disappears from the
+catalog with no error and no diagnostic — indistinguishable from an honest delisting. So
+`WithdrawnAnnouncement` carries the source alongside the announcement ID, and
+`liveOfferCards` matches it against the card's own `item.provenance`. The unsafe fold is not
+expressible.
 
 The card does carry the `supersedes` edge, and an index that resolves supersession from
 cards must apply the same rule the record layer's `resolveLiveOffers` applies: **a
@@ -97,9 +109,27 @@ import {
 const catalog = listOffersForSubject(announcedItems, {
   subject: "sha256:…",
   rail: "https://rails.example/usdc-base",
-  withdrawnOfferDigests: withdrawn,
+  withdrawnAnnouncements: withdrawn,
 });
 ```
+
+`withdrawn` is what the index folded out of the feeds it follows: one
+`{ source, announcementId }` per `withdrawn` announcement, taking `source` from the entry that
+carried it and `announcementId` from its `retracts`. Note that `retracts` names an
+announcement, not a record digest — the offer it retires is the one the retracted `available`
+announcement announced. `@jinn-network/evidence-local-runtime`'s `src/offer-listings.test.ts`
+walks a real published chain and does exactly this.
+
+## Fixtures
+
+`fixtures/catalog/` ships the three sealed offer envelopes this leaf's queries are
+demonstrated on, mirrored byte for byte from the record package's goldens and pinned by
+`src/fixtures.test.ts`. They ship in the published archive under the `./fixtures/*` export:
+this leaf is the one sanctioned edge between the discovery tree and the offer record kind,
+so a consumer on the far side of that boundary — `@jinn-network/evidence-local-runtime`,
+whose `src/offer-listings.test.ts` publishes them through the real durable source writer and
+then answers "offers for subject X, live, cheapest first" from the announced cards alone —
+reaches real offer bytes through here or not at all.
 
 ## Card and record must agree
 

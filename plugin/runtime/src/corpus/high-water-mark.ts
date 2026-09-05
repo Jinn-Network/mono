@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { dirname } from "node:path";
-
 import type {
   HighWaterMark,
   HighWaterMarkStore,
@@ -9,6 +7,7 @@ import type {
 } from "@jinn-network/record-discovery-protocol";
 import { z } from "zod";
 
+import { writeFileAtomically } from "./atomic-write.js";
 import { CORPUS_ERROR_CODES, CorpusMirrorError, describeError, nodeErrorCode } from "./errors.js";
 import type { CorpusFilesystem } from "./fs.js";
 import { compareCodeUnitStrings } from "./order.js";
@@ -41,6 +40,15 @@ function sourceKey(source: SourceIdentity): string {
  * archive from genesis — a quiet, expensive failure mode. Because sync
  * failure never reaches the read path (see `read.ts`), failing loudly here
  * degrades relevance, never availability.
+ *
+ * Every `get` and `put` reads the file. The store deliberately memoizes
+ * NOTHING, because the file — not any one store object — is the shared
+ * position: the verify driver, the mirror and the reader each hold their own
+ * instance over the same path. A per-instance snapshot would let one
+ * instance's `put`, which rewrites the whole document, revert a mark another
+ * instance had already advanced, silently stranding the entries between the
+ * two positions. The document holds one small mark per followed source, so
+ * re-reading it a handful of times per sync is not a cost worth caching away.
  */
 export function createFileHighWaterMarkStore(options: {
   readonly filePath: string;
@@ -48,19 +56,13 @@ export function createFileHighWaterMarkStore(options: {
   readonly tempNonce?: () => string;
 }): HighWaterMarkStore {
   const tempNonce = options.tempNonce ?? (() => crypto.randomUUID());
-  let cache: Map<string, HighWaterMark> | undefined;
 
   async function load(): Promise<Map<string, HighWaterMark>> {
-    if (cache !== undefined) return cache;
-
     let text: string;
     try {
       text = await options.fs.readFile(options.filePath, "utf8");
     } catch (error) {
-      if (nodeErrorCode(error) === "ENOENT") {
-        cache = new Map();
-        return cache;
-      }
+      if (nodeErrorCode(error) === "ENOENT") return new Map();
       throw new CorpusMirrorError(
         CORPUS_ERROR_CODES.highWaterMarkIo,
         `Unable to read the mirror state file at ${options.filePath}.`,
@@ -87,8 +89,7 @@ export function createFileHighWaterMarkStore(options: {
       );
     }
 
-    cache = new Map(Object.entries(parsed.data.marks) as [string, HighWaterMark][]);
-    return cache;
+    return new Map(Object.entries(parsed.data.marks) as [string, HighWaterMark][]);
   }
 
   async function persist(marks: ReadonlyMap<string, HighWaterMark>): Promise<void> {
@@ -98,21 +99,9 @@ export function createFileHighWaterMarkStore(options: {
     }
     const body = `${JSON.stringify({ format: HIGH_WATER_MARK_FORMAT, marks: ordered }, null, 2)}\n`;
 
-    const nonce = tempNonce();
-    const temporaryPath = `${options.filePath}.${nonce}.tmp`;
     try {
-      await options.fs.mkdir(dirname(options.filePath), { recursive: true, mode: 0o700 });
-      await options.fs.unlink(temporaryPath).catch(() => undefined);
-      const handle = await options.fs.open(temporaryPath, "wx", 0o600);
-      try {
-        await handle.writeFile(body, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await options.fs.rename(temporaryPath, options.filePath);
+      await writeFileAtomically({ fs: options.fs, filePath: options.filePath, body, tempNonce });
     } catch (error) {
-      await options.fs.unlink(temporaryPath).catch(() => undefined);
       throw new CorpusMirrorError(
         CORPUS_ERROR_CODES.highWaterMarkIo,
         `Unable to write the mirror state file at ${options.filePath}.`,

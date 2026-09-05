@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { FetchLike } from "./ports.js";
 import { createInMemoryTailSource } from "./tail.js";
 import { openArchiveTailStream } from "./sse.js";
+import { TransportRedirectError } from "./redirect-guard.js";
 import { SseFrameOverflowError, SseTerminalError, createSseStreamTransport } from "./sse-transport.js";
 
 function waitFor(predicate: () => boolean, label: string): Promise<void> {
@@ -203,5 +204,101 @@ describe("createSseStreamTransport", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(errors).toHaveLength(1);
     expect(chunksPulled).toBe(pulledAtStop);
+  });
+});
+
+// #3432 AC2. The tail enforces the same per-hop origin rule the archive path
+// does -- `sse-transport.ts` calls `requestWithinOrigin` -- but nothing pinned
+// it, so deleting that call turned nothing red. That is the very failure #3432
+// was filed about ("a guard that cannot tell whether it is armed"), one layer
+// up: the guard is armed, and the suite could not tell.
+//
+// A tail URL is peer-served, so the relay on the other end of an
+// operator-configured `sseUrl` can post a forwarding address exactly as an
+// archive host can, and the daemon then READS the stream it lands on.
+describe("createSseStreamTransport redirect containment (#3432)", () => {
+  /** A relay that 3xxes the tail to `location`, and serves a one-event stream anywhere else. */
+  function redirectingTail(location: string): { fetchLike: FetchLike; urls: string[]; redirects: string[] } {
+    const urls: string[] = [];
+    const redirects: string[] = [];
+    return {
+      urls,
+      redirects,
+      async fetchLike(url, init) {
+        urls.push(url);
+        redirects.push(init?.redirect ?? "follow");
+        if (url === "https://relay.example/sources/feed/tail") {
+          return new Response(null, { status: 302, headers: { location } });
+        }
+        return new Response(
+          new TextEncoder().encode('event: announcement\ndata: {"n":1}\n\n'),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      },
+    };
+  }
+
+  it("refuses an off-origin redirect and never opens the stream it points at", async () => {
+    const link = redirectingTail("http://127.0.0.1:8545/sources/feed/tail");
+    const transport = createSseStreamTransport("https://relay.example", link.fetchLike, {
+      reconnectDelayMs: 1,
+      maxReconnects: 0,
+    });
+    const errors: unknown[] = [];
+    const seen: string[] = [];
+
+    const subscription = transport.connect(
+      "/sources/feed/tail",
+      (raw) => seen.push(raw),
+      (error) => errors.push(error),
+    );
+    await waitFor(() => errors.length === 1, "the redirect refusal");
+    subscription.close();
+
+    expect(errors[0]).toBeInstanceOf(TransportRedirectError);
+    expect((errors[0] as TransportRedirectError).location).toBe("http://127.0.0.1:8545/sources/feed/tail");
+    // The refusal is before the hop, not after it: the loopback endpoint is never requested.
+    expect(link.urls).toEqual(["https://relay.example/sources/feed/tail"]);
+    expect(seen).toEqual([]);
+  });
+
+  it("asks the primitive not to follow the tail's redirects itself", async () => {
+    const link = redirectingTail("https://relay.example/sources/feed/tail-final");
+    const transport = createSseStreamTransport("https://relay.example", link.fetchLike, {
+      reconnectDelayMs: 1,
+      maxReconnects: 0,
+    });
+    const seen: string[] = [];
+
+    const subscription = transport.connect("/sources/feed/tail", (raw) => seen.push(raw), () => undefined);
+    await waitFor(() => seen.length === 1, "the delivered event");
+    subscription.close();
+
+    expect(link.redirects).toEqual(["manual", "manual"]);
+  });
+
+  it("follows a same-origin redirect, which stays inside the origin the operator chose", async () => {
+    const link = redirectingTail("/sources/feed/tail-final");
+    const transport = createSseStreamTransport("https://relay.example", link.fetchLike, {
+      reconnectDelayMs: 1,
+      maxReconnects: 0,
+    });
+    const errors: unknown[] = [];
+    const seen: string[] = [];
+
+    const subscription = transport.connect(
+      "/sources/feed/tail",
+      (raw) => seen.push(raw),
+      (error) => errors.push(error),
+    );
+    await waitFor(() => seen.length === 1, "the delivered event");
+    subscription.close();
+
+    expect(seen).toEqual(['{"n":1}']);
+    expect(errors).toEqual([]);
+    expect(link.urls).toEqual([
+      "https://relay.example/sources/feed/tail",
+      "https://relay.example/sources/feed/tail-final",
+    ]);
   });
 });

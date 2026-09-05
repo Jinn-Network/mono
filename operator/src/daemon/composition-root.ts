@@ -208,6 +208,7 @@ import type { VenueBroadcaster } from '../adapters/mech/safe.js';
 import { setDefaultEoaBroadcastLock } from '../tx-retry.js';
 import type { Store } from '../store/store.js';
 import { fetchRawBytesFromIpfs } from '../adapters/mech/ipfs.js';
+import { classifyIpfsFetchFailure } from '@jinn-network/core/corpus-read';
 import { getTaskCidDigest } from '../adapters/mech/contracts.js';
 import { openOperatorEvidence, type OperatorEvidence } from './evidence-join.js';
 import { buildLegacyExecutionEnvelope, LEGACY_ENVELOPE_EXTENSION_KEY, synthesizeLegacyExecutionDocuments } from './bridge-legacy-delivery.js';
@@ -426,6 +427,21 @@ export interface CompositionRootInput {
    * assemble a real `ProjectorLoop`/`ClaimGate`/`EngagementLedger` rather than stubs.
    */
   readonly store: Store;
+  /**
+   * Host-supplied launchers considered alongside `ALL_LAUNCHERS` when resolving this
+   * composition's `executionWiring`. Each entry carries the executable its own `plan()` argv
+   * spawns, because `resolveLauncherCommand` only knows the shipped launcher ids.
+   *
+   * The seam exists so a hermetic rig can dispatch a work kind the shipped registry has no
+   * launcher for (the swe-rebench-v2 e2e's canned-patch stub) without a test stub — or an
+   * env-gated branch selecting one — landing in the production launcher list. Omitted by
+   * `main.ts` and every production host: the shipped registry is then the whole set, exactly
+   * as before.
+   *
+   * An entry whose id collides with a shipped launcher (or another entry) is refused at
+   * composition build time — see `buildLaunchers`.
+   */
+  readonly extraLaunchers?: readonly { readonly launcher: LauncherContract; readonly command: string }[];
   /** Projector poll interval (ms). Defaults to 5000, matching `LOOP_REGISTRY`'s entry. */
   readonly projectorPollIntervalMs?: number;
   readonly logger?: { info(m: string): void; warn(m: string): void };
@@ -568,24 +584,50 @@ function buildVerifiedExecutable(command: string): VerifiedExecutable {
   return { path, digest };
 }
 
-function buildLaunchers(
+/**
+ * Selects the launchers this composition's `executionWiring` names, out of the shipped
+ * `ALL_LAUNCHERS` plus any host-supplied `extraLaunchers`. An extra is selected only when a
+ * wiring entry names its id, so passing extras a wiring never asks for is inert.
+ *
+ * Exported for test only (the seam decides *whether* an injected launcher is selected at all;
+ * `buildOperatorComposition` is too heavy a fixture to assert that through). Production callers
+ * reach it through `buildOperatorComposition`.
+ */
+export function buildLaunchers(
   wiring: readonly ExecutionWiringEntry[],
   mode: CompositionRootInput['mode'],
+  extra: CompositionRootInput['extraLaunchers'] = [],
 ): readonly LauncherContract[] {
   const aliases = mode === 'legacy' ? LEGACY_HARNESS_TO_LAUNCHER_ID : HARNESS_TO_LAUNCHER_ID;
   const wanted = new Set(
     wiring.map((entry) => aliases[entry.harness] ?? entry.harness),
   );
-  return ALL_LAUNCHERS.filter((launcher) => wanted.has(launcher.id));
+  const available = [...ALL_LAUNCHERS, ...extra.map((entry) => entry.launcher)];
+  // Refuse a duplicate id loudly rather than carrying both contracts: the downstream consumers
+  // disagree about which one wins (`buildLauncherDeployments` keys by id, so the injected
+  // command wins for both iterations, while `buildNativeLauncherCapabilityPort`'s `find` hits
+  // whichever contract comes first — the shipped one, since `ALL_LAUNCHERS` is prepended). A
+  // collision therefore pairs a shipped launcher's `capabilities()`/`plan()` with an injected
+  // executable. A host that reuses an id has a wiring bug; say so at composition build time.
+  const seen = new Set<string>();
+  for (const launcher of available) {
+    if (seen.has(launcher.id)) {
+      throw new Error(`extraLaunchers id "${launcher.id}" collides with another launcher; use a distinct id`);
+    }
+    seen.add(launcher.id);
+  }
+  return available.filter((launcher) => wanted.has(launcher.id));
 }
 
 export function buildLauncherDeployments(
   launchers: readonly LauncherContract[],
   config: JinnConfig,
+  extra: CompositionRootInput['extraLaunchers'] = [],
 ): Readonly<Record<string, LauncherDeployment>> {
+  const extraCommands = new Map(extra.map((entry) => [entry.launcher.id, entry.command]));
   const deployments: Record<string, LauncherDeployment> = {};
   for (const launcher of launchers) {
-    const command = resolveLauncherCommand(launcher.id, config);
+    const command = extraCommands.get(launcher.id) ?? resolveLauncherCommand(launcher.id, config);
     if (command === undefined) continue;
     const executable = buildVerifiedExecutable(command);
     deployments[launcher.id] = {
@@ -859,16 +901,75 @@ const GET_TASK_VIEW_ABI = [{
   }],
 }] as const;
 
-/** Real (gap 1 CLOSED): a raw sha256-digest IPFS fetch, reusing the existing gateway machinery
- * (`operator/src/adapters/mech/ipfs.ts`) already proven for the rest of the daemon. */
-function buildFetchIpfsBytes(gatewayUrl: string): (digest: `sha256:${string}`) => Promise<Uint8Array | undefined> {
+/**
+ * Why a fetch produced no bytes. FAILURE IS NOT ABSENCE (#2647), applied to the IPFS leg (#3451):
+ *
+ *   - `'too-large'` — a gateway ANSWERED for the content and the byte cap refused it. Positive
+ *     evidence the document exists; reporting it as absent turns a size-policy decision into a
+ *     silent data gap the resolver cannot tell from a genuine miss.
+ *   - `'unavailable'` — transport failure or timeout. Nothing was learned about this digest.
+ */
+export type IpfsBytesRefusal = 'too-large' | 'unavailable';
+
+/**
+ * Real (gap 1 CLOSED): a raw sha256-digest IPFS fetch, reusing the existing gateway machinery
+ * (`operator/src/adapters/mech/ipfs.ts`) already proven for the rest of the daemon.
+ *
+ * Three answers, on the {@link buildReadTodayDeliveryFacts} precedent (#2647). Every failure used
+ * to collapse into the one `undefined` the caller reads as "this digest is not on IPFS", so the
+ * 8 MiB cap added in #3438 made a merely-large sealed document indistinguishable from one that was
+ * never pinned:
+ *
+ *   - `Uint8Array` — the bytes. Never trusted by the caller without re-deriving the digest.
+ *   - `undefined` — genuine absence: every candidate answered, and every answer was 404/410. The
+ *     strictest answer, and so the rarest — see `classifyIpfsFetchFailure`.
+ *   - {@link IpfsBytesRefusal} — the fetch did not answer the absence question at all.
+ *
+ * Exported so `operator/test/daemon/*` can drive this exact production resolver, matching the
+ * `buildReadTodayDeliveryFacts` / `buildResolveSubmissionBytes` precedents in this file.
+ */
+export function buildFetchIpfsBytes(
+  gatewayUrl: string,
+): (digest: `sha256:${string}`) => Promise<Uint8Array | IpfsBytesRefusal | undefined> {
   return async (digest) => {
     const hex = digest.slice('sha256:'.length);
     try {
       return await fetchRawBytesFromIpfs(gatewayUrl, `f01551220${hex}`);
-    } catch {
+    } catch (error) {
+      const classified = classifyIpfsFetchFailure(error);
+      return classified === 'not-found' ? undefined : classified;
+    }
+  };
+}
+
+/**
+ * Adapts the classified fetch above to the `Uint8Array | undefined` shape the projector, archive
+ * and legacy sealed-document ports still consume. The narrowing is deliberate — every one of those
+ * callers drops and retries on any non-answer, so the refusal changes no control flow — but it is
+ * no longer SILENT: each class is reported separately, which is the whole point of the #2647
+ * discipline ("same drop; the difference is what the operator goes and fixes").
+ */
+export function narrowIpfsBytes(
+  fetchClassified: (digest: `sha256:${string}`) => Promise<Uint8Array | IpfsBytesRefusal | undefined>,
+  logger?: { warn(message: string): void },
+): (digest: `sha256:${string}`) => Promise<Uint8Array | undefined> {
+  return async (digest) => {
+    const result = await fetchClassified(digest);
+    if (result === 'too-large') {
+      logger?.warn(
+        `[ipfs] ${digest} was ANSWERED FOR but exceeds the response byte cap -- refused for size, `
+          + 'not absent; the document exists and needs a larger bound or an out-of-band read',
+      );
       return undefined;
     }
+    if (result === 'unavailable') {
+      logger?.warn(
+        `[ipfs] ${digest} could not be fetched (transport failure or timeout) -- nothing was `
+          + 'learned about whether it is pinned; a later tick can retry',
+      );
+      return undefined;
+    }
+    return result;
   };
 }
 
@@ -1989,7 +2090,7 @@ function buildProjector(input: {
   const isAuthorizedMechOrigin = (address: Address): boolean =>
     address.toLowerCase() === input.mechAddress.toLowerCase();
 
-  const fetchIpfsBytes = buildFetchIpfsBytes(input.ipfsGatewayUrl);
+  const fetchIpfsBytes = narrowIpfsBytes(buildFetchIpfsBytes(input.ipfsGatewayUrl), input.logger);
   const resolveAssociation = input.mode === 'native'
     ? createNativeRequesterSubmissionResolver(input.nativeRequester ?? (() => {
       throw new Error('native projector requires a requester association directory and B2 requester-submission identity');
@@ -2343,8 +2444,8 @@ export async function buildOperatorComposition(
   const evidence = await openOperatorEvidence({ rootDir: input.evidenceRoot });
 
   const wiring = toPipelineWiring(config.executionWiring ?? []);
-  const launchers = buildLaunchers(wiring, input.mode);
-  const launcherDeployments = buildLauncherDeployments(launchers, config);
+  const launchers = buildLaunchers(wiring, input.mode, input.extraLaunchers);
+  const launcherDeployments = buildLauncherDeployments(launchers, config, input.extraLaunchers);
   const workspaceRuntime = buildWorkspaceRuntimePorts();
 
   const backendConfig: LocalTaskExecutionBackendConfig = {
@@ -2410,7 +2511,7 @@ export async function buildOperatorComposition(
     release: venue.release,
   };
 
-  const fetchIpfsBytes = buildFetchIpfsBytes(config.ipfsGatewayUrl);
+  const fetchIpfsBytes = narrowIpfsBytes(buildFetchIpfsBytes(config.ipfsGatewayUrl), input.logger);
   const readLegacySealedDocuments = async (card: AnnouncedSubmissionCard): Promise<SealedDocuments> => {
     const taskDigest = card.facts['taskDigest'];
     if (typeof taskDigest !== 'string' || !taskDigest.startsWith('sha256:')) {

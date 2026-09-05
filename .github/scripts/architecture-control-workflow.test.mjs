@@ -191,12 +191,17 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   assert.match(selectionJob, /fetch-depth: 0/u);
   assert.match(selectionJob, /timeout-minutes: 5/u);
   assert.match(selectionJob, /PR_BASE_REF: \$\{\{ github\.base_ref \}\}/u);
+  assert.match(selectionJob, /PR_HEAD_REF: \$\{\{ github\.head_ref \}\}/u);
   assert.match(selectionJob, /MG_BASE_SHA: \$\{\{ github\.event\.merge_group\.base_sha \}\}/u);
   // The base-ref carve-out is asserted as one contiguous block, before the fast-lane
   // unselect, so a future edit cannot reorder them and silently thin the hotfix lane.
+  // The head-ref clause is part of that same contiguous block: the standing
+  // release-review PR (`base:main head:next`, issue #2831) mirrors merge-group runs
+  // that already verified every commit it carries, so it takes the fast lane while
+  // every other `main`-targeting head — the real hotfixes — still verifies in full.
   assert.match(
     selectionJob,
-    /^\s+pull_request\)\n\s+if \[ "\$\{PR_BASE_REF\}" = main \]; then\n\s+echo '[^']*'\n\s+echo 'run=true' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0\n\s+fi\n\s+echo 'pr-fast-lane: full verification runs on the merge group'\n\s+echo 'run=false' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0/mu,
+    /^\s+pull_request\)\n\s+if \[ "\$\{PR_BASE_REF\}" = main \] && \[ "\$\{PR_HEAD_REF\}" != next \]; then\n\s+echo '[^']*'\n\s+echo 'run=true' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0\n\s+fi\n\s+echo 'pr-fast-lane: full verification runs on the merge group'\n\s+echo 'run=false' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0/mu,
   );
   // The PR lane must not diff at all — a surviving pull_request base/head pair would mean
   // fast mode was only half-applied and the PR lane still paid for selection.
@@ -243,6 +248,7 @@ test('the selection script resolves its diff endpoints from the event it is give
     env: {
       EVENT_NAME: 'pull_request',
       PR_BASE_REF: 'next',
+      PR_HEAD_REF: 'autopilot/1',
       MG_BASE_SHA: '',
       GITHUB_SHA: 'checked-out-sha',
     },
@@ -257,6 +263,7 @@ test('the selection script resolves its diff endpoints from the event it is give
     env: {
       EVENT_NAME: 'pull_request',
       PR_BASE_REF: 'main',
+      PR_HEAD_REF: 'fix/hotfix-branch',
       MG_BASE_SHA: '',
       GITHUB_SHA: 'checked-out-sha',
     },
@@ -265,12 +272,30 @@ test('the selection script resolves its diff endpoints from the event it is give
   assert.equal(hotfix.gitArgs, '');
   assert.match(hotfix.output, /^run=true$/mu);
 
+  // Release-review lane: the standing `base:main head:next` PR resynchronizes on every
+  // push to `next` and mirrors merge groups that already verified the same commits, so
+  // it unselects like the fast lane rather than paying the full battery again (#2831).
+  const releaseReview = runSelectionScript({
+    script,
+    env: {
+      EVENT_NAME: 'pull_request',
+      PR_BASE_REF: 'main',
+      PR_HEAD_REF: 'next',
+      MG_BASE_SHA: '',
+      GITHUB_SHA: 'checked-out-sha',
+    },
+  });
+  assert.equal(releaseReview.status, 0, releaseReview.stderr);
+  assert.equal(releaseReview.gitArgs, '');
+  assert.match(releaseReview.output, /^run=false$/mu);
+
   // The merge-group head is `GITHUB_SHA`, not a second payload field.
   const mergeGroup = runSelectionScript({
     script,
     env: {
       EVENT_NAME: 'merge_group',
       PR_BASE_REF: '',
+      PR_HEAD_REF: '',
       MG_BASE_SHA: 'base-from-merge-group',
       GITHUB_SHA: 'checked-out-sha',
     },
@@ -282,7 +307,7 @@ test('the selection script resolves its diff endpoints from the event it is give
   // Any other event verifies in full without consulting a diff at all.
   const dispatch = runSelectionScript({
     script,
-    env: { EVENT_NAME: 'workflow_dispatch', PR_BASE_REF: '', MG_BASE_SHA: '', GITHUB_SHA: 'checked-out-sha' },
+    env: { EVENT_NAME: 'workflow_dispatch', PR_BASE_REF: '', PR_HEAD_REF: '', MG_BASE_SHA: '', GITHUB_SHA: 'checked-out-sha' },
   });
   assert.equal(dispatch.status, 0, dispatch.stderr);
   assert.match(dispatch.output, /^run=true$/mu);
@@ -299,6 +324,7 @@ test('the selection script refuses to unselect when a diff endpoint is unresolve
     env: {
       EVENT_NAME: 'merge_group',
       PR_BASE_REF: '',
+      PR_HEAD_REF: '',
       MG_BASE_SHA: '',
       GITHUB_SHA: 'checked-out-sha',
     },

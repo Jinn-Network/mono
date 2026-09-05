@@ -384,8 +384,7 @@ may proceed against its exact immutable head.
 
 ## 11. Implementation status
 
-Delivery stacks 1–9 in §10 have landed on `next`; stack 10 landed its commissioning link but not
-its dual-write and backfill tail (§11.2). Each of issue #2711's eight acceptance criteria is
+Delivery stacks 1–10 in §10 have landed on `next`. Each of issue #2711's eight acceptance criteria is
 carried by a test that runs in CI. This section records where each proof lives so a reader can
 re-run it rather than take the claim on trust.
 
@@ -398,22 +397,26 @@ re-run it rather than take the claim on trust.
 | One Inspect judge call is evaluator Execution Evidence plus a Result Evaluation over the subject Task+Result | `packages/benchmarking/native-capture/src/inspect.test.ts` — "atomizes two samples by three epochs into six independent evaluator executions" and "refuses truth-bearing judge input and aggregate extraction in exact Evidence v1 roles"; `packages/benchmarking/evaluation/src/index.test.ts` — "issues a judge opinion over original Task+Result with evaluator execution provenance and no Attempt" |
 | Two human reviews stay independent; unanimity is separately derived | `packages/benchmarking/evaluation/src/index.test.ts` — "preserves two human claims and derives a separately signed unanimous label" and "admits an authoritative imported label without inventing a human evaluation"; `packages/benchmarking/protocol/src/records.test.ts` — "keeps two human opinions separate from their unanimous label resolution" |
 | Cohort, Matrix, and Report rebuild without Submission/Attempt/Delivery | `packages/benchmarking/evidence/src/evidence.test.ts` — "verifies exact Task+Result claim bindings with no commissioning records", which verifies a Cohort and assembles a Matrix from evidence records alone; `packages/benchmarking/evidence/src/golden-lifecycle.test.ts` additionally scans the assembled Matrix bytes for any commissioning term. The Report is covered structurally, by issuing from the Matrix bytes, rather than by a byte scan |
-| 12 × 4 × 3 yields 144 automated and 24 human claims; appending D does not mutate the A/B/C cohort | `packages/benchmarking/evidence/src/golden-lifecycle.test.ts` — "appends evaluator D without rerunning or mutating twelve original memory subjects" asserts the twelve subjects, 144 evaluator executions, 144 automated claims, and 24 human claims, then builds the A/B/C/D chain as a separately sealed chain that supersedes the A/B/C cohort by digest (132 admitted evaluations for A/B/C against 168 for A/B/C/D) rather than replacing it, and re-checks the captured A/B/C cohort, matrix, and report-payload digests plus the report envelope re-digested from its own bytes. No golden digest is pinned as a literal, so the test shows that building D leaves the A/B/C artifacts untouched, not that their bytes match a value fixed outside it |
-| TEP commissioning adds lineage without changing evidence semantics | `packages/benchmark-product/core/src/conformance/evidence-native-commissioning-parity.test.ts` — "a real Submission/Attempt/Delivery link does not change evaluator-D evidence identity" |
+| 12 × 4 × 3 yields 144 automated and 24 human claims; appending D does not mutate the A/B/C cohort | `packages/benchmarking/evidence/src/golden-lifecycle.test.ts` — "appends evaluator D without rerunning or mutating twelve original memory subjects" asserts the twelve subjects, 144 evaluator executions, 144 automated claims, and 24 human claims, then builds the A/B/C/D chain as a separately sealed chain that supersedes the A/B/C cohort by digest (132 admitted evaluations for A/B/C against 168 for A/B/C/D) rather than replacing it, and re-checks the captured A/B/C cohort, matrix, and report-payload digests plus the report envelope re-digested from its own bytes. Since #3341 the test's signing keys are deterministic, and both the A/B/C and A/B/C/D tier-2 digests are additionally asserted against literals pinned in `packages/benchmarking/evidence/fixtures/golden-lifecycle/digests.json`, so a serialization change applied uniformly across the build and the append no longer passes unnoticed |
+| TEP commissioning adds lineage without changing evidence semantics | `packages/benchmark-product/core/src/conformance/evidence-native-commissioning-parity.test.ts` — "a real Submission/Attempt/Delivery link does not change evaluator-D evidence identity" and "the operational backfill path reaches the same conclusion over the same TEP records"; the capture-time half is `packages/benchmarking/native-capture/src/coordinator.test.ts` — "dual-write records commissioning lineage without changing any evidence byte" |
 | claim-package/3 and public-bundle/5 verify independently; claim-package/2 and bundle/4 still accepted | The two claim closures have separate parsers that neither share nor supersede each other: `packages/benchmark-product/verify/src/profile/claim.ts` accepts claim-package/1 and /2 (and the later anchored /4 and /5), while claim-package/3 is sealed and parsed by `packages/benchmarking/evidence/src/portable.ts`, exercised end to end in `packages/benchmarking/evidence/src/golden-lifecycle.test.ts` and in `packages/benchmark-product/verify/src/signers.test.ts`. On the bundle side `SUPPORTED_BUNDLE_FORMATS` in `packages/benchmark-product/verify/src/manifest.ts` carries v2, v4, and v5 (plus the later anchored v6/v7) side by side, and `packages/benchmark-product/verify/test/cli.test.mjs` exercises every bundle format, including the seven evidence-native checks and the metadata-first deferral |
 
 ### 11.2 Residual work, outside this amendment
 
-Two items are not carried by any acceptance criterion and remain open. They belong in their own
-issues rather than in #2711's closure:
+One item is not carried by any acceptance criterion and remains open. It belongs in its own issue
+rather than in #2711's closure:
 
-- **Commissioning dual-write and explicit backfill** (§10 stack 10). `ExecutionCommissioningLink`
-  and its parity fixture ship; the operational dual-write and backfill paths do not exist.
 - **A user-facing evidence-native production path.** The shipped `colophon` CLI reads and verifies a
   `public-bundle/5` closure, but the produce side (native capture, cohort sealing, Matrix v2, Report
   kind v3) is a library surface, `packages/benchmark-product/core/src/evidence-first.ts`, reached
   only from repository scripts. The `packages/benchmark-product/web` reader likewise has no
   evidence-native presentation.
+
+Commissioning dual-write and explicit backfill (§10 stack 10) shipped in #3339:
+`NativeAtomDraft.commissioning` carries protocol-neutral lineage that the capture coordinator
+dual-writes as a separate `ExecutionCommissioningLink`, and
+`backfillExecutionCommissioningLinks` attaches links to already-sealed evidence. Both paths
+re-read the evidence after writing and refuse the write if a byte moved.
 
 ## Appendix A. Review disposition
 

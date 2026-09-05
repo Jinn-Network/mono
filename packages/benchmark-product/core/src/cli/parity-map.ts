@@ -23,16 +23,24 @@
 
 /**
  * Facade exports that are helpers, not operations a caller invokes directly — see
- * `./parity.test.ts`'s own header. Currently just one: `unverifiableAxisCounts`
+ * `./parity.test.ts`'s own header. Two of them: `unverifiableAxisCounts`
  * (`../operations/run-results.ts`) is exported so `../report/claim.ts` can reuse the same per-axis
- * tally the results document builds; it is not itself an operation with an
- * `OperationContext`/`OperationResult` shape.
+ * tally the results document builds; `draftSampleSizeAdvisory` (`../operations/run-lock.ts`) is
+ * exported so an operator surface can show the seal-time sample-size advisory BEFORE calling
+ * `runLock`, which is the whole point of an advisory. Neither has an
+ * `OperationContext`/`OperationResult` shape, and neither audits: `lock` is the operation behind
+ * the second one.
  */
-export const EXCLUDED_FACADE_EXPORTS: readonly string[] = ["unverifiableAxisCounts"];
+export const EXCLUDED_FACADE_EXPORTS: readonly string[] = [
+  "unverifiableAxisCounts",
+  "draftSampleSizeAdvisory",
+];
 
 /** Standalone filesystem helpers deliberately outside the workspace operations/audit boundary. */
 export const STANDALONE_CLI_VERBS: Readonly<Record<string, string>> = {
   "bundle verify": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal",
+  "freeze-repo export": "deterministic public-repository projection reads only the caller-selected immutable bundle and writes one local directory; no workspace, principal, or audited record is involved",
+  "freeze-repo verify": "standalone byte-for-byte comparison of a published tree against the bundle it claims to be derived from; reads only what the caller names",
   "demo1 prereg verify": "read-only post-lock/pre-dispatch gate verifies the exact local E4 witness without credentials or network access",
   "agent add": "stores a strict machine-local built-in agent profile outside every workspace",
   "agent credentials": "copies an explicitly selected API-key file into protected Colophon machine storage",
@@ -75,11 +83,15 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   runAnchor: "anchor",
   runBind: "bind",
   anchoringConfigure: "anchoring configure",
+  identityBind: "identity bind",
+  disclosureDeclare: "disclosure declare",
+  disclosureShow: "disclosure show",
   publicationConfigure: "publication configure",
   publicationRegister: "publication register",
   publicationAccounting: "publication accounting",
   publicationReport: "publication report",
   publicationStatus: "publication status",
+  importRunRecords: "run import",
   runLaunch: "launch",
   runResume: "resume",
   runCancel: "cancel",
@@ -123,11 +135,15 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   runAnchor: "anchor",
   runBind: "bind",
   anchoringConfigure: "anchoring.configure",
+  identityBind: "identity.bind",
+  disclosureDeclare: "disclosure.declare",
+  disclosureShow: "disclosure.show",
   publicationConfigure: "publication.configure",
   publicationRegister: "publication.register",
   publicationAccounting: "publication.accounting",
   publicationReport: "publication.report",
   publicationStatus: "publication.status",
+  importRunRecords: "launch",
   runLaunch: "launch",
   runResume: "run.resume",
   runCancel: "cancel",
@@ -171,14 +187,21 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
   runAnchor:
     "Obtains third-party time evidence over the run's own sealed Run or Matrix digest from a configured provider, verifies it, and stores it as an AnchorEvidence record.",
   runBind:
-    "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976).",
+    "Binds the sealed, not-yet-launched run to a public beacon value that postdates its seal, deriving and sealing the run's execution order from it (issue #2976). On a scheduled source the seal names exactly one admissible round -- the first published strictly after it -- and every other round is refused (issue #3322).",
   anchoringConfigure:
     "Replaces or clears the workspace's ordered anchor provider and endpoint configuration, which is what makes later locks anchor automatically (authority-gated).",
+  identityBind:
+    "Binds the workspace's report-signing key to a domain the operator controls, minting the colophon-domain-binding/1 document a reader supplies to the verifier and naming the exact record to publish at that domain (issue #2983).",
+  disclosureDeclare:
+    "Seals this run's six-variable disclosure-specification record over its sealed Matrix, recording which of ingestion model, retrieval config, answer model, answer prompt, judge model, and judge prompt this venue measured and which it only carries as an assertion.",
+  disclosureShow:
+    "Reads the sealed disclosure-specification record back out of the workspace's content-addressed store.",
   publicationConfigure: "Configures the mutable public source locator and explicit prospective-publication intent.",
   publicationRegister: "Stores, announces, and exact-probes the registration closure before dispatch or truthfully post-hoc.",
   publicationAccounting: "Publishes retained complete or partial dispatch accounting and Matrix v2 without running work or requiring a Report.",
   publicationReport: "Produces, independently verifies, and publishes the signed Report v2 envelope after its exact accounting closure.",
   publicationStatus: "Reads the local publication state, timing assurance, receipts, compatibility, and recovery guidance without contacting a backend.",
+  importRunRecords: "Turns a locked run into a run by importing an external harness's per-attempt results over the whole sealed slate (authority-gated as launch).",
   runLaunch: "Launches the locked run on the real local venue (authority-gated).",
   runResume: "Resumes an interrupted run, dispatching only outstanding work.",
   runCancel:
@@ -233,11 +256,22 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   // does for `publication.configure`. A browser-supplied anchor endpoint would make this action an
   // outbound-request primitive pointed wherever a form said.
   anchoringConfigure: { status: "shipped", action: "anchoring.configure" },
+  // Binding names the operator's own organization, and the step that makes it true is publishing a
+  // record at their own DNS or web host. A browser form would collect the claim without being able
+  // to help with the only part that carries weight.
+  identityBind: { status: "unavailable", reason: "the operator publishes the proof at their own domain, outside any Colophon surface" },
+  // The six statements are the venue's own prose about its own experiment, composed offline and
+  // handed over as a file. A browser form for them would invite the half-filled declaration the
+  // record's all-six-required rule exists to make impossible; the web surface for READING a
+  // disclosed bundle is packet R1's.
+  disclosureDeclare: { status: "unavailable", reason: "requires a locally composed six-variable declaration file" },
+  disclosureShow: { status: "unavailable", reason: "reads a local sealed record from the workspace store" },
   publicationConfigure: { status: "shipped", action: "publication.configure" },
   publicationRegister: { status: "shipped", action: "publication.register" },
   publicationAccounting: { status: "shipped", action: "publication.accounting" },
   publicationStatus: { status: "shipped", action: "publication.status" },
   publicationReport: { status: "shipped", action: "publication.report" },
+  importRunRecords: { status: "unavailable", reason: "reads a local run dump and every evidence file it names by relative path; browser upload of a path-rooted evidence tree is intentionally unavailable" },
   runLaunch: { status: "shipped", action: "run.launch" },
   runResume: { status: "shipped", action: "run.resume" },
   runCancel: { status: "shipped", action: "run.cancel" },

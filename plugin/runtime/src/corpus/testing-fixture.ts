@@ -10,11 +10,17 @@ import type {
   EvidenceRepository,
 } from "@jinn-network/evidence-repository";
 import {
+  MEDIA_ENTRY,
+  MEDIA_HEAD,
   RECORD_DISCOVERY_VERSION,
   RECORD_KINDS,
+  dssePreAuthEncoding,
   headPath,
+  nextSequence,
+  recordPath,
   sealJson,
 } from "@jinn-network/record-discovery-protocol";
+import type { SourceHead } from "@jinn-network/record-discovery-protocol";
 import type { Transport, TransportResponse } from "@jinn-network/record-discovery-client";
 import {
   TRUST_POLICY_FORMAT,
@@ -322,13 +328,12 @@ function envelopeHead(head: unknown): unknown {
   };
 }
 
-function buildArchiveTransport(
-  source: MirrorSourceConfig,
-  recordBytes: readonly Uint8Array[],
-  options: { readonly delayMs?: number; readonly signHead?: boolean } = {},
-): Transport {
-  const delayMs = options.delayMs ?? 0;
-  const signHead = options.signHead ?? false;
+/**
+ * The one archive shape this fixture serves — a single genesis entry
+ * announcing every supplied record — so the placeholder-signature and the
+ * genuinely-signed builders below cannot drift apart on the wire.
+ */
+function archiveDocuments(source: MirrorSourceConfig, recordBytes: readonly Uint8Array[]) {
   const announcements = recordBytes.map((bytes, index) => ({
     announcementId: `ann-${String(index + 1)}`,
     action: "available" as const,
@@ -342,15 +347,32 @@ function buildArchiveTransport(
     timestamp: "2026-07-30T00:00:00Z",
     announcements,
   };
-  const entryDigest = sealJson(entry).digest;
   const head = {
     protocol: RECORD_DISCOVERY_VERSION,
     origin: `${source.agent}/${source.name}`,
     sequence: "0000000000000001",
-    entry: entryDigest,
+    entry: sealJson(entry).digest,
     issuedAt: "2026-07-30T00:00:00Z",
-    refreshBy: "2026-08-30T00:00:00Z",
+    // At — not past — the published-source profile's 24h ceiling ahead of
+    // `issuedAt` (§5.2). A month-long window, which this fixture used to
+    // carry, is exactly the head both verification procedures now refuse
+    // `refresh-by-ceiling` (#3467).
+    refreshBy: "2026-07-31T00:00:00Z",
   };
+  const recordsByDigest = new Map(
+    recordBytes.map((bytes) => [recordDigest(bytes), bytes] as const),
+  );
+  return { entry, head, recordsByDigest };
+}
+
+function buildArchiveTransport(
+  source: MirrorSourceConfig,
+  recordBytes: readonly Uint8Array[],
+  options: { readonly delayMs?: number; readonly signHead?: boolean } = {},
+): Transport {
+  const delayMs = options.delayMs ?? 0;
+  const signHead = options.signHead ?? false;
+  const { entry, head, recordsByDigest } = archiveDocuments(source, recordBytes);
   const page = {
     protocol: RECORD_DISCOVERY_VERSION,
     source: `${source.agent}/${source.name}`,
@@ -358,9 +380,6 @@ function buildArchiveTransport(
     prevArchive: null,
     entries: [{ entry }],
   };
-  const recordsByDigest = new Map(
-    recordBytes.map((bytes) => [recordDigest(bytes), bytes] as const),
-  );
 
   return {
     async fetch(url: string): Promise<TransportResponse> {
@@ -406,5 +425,201 @@ export function buildFixtureArchive(
     policyVersions: [policy.envelopeBytes],
     genesisDigest: policy.digest,
     reference,
+  };
+}
+
+// --- genuinely-signed variants -------------------------------------------
+//
+// Everything above signs with placeholder bytes, which is enough for the
+// tests that inject a verdict but not for one that drives the REAL verify
+// driver end to end. These builders take an injected `DsseSigner` so the
+// private key stays in the calling test: this file is production source to
+// the plugin-tree custody guard, and key material does not belong in it.
+
+function base64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString("base64");
+}
+
+async function signedEnvelope(
+  payloadType: string,
+  payloadBytes: Uint8Array,
+  signer: DsseSigner,
+  tamper: boolean,
+): Promise<unknown> {
+  const signatures = await signer({
+    payloadType,
+    payloadBytes,
+    preAuthEncoding: dssePreAuthEncoding(payloadType, payloadBytes),
+  });
+  return {
+    payloadType,
+    payload: base64(payloadBytes),
+    signatures: signatures.map((signature) => {
+      // A flipped bit, not a truncation: the envelope stays structurally
+      // valid so the refusal that follows can only come from the signature
+      // check itself.
+      const bytes = Uint8Array.from(signature.signature);
+      if (tamper) bytes[0] = (bytes[0]! ^ 0xff) & 0xff;
+      return { ...(signature.keyid === undefined ? {} : { keyid: signature.keyid }), sig: base64(bytes) };
+    }),
+  };
+}
+
+/**
+ * A loopback `fetchLike` over a fixed URL-to-bytes map, so a suite drives the
+ * real HTTP transport without acquiring an ambient socket.
+ *
+ * The return type is written structurally rather than as
+ * `@jinn-network/record-discovery-transport-http`'s `FetchLike`: that package
+ * hands its importer the network by defaulting to the global `fetch`, so the
+ * plugin-tree custody gate confines it to the host-adapter layer, and this
+ * module is scanned as production source.
+ */
+export function loopbackFetch(
+  routes: ReadonlyMap<string, Uint8Array>,
+): (url: string) => Promise<Response> {
+  return async (url) => {
+    const bytes = routes.get(url);
+    if (bytes === undefined) return new Response(null, { status: 404 });
+    return new Response(bytes.slice().buffer as ArrayBuffer, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+}
+
+export interface SignedFixtureArchive {
+  /** Absolute serving-plane URL to response bytes, for a loopback `fetchLike`. */
+  readonly routes: ReadonlyMap<string, Uint8Array>;
+  readonly policyVersions: readonly Uint8Array[];
+  readonly genesisDigest: Sha256Digest;
+  readonly reference: EvidenceRecordReference;
+  /**
+   * The head this archive was BUILT serving, so a caller can derive a re-signed
+   * one from it. `serveHead` replaces what is served; this stays the original,
+   * which is what lets a caller replay it after a re-sign.
+   */
+  readonly head: SourceHead;
+  /**
+   * Signs `next` with the archive's own signer and serves it at the head path,
+   * replacing what was there -- the idle re-signing a live source performs
+   * (`serve`'s `maintainHead`).
+   */
+  readonly serveHead: (next: SourceHead) => Promise<void>;
+}
+
+export interface BuildSignedFixtureArchiveOptions {
+  readonly source: MirrorSourceConfig;
+  readonly admittedProducers: readonly string[];
+  /** The did:key the trust policy's signer set names and the envelopes claim. */
+  readonly signerKeyid: string;
+  readonly signer: DsseSigner;
+  /** Corrupts one signature so the driver's refusal can be observed. */
+  readonly tamper?: "head" | "entry";
+  /**
+   * Total entries on the chain, default 1. Above 1 the archive serves a
+   * genuinely linked, contiguous, individually signed chain whose head cites
+   * the NEWEST entry -- the shape a consumer with a per-pass entry bound
+   * smaller than the backlog cannot walk in one pass (#3252).
+   */
+  readonly entryCount?: number;
+}
+
+/**
+ * The same archive `buildFixtureArchive` serves, with every signature — head,
+ * entry, and the trust-policy chain — genuinely produced by the injected
+ * signer, so a real `VerifyDriver` and a real `DsseChainVerifier` reach a real
+ * verdict on it.
+ */
+export async function buildSignedFixtureArchive(
+  options: BuildSignedFixtureArchiveOptions,
+): Promise<SignedFixtureArchive> {
+  const { source, signer } = options;
+  const aliceBytes = VARIANT_BYTES.filter(
+    (entry) => entry.variant.executorId === "https://agents.test/alice",
+  ).map((entry) => entry.bytes);
+  const { entry, head: genesisHead, recordsByDigest } = archiveDocuments(source, aliceBytes);
+
+  // Successors to the genesis entry, each linked to the one before it and
+  // announcing the same records under fresh announcementIds (§5.3 requires
+  // announcementIds to be source-wide unique; it says nothing about a record
+  // being announced twice).
+  const chain: Array<Omit<typeof entry, "previous"> & { previous: string | null }> = [entry];
+  for (let index = 1; index < (options.entryCount ?? 1); index += 1) {
+    const previous = chain[index - 1]!;
+    chain.push({
+      ...previous,
+      sequence: nextSequence(previous.sequence),
+      previous: sealJson(previous).digest,
+      announcements: previous.announcements.map((announcement, position) => ({
+        ...announcement,
+        announcementId: `ann-${String(index)}-${String(position + 1)}`,
+      })),
+    });
+  }
+  const newest = chain[chain.length - 1]!;
+  const head = { ...genesisHead, sequence: newest.sequence, entry: sealJson(newest).digest };
+
+  const page = {
+    protocol: RECORD_DISCOVERY_VERSION,
+    source: `${source.agent}/${source.name}`,
+    page: "0000000000000001",
+    prevArchive: null,
+    entries: await Promise.all(
+      chain.map(async (link) => ({
+        entry: link,
+        signature: await signedEnvelope(
+          MEDIA_ENTRY,
+          sealJson(link).bytes,
+          signer,
+          options.tamper === "entry",
+        ),
+      })),
+    ),
+  };
+  const headEnvelope = await signedEnvelope(
+    MEDIA_HEAD,
+    sealJson(head).bytes,
+    signer,
+    options.tamper === "head",
+  );
+
+  const policy = await sealTrustPolicy(
+    {
+      protocol: TRUST_POLICY_FORMAT,
+      version: 1,
+      purposes: {
+        [DEFAULT_CORPUS_PRODUCER_PURPOSE]: {
+          accepted: [...options.admittedProducers],
+          requiredStrength: "strong",
+        },
+      },
+      signerSet: { keys: [options.signerKeyid], threshold: 1 },
+      refreshBy: "2027-01-01T00:00:00.000Z",
+    },
+    signer,
+  );
+
+  const encode = (value: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(value));
+  const routes = new Map<string, Uint8Array>([
+    [`${source.servingRoot}${headPath(source.name)}`, encode(headEnvelope)],
+    [source.archiveRootUrl, encode(page)],
+    ...[...recordsByDigest].map(
+      ([digest, bytes]) => [`${source.servingRoot}${recordPath(digest)}`, bytes] as const,
+    ),
+  ]);
+
+  return {
+    routes,
+    policyVersions: [policy.envelopeBytes],
+    genesisDigest: policy.recordDigest,
+    reference: { family: "execution-evidence", digest: recordDigest(aliceBytes[0]!) },
+    head,
+    async serveHead(next: SourceHead): Promise<void> {
+      routes.set(
+        `${source.servingRoot}${headPath(source.name)}`,
+        encode(await signedEnvelope(MEDIA_HEAD, sealJson(next).bytes, signer, options.tamper === "head")),
+      );
+    },
   };
 }

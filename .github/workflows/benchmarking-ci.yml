@@ -13,6 +13,31 @@ on:
       - ".github/workflows/benchmarking-ci.yml"
       - "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md"
       - "docs/superpowers/specs/2026-08-16-evidence-first-benchmarking-design-amendment.md"
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/discovery/protocol/**"
+      - "packages/discovery/publication/**"
+      - "packages/discovery/serve/**"
+      - "packages/discovery/testing/**"
+      - "packages/evidence/attestation-issuer/**"
+      - "packages/evidence/discovery/**"
+      - "packages/evidence/execution-evidence-builder/**"
+      - "packages/evidence/execution-recorder/**"
+      - "packages/evidence/protocol/**"
+      - "packages/evidence/repository/**"
+      - "packages/marketplace/binding/**"
+      - "packages/marketplace/projector/**"
+      - "packages/task-execution/backend/**"
+      - "packages/task-execution/backend-local/assembly/**"
+      - "packages/task-execution/backend-local/launchers/**"
+      - "packages/task-execution/backend-local/supervisor/**"
+      - "packages/task-execution/backend-local/workspace/**"
+      - "packages/task-execution/profiles/**"
+      - "packages/task-execution/protocol/**"
+      - "packages/task-execution/testing/**"
+      - "packages/trust/core/**"
+      - "packages/trust/resolve/**"
   push:
     branches: [next]
     paths:
@@ -21,6 +46,31 @@ on:
       - ".github/workflows/benchmarking-ci.yml"
       - "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md"
       - "docs/superpowers/specs/2026-08-16-evidence-first-benchmarking-design-amendment.md"
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/discovery/protocol/**"
+      - "packages/discovery/publication/**"
+      - "packages/discovery/serve/**"
+      - "packages/discovery/testing/**"
+      - "packages/evidence/attestation-issuer/**"
+      - "packages/evidence/discovery/**"
+      - "packages/evidence/execution-evidence-builder/**"
+      - "packages/evidence/execution-recorder/**"
+      - "packages/evidence/protocol/**"
+      - "packages/evidence/repository/**"
+      - "packages/marketplace/binding/**"
+      - "packages/marketplace/projector/**"
+      - "packages/task-execution/backend/**"
+      - "packages/task-execution/backend-local/assembly/**"
+      - "packages/task-execution/backend-local/launchers/**"
+      - "packages/task-execution/backend-local/supervisor/**"
+      - "packages/task-execution/backend-local/workspace/**"
+      - "packages/task-execution/profiles/**"
+      - "packages/task-execution/protocol/**"
+      - "packages/task-execution/testing/**"
+      - "packages/trust/core/**"
+      - "packages/trust/resolve/**"
 
 permissions:
   contents: read

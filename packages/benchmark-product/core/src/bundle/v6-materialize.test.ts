@@ -38,7 +38,7 @@ import {
   CLAIM_PACKAGE_SCHEMA_ID,
   buildClaimPackage,
 } from "../report/claim.js";
-import { BUNDLE_V6_FORMAT } from "./manifest.js";
+import { BUNDLE_V6_FORMAT } from "../legacy-closures.js";
 import { LOCAL_VENUE_LIMITS } from "../operations/run-results.js";
 import { verifyRunWorkspace } from "../operations/verify.js";
 import { readRunState, writeRunState } from "../run/state.js";

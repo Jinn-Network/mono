@@ -11,16 +11,57 @@ export interface ChainVerificationInput {
   readonly head: SourceHead;
   readonly headSignature?: DsseEnvelope;
   readonly entries: readonly SyncedEntry[];
+  /**
+   * Whether the mirror abandoned the walk before it ran out -- its per-pass
+   * entry bound was reached, or the operation was aborted -- so `entries` is a
+   * PREFIX of the chain above the mark rather than the whole of it (#3252).
+   *
+   * The walk yields oldest-first, so a prefix is missing the newest entries,
+   * including the one the head cites. Whether that is fatal is the posture's
+   * to say, which is why the fact travels here rather than being judged in the
+   * mirror: a posture that verifies linkage cannot accept it, and one that
+   * verifies nothing loses nothing by indexing the prefix and resuming from it
+   * on the next pass.
+   */
+  readonly truncated: boolean;
   readonly firstAdoption: boolean;
+}
+
+/**
+ * The head of a source that is re-serving the chain position this mirror
+ * already holds -- byte-identical, or re-signed at a later instant (#3468).
+ * `entries` is deliberately absent: the caller only reaches this input having
+ * established that the walk yielded nothing.
+ */
+export interface HeadRevalidationInput {
+  readonly source: SourceIdentity;
+  readonly head: SourceHead;
+  readonly headSignature?: DsseEnvelope;
 }
 
 export type ChainVerificationOutcome =
   | { readonly status: "ok" }
   | { readonly status: "rejected"; readonly reason: string };
 
+/**
+ * The one refusal reason in this module that is NOT the archive's doing but
+ * this runtime's own per-pass bound (#3252). Shared so the health check can
+ * branch its remedy on it without matching a bare literal that could drift
+ * away from the value emitted here.
+ */
+export const SYNC_TRUNCATED_REASON = "sync-truncated";
+
 export interface ChainVerification {
   readonly mode: "verified" | "unverified";
   verify(input: ChainVerificationInput): Promise<ChainVerificationOutcome>;
+  /**
+   * `source-head-revalidation`: the same posture applied to a head at the
+   * position already on file. Every posture must answer it, and must answer it
+   * as strictly as it answers `verify` -- it is the one path a source can take
+   * repeatedly without appending anything, so a posture that waved it through
+   * would let a revoked key keep a mirror green indefinitely.
+   */
+  revalidateHead(input: HeadRevalidationInput): Promise<ChainVerificationOutcome>;
 }
 
 /**
@@ -36,6 +77,9 @@ export function createRejectingChainVerification(): ChainVerification {
   return Object.freeze({
     mode: "unverified" as const,
     async verify(): Promise<ChainVerificationOutcome> {
+      return { status: "rejected", reason: "chain-verification-not-configured" };
+    },
+    async revalidateHead(): Promise<ChainVerificationOutcome> {
       return { status: "rejected", reason: "chain-verification-not-configured" };
     },
   });
@@ -62,6 +106,9 @@ export function createUnverifiedChainVerification(
     async verify(): Promise<ChainVerificationOutcome> {
       return { status: "ok" };
     },
+    async revalidateHead(): Promise<ChainVerificationOutcome> {
+      return { status: "ok" };
+    },
   });
 }
 
@@ -70,6 +117,16 @@ export function createDriverChainVerification(driver: VerifyDriver): ChainVerifi
   return Object.freeze({
     mode: "verified" as const,
     async verify(input: ChainVerificationInput): Promise<ChainVerificationOutcome> {
+      if (input.truncated) {
+        // Refused ahead of every check on the source, because a cut chain is
+        // this runtime's own doing: `verifySourceChain` walks linkage from the
+        // head's cited entry, which a truncated walk does not contain, so
+        // asking it here would return `broken-chain` and blame the archive for
+        // a bound the operator set. Naming the real cause is what lets that
+        // operator raise `maxEntriesPerSync` instead of hunting a phantom
+        // linkage break (#3252).
+        return { status: "rejected", reason: SYNC_TRUNCATED_REASON };
+      }
       const headSignature = input.headSignature;
       if (headSignature === undefined) {
         // The unpublished-source profile omits head signatures. A runtime
@@ -96,6 +153,28 @@ export function createDriverChainVerification(driver: VerifyDriver): ChainVerifi
           headSignature,
           entries: entries(),
           firstAdoption: input.firstAdoption,
+        });
+        return outcome.status === "ok"
+          ? { status: "ok" }
+          : { status: "rejected", reason: outcome.status };
+      } catch (error) {
+        void describeError(error);
+        return { status: "rejected", reason: "verification-failed" };
+      }
+    },
+
+    async revalidateHead(input: HeadRevalidationInput): Promise<ChainVerificationOutcome> {
+      const headSignature = input.headSignature;
+      if (headSignature === undefined) {
+        // Same fail-closed rule as `verify`: this runtime does not accept an
+        // unsigned head, and one at the position already on file is no different.
+        return { status: "rejected", reason: "head-unsigned" };
+      }
+      try {
+        const outcome = await driver.verifyHead({
+          source: input.source,
+          head: input.head,
+          headSignature,
         });
         return outcome.status === "ok"
           ? { status: "ok" }

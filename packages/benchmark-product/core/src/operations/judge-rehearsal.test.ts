@@ -22,7 +22,8 @@ import {
   verifyPublicBundle,
 } from "@colophon-claims/verify";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
-import { BUNDLE_V4_FORMAT as CORE_BUNDLE_V4_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
+import { buildBundleManifest } from "../bundle/manifest.js";
+import { BUNDLE_V4_FORMAT as CORE_BUNDLE_V4_FORMAT } from "../legacy-closures.js";
 import { findBundleLeaks } from "../bundle/testing/leak-scan.js";
 import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
 import {
@@ -522,5 +523,26 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     }
     expect(assetPath).toMatch(/^native\/inspect\/[a-f0-9]{64}\.eval$/u);
     discardBundleCopy(assetTamper);
+    // Two hours, and this case measured 2,165,911ms of a 2,690s CI run — it holds one of the
+    // config's two workers for about 80% of the `product` job while the other 180-plus files
+    // queue on the remaining worker (#2766, #3356).
+    //
+    // Decision (#3356): it stays on every PR. It is the only cold-verify of the six-arm synthetic
+    // freeze path together with its five tamper rejections (manifest, report metric, claim
+    // consistency, native asset, evidence closure), which is the closure packet P8 exists to hold;
+    // dropping it from PR gating lets a regression there reach a release cut.
+    //
+    // The two ways out were both measured against that and rejected. Its own CI step does not
+    // help: `benchmark-product-ci.yml`'s `product` is a single serial job, so a separate step
+    // turns 36 minutes of overlap into 36 minutes of extra wall clock — the gate gets slower.
+    // And this package's `.external.test.ts` opt-ins are gated on *capability* (a local Docker
+    // daemon, the exact Harbor binary, a SkillsBench fixture), never on cost; this rehearsal is
+    // fully synthetic and needs none of that, so moving it there would quietly redefine what the
+    // opt-in means.
+    //
+    // The starvation it causes is now bounded by the 30s `testTimeout` that #3330 hoisted. The
+    // lever left is `maxWorkers: 2`, whose own comment records that the 2 was chosen against the
+    // old 5s default and is not a current argument for 2. That is the next thing to revisit, and
+    // it is a measured CI change rather than a change to what this gate covers.
   }, 7_200_000);
 });

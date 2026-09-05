@@ -1448,7 +1448,9 @@
         "profiles": [
           "profiles"
         ],
-        "fixtures": [],
+        "fixtures": [
+          "fixtures"
+        ],
         "conformance": []
       },
       "supersedes": [],

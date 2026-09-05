@@ -77,14 +77,21 @@ what lets an index answer join — "this environment, its attempts, their
 verdicts" — without fetching anything, which for a record behind a payment gate
 is the only way to answer it at all.
 
+Both directions are indexed twice: once for a filter on the digest alone, and
+once for the digest narrowed to a single field, which is how a graph is walked
+a hop at a time. SQLite applies equality terms only across an index prefix, so
+one index cannot serve both shapes without falling back to a temporary b-tree
+for the page ordering. `announcement-edges.test.ts` asserts the query plan for
+each shape, so the coverage is proven rather than restated.
+
 A card is a holder-authored claim and nothing here is checked against the
 record, so edges are scoped to the announcing source: a source replacing its own
 card replaces its own rows and can never displace another source's. Two sources
 may disagree about one record, and a reader sees both with attribution. An edge
 is a hint; a decision resting on one re-checks it against the fetched record.
 
-Any table change moves the SQLite schema version, and there is no migration
-path: `openSqliteEvidenceCatalog` throws `IO_FAILURE` on a database written
+Any table or index change moves the SQLite schema version, and there is no
+migration path: `openSqliteEvidenceCatalog` throws `IO_FAILURE` on a database written
 under an older version, and that throw surfaces at open rather than triggering
 a rebuild. A catalog is a derived index, so the recovery is to start a fresh
 generation and reproject — today that means removing the stale generation, not

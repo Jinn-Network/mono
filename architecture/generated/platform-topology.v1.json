@@ -1058,6 +1058,11 @@
       {
         "from": "@jinn-network/plugin-runtime",
         "kind": "runtime",
+        "to": "@jinn-network/record-discovery-transport-http"
+      },
+      {
+        "from": "@jinn-network/plugin-runtime",
+        "kind": "runtime",
         "to": "@jinn-network/trust-core"
       },
       {
@@ -3280,7 +3285,9 @@
       "path": "packages/discovery/facts/offers",
       "publicSurface": {
         "conformance": [],
-        "fixtures": [],
+        "fixtures": [
+          "fixtures"
+        ],
         "profiles": [
           "profiles"
         ],
@@ -6268,6 +6275,7 @@
           "@jinn-network/execution-recorder",
           "@jinn-network/record-discovery-client",
           "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-transport-http",
           "@jinn-network/trust-core",
           "@modelcontextprotocol/sdk",
           "better-sqlite3",
@@ -7888,6 +7896,51 @@
         "relativeSource": "profiles/result-evaluation.v3.json"
       },
       {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/offers/fixtures/catalog/free.json",
+        "relativeSource": "fixtures/catalog/free.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/offers/fixtures/catalog/priced.json",
+        "relativeSource": "fixtures/catalog/priced.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/offers/fixtures/catalog/superseding.json",
+        "relativeSource": "fixtures/catalog/superseding.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/offers/fixtures/manifest.sha256.json",
+        "relativeSource": "fixtures/manifest.sha256.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-facts-offers",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/offers/fixtures/README.md",
+        "relativeSource": "fixtures/README.md"
+      },
+      {
         "claim": {
           "field": "profile",
           "identifier": "https://spec.jinn.network/facts/offer/v1",
@@ -8276,6 +8329,33 @@
         "kind": "fixtures",
         "package": "@jinn-network/record-discovery-testing",
         "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/consumer-archive-root-escaping-serving-root/vector.json",
+        "relativeSource": "fixtures/vectors/consumer-archive-root-escaping-serving-root/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/consumer-archive-root-inside-serving-root/vector.json",
+        "relativeSource": "fixtures/vectors/consumer-archive-root-inside-serving-root/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/consumer-archive-root-outside-serving-root/vector.json",
+        "relativeSource": "fixtures/vectors/consumer-archive-root-outside-serving-root/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/consumer-cold-start-mirror-disagreement/vector.json",
         "relativeSource": "fixtures/vectors/consumer-cold-start-mirror-disagreement/vector.json"
       },
@@ -8447,6 +8527,24 @@
         "kind": "fixtures",
         "package": "@jinn-network/record-discovery-testing",
         "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/head-issued-ahead/vector.json",
+        "relativeSource": "fixtures/vectors/head-issued-ahead/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/issued-at-regression-v2/vector.json",
+        "relativeSource": "fixtures/vectors/issued-at-regression-v2/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/issued-at-regression/vector.json",
         "relativeSource": "fixtures/vectors/issued-at-regression/vector.json"
       },
@@ -8575,6 +8673,15 @@
         "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/re-announce-after-withdrawal/vector.json",
         "relativeSource": "fixtures/vectors/re-announce-after-withdrawal/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/refresh-by-ceiling-inverted-window/vector.json",
+        "relativeSource": "fixtures/vectors/refresh-by-ceiling-inverted-window/vector.json"
       },
       {
         "claim": null,
@@ -10556,6 +10663,33 @@
         "packedTargets": [],
         "path": "packages/evidence/offer/fixtures/offer/superseding.sha256",
         "relativeSource": "fixtures/offer/superseding.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/unsealable-non-finite-extension-number.json",
+        "relativeSource": "fixtures/offer/unsealable-non-finite-extension-number.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/unsealable-non-integral-extension-number.json",
+        "relativeSource": "fixtures/offer/unsealable-non-integral-extension-number.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/unsealable-unpaired-surrogate-extension-string.json",
+        "relativeSource": "fixtures/offer/unsealable-unpaired-surrogate-extension-string.json"
       },
       {
         "claim": null,
@@ -15908,7 +16042,9 @@
       },
       {
         "conformance": [],
-        "fixtures": [],
+        "fixtures": [
+          "fixtures"
+        ],
         "name": "@jinn-network/record-discovery-facts-offers",
         "path": "packages/discovery/facts/offers",
         "profiles": [

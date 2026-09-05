@@ -314,7 +314,7 @@ describe("runStatus — reflects a driven run", () => {
       expect(cell.verdictSha256, cell.cellKey).toMatch(/^[a-f0-9]{64}$/);
     }
     expect(outcome.result.counts).toEqual({ expected: 6, dispatched: 6, delivered: 6, judged: 6, failed: 0, awaitingEvaluation: 0 });
-  }, 30_000);
+  });
 
   test("a cell with no journal activity at all reports 'pending' among otherwise-complete cells", async () => {
     const clock = makeClock();
@@ -344,7 +344,7 @@ describe("runStatus — reflects a driven run", () => {
     expect(pendingCell).toMatchObject({ status: "pending", dispatches: 0 });
     expect(pendingCell?.attempt).toBeUndefined();
     expect(outcome.result.counts).toEqual({ expected: 6, dispatched: 5, delivered: 5, judged: 5, failed: 0, awaitingEvaluation: 0 });
-  }, 30_000);
+  });
 });
 
 describe("runStatus — cancelRequested flag and blame passthrough (BP-22)", () => {
@@ -370,7 +370,7 @@ describe("runStatus — cancelRequested flag and blame passthrough (BP-22)", () 
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.result.cancelRequested).toBe(true);
-  }, 30_000);
+  });
 
   test("fails closed when the durable cancel marker contains malformed bytes", async () => {
     const clock = makeClock();
@@ -403,7 +403,7 @@ describe("runStatus — cancelRequested flag and blame passthrough (BP-22)", () 
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("journal-integrity");
-  }, 30_000);
+  });
 });
 
 describe("runStatus — evaluation gaps resume would act on (#3084)", () => {
@@ -447,7 +447,7 @@ describe("runStatus — evaluation gaps resume would act on (#3084)", () => {
     expect(outcome.result.evaluationRecovery).toBeUndefined();
     expect(outcome.result.counts.awaitingEvaluation).toBe(1);
     expect(outcome.result.cells.filter((candidate) => candidate.evaluationGap !== undefined)).toHaveLength(1);
-  }, 30_000);
+  });
 
   test("a delivered cell whose delivery IS journaled but whose evaluation leg is missing reports the gap as delivery-journaled", async () => {
     const clock = makeClock();
@@ -475,7 +475,7 @@ describe("runStatus — evaluation gaps resume would act on (#3084)", () => {
     const cell = outcome.result.cells.find((candidate) => candidate.cellKey === gapCellKey);
     expect(cell?.evaluationGap).toEqual({ missingEvalIndexes: [1], deliveryJournaled: true });
     expect(outcome.result.counts.awaitingEvaluation).toBe(1);
-  }, 30_000);
+  });
 
   test("a closed run reports no gap — `resume` cannot act outside `running`, so the cue would be false", async () => {
     const clock = makeClock();
@@ -507,7 +507,7 @@ describe("runStatus — evaluation gaps resume would act on (#3084)", () => {
     expect(outcome.result.state).toBe("closed");
     expect(outcome.result.cells.every((cell) => cell.evaluationGap === undefined)).toBe(true);
     expect(outcome.result.counts.awaitingEvaluation).toBe(0);
-  }, 30_000);
+  });
 
   test("a fully judged run reports no evaluation gap on any cell", async () => {
     const clock = makeClock();
@@ -521,5 +521,5 @@ describe("runStatus — evaluation gaps resume would act on (#3084)", () => {
     if (!outcome.ok) return;
     expect(outcome.result.cells.every((cell) => cell.evaluationGap === undefined)).toBe(true);
     expect(outcome.result.counts.awaitingEvaluation).toBe(0);
-  }, 30_000);
+  });
 });

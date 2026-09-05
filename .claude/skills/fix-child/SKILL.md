@@ -49,8 +49,35 @@ autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
 5. Finish with `session child-complete` (verifies parent-head trailers, closes
    the child). The parent re-enters review for a fresh pass.
 
+## Surfaces you cannot mutate
+
+Your three verbs write commits on the parent branch, close the child, and park
+the attempt. They write nothing else. In particular you have **no verb that
+mutates the parent pull request body**, and therefore none that amends the
+implementation summary inside it. That summary was written once by `session
+implementation-complete` in the parent's implementation session, and the
+lifecycle never returns a delivered PR to that session.
+
+So a fix can falsify a claim the summary makes, and you cannot repair it.
+
+- **Never assert a change to a surface this session has no verb to mutate.**
+  Not in a commit message, not in a trailer, not in a checkpoint. A commit
+  message describes only what its commit contains. A reader auditing the branch
+  will not diff for a correction you announced but did not make.
+- If the falsified claim is **material** — a reader of the squashed merge
+  commit message would be misled about what actually shipped — escalate with
+  `session human`. Name the exact sentence, quote what is now true, and say
+  which commit falsified it. A human can edit the PR body; you cannot.
+- If it is **immaterial** — a stale test count, a narrowed caveat — say so
+  plainly as an observation ("this fix invalidates X in the implementation
+  summary") and finish the child. Do not escalate, and do not claim a fix.
+
+The same boundary applies to labels, reviews, draft state, and Project fields:
+you have no verb for any of them, so you may not report changing any of them.
+
 ## Non-negotiables
 
 - Never open a new PR.
 - Never rebase or rewrite published history.
 - Never guess when intent is undeterminable — escalate with `session human`.
+- Never assert a change to a surface this session has no verb to mutate.

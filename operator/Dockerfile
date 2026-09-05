@@ -71,11 +71,15 @@ COPY packages/read-plane/package.json packages/read-plane/yarn.lock packages/rea
 
 # Nested portal targets. build:stack runs each stack package's own
 # `yarn install --immutable`, which resolves that package's portal
-# resolutions; these two are named there and nowhere in operator/package.json.
+# resolutions; these are named there and nowhere in operator/package.json.
 # They are never installed or built themselves, so the resolver needs the
-# manifest and nothing else (#2809).
+# manifest and nothing else (#2809, #3527). The offer pair reaches one level
+# deeper still: evidence/local-runtime resolves both, and facts/offers resolves
+# evidence/offer in turn.
 COPY packages/discovery/sources/evidence-journal/package.json ./packages/discovery/sources/evidence-journal/
 COPY packages/task-execution/testing/package.json ./packages/task-execution/testing/
+COPY packages/evidence/offer/package.json ./packages/evidence/offer/
+COPY packages/discovery/facts/offers/package.json ./packages/discovery/facts/offers/
 RUN corepack enable && cd operator && yarn install --immutable
 
 # Copy portal-package sources before the client build; `yarn build` builds them

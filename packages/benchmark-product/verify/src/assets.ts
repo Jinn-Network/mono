@@ -1,10 +1,11 @@
-import { BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, DISCLOSURE_VARIABLE_KEYS } from "@jinn-network/benchmarking-records";
 import { validateBinaryInstrumentQualificationProjection } from "@jinn-network/benchmarking-aggregate";
 import type { MatrixRecord, ReportRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { Buffer } from "node:buffer";
+import { refuse } from "./profile/errors.js";
 import { PRODUCT_BRANDING } from "./profile/branding.js";
 import { COLOPHON_MARK_SVG } from "./profile/branding-assets.js";
 import type { ClaimPackage } from "./profile/claim.js";
@@ -21,7 +22,7 @@ export interface PublicAssetInput {
   readonly dissentCellKeys: readonly string[];
   /**
    * Verifier-derived, authenticated human projection. Absent only for the
-   * qualification-projecting profile (`benchmark-product-public-bundle/4` and `/7`), which
+   * qualification-projecting profile (`benchmark-product-public-bundle/4`, `/7`, and `/8`), which
    * carries `binaryQualification` instead. There is no third, comparison-free profile: a
    * bundle rendered with neither field is refused at verification (issue #2984).
    */
@@ -202,6 +203,61 @@ function boundedVisual(value: string, maximumCodePoints: number): string {
   return points.length <= maximumCodePoints ? points.join("") : `${points.slice(0, maximumCodePoints - 1).join("")}…`;
 }
 
+/** Where a projection refuses, and the prose its messages read with. A bundle projects from
+ * exactly two sources -- the sealed Report and the stored claim package -- and each refuses at
+ * its own path. */
+interface ProjectionSource {
+  readonly path: string;
+  readonly label: string;
+}
+
+/*
+ * Every one of this file's thirteen `throw new Error` sites is accounted for below (issue #3643).
+ * Four of them became typed refusals in the same pass; the nine that stay bare are each accounted
+ * for with its own reason. One rule sorts them: a projection check refuses when nothing earlier
+ * settles the same fact, and stays a bare throw when an earlier check or the compiler already
+ * does.
+ *
+ * WHAT REFUSES. `wilsonProjection`'s per-arm check, `comparisonProjection`, `judgeInterval`, and
+ * `pairwiseDisagreementAssetProjection`'s per-pair check read producer-supplied sealed-record
+ * content at a depth no earlier check reaches. `profile/claim.ts` carries `arms`, `pairs`, and
+ * `interval` through VERBATIM into the claim package it rebuilds, so a self-consistent bundle
+ * whose Report carries, say, a string `arm.n` passes `claim-consistency`'s byte-compare and
+ * arrives here intact. `comparisonProjection` is in the same position for the sealed parameters
+ * and the interval's own fields, which that file's sibling never types. This file is therefore the
+ * first and only reader of those facts, and a mismatch is a named disagreement with the record a
+ * reader was handed -- not an internal fault, so `execution` would be the wrong code for it.
+ *
+ * WHAT STAYS BARE. Three sites are internal faults. `recordPaths` and `singleSubjectResults`
+ * assert a shape the caller has already established -- the canonical sort of `recordSha256s`, the
+ * single-Matrix-subject wrapper -- and the `truthAdmission` default is guarded by a
+ * `const exhaustive: never` binding, so the compiler refuses a new member of that closed set
+ * before the throw can run. Reaching any of the three means this package disagrees with itself
+ * about a fact it just derived. That is an internal fault, and `toErrorEnvelope` carrying it as
+ * `execution` is the correct code for exactly that.
+ *
+ * The four outer-shape checks -- `wilsonProjection`'s arms/conflicted pair and its `conflicted`
+ * fields, `pairwiseDisagreementAssetProjection`'s pairs/conflicted pair, and
+ * `pairedMajorityDeltaAssetProjection`'s -- are each shadowed by a strictly stronger sibling of
+ * the same name in `profile/claim.ts`, which `verify.ts` reaches through
+ * `assertClaimConsistency` before it builds the assets. A Report whose shape they would reject
+ * never gets here.
+ *
+ * The two `methodProjection` throws are NOT protected by a schema: `MethodRefSchema.id` is a bare
+ * `z.string()` and `results` is `JsonValueSchema`, so neither the unregistered-method default nor
+ * the binary-qualification validation is unreachable on grammar grounds. What keeps them off the
+ * public reader path is that `profile/claim.ts` reaches the same facts FIRST, and the two are
+ * shadowed differently. The unregistered-method default is shadowed by the identical default in
+ * that file's own projection rebuild for `claim-consistency`, which now refuses with this same
+ * typed shape (issue #3855). The binary-qualification one is shadowed by something stronger:
+ * `ClaimPackageSchema`'s `superRefine` runs the same
+ * `validateBinaryInstrumentQualificationProjection` while parsing `claim-package.json`, and emits a
+ * typed Zod refusal rather than a throw. So a Report this file would reject never reaches it, and
+ * converting either shadowed copy here would move nothing.
+ *
+ * The mismatch in `buildPublicAssets` below is reader-facing for a different reason: it compares
+ * two independently supplied inputs rather than restating a derived fact, so it refuses.
+ */
 function recordPaths(input: PublicAssetInput): readonly string[] {
   const expected = [...input.recordSha256s].sort();
   if (
@@ -217,17 +273,17 @@ function recordPaths(input: PublicAssetInput): readonly string[] {
 /** Every method this product wires publishes its single Matrix subject's results at this fixed
  * path -- mirrors `report/claim.ts`'s `singleSubjectResults`; the wrapper itself is
  * method-agnostic, only what's inside `results` differs by method. */
-function singleSubjectResults(value: unknown, label: string): unknown {
+function singleSubjectResults(value: unknown, source: ProjectionSource): unknown {
   const results = value as { readonly perSubject?: readonly { readonly results?: unknown }[] } | undefined;
   if (results?.perSubject?.length !== 1) {
-    throw new Error(`${label}: expected exactly one subject (this product's single-Matrix Report shape)`);
+    throw new Error(`${source.label}: expected exactly one subject (this product's single-Matrix Report shape)`);
   }
   return results.perSubject[0]?.results;
 }
 
 /** wilson@1's per-arm facts projection. A narrow, local shape check -- deliberately not a general
  * Method-results parser; a mismatch here means the sealed Report was not produced by wilson@1. */
-function wilsonProjection(subjectResults: unknown, label: string): WilsonFacts {
+function wilsonProjection(subjectResults: unknown, source: ProjectionSource): WilsonFacts {
   const shape = subjectResults as {
     readonly arms?: Record<string, {
       readonly n?: unknown;
@@ -237,7 +293,7 @@ function wilsonProjection(subjectResults: unknown, label: string): WilsonFacts {
     readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown };
   } | undefined;
   if (shape?.arms === undefined || shape.conflicted === undefined) {
-    throw new Error(`${label}: expected wilson@1's arms/conflicted shape`);
+    throw new Error(`${source.label}: expected wilson@1's arms/conflicted shape`);
   }
   const arms = Object.entries(shape.arms).map(([armId, arm]) => {
     if (
@@ -246,12 +302,12 @@ function wilsonProjection(subjectResults: unknown, label: string): WilsonFacts {
       || typeof arm.wilsonInterval?.low !== "string"
       || typeof arm.wilsonInterval.high !== "string"
     ) {
-      throw new Error(`${label}: arm ${armId} lacks exact wilson@1 facts`);
+      refuse("record-integrity", source.path, `${source.label}: arm ${armId} lacks exact wilson@1 facts`);
     }
     return { armId, n: arm.n, passRate: arm.passRate, low: arm.wilsonInterval.low, high: arm.wilsonInterval.high };
   });
   if (typeof shape.conflicted.count !== "number" || !Array.isArray(shape.conflicted.cellKeys)) {
-    throw new Error(`${label}: conflicted facts are invalid`);
+    throw new Error(`${source.label}: conflicted facts are invalid`);
   }
   return {
     kind: "wilson",
@@ -270,7 +326,7 @@ function wilsonProjection(subjectResults: unknown, label: string): WilsonFacts {
 function comparisonProjection(
   subjectResults: unknown,
   parameters: unknown,
-  label: string,
+  source: ProjectionSource,
 ): ComparisonFacts {
   const shape = subjectResults as {
     readonly pairs?: unknown;
@@ -303,7 +359,7 @@ function comparisonProjection(
     || typeof parameterShape.alpha !== "string"
     || !["0.10", "0.05", "0.01"].includes(parameterShape.alpha)
   ) {
-    throw new Error(`${label}: expected paired-delta@1's pairs/delta/interval/reasons/conflicted shape`);
+    refuse("record-integrity", source.path, `${source.label}: expected paired-delta@1's pairs/delta/interval/reasons/conflicted shape`);
   }
   return {
     kind: "comparison",
@@ -321,11 +377,11 @@ function comparisonProjection(
   };
 }
 
-function judgeInterval(value: unknown, label: string): { readonly lower: string; readonly upper: string; readonly alpha: string } | null {
+function judgeInterval(value: unknown, source: ProjectionSource): { readonly lower: string; readonly upper: string; readonly alpha: string } | null {
   if (value === null || value === undefined) return null;
   const shape = value as { readonly lower?: unknown; readonly upper?: unknown; readonly alpha?: unknown };
   if (typeof shape.lower !== "string" || typeof shape.upper !== "string" || typeof shape.alpha !== "string") {
-    throw new Error(`${label}: expected a {lower, upper, alpha} interval`);
+    refuse("record-integrity", source.path, `${source.label}: expected a {lower, upper, alpha} interval`);
   }
   return { lower: shape.lower, upper: shape.upper, alpha: shape.alpha };
 }
@@ -333,7 +389,7 @@ function judgeInterval(value: unknown, label: string): { readonly lower: string;
 /** `pairwise-disagreement@1`'s asset projection (packet #2837), sibling to `comparisonProjection`.
  * Narrow local shape check, same posture as its siblings: a mismatch means the sealed Report was
  * not produced by this method. */
-function pairwiseDisagreementAssetProjection(subjectResults: unknown, label: string): PairwiseDisagreementFacts {
+function pairwiseDisagreementAssetProjection(subjectResults: unknown, source: ProjectionSource): PairwiseDisagreementFacts {
   const shape = subjectResults as {
     readonly pairs?: unknown;
     readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown };
@@ -343,7 +399,7 @@ function pairwiseDisagreementAssetProjection(subjectResults: unknown, label: str
     || typeof shape.conflicted?.count !== "number"
     || !Array.isArray(shape.conflicted.cellKeys)
   ) {
-    throw new Error(`${label}: expected pairwise-disagreement@1's pairs/conflicted shape`);
+    throw new Error(`${source.label}: expected pairwise-disagreement@1's pairs/conflicted shape`);
   }
   const pairs = shape.pairs.map((entry) => {
     const pair = entry as {
@@ -355,11 +411,11 @@ function pairwiseDisagreementAssetProjection(subjectResults: unknown, label: str
       || typeof pair.n !== "number" || typeof pair.disagreements !== "number"
       || !(typeof pair.rate === "string" || pair.rate === null)
     ) {
-      throw new Error(`${label}: expected pairwise-disagreement@1's per-pair armA/armB/n/disagreements/rate shape`);
+      refuse("record-integrity", source.path, `${source.label}: expected pairwise-disagreement@1's per-pair armA/armB/n/disagreements/rate shape`);
     }
     return {
       armA: pair.armA, armB: pair.armB, n: pair.n, disagreements: pair.disagreements,
-      rate: pair.rate as string | null, interval: judgeInterval(pair.interval, label),
+      rate: pair.rate as string | null, interval: judgeInterval(pair.interval, source),
     };
   });
   return {
@@ -376,7 +432,7 @@ function pairwiseDisagreementAssetProjection(subjectResults: unknown, label: str
  * `baseline`/`candidate` come from the method's own output here (unlike `paired-delta@1`, which
  * reads them from the sealed parameters) because this method DERIVES its pair rather than
  * accepting one. */
-function pairedMajorityDeltaAssetProjection(subjectResults: unknown, label: string): PairedMajorityDeltaFacts {
+function pairedMajorityDeltaAssetProjection(subjectResults: unknown, source: ProjectionSource): PairedMajorityDeltaFacts {
   const shape = subjectResults as {
     readonly baseline?: unknown; readonly candidate?: unknown; readonly n?: unknown;
     readonly delta?: unknown; readonly interval?: unknown; readonly reasons?: unknown;
@@ -390,7 +446,7 @@ function pairedMajorityDeltaAssetProjection(subjectResults: unknown, label: stri
     || typeof shape.conflicted?.count !== "number"
     || !Array.isArray(shape.conflicted.cellKeys)
   ) {
-    throw new Error(`${label}: expected paired-majority-delta@1's baseline/candidate/n/delta/reasons/conflicted shape`);
+    throw new Error(`${source.label}: expected paired-majority-delta@1's baseline/candidate/n/delta/reasons/conflicted shape`);
   }
   return {
     kind: "paired-majority-delta",
@@ -398,7 +454,7 @@ function pairedMajorityDeltaAssetProjection(subjectResults: unknown, label: stri
     candidate: shape.candidate,
     n: shape.n,
     delta: shape.delta as string | null,
-    interval: judgeInterval(shape.interval, label),
+    interval: judgeInterval(shape.interval, source),
     reasons: shape.reasons.map((value) => String(value)),
     conflicted: {
       count: shape.conflicted.count,
@@ -413,26 +469,26 @@ function pairedMajorityDeltaAssetProjection(subjectResults: unknown, label: stri
 function methodProjection(
   value: unknown,
   method: { readonly id: string; readonly parameters: unknown },
-  label: string,
+  source: ProjectionSource,
 ): MethodFacts {
-  const subjectResults = singleSubjectResults(value, label);
+  const subjectResults = singleSubjectResults(value, source);
   switch (method.id) {
     case BENCHMARKING_METHOD_IDS.wilson:
-      return wilsonProjection(subjectResults, label);
+      return wilsonProjection(subjectResults, source);
     case BENCHMARKING_METHOD_IDS.pairedDelta:
-      return comparisonProjection(subjectResults, method.parameters, label);
+      return comparisonProjection(subjectResults, method.parameters, source);
     case BENCHMARKING_METHOD_IDS.binaryInstrument: {
       const validation = validateBinaryInstrumentQualificationProjection(subjectResults);
-      if (!validation.ok) throw new Error(`${label}: invalid binary qualification: ${validation.issues.join("; ")}`);
+      if (!validation.ok) throw new Error(`${source.label}: invalid binary qualification: ${validation.issues.join("; ")}`);
       const qualification = subjectResults as BinaryFacts["qualification"];
       return { kind: "binary", qualification, conflicted: qualification.conflicted };
     }
     case BENCHMARKING_METHOD_IDS.pairwiseDisagreement:
-      return pairwiseDisagreementAssetProjection(subjectResults, label);
+      return pairwiseDisagreementAssetProjection(subjectResults, source);
     case BENCHMARKING_METHOD_IDS.pairedMajorityDelta:
-      return pairedMajorityDeltaAssetProjection(subjectResults, label);
+      return pairedMajorityDeltaAssetProjection(subjectResults, source);
     default:
-      throw new Error(`${label}: method "${method.id}" has no bundle-asset projection`);
+      throw new Error(`${source.label}: method "${method.id}" has no bundle-asset projection`);
   }
 }
 
@@ -535,7 +591,7 @@ function pairedMajorityDeltaFactsHtml(facts: PairedMajorityDeltaFacts): string {
   return `<dl class="facts"><div><dt>Candidate (evidence-declaring arm)</dt><dd>${escapeMarkup(facts.candidate)}</dd></div><div><dt>Baseline (evidence-free twin)</dt><dd>${escapeMarkup(facts.baseline)}</dd></div><div><dt>Paired task count</dt><dd>${facts.n}</dd></div><div><dt>Candidate minus baseline estimate</dt><dd>${facts.delta === null ? "—" : escapeMarkup(facts.delta)}</dd></div></dl>${judgeIntervalHtml(facts.interval, facts.reasons)}`;
 }
 
-/** The projection is already validated at :294 (validateBinaryInstrumentQualificationProjection),
+/** The projection is already validated by `validateBinaryInstrumentQualificationProjection`,
  * so `configuration["strata"]` is a sealed, non-empty, sorted-unique, grammar-conforming array. */
 function stratumCaption(configuration: Record<string, unknown>): string {
   const strata = Array.isArray(configuration["strata"])
@@ -661,6 +717,57 @@ function publicationGradeWording(truthAdmission: NonNullable<PublicAssetInput["b
   }
 }
 
+/**
+ * The six-variable disclosure table (issue #2839, ruling Q4: the bundle's own `index.html` and
+ * `README.md` are S2's; the site template is packet R1's).
+ *
+ * Rendered from `claim.disclosure` — a verified fact the claim already carries — so this hangs off
+ * the REPORT/claim facts rather than off a format test, and every bundle without a declaration
+ * renders byte-identically to what it rendered before this section existed.
+ *
+ * `measured-here` and `disclosed-by-publisher` are kept visually distinct and are never merged into
+ * one list: the whole point of the record is that a reader can tell at a glance which variables this
+ * venue proved and which it only carries. Nothing here counts, scores, or ranks the statuses (design
+ * §8), and there is no explanatory caption — the status token and the statement are the content.
+ */
+export function disclosureSpecificationHtml(input: PublicAssetInput): string {
+  const disclosure = input.claim.disclosure;
+  if (disclosure === undefined) return "";
+  const rows = DISCLOSURE_VARIABLE_KEYS.map((key) => {
+    const entry = disclosure.variables[key];
+    const detail = entry.status === "undisclosed"
+      ? `<p class="disclosure-reason">${escapeMarkup(entry.reason)}</p>`
+      : `<p class="disclosure-statement">${escapeMarkup(entry.statement)}</p>`;
+    const sources = entry.status === "disclosed-by-publisher" && entry.sources !== undefined
+      ? `<ul class="disclosure-sources">${entry.sources.map((source) => `<li>${escapeMarkup(source.uri)}</li>`).join("")}</ul>`
+      : "";
+    const evidence = entry.status === "measured-here"
+      ? `<ul class="disclosure-evidence">${entry.evidence.map((citation) => `<li><span class="role">${escapeMarkup(citation.role)}</span> <span class="digest">${escapeMarkup(citation.digest.sha256)}</span></li>`).join("")}</ul>`
+      : "";
+    return `<div class="disclosure-variable disclosure-${escapeMarkup(entry.status)}"><dt>${escapeMarkup(key)}</dt><dd><span class="disclosure-status">${escapeMarkup(entry.status)}</span>${detail}${sources}${evidence}</dd></div>`;
+  }).join("");
+  return `<section id="disclosure-specification" aria-labelledby="disclosure-specification-heading"><h2 id="disclosure-specification-heading">Six-variable disclosure</h2><dl class="facts disclosure">${rows}</dl><p class="digest">${escapeMarkup(disclosure.specification)} · record ${escapeMarkup(disclosure.recordSha256)} · subject ${escapeMarkup(disclosure.subjectSha256)}</p></section>`;
+}
+
+export function disclosureSpecificationMarkdown(input: PublicAssetInput): string {
+  const disclosure = input.claim.disclosure;
+  if (disclosure === undefined) return "";
+  const rows = DISCLOSURE_VARIABLE_KEYS.map((key) => {
+    const entry = disclosure.variables[key];
+    const detail = entry.status === "undisclosed"
+      ? `\n  - ${escapeMarkdown(entry.reason)}`
+      : `\n  - ${escapeMarkdown(entry.statement)}`;
+    const sources = entry.status === "disclosed-by-publisher" && entry.sources !== undefined
+      ? entry.sources.map((source) => `\n  - source: ${escapeMarkdown(source.uri)}`).join("")
+      : "";
+    const evidence = entry.status === "measured-here"
+      ? entry.evidence.map((citation) => `\n  - ${escapeMarkdown(citation.role)}: ${escapeMarkdown(citation.digest.sha256)}`).join("")
+      : "";
+    return `- ${escapeMarkdown(key)}: ${escapeMarkdown(entry.status)}${detail}${sources}${evidence}`;
+  }).join("\n");
+  return `## Six-variable disclosure\n\n${rows}\n\n- ${escapeMarkdown(disclosure.specification)}\n- record: ${escapeMarkdown(disclosure.recordSha256)}\n- subject: ${escapeMarkdown(disclosure.subjectSha256)}\n\n`;
+}
+
 export function binaryAdmissionHtml(input: PublicAssetInput): string {
   const admission = input.binaryQualification;
   if (admission === undefined) return "";
@@ -710,6 +817,16 @@ function neutralClaimHtml(facts: MethodFacts): string {
 // `verifyPublicBundleSnapshot` byte-compares every presentation asset against its own rebuild, so
 // a bundle that rendered the sentence would carry an instruction to run a verifier that refuses
 // it. Restoring the render is issue #3416, once the reader line that derives it is re-pinned.
+
+// The strict all-slots denominator (issue #2977) is held for the same reason, so the wilson arm
+// table below still shows the declared denominator alone. Nothing is missing but a place to put
+// it: `armDenominators` in `denominators.ts` derives the pair from records this page already
+// holds -- the Report's own per-arm `n` and the Matrix's per-arm `expected`. Rendering it here is
+// a bundle-format allocation, because `verify.ts` byte-compares every asset against the reader's
+// own rebuild and every allocated format pins a released reader, so a bundle that rendered the
+// pair would carry an instruction to run a verifier that refuses it
+// (`spec/2026-09-02-report-page-information-architecture.md` section 8). The operator's results
+// page renders the pair today; it is not part of the sealed bundle.
 
 function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
   const outcome = input.matrix.completeness.runOutcome;
@@ -763,7 +880,7 @@ ${neutralClaimHtml(reportFacts)}
 </header>
 <main>
 <section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>${input.comparison === undefined ? "" : `\n${comparisonSectionHtml(input.comparison)}`}
-<section aria-labelledby="scope-heading"><h2 id="scope-heading">Benchmark and configuration scope</h2><dl class="facts"><div><dt>Benchmark digest</dt><dd class="digest">${input.claim.scope.benchmarkSha256}</dd></div><div><dt>Tasks</dt><dd>${input.claim.scope.taskCount}</dd></div><div><dt>Replicates</dt><dd>${input.claim.scope.replicates}</dd></div><div><dt>Venue</dt><dd>${escapeMarkup(input.claim.scope.venue)}</dd></div></dl><h3>Arms and pinned configuration</h3><ul>${arms}</ul></section>${reportFacts.kind === "binary" ? binaryAdmissionHtml(input) : ""}
+<section aria-labelledby="scope-heading"><h2 id="scope-heading">Benchmark and configuration scope</h2><dl class="facts"><div><dt>Benchmark digest</dt><dd class="digest">${input.claim.scope.benchmarkSha256}</dd></div><div><dt>Tasks</dt><dd>${input.claim.scope.taskCount}</dd></div><div><dt>Replicates</dt><dd>${input.claim.scope.replicates}</dd></div><div><dt>Venue</dt><dd>${escapeMarkup(input.claim.scope.venue)}</dd></div></dl><h3>Arms and pinned configuration</h3><ul>${arms}</ul></section>${reportFacts.kind === "binary" ? binaryAdmissionHtml(input) : ""}${disclosureSpecificationHtml(input)}
 <section aria-labelledby="matrix-heading"><h2 id="matrix-heading">Sealed Matrix accounting</h2><p class="source-label">Source: authenticated <a href="matrix.json">matrix.json</a>; values below are copied without reconciliation.</p><pre>${escapeMarkup(canonicalText({ completeness: input.matrix.completeness, attrition: input.matrix.attrition }))}</pre><h3>Completeness and attrition</h3><dl class="facts"><div><dt>Matrix run outcome</dt><dd>${escapeMarkup(outcome)}</dd></div><div><dt>Matrix expected</dt><dd>${input.matrix.completeness.expected}</dd></div><div><dt>Matrix judged</dt><dd>${input.matrix.completeness.judged}</dd></div><div><dt>Matrix floor</dt><dd>${escapeMarkup(input.matrix.completeness.floor)}</dd></div></dl><div class="table-scroll" tabindex="0" role="region" aria-label="Per-arm Matrix attrition"><table><caption>Exact per-arm attrition stored in the Matrix</caption><thead><tr><th scope="col">Arm</th><th scope="col">Expected</th><th scope="col">Judged</th><th scope="col">Unjudged</th><th scope="col">Unscorable</th><th scope="col">Expired</th><th scope="col">Invalidated</th><th scope="col">Excluded</th><th scope="col">Replacements</th></tr></thead><tbody>${attritionRows(input)}</tbody></table></div><h3>Matrix asymmetry flags</h3>${list(input.matrix.attrition.asymmetryFlags, "None recorded in the Matrix.")}</section>
 <section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>; values below are copied without reconciliation.</p><h3>${factsHeading(reportFacts, "report")}</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report")}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
 <section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>; values below are copied without reconciliation.</p><h3>${factsHeading(claimFacts, "claim")}</h3>${armResultsHtml(claimFacts, "Exact arm values stored in the Claim package")}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
@@ -977,7 +1094,7 @@ ${adverse.map((value) => `- ${escapeMarkdown(value)}`).join("\n")}
 
 ## Configurations
 
-${arms}${reportFacts.kind === "binary" ? `\n\n${binaryAdmissionMarkdown(input).trimEnd()}` : ""}
+${arms}${reportFacts.kind === "binary" ? `\n\n${binaryAdmissionMarkdown(input).trimEnd()}` : ""}${input.claim.disclosure === undefined ? "" : `\n\n${disclosureSpecificationMarkdown(input).trimEnd()}`}
 
 ## Sealed Matrix accounting
 
@@ -1100,10 +1217,20 @@ function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): stri
 /** Fixed, deterministic public-bundle/2 presentation bytes. The builder only projects already
  * verified stored facts; it never computes a statistic, selects a winner, or reconciles records. */
 export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<string, Uint8Array>> {
-  const reportFacts = methodProjection(input.report.results, input.report.method, "sealed Report");
-  const claimFacts = methodProjection(input.claim.results, input.claim.method, "stored claim package");
+  const reportFacts = methodProjection(input.report.results, input.report.method, { path: "report.json", label: "sealed Report" });
+  const claimFacts = methodProjection(input.claim.results, input.claim.method, { path: "claim-package.json", label: "stored claim package" });
   if ((reportFacts.kind === "binary") !== (input.binaryQualification !== undefined)) {
-    throw new Error("binary public assets require exactly one producer-verified admission/instrument projection");
+    // Typed, not a bare throw (issue #3643). A caller branches on `code` and `issues[].path`; this
+    // is a named disagreement between the requested presentation profile and the sealed Report's
+    // method, not an internal fault, so it must not reach the reader as `execution`. The verifier's
+    // qualification-axis guard (issue #3245) makes it unreachable for the format-relabeling shape,
+    // and the producer's own claim/method agreement check covers the materialize path — so this is
+    // a backstop on the last step of the run, and it refuses like every other step.
+    refuse(
+      "record-integrity",
+      "bundle.presentation",
+      "binary public assets require exactly one producer-verified admission/instrument projection",
+    );
   }
   return {
     "index.html": encoder.encode(buildIndex(input, reportFacts, claimFacts)),
