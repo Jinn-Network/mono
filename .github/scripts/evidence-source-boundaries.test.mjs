@@ -11,7 +11,7 @@ const evidenceDirectories = [
   'catalog-sqlite', 'execution-evidence-builder', 'execution-recorder',
   'attestation-issuer', 'derivation',
   'publication', 'local-runtime', 'execution-recorder-bridge', 'retrieval',
-  'contribution', 'trace', 'trace-decode', 'offer',
+  'contribution', 'trace', 'trace-decode', 'offer', 'gate',
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
@@ -447,6 +447,63 @@ const OFFER_FORBIDDEN_PACKAGES = [
   'node:dgram',
   'node:dns',
   'node:fs',
+  'node:http',
+  'node:http2',
+  'node:https',
+  'node:net',
+  'node:tls',
+  'viem',
+];
+
+// Gate is the tier-3 reference implementation over the offer and the repository contract.
+// It composes exactly three Jinn packages -- the terms, digest-addressed byte reads, and
+// trust-core -- because a holder selling bytes must not have to run discovery, a catalog, a
+// recorder, or a chain client. Every side effect is an injected port, so it performs no I/O
+// at all outside its testing region, where `node:crypto` backs the fixture signer and the
+// test rail's stand-in payer proof.
+const GATE_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/evidence-offer',
+  '@jinn-network/evidence-repository',
+  '@jinn-network/trust-core',
+  'zod',
+];
+const GATE_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
+const GATE_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const GATE_FORBIDDEN_PACKAGES = [
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/autopilot',
+  '@jinn-network/broadcast-bot',
+  '@jinn-network/client',
+  '@jinn-network/operator',
+  '@jinn-network/core',
+  '@jinn-network/evidence-catalog-sqlite',
+  '@jinn-network/evidence-contribution',
+  '@jinn-network/evidence-derivation',
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-local-runtime',
+  '@jinn-network/evidence-publication',
+  '@jinn-network/evidence-repository-ipfs',
+  '@jinn-network/evidence-repository-oci',
+  '@jinn-network/evidence-retrieval',
+  '@jinn-network/evidence-trace',
+  '@jinn-network/evidence-trace-decode',
+  '@jinn-network/execution-recorder',
+  '@jinn-network/execution-recorder-bridge',
+  '@jinn-network/indexer',
+  '@jinn-network/indexer-enrichment',
+  '@jinn-network/jinn-layer',
+  '@jinn-network/marketplace',
+  '@jinn-network/plugin',
+  '@jinn-network/sdk',
+  'better-sqlite3',
+  'hermes-agent',
+  'kubo-rpc-client',
+  'node:child_process',
+  'node:crypto',
+  'node:dgram',
+  'node:dns',
+  'node:fs',
+  'node:fs/promises',
   'node:http',
   'node:http2',
   'node:https',
@@ -999,6 +1056,29 @@ test('Offer boundary checks catch package, I/O, and ambient-network escapes', ()
     ].join('\n'));
     assert.equal(
       forbiddenImports(source, OFFER_FORBIDDEN_PACKAGES).length,
+      6,
+    );
+    assert.equal(ambientNetworkUsesInFiles(files(source)).length, 1);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('Gate boundary checks catch package, I/O, and ambient-network escapes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-gate-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), [
+      'import "@jinn-network/plugin";',
+      'export * from "@jinn-network/evidence-retrieval";',
+      'await import("@jinn-network/core");',
+      'require("@jinn-network/evidence-discovery");',
+      'import "@jinn-network/evidence-offer";',
+      'import "node:fs/promises";',
+      'import "node:crypto";',
+      'fetch;',
+    ].join('\n'));
+    assert.equal(
+      forbiddenImports(source, GATE_FORBIDDEN_PACKAGES).length,
       6,
     );
     assert.equal(ambientNetworkUsesInFiles(files(source)).length, 1);
@@ -1904,7 +1984,9 @@ test('evidence source boundaries remain one-way across the approved graph', () =
       );
     }
   }
-  for (const directory of evidenceDirectories.filter((entry) => entry !== 'offer')) {
+  // Gate is the one package that may reach for the terms: honoring them is its whole job.
+  for (const directory of evidenceDirectories.filter(
+    (entry) => entry !== 'offer' && entry !== 'gate')) {
     assertBoundary(
       join(packages, directory, 'src'),
       ['@jinn-network/evidence-offer'],
@@ -1919,6 +2001,103 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     ),
     [],
     'the Offer root entrypoint must not export testing.ts or fixtures.ts',
+  );
+
+  const gate = join(packages, 'gate');
+  const gateSource = join(gate, 'src');
+  const gateTestingEntry = join(gateSource, 'testing.ts');
+  const gateTestRegex = /\.test\.[cm]?[jt]sx?$/u;
+  const gateSourceFiles = files(gateSource);
+  const gateTestingFiles = gateSourceFiles.filter((file) =>
+    file === gateTestingEntry || gateTestRegex.test(file));
+  const gateProductionFiles = gateSourceFiles.filter((file) =>
+    !gateTestingFiles.includes(file));
+  const gateManifest = manifest('gate');
+  const gateForeignRoots = evidenceDirectories
+    .filter((directory) => directory !== 'gate')
+    .map((directory) => join(packages, directory));
+
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      gateProductionFiles,
+      [...GATE_FORBIDDEN_PACKAGES, 'vitest'],
+      [...gateForeignRoots, ...gateTestingFiles],
+    ),
+    [],
+    'Gate production source must not import forbidden packages, vitest, filesystem APIs, or the testing region',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      gateTestingFiles,
+      GATE_FORBIDDEN_PACKAGES.filter((dependency) => dependency !== 'node:crypto'),
+      gateForeignRoots,
+    ),
+    [],
+    'Gate testing files must not cross into foreign package roots',
+  );
+  assert.deepEqual(
+    gateProductionFiles.flatMap((file) =>
+      specifiers(readFileSync(file, 'utf8'))
+        .filter((specifier) => specifier === 'node:crypto')
+        .map((specifier) => `${relative(root, file)} -> ${specifier}`)),
+    [],
+    'node:crypto belongs to the fixture signer and the test rail in the testing region, never to production source',
+  );
+  assert.deepEqual(
+    ambientNetworkUsesInFiles(gateSourceFiles),
+    [],
+    'Gate source must not use ambient network APIs',
+  );
+  assert.deepEqual(Object.keys(gateManifest.exports).sort(), ['.', './testing']);
+  assert.deepEqual(gateManifest.exports['.'], {
+    import: './dist/index.js',
+    types: './dist/index.d.ts',
+  });
+  assert.deepEqual(gateManifest.exports['./testing'], {
+    import: './dist/testing.js',
+    types: './dist/testing.d.ts',
+  });
+  assert.deepEqual(
+    Object.keys(gateManifest.dependencies ?? {}).sort(),
+    GATE_ALLOWED_DEPENDENCIES,
+  );
+  assert.deepEqual(
+    Object.keys(gateManifest.devDependencies ?? {}).sort(),
+    GATE_ALLOWED_DEV_DEPENDENCIES,
+  );
+  assert.deepEqual(
+    Object.keys(gateManifest.optionalDependencies ?? {}),
+    [],
+    'gate may not declare optional dependencies',
+  );
+  assert.deepEqual(
+    Object.keys(gateManifest.peerDependencies ?? {}).sort(),
+    GATE_ALLOWED_PEER_DEPENDENCIES,
+  );
+  assert.deepEqual(gateManifest.peerDependenciesMeta, { vitest: { optional: true } });
+  for (const section of [
+    'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
+  ]) {
+    for (const dependency of GATE_FORBIDDEN_PACKAGES) {
+      assert.ok(
+        !Object.hasOwn(gateManifest[section] ?? {}, dependency),
+        `gate may not declare ${dependency} in ${section}`,
+      );
+    }
+  }
+  // Nothing depends on the gate: it is the leaf a holder runs, not a library the rest of
+  // the tree composes.
+  for (const directory of evidenceDirectories.filter((entry) => entry !== 'gate')) {
+    assertBoundary(
+      join(packages, directory, 'src'),
+      ['@jinn-network/evidence-gate'],
+      [gate],
+    );
+  }
+  assert.deepEqual(
+    forbiddenImportsInFiles([join(gateSource, 'index.ts')], [], [gateTestingEntry]),
+    [],
+    'the Gate root entrypoint must not export testing.ts',
   );
 
   for (const directory of evidenceDirectories) {
