@@ -54,6 +54,15 @@
  *      reservation no longer adopts an unrelated `Math.random` nearby.
  *      Guessing is the same race as hard-coding, just with a wider blast
  *      radius and a lower reproduction rate.
+ *   2b. No in-band literal RETURNED from that same port-ish block —
+ *      `function pickPort() { return 45000; }`. Rule 2 caught that function
+ *      when it computed the number and rule 1c caught the number when it was
+ *      bound to a name, so the one form that escaped both was the constant
+ *      handed straight back: the identical fixed port, one `return` away from
+ *      a shape two other rules already reject (#3580). Same bounded
+ *      enclosing-declaration walk as rule 2, so it inherits both of that
+ *      walk's protections — the port-ish name filter and the stop at a
+ *      completed statement — and both of its residual false positives below.
  *   3. No parallelism pin, and no isolation opt-out, in
  *      `operator/vitest.config.ts`.
  *
@@ -219,6 +228,12 @@
  *   - A port position inside a template literal's `${…}` interpolation. The
  *     blanking does not parse interpolations back out; the failure is a missed
  *     literal, never a spurious one.
+ *   - A returned in-band literal whose enclosing declaration is not port-ish
+ *     and does not become so within the 10-line lookback — `function make() {
+ *     return 45000; }` handed to a `.listen(` elsewhere. Rule 2b filters on
+ *     the same name test as rules 1 and 2, and a value-only rule over every
+ *     `return` in the tree is the noise the POSITION ∧ VALUE-BAND design
+ *     exists to avoid.
  *   - A bare reassignment — `apiPort = 45000;` with the declaration elsewhere.
  *     Rule 1c requires the `const` / `let` / `var`, which keeps it away from
  *     every `==` / `>=` / `=>` shape a looser pattern would have to exclude.
@@ -263,7 +278,9 @@
  *     declaration whose block has already CLOSED within the 10-line lookback —
  *     `function pickPort() { … }` followed by an unrelated `Math.random()`.
  *     Closing that needs brace tracking, which is more machine than a
- *     heuristic rule warrants.
+ *     heuristic rule warrants. Rule 2b shares the walk and therefore this
+ *     gap: an unrelated in-band `return` under a closed port-ish block reads
+ *     the same way.
  *   - A regex literal read as division. `blankComments` decides from the
  *     preceding significant character, so `if (x) /re/.test(y)` reads as
  *     division and the pattern body is scanned as code. It takes an in-band
@@ -340,6 +357,13 @@ const PORT_DECL_ARRAY = new RegExp(`${PORT_DECL}\\[([^\\]]{0,${PORT_KEY_ARRAY_MA
 // as catching a "randomly guessed" port, and `crypto.randomInt(40000, 60000)`
 // is the same guess with a better RNG.
 const RANDOM_CALL = /Math\.random|\brandomInt\s*\(/;
+// Rule 2b — `return 45000` from inside a port-ish declaration. The same fixed
+// port as `const apiPort = 45000` (rule 1c), one `return` away from it, and
+// the shape rule 2 stops one step short of: it catches `pickPort()` when the
+// number is guessed, not when it is written down. Shares rule 2's bounded
+// enclosing-declaration walk, so `function pickTransport()` is filtered out by
+// name and a completed statement stops the attribution, exactly as there.
+const RETURN_LITERAL = new RegExp(`\\breturn\\s+${NUM}`, 'g');
 const DECLARATION = /\bfunction\s+([A-Za-z_$][\w$]*)|\bconst\s+([A-Za-z_$][\w$]*)\s*=/;
 /**
  * A `port` at a word or camelCase boundary — never a bare substring.
@@ -680,6 +704,14 @@ export function scanText(text) {
     if (RANDOM_CALL.test(line)) {
       const name = enclosingName(codeLines, idx);
       if (name && PORTISH_NAME.test(name)) flagged = true;
+    }
+    // Rule 2b — a written-down port returned from the same port-ish block.
+    if (!flagged) {
+      for (const m of line.matchAll(RETURN_LITERAL)) {
+        if (!inBand(m[1])) continue;
+        const name = enclosingName(codeLines, idx);
+        if (name && PORTISH_NAME.test(name)) flagged = true;
+      }
     }
 
     if (flagged) violations.push({ line: idx + 1, snippet: raw.trim() });

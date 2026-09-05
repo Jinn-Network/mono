@@ -341,6 +341,11 @@ test('documented non-catches stay documented', () => {
   assert.deepEqual(flagged('const { apiPort = 45000 } = opts;'), [], 'destructured');
   assert.deepEqual(flagged('const ports = opts.ports ?? [45000];'), [], 'defaulted array initializer');
   assert.deepEqual(
+    flagged('function make() {\n  return 45000;\n}'),
+    [],
+    'a returned literal whose enclosing declaration is not port-ish',
+  );
+  assert.deepEqual(
     flagged('const apiPort = 7331;\nobj.x = Math.random();'),
     [],
     'rule 2 does not reach across a completed statement',
@@ -362,6 +367,11 @@ test('documented false positives stay documented', () => {
     flagged('function pickPort() {\n  return 1;\n}\nobj.x = Math.random(); // ' + ALLOW_MARKER),
     [],
     'and the marker is the resolution',
+  );
+  assert.deepEqual(
+    flagged('function pickPort() {\n  return 1;\n}\nreturn 45000;'),
+    [4],
+    'rule 2b shares the walk, so it shares the gap',
   );
   assert.deepEqual(
     flagged('if (x) /apiPort: 45000/.test(y);'),
@@ -489,6 +499,27 @@ test('rule 2 still catches a random call inside a port-ish declaration', () => {
   assert.deepEqual(flagged('const pickPort = () => {\n  return Math.random();\n};'), [2], 'an arrow body');
   assert.deepEqual(flagged('const apiPort =\n  40000 + Math.floor(Math.random() * 20000);'), [2], 'a continued initializer');
   assert.deepEqual(flagged('const attempts = 3;\nfunction pickPort() {\n  return Math.random();\n}'), [3], 'the nearest declaration still wins');
+});
+
+// ── Rule 2b: a bare in-band literal returned from a port-ish declaration (#3580)
+// Rule 2 catches `function pickPort() { return randomInt(40000, 60000); }` —
+// the form #3065 removed — but not the same function returning a CONSTANT,
+// which is the identical fixed-port hazard with none of the randomness. It
+// reuses rule 2's bounded enclosing-declaration walk, so the attribution rules
+// (nearest declaration wins, a completed statement stops it) are the same.
+test('rule 2b catches a bare in-band literal returned from a port-ish declaration', () => {
+  assert.deepEqual(flagged('function pickPort() { return 45000; }'), [1], 'one line');
+  assert.deepEqual(flagged('function pickPort() {\n  return 45000;\n}'), [2], 'reported at the literal');
+  assert.deepEqual(flagged('const pickPort = () => {\n  return 45_000;\n};'), [2], 'an arrow body, separated');
+  assert.deepEqual(flagged('function pickPort() {\n  return 7732;\n}'), [], 'sub-band is the sanctioned form');
+  assert.deepEqual(flagged('function pickTransport() {\n  return 45000;\n}'), [], 'the name is filtered like every other rule');
+  assert.deepEqual(flagged('function pickPort() {\n  return 45000; // ' + ALLOW_MARKER + '\n}'), [], 'the marker suppresses it');
+  assert.deepEqual(flagged('const attempts = 3;\nfunction pickPort() {\n  return 45000;\n}'), [3], 'the nearest declaration still wins');
+  assert.deepEqual(
+    flagged('const apiPort = 7331;\nreturn 45000;'),
+    [],
+    'and a completed statement stops the walk, exactly as for rule 2',
+  );
 });
 
 // ── The walk's extension filter (#3543) ────────────────────────────────────

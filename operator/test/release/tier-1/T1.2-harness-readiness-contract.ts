@@ -46,6 +46,11 @@ const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-ag
 //                 bound at :246 the same way
 //   7732 / 7733   test/helpers/multi-op-daemon.test.ts -- op-a / op-b dummies
 //   7734          test/helpers/multi-op-daemon.test.ts -- 'teardown is idempotent'
+//   7735 / 7736   test/helpers/multi-op-daemon.test.ts -- the lifetime-log
+//                 describe: 'streams stdout + stderr ...' / 'does not write a
+//                 log file when logDir is omitted'
+//   7737          test/helpers/multi-op-daemon.test.ts -- 'keeps the fatal
+//                 daemon envelope in the readiness error'
 //   7740 / 7741   test/release/tier-2/tier-2-helpers.test.ts -- portBase 7740
 //                 (op-b takes portBase + 1)
 //   7742 / 7743   test/release/tier-2/tier-2-helpers.test.ts -- portBase 7742
@@ -76,7 +81,8 @@ const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-ag
 //      unique repo-wide), or `allocateAnvilPort()` when a fixed reservation is
 //      impractical -- many ports, or several instances inside one file. The
 //      allocator has a narrow allocate-then-rebind window; the reservation has
-//      none.
+//      none, so a handful of single-port call sites reserve rather than
+//      allocate however short the window would have been (#3582).
 //   3. The assertion IS "nothing is listening here" -> a fixed port below
 //      32768, with a comment saying why.
 //

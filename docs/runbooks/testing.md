@@ -282,8 +282,9 @@ can have it taken mid-run. Three sanctioned forms, in preference order:
 | nothing — the assertion *is* "nothing is listening here" | a fixed port **below 32768**, with a comment saying why |
 
 The invariant under all three: **never a literal inside 32768–65535 in a
-port-shaped position** — a `.listen(` argument, a port-shaped object key, or a
-port-ish `const`, and in the last two cases every element of an array bound
+port-shaped position** — a `.listen(` argument, a port-shaped object key, a
+port-ish `const`, or a `return` from inside a port-ish block, and in the object
+key and `const` cases every element of an array bound
 there. Those are the positions the lint can see; a port buried in a
 URL string (`fetch('http://127.0.0.1:45020/health')`) is outside it, and so are
 the other gaps listed under "What this guard does not catch" in the header of
