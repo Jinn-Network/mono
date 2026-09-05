@@ -42,21 +42,36 @@ interface EarningTarget {
  *   even when both operators happened to share one password;
  * - rotated a custom earning dir on a host with no default keystore → the file opens
  *   nothing, so it goes, which keeps single-operator rotation working.
+ *
+ * Every failure this cannot classify answers "not stale", so an unreadable file or a
+ * corrupt default keystore keeps the one artifact that could still open a keystore
+ * restored from backup. Callers must run this AFTER the new keystore is saved:
+ * against the old keystore the old password still decrypts, and the file would
+ * wrongly survive its own rotation.
  */
 async function passwordFileIsStale(
   passwordFilePath: string,
   defaultEarningDir: string,
 ): Promise<boolean> {
   if (!existsSync(passwordFilePath)) return false;
-  const value = readFileSync(passwordFilePath, 'utf-8').trim();
-  if (value.length === 0) return true;
-  const defaultStore = new FleetStateStore(defaultEarningDir);
-  if (!defaultStore.hasMnemonicKeystore()) return true;
   try {
-    await decryptMnemonic(await defaultStore.loadMnemonicKeystore(), value);
-    return false;
+    const value = readFileSync(passwordFilePath, 'utf-8').trim();
+    if (value.length === 0) return true;
+    const defaultStore = new FleetStateStore(defaultEarningDir);
+    if (!defaultStore.hasMnemonicKeystore()) return true;
+    const encrypted = await defaultStore.loadMnemonicKeystore();
+    // `hasMnemonicKeystore` is only an existence check, and `decryptMnemonic` throws
+    // the same way for a corrupt payload as for a wrong password. Rule out corruption
+    // first so a broken default keystore never costs the operator this file too.
+    JSON.parse(encrypted);
+    try {
+      await decryptMnemonic(encrypted, value);
+      return false;
+    } catch {
+      return true;
+    }
   } catch {
-    return true;
+    return false;
   }
 }
 

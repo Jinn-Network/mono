@@ -17,6 +17,10 @@ async function makeKeystore(): Promise<{ dir: string; password: string }> {
 }
 
 describe('keys backup command', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('writes the mnemonic to --output when password is correct', async () => {
     const { dir, password } = await makeKeystore();
     const outPath = join(dir, 'backup.txt');
@@ -78,6 +82,7 @@ describe('keys backup command', () => {
   });
 
   it('honors --config for the earning dir', async () => {
+    vi.stubEnv('JINN_EARNING_DIR', '');
     const { dir, password } = await makeKeystore();
     const outPath = join(dir, 'backup.txt');
     const configPath = join(mkdtempSync(join(tmpdir(), 'jinn-keys-backup-config-')), 'config.json');
@@ -331,6 +336,54 @@ describe('keys change-password command', () => {
     await keysCmd.run(ctx);
 
     expect(JSON.parse(writes[writes.length - 1]!).keystoreDir).toBe(dir);
+  });
+
+  it('resolves the legacy ~/.jinn-client tree when it is the populated one', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-keys-cp-home-'));
+    const legacyStateDir = join(home, '.jinn-client');
+    const legacyEarningDir = join(legacyStateDir, 'earning');
+    mkdirSync(legacyEarningDir, { recursive: true });
+    const { generateMnemonic, encryptMnemonic } = await import('../../../src/earning/wallet.js');
+    const { FleetStateStore } = await import('../../../src/earning/store.js');
+    await new FleetStateStore(legacyEarningDir).saveMnemonicKeystore(
+      await encryptMnemonic(generateMnemonic(), 'pw'),
+    );
+    const passwordFile = join(legacyStateDir, 'keystore-password');
+    writeFileSync(passwordFile, 'pw\n', { mode: 0o600 });
+
+    // Rotating another operator must leave the legacy tree's password file alone.
+    const { dir, password } = await makeKeystore();
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home,
+      JINN_EARNING_DIR: dir,
+      JINN_PASSWORD: password,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(false);
+    expect(existsSync(passwordFile)).toBe(true);
+  });
+
+  // A corrupt default keystore throws exactly like a wrong password. Keep the file:
+  // it may be the only thing that still opens a keystore restored from backup.
+  it('keeps the password file when the default keystore is corrupt', async () => {
+    const { home, defaultEarningDir, passwordFile } = await makeDefaultOperator();
+    writeFileSync(join(defaultEarningDir, 'master_keystore.json'), 'not json at all');
+    const { dir, password } = await makeKeystore();
+
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home,
+      JINN_EARNING_DIR: dir,
+      JINN_PASSWORD: password,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(false);
+    expect(existsSync(passwordFile)).toBe(true);
   });
 
   it('rejects an explicit --config that cannot be loaded', async () => {
