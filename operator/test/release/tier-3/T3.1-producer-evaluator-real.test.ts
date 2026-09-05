@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import {
+  assertT31ApprovedHermesOverridePair,
   buildT31DaemonEnv,
   createT31GuardMismatchScanner,
   resolveT31SolverHermesConfigPath,
@@ -138,6 +139,50 @@ describe('resolveT31SolverHermesConfigPath env handling', () => {
   });
 });
 
+describe('assertT31ApprovedHermesOverridePair', () => {
+  it('accepts a complete approved pair', () => {
+    expect(() =>
+      assertT31ApprovedHermesOverridePair({
+        approvedHermesOverride: { model: 'anthropic/claude-opus-4.6', provider: 'anthropic' },
+        env: {},
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts no approved override at all', () => {
+    expect(() => assertT31ApprovedHermesOverridePair({ env: {} })).not.toThrow();
+  });
+
+  it('rejects an approved provider with no approved model', () => {
+    expect(() =>
+      assertT31ApprovedHermesOverridePair({
+        approvedHermesOverride: undefined,
+        env: { [T31_APPROVED_HERMES_PROVIDER_ENV]: 'anthropic' },
+      }),
+    ).toThrow(new RegExp(T31_APPROVED_HERMES_MODEL_ENV));
+  });
+
+  it('rejects a stray inherited approved provider even when the scenario emits neither half', () => {
+    // spawnMultiOpDaemons builds each child env as { ...process.env, ...extraEnv },
+    // so the stray var reaches the daemon and trips the guard after boot.
+    expect(() =>
+      assertT31ApprovedHermesOverridePair({
+        approvedHermesOverride: { model: '', provider: '' },
+        env: { [T31_APPROVED_HERMES_PROVIDER_ENV]: '  openrouter  ' },
+      }),
+    ).toThrow(/before .*spawn|Refusing to spawn/i);
+  });
+
+  it('accepts an inherited provider once the scenario supplies the approved model', () => {
+    expect(() =>
+      assertT31ApprovedHermesOverridePair({
+        approvedHermesOverride: { model: 'anthropic/claude-opus-4.6' },
+        env: { [T31_APPROVED_HERMES_PROVIDER_ENV]: 'anthropic' },
+      }),
+    ).not.toThrow();
+  });
+});
+
 describe('createT31GuardMismatchScanner', () => {
   const mismatchLine =
     `[hermes-agent] ${RESOLVED_HERMES_MODEL_MISMATCH_MARKER}: ` +
@@ -181,6 +226,43 @@ describe('createT31GuardMismatchScanner', () => {
       // not be scanned — nor may the offset advance past it.
       expect(await scan()).toBeNull();
       await fs.appendFile(logPath, `${mismatchLine.slice(split)}\n`);
+      expect(await scan()).toEqual({ logPath, line: mismatchLine });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rescans from the start when a log is truncated and regrows past the stale offset', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 't31-scan-'));
+    try {
+      const logPath = path.join(dir, 'op-b-daemon.log');
+      await fs.writeFile(logPath, `first boot\n${'a'.repeat(4096)}\n`);
+      const scan = createT31GuardMismatchScanner([logPath]);
+      expect(await scan()).toBeNull();
+      // Truncated and regrown past the remembered offset entirely between two
+      // polls: the size check alone cannot see the shrink, so a marker in the
+      // skipped prefix would be missed.
+      await fs.writeFile(logPath, `second boot\n${mismatchLine}\n${'b'.repeat(8192)}\n`);
+      expect(await scan()).toEqual({ logPath, line: mismatchLine });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('remembers a truncation observed while the replacement has no complete line yet', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 't31-scan-'));
+    try {
+      const logPath = path.join(dir, 'op-b-daemon.log');
+      await fs.writeFile(logPath, `first boot\n${'a'.repeat(4096)}\n`);
+      const scan = createT31GuardMismatchScanner([logPath]);
+      expect(await scan()).toBeNull();
+      // Truncated, and the replacement's first line is still unterminated.
+      await fs.writeFile(logPath, 'second boot');
+      expect(await scan()).toBeNull();
+      // Completed, and regrown past the stale offset: the reset must survive
+      // that early-out, or this poll reads from byte 4108 of the replacement
+      // and misses the marker.
+      await fs.appendFile(logPath, `\n${mismatchLine}\n${'b'.repeat(8192)}\n`);
       expect(await scan()).toEqual({ logPath, line: mismatchLine });
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
