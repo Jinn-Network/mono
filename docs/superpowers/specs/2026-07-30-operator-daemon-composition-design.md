@@ -89,6 +89,10 @@ the composition root this spec designs. The physical tree renames `client/` → 
 cutover stage 5 (§10) — after the recomposition, so the strangler stages diff against a
 stable tree and the rename is one clean commit touching only paths.
 `client/OPERATOR-APP-SPEC.md` moves with it, its name finally matching its home.
+Three uses of `client` survive the retirement by decision, not by omission: the
+`client-v*` legacy release-tag pattern, the `client` key in the `schemaVersion: 1`
+`version --json` payload, and `packages/discovery/client` (a different tree). See
+[DR-2026-09-02](../../../log/decisions/2026-09-02-f1-operator-naming-closure.md).
 
 **The three-way split:**
 
