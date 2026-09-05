@@ -138,6 +138,23 @@ const CONSTRAINT = [
   "EXPECTED_JUSTIFIED_SITES in this file so the addition is reviewed rather than assumed.",
 ].join(" ");
 
+const STRING_OPENERS = new Set(["=", "(", ",", ":"]);
+
+function sameLineStringCloser(text: string, opener: number): number | undefined {
+  const quote = text[opener]!;
+  for (let closer = opener + 1; closer < text.length && text[closer] !== "\n"; closer += 1) {
+    const candidate = text[closer]!;
+    if (candidate === "\\") {
+      if (text[closer + 1] === ";" || text[closer + 1] === "\n") return undefined;
+      closer += 1;
+      continue;
+    }
+    if (candidate === ";") return undefined;
+    if (candidate === quote) return closer;
+  }
+  return undefined;
+}
+
 /**
  * Comments blanked to same-length runs, so offsets and line numbers survive and prose about a
  * binding is not read as one.
@@ -147,15 +164,12 @@ const CONSTRAINT = [
  * site; the walker below is deliberately narrower than the one reverted here, which lexed all three
  * nesting forms and, on a stray backtick in a regex character class (the tree contains one, at
  * `core/src/run/publication-source.ts:476`), went into template mode to end of file and blanked a
- * whole tail silently. So: backticks are not tracked at all, and quote state is dropped at every
- * newline. A quote that never closes on its line therefore costs at most the comment blanking on
- * the rest of THAT line -- a comment read as code, which is the loud direction -- and can never
- * reach the next line, let alone the file's tail.
- *
- * The residue that remains is the template literal: a backtick-quoted string carrying a comment
- * opener still blanks the rest of its line. That is precisely the form that cost the last attempt a
- * whole file, and it is the noise-direction half of the pair anyway, since `blankStringLiterals`
- * closes the forging direction over the quoted forms.
+ * whole tail silently. So: backticks are not parsed, quotes use the same narrow opener confidence as
+ * `blankStringLiterals`, and quote state is dropped at every newline. Once a slash, backtick, or
+ * rejected quote makes a line ambiguous, nothing later on that line is blanked. A quote that never
+ * closes on its line therefore costs at most the comment blanking on the rest of THAT line -- a
+ * comment read as code, which is the loud direction -- and can never reach the next line, let alone
+ * the file's tail.
  */
 function blankComments(text: string): string {
   // Split by UTF-16 unit, which is what `text[index]` reads: spreading would split by code
@@ -164,31 +178,57 @@ function blankComments(text: string): string {
   const blank = (from: number, to: number): void => {
     for (let index = from; index < to; index += 1) if (out[index] !== "\n") out[index] = " ";
   };
-  let mode: "code" | "line" | "block" | "string" = "code";
-  let quote = "";
+  let mode: "code" | "line" | "block" | "opaque" = "code";
   let start = 0;
+  let previousToken: string | undefined;
+  let slashSeen = false;
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index]!;
     if (mode === "line") {
-      if (character === "\n") { blank(start, index); mode = "code"; }
+      if (character === "\n") {
+        blank(start, index);
+        mode = "code";
+        previousToken = undefined;
+        slashSeen = false;
+      }
       continue;
     }
     if (mode === "block") {
       // An unterminated block comment is left as written, which is what the regex this replaced
       // did: only a closed comment is blanked.
       if (character === "*" && text[index + 1] === "/") { blank(start, index + 2); index += 1; mode = "code"; }
+      else if (character === "\n") { previousToken = undefined; slashSeen = false; }
       continue;
     }
-    if (mode === "string") {
-      // An escape consumes the next character, but never the newline: state is dropped at every
-      // line break, so nothing this walker gets wrong can reach the line after it.
-      if (character === "\\" && text[index + 1] !== "\n") index += 1;
-      else if (character === quote || character === "\n") mode = "code";
+    if (mode === "opaque") {
+      if (character === "\n") {
+        mode = "code";
+        previousToken = undefined;
+        slashSeen = false;
+      }
       continue;
     }
+    if (character === "\n") { previousToken = undefined; slashSeen = false; }
     if (character === "/" && text[index + 1] === "/") { mode = "line"; start = index; index += 1; }
     else if (character === "/" && text[index + 1] === "*") { mode = "block"; start = index; index += 1; }
-    else if (character === '"' || character === "'") { mode = "string"; quote = character; }
+    else if (character === '"' || character === "'") {
+      if (slashSeen || (previousToken !== undefined && !STRING_OPENERS.has(previousToken))) {
+        mode = "opaque";
+      } else {
+        const closer = sameLineStringCloser(text, index);
+        if (closer === undefined) {
+          mode = "opaque";
+        } else {
+          previousToken = character;
+          index = closer;
+        }
+      }
+    } else if (character === "`") {
+      mode = "opaque";
+    } else {
+      if (character === "/") slashSeen = true;
+      if (!/\s/u.test(character)) previousToken = character;
+    }
   }
   if (mode === "line") blank(start, text.length);
   return out.join("");
@@ -205,17 +245,17 @@ function blankComments(text: string): string {
  * advances over the whole string body.
  *
  * A would-be span containing a semicolon also stays visible because it may cross an executable
- * statement boundary. The walker advances to that span's closer instead of retrying its suffix,
- * and an unclosed eligible opener scans the rest of its line once, so total work is linear per
- * line. Run over comment-blanked text, so an apostrophe inside a comment cannot open a string here.
+ * statement boundary. It stops blanking for the rest of the line instead of resuming at its closer,
+ * and an unclosed eligible opener scans the rest of its line once, so total work is linear per line.
+ * Run over comment-blanked text, so an apostrophe inside a comment cannot open a string here.
  *
  * Applied only inside `emitterCallSites`, never folded into `blankComments`: `resolveOrigin` reads
  * the import SPECIFIER off that function's output, and blanking interiors there would resolve every
  * file's origin to the empty specifier and silently drop its real calls -- the barrel hole in a
- * third shape. Same narrowness as above: no backticks, and no quote state crosses a newline.
+ * third shape. Same narrowness as above: a backtick stops the line instead of being parsed, and no
+ * quote state crosses a newline.
  */
 function blankStringLiterals(text: string): string {
-  const openers = new Set(["=", "(", ",", ":"]);
   return text.split("\n").map((line) => {
     const out = line.split("");
     let previousToken: string | undefined;
@@ -223,31 +263,18 @@ function blankStringLiterals(text: string): string {
     for (let index = 0; index < line.length; index += 1) {
       const character = line[index]!;
       if (character !== '"' && character !== "'") {
+        if (character === "`") break;
         if (character === "/") slashSeen = true;
         if (!/\s/u.test(character)) previousToken = character;
         continue;
       }
-      if (slashSeen || (previousToken !== undefined && !openers.has(previousToken))) {
+      if (slashSeen || (previousToken !== undefined && !STRING_OPENERS.has(previousToken))) {
         break;
       }
 
-      let closer = index + 1;
-      let crossesStatementBoundary = false;
-      while (closer < line.length) {
-        const candidate = line[closer]!;
-        if (candidate === "\\") {
-          if (line[closer + 1] === ";") crossesStatementBoundary = true;
-          closer += 2;
-          continue;
-        }
-        if (candidate === ";") crossesStatementBoundary = true;
-        if (candidate === character) break;
-        closer += 1;
-      }
-      if (closer >= line.length) break;
-      if (!crossesStatementBoundary) {
-        for (let blank = index + 1; blank < closer; blank += 1) out[blank] = " ";
-      }
+      const closer = sameLineStringCloser(line, index);
+      if (closer === undefined) break;
+      for (let blank = index + 1; blank < closer; blank += 1) out[blank] = " ";
       previousToken = character;
       index = closer;
     }
@@ -696,6 +723,42 @@ describe("the binding face is never emitted from an unchecked binding", () => {
 
   test("a quote in a regex character class cannot hide a comma-separated call", () => {
     const source = 'const values = [/["]/u, runBindingSentence(forged), ""];\n';
+    expect(emitterCallSites(source, "fixture.ts")).toEqual([{
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    }]);
+  });
+
+  test("a regex quote cannot make a later URL hide a call", () => {
+    const source = 'const media = /["]/u; const url = "https://example.com"; const s = runBindingSentence(forged);';
+    expect(emitterCallSites(source, "fixture.ts")).toEqual([{
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    }]);
+  });
+
+  test("a semicolon-crossing comment-string candidate cannot hide a later URL and call", () => {
+    const source = 'const template = `= "unterminated`; const url = "https://example.com"; const s = runBindingSentence(forged);';
+    expect(emitterCallSites(source, "fixture.ts")).toEqual([{
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    }]);
+  });
+
+  test("a template quote cannot hide a comma-separated URL and call", () => {
+    const source = 'const values = [`= "unterminated`, "https://example.com", runBindingSentence(forged)];';
+    expect(emitterCallSites(source, "fixture.ts")).toEqual([{
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    }]);
+  });
+
+  test("a semicolon-rejected string cannot let a template quote hide a call", () => {
+    const source = 'const first = "contains;semicolon"; const rendered = `, "${runBindingSentence(forged)}"`;';
     expect(emitterCallSites(source, "fixture.ts")).toEqual([{
       site: "fixture.ts:runBindingSentence",
       binding: "forged",
