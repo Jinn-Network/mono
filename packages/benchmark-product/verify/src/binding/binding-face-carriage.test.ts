@@ -217,14 +217,17 @@ function blankStringLiterals(text: string): string {
   };
   const blank = (body: string): string => body.replace(/[^\n]/g, " ");
   return text.split("\n").map((line) => {
-    let blanked = line;
-    if (countUnescaped(line, '"') % 2 === 0) {
-      blanked = blanked.replace(/"((?:\\.|[^\\\n])*?)"/gu, (_match, body: string) => `"${blank(body)}"`);
-    }
-    if (countUnescaped(line, "'") % 2 === 0) {
-      blanked = blanked.replace(/'((?:\\.|[^\\\n])*?)'/gu, (_match, body: string) => `'${blank(body)}'`);
-    }
-    return blanked;
+    const doubleEven = countUnescaped(line, '"') % 2 === 0;
+    const singleEven = countUnescaped(line, "'") % 2 === 0;
+    const strings = doubleEven
+      ? singleEven ? /(["'])((?:\\.|[^\\\n])*?)\1/gu : /"(?:\\.|[^\\\n])*?"|'/gu
+      : singleEven ? /'(?:\\.|[^\\\n])*?'|"/gu : /["']/gu;
+    return line.replace(strings, (match) => {
+      const quote = match[0]!;
+      return countUnescaped(line, quote) % 2 === 0
+        ? `${quote}${blank(match.slice(1, -1))}${quote}`
+        : match;
+    });
   }).join("\n");
 }
 
@@ -634,6 +637,12 @@ describe("the binding face is never emitted from an unchecked binding", () => {
       .toEqual([]);
     const dangerous = `${IMPORTED}const media = /[']/u; const help = "call runBindingSentence(fake)"; const s = runBindingSentence(forged); const empty = '';\n`;
     expect(emitterCallSites(dangerous, "fixture.ts")).toEqual([{
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    }]);
+    const mixed = `${IMPORTED}const media = /['"']/u; const s = runBindingSentence(forged); const other = /["]/u;\n`;
+    expect(emitterCallSites(mixed, "fixture.ts")).toEqual([{
       site: "fixture.ts:runBindingSentence",
       binding: "forged",
       justified: false,
