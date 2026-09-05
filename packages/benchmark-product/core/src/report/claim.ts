@@ -45,6 +45,8 @@ import {
   ClaimDisclosureSectionSchema,
   PROMPTED_SCREENING_PROFILE,
   PUBLIC_BUNDLE_V8_CHECKS as READER_DISCLOSED_VERIFICATION_CHECKS,
+  PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND,
   SELF_RUN_TRUST_ROOT,
   anchoredTrustRoot,
 } from "@colophon-claims/verify";
@@ -411,11 +413,24 @@ const ClaimPackageWireSchema = z.object({
         path: ["headline"],
       });
     }
+    // Two lines, because claim-package/4 is carried by two bundle formats that differ only in the
+    // page they render (issue #3698): `/6`, whose reader is the first public `0.1` line, and `/9`,
+    // whose page states the denominator pair and whose reader is the `0.3` line. The claim carries
+    // no format literal, so from the claim alone either pin is honest -- the same shape the
+    // prompted-screening guard already has, where a historical `0.2.0` line stays acceptable
+    // alongside the current one. `verifyPublicBundleSnapshot` knows the format and pins it exactly
+    // there, so nothing is lost: this admits the pair, the verifier picks the one.
     if (
-      claim.verification.command !== PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
-      || claim.verification.compatibleCommand !== PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
+      (
+        claim.verification.command !== PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
+        || claim.verification.compatibleCommand !== PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
+      )
+      && (
+        claim.verification.command !== PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND
+        || claim.verification.compatibleCommand !== PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND
+      )
     ) {
-      ctx.addIssue({ code: "custom", message: "anchored claim package must pin verifier 0.1.0/@0.1", path: ["verification"] });
+      ctx.addIssue({ code: "custom", message: "anchored claim package must pin verifier 0.1.0/@0.1 (a /6 bundle) or 0.3.0/@0.3 (a /9 bundle)", path: ["verification"] });
     }
     if (
       claim.verification.checks.length !== READER_ANCHORED_VERIFICATION_CHECKS.length
@@ -1085,7 +1100,10 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       command: anchoredQualification
         ? PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND
         : anchored
-          ? PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
+          // Anchored and non-qualifying is `/9` now (issue #3698): the page states the
+          // denominator pair, and only the `0.3` line renders it. `/6` bundles already
+          // materialized keep their own immutable claim.
+          ? PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND
           : promptedScreening
             ? PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND
             : projection.qualification === undefined
@@ -1094,7 +1112,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       compatibleCommand: anchoredQualification
         ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
         : anchored
-          ? PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
+          ? PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND
           : promptedScreening
             ? PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
             : projection.qualification === undefined

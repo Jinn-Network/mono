@@ -25,6 +25,7 @@ import { dirname, join, relative, sep } from "node:path";
 import {
   BUNDLE_V5_FORMAT,
   BUNDLE_V8_FORMAT,
+  BUNDLE_V9_FORMAT,
   SUPPORTED_BUNDLE_FORMATS,
   type SupportedBundleFormat,
   type VerifiedBundleSnapshot,
@@ -74,6 +75,9 @@ export const FREEZE_REPO_BUNDLE_SUPPORT: Record<SupportedBundleFormat, FreezeRep
   [BUNDLE_V6_FORMAT]: { qualification: false, disclosure: false },
   [BUNDLE_V7_FORMAT]: { qualification: true, disclosure: false },
   [BUNDLE_V8_FORMAT]: { qualification: true, disclosure: true },
+  // `/9` is `/6`'s closure with a different page (issue #3698), so it means to this projection
+  // exactly what `/6` means: no qualification graph, and therefore no freeze repository.
+  [BUNDLE_V9_FORMAT]: { qualification: false, disclosure: false },
 };
 
 /** The accepted formats, in the order `SUPPORTED_BUNDLE_FORMATS` declares them. */

@@ -7,13 +7,14 @@ import {
   PUBLIC_BUNDLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_CHECKS,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
 } from "./legacy-closures.js";
-import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT } from "./manifest.js";
+import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V9_FORMAT } from "./manifest.js";
 
 /**
  * The exact producer-side release inside the `/5` line, for byte-for-byte reproduction.
@@ -54,10 +55,31 @@ export const PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND =
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND;
 
 /**
+ * `/9` is `/6`'s closure with a different page, so it runs `/6`'s list unchanged: the denominator
+ * pair is a projection of two already-sealed integers, and nothing about it is a thing to check.
+ * A presentation allocation that grew a check would be claiming the render proves something the
+ * records did not already prove.
+ */
+export const PUBLIC_BUNDLE_V9_CHECKS = PUBLIC_BUNDLE_V6_CHECKS;
+
+/**
+ * The first line that cannot be an earlier one. `/7` and `/8` pin `@0.2.1`, which is published and
+ * reads `/2` through `/8`; it has never heard of `/9`, and a claim naming a reader that cannot read
+ * its own bundle is an instruction to fail. `/9` therefore pins the next line — the one this
+ * verifier source becomes — exactly as `/7` pinned `@0.2.1` before that release existed. Publishing
+ * it is the release train's own step, not this allocation's.
+ */
+export const PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND =
+  "npx @colophon-claims/verify@0.3.0 <bundle-dir>" as const;
+export const PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND =
+  "npx @colophon-claims/verify@0.3 <bundle-dir>" as const;
+
+/**
  * Spans every lineage, so it is composed here rather than frozen in `legacy-closures.ts`: the four
- * legacy rows come from the frozen closures, the `/5` row is the evidence-native line, and the `/8`
- * row is the disclosed closure. Every format through v6 stamps the same first public 0.1 line; v7
- * is the first that cannot, and v8 pins the same 0.2.1 line as v7.
+ * legacy rows come from the frozen closures, the `/5` row is the evidence-native line, the `/8` row
+ * is the disclosed closure, and the `/9` row is the denominator-pair page. Every format through v6 stamps the same first public 0.1 line; v7
+ * is the first that cannot, v8 pins the same 0.2.1 line as v7, and v9 is the first to pin the 0.3
+ * line.
  *
  * `command` is the exact producer-side release and `compatibleCommand` the compatible major line.
  * On every row but `/5` the claim states both. The `/5` row is asymmetric (issue #3941): its
@@ -89,5 +111,9 @@ export const PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS = {
   [BUNDLE_V8_FORMAT]: {
     command: PUBLIC_BUNDLE_V8_VERIFICATION_COMMAND,
     compatibleCommand: PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
+  },
+  [BUNDLE_V9_FORMAT]: {
+    command: PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND,
+    compatibleCommand: PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND,
   },
 } as const;

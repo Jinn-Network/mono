@@ -88,15 +88,18 @@ import {
 import { assertClaimConsistency } from "./profile/claim-consistency.js";
 import { assertTaskSelectionConsistency } from "./profile/task-selection.js";
 import { buildPublicAssets } from "./assets.js";
+import { PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS } from "./reader-instructions.js";
 import { derivePublicComparison, type PublicComparisonView } from "./comparison.js";
 import {
   verifyBundleSnapshot,
   type VerifiedBundleSnapshot,
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
-import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT } from "./manifest.js";
+import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V9_FORMAT } from "./manifest.js";
 import {
+  BUNDLE_V6_FORMAT,
   LEGACY_ANCHOR_MEMBER_PATTERN,
+  PUBLIC_BUNDLE_FILES,
   PUBLIC_BUNDLE_V4_FILES,
   legacyClosure,
   type LegacyBundleFormat,
@@ -533,7 +536,12 @@ export async function verifyPublicBundleSnapshot(
   const { carriesQualification, carriesAnchors, mandatoryFiles } =
     checked.manifest.format === BUNDLE_V8_FORMAT
       ? { carriesQualification: true, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_V4_FILES }
-      : legacyClosure(checked.manifest.format);
+      // `/9` is `/6`'s closure exactly (issue #3698). It moves no axis: the allocation buys a page
+      // that states the denominator pair, and the pair is a projection of two integers this closure
+      // already carries, so restating v6's row here is the whole of what `/9` means to the closure.
+      : checked.manifest.format === BUNDLE_V9_FORMAT
+        ? { carriesQualification: false, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_FILES }
+        : legacyClosure(checked.manifest.format);
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
@@ -600,6 +608,28 @@ export async function verifyPublicBundleSnapshot(
   const claimBytes = read("claim-package.json");
   const claim = parseJson(claimBytes, ClaimPackageSchema, "claim-package.json");
   requireCanonical(claimBytes, claim, "claim-package.json");
+  // ── The anchored headline claim's reader line is BOUND to the format (issue #3698) ──────────
+  //
+  // `/6` and `/9` carry the same claim-package/4 shape and differ only in the page they render and
+  // the reader release that renders it, so the claim's own schema-level refine cannot tell them
+  // apart: it accepts either pin, exactly as the prompted-screening guard accepts its historical
+  // `0.2.0` line. Here the format IS known, so exactness is recovered. A `/9` bundle pinning the
+  // `/6` line would hand its reader a verifier that rebuilds the old page and refuses these bytes;
+  // a `/6` bundle pinning the `/9` line would send a reader to a release its own bundle predates.
+  if (checked.manifest.format === BUNDLE_V6_FORMAT || checked.manifest.format === BUNDLE_V9_FORMAT) {
+    const expected = PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[checked.manifest.format];
+    if (
+      claim.verification.command !== expected.command
+      || claim.verification.compatibleCommand !== expected.compatibleCommand
+    ) {
+      refuse(
+        "record-integrity",
+        "claim-package.json",
+        `a ${checked.manifest.format} bundle's claim must pin ${expected.command}`
+        + ` and ${expected.compatibleCommand}`,
+      );
+    }
+  }
   let benchmark: ReturnType<typeof parseBenchmark>;
   let run: ReturnType<typeof parseRun>;
   let matrix: ReturnType<typeof parseMatrix>;
@@ -1992,6 +2022,7 @@ export async function verifyPublicBundleSnapshot(
     })
     : undefined;
   const assetFacts = {
+    format: checked.manifest.format,
     claim,
     matrix,
     report: verifiedReport.record,

@@ -56,8 +56,8 @@ import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/sig
 import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT } from "../legacy-closures.js";
-import { BUNDLE_V8_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT } from "../legacy-closures.js";
+import { BUNDLE_V8_FORMAT, BUNDLE_V9_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildPublicAssets } from "./assets.js";
@@ -248,9 +248,9 @@ function recordClosure(input: MaterializeBundleInput): {
   readonly format:
     | "benchmark-product-public-bundle/2"
     | typeof BUNDLE_V4_FORMAT
-    | typeof BUNDLE_V6_FORMAT
     | typeof BUNDLE_V7_FORMAT
-    | typeof BUNDLE_V8_FORMAT;
+    | typeof BUNDLE_V8_FORMAT
+    | typeof BUNDLE_V9_FORMAT;
 } {
   const { workspaceDir, draftId, benchmarkSha256, runState, reportSelector } = input;
   if (
@@ -1078,7 +1078,25 @@ function recordClosure(input: MaterializeBundleInput): {
       getSealedBytes(workspaceDir, record.sha256),
     ])),
   });
+  // Computed before the assets, not beside the return: which page these bytes are is a property of
+  // the format (issue #3698), so the format has to exist before `buildPublicAssets` runs.
+  //
+  // Three independent axes, unchanged: carrying an anchor moves a bundle onto an anchored closure,
+  // projecting a binary qualification moves it onto a qualification closure, and declaring a
+  // disclosure record moves it onto the disclosed one. `/9` is the anchored non-qualifying cell:
+  // `/6`'s closure exactly, with a page that states the denominator pair. Everything else emits
+  // exactly the version it emitted before any of these features existed, byte for byte.
+  const format = anchored
+    ? binaryQualification
+      ? disclosed
+        ? BUNDLE_V8_FORMAT
+        : BUNDLE_V7_FORMAT
+      : BUNDLE_V9_FORMAT
+    : binaryQualification
+      ? BUNDLE_V4_FORMAT
+      : "benchmark-product-public-bundle/2";
   for (const [path, bytes] of Object.entries(buildPublicAssets({
+    format,
     claim,
     matrix,
     report,
@@ -1094,19 +1112,7 @@ function recordClosure(input: MaterializeBundleInput): {
   return {
     files,
     evidenceRecords,
-    // Three independent axes: carrying an anchor moves a bundle onto an anchored closure,
-    // projecting a binary qualification moves it onto a qualification closure, and declaring a
-    // disclosure record moves it onto the disclosed one. Everything else emits exactly the version
-    // it emitted before any of these features existed, byte for byte.
-    format: anchored
-      ? binaryQualification
-        ? disclosed
-          ? BUNDLE_V8_FORMAT
-          : BUNDLE_V7_FORMAT
-        : BUNDLE_V6_FORMAT
-      : binaryQualification
-        ? BUNDLE_V4_FORMAT
-        : "benchmark-product-public-bundle/2",
+    format,
   };
 }
 
