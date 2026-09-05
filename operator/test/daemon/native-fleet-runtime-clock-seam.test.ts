@@ -13,7 +13,7 @@
  *   2. omitting `now` is exactly wall-clock (the production default, byte-identical to pre-seam).
  *
  * The chain reads the boot makes are the anchor lookup only, so the fork is stood in for by a
- * four-method `publicClient` stub answering for one finalized calldata anchor.
+ * small `publicClient` stub answering for one finalized calldata anchor.
  */
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -29,7 +29,7 @@ const CEREMONY_ACCOUNT = privateKeyToAccount(`0x${'11'.repeat(32)}`);
 /** A contract account, never the ceremony EOA — the §2.3b settlement authority. */
 const SETTLEMENT_SAFE = `0x${'5a'.repeat(20)}` as const;
 
-const ANCHOR_TX = `0x${'11'.repeat(32)}` as const;
+const ANCHOR_TX = `0x${'a1'.repeat(32)}` as const;
 const ANCHOR_CONTRACT = `0x${'22'.repeat(20)}` as const;
 const ANCHOR_BLOCK_HASH = `0x${'33'.repeat(32)}` as const;
 const ANCHOR_BLOCK = 100n;
