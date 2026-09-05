@@ -423,9 +423,8 @@ and the next iteration starts only if the slowest one seen so far still fits in
 what is left), it asserts on exhaustion if not even one race completes, and the
 `testTimeout` moved to 90s so it is a backstop rather than the thing that ends
 the loop. A race test's coverage is probabilistic, so the currency spent under
-load is iterations, not reliability. Verified: green idle (50.8s, all 6
-iterations) and green under an added 8-way CPU load at load average 35 (48.7s,
-budget-truncated).
+load is iterations, not reliability. Verified: green idle (50.8s) and green
+under an added 8-way CPU load at load average 35 (48.7s).
 
 `test/_support/chain/anvil.test.ts` / `olas-funding.test.ts` — **measured, and
 left alone.** Anvil readiness against a live Base-mainnet fork was timed over
@@ -433,9 +432,12 @@ left alone.** Anvil readiness against a live Base-mainnet fork was timed over
 0.97s, max **5.34s**, zero timeouts. The 15s budget is ~13x the median and
 ~2.8x the worst observed. The tail is network-bound (fetching fork state), not
 CPU-bound, which is why the loaded runs look like the idle ones. Mining the CI
-history the same way as the census above — the last 300 `ci.yml` runs, every
-`Typecheck & Test` failure log retrieved — found **zero** occurrences of
-`anvil did not become ready`. The wait already follows both rules (a
+history the same way as the census above — the last 300 `ci.yml` runs, which
+held 297 `check` jobs but only **5** `Typecheck & Test` failures, every one of
+those logs retrieved — found **zero** occurrences of `anvil did not become
+ready` (and one of the `native-identity` timeout above, which is how that one
+was caught). Five failure logs is a thin instrument; treat this as "no evidence
+of a problem", not as a measured rate. The wait already follows both rules (a
 `Date.now()` deadline, and a throw naming the budget and the port), and there
 is nothing here to fix on evidence. Re-derive with a spawn-and-poll loop
 against `spawnAnvilFork`'s own arguments if the picture changes.

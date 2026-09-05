@@ -228,6 +228,10 @@
  *   - A port position inside a template literal's `${…}` interpolation. The
  *     blanking does not parse interpolations back out; the failure is a missed
  *     literal, never a spurious one.
+ *   - A `return` written across lines — `return\n  45000;`. Rule 2b is a
+ *     per-line rule, because it has to consult the enclosing-declaration walk
+ *     at a LINE index; the whole-file treatment rules 1a/1d/1e get would lose
+ *     that. Nothing in the tree writes a bare returned number that way.
  *   - A returned in-band literal whose enclosing declaration is not port-ish
  *     and does not become so within the 10-line lookback — `function make() {
  *     return 45000; }` handed to a `.listen(` elsewhere. Rule 2b filters on
@@ -706,12 +710,10 @@ export function scanText(text) {
       if (name && PORTISH_NAME.test(name)) flagged = true;
     }
     // Rule 2b — a written-down port returned from the same port-ish block.
-    if (!flagged) {
-      for (const m of line.matchAll(RETURN_LITERAL)) {
-        if (!inBand(m[1])) continue;
-        const name = enclosingName(codeLines, idx);
-        if (name && PORTISH_NAME.test(name)) flagged = true;
-      }
+    for (const m of line.matchAll(RETURN_LITERAL)) {
+      if (!inBand(m[1])) continue;
+      const name = enclosingName(codeLines, idx);
+      if (name && PORTISH_NAME.test(name)) flagged = true;
     }
 
     if (flagged) violations.push({ line: idx + 1, snippet: raw.trim() });

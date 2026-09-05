@@ -346,6 +346,11 @@ test('documented non-catches stay documented', () => {
     'a returned literal whose enclosing declaration is not port-ish',
   );
   assert.deepEqual(
+    flagged('function pickPort() {\n  return\n    45000;\n}'),
+    [],
+    'a return written across lines — rule 2b is per-line',
+  );
+  assert.deepEqual(
     flagged('const apiPort = 7331;\nobj.x = Math.random();'),
     [],
     'rule 2 does not reach across a completed statement',
