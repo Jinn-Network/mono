@@ -82,7 +82,10 @@ def absolute_iri(value: Any) -> bool:
 
 def _too_long(value: str, schema: str, field: str) -> bool:
     """True when *value* exceeds the maximum the runtime's *schema* enforces for *field*."""
-    return len(value) > FIELD_MAX_LENGTHS[schema][field]
+    # Zod uses JavaScript string.length (UTF-16 units), not Python code points.
+    # Otherwise an astral character counts once here and twice at seal time.
+    limit = FIELD_MAX_LENGTHS[schema][field]
+    return len(value) > limit or sum(2 if ord(character) > 0xFFFF else 1 for character in value) > limit
 
 
 def _slug(value: str) -> str:

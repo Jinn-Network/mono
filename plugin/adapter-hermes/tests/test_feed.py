@@ -494,14 +494,17 @@ def test_repository_state_drops_an_iri_the_runtime_cannot_parse(feed_path, repos
 
 
 @pytest.mark.parametrize("field", ["branch", "target_base"])
-def test_repository_state_keeps_the_binding_when_context_is_over_long(feed_path, field):
+@pytest.mark.parametrize(
+    "value", ["x" * 257, "\U0001f600" * 128 + "x"], ids=["ascii", "astral"]
+)
+def test_repository_state_keeps_the_binding_when_context_is_over_long(feed_path, field, value):
     """A branch name longer than the bound is reachable; it must not cost the commit and tree."""
     writer = feed.SessionFeed(feed_path)
     writer.repository_state(
         repository="https://github.com/Jinn-Network/mono",
         base_commit="a" * 40,
         base_tree="b" * 40,
-        **{field: "x" * 257},
+        **{field: value},
     )
     event = read_lines(feed_path)[0]
     assert event["baseCommit"] == "a" * 40
@@ -510,7 +513,12 @@ def test_repository_state_keeps_the_binding_when_context_is_over_long(feed_path,
 
 @pytest.mark.parametrize(
     "over",
-    [{"name": "n" * 257}, {"media_type": "text/" + "x" * 124}],
+    [
+        {"name": "n" * 257},
+        {"media_type": "text/" + "x" * 124},
+        {"name": "\U0001f600" * 128 + "x"},
+        {"media_type": "\U0001f600" * 64 + "x"},
+    ],
 )
 def test_controlled_input_drops_an_over_long_required_field(feed_path, over):
     writer = feed.SessionFeed(feed_path)
@@ -521,7 +529,10 @@ def test_controlled_input_drops_an_over_long_required_field(feed_path, over):
     assert feed_path.read_text(encoding="utf-8") == ""
 
 
-def test_open_session_keeps_the_service_identity_when_a_label_is_over_long(feed_path):
+@pytest.mark.parametrize("character, repetitions", [("n", 256), ("\U0001f600", 128)])
+def test_open_session_keeps_the_service_identity_when_a_label_is_over_long(
+    feed_path, character, repetitions
+):
     """The descriptive fields are optional there, so an over-long one costs only itself."""
     writer = feed.SessionFeed(feed_path)
     writer.open_session(
@@ -532,11 +543,26 @@ def test_open_session_keeps_the_service_identity_when_a_label_is_over_long(feed_
         model_name="claude-opus-5",
         model_service={
             "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
-            "name": "n" * 257,
-            "version": "v" * 129,
-            "deployment": "d" * 257,
+            "name": character * repetitions + "x",
+            "version": character * (repetitions // 2) + "x",
+            "deployment": character * repetitions + "x",
         },
     )
     assert read_lines(feed_path)[0]["model"]["service"] == {
         "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
     }
+
+
+@pytest.mark.parametrize("extra", ["", "x"])
+def test_controlled_input_enforces_utf16_boundary_without_spending_a_dropped_input(feed_path, extra):
+    """Zod counts UTF-16 units: astral characters use two, although Python len counts one."""
+    writer = feed.SessionFeed(feed_path)
+    name = "\U0001f600" * 128 + extra
+    writer.controlled_input(role="skill", name=name, media_type="text/plain", content=b"x")
+    events = read_lines(feed_path)
+    assert len(events) == (0 if extra else 1)
+    if not extra:
+        assert events[0]["name"] == name
+    for _ in range(feed.CONTROLLED_INPUT_MAX_COUNT):
+        writer.controlled_input(role="skill", name="valid", media_type="text/plain", content=b"x")
+    assert len(read_lines(feed_path)) == feed.CONTROLLED_INPUT_MAX_COUNT
