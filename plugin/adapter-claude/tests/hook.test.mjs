@@ -227,6 +227,16 @@ test("no resolvable runtime is silence: no state, no feed, no raise", async () =
   assert.equal(existsSync(join(env.CLAUDE_CONFIG_DIR, "jinn", "sessions")), false);
 });
 
+test("a runtime that dies or speaks an alien protocol is silence, and leaks no child", async () => {
+  // The suite finishing at all is half the assertion: a start that failed without closing its
+  // child would keep the test runner's event loop open until it was killed.
+  for (const mode of ["die", "protocol-alien"]) {
+    const env = fakeEnv();
+    await withFakeMode(mode, () => hook("SessionStart", env));
+    assert.equal(stateOf(env), undefined, mode);
+  }
+});
+
 test("a runtime that answers capture_open with nothing usable writes no state", async () => {
   for (const mode of ["open-empty", "open-relative"]) {
     const env = fakeEnv();

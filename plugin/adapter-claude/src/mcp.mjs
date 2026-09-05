@@ -96,7 +96,14 @@ export class McpClient {
         if (this.stderr.length > STDERR_RING_LINES) this.stderr.shift();
       }
     });
-    await this.#handshake();
+    try {
+      await this.#handshake();
+    } catch (error) {
+      // A failed start must not leak the child it spawned: the caller has nothing left to
+      // close, and a leaked Node process outlives the hook that started it.
+      this.close();
+      throw error;
+    }
     return this;
   }
 
