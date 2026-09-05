@@ -378,7 +378,10 @@ describe('jinn ceremony → production verifiers, two operators, distinct EOAs a
     expect(trust.policy('native:admission').accepted).toContain(trip.admissionAgentA);
     // Admission is A's separate signing authority, never the operator IRI it admits for.
     expect(trust.policy('admission-agent').accepted).not.toContain(trip.agentA);
-    for (const purpose of ['native:solver-settlement', 'native:requester-submission', 'native:evaluator-verdict']) {
+    for (const purpose of [
+      'native:solver-settlement', 'native:solver-delivery',
+      'native:requester-submission', 'native:evaluator-verdict',
+    ]) {
       expect(trust.policy(purpose).accepted).toEqual(expect.arrayContaining([trip.agentA, trip.agentB]));
     }
   });
@@ -620,19 +623,6 @@ describe('produced catalog over the production calldata-locator verifier (#2432)
     ] as const) {
       const set = await open(dir, agent, family);
       for (const role of FAMILIES[family]!) expect(set.get(role).keyId).toMatch(/^did:key:z/u);
-    }
-  });
-
-  it('serves the four evaluator-consumed purposes off those same verified anchors', async () => {
-    const trip = await twoOperatorCeremony();
-    const trust = await openCatalog(trip, honestOwnership(trip), productionAnchorClient(trip));
-    for (const purpose of [
-      'admission-agent',
-      'evaluator-eligibility',
-      'native:requester-submission',
-      'native:solver-delivery',
-    ]) {
-      expect(trust.policy(purpose)).toBeDefined();
     }
   });
 
