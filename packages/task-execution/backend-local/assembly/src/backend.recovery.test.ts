@@ -8,6 +8,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AttemptUri } from "@jinn-network/task-execution-backend";
 import { InMemoryEvidenceCatalog } from "@jinn-network/evidence-discovery";
 import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
 import type {
@@ -415,8 +416,8 @@ describe("restart reconstruction and §6.4 actions", () => {
       recorderAvailability: "always",
       evidenceRepository: repository,
     });
-    expect(await recovered.recover(accepted.attempt)).toEqual({ classification: "matching" });
-    expect(await recovered.recover(accepted.attempt)).toEqual({ classification: "matching" });
+    expect(await recovered.recover(accepted.attempt)).toEqual({ classification: "matching", retained: true });
+    expect(await recovered.recover(accepted.attempt)).toEqual({ classification: "matching", retained: true });
     expect(await terminalState(recovered, accepted.attempt)).toBe("delivered");
     expect(planCalls.value).toBe(1);
     expect(selectionInputs).toHaveLength(2);
@@ -485,7 +486,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     const { attempt } = await submit(first);
     await pause.entered;
     const recovered = await restartWhilePaused(root, first, pause, attempt, { harvestCalls });
-    expect(await recovered.recover(attempt)).toEqual({ classification: "matching" });
+    expect(await recovered.recover(attempt)).toEqual({ classification: "matching", retained: true });
     expect(await terminalState(recovered, attempt)).toBe("delivered");
     expect(harvestCalls.value).toBe(1);
     pause.release();
@@ -560,6 +561,7 @@ describe("restart reconstruction and §6.4 actions", () => {
 
     expect(await recovered.recover(attempt)).toEqual({
       classification: "absent",
+      retained: true,
       detail: "stale-foreign",
     });
     expect(await terminalState(recovered, attempt)).toBe("lost");
@@ -728,7 +730,20 @@ describe("restart reconstruction and §6.4 actions", () => {
       events.filter(({ type }) => type !== "attempt-terminal"));
     await handoffWriter(intended);
     const intendedRecovered = fixture(intendedRoot);
-    expect((await intendedRecovered.recover(intendedAttempt)).classification).toBe("absent");
+    const intendedReport = await intendedRecovered.recover(intendedAttempt);
+    expect(intendedReport.classification).toBe("absent");
+    // The two faces of `absent` (#3634): this attempt IS durably remembered, so its idempotency
+    // key is still held and a caller must not re-seal under it...
+    expect(intendedReport.retained).toBe(true);
+    // ...while a ref the backend cannot resolve at all is the one `absent` that frees the key.
+    const unknown = await intendedRecovered.recover(
+      "urn:uuid:00000000-0000-4000-8000-0000000000ff" as AttemptUri,
+    );
+    expect(unknown).toEqual({
+      classification: "absent",
+      retained: false,
+      detail: 'no durable record for ref "urn:uuid:00000000-0000-4000-8000-0000000000ff"',
+    });
     expect(await terminalState(intendedRecovered, intendedAttempt)).toBe("lost");
   });
 
@@ -888,7 +903,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
     await writeFile(metadataPath, JSON.stringify({ ...metadata, monotonicClockIdentity: "reset-boot" }));
     const recovered = await restartWhilePaused(root, first, pause, attempt, { processDelayMs: 30_000 });
-    expect(await recovered.recover(attempt)).toEqual({ classification: "matching" });
+    expect(await recovered.recover(attempt)).toEqual({ classification: "matching", retained: true });
     expect(await terminalState(recovered, attempt)).toBe("expired");
     const events = await journalEvents(root, attempt);
     expect(events.filter(({ type, details }) => type === "progress" && details["degradation"] === "relative-deadline-monotonic-unavailable")).toHaveLength(1);
