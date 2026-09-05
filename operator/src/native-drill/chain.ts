@@ -13,13 +13,7 @@
  * receipt, replacement, and finality -- none of which needs a contract to be real.
  */
 import { createPublicClient, createTestClient, createWalletClient, http, type Hex } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
 import { baseSepolia } from 'viem/chains';
-
-/** Anvil's first default development account. Public, funded, and never a real key. */
-const DRILL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as const;
-/** Anvil's second default development account: an inert destination for drill calldata. */
-const DRILL_SINK = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8' as const;
 
 /** Anvil's `finalized` tag trails `latest` by this many blocks. */
 export const ANVIL_FINALITY_DEPTH = 64;
@@ -87,8 +81,17 @@ export async function createAnvilDrillChain(rpcUrl: string): Promise<DrillChain>
   const forkBlock = nodeInfo.forkConfig?.forkBlockNumber;
   const scanFloor = forkBlock === undefined || forkBlock === null ? 0n : BigInt(forkBlock) + 1n;
 
-  const account = privateKeyToAccount(DRILL_PRIVATE_KEY);
-  const walletClient = createWalletClient({ account, chain: baseSepolia, transport: http(rpcUrl) });
+  // Custody stays on the node. Anvil's development accounts are unlocked, so the drill signs
+  // through `eth_sendTransaction` and carries no private key of its own — nothing key-shaped ends
+  // up in the operator package this module compiles into. Signing is still deterministic, so two
+  // lanes broadcasting the same operation produce the same transaction hash.
+  const walletClient = createWalletClient({ chain: baseSepolia, transport: http(rpcUrl) });
+  const accounts = await walletClient.getAddresses();
+  const sender = accounts[0];
+  const sink = accounts[1] ?? accounts[0];
+  if (sender === undefined || sink === undefined) {
+    throw new Error('restart drill requires an Anvil exposing its unlocked development accounts');
+  }
 
   const testClient = createTestClient({ chain: baseSepolia, mode: 'anvil', transport: http(rpcUrl) });
   const mine = (blocks: number): Promise<void> => testClient.mine({ blocks });
@@ -115,9 +118,9 @@ export async function createAnvilDrillChain(rpcUrl: string): Promise<DrillChain>
   return {
     async broadcast(digest) {
       return walletClient.sendTransaction({
-        account,
+        account: sender,
         chain: baseSepolia,
-        to: DRILL_SINK,
+        to: sink,
         value: 0n,
         data: digestToCalldata(digest),
       });
@@ -132,7 +135,7 @@ export async function createAnvilDrillChain(rpcUrl: string): Promise<DrillChain>
         const block = await publicClient.getBlock({ blockNumber: height, includeTransactions: true });
         for (const transaction of block.transactions) {
           if (typeof transaction === 'string') continue;
-          if (transaction.from.toLowerCase() !== account.address.toLowerCase()) continue;
+          if (transaction.from.toLowerCase() !== sender.toLowerCase()) continue;
           if ((transaction.input ?? '0x').toLowerCase() !== calldata) continue;
           found.push({
             hash: transaction.hash,
@@ -162,7 +165,7 @@ export async function createAnvilDrillChain(rpcUrl: string): Promise<DrillChain>
       return { hash, blockHash: read.blockHash, blockNumber: read.blockNumber };
     },
     async senderNonce() {
-      return publicClient.getTransactionCount({ address: account.address, blockTag: 'latest' });
+      return publicClient.getTransactionCount({ address: sender, blockTag: 'latest' });
     },
     async latestBlock() {
       return publicClient.getBlockNumber();
