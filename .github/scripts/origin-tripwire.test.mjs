@@ -158,6 +158,8 @@ test('isEnforcedPath covers the source scopes an identifier can be minted from',
   for (const enforced of [
     '.github/scripts/build-profile-root.mjs',
     'operator/src/daemon/native.ts',
+    'operator/deployments/evaluator/prediction-market-deployment.mjs',
+    'operator/deployments/evaluator/prediction-market-evaluation-method.v1.json',
     'plugin/runtime/src/index.ts',
     'packages/discovery/protocol/src/identifiers.ts',
     'packages/evidence/protocol/schemas/task.schema.json',
@@ -231,6 +233,36 @@ test('the exclusion list is closed: widening it is a reviewed edit', () => {
     'docs/superpowers/',
     'legacy/',
   ]);
+});
+
+test('a retired-origin literal under operator/deployments/ fails the guard', () => {
+  withTempRepo((root) => {
+    // The deployment artifacts mint evaluation-method URIs that flow into sealed records; the
+    // near-miss on PR #2439 landed one of these on the retired origin (issue #2459).
+    mkdirSync(join(root, 'operator', 'deployments', 'evaluator'), { recursive: true });
+    writeFileSync(
+      join(root, 'operator', 'deployments', 'evaluator', 'some-deployment.mjs'),
+      "  uri: 'https://jinn.network/evaluation-methods/prediction-market/v1',\n",
+    );
+
+    assert.deepEqual(
+      findEnforcedScopeViolations({ repoRoot: root }).map(({ path }) => path),
+      ['operator/deployments/evaluator/some-deployment.mjs'],
+    );
+
+    assert.throws(
+      () => execFileSync(
+        process.execPath,
+        [join(repoRoot, '.github/scripts/origin-tripwire.mjs'), '--root', root],
+        { encoding: 'utf8', stdio: 'pipe' },
+      ),
+      (error) => {
+        assert.equal(error.status, 1);
+        assert.match(error.stderr, /operator\/deployments\/evaluator\/some-deployment\.mjs:1/u);
+        return true;
+      },
+    );
+  });
 });
 
 test('this repository is clean: the CLI exits zero on the real tree', () => {
