@@ -30,6 +30,14 @@ export const DEFAULT_TIMEOUT_MS = 30_000;
 const STDERR_RING_LINES = 20;
 const TERMINATE_GRACE_MS = 2_000;
 
+/**
+ * The last unbounded accumulator in this module. Every message this adapter asks for is small
+ * — a handshake result, a session id and feed path, a digest — so a child streaming past this
+ * without a newline is not answering; it is filling the hook's memory. The connection fails
+ * rather than growing.
+ */
+export const RESPONSE_BUFFER_MAX_BYTES = 8 * 1024 * 1024;
+
 export class McpError extends Error {
   constructor(code, detail) {
     super(`${code}: ${detail}`);
@@ -196,6 +204,11 @@ export class McpClient {
 
   #absorb(chunk) {
     this.buffer += chunk;
+    if (this.buffer.length > RESPONSE_BUFFER_MAX_BYTES) {
+      this.buffer = "";
+      this.#fail("response-too-large", "the runtime sent an unterminated oversized response");
+      return;
+    }
     let newline = this.buffer.indexOf("\n");
     while (newline !== -1) {
       const line = this.buffer.slice(0, newline);

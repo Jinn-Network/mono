@@ -86,6 +86,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (message.method === "tools/call") {
     if (mode === "silent") return; // a wedged runtime that never answers
+    if (mode === "flood") {
+      // Never a newline: a child that fills the client's buffer instead of answering.
+      const block = "x".repeat(1024 * 1024);
+      for (let index = 0; index < 12; index += 1) process.stdout.write(block);
+      return;
+    }
     if (mode === "rpc-error") {
       send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "broken" } });
       return;

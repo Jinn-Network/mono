@@ -92,6 +92,19 @@ test("a wedged runtime is a bounded wait, never a hung hook", async () => {
   }
 });
 
+test("a runtime that floods stdout without answering fails instead of growing", async () => {
+  const connection = client("flood", { timeoutMs: 10_000 });
+  try {
+    await connection.start();
+    await assert.rejects(connection.callTool("capture_open", {}), (error) => {
+      assert.equal(error.code, "response-too-large");
+      return true;
+    });
+  } finally {
+    connection.close();
+  }
+});
+
 test("a runtime that exits fails the handshake instead of hanging it", async () => {
   const connection = client("die", { timeoutMs: 5_000 });
   await assert.rejects(connection.start(), (error) => {
