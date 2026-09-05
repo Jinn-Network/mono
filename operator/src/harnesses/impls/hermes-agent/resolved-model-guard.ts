@@ -13,6 +13,15 @@ export const T31_EXPECTED_HERMES_PROVIDER_ENV = 'JINN_T31_EXPECTED_HERMES_PROVID
 export const T31_APPROVED_HERMES_MODEL_ENV = 'JINN_T31_APPROVED_HERMES_MODEL';
 export const T31_APPROVED_HERMES_PROVIDER_ENV = 'JINN_T31_APPROVED_HERMES_PROVIDER';
 
+/**
+ * Stable prefix of the mismatch message. The guard trips inside the solver
+ * daemon, so the only channel back to the T3.1 scenario is that daemon's stdio
+ * capture; the scenario scans for this constant rather than for a hand-copied
+ * substring of the message below.
+ */
+export const RESOLVED_HERMES_MODEL_MISMATCH_MARKER =
+  'T3.1 Hermes model/provider mismatch before solve spend';
+
 export interface HermesModelProviderPair {
   model: string;
   provider?: string;
@@ -69,7 +78,7 @@ export class ResolvedHermesModelMismatchError extends Error {
     configPath: string;
   }) {
     super(
-      `T3.1 Hermes model/provider mismatch before solve spend: ` +
+      `${RESOLVED_HERMES_MODEL_MISMATCH_MARKER}: ` +
         `requested model=${args.requestedModel} provider=${display(args.requestedProvider)}, ` +
         `resolved model=${display(args.resolvedModel)} provider=${display(args.resolvedProvider)}, ` +
         `config=${args.configPath}`,
@@ -167,6 +176,16 @@ export function parseT31ResolvedModelGuardPolicy(
   const provider = env[T31_EXPECTED_HERMES_PROVIDER_ENV]?.trim() || undefined;
   const overrideModel = env[T31_APPROVED_HERMES_MODEL_ENV]?.trim() || undefined;
   const overrideProvider = env[T31_APPROVED_HERMES_PROVIDER_ENV]?.trim() || undefined;
+  if (overrideProvider && !overrideModel) {
+    // A spend guard that half-reads its own override is worse than no override:
+    // the run would silently hold the requested model while the operator believes
+    // a swap was sanctioned. Only reachable once the guard is active, so an
+    // ordinary operator run with a stray env var is unaffected.
+    throw new Error(
+      `${T31_APPROVED_HERMES_PROVIDER_ENV} declares an approved provider without an ` +
+        `approved model (${T31_APPROVED_HERMES_MODEL_ENV} is unset); set both or neither`,
+    );
+  }
   return {
     requested: { model, ...(provider ? { provider } : {}) },
     ...(overrideModel

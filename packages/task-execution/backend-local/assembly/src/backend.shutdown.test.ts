@@ -230,7 +230,7 @@ describe("writer-lock-safe shutdown (§7.102)", () => {
     await shuttingDown;
 
     const recovered = fixture(root);
-    expect(await recovered.recover(attempt)).toEqual({ classification: "matching" });
+    expect(await recovered.recover(attempt)).toEqual({ classification: "matching", retained: true });
     await recovered.drain();
   });
 
@@ -410,7 +410,7 @@ describe("writer-lock-safe shutdown (§7.102)", () => {
       provisioner: () => ({ id: "slow-setup", contract: provisioner }),
     });
     backends.push(reopened);
-    expect(await reopened.recover(attempt)).toEqual({ classification: "matching" });
+    expect(await reopened.recover(attempt)).toEqual({ classification: "matching", retained: true });
     await reopened.shutdown();
   });
 
@@ -436,7 +436,7 @@ describe("writer-lock-safe shutdown (§7.102)", () => {
     pause.release();
     await expect(shuttingDown).resolves.toBeUndefined();
     const reopened = fixture(root);
-    expect(await reopened.recover(attempt)).toEqual({ classification: "matching" });
+    expect(await reopened.recover(attempt)).toEqual({ classification: "matching", retained: true });
   });
 
   test("cleared deadline timers never mutate the journal after shutdown and lock handoff", async () => {

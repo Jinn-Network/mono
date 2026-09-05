@@ -64,7 +64,7 @@ env:
 
 # Consolidated per #2997 (pattern proven by the trust-ci pilot, PR #3001): the
 # previous shape ran 17 runner jobs (11 + a 6-leg components matrix) chained
-# through artifact dist round-trips. The packages job below builds the fifteen
+# through artifact dist round-trips. The packages job below builds the seventeen
 # pure-node packages with their VERBATIM per-package command sets in dependency
 # order in ONE workspace. The two infrastructure-backed components
 # (repository-oci needs a Distribution registry + ORAS; repository-ipfs needs
@@ -251,6 +251,14 @@ jobs:
           yarn test
           yarn build
           yarn check:fixtures
+          yarn pack:smoke
+      - name: Verify Evidence Gate
+        working-directory: packages/evidence/gate
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
           yarn pack:smoke
       - name: Verify Evidence Contribution
         working-directory: packages/evidence/contribution

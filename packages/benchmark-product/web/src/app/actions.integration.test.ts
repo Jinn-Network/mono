@@ -527,8 +527,16 @@ describe.sequential("server action layer against a real workspace", () => {
       const sealedAdvisory = sealedRun[SAMPLE_SIZE_ADVISORY_EXTENSION] as
         { readonly n: number; readonly expectedIntervalWidth: string } | undefined;
       expect(sealedAdvisory, JSON.stringify(Object.keys(sealedRun))).toBeDefined();
-      expect(unacknowledged.status === "error" ? unacknowledged.error.detail : "")
-        .toContain(`n=${sealedAdvisory!.n}: interval width ${sealedAdvisory!.expectedIntervalWidth}`);
+      // Matched against the advisory's LEAD sentence, never a reference row (issue #3906):
+      // `formatSampleSizeAdvisory` prints rows for [n, 2n, round(n/2)], so a row match is
+      // satisfied by a neighbour of the sealed n. If the gate and `runLock` ever computed n a
+      // factor of two apart -- the gate counting items while the seal counted items x replicates,
+      // say -- the sealed n's row would still be present verbatim, and the operator would have
+      // been shown a declared n the seal does not record. Only the lead sentence names that
+      // declared n, so only it can fail for the reason this assertion exists.
+      const refusal = unacknowledged.status === "error" ? unacknowledged.error.detail : "";
+      expect(refusal).toContain(`At the declared n=${sealedAdvisory!.n} per arm`);
+      expect(refusal).toContain(`wider than ${sealedAdvisory!.expectedIntervalWidth}`);
       expect(await invoke("draft.show", { draftId: "gui-walkthrough" })).toMatchObject({
         status: "success",
         result: { draft: { state: "locked" } },

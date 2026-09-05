@@ -15,7 +15,18 @@ import {
 } from "./legacy-closures.js";
 import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT } from "./manifest.js";
 
+/**
+ * The exact producer-side release inside the `/5` line, for byte-for-byte reproduction.
+ *
+ * **No `/5` bundle carries this line** (issue #3941), and `/5` is the only format of which that is
+ * true. Every other format's claim states its exact release; claim-package/3 has a single `command`
+ * field and no compatible-line field, so a `/5` producer writes the compatible major line —
+ * `PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND` — into it and states nothing else. Read that
+ * constant, not this one, when the question is "which line does a `/5` bundle pin".
+ */
 export const PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND = PUBLIC_BUNDLE_VERIFICATION_COMMAND;
+
+/** The one line a `/5` claim states. See the asymmetry documented above. */
 export const PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND =
   PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
 
@@ -47,6 +58,12 @@ export const PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND =
  * legacy rows come from the frozen closures, the `/5` row is the evidence-native line, and the `/8`
  * row is the disclosed closure. Every format through v6 stamps the same first public 0.1 line; v7
  * is the first that cannot, and v8 pins the same 0.2.1 line as v7.
+ *
+ * `command` is the exact producer-side release and `compatibleCommand` the compatible major line.
+ * On every row but `/5` the claim states both. The `/5` row is asymmetric (issue #3941): its
+ * claim-package/3 states only `compatibleCommand`, so its `command` reproduces the producer and is
+ * not a line any `/5` bundle carries. A consumer asking "which line does this format pin" reads
+ * `compatibleCommand` for `/5` and `command` everywhere else.
  */
 export const PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS = {
   [BUNDLE_FORMAT]: {
