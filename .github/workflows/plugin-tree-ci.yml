@@ -157,8 +157,29 @@ jobs:
         working-directory: plugin/adapter-hermes
         run: python3 -m pytest
 
+  adapter_claude:
+    name: Adapter (Claude Code, Node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # No `yarn install`: this adapter is installed by clone and carries no npm manifest, so
+      # a dependency step here would verify a shape the product never has.
+      - name: Assert the adapter has no third-party imports
+        working-directory: plugin/adapter-claude
+        run: node scripts/check-stdlib-only.mjs
+
+      - name: Test
+        working-directory: plugin/adapter-claude
+        run: node --test "tests/*.test.mjs"
+
   verify:
-    needs: [architecture, runtime, adapter]
+    needs: [architecture, runtime, adapter, adapter_claude]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -167,11 +188,13 @@ jobs:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           RUNTIME_RESULT: ${{ needs.runtime.result }}
           ADAPTER_RESULT: ${{ needs.adapter.result }}
+          ADAPTER_CLAUDE_RESULT: ${{ needs.adapter_claude.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
             "$RUNTIME_RESULT" \
-            "$ADAPTER_RESULT"; do
+            "$ADAPTER_RESULT" \
+            "$ADAPTER_CLAUDE_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v7
