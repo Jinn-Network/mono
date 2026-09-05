@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Version** | 0.1 |
-| **Date** | 2026-09-02 |
-| **Author** | Autopilot design session (Claude Opus 5); every seam citation read against the attempt base of `autopilot/2606` (`31a763d60`) |
+| **Version** | 1.0 |
+| **Date** | 2026-09-02; adopted 2026-09-05 |
+| **Author** | Autopilot design session (Claude Opus 5); every seam citation read against the attempt base of `autopilot/2606` (`31a763d60`) and re-verified against `24611b57a` at adoption |
 | **Shape** | `design`. Output is this spec; implementation lands as a separate packet (§7) |
-| **Status** | proposed — needs operator decision on D1–D3 (§9) |
+| **Status** | **Adopted.** D1–D3 answered by operator ruling 2026-09-05; recorded as [DR-2026-09-05](../../../log/decisions/2026-09-05-prediction-forecast-task-provenance-extension.md) |
 | **Issue** | [#2606](https://github.com/Jinn-Network/mono/issues/2606) |
 | **Supersedes the premise of** | [P4b scoping §6.1](../plans/demo-report-1/P4b-scoping.md) and [P4b implementation plan, Task 8a](../plans/demo-report-1/2026-08-12-P4b-implementation-plan.md) — their conclusion was correct *when written*; one of the two contracts they cite moved the day after (§2.2) |
 | **Does not do** | It proposes no change to `PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1`, no new admission-policy version, no re-seal of `prediction-forecast/1.0`, and no change to any method's statistics. It moves nothing that is frozen |
@@ -275,7 +275,8 @@ Two consequences worth stating plainly:
 
 ## 7. Implementation packet
 
-A separate `feat` issue. Four slices, each independently verifiable.
+Filed as [#4098](https://github.com/Jinn-Network/mono/issues/4098) (`feat`), blocked on #2606 until this spec and its DR land. Four slices, each
+independently verifiable.
 
 **S1 — resolver (records).** Add the second accepted location and the
 both-present refusal to `resolveBenchmarkTaskProvenance`
@@ -318,35 +319,56 @@ cannot change any currently passing outcome.
 - Retrofitting existing `repository-work` tasks to the new location. They stay
   where they are, indefinitely.
 
-## 9. Open decisions
+## 9. Decisions taken
 
-**D1 — Adopt the "yes" answer at all?** The recommendation is yes (§3). A "no"
-answer is defensible only on the grounds that clustered comparison is
-out of scope for bounded venue profiles as a class — and that position needs
-stating explicitly, because it applies to every future venue profile, not just
-this one. If "no" is chosen, §10 is the obligation that follows.
+Answered by operator ruling on 2026-09-05 and recorded as
+[DR-2026-09-05](../../../log/decisions/2026-09-05-prediction-forecast-task-provenance-extension.md).
+The questions are kept in their original form so the record shows what was
+asked, not only what was answered.
 
-**D2 — The extension key spelling.**
-`https://spec.jinn.network/task-provenance/v1` is proposed. It must be an
-absolute URI (§2.2), and it should be minted under `spec.jinn.network` the same
-way the other sealed identifiers are. If a different namespace is preferred, the
-only hard constraint is the scheme colon.
+**D1 — Adopt the "yes" answer at all?** *Asked:* the recommendation is yes (§3);
+a "no" is defensible only as a class-wide position that clustered comparison is
+out of scope for bounded venue profiles, which needs stating explicitly because
+it binds every future venue profile. **Answered: adopted, yes.**
+Prediction-forecast tasks are scoreable by the clustered paired methods, on
+route B (§4).
 
-**D3 — Does the bundled sample grow to ≥5 tasks across ≥2 clusters?** Out of
-scope for this design. With this design the sample reaches interval-withheld-
-with-a-reason, which is honest. Reaching interval-present on the bundled path is
-a product-surface call about what the first-run demo should show.
+**D2 — The extension key spelling.** *Asked:* `https://spec.jinn.network/task-provenance/v1`
+is proposed; the only hard constraint is the scheme colon (§2.2).
+**Answered: as proposed** — `https://spec.jinn.network/task-provenance/v1`.
 
-## 10. If the answer is "no" instead
+**D3 — Does the bundled sample grow to ≥5 tasks across ≥2 clusters?**
+*Asked:* out of scope for this design; with this design the sample reaches
+interval-withheld-with-a-reason, which is honest. **Answered: unchanged** — the
+sample does not grow. It stays at its three fixed variations sharing one
+synthetic source, below both thresholds named in the question, and reports a
+withheld interval with a stated reason. Whether the first-run demo should show
+an interval instead remains a separate product call.
 
-The decision is still recordable, and one obligation follows from #2606's second
-acceptance criterion: the limitation must be documented where a prediction-
-profile reader meets it. Minimally that is (a) a note on
-`buildPredictionForecastProfile` stating that the closed `payloadSchema` and the
-resolver's single read location together make the profile unscoreable by the
-five clustered methods, and why that is intended; and (b) a note at
-`resolveBenchmarkTaskProvenance` naming closed-payload profiles as a known
-excluded class, so the typed `invalid-provenance` refusal reads as a boundary
-rather than a defect. §2.2 should be corrected in that note either way — the
-"cannot be a top-level sibling" premise is no longer true, and leaving it in the
-record will cost the next reader the same investigation.
+> The ruling words D3 as "unchanged at 5 tasks / 2 clusters". Those two numbers
+> are the thresholds this question named (`paired-delta@1`'s `minN = 5`; the two
+> clusters clustering needs), not the sample's size —
+> `SAMPLE_FORECAST_VARIATIONS` (`intake/sample.ts:58-80`) holds three variations
+> against one synthetic source, as §2.5 and §6 state. The substantive
+> ruling — *unchanged* — is unambiguous either way.
+
+## 10. The path not taken
+
+Kept for the record: this is what a "no" answer would have obliged, and D1
+declined it. Nothing below is an outstanding obligation.
+
+Had the answer been "no", the decision would still have been recordable, and one
+obligation would follow from #2606's second acceptance criterion: the limitation
+must be documented where a prediction-profile reader meets it. Minimally that is
+(a) a note on `buildPredictionForecastProfile` stating that the closed
+`payloadSchema` and the resolver's single read location together make the
+profile unscoreable by the five clustered methods, and why that is intended; and
+(b) a note at `resolveBenchmarkTaskProvenance` naming closed-payload profiles as
+a known excluded class, so the typed `invalid-provenance` refusal reads as a
+boundary rather than a defect.
+
+§2.2 wanted correcting either way — the "cannot be a top-level sibling" premise
+is no longer true, and leaving it in the record would cost the next reader the
+same investigation. Under the adopted answer that correction is discharged by
+this spec and by S4 of the implementation packet (§7), which puts the mechanism
+in front of the prediction-profile reader rather than the mystery.
