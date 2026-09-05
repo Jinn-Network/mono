@@ -99,7 +99,7 @@ not lost; it stays task identity via `payload.forecast.marketId`.
 
 | Route | Verdict |
 |---|---|
-| `payload.provenance` via a re-sealed `prediction-forecast/1.1` + admission policy `v2` | **Rejected.** Moves the sealed profile digest and cascades it through admission, the `prediction-v1-baseline` launcher and the pinned `profile.sha256`. The last time that digest moved, every prediction solve was rejected. It also entrenches the modelling error: provenance is not solver-visible work. |
+| `payload.provenance` via a re-sealed `prediction-forecast/1.1` + admission policy `v2` | **Rejected.** Moves the sealed profile digest and cascades it through admission, the `prediction-v1-baseline` launcher and the pinned `profile.sha256`. The last time that digest moved, every prediction solve was rejected. It also entrenches the modeling error: provenance is not solver-visible work. |
 | Make provenance optional in the five methods | **Rejected**, re-affirming P4b §5.4. Optional provenance silently disables the whole-source-cluster correction and reports a narrower interval than the data supports. That is a wrong number, not a missing one. |
 
 ## Consequences
@@ -110,7 +110,7 @@ not lost; it stays task identity via `payload.forecast.marketId`.
   `{forecast}`, and the `admitPredictionSnapshot` sanity call in
   `intake/sample.ts` stays load-bearing: under this design it additionally
   proves the extension key is admissible, which is the property being relied on.
-- The bundled sample benchmark digest **moves** when the sample synthesises the
+- The bundled sample benchmark digest **moves** when the sample synthesizes the
   extension key. Every pinned fixture is updated deliberately and called out.
 - Implementation lands as a separate `feat` packet, filed as
   [#4098](https://github.com/Jinn-Network/mono/issues/4098) — §7 of the owning
