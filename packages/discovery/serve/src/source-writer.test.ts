@@ -25,6 +25,7 @@ import {
   type DurableSourceAppendIntent,
   type DurableSourceSigner,
   type DurableSourceState,
+  type DurableSourceWriterOptions,
   type SourceAppendIntentStore,
   type SourceStateStore,
   type SourceWriterFaultBoundary,
@@ -171,6 +172,26 @@ function clockAt(iso: string): Clock {
 /** Pinned so the suite does not depend on wall clock now that appends are clock-bounded. */
 const DEFAULT_TEST_CLOCK = clockAt("2026-08-03T12:00:00.000Z");
 
+/**
+ * The one place this suite builds writer options. Every writer is constructed from
+ * it, so no case can silently fall back to the wall-clock default and start reading
+ * host time on the clock-bounded append path (#3570).
+ */
+function writerOptions(
+  harness: ReturnType<typeof makeHarness>,
+  overrides: Partial<DurableSourceWriterOptions> = {},
+): DurableSourceWriterOptions {
+  return {
+    source: SOURCE,
+    signer: harness.signer,
+    blobs: harness.blobs,
+    states: harness.states,
+    intents: harness.intents,
+    clock: DEFAULT_TEST_CLOCK,
+    ...overrides,
+  };
+}
+
 function writer(
   harness: ReturnType<typeof makeHarness>,
   faultBoundary?: SourceWriterFaultBoundary,
@@ -178,12 +199,7 @@ function writer(
 ) {
   let tripped = false;
   return createDurableSourceWriter({
-    source: SOURCE,
-    signer: harness.signer,
-    blobs: harness.blobs,
-    states: harness.states,
-    intents: harness.intents,
-    clock: clock ?? DEFAULT_TEST_CLOCK,
+    ...writerOptions(harness, clock === undefined ? {} : { clock }),
     ...(faultBoundary === undefined ? {} : {
       faults: {
         async at(boundary: SourceWriterFaultBoundary) {
@@ -294,13 +310,9 @@ describe("durable Record Discovery source writer", () => {
         return equalBytes(pae, signature);
       },
     };
-    const recoveryWriter = createDurableSourceWriter({
-      source: SOURCE,
-      signer: rejectingSigner,
-      blobs: harness.blobs,
-      states: harness.states,
-      intents: harness.intents,
-    });
+    const recoveryWriter = createDurableSourceWriter(
+      writerOptions(harness, { signer: rejectingSigner }),
+    );
 
     await expect(recoveryWriter.recover()).resolves.toMatchObject({ status: "recovered" });
     expect((await harness.blobs.get(pending.value.page.path))?.bytes)
@@ -392,13 +404,7 @@ describe("durable Record Discovery source writer", () => {
         return equalBytes(pae, signature);
       },
     };
-    const mismatched = createDurableSourceWriter({
-      source: SOURCE,
-      signer: otherSigner,
-      blobs: harness.blobs,
-      states: harness.states,
-      intents: harness.intents,
-    });
+    const mismatched = createDurableSourceWriter(writerOptions(harness, { signer: otherSigner }));
 
     await expect(mismatched.readState()).rejects.toThrow("different signer key");
   });
@@ -416,13 +422,7 @@ describe("durable Record Discovery source writer", () => {
         return harness.stateCas.compareAndSwap(expected, next);
       },
     };
-    await createDurableSourceWriter({
-      source: SOURCE,
-      signer: harness.signer,
-      blobs: harness.blobs,
-      states,
-      intents: harness.intents,
-    }).append(command());
+    await createDurableSourceWriter(writerOptions(harness, { states })).append(command());
 
     expect(new Set(seen)).toEqual(new Set([formatOrigin(SOURCE.agent, SOURCE.name)]));
   });
@@ -483,15 +483,7 @@ describe("durable Record Discovery source writer", () => {
   it("returns a committed announcement's receipt from a writer whose window now collapses", async () => {
     const harness = makeHarness();
     const first = await writer(harness).append(command());
-    const collapsed = createDurableSourceWriter({
-      source: SOURCE,
-      signer: harness.signer,
-      blobs: harness.blobs,
-      states: harness.states,
-      intents: harness.intents,
-      clock: DEFAULT_TEST_CLOCK,
-      refreshWithinMs: 0.5,
-    });
+    const collapsed = createDurableSourceWriter(writerOptions(harness, { refreshWithinMs: 0.5 }));
 
     await expect(collapsed.append(command())).resolves.toEqual(first);
   });
@@ -506,15 +498,7 @@ describe("durable Record Discovery source writer", () => {
   it("refuses a refresh window that truncates to nothing", async () => {
     const harness = makeHarness();
     // Sub-millisecond windows round to `refreshBy === issuedAt`, which §5.2 rule 1 refuses.
-    const collapsed = createDurableSourceWriter({
-      source: SOURCE,
-      signer: harness.signer,
-      blobs: harness.blobs,
-      states: harness.states,
-      intents: harness.intents,
-      clock: DEFAULT_TEST_CLOCK,
-      refreshWithinMs: 0.5,
-    });
+    const collapsed = createDurableSourceWriter(writerOptions(harness, { refreshWithinMs: 0.5 }));
 
     await expect(collapsed.append(command())).rejects.toThrow(/no consumer accepts/);
   });
