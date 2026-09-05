@@ -1,7 +1,7 @@
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
 import { isMetadataFirstBundleProfile } from "@jinn-network/benchmarking-protocol";
 import { legacyClosure } from "./legacy-closures.js";
-import { PUBLIC_BUNDLE_V8_CHECKS } from "./reader-instructions.js";
+import { PUBLIC_BUNDLE_V8_CHECKS, PUBLIC_BUNDLE_V9_CHECKS } from "./reader-instructions.js";
 import type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./verify.js";
 
 /**
@@ -106,7 +106,10 @@ export function summarizeVerificationOutcome(result: PublicBundleVerificationRes
     ? EVIDENCE_NATIVE_BUNDLE_V5_CHECKS.length
     : result.format === "benchmark-product-public-bundle/8"
       ? PUBLIC_BUNDLE_V8_CHECKS.length
-      : legacyClosure(result.format).checks.length;
+      // `/9` runs `/6`'s list: a presentation allocation adds no check (issue #3698).
+      : result.format === "benchmark-product-public-bundle/9"
+        ? PUBLIC_BUNDLE_V9_CHECKS.length
+        : legacyClosure(result.format).checks.length;
   const deferred = result.format === "benchmark-product-public-bundle/5"
     && result.artifactContent.status === "not-fetched"
     ? result.artifactContent

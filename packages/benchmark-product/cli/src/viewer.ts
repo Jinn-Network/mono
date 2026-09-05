@@ -8,6 +8,7 @@ import {
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND,
   bundleIdentityLabel,
   isMetadataFirstBundle,
   summarizeVerificationOutcome,
@@ -86,17 +87,20 @@ function viewerHtml(
   const artifactContentNote = outcome.artifactContent === undefined
     ? ""
     : `<p class="deferred-note">${outcome.artifactContent.notFetched} artifact ${outcome.artifactContent.notFetched === 1 ? "body was" : "bodies were"} not fetched. This bundle carries their exact digests, not their bytes, so nothing here says what they contain. Check fetched bytes against those digests yourself, or verify the full-evidence bundle.</p>`;
-  // The anchored binary-qualification closure is the one format the @0.1 line cannot read
-  // (issue #3205), so it is named before the fall-through rather than inheriting it.
+  // The anchored closures are the formats the @0.1 line cannot read -- `/7` and `/8` (issue #3205)
+  // and `/9`, whose page states the denominator pair (issue #3698) -- so each is named before the
+  // fall-through rather than inheriting it.
   const verificationCommand = verification.format === "benchmark-product-public-bundle/5"
     ? PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND
-    : verification.format === "benchmark-product-public-bundle/8"
-      ? PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND
-      : verification.format === "benchmark-product-public-bundle/7"
-        ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
-        : verification.format === "benchmark-product-public-bundle/4"
-          ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
-          : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
+    : verification.format === "benchmark-product-public-bundle/9"
+      ? PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND
+      : verification.format === "benchmark-product-public-bundle/8"
+        ? PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND
+        : verification.format === "benchmark-product-public-bundle/7"
+          ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
+          : verification.format === "benchmark-product-public-bundle/4"
+            ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
+            : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
   // No released npx line understands the metadata-first profile -- an older reader refuses it at
   // manifest parse -- so this page offers the local command that does work instead of an
   // instruction to fail. The key is the bundle's declared profile, not whether a body happened to

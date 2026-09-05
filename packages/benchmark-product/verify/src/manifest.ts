@@ -43,7 +43,33 @@ export const BUNDLE_V5_FORMAT = "benchmark-product-public-bundle/5" as const;
  * declared here rather than in `legacy-closures.ts`.
  */
 export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
-/** Spans every lineage: the four frozen legacy closures, the evidence-native bundle, and `/8`. */
+/**
+ * The anchored headline closure that renders the denominator pair (issue #3698): `/6`'s exact
+ * member list, anchors allowlist, and seven checks, and a page whose wilson arm tables state the
+ * declared denominator beside the strict all-slots one and the planned slots the declared one
+ * leaves out.
+ *
+ * **A presentation allocation, which is the only kind a rendered fact can have.**
+ * `verifyPublicBundleSnapshot` byte-compares every presentation asset against the reader's own
+ * rebuild, so a page element added under an existing format would carry an instruction to run a
+ * verifier that refuses it, and would break every already-published report
+ * (`spec/2026-09-02-report-page-information-architecture.md` §8). The closure is untouched: no
+ * member, no check, no record schema, and no sealed field changes, because both numbers are
+ * already sealed — the declared one in the Report's per-arm facts, the strict one in the Matrix's
+ * per-arm accounting.
+ *
+ * **Why it succeeds `/6` and not another cell.** The pair is a wilson rendering: it needs a per-arm
+ * declared denominator, which only `wilson@1`'s headline carries. `/4`, `/7`, and `/8` are the
+ * qualification-projecting cells, whose reports are binary-instrument and have no per-arm `n`;
+ * `/2` is the pre-anchor legacy. `/6` is the anchored, publication-grade headline cell, so the
+ * allocation follows the real material, exactly as `/8`'s did.
+ *
+ * Additive like every allocation before it: `/2`, `/4`, `/5`, `/6`, `/7`, and `/8` keep their
+ * member lists, check lists, and bytes, and only an anchored run that projects no binary
+ * qualification emits this one.
+ */
+export const BUNDLE_V9_FORMAT = "benchmark-product-public-bundle/9" as const;
+/** Spans every lineage: the four frozen legacy closures, the evidence-native bundle, `/8`, and `/9`. */
 export const SUPPORTED_BUNDLE_FORMATS = [
   BUNDLE_FORMAT,
   BUNDLE_V4_FORMAT,
@@ -51,6 +77,7 @@ export const SUPPORTED_BUNDLE_FORMATS = [
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
   BUNDLE_V8_FORMAT,
+  BUNDLE_V9_FORMAT,
 ] as const;
 export type SupportedBundleFormat = (typeof SUPPORTED_BUNDLE_FORMATS)[number];
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
@@ -64,7 +91,7 @@ export const BundleManifestFileSchema = z.object({
 });
 
 const LegacyBundleManifestSchema = z.object({
-  format: z.union([LegacyBundleFormatSchema, z.literal(BUNDLE_V8_FORMAT)]),
+  format: z.union([LegacyBundleFormatSchema, z.literal(BUNDLE_V8_FORMAT), z.literal(BUNDLE_V9_FORMAT)]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
 
@@ -93,7 +120,7 @@ export interface VerifyBundleSnapshotDeps {
 
 export interface BuildBundleManifestOptions {
   /** Defaults to v2 so existing producer and golden bytes remain immutable. */
-  readonly format?: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT;
+  readonly format?: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT | typeof BUNDLE_V9_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {

@@ -83,7 +83,7 @@ export {
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
 } from "./legacy-closures.js";
-export { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
+export { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V9_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 // The disclosed-closure projection and check (disclosure-specification-record design §6.4/§6.6/§7,
 // issue #2839). Single-sourced here for exactly the reason the anchored projection above is: the
 // product core imports this package, so the producer's claim section and the verifier's rebuild of
@@ -148,6 +148,9 @@ export {
   PUBLIC_BUNDLE_V8_CHECKS,
   PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V9_CHECKS,
+  PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
 } from "./reader-instructions.js";
 // The deterministic public-repository projection of a bundle's freeze artifacts (issue #2870).
