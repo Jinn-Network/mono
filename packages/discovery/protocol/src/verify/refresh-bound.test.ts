@@ -89,3 +89,31 @@ describe("checkRefreshWindow (§5.2 as a whole, #3467)", () => {
     expect(checkRefreshWindow(head, NOW, Number.POSITIVE_INFINITY)).toBeUndefined();
   });
 });
+
+describe("offset-less head timestamps (§5.2, #3482)", () => {
+  const NOW = new Date("2026-07-28T00:00:00.000Z");
+
+  // Two spacings, because one cannot carry the regression on its own: before
+  // the fix the offset-less `issuedAt` was read as host-local, so whether a
+  // single pair landed inside the 24h ceiling depended on the runner's zone.
+  // A 6h and a 20h window between them are acceptable pre-fix in every real
+  // zone (UTC-12 through UTC+14), so at least one of these assertions fails
+  // wherever the suite runs.
+  it("refuses an offset-less `issuedAt` rather than reading it as host-local time", () => {
+    for (const refreshBy of ["2026-07-28T06:00:00.000Z", "2026-07-28T20:00:00.000Z"]) {
+      expect(refreshByWithinCeiling({ issuedAt: "2026-07-28T00:00:00", refreshBy })).toBe(false);
+      expect(checkRefreshWindow({ issuedAt: "2026-07-28T00:00:00", refreshBy }, NOW)).toBe("refresh-by-ceiling");
+    }
+  });
+
+  it("refuses an offset-less `refreshBy` the same way", () => {
+    for (const issuedAt of ["2026-07-28T18:00:00.000Z", "2026-07-28T04:00:00.000Z"]) {
+      expect(refreshByWithinCeiling({ issuedAt, refreshBy: "2026-07-29T00:00:00" })).toBe(false);
+      expect(checkRefreshWindow({ issuedAt, refreshBy: "2026-07-29T00:00:00" }, NOW)).toBe("refresh-by-ceiling");
+    }
+  });
+
+  it("reads an offset-bearing window as the instant it names, wherever the consumer sits", () => {
+    expect(checkRefreshWindow({ issuedAt: "2026-07-28T02:00:00+02:00", refreshBy: "2026-07-29T02:00:00+02:00" }, NOW)).toBeUndefined();
+  });
+});

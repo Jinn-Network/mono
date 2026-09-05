@@ -15,6 +15,16 @@ Its only Jinn dependency is `@jinn-network/trust-core` (types and the key-bindin
 surface consulted by the verification-procedure ports); it never imports a record-defining
 package (TEP, Evidence, or profiles).
 
+## Source Head timestamps carry an explicit offset
+
+`issuedAt` and `refreshBy` are calendar-strict RFC 3339 date-times with a mandatory offset
+(`Z` or `+/-HH:MM`), enforced by `parseSourceHead` and by every §5.2 comparison through the
+package's own `parseHeadTimestamp`. An offset-less spelling is defined to mean host-*local*
+time, so accepting one would let the same signed head present a different freshness window --
+and, since the window became a typed refusal, a different accept/reject verdict -- on each
+consumer. Lowercase `t`/`z`, which RFC 3339 permits, is refused for the same reason: it sits
+outside the spelling ECMAScript pins, and determinism is the point.
+
 ## Facts profiles must carry their kind's join edges
 
 A profile's reference-bearing set must be **complete**: every field of the record's own sealed
