@@ -61,6 +61,10 @@ const PRUNED_DIRECTORIES = new Set(['.git', '.yarn', 'node_modules']);
 // `python`, `node`, …) has no `|` semantics this lint models, and is skipped whole.
 const PIPELINE_SHELLS = new Set(['bash', 'sh', 'dash', 'zsh']);
 
+// GitHub's built-in `shell:` keywords. Only these are given GitHub's own invocation
+// template; any other value is passed through as a custom shell command.
+const GITHUB_BUILTIN_SHELLS = new Set(['bash', 'pwsh', 'python', 'sh', 'cmd', 'powershell']);
+
 // grep options that consume the following argument, so a pattern that happens to look
 // like `-q` is never read as a flag.
 const GREP_ARG_TAKING = new Set(['-e', '-f', '-m', '--regexp', '--file', '--max-count']);
@@ -139,25 +143,32 @@ const ANNOTATION = /#\s*pipefail-lint:\s*allow\b(?<rest>.*)$/u;
 // as literal would have made this lint blind to the sites it exists to find.
 function syntaxMask(text, initial = { quote: null, frames: [] }) {
   const mask = new Array(text.length).fill(false);
+  const substDepth = new Array(text.length).fill(0);
   const frames = [...initial.frames];
   let quote = initial.quote;
 
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
     if (quote !== "'" && char === '\\') {
+      substDepth[index] = frames.length;
       index += 1;
+      if (index < text.length) substDepth[index] = frames.length;
       continue;
     }
     if (quote !== "'" && char === '$' && text[index + 1] === '(') {
       frames.push(quote);
       quote = null;
+      substDepth[index] = frames.length;
       index += 1;
+      substDepth[index] = frames.length;
       continue;
     }
     if (quote === null && char === ')' && frames.length > 0) {
       quote = frames.pop();
+      substDepth[index] = frames.length;
       continue;
     }
+    substDepth[index] = frames.length;
     if (quote === null && (char === "'" || char === '"')) {
       quote = char;
       continue;
@@ -168,7 +179,38 @@ function syntaxMask(text, initial = { quote: null, frames: [] }) {
     }
     mask[index] = quote === null;
   }
-  return { mask, quote, frames };
+  return { mask, substDepth, quote, frames };
+}
+
+// The interiors of `text`'s outermost `$( … )`, as `[start, end)` offsets. A run of
+// non-zero substitution depth opens on the `$` and ends on the index of the closing `)`,
+// which is back at the enclosing depth.
+function substitutionSpans(text) {
+  const { substDepth } = syntaxMask(text);
+  const spans = [];
+  let start = null;
+  const close = (end) => {
+    if (start !== null && text.startsWith('$(', start)) spans.push({ start: start + 2, end });
+    start = null;
+  };
+  for (let index = 0; index < text.length; index += 1) {
+    if (substDepth[index] > 0) {
+      start ??= index;
+      continue;
+    }
+    close(index);
+  }
+  close(text.length);
+  return spans;
+}
+
+// `text` with the given spans replaced by spaces, so offsets outside them are unmoved.
+function blankSpans(text, spans) {
+  let masked = text;
+  for (const span of spans) {
+    masked = masked.slice(0, span.start) + ' '.repeat(span.end - span.start) + masked.slice(span.end);
+  }
+  return masked;
 }
 
 // Split `text` on shell-syntax occurrences of the operators in `separators`.
@@ -382,7 +424,7 @@ export function earlyExitConsumer(segment) {
 // A single `|` stays inside its word: the pipeline split is `splitUnquoted`'s job, and
 // only the operators that separate *statements* matter here.
 function shellTokens(text) {
-  const { mask } = syntaxMask(text);
+  const { mask, substDepth } = syntaxMask(text);
   const tokens = [];
   let index = 0;
   while (index < text.length) {
@@ -393,12 +435,24 @@ function shellTokens(text) {
     if (mask[index] === true) {
       const pair = text.slice(index, index + 2);
       if ((pair === '&&' || pair === '||') && mask[index + 1] === true) {
-        tokens.push({ type: 'operator', value: pair, start: index, end: index + 2 });
+        tokens.push({
+          type: 'operator',
+          value: pair,
+          start: index,
+          end: index + 2,
+          subst: substDepth[index] > 0,
+        });
         index += 2;
         continue;
       }
       if (text[index] === ';') {
-        tokens.push({ type: 'operator', value: ';', start: index, end: index + 1 });
+        tokens.push({
+          type: 'operator',
+          value: ';',
+          start: index,
+          end: index + 1,
+          subst: substDepth[index] > 0,
+        });
         index += 1;
         continue;
       }
@@ -419,6 +473,7 @@ function shellTokens(text) {
       value: text.slice(start, index),
       start,
       end: index,
+      subst: substDepth[start] > 0,
       // A shell-syntax `(`/`)` glued to the word. `$( … )` is transparent to the mask, so
       // its brackets are not shell syntax here and a command substitution neither opens
       // nor closes a compound.
@@ -461,6 +516,7 @@ function leadsStatement(previous) {
  */
 function tokenCompound(token, previous) {
   if (token.type !== 'word') return null;
+  if (token.subst) return null;
   // `(cmd)` written with no spaces is self-contained: it can hold no top-level separator,
   // so counting it would only unbalance the depth.
   if (token.opensParen && token.closesParen) return null;
@@ -569,7 +625,7 @@ function splitTopLevel(text) {
   const units = [];
   let start = 0;
   for (const [position, token] of tokens.entries()) {
-    if (token.type !== 'operator' || enclosed[position]) continue;
+    if (token.type !== 'operator' || token.subst || enclosed[position]) continue;
     units.push({ text: text.slice(start, token.start), separator: token.value, offset: start });
     start = token.end;
   }
@@ -888,16 +944,18 @@ function shellSetsPipefail(shell) {
   return trimmed === 'bash' || /\bpipefail\b/u.test(trimmed);
 }
 
-// GitHub invokes `bash --noprofile --norc -eo pipefail {0}` for `shell: bash`, `sh -e {0}`
-// for `shell: sh`, and `bash -e {0}` when a step declares no shell. Only the shells that
-// do *not* set pipefail reach this, so name the one that actually laundered the producer
-// rather than always saying `bash` — and name it as GitHub writes it, `{0}` included, so
-// the advisory can be matched against the workflow syntax it is talking about.
+// How GitHub invokes the shell, for the advisory that reports a laundered producer. Only
+// a built-in keyword gets GitHub's own `<name> -e {0}` template; every other value —
+// bare name or full string — is a custom shell command, run as written with the script
+// path appended and no `-e` added. `PIPELINE_SHELLS` admits `dash` and `zsh`, neither of
+// which is built in, so claiming `-e` for them sent a reader looking for a flag that is
+// not there.
 function invokedShellLabel(shell) {
   if (shell === null) return 'default shell (`bash -e`)';
   const trimmed = shell.trim();
   const name = trimmed.split(/\s+/u)[0].split('/').at(-1);
-  return trimmed === name ? `\`${name} -e {0}\`` : `\`${trimmed}\``;
+  if (trimmed === name && GITHUB_BUILTIN_SHELLS.has(name)) return `\`${name} -e {0}\``;
+  return `custom shell (\`${trimmed}\`)`;
 }
 
 function pipefailToggle(statement) {
@@ -1031,7 +1089,25 @@ function scanStatements(text, guarded, context, scope = 'top', base = 0) {
     }
     if (unitGuarded) continue;
 
-    for (const segment of splitUnquoted(statement, ['|&', '|']).slice(1)) {
+    // A command substitution is its own list: `$( … )` runs in a subshell, so a guard
+    // written inside one covers the inside only, and a `||` written inside one is not a
+    // separator of the statement that holds it. Walking the interior separately keeps
+    // both true while the finding still names the whole statement a reader sees.
+    const spans = substitutionSpans(statement);
+    for (const span of spans) {
+      const interior = statement.slice(span.start, span.end);
+      scanStatements(
+        interior,
+        false,
+        {
+          ...context,
+          report: (_inner, consumer) => context.report(statement.trim(), consumer, offset),
+        },
+        'sealed',
+      );
+    }
+
+    for (const segment of splitUnquoted(blankSpans(statement, spans), ['|&', '|']).slice(1)) {
       const consumer = earlyExitConsumer(segment);
       if (consumer !== null) context.report(statement.trim(), consumer, offset);
     }
