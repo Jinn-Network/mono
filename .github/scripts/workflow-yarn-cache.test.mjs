@@ -20,6 +20,14 @@ const workflowsDir = resolve(root, '.github/workflows');
 const indentOf = (line) => line.match(/^\s*/u)[0].length;
 const unquote = (value) => value.trim().replace(/^(['"])(.*)\1$/u, '$2');
 const scalar = (value) => unquote(value.replace(/\s+#.*$/u, ''));
+const jobKeyPattern = /^(?:"([A-Za-z_][A-Za-z0-9_-]*)"|'([A-Za-z_][A-Za-z0-9_-]*)'|([A-Za-z_][A-Za-z0-9_-]*))$/u;
+
+function mappingKey(line) {
+  const match = line.match(/^(\s+)(.+?):\s*(?:#.*)?$/u);
+  if (!match) return null;
+  const key = match[2].match(jobKeyPattern);
+  return key ? { indent: match[1].length, name: key[1] ?? key[2] ?? key[3] } : null;
+}
 
 function jobRanges(source) {
   const lines = source.split('\n');
@@ -31,8 +39,8 @@ function jobRanges(source) {
   for (let index = jobsAt + 1; index < lines.length; index += 1) {
     const line = lines[index];
     if (line.trim() && indentOf(line) <= jobsIndent) break;
-    const match = line.match(/^(\s+)([A-Za-z0-9_-]+):\s*(?:#.*)?$/u);
-    if (match && match[1].length === jobsIndent + 2) starts.push({ index, name: match[2] });
+    const key = mappingKey(line);
+    if (key?.indent === jobsIndent + 2) starts.push({ index, name: key.name });
   }
 
   return starts.map((start, position) => ({
@@ -115,13 +123,153 @@ function setupNodeAction(lines) {
   return uses?.startsWith('actions/setup-node@') ?? false;
 }
 
-function runsYarnInstall(lines) {
-  const run = propertyValue(lines, 'run');
-  if (run === null) return false;
+// Repository-structure runs this guard before installing dependencies, so keep the
+// workflow reader self-contained. Unknown dynamic directories fail closed below;
+// finite matrix axes and the repository's package-loop form expand to exact paths.
+function defaultsWorkingDirectory(lines, defaultsIndent) {
+  const defaultsPattern = new RegExp(`^\\s{${defaultsIndent}}defaults:\\s*(?:#.*)?$`, 'u');
+  const defaultsAt = lines.findIndex((line) => defaultsPattern.test(line));
+  if (defaultsAt === -1) return null;
+
+  const runIndent = defaultsIndent + 2;
+  const runPattern = new RegExp(`^\\s{${runIndent}}run:\\s*(?:#.*)?$`, 'u');
+  const runAt = lines.findIndex((line, index) => index > defaultsAt && runPattern.test(line));
+  if (runAt === -1) return null;
+
+  const workingDirectoryPattern = new RegExp(
+    `^\\s{${runIndent + 2}}working-directory:\\s*(.+)$`,
+    'u',
+  );
+  for (let index = runAt + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() && indentOf(line) <= runIndent) break;
+    const match = line.match(workingDirectoryPattern);
+    if (match) return scalar(match[1]);
+  }
+  return null;
+}
+
+function matrixValues(lines, variable) {
+  const jobIndent = indentOf(lines[0]);
+  const matrixPattern = new RegExp(`^\\s{${jobIndent + 4}}matrix:\\s*(?:#.*)?$`, 'u');
+  const matrixAt = lines.findIndex((line) => matrixPattern.test(line));
+  if (matrixAt === -1) return [];
+
+  const variableIndent = jobIndent + 6;
+  const variablePattern = new RegExp(
+    `^\\s{${variableIndent}}${variable}:\\s*(.*)$`,
+    'u',
+  );
+  const variableAt = lines.findIndex((line, index) => index > matrixAt && variablePattern.test(line));
+  if (variableAt === -1) return [];
+  const raw = lines[variableAt].match(variablePattern)[1].trim();
+  if (raw.startsWith('[') && raw.endsWith(']')) {
+    return raw.slice(1, -1).split(',').map(scalar).filter(Boolean);
+  }
+
+  const itemPattern = new RegExp(`^\\s{${variableIndent + 2}}-\\s+(.+)$`, 'u');
+  const values = [];
+  for (let index = variableAt + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() && indentOf(line) <= variableIndent) break;
+    const match = line.match(itemPattern);
+    if (match) values.push(scalar(match[1]));
+  }
+  return values;
+}
+
+function expandWorkingDirectories(value, jobLines) {
+  const workspaceExpanded = value.replace(/\$\{\{\s*github\.workspace\s*\}\}/gu, '.');
+  const expressionPattern = /\$\{\{\s*matrix\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}/u;
+  const match = workspaceExpanded.match(expressionPattern);
+  if (!match) return workspaceExpanded.includes('${{') ? [] : [workspaceExpanded];
+
+  const values = matrixValues(jobLines, match[1]);
+  return values.flatMap((entry) => expandWorkingDirectories(
+    workspaceExpanded.replace(expressionPattern, entry),
+    jobLines,
+  ));
+}
+
+function repositoryPath(repositoryRoot, ...parts) {
+  const absolute = resolve(repositoryRoot, ...parts);
+  const insideRoot = relative(repositoryRoot, absolute);
+  if (insideRoot.startsWith(`..${sep}`) || insideRoot === '..') return null;
+  return insideRoot || '.';
+}
+
+function shellLoopValues(run) {
   const commands = run.split('\n')
     .filter((line) => !line.trimStart().startsWith('#'))
-    .join('\n');
-  return /(?:^|[;&|()\s])yarn(?:\s+--cwd(?:=|\s+)\S+)?\s+install(?:\s|$)/u.test(commands);
+    .join('\n')
+    .replace(/\\\s*\n\s*/gu, ' ');
+  const values = new Map();
+  const loopPattern = /(?:^|\n)\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;\n]+);\s*do/gu;
+  for (const match of commands.matchAll(loopPattern)) {
+    const entries = match[2].trim().split(/\s+/u).map(unquote).filter(Boolean);
+    if (entries.some((entry) => entry.includes('$'))) continue;
+    values.set(match[1], entries);
+  }
+  return values;
+}
+
+function expandShellWorkingDirectories(value, loopValues) {
+  const workspaceExpanded = value
+    .replace(/^\$\{?GITHUB_WORKSPACE\}?$/u, '.')
+    .replace(/^\$\{\{\s*github\.workspace\s*\}\}$/u, '.');
+  const variablePattern = /\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/u;
+  const match = workspaceExpanded.match(variablePattern);
+  if (!match) return [workspaceExpanded];
+
+  const values = loopValues.get(match[1] ?? match[2]) ?? [];
+  return values.flatMap((entry) => expandShellWorkingDirectories(
+    workspaceExpanded.replace(variablePattern, entry),
+    loopValues,
+  ));
+}
+
+function yarnInstallLockfiles(step, jobLines, inheritedWorkingDirectory, repositoryRoot) {
+  const run = propertyValue(step, 'run');
+  if (run === null) return { found: false, lockfiles: [], unresolved: false };
+
+  const stepWorkingDirectory = propertyValue(step, 'working-directory');
+  const workingDirectory = stepWorkingDirectory ?? inheritedWorkingDirectory ?? '.';
+  const workingDirectories = expandWorkingDirectories(workingDirectory, jobLines);
+  const lockfiles = [];
+  let found = false;
+  let unresolved = workingDirectories.length === 0;
+  const loopValues = shellLoopValues(run);
+  const yarnPattern = /(?:^|[;&|()\s])yarn(?:\s+--cwd(?:=|\s+)("[^"]+"|'[^']+'|[^\s;&|()]+))?\s+install(?:\s|$)/gu;
+  const cdPattern = /(?:^\s*|[;&|(]\s*)cd\s+("[^"]+"|'[^']+'|[^\s;&|()]+)\s*&&\s*$/u;
+
+  for (const line of run.split('\n')) {
+    if (line.trimStart().startsWith('#')) continue;
+    for (const match of line.matchAll(yarnPattern)) {
+      found = true;
+      const beforeYarn = line.slice(0, match.index + match[0].indexOf('yarn'));
+      const cd = beforeYarn.match(cdPattern);
+      const commandWorkingDirectory = match[1] ? unquote(match[1]) : cd ? unquote(cd[1]) : null;
+      const commandWorkingDirectories = commandWorkingDirectory === null
+        ? ['.']
+        : expandShellWorkingDirectories(commandWorkingDirectory, loopValues);
+      if (commandWorkingDirectories.length === 0) {
+        unresolved = true;
+        continue;
+      }
+      for (const base of workingDirectories) {
+        for (const commandDirectory of commandWorkingDirectories) {
+          const project = repositoryPath(repositoryRoot, base, commandDirectory);
+          if (project === null) {
+            unresolved = true;
+            continue;
+          }
+          lockfiles.push(project === '.' ? 'yarn.lock' : `${project}/yarn.lock`);
+        }
+      }
+    }
+  }
+
+  return { found, lockfiles: [...new Set(lockfiles)], unresolved };
 }
 
 export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = root) {
@@ -132,11 +280,19 @@ export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = r
 
   for (const workflowName of workflowNames) {
     const source = readFileSync(join(directory, workflowName), 'utf8');
+    const sourceLines = source.split('\n');
+    const jobsAt = sourceLines.findIndex((line) => /^jobs:\s*(?:#.*)?$/u.test(line));
+    const workflowWorkingDirectory = defaultsWorkingDirectory(sourceLines.slice(0, jobsAt), 0);
     for (const job of jobRanges(source)) {
       const steps = stepsForJob(job.lines);
+      const jobWorkingDirectory = defaultsWorkingDirectory(job.lines, indentOf(job.lines[0]) + 2)
+        ?? workflowWorkingDirectory;
       for (let index = 0; index < steps.length; index += 1) {
         if (!setupNodeAction(steps[index])) continue;
-        if (!steps.slice(index + 1).some(runsYarnInstall)) continue;
+        const installs = steps.slice(index + 1)
+          .map((step) => yarnInstallLockfiles(step, job.lines, jobWorkingDirectory, repositoryRoot))
+          .filter((install) => install.found);
+        if (installs.length === 0) continue;
 
         const location = `${workflowName} job ${job.name}`;
         const values = withValues(steps[index]);
@@ -163,6 +319,15 @@ export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = r
         }
         if (new Set(paths).size !== paths.length) {
           violations.push(`${location}: cache-dependency-path entries must be deduplicated`);
+        }
+        if (installs.some((install) => install.unresolved)) {
+          violations.push(`${location}: could not derive every Yarn install project lockfile`);
+        }
+        const requiredPaths = [...new Set(installs.flatMap((install) => install.lockfiles))];
+        for (const requiredPath of requiredPaths) {
+          if (!paths.includes(requiredPath)) {
+            violations.push(`${location}: setup-node must cache ${requiredPath}`);
+          }
         }
         for (const dependencyPath of paths) {
           const absolute = resolve(repositoryRoot, dependencyPath);
@@ -210,6 +375,19 @@ function withFixture(run) {
     run({ fixtureRoot, fixtureWorkflows });
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
+
+function withWorkflowMutation(workflowName, mutate, run) {
+  const fixtureWorkflows = mkdtempSync(join(tmpdir(), 'jinn-workflow-yarn-cache-mutation-'));
+  const source = readFileSync(join(workflowsDir, workflowName), 'utf8');
+  const mutant = mutate(source);
+  assert.notEqual(mutant, source, `mutation did not change ${workflowName}`);
+  writeFileSync(join(fixtureWorkflows, workflowName), mutant);
+  try {
+    run(fixtureWorkflows);
+  } finally {
+    rmSync(fixtureWorkflows, { recursive: true, force: true });
   }
 }
 
@@ -321,5 +499,128 @@ test('guard rejects a directory named like a lockfile', () => {
       '          node-version: 22\n          cache: yarn\n          cache-dependency-path: app/yarn.lock',
     ));
     assert.match(yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'), /not an existing lockfile/u);
+  });
+});
+
+test('guard rejects a cache mapping missing one installed project lockfile', () => {
+  withWorkflowMutation('ci.yml', (source) => source.replace(
+    '            packages/lifecycle-notifications/yarn.lock\n',
+    '',
+  ), (fixtureWorkflows) => {
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows), [
+      'ci.yml job dashboard-e2e: setup-node must cache packages/lifecycle-notifications/yarn.lock',
+    ]);
+  });
+});
+
+test('guard rejects an unrelated existing lockfile in place of the installed project', () => {
+  withWorkflowMutation('ci.yml', (source) => source.replace(
+    '            packages/lifecycle-notifications/yarn.lock\n',
+    '            operator/yarn.lock\n',
+  ), (fixtureWorkflows) => {
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows), [
+      'ci.yml job dashboard-e2e: setup-node must cache packages/lifecycle-notifications/yarn.lock',
+    ]);
+  });
+});
+
+test('guard derives installs from workflow defaults and yarn --cwd', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    mkdirSync(join(fixtureRoot, 'dependency'), { recursive: true });
+    writeFileSync(join(fixtureRoot, 'dependency/yarn.lock'), 'dependency lockfile\n');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+defaults:
+  run:
+    working-directory: app
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: app/yarn.lock
+      - run: yarn --cwd ../dependency install --immutable
+`);
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /must cache dependency\/yarn\.lock/u,
+    );
+  });
+});
+
+test('guard expands matrix working directories', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    for (const directory of ['packages/one', 'packages/two']) {
+      mkdirSync(join(fixtureRoot, directory), { recursive: true });
+      writeFileSync(join(fixtureRoot, directory, 'yarn.lock'), `${directory} lockfile\n`);
+    }
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [one, two]
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: packages/one/yarn.lock
+      - run: yarn install --immutable
+        working-directory: packages/\${{ matrix.component }}
+`);
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /must cache packages\/two\/yarn\.lock/u,
+    );
+  });
+});
+
+test('guard expands shell install loops', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    for (const directory of ['packages/one', 'packages/two']) {
+      mkdirSync(join(fixtureRoot, directory), { recursive: true });
+      writeFileSync(join(fixtureRoot, directory, 'yarn.lock'), `${directory} lockfile\n`);
+    }
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: packages/one/yarn.lock
+      - run: |
+          for component in one two; do
+            (cd "packages/$component" && yarn install --immutable)
+          done
+`);
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /must cache packages\/two\/yarn\.lock/u,
+    );
+  });
+});
+
+test('guard checks Yarn installs under double-quoted job IDs', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
+      '          node-version: 22',
+    ).replace('  verify:', '  "verify":'));
+    assert.match(yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'), /cache: yarn/u);
+  });
+});
+
+test('guard checks Yarn installs under single-quoted job IDs with valid punctuation', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
+      '          node-version: 22',
+    ).replace('  verify:', "  'verify-job_1':"));
+    assert.match(yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'), /cache: yarn/u);
   });
 });
