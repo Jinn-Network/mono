@@ -12,7 +12,7 @@
 
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { stateDir } from "./paths.mjs";
 
@@ -43,7 +43,7 @@ export function readState(path) {
 /** Best-effort persist. Owner-only, because the feed path names a private archive. */
 export function writeState(path, state) {
   try {
-    mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     writeFileSync(path, `${JSON.stringify(state)}\n`, { encoding: "utf8", mode: 0o600 });
     return true;
   } catch {

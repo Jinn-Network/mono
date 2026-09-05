@@ -51,6 +51,13 @@ test("the pinned runtime version in the README matches the pin the adapter asser
   assert.equal(readme.includes(`${pin.package}@${pin.version}`), true);
 });
 
+test("the README does not quote an install command the channel cannot yet serve", () => {
+  // Publication to a plugin marketplace is not part of this adapter; a quoted command that
+  // resolves nothing would be a claim the repository cannot back.
+  assert.equal(readme.includes("claude plugin install"), false);
+  assert.match(readme, /not yet published to a plugin marketplace/u);
+});
+
 test("the README states the privacy posture rather than leaving it to be discovered", () => {
   assert.match(readme, /owner-only/u);
   assert.match(readme, /does not\s+scrub at capture time/u);

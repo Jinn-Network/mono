@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
+import { CONTROLLED_INPUT_MAX_BYTES } from "../src/feed.mjs";
 import { HOOK_PAYLOAD_MAX_BYTES, run } from "../src/hook.mjs";
 import { CONTROLLED_INPUT_SELECTION_RULE } from "../src/identity.mjs";
 import { readState, sessionStatePath, writeState } from "../src/state.mjs";
@@ -138,6 +139,49 @@ test("an empty first prompt binds nothing and leaves the binding available", asy
   assert.equal(stateOf(env).promptBound, false);
   await hook("UserPromptSubmit", env, { prompt: "the real instruction" });
   assert.equal(stateOf(env).promptBound, true);
+});
+
+test("an oversized first instruction is absent, never replaced by a later one", async () => {
+  const env = fakeEnv();
+  await withFakeMode("ok", () => hook("SessionStart", env));
+  await hook("UserPromptSubmit", env, { prompt: "x".repeat(CONTROLLED_INPUT_MAX_BYTES + 1) });
+  await hook("UserPromptSubmit", env, { prompt: "a much later instruction" });
+
+  // Binding turn two under the name `initial-user-prompt.md` would be a confident wrong claim.
+  assert.equal(
+    events(env).some((event) => event.type === "controlled-input" && event.role === "prompt"),
+    false,
+  );
+  assert.equal(stateOf(env).promptBound, true);
+});
+
+test("a reported failure is recorded as one; an empty error string is not", async () => {
+  const env = fakeEnv();
+  await withFakeMode("ok", () => hook("SessionStart", env));
+  await hook("PostToolUse", env, {
+    tool_name: "Read",
+    tool_input: {},
+    tool_response: { error: "   " },
+  });
+  await hook("PostToolUse", env, {
+    tool_name: "Read",
+    tool_input: {},
+    tool_response: { success: false },
+  });
+  const calls = events(env).filter((event) => event.type === "tool-call");
+  assert.equal(calls[0].status, "ok");
+  assert.equal(calls[0].errorMessage, undefined);
+  assert.equal(calls[1].status, "error");
+});
+
+test("a session-end reason nobody sent cannot reach the prototype", async () => {
+  for (const reason of ["constructor", "toString", "__proto__"]) {
+    const env = fakeEnv();
+    await withFakeMode("ok", () => hook("SessionStart", env));
+    const { feedPath } = stateOf(env);
+    await withFakeMode("ok", () => hook("SessionEnd", env, { reason }));
+    assert.equal(feedEvents(feedPath).at(-1).outcome, "completed", reason);
+  }
 });
 
 test("a tool call carries the host's own id when it has one, and a unique id when not", async () => {

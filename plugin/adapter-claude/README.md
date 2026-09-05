@@ -5,17 +5,19 @@ Execution Evidence record on your machine. Nothing leaves it.
 
 ## Install
 
-    claude plugin install jinn@Jinn-Network/mono
+This directory **is** the plugin: `.claude-plugin/plugin.json` plus the four hooks it
+registers. Install it the way Claude Code installs any local plugin, from a checkout of this
+repository. It is not yet published to a plugin marketplace, so there is no one-line install
+command to quote here; when it is, this section names it.
 
-The plugin registers four hooks and nothing else. It needs the Jinn plugin runtime, which it
-**resolves but never acquires**: Claude Code runs no dependency install for a plugin, and a
-hook that ran one would turn a session start into a several-minute wait. Install the runtime
-once, into the plugin's own directory:
+The plugin needs the Jinn plugin runtime, which it **resolves but never acquires**: Claude
+Code runs no dependency install for a plugin, and a hook that ran one would turn a session
+start into a several-minute wait. Install the runtime once, into the plugin's own directory:
 
     npm install --prefix "<plugin directory>" @jinn-network/plugin-runtime@0.1.0
 
 `node <plugin directory>/src/main.mjs doctor` prints one line per check and, for each failure,
-the one command that fixes it.
+the one command that fixes it — including this one, with the directory filled in.
 
 ## What it does
 
@@ -108,6 +110,6 @@ its own pipeline.
 
 ## Uninstall
 
-    claude plugin uninstall jinn
-
-To purge all state, remove `~/.claude/jinn/`.
+Remove the plugin from Claude Code. Its hooks go with it, so capture stops immediately. To
+purge what it wrote, remove `~/.claude/jinn/` — that is the archive as well as the state, so
+the records go too.

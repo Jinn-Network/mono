@@ -183,12 +183,17 @@ function onUserPromptSubmit(payload, env) {
   // feed as a `user-turn`, so binding them adds no disclosure surface; it makes them
   // content-addressed rather than narrative.
   if (!promptBound && prompt !== "") {
-    promptBound = feed.controlledInput({
+    feed.controlledInput({
       role: "prompt",
       name: PROMPT_INPUT_NAME,
       mediaType: "text/markdown",
       content: new TextEncoder().encode(prompt),
     });
+    // Marked whether or not the writer took it. An oversized first instruction is dropped, and
+    // the chance to bind one is spent with it: binding turn five under the name
+    // `initial-user-prompt.md` would be a confident wrong claim, where an absent input is a
+    // gap a verifier can see.
+    promptBound = true;
   }
   feed.userTurn(prompt);
   persist(statePath, { ...state, promptBound }, feed);
@@ -200,10 +205,16 @@ function onPostToolUse(payload, env) {
   if (stored === undefined) return;
   const { state, feed } = stored;
   const response = payload.tool_response;
+  // A reported failure, never an inferred one: an `error` key holding the empty string says
+  // nothing went wrong, and recording it as an error would put a false verdict in the trace.
+  const reportedError =
+    response !== null && typeof response === "object" && !Array.isArray(response) &&
+    typeof response.error === "string" && response.error.trim() !== ""
+      ? response.error
+      : undefined;
   const failed =
-    response !== null && typeof response === "object" && !Array.isArray(response)
-      ? response.success === false || typeof response.error === "string"
-      : false;
+    reportedError !== undefined ||
+    (response !== null && typeof response === "object" && response.success === false);
   feed.toolCall({
     toolName: typeof payload.tool_name === "string" ? payload.tool_name : "unknown",
     // Claude Code does not always name the call, and a trace needs one identifier per call.
@@ -213,7 +224,7 @@ function onPostToolUse(payload, env) {
     args: payload.tool_input,
     result: response,
     status: failed ? "error" : "ok",
-    ...(failed && typeof response.error === "string" ? { errorMessage: response.error } : {}),
+    ...(reportedError === undefined ? {} : { errorMessage: reportedError }),
   });
   persist(statePath, state, feed);
 }
@@ -223,8 +234,11 @@ async function onSessionEnd(payload, env) {
   const stored = openStoredFeed(statePath);
   if (stored === undefined) return;
   const { state, feed } = stored;
+  const reason = String(payload.reason ?? "other");
   feed.closeSession({
-    outcome: OUTCOME_BY_REASON[String(payload.reason ?? "other")] ?? "completed",
+    // `Object.hasOwn`, not a bare lookup: `reason` is host-written, and a bare lookup would
+    // read `constructor` or `toString` off the prototype for a reason nobody sent.
+    outcome: Object.hasOwn(OUTCOME_BY_REASON, reason) ? OUTCOME_BY_REASON[reason] : "completed",
     summary: "",
   });
   // The state is dropped whatever the seal does: the session is over, and an unsealed feed is
