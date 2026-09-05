@@ -447,7 +447,10 @@ describe('native-vertical identity CLI surface', () => {
       // Genuine OS-level process concurrency: two separate `jinn native-vertical identity
       // --create` invocations, spawned as real child processes racing on the same store path —
       // not a spy injecting a chosen interleaving. Mirrors the reviewer's race2.sh harness.
-      const ITERATIONS = 6;
+      // Each iteration launches three real TSX processes. Three independent races retain
+      // process-level coverage alongside the eight-way in-process race above, while leaving
+      // headroom for the default suite's parallel workers on two-core CI runners.
+      const ITERATIONS = 3;
       for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
         const store = tempStorePath();
         const env = { JINN_PASSWORD: 'operator-password' };
