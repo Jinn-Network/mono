@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -33,7 +42,9 @@ function jobRanges(source) {
 }
 
 function stepsForJob(lines) {
-  const stepsAt = lines.findIndex((line) => /^\s+steps:\s*(?:#.*)?$/u.test(line));
+  const jobIndent = indentOf(lines[0]);
+  const stepsPattern = new RegExp(`^\\s{${jobIndent + 2}}steps:\\s*(?:#.*)?$`, 'u');
+  const stepsAt = lines.findIndex((line) => stepsPattern.test(line));
   if (stepsAt === -1) return [];
   const stepsIndent = indentOf(lines[stepsAt]);
   const starts = [];
@@ -46,7 +57,11 @@ function stepsForJob(lines) {
 }
 
 function propertyValue(lines, property) {
-  const pattern = new RegExp(`^\\s*(?:-\\s*)?${property}:\\s*(.*)$`, 'u');
+  const stepIndent = indentOf(lines[0]);
+  const pattern = new RegExp(
+    `^(?:\\s{${stepIndent}}-\\s*|\\s{${stepIndent + 2}})${property}:\\s*(.*)$`,
+    'u',
+  );
   const at = lines.findIndex((line) => pattern.test(line));
   if (at === -1) return null;
   const match = lines[at].match(pattern);
@@ -67,7 +82,12 @@ function blockAfter(lines, at, propertyIndent) {
 }
 
 function withValues(lines) {
-  const withAt = lines.findIndex((line) => /^\s*(?:-\s*)?with:\s*(?:#.*)?$/u.test(line));
+  const stepIndent = indentOf(lines[0]);
+  const withPattern = new RegExp(
+    `^(?:\\s{${stepIndent}}-\\s*|\\s{${stepIndent + 2}})with:\\s*(?:#.*)?$`,
+    'u',
+  );
+  const withAt = lines.findIndex((line) => withPattern.test(line));
   if (withAt === -1) return new Map();
   const withIndent = indentOf(lines[withAt]);
   const values = new Map();
@@ -97,7 +117,11 @@ function setupNodeAction(lines) {
 
 function runsYarnInstall(lines) {
   const run = propertyValue(lines, 'run');
-  return run !== null && /(?:^|[;&|()\s])yarn(?:\s+--cwd(?:=|\s+)\S+)?\s+install(?:\s|$)/u.test(run);
+  if (run === null) return false;
+  const commands = run.split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('\n');
+  return /(?:^|[;&|()\s])yarn(?:\s+--cwd(?:=|\s+)\S+)?\s+install(?:\s|$)/u.test(commands);
 }
 
 export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = root) {
@@ -116,10 +140,15 @@ export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = r
 
         const location = `${workflowName} job ${job.name}`;
         const values = withValues(steps[index]);
-        const checkoutRoots = steps.slice(0, index)
+        const remoteCheckoutLockfiles = steps.slice(0, index)
           .filter((step) => propertyValue(step, 'uses')?.startsWith('actions/checkout@'))
-          .map((step) => withValues(step).get('path'))
-          .filter(Boolean);
+          .map((step) => withValues(step))
+          .filter((checkout) => checkout.get('repository') && checkout.get('path'))
+          .map((checkout) => relative(
+            repositoryRoot,
+            resolve(repositoryRoot, checkout.get('path'), 'yarn.lock'),
+          ))
+          .filter((dependencyPath) => !dependencyPath.startsWith(`..${sep}`) && dependencyPath !== '..');
         if (values.get('cache') !== 'yarn') {
           violations.push(`${location}: setup-node must declare cache: yarn`);
         }
@@ -140,10 +169,10 @@ export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = r
           const insideRoot = relative(repositoryRoot, absolute);
           if (insideRoot.startsWith(`..${sep}`) || insideRoot === '..' || dependencyPath.startsWith('/')) {
             violations.push(`${location}: cache dependency path must stay inside the repository: ${dependencyPath}`);
-          } else if (!dependencyPath.endsWith('yarn.lock')) {
+          } else if (basename(dependencyPath) !== 'yarn.lock') {
             violations.push(`${location}: cache dependency path is not an existing lockfile: ${dependencyPath}`);
-          } else if (!existsSync(absolute)
-            && !checkoutRoots.some((checkoutRoot) => dependencyPath === `${checkoutRoot}/yarn.lock`)) {
+          } else if ((!existsSync(absolute) || !statSync(absolute).isFile())
+            && !remoteCheckoutLockfiles.includes(dependencyPath)) {
             violations.push(`${location}: cache dependency path is not an existing lockfile: ${dependencyPath}`);
           }
         }
@@ -197,6 +226,99 @@ test('guard rejects cache dependency paths that do not exist', () => {
   withFixture(({ fixtureRoot, fixtureWorkflows }) => {
     writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
       '          node-version: 22\n          cache: yarn\n          cache-dependency-path: missing/yarn.lock',
+    ));
+    assert.match(yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'), /not an existing lockfile/u);
+  });
+});
+
+test('guard does not treat a nested checkout path as proof that a lockfile exists', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: dependency
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: dependency/yarn.lock
+      - run: yarn install --immutable
+`);
+    assert.match(yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'), /not an existing lockfile/u);
+  });
+});
+
+test('guard accepts a lockfile supplied by an external repository checkout', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: Jinn-Network/autopilot
+          path: .autopilot-pin
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: .autopilot-pin/yarn.lock
+      - run: yarn install --immutable
+        working-directory: .autopilot-pin
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), []);
+  });
+});
+
+test('guard reads step properties at their YAML depth', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node
+        env:
+          uses: not-an-action
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: yarn install --immutable
+        working-directory: app
+`);
+    assert.match(yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'), /cache: yarn/u);
+  });
+});
+
+test('guard does not mistake nested step data or shell comments for executable workflow structure', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Document an action
+        env:
+          uses: actions/setup-node@v7
+        run: |
+          # yarn install --immutable
+          echo no dependency installation
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), []);
+  });
+});
+
+test('guard rejects a directory named like a lockfile', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    rmSync(join(fixtureRoot, 'app/yarn.lock'));
+    mkdirSync(join(fixtureRoot, 'app/yarn.lock'));
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
+      '          node-version: 22\n          cache: yarn\n          cache-dependency-path: app/yarn.lock',
     ));
     assert.match(yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'), /not an existing lockfile/u);
   });
