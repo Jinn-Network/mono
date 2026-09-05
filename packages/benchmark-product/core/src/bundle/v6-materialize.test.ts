@@ -38,7 +38,7 @@ import {
   CLAIM_PACKAGE_SCHEMA_ID,
   buildClaimPackage,
 } from "../report/claim.js";
-import { BUNDLE_V6_FORMAT } from "../legacy-closures.js";
+import { BUNDLE_V9_FORMAT } from "./manifest.js";
 import { LOCAL_VENUE_LIMITS } from "../operations/run-results.js";
 import { verifyRunWorkspace } from "../operations/verify.js";
 import { readRunState, writeRunState } from "../run/state.js";
@@ -84,11 +84,14 @@ describe("anchored public bundle v6 — producer", () => {
     expect(claim.verification.checks).toHaveLength(6);
   }, 120_000);
 
-  test("one RFC 3161 lock anchor moves the bundle onto v6 and the claim onto /4", async () => {
+  // The closure this suite exercises is v6's; issue #3698 moved the FORMAT LITERAL a new one
+  // stamps to `/9`, whose closure is v6's exactly and whose page states the denominator pair.
+  // Every member, allowlist, and check below is unchanged.
+  test("one RFC 3161 lock anchor moves the bundle onto the anchored closure and the claim onto /4", async () => {
     const built = await fixture([{ kind: "rfc3161-lock" }]);
 
     const manifest = json(built.bundle.bundleDir, "bundle.json");
-    expect(manifest.format).toBe(BUNDLE_V6_FORMAT);
+    expect(manifest.format).toBe(BUNDLE_V9_FORMAT);
 
     const anchorPaths = built.bundle.files.filter((path) => path.startsWith("anchors/"));
     expect(anchorPaths).toHaveLength(1);

@@ -26,6 +26,7 @@ import {
   PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V7_CHECKS,
   PUBLIC_BUNDLE_V8_CHECKS,
+  PUBLIC_BUNDLE_V9_CHECKS,
   SUPPORTED_BUNDLE_FORMATS,
 } from "@colophon-claims/verify";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
@@ -328,6 +329,11 @@ describe("product documentation consistency", () => {
         pinned: [readerLine(instruction(BUNDLE_V8_FORMAT).command)],
         compatible: [readerLine(instruction(BUNDLE_V8_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_V8_CHECKS,
+      },
+      [`\`${BUNDLE_V9_FORMAT}\``]: {
+        pinned: [readerLine(instruction(BUNDLE_V9_FORMAT).command)],
+        compatible: [readerLine(instruction(BUNDLE_V9_FORMAT).compatibleCommand)],
+        checks: PUBLIC_BUNDLE_V9_CHECKS,
       },
     };
 

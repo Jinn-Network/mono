@@ -415,11 +415,12 @@ const ClaimPackageWireSchema = z.object({
     }
     // Two lines, because claim-package/4 is carried by two bundle formats that differ only in the
     // page they render (issue #3698): `/6`, whose reader is the first public `0.1` line, and `/9`,
-    // whose page states the denominator pair and whose reader is the `0.3` line. The claim carries
-    // no format literal, so from the claim alone either pin is honest -- the same shape the
+    // whose page states the denominator pair and reads on the `0.2` line. The claim carries no
+    // format literal, so from the claim alone either pin is honest -- the same shape the
     // prompted-screening guard already has, where a historical `0.2.0` line stays acceptable
-    // alongside the current one. `verifyPublicBundleSnapshot` knows the format and pins it exactly
-    // there, so nothing is lost: this admits the pair, the verifier picks the one.
+    // alongside the current one. Nothing is lost by admitting both: inside a bundle the format IS
+    // known, and `claim-consistency` rebuilds `verification` from it, so a `/6` bundle carrying a
+    // `/9` claim (or the reverse) fails there on the exact field that disagrees.
     if (
       (
         claim.verification.command !== PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND

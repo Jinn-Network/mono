@@ -40,8 +40,8 @@ import {
   DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
 } from "../report/claim.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
-import { BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, PUBLIC_BUNDLE_V4_FILES } from "../legacy-closures.js";
-import { BUNDLE_V8_FORMAT, buildBundleManifest } from "./manifest.js";
+import { BUNDLE_V7_FORMAT, PUBLIC_BUNDLE_V4_FILES } from "../legacy-closures.js";
+import { BUNDLE_V8_FORMAT, BUNDLE_V9_FORMAT, buildBundleManifest } from "./manifest.js";
 import { materializePublicBundle } from "./materialize.js";
 import { readRunState } from "../run/state.js";
 import {
@@ -387,12 +387,12 @@ describe("disclosed bundle v8 — the standalone reader (T1)", () => {
       runState: readRunState(workspaceDir, built.draftId)!,
       reportSelector: { method: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: "1" },
     });
-    expect(json(sibling.bundleDir, "bundle.json").format).toBe(BUNDLE_V6_FORMAT);
+    expect(json(sibling.bundleDir, "bundle.json").format).toBe(BUNDLE_V9_FORMAT);
     const siblingClaim = json(sibling.bundleDir, "claim-package.json");
     expect(siblingClaim.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
     expect(siblingClaim.disclosure).toBeUndefined();
     expect(json(sibling.bundleDir, "report.json")[DISCLOSURE_SPECIFICATION_EXTENSION]).toBeUndefined();
-    await expect(verifyPublicBundle(sibling.bundleDir)).resolves.toMatchObject({ format: BUNDLE_V6_FORMAT });
+    await expect(verifyPublicBundle(sibling.bundleDir)).resolves.toMatchObject({ format: BUNDLE_V9_FORMAT });
   }, 900_000);
 
   test("T11a — a v8 bundle whose Report lost its extension refuses at the check's first step", async () => {

@@ -15,9 +15,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { RFC3161_TSA_ANCHOR_PROFILE, canonicalJsonBytes } from "@jinn-network/trust-core";
-import { verifyPublicBundle } from "@colophon-claims/verify";
+import { derivePublicComparison, verifyPublicBundle } from "@colophon-claims/verify";
 import { buildBundleManifest } from "./manifest.js";
-import { BUNDLE_V6_FORMAT } from "../legacy-closures.js";
+import {
+  BUNDLE_V6_FORMAT,
+  PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
+} from "../legacy-closures.js";
+import { BUNDLE_V9_FORMAT, type BuildBundleManifestOptions } from "./manifest.js";
+import { buildPublicAssets } from "./assets.js";
+import { parseBenchmark, parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
 import { LOCAL_VENUE_LIMITS } from "../operations/run-results.js";
 import {
   V6_FIXTURE_SPLICED_GEN_TIME_DER,
@@ -60,11 +67,14 @@ function json(bundleDir: string, path: string): Record<string, any> {
 }
 
 /** Rebuilds the manifest over whatever members the directory now holds, so a tamper case is refused
- * by the semantic check under test rather than by the manifest digest that precedes it. */
+ * by the semantic check under test rather than by the manifest digest that precedes it. Keeps the
+ * bundle's OWN declared format rather than stamping one: relabelling is its own tamper family, and
+ * a helper that silently performed it would make every other case a relabel too. */
 function rewriteManifest(bundleDir: string, paths: readonly string[]): void {
+  const format = json(bundleDir, "bundle.json").format as BuildBundleManifestOptions["format"];
   writeFileSync(
     join(bundleDir, "bundle.json"),
-    buildBundleManifest(bundleDir, [...paths], { format: BUNDLE_V6_FORMAT }).bytes,
+    buildBundleManifest(bundleDir, [...paths], { format }).bytes,
   );
 }
 
@@ -82,7 +92,91 @@ async function expectRefusal(bundleDir: string, fragment: string): Promise<void>
   expect(message, `expected a refusal mentioning "${fragment}"`).toContain(fragment);
 }
 
+/**
+ * A faithful `/6` bundle, built by moving a `/9` one back onto the allocation it succeeded.
+ *
+ * The producer no longer emits `/6` (issue #3698), but every `/6` bundle ever published still has
+ * to verify, forever — that immutability is what makes a published claim citable, and
+ * `claim-consistency` rebuilds each one's claim from its own records before byte-comparing. The
+ * three things that differ between the two allocations are exactly the three rewritten here: the
+ * format literal, the reader line the claim pins, and the page. Nothing else moves, which is the
+ * whole content of the allocation.
+ */
+function moveOntoV6(bundleDir: string): void {
+  const claim = json(bundleDir, "claim-package.json");
+  claim.verification.command = PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND;
+  claim.verification.compatibleCommand = PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND;
+  writeFileSync(join(bundleDir, "claim-package.json"), canonicalJsonBytes(claim));
+
+  const read = (name: string): Uint8Array => new Uint8Array(readFileSync(join(bundleDir, name)));
+  const manifest = json(bundleDir, "bundle.json");
+  const paths = (manifest.files as Array<{ path: string }>).map((entry) => entry.path);
+  // Line 1 is the assembly header, not a cell; the reader parses it under its own schema.
+  const assembly = readFileSync(join(bundleDir, "verification/assembly.jsonl"), "utf8")
+    .split("\n")
+    .filter((line) => line !== "")
+    .slice(1)
+    .map((line) => JSON.parse(line) as { cellKey: string; verdicts: Array<{ verdict: string }> });
+  const matrix = parseMatrix(read("matrix.json"));
+  const recordSha256s = paths.flatMap((path) => {
+    const match = /^records\/([a-f0-9]{64})\.bin$/u.exec(path);
+    return match === null ? [] : [match[1]!];
+  });
+  const assets = buildPublicAssets({
+    format: BUNDLE_V6_FORMAT,
+    claim: claim as never,
+    matrix,
+    report: parseReport(read("report.json")),
+    reportSha256: claim.records.reportSha256 as string,
+    matrixSha256: claim.records.matrixSha256 as string,
+    recordSha256s,
+    dissentCellKeys: assembly
+      .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
+      .map((cell) => cell.cellKey)
+      .sort(),
+    // Derived, not omitted: the verifier derives it for every non-binary bundle, and the page it
+    // rebuilds is what these bytes are compared against.
+    comparison: derivePublicComparison({
+      benchmark: parseBenchmark(read("benchmark.json")),
+      matrix,
+      assemblyCells: assembly as never,
+      recordBytes: new Map(recordSha256s.map((sha256) => [sha256, read(`records/${sha256}.bin`)])),
+    }),
+  } as never);
+  for (const [name, bytes] of Object.entries(assets)) writeFileSync(join(bundleDir, name), bytes);
+  writeFileSync(
+    join(bundleDir, "bundle.json"),
+    buildBundleManifest(bundleDir, paths, { format: BUNDLE_V6_FORMAT }).bytes,
+  );
+}
+
 describe("anchored public bundle v6 — portable verification", () => {
+  test("a bundle on the superseded /6 allocation still verifies, page and pin included", async () => {
+    const built = await fixture([{ kind: "rfc3161-lock" }]);
+    const bundleDir = detach(built.bundle.bundleDir);
+    rmSync(built.workspaceDir, { recursive: true, force: true });
+    moveOntoV6(bundleDir);
+
+    const verified = await verifyPublicBundle(bundleDir);
+    expect(verified.format).toBe(BUNDLE_V6_FORMAT);
+    expect(verified.checks.at(-1)).toBe("integrity-anchors");
+  }, 120_000);
+
+  test("a /9 bundle relabelled to /6 without moving its claim and page is refused", async () => {
+    // The half that proves the test above is not simply accepting anything: relabelling alone
+    // leaves a claim pinning the /9 line and a page without the denominator columns, and
+    // `claim-consistency` rebuilds both from the format the manifest declares.
+    const built = await fixture([{ kind: "rfc3161-lock" }]);
+    const bundleDir = detach(built.bundle.bundleDir);
+    const paths = (json(bundleDir, "bundle.json").files as Array<{ path: string }>).map((entry) => entry.path);
+    writeFileSync(
+      join(bundleDir, "bundle.json"),
+      buildBundleManifest(bundleDir, paths, { format: BUNDLE_V6_FORMAT }).bytes,
+    );
+    await expectRefusal(bundleDir, "is not the exact projection");
+  }, 120_000);
+
+
   test("an anchored bundle round-trips producer to verifier and returns the seven checks", async () => {
     const built = await fixture([{ kind: "rfc3161-lock" }]);
     const bundleDir = detach(built.bundle.bundleDir);
@@ -90,7 +184,7 @@ describe("anchored public bundle v6 — portable verification", () => {
     rmSync(built.workspaceDir, { recursive: true, force: true });
 
     const verified = await verifyPublicBundle(bundleDir);
-    expect(verified.format).toBe(BUNDLE_V6_FORMAT);
+    expect(verified.format).toBe(BUNDLE_V9_FORMAT);
     expect(verified.checks).toEqual([
       "manifest",
       "evidence-closure",
@@ -184,7 +278,7 @@ describe("anchored public bundle v6 — portable verification", () => {
     // nothing to say about the declaration it seals.
     expect(built.bundle.files.some((path) => path.startsWith("anchors/"))).toBe(false);
     const verified = await verifyPublicBundle(detach(built.bundle.bundleDir));
-    expect(verified.format).toBe(BUNDLE_V6_FORMAT);
+    expect(verified.format).toBe(BUNDLE_V9_FORMAT);
     expect(verified.checks.at(-1)).toBe("integrity-anchors");
     if (verified.format === "benchmark-product-public-bundle/5") throw new Error("unreachable");
     expect(verified.anchors?.anchors).toHaveLength(0);

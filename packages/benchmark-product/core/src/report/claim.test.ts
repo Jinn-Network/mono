@@ -1708,11 +1708,14 @@ describe("issue #3205: an anchored run whose method emits a qualification projec
 });
 
 /**
- * The allocation is an ADDITION. These two digests were measured on the tree that still refused the
- * anchored qualification pair, so a change that moved either existing projection's bytes — the
- * unanchored binary claim (`claim-package/2`, a reject-policy qualification) or the anchored
- * non-qualification claim (`claim-package/4`) — fails here rather than silently republishing every
- * bundle under new bytes.
+ * These two digests were measured on the tree that still refused the anchored qualification pair, so
+ * a change that moved either existing projection's bytes — the unanchored binary claim
+ * (`claim-package/2`, a reject-policy qualification) or the anchored non-qualification claim
+ * (`claim-package/4`) — fails here rather than silently republishing every bundle under new bytes.
+ *
+ * The anchored one is now stated for its bundle format (issue #3698). `/6` and `/9` carry the same
+ * claim shape and differ only in the reader line, so the digest below is `/6`'s — the bytes every
+ * already-published anchored bundle must keep rebuilding to.
  */
 const PRE_ALLOCATION_UNANCHORED_BINARY_CLAIM_SHA256 = "23d59de90f615c05fe0b14d7c4a4c7f449ef3c4796988294c6eaf09fc6ccfe8f";
 const PRE_ALLOCATION_ANCHORED_WILSON_CLAIM_SHA256 = "eb20124f106947deedf1c25b5cb5349d11beda740be626bf079ebea93fe95a97";
@@ -1732,12 +1735,34 @@ describe("issue #3205: byte-identity of every projection that already existed", 
     expect(sha256Hex(canonicalJsonBytes(claim))).toBe(PRE_ALLOCATION_UNANCHORED_BINARY_CLAIM_SHA256);
   });
 
-  it("the anchored non-qualification claim keeps its exact pre-allocation bytes", async () => {
+  it("the anchored non-qualification claim keeps its exact pre-allocation bytes on /6", async () => {
+    // Issue #3698 moved the anchored non-qualifying PRODUCER cell from `/6` to `/9`, which changes
+    // the reader line a new claim pins. What must not change is the bytes a `/6` claim rebuilds to:
+    // `claim-consistency` reconstructs every already-published bundle's claim and byte-compares it,
+    // so a drift here would refuse every `/6` bundle in the world. This is that guard, and the
+    // digest is the one measured before either allocation existed.
     const claim = ClaimPackageSchema.parse(
-      buildClaimPackage({ ...(await wilsonGoldenInput()), anchors: [FIXTURE_LOCK_ANCHOR] }),
+      buildClaimPackage({
+        ...(await wilsonGoldenInput()),
+        anchors: [FIXTURE_LOCK_ANCHOR],
+        anchoredBundleFormat: "benchmark-product-public-bundle/6",
+      }),
     );
     expect(claim.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
     expect(sha256Hex(canonicalJsonBytes(claim))).toBe(PRE_ALLOCATION_ANCHORED_WILSON_CLAIM_SHA256);
+  });
+
+  it("the same projection on /9 differs from /6 in the reader line and nothing else", async () => {
+    // The allocation buys a page, not a record. Asserting the whole document rather than the two
+    // pinned strings is what catches a field that moved by accident alongside them.
+    const input = { ...(await wilsonGoldenInput()), anchors: [FIXTURE_LOCK_ANCHOR] };
+    const onV6 = buildClaimPackage({ ...input, anchoredBundleFormat: "benchmark-product-public-bundle/6" });
+    const onV9 = buildClaimPackage(input);
+    expect(onV9.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect({ ...onV9, verification: onV6.verification }).toEqual(onV6);
+    expect(onV9.verification.command).not.toBe(onV6.verification.command);
+    expect(onV9.verification.compatibleCommand).not.toBe(onV6.verification.compatibleCommand);
+    expect(onV9.verification.checks).toEqual(onV6.verification.checks);
   });
 });
 

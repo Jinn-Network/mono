@@ -88,7 +88,6 @@ import {
 import { assertClaimConsistency } from "./profile/claim-consistency.js";
 import { assertTaskSelectionConsistency } from "./profile/task-selection.js";
 import { buildPublicAssets } from "./assets.js";
-import { PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS } from "./reader-instructions.js";
 import { derivePublicComparison, type PublicComparisonView } from "./comparison.js";
 import {
   verifyBundleSnapshot,
@@ -608,28 +607,6 @@ export async function verifyPublicBundleSnapshot(
   const claimBytes = read("claim-package.json");
   const claim = parseJson(claimBytes, ClaimPackageSchema, "claim-package.json");
   requireCanonical(claimBytes, claim, "claim-package.json");
-  // ── The anchored headline claim's reader line is BOUND to the format (issue #3698) ──────────
-  //
-  // `/6` and `/9` carry the same claim-package/4 shape and differ only in the page they render and
-  // the reader release that renders it, so the claim's own schema-level refine cannot tell them
-  // apart: it accepts either pin, exactly as the prompted-screening guard accepts its historical
-  // `0.2.0` line. Here the format IS known, so exactness is recovered. A `/9` bundle pinning the
-  // `/6` line would hand its reader a verifier that rebuilds the old page and refuses these bytes;
-  // a `/6` bundle pinning the `/9` line would send a reader to a release its own bundle predates.
-  if (checked.manifest.format === BUNDLE_V6_FORMAT || checked.manifest.format === BUNDLE_V9_FORMAT) {
-    const expected = PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[checked.manifest.format];
-    if (
-      claim.verification.command !== expected.command
-      || claim.verification.compatibleCommand !== expected.compatibleCommand
-    ) {
-      refuse(
-        "record-integrity",
-        "claim-package.json",
-        `a ${checked.manifest.format} bundle's claim must pin ${expected.command}`
-        + ` and ${expected.compatibleCommand}`,
-      );
-    }
-  }
   let benchmark: ReturnType<typeof parseBenchmark>;
   let run: ReturnType<typeof parseRun>;
   let matrix: ReturnType<typeof parseMatrix>;
