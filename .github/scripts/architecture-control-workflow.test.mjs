@@ -102,7 +102,7 @@ const JQ_STUB = [
  * `gitMode: 'real'` keeps the real git on PATH inside a throwaway repository so a
  * genuinely failing `git diff` (bad object) can be observed rather than simulated.
  */
-function runSelectionScript({ script, env, gitMode = 'stub' }) {
+function runSelectionScript({ script, env, gitMode = 'stub', jqStub = JQ_STUB }) {
   const dir = mkdtempSync(join(tmpdir(), 'pac-selection-'));
   try {
     const bin = join(dir, 'bin');
@@ -114,7 +114,7 @@ function runSelectionScript({ script, env, gitMode = 'stub' }) {
 
     if (gitMode === 'stub') writeExecutable(join(bin, 'git'), GIT_STUB);
     writeExecutable(join(bin, 'node'), SELECTOR_STUB);
-    writeExecutable(join(bin, 'jq'), JQ_STUB);
+    writeExecutable(join(bin, 'jq'), jqStub);
 
     if (gitMode === 'real') {
       execFileSync('git', ['init', '-q', dir], { stdio: 'ignore' });
@@ -223,6 +223,14 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   assert.match(selectionJob, /run: \|\n\s+set -o pipefail\n/u);
   assert.match(selectionJob, /if \[ -z "\$\{diff_base\}" \] \|\| \[ -z "\$\{diff_head\}" \]; then/u);
   assert.match(selectionJob, /::error::selection endpoints unresolved on \$\{EVENT_NAME\}/u);
+  // The jq hop is assigned before it is echoed. Folded into the `echo` argument the
+  // substitution is invisible to `set -e`, and a dead jq publishes an empty `run=` that
+  // unselects the whole battery at exit 0 (#2456). Executable coverage is below.
+  assert.match(
+    selectionJob,
+    /\n\s+run_value="\$\(jq -r '\.run' <<<"\$\{selection\}"\)"\n\s+echo "run=\$\{run_value\}" >> "\$\{GITHUB_OUTPUT\}"/u,
+  );
+  assert.doesNotMatch(selectionJob, /echo "run=\$\(/u);
   assert.doesNotMatch(source, /npm (?:publish|install)|yarn npm publish/u);
   // Ban publish-verified-platform script invocations; wiring its test file is allowed.
   assert.doesNotMatch(source, /publish-verified-platform(?!\.test\.mjs)/u);
@@ -361,6 +369,40 @@ test('a failing git diff reds selection instead of silently unselecting verifica
   });
   assert.equal(unguarded.status, 0, 'without pipefail the broken diff is masked');
   assert.match(unguarded.output, /^run=false$/mu);
+});
+
+// Stands in for a `jq` that dies on its input -- a malformed `selection` exits 5. The
+// selector's own output is well-formed by construction, so this is the transport
+// failure (a truncated pipe, an OOM-killed jq) rather than a selector bug.
+const FAILING_JQ_STUB = ['#!/bin/bash', 'cat > /dev/null', "echo 'jq: parse error' >&2", 'exit 5', ''].join('\n');
+
+test('a failing jq reds selection instead of publishing an empty run= verdict', () => {
+  const script = extractSelectionScript(readArchitectureControlWorkflow());
+  const env = {
+    EVENT_NAME: 'merge_group',
+    PR_BASE_REF: '',
+    PR_HEAD_REF: '',
+    MG_BASE_SHA: 'base-from-merge-group',
+    GITHUB_SHA: 'checked-out-sha',
+  };
+
+  const guarded = runSelectionScript({ script, env, jqStub: FAILING_JQ_STUB });
+  assert.notEqual(guarded.status, 0, 'a failing jq must red the job');
+  assert.doesNotMatch(guarded.output, /run=/u, 'no run= verdict may be published');
+
+  // The same script with the assignment folded back into the `echo` argument is the
+  // defect being guarded, and running it proves the assertion above is load-bearing.
+  // `set -e` does not see a command substitution in an argument position -- `echo`
+  // returns 0 -- so the step publishes `run=`, `platform-verification-reusable` is
+  // skipped, and the terminal gate accepts `skipped`: green, having verified nothing.
+  const foldedBack = script.replace(
+    /^run_value="\$\(jq -r '\.run' <<<"\$\{selection\}"\)"\necho "run=\$\{run_value\}"/mu,
+    'echo "run=$(jq -r \'.run\' <<<"${selection}")"',
+  );
+  assert.notEqual(foldedBack, script, 'the selection step must assign the jq result before echoing it');
+  const laundered = runSelectionScript({ script: foldedBack, env, jqStub: FAILING_JQ_STUB });
+  assert.equal(laundered.status, 0, 'in argument position the jq failure is masked');
+  assert.match(laundered.output, /^run=$/mu);
 });
 
 test('scheduled/manual audit is read-only, summarizes, and uploads deterministic evidence', () => {

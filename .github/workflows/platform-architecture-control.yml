@@ -150,7 +150,12 @@ jobs:
           selection="$(git diff --name-only "${diff_base}...${diff_head}" \
             | node .github/scripts/platform-verification-selection.mjs)"
           echo "${selection}"
-          echo "run=$(jq -r '.run' <<<"${selection}")" >> "${GITHUB_OUTPUT}"
+          # Assigned before it is echoed. A command substitution in an argument position
+          # is invisible to `set -e` -- `echo` returns 0 -- so a dead jq would publish
+          # `run=`, skip the reusable call, and satisfy the terminal gate's `skipped`
+          # arm: green with nothing verified (issue #2456).
+          run_value="$(jq -r '.run' <<<"${selection}")"
+          echo "run=${run_value}" >> "${GITHUB_OUTPUT}"
 
   platform-release-surface:
     name: platform-release-surface
