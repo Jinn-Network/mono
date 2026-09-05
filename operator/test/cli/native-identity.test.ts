@@ -447,8 +447,33 @@ describe('native-vertical identity CLI surface', () => {
       // Genuine OS-level process concurrency: two separate `jinn native-vertical identity
       // --create` invocations, spawned as real child processes racing on the same store path —
       // not a spy injecting a chosen interleaving. Mirrors the reviewer's race2.sh harness.
+      // The loop is bounded by WALL CLOCK, not by iteration count (#3581). Each
+      // iteration is three real CLI process boots — 18 in all at the cap — and
+      // measured ~8-11s per iteration on an idle 12-core laptop, i.e. ~56s
+      // against the old flat 60s budget: a ~7% margin that a 4-vCPU CI runner
+      // sharing itself with two sibling vitest workers does not have. It went
+      // red at 60017ms on CI on 2026-09-05 and reproduced locally on the first
+      // try. A race test's coverage is probabilistic, so the right currency to
+      // spend under load is ITERATIONS, not reliability: a slow host does fewer
+      // races rather than failing at an arbitrary one.
+      //
+      // The next iteration starts only if the SLOWEST one seen so far still
+      // fits in the remaining budget, so the loop cannot overrun by more than
+      // one iteration's worth of surprise; `testTimeout` below is the backstop,
+      // set well clear of the budget so a starved run surfaces as the
+      // exhaustion assertion under the loop rather than as an opaque vitest
+      // timeout that names no cause.
       const ITERATIONS = 6;
+      const BUDGET_MS = 60_000;
+      const startedAt = Date.now();
+      let completed = 0;
+      let slowestMs = 0;
       for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
+        const elapsed = Date.now() - startedAt;
+        // Always run the first; after that, only while the budget can absorb
+        // another of the slowest observed.
+        if (iteration > 0 && elapsed + slowestMs > BUDGET_MS) break;
+        const iterationStartedAt = Date.now();
         const store = tempStorePath();
         const env = { JINN_PASSWORD: 'operator-password' };
 
@@ -475,8 +500,18 @@ describe('native-vertical identity CLI surface', () => {
           const parsed = JSON.parse(result.stdout) as { identities: { keyId: string }[] };
           expect(parsed.identities[0]?.keyId).toBe(truthKeyId);
         }
+        completed += 1;
+        slowestMs = Math.max(slowestMs, Date.now() - iterationStartedAt);
       }
+
+      // Assert on exhaustion: a host too starved to finish even one race must
+      // say so here, not leave the reader with a green test that proved
+      // nothing (or an unrelated assertion further down).
+      expect(
+        completed,
+        `no race iteration completed within ${BUDGET_MS}ms — the host is too starved for this test to prove anything`,
+      ).toBeGreaterThan(0);
     },
-    60_000,
+    90_000,
   );
 });

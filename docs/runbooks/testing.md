@@ -409,11 +409,36 @@ Results:
   the first run and re-compared against that same baseline afterwards, so its
   unchanged result covers the six runs cumulatively.
 
-Named but not fixed here, both load-sensitive budgets with CI evidence and no
-local reproduction: `test/cli/native-identity.test.ts` (18 real process boots
-against a 60s budget) and `test/_support/chain/anvil.test.ts` /
-`olas-funding.test.ts` (a 15s anvil readiness budget while forking Base mainnet
-over the network).
+**Both budgets named but not fixed under #1627 were resolved on 2026-09-05
+(#3581), one each way.**
+
+`test/cli/native-identity.test.ts` — **fixed.** The reproduction the #1627 pass
+lacked turned up on the first attempt: the `real two-process concurrent
+--create` race took **~56s of a flat 60s budget on an idle 12-core laptop**
+(~8-11s per iteration over 6 iterations, 18 real CLI process boots), and the
+same test went red at **60017ms on a CI `Typecheck & Test` job on 2026-09-05**
+— a ~7% margin, on a 4-vCPU runner sharing itself with two sibling workers. The
+fix applies both rules above: the loop is bounded by wall clock (a 60s budget,
+and the next iteration starts only if the slowest one seen so far still fits in
+what is left), it asserts on exhaustion if not even one race completes, and the
+`testTimeout` moved to 90s so it is a backstop rather than the thing that ends
+the loop. A race test's coverage is probabilistic, so the currency spent under
+load is iterations, not reliability. Verified: green idle (50.8s, all 6
+iterations) and green under an added 8-way CPU load at load average 35 (48.7s,
+budget-truncated).
+
+`test/_support/chain/anvil.test.ts` / `olas-funding.test.ts` — **measured, and
+left alone.** Anvil readiness against a live Base-mainnet fork was timed over
+13 spawns, 5 idle and 8 under an added 8-way CPU load: median **1.13s**, min
+0.97s, max **5.34s**, zero timeouts. The 15s budget is ~13x the median and
+~2.8x the worst observed. The tail is network-bound (fetching fork state), not
+CPU-bound, which is why the loaded runs look like the idle ones. Mining the CI
+history the same way as the census above — the last 300 `ci.yml` runs, every
+`Typecheck & Test` failure log retrieved — found **zero** occurrences of
+`anvil did not become ready`. The wait already follows both rules (a
+`Date.now()` deadline, and a throw naming the budget and the port), and there
+is nothing here to fix on evidence. Re-derive with a spawn-and-poll loop
+against `spawnAnvilFork`'s own arguments if the picture changes.
 
 **Verifying that no test touched the real home.** The in-suite guards —
 `operator/test/config/home-isolation.test.ts`,
