@@ -444,9 +444,9 @@ metadata-first bundle there. What a `/5` producer writes today still does not sa
 metadata-first-specific command constant, so a metadata-first bundle whose claim pins `@0.1`
 remains an instruction to fail. The gate is open and unexercised — the profile is a format
 definition and a local derivation of an already-published full-evidence bundle, and no producer
-emits one. The local viewer, which is the one surface that can be pointed
-at a hand-derived metadata-first bundle, offers the local `colophon bundle verify` command; a
-reader handed such a bundle can also run `npx @colophon-claims/verify@0.2.1 <bundle-dir>`.
+emits one. The local viewer, which is the one surface that can be pointed at a hand-derived
+metadata-first bundle, offers the local `colophon bundle verify` command; a reader handed such a
+bundle can also run `npx @colophon-claims/verify@0.2.1 <bundle-dir>`.
 
 ### Disclosed anchored binary qualification bundle v8
 
