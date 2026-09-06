@@ -2319,7 +2319,7 @@
       "requiredGateIds": [
         "client-ci"
       ],
-      "role": "operator daemon and application",
+      "role": "operator daemon and application, and the requester CLI (consumer class 1)",
       "stability": "transitional",
       "supersedes": [],
       "tier": 4,

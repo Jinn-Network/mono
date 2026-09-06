@@ -102,6 +102,7 @@ import {
   parseMultisigFromReceipt as parseMultisigFromReceiptImpl,
   parseServiceIdFromReceipt as parseServiceIdFromReceiptImpl,
 } from './steps/receipt-parsing.js';
+import { requesterMinMasterEth } from './requester-init.js';
 import { stepFleetSafePredict as stepFleetSafePredictImpl } from './steps/fleet-safe-predict.js';
 import { stepFleetSafeDeploy as stepFleetSafeDeployImpl } from './steps/fleet-safe-deploy.js';
 import { stepFleetIdentityRegister as stepFleetIdentityRegisterImpl } from './steps/fleet-identity-register.js';
@@ -634,6 +635,143 @@ export class FleetBootstrapper {
         rawErrorMessage: rawMessage,
       };
     }
+  }
+
+  /**
+   * Requester-only onboarding (B0a, issue #2446) — wallet, creator Safe, done.
+   *
+   * This is `ensureStage1` minus its third step. It walks master wallet →
+   * ETH-only funding gate → predict creator Safe → deploy creator Safe, and it
+   * stops there: no ERC-8004 identity mint, no `setAgentWallet` bind, no
+   * service row, no staking, no mech. Those are the supplier's costs, and a
+   * person who wants work done should not pay them to ask for it
+   * (`docs/superpowers/specs/2026-08-05-user-journeys-design.md` §4.2).
+   *
+   * The Safe it deploys is `fleet_safe_address` — the same free-standing,
+   * deterministically-predicted Safe Stage 1 uses, which is precisely the
+   * shape the native requester's `creatorSafe` wants. Sharing the two step
+   * functions rather than reimplementing them means the requester's Safe is
+   * the operator's Safe, so an operator who later runs the full bootstrap
+   * finds Stage 1's first two steps already satisfied.
+   *
+   * The funding gate is `requesterMinMasterEth()` (0.0015 ETH), not the
+   * operator's `stage1MinMasterEth` (0.020 ETH). See `requester-init.ts`.
+   */
+  async ensureRequesterSafe(password: string): Promise<FleetBootstrapResult> {
+    if (!this.store.hasMnemonicKeystore() && this.store.hasLegacyKeystore()) {
+      await this.store.migrateLegacyFiles();
+    }
+
+    let state = await this.store.load(this.chain);
+
+    try {
+      state = await this.ensureMasterWallet(state, password);
+      const masterAddress = state.master_address!;
+      const required = requesterMinMasterEth();
+
+      let masterBalance = await this.publicClient.getBalance({
+        address: masterAddress as Address,
+      });
+      if (masterBalance < required && this.chain === 'base-sepolia' && this.autoTestnetFaucet) {
+        masterBalance = await this.dripFaucetToward(masterAddress, required, masterBalance);
+      }
+
+      if (masterBalance < required) {
+        const shortfall = required - masterBalance;
+        return {
+          ok: false,
+          fleet_state: state,
+          message:
+            `Your wallet needs ${formatEther(shortfall)} ETH more to deploy your creator Safe ` +
+            `(currently ${formatEther(masterBalance)} ETH, need ${formatEther(required)} ETH). ` +
+            `Send Base Sepolia ETH to: ${masterAddress}`,
+          funding: {
+            master_address: masterAddress,
+            eth_required: shortfall.toString(),
+            eth_balance: masterBalance.toString(),
+          },
+        };
+      }
+
+      const mnemonic = await this.loadExistingMnemonic(state, password);
+
+      if (!state.fleet_safe_address) {
+        state = await this.stepFleetSafePredict(state, mnemonic);
+      }
+      const safeCode = await this.publicClient.getCode({
+        address: getAddress(state.fleet_safe_address!) as Address,
+      });
+      if (safeCode === undefined || safeCode === '0x') {
+        state = await this.stepFleetSafeDeploy(state, mnemonic);
+      }
+
+      if (state.requester_stage !== 'safe_deployed') {
+        state = await this.store.patchFleet({ requester_stage: 'safe_deployed' });
+      }
+
+      return {
+        ok: true,
+        fleet_state: state,
+        message: `Creator Safe ready at ${state.fleet_safe_address}.`,
+      };
+    } catch (error) {
+      const { summary, hint, rawMessage } = formatBootstrapOperatorMessage(error);
+      const userMessage = hint !== undefined ? `${summary}\nHint: ${hint}` : summary;
+      console.error(`[requester-init] ${summary}`);
+      if (hint !== undefined) console.error(`Hint: ${hint}`);
+      return {
+        ok: false,
+        fleet_state: state,
+        message: userMessage,
+        rawErrorMessage: rawMessage,
+      };
+    }
+  }
+
+  /**
+   * Bounded CDP drip loop toward one address and one target.
+   *
+   * A narrow sibling of the operator bootstrap's inline loop, not an
+   * extraction of it: the requester target is ~15 drips where the operator's
+   * is ~200, and the operator loop additionally sums self-bond agent/Safe
+   * balances into its "system ETH". Both exit on target, rate-limit, drip cap,
+   * or wall clock, whichever comes first.
+   */
+  private async dripFaucetToward(
+    address: string,
+    targetWei: bigint,
+    startingBalance: bigint,
+  ): Promise<bigint> {
+    let balance = startingBalance;
+    // `floor: 0` — the shared helper's default 60-drip floor exists for callers
+    // that have no target at all. This loop has one, and it is small (~15
+    // drips): inheriting a floor four times the need would spend the
+    // requester's 4:30 budget on drips it does not want.
+    const maxIters = computeFaucetDripCap({ targetWei, balanceWei: balance, floor: 0 });
+    const deadline = this.now() + this.faucetLoopTimeoutMs;
+    let rateLimitRetries = 0;
+    console.error(
+      `[requester-init] Wallet has ${formatEther(balance)} ETH; need ${formatEther(targetWei)} ETH. ` +
+      `Draining CDP faucet on ${this.chain} (up to ${maxIters} drips or ` +
+      `${Math.round(this.faucetLoopTimeoutMs / 1000)}s).`,
+    );
+    for (let i = 0; i < maxIters; i++) {
+      if (this.now() >= deadline) break;
+      const result = await this.requestFunding(address, 'base-sepolia');
+      if (!result.ok) {
+        if (result.rateLimited && rateLimitRetries < FAUCET_RATE_LIMIT_MAX_RETRIES) {
+          rateLimitRetries++;
+          await new Promise((r) => setTimeout(r, this.faucetRateLimitBackoffMs));
+          continue;
+        }
+        console.error(`[requester-init] CDP faucet stopped after ${i} drips: ${result.reason}`);
+        break;
+      }
+      if ((i + 1) % 5 !== 0 && i !== maxIters - 1) continue;
+      balance = await this.publicClient.getBalance({ address: address as Address });
+      if (balance >= targetWei) break;
+    }
+    return balance;
   }
 
   /**

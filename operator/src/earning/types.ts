@@ -18,6 +18,19 @@ export type StakingMode = z.infer<typeof StakingModeSchema>;
 export const FleetStageSchema = z.enum(['none', 'stage1', 'stage1_and_2']);
 export type FleetStage = z.infer<typeof FleetStageSchema>;
 
+/**
+ * Requester-only onboarding marker (B0a, issue #2446). `safe_deployed` means
+ * `fleet_safe_address` is a *creator* Safe reached over the requester path —
+ * wallet, Safe, funding, and nothing else. It is deliberately independent of
+ * `fleet_stage`: the requester path never mints an ERC-8004 identity, so it
+ * never earns `stage1`, and an operator who later runs the full bootstrap
+ * advances `fleet_stage` over the very same Safe without this marker changing
+ * meaning. The read side (`planFleetFunding`) uses it to answer the
+ * requester's funding question instead of the operator's.
+ */
+export const RequesterStageSchema = z.enum(['none', 'safe_deployed']);
+export type RequesterStage = z.infer<typeof RequesterStageSchema>;
+
 // ── Service step progression ─────────────────────────────────────────────────
 //
 // Standard (stOLAS) mode:
@@ -135,6 +148,7 @@ export const FleetStateSchema = z.object({
   fleet_safe_address: z.string().nullable().optional().default(null),
   fleet_identity_registry: z.string().nullable().optional().default(null),
   fleet_stage: FleetStageSchema.optional().default('none'),
+  requester_stage: RequesterStageSchema.optional().default('none'),
 });
 
 export type FleetState = z.infer<typeof FleetStateSchema>;
@@ -152,6 +166,7 @@ export function createDefaultFleetState(chain: 'base' | 'base-sepolia' = 'base')
     fleet_safe_address: null,
     fleet_identity_registry: null,
     fleet_stage: 'none',
+    requester_stage: 'none',
   };
 }
 

@@ -15,6 +15,7 @@ interface MakeDepsOpts {
 
 function makeFakeDeps(opts: MakeDepsOpts = {}): FundRequirementsDeps {
   const plan: FundingPlan = {
+    persona: 'operator',
     satisfied: true,
     partial: false,
     reasons: [],
@@ -173,6 +174,7 @@ describe('fund-requirements command', () => {
     // dependency. We assert that exactly one read-only call is made and the
     // command does not pull in any other dependency that could mutate state.
     const planSpy = vi.fn(async () => ({
+      persona: 'operator',
       satisfied: true,
       partial: false,
       reasons: [],
@@ -205,6 +207,7 @@ describe('fund-requirements command', () => {
     // surface partial=true with `password_missing` so an agent can poll
     // safely without ever supplying secrets to an inspection verb.
     const planSpy = vi.fn(async () => ({
+      persona: 'operator',
       satisfied: false,
       partial: true,
       reasons: ['no_keystore', 'password_missing'],
