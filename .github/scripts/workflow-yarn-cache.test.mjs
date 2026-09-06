@@ -23,7 +23,7 @@ const scalar = (value) => unquote(value.replace(/\s+#.*$/u, ''));
 const jobKeyPattern = /^(?:"([A-Za-z_][A-Za-z0-9_-]*)"|'([A-Za-z_][A-Za-z0-9_-]*)'|([A-Za-z_][A-Za-z0-9_-]*))$/u;
 
 function mappingKey(line) {
-  const match = line.match(/^(\s+)(.+?):(?:\s+&[A-Za-z_][A-Za-z0-9_-]*)?\s*(?:#.*)?$/u);
+  const match = line.match(/^(\s+)(.+?):(?:\s+&[^\s#]+)?\s*(?:#.*)?$/u);
   if (!match) return null;
   const key = match[2].match(jobKeyPattern);
   return key ? { indent: match[1].length, name: key[1] ?? key[2] ?? key[3] } : null;
@@ -633,3 +633,14 @@ test('guard checks Yarn installs under anchored job IDs', () => {
     assert.match(yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'), /cache: yarn/u);
   });
 });
+
+for (const anchor of ['verify.job', 'verify/job']) {
+  test(`guard checks Yarn installs under job anchor ${anchor}`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
+        '          node-version: 22',
+      ).replace('  verify:', `  verify: &${anchor}`));
+      assert.match(yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'), /cache: yarn/u);
+    });
+  });
+}
