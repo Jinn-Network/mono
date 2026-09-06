@@ -214,18 +214,16 @@ export async function verifyRunWorkspace(
           `carried anchor is invalid: ${firstInvalidAnchor.reason ?? "the proof does not verify"}`,
         );
       }
-      const anchorStatusByDigest = new Map(
-        (anchorReport?.anchors ?? []).map((anchor) => [anchor.recordSha256, anchor.status]),
-      );
-      const completedRecordDigests = new Set(
-        (runState.anchors ?? []).flatMap((anchor) => {
-          if (anchor.upgradesRecordSha256 === undefined) return [];
-          const status = anchorStatusByDigest.get(anchor.recordSha256);
-          return status === "present" || status === "verified" ? [anchor.upgradesRecordSha256] : [];
-        }),
+      // Resolve upgrades from the shared sealed-byte projection, not RunState's producer
+      // bookkeeping. The projection emits this edge only for a pending/completed pair over the
+      // same actual subject and provider; a mislabeled state entry must not suppress the warning.
+      const resolvedPendingDigests = new Set(
+        anchorCarriage.anchors.flatMap((anchor) =>
+          anchor.upgradesRecordSha256 === undefined ? [] : [anchor.upgradesRecordSha256],
+        ),
       );
       const anchoringWindow = anchorReport?.anchors.some(
-        (anchor) => anchor.status === "pending" && !completedRecordDigests.has(anchor.recordSha256),
+        (anchor) => anchor.status === "pending" && !resolvedPendingDigests.has(anchor.recordSha256),
       ) === true
         ? { closingOperation: "report" as const }
         : undefined;

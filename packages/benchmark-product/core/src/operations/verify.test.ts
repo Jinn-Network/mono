@@ -2,14 +2,16 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { parseMatrix, sealMatrix } from "@jinn-network/benchmarking-records";
+import { RUN_RECORD_KIND, parseMatrix, sealMatrix } from "@jinn-network/benchmarking-records";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import {
+  ANCHOR_EVIDENCE_KIND,
   OPENTIMESTAMPS_ANCHOR_PROFILE,
   RFC3161_TSA_ANCHOR_PROFILE,
   canonicalJsonBytes,
   parseDsseEnvelope,
+  sealAnchorEvidence,
   sealDsseEnvelope,
 } from "@jinn-network/trust-core";
 import type { AnchorProofSource } from "@jinn-network/trust-core";
@@ -22,10 +24,11 @@ import {
 } from "@jinn-network/trust-testing";
 import { runCli } from "../cli/main.js";
 import type { CliContext } from "../cli/result.js";
+import { encodeAnchorProofContent, RFC3161_TOKEN_MEDIA_TYPE } from "../anchor/profiles.js";
 import type { AnchorHttpFetch } from "../anchor/sources.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunState, writeRunState } from "../run/state.js";
-import { claimPackageArtifactPath, runCancelMarkerPath } from "../workspace/layout.js";
+import { claimPackageArtifactPath, runCancelMarkerPath, runStatePath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes, sealedRecordPath, sha256Hex } from "../workspace/sealed-store.js";
 import { LEGACY_VERDICT_EVALUATOR_ID, createVerdictDsseSigner, loadOrCreateVerdictSigningKey, sealVerdictStatement } from "../venue/signing.js";
 import type { LocalVenue } from "../venue/venue.js";
@@ -383,12 +386,28 @@ describe("runVerify — pre-report integrity anchors", () => {
       }),
     ]);
     expect(outcome.result.anchoringWindow).toEqual({ closingOperation: "report" });
+
+    const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    const afterReport = await runVerify(contextFor(clock), { draftId: "draft-1" });
+    expect(afterReport.ok, JSON.stringify(afterReport)).toBe(true);
+    if (!afterReport.ok) return;
+    expect(afterReport.result.anchors?.anchors[0]?.status).toBe("pending");
+    expect(afterReport.result.anchoringWindow).toBeUndefined();
+    expect(afterReport.result.checks).toEqual([
+      "matrix-rederivation",
+      "report-verification",
+      "claim-consistency",
+      "integrity-anchors",
+    ]);
   }, 30_000);
 
-  test("reports complete evidence as present when no verifier trust roots are supplied", async () => {
+  test("does not trust producer bookkeeping to resolve a pending proof", async () => {
     const clock = makeClock();
+    let pendingRecordSha256 = "";
     await setUpClosedRun(clock, "draft-1", {
       afterLock: async (runSha256) => {
+        pendingRecordSha256 = await addPendingOpenTimestampsAnchor(clock);
         const anchored = await runAnchor(
           contextFor(clock),
           {
@@ -400,6 +419,23 @@ describe("runVerify — pre-report integrity anchors", () => {
           { sources: { [RFC3161_TSA_ANCHOR_PROFILE]: rfc3161SourceFor(runSha256) } },
         );
         expect(anchored.ok, JSON.stringify(anchored)).toBe(true);
+        if (!anchored.ok) throw new Error("complete anchor failed");
+
+        // RunState labels are producer bookkeeping. Make the complete RFC 3161 record claim to be
+        // the OTS pending record's successor; the sealed bytes still identify different providers.
+        const state = readRunState(workspaceDir, "draft-1");
+        if (state === undefined) throw new Error("run state missing");
+        // Bypass the guarded writer deliberately: this is an on-disk corruption test.
+        writeFileSync(runStatePath(workspaceDir, "draft-1"), `${JSON.stringify({
+          ...state,
+          anchors: state.anchors?.map((anchor) => anchor.recordSha256 === anchored.result.recordSha256
+            ? {
+                ...anchor,
+                provider: OPENTIMESTAMPS_ANCHOR_PROFILE,
+                upgradesRecordSha256: pendingRecordSha256,
+              }
+            : anchor),
+        })}\n`);
       },
     });
 
@@ -407,13 +443,18 @@ describe("runVerify — pre-report integrity anchors", () => {
     expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.result.anchors?.anchors[0]).toMatchObject({
-      provider: RFC3161_TSA_ANCHOR_PROFILE,
       subject: "lock",
-      status: "present",
       timeBasis: "authority-time",
-      trustMaterial: "none",
     });
-    expect(outcome.result.anchoringWindow).toBeUndefined();
+    expect(outcome.result.anchors?.anchors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ recordSha256: pendingRecordSha256, status: "pending" }),
+      expect.objectContaining({
+        provider: RFC3161_TSA_ANCHOR_PROFILE,
+        status: "present",
+        trustMaterial: "none",
+      }),
+    ]));
+    expect(outcome.result.anchoringWindow).toEqual({ closingOperation: "report" });
   }, 30_000);
 
   test("keeps an upgraded pending record listed without warning that its window is open", async () => {
@@ -475,19 +516,36 @@ describe("runVerify — pre-report integrity anchors", () => {
     });
   }, 30_000);
 
-  test("refuses corrupt stored anchor evidence as record-integrity", async () => {
+  test("refuses an anchor the shared evaluator marks invalid", async () => {
     const clock = makeClock();
-    let recordSha256 = "";
-    await setUpClosedRun(clock, "draft-1", {
-      afterLock: async () => { recordSha256 = await addPendingOpenTimestampsAnchor(clock); },
+    await setUpClosedRun(clock);
+    const state = readRunState(workspaceDir, "draft-1");
+    if (state?.runSha256 === undefined) throw new Error("sealed run missing");
+    const token = anchorAuthority.mintTimeStampToken({
+      subjectSha256: state.runSha256,
+      genTime: "20270805120000Z",
     });
-    writeFileSync(sealedRecordPath(workspaceDir, recordSha256), "corrupt anchor bytes");
+    const invalid = sealAnchorEvidence({
+      kind: ANCHOR_EVIDENCE_KIND,
+      subject: { kind: RUN_RECORD_KIND, digest: { sha256: state.runSha256 } },
+      provider: RFC3161_TSA_ANCHOR_PROFILE,
+      proof: {
+        mediaType: RFC3161_TOKEN_MEDIA_TYPE,
+        content: encodeAnchorProofContent(token.tokenDer),
+      },
+    });
+    const recordSha256 = putSealedBytes(workspaceDir, invalid.bytes);
+    writeRunState(workspaceDir, "draft-1", {
+      ...state,
+      anchors: [{ subject: "lock", provider: RFC3161_TSA_ANCHOR_PROFILE, recordSha256 }],
+    });
 
     const outcome = await runVerify(contextFor(clock), { draftId: "draft-1" });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("record-integrity");
-    expect(outcome.error.detail).toContain("stored bytes do not match their digest");
+    expect(outcome.error.detail).toContain("carried anchor is invalid");
+    expect(outcome.error.detail).toContain("after this run's own pre-registered close instant");
   }, 30_000);
 
   test("preserves the legacy unanchored closed result shape", async () => {
