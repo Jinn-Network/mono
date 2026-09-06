@@ -151,6 +151,7 @@ interface MintCertificateOptions {
   readonly ca?: boolean;
   readonly keyCertSign?: boolean;
   readonly extendedKeyUsageOids?: readonly string[];
+  readonly extendedKeyUsageCritical?: boolean;
   readonly notBefore?: string;
   readonly notAfter?: string;
 }
@@ -178,7 +179,11 @@ function mintCertificate(options: MintCertificateOptions): MintedCertificate {
     extension(OID_EXT_KEY_USAGE, true, keyUsageBits),
     ...(options.extendedKeyUsageOids === undefined
       ? []
-      : [extension(OID_EXT_EXTENDED_KEY_USAGE, true, seq(...options.extendedKeyUsageOids.map((each) => oid(each))))]),
+      : [extension(
+        OID_EXT_EXTENDED_KEY_USAGE,
+        options.extendedKeyUsageCritical ?? true,
+        seq(...options.extendedKeyUsageOids.map((each) => oid(each))),
+      )]),
   ];
 
   const tbsCertificate = seq(
@@ -416,6 +421,21 @@ describe("the node:crypto certificate port", () => {
     const issuerAndSerial = facts.sid.find((form) => form.kind === "issuerAndSerialNumber")!;
     expect(issuerAndSerial.kind === "issuerAndSerialNumber"
       && bytesToHex(issuerAndSerial.serialNumber)).toBe(HIGH_BIT_SERIAL_HEX);
+  });
+
+  test("reports extended-key-usage criticality from real DER", () => {
+    const critical = anchorCertificateReader.readCertificate(certificate.der);
+    const nonCriticalCertificate = mintCertificate({
+      commonName: "P4 non-critical timestamping",
+      extendedKeyUsageOids: [OID_ID_KP_TIME_STAMPING],
+      extendedKeyUsageCritical: false,
+    });
+    const nonCritical = anchorCertificateReader.readCertificate(nonCriticalCertificate.der);
+
+    expect(critical.extendedKeyUsageOids).toEqual([OID_ID_KP_TIME_STAMPING]);
+    expect(critical.extendedKeyUsageCritical).toBe(true);
+    expect(nonCritical.extendedKeyUsageOids).toEqual([OID_ID_KP_TIME_STAMPING]);
+    expect(nonCritical.extendedKeyUsageCritical).toBe(false);
   });
 
   test("the platform's own rendering drops that sign octet", () => {
