@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +14,7 @@ import { test } from 'node:test';
 
 import {
   DEFAULT_EXCLUSIONS,
+  ENFORCED_SCOPE_PREFIXES,
   findEnforcedScopeViolations,
   findLegacyOriginOccurrences,
   isEnforcedPath,
@@ -198,6 +200,26 @@ test('a violation inside an enforced scope is reported; the same string outside 
       ['packages/core/src/identifiers.ts'],
     );
   });
+});
+
+test('every enforced scope prefix resolves to a real directory, so a rename cannot silently drop enforcement', () => {
+  // The prefixes are literal path spellings. A rename that leaves one behind turns the guard
+  // into a no-op over that tree, with a green build as its only signal (issue #4061).
+  for (const prefix of ENFORCED_SCOPE_PREFIXES) {
+    assert.equal(existsSync(join(repoRoot, prefix)), true, prefix);
+    assert.equal(statSync(join(repoRoot, prefix)).isDirectory(), true, prefix);
+  }
+});
+
+test('the enforced scope list is closed: widening it is a reviewed edit', () => {
+  // Named here so that adding or renaming an enforced prefix means touching this assertion
+  // too. Each entry's reason lives beside it in origin-tripwire.mjs.
+  assert.deepEqual(ENFORCED_SCOPE_PREFIXES, [
+    '.github/scripts/',
+    'operator/src/',
+    'operator/deployments/',
+    'plugin/runtime/src/',
+  ]);
 });
 
 test('every excluded exact path exists, so the list cannot rot into a silent blanket', () => {
