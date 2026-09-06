@@ -195,14 +195,16 @@ describe("paired-delta@1 over the bundled sample (#4098 acceptance)", () => {
     for (const id of [BENCHMARKING_METHOD_IDS.pairedMcnemar, BENCHMARKING_METHOD_IDS.provenanceClusterSign]) {
       const method = registry.get(id, BENCHMARKING_METHOD_VERSION)!;
       const results = method.compute!(input).perSubject[0]!.results as {
+        pairing: { taskDigests: readonly string[] };
         clustering: { basis: string; clusters: number };
       };
       // The issue's stated impact is that ALL FIVE `task-provenance-source` methods were unusable
       // against a closed-payload profile, not just the one S3 names. Two more, computing over the
       // same real sample bytes, is the cheapest honest evidence that the resolver — not each
-      // method — was the single blocker.
+      // method — was the single blocker. `pairing.taskDigests` is what proves provenance actually
+      // resolved for every task; `clusters` proves they landed in the one venue cluster §6 intends.
+      expect([...results.pairing.taskDigests].sort(), id).toEqual(sample.tasks.map((task) => task.sha256).sort());
       expect(results.clustering, id).toEqual({ basis: "task-provenance-source", clusters: 1 });
-      expect(sample.tasks.length, id).toBe(3);
     }
   });
 });
