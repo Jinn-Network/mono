@@ -89,6 +89,25 @@ sealed world showed under the block's criteria, not absolute truth.
 Fixture families: `state-predicate-block`, `state-predicate-evaluation`, and the sealed
 `evaluation-spec/golden/state-predicate-minimal` pin.
 
+## `@noble/hashes` version constraint
+
+This package, `@jinn-network/task-execution-protocol`, and `@jinn-network/evidence-protocol` all
+declare `@noble/hashes` as `^2.2.0`. The range is deliberate and the three must stay aligned:
+each is a self-contained Yarn project consumed by the others through `portal:` resolutions, and a
+portal chain in which one package pins an exact version while another floats fails to install
+(YN0071) as soon as upstream publishes a newer 2.x.
+
+The earlier exact `2.2.0` pin here was incidental, not a canonical-hashing stability commitment.
+Sealed bytes are held by this package's golden and adversarial fixture families, not by a version
+number — a hash function whose output moved within a semver-compatible release would be an
+upstream defect that the fixtures catch. The range therefore lets a security or correctness patch
+in `@noble/hashes` 2.x reach every package, while each committed `yarn.lock` plus
+`yarn install --immutable` keeps the resolved artifact reproducible.
+
+No package under `packages/task-execution/` may carry a `@noble/hashes` entry in `resolutions` to
+work around a mismatch; align the declared range instead. Both rules are enforced by
+`.github/scripts/task-execution-package-inventory.test.mjs`.
+
 ## Development
 
 Use Node 22 and Yarn 4.13.0:
