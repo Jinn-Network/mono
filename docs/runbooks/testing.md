@@ -282,8 +282,9 @@ can have it taken mid-run. Three sanctioned forms, in preference order:
 | nothing — the assertion *is* "nothing is listening here" | a fixed port **below 32768**, with a comment saying why |
 
 The invariant under all three: **never a literal inside 32768–65535 in a
-port-shaped position** — a `.listen(` argument, a port-shaped object key, or a
-port-ish `const`, and in the last two cases every element of an array bound
+port-shaped position** — a `.listen(` argument, a port-shaped object key, a
+port-ish `const`, or a `return` from inside a port-ish block, and in the object
+key and `const` cases every element of an array bound
 there. Those are the positions the lint can see; a port buried in a
 URL string (`fetch('http://127.0.0.1:45020/health')`) is outside it, and so are
 the other gaps listed under "What this guard does not catch" in the header of
@@ -408,11 +409,38 @@ Results:
   the first run and re-compared against that same baseline afterwards, so its
   unchanged result covers the six runs cumulatively.
 
-Named but not fixed here, both load-sensitive budgets with CI evidence and no
-local reproduction: `test/cli/native-identity.test.ts` (18 real process boots
-against a 60s budget) and `test/_support/chain/anvil.test.ts` /
-`olas-funding.test.ts` (a 15s anvil readiness budget while forking Base mainnet
-over the network).
+**Both budgets named but not fixed under #1627 were resolved on 2026-09-05
+(#3581), one each way.**
+
+`test/cli/native-identity.test.ts` — **fixed.** The reproduction the #1627 pass
+lacked turned up on the first attempt: the `real two-process concurrent
+--create` race took **~56s of a flat 60s budget on an idle 12-core laptop**
+(~8-11s per iteration over 6 iterations, 18 real CLI process boots), and the
+same test went red at **60017ms on a CI `Typecheck & Test` job on 2026-09-05**
+— a ~7% margin, on a 4-vCPU runner sharing itself with two sibling workers. The
+fix applies both rules above: the loop is bounded by wall clock (a 60s budget,
+and the next iteration starts only if the slowest one seen so far still fits in
+what is left), it asserts on exhaustion if not even one race completes, and the
+`testTimeout` moved to 90s so it is a backstop rather than the thing that ends
+the loop. A race test's coverage is probabilistic, so the currency spent under
+load is iterations, not reliability. Verified: green idle (50.8s) and green
+under an added 8-way CPU load at load average 35 (48.7s).
+
+`test/_support/chain/anvil.test.ts` / `olas-funding.test.ts` — **measured, and
+left alone.** Anvil readiness against a live Base-mainnet fork was timed over
+13 spawns, 5 idle and 8 under an added 8-way CPU load: median **1.13s**, min
+0.97s, max **5.34s**, zero timeouts. The 15s budget is ~13x the median and
+~2.8x the worst observed. The tail is network-bound (fetching fork state), not
+CPU-bound, which is why the loaded runs look like the idle ones. Mining the CI
+history the same way as the census above — the last 300 `ci.yml` runs, which
+held 297 `check` jobs but only **5** `Typecheck & Test` failures, every one of
+those logs retrieved — found **zero** occurrences of `anvil did not become
+ready` (and one of the `native-identity` timeout above, which is how that one
+was caught). Five failure logs is a thin instrument; treat this as "no evidence
+of a problem", not as a measured rate. The wait already follows both rules (a
+`Date.now()` deadline, and a throw naming the budget and the port), and there
+is nothing here to fix on evidence. Re-derive with a spawn-and-poll loop
+against `spawnAnvilFork`'s own arguments if the picture changes.
 
 **Verifying that no test touched the real home.** The in-suite guards —
 `operator/test/config/home-isolation.test.ts`,
