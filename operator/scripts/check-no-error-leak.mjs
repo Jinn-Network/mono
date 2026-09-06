@@ -73,6 +73,13 @@ const MASKED_CALL_MARKERS = ['maskUrlsInMessage', 'sanitizeErrorText', 'sanitize
  * client even though the seam's own module does not import viem. The listed
  * type/module names are the import-site spelling, which is what survives a
  * revert of the masking call.
+ *
+ * This is an enumeration, not a derivation: a new token-gated route reaching
+ * the chain through some *other* injected reader is not covered until its seam
+ * is added here. If you introduce one, extend this list in the same change.
+ * The structural alternative is import-graph reachability (does anything this
+ * file imports transitively import viem?), which would need no list at all —
+ * tracked as a follow-up rather than built here.
  */
 const INDIRECT_RPC_PATTERN =
   /PluginPublicationReader|ArchiveReads|gather-status\.js|intents\/claim-rewards\.js/;

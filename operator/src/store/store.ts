@@ -691,6 +691,10 @@ export class Store {
           for (const row of rows) {
             const masked = sanitizePersistedText(row.detail);
             if (masked !== row.detail) update.run(masked, row.id);
+            // Advance on every row, not only updated ones. A row can match the
+            // LIKE filter and still mask to itself (`... trailing http://` has
+            // nothing for the URL regex to consume); advancing only on update
+            // would re-select it forever.
             afterId = row.id;
           }
           if (rows.length < batch) break;
