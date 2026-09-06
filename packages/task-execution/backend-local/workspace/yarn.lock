@@ -55,7 +55,7 @@ __metadata:
   resolution: "@jinn-network/task-execution-profiles@portal:../../profiles::locator=%40jinn-network%2Ftask-execution-workspace%40workspace%3A."
   dependencies:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
-    "@noble/hashes": "npm:2.2.0"
+    "@noble/hashes": "npm:^2.2.0"
     ajv: "npm:8.17.1"
     safe-regex: "npm:2.1.1"
     zod: "npm:4.4.3"
@@ -103,7 +103,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@noble/hashes@npm:2.2.0, @noble/hashes@npm:^2.2.0":
+"@noble/hashes@npm:^2.2.0":
   version: 2.2.0
   resolution: "@noble/hashes@npm:2.2.0"
   checksum: 10c0/cad8630c504d6b9271984f685cd0af9101b40988fc2dfbe17ccdf068a9941f95cc5c9957d89e9ca4b7ca94c15cb35f93510c5d53a09fbcc83ee503b93d0a1034
