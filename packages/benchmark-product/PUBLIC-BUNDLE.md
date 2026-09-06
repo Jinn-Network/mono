@@ -218,13 +218,10 @@ V6 pins the same first public line as v2 and v4. It is the only anchored format
 that does: v7, v8, and v9 are anchored too and read on a later line, named in
 their own sections.
 
-**No new bundle is materialized on this format.** A run that is anchored and
-projects no binary qualification now emits `benchmark-product-public-bundle/9`,
-whose closure is this one exactly and whose page states the strict all-slots
-denominator beside the declared one. Every v6 bundle already published keeps its
-own page, its own claim, and this line, forever — that immutability is the
-property that makes a published claim citable, and it is why the render needed a
-number of its own rather than an edit here.
+A run that is anchored and projects no binary qualification emits this format.
+`benchmark-product-public-bundle/9` succeeds it — this closure exactly, with a
+page that states the strict all-slots denominator beside the declared one — but
+no producer emits v9 yet, for the reason its own section gives.
 
 ```bash
 npx @colophon-claims/verify@0.1 <bundle-dir>
@@ -305,6 +302,15 @@ evidence-contrast method renders exactly what v6 renders for the same records.
 V9 reads on the `@0.2` line, with v7 and v8. What it cannot inherit is v6's
 first public `@0.1` line: no `0.1` reader has heard of a page that states the
 denominator pair, so it would rebuild v6's page and refuse these bytes.
+
+**No bundle is materialized on this format yet, and none has been published.**
+The reader below understands v9; the producer still emits v6 for the anchored,
+non-qualifying cell. A published claim seals its verification command forever,
+and the exact release named here — `0.2.1` — is already published, immutable,
+and predates v9, so it refuses a v9 bundle at manifest parse. Sealing it would
+publish an instruction that can never be true. Both the pin and the producer
+move in the release that actually serves this format; until then the exact
+version below is provisional, and only the `@0.2` compatible line is meaningful.
 
 ```bash
 npx @colophon-claims/verify@0.2 <bundle-dir>
@@ -582,7 +588,7 @@ out where it applies.
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1`, publication pending | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/8` | `@0.2.1`, publication pending | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
-| `benchmark-product-public-bundle/9` | `@0.2.1`, publication pending | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
+| `benchmark-product-public-bundle/9` | `@0.2.1`, provisional — no bundle is materialized on this format | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a

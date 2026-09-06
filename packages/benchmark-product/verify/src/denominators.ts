@@ -17,9 +17,10 @@
  * Single-sourced here for the reason `binding/report-face.ts` gives: `@colophon-claims/core`
  * depends on this package, so producer and reader run one function rather than two that can drift.
  *
- * Rendered on the operator's results route and, from `benchmark-product-public-bundle/9`, on the
- * published bundle page (issue #3698). Formats before `/9` render the declared denominator alone,
- * permanently: a published page is immutable.
+ * Rendered on the operator's results route and, on the published bundle page, by
+ * `benchmark-product-public-bundle/9` alone (issue #3698). Every earlier format renders the
+ * declared denominator alone, permanently: a published page is immutable. No producer emits `/9`
+ * yet — the reader understands it, and the flip waits on the release that serves it.
  */
 
 /** The per-arm slice of a sealed Matrix's attrition this derivation reads. */

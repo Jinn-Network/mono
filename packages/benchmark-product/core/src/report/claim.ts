@@ -680,11 +680,15 @@ export interface BuildClaimPackageInput {
    *
    * Two bundle formats carry `benchmark-product.claim-package/4` -- `/6` and `/9` -- and they
    * differ only in the page they render and the release that renders it (issue #3698), so which
-   * line the claim pins is not derivable from any record this builder reads. The producer always
-   * builds the current allocation and leaves this unset; a reader rebuilding an ALREADY-SEALED
-   * claim states the format that claim belongs to, so a `/6` bundle published before `/9` existed
-   * keeps rebuilding to its own immutable pin instead of failing `claim-consistency` against a
-   * line it predates.
+   * line the claim pins is not derivable from any record this builder reads. Unset means `/6`,
+   * which is the allocation every producer still emits and every anchored bundle so far published
+   * carries; `/9` is stated explicitly, by a reader rebuilding a `/9` bundle's sealed claim from
+   * the format its own manifest declares.
+   *
+   * The default is `/6` rather than the newer allocation because a pin is sealed forever: `/9`'s
+   * exact pin names `@colophon-claims/verify@0.2.1`, a published, immutable release that predates
+   * `/9` and refuses it at manifest parse. Nothing may seal that command until a release serving
+   * `/9` exists and `/9` pins it.
    */
   readonly anchoredBundleFormat?:
     | "benchmark-product-public-bundle/6"
@@ -1115,12 +1119,12 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       command: anchoredQualification
         ? PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND
         : anchored
-          // Anchored and non-qualifying is `/9` now (issue #3698): the page states the
-          // denominator pair, and only the `0.2` line renders it -- `/6`'s `@0.1` reader rebuilds
-          // the old page. A reader rebuilding a `/6` claim says so and gets `/6`'s line back.
-          ? input.anchoredBundleFormat === "benchmark-product-public-bundle/6"
-            ? PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
-            : PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND
+          // Anchored and non-qualifying is still `/6` (issue #3698). `/9` renders the denominator
+          // pair and can only read on the `0.2` line -- `/6`'s `@0.1` reader rebuilds the old page
+          // -- so a reader rebuilding a `/9` bundle's claim says so and gets that line.
+          ? input.anchoredBundleFormat === "benchmark-product-public-bundle/9"
+            ? PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND
+            : PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
           : promptedScreening
             ? PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND
             : projection.qualification === undefined
@@ -1129,9 +1133,9 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       compatibleCommand: anchoredQualification
         ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
         : anchored
-          ? input.anchoredBundleFormat === "benchmark-product-public-bundle/6"
-            ? PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
-            : PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND
+          ? input.anchoredBundleFormat === "benchmark-product-public-bundle/9"
+            ? PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND
+            : PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
           : promptedScreening
             ? PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
             : projection.qualification === undefined

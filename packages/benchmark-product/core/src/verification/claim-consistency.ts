@@ -51,9 +51,9 @@ export function assertClaimConsistency(input: {
    * re-derived from the sealed record's own bytes, never read from the claim under test. */
   readonly disclosure?: ClaimDisclosureSection;
   /** Issue #3698: which anchored, non-qualifying allocation this bundle is, `/6` or `/9`. The two
-   * carry the same claim shape and differ only in the reader line they pin, so a `/6` bundle
-   * published before `/9` existed must rebuild to `/6`'s own immutable pin rather than failing
-   * against a line it predates. Unset means the current allocation. */
+   * carry the same claim shape and differ only in the reader line they pin, so each must rebuild
+   * to its own immutable pin rather than to whichever allocation is newest. Unset means `/6`,
+   * which is what every producer still emits. */
   readonly anchoredBundleFormat?:
     | "benchmark-product-public-bundle/6"
     | "benchmark-product-public-bundle/9";

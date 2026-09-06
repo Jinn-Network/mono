@@ -15,13 +15,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { RFC3161_TSA_ANCHOR_PROFILE, canonicalJsonBytes } from "@jinn-network/trust-core";
-import { derivePublicComparison, verifyPublicBundle } from "@colophon-claims/verify";
-import { buildBundleManifest } from "./manifest.js";
 import {
-  BUNDLE_V6_FORMAT,
-  PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
-} from "../legacy-closures.js";
+  PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND,
+  derivePublicComparison,
+  verifyPublicBundle,
+} from "@colophon-claims/verify";
+import { buildBundleManifest } from "./manifest.js";
+import { BUNDLE_V6_FORMAT } from "../legacy-closures.js";
 import { BUNDLE_V9_FORMAT, type BuildBundleManifestOptions } from "./manifest.js";
 import { buildPublicAssets } from "./assets.js";
 import { parseBenchmark, parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
@@ -93,19 +94,18 @@ async function expectRefusal(bundleDir: string, fragment: string): Promise<void>
 }
 
 /**
- * A faithful `/6` bundle, built by moving a `/9` one back onto the allocation it succeeded.
+ * A faithful `/9` bundle, built by moving a `/6` one onto the allocation that succeeds it.
  *
- * The producer no longer emits `/6` (issue #3698), but every `/6` bundle ever published still has
- * to verify, forever — that immutability is what makes a published claim citable, and
- * `claim-consistency` rebuilds each one's claim from its own records before byte-comparing. The
+ * No producer emits `/9` yet (issue #3698) — the flip waits on the release whose reader serves it —
+ * but the reader has to be ready before that release can exist, and this is what proves it is. The
  * three things that differ between the two allocations are exactly the three rewritten here: the
  * format literal, the reader line the claim pins, and the page. Nothing else moves, which is the
  * whole content of the allocation.
  */
-function moveOntoV6(bundleDir: string): void {
+function moveOntoV9(bundleDir: string): void {
   const claim = json(bundleDir, "claim-package.json");
-  claim.verification.command = PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND;
-  claim.verification.compatibleCommand = PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND;
+  claim.verification.command = PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND;
+  claim.verification.compatibleCommand = PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND;
   writeFileSync(join(bundleDir, "claim-package.json"), canonicalJsonBytes(claim));
 
   const read = (name: string): Uint8Array => new Uint8Array(readFileSync(join(bundleDir, name)));
@@ -123,7 +123,7 @@ function moveOntoV6(bundleDir: string): void {
     return match === null ? [] : [match[1]!];
   });
   const assets = buildPublicAssets({
-    format: BUNDLE_V6_FORMAT,
+    format: BUNDLE_V9_FORMAT,
     claim: claim as never,
     matrix,
     report: parseReport(read("report.json")),
@@ -146,32 +146,35 @@ function moveOntoV6(bundleDir: string): void {
   for (const [name, bytes] of Object.entries(assets)) writeFileSync(join(bundleDir, name), bytes);
   writeFileSync(
     join(bundleDir, "bundle.json"),
-    buildBundleManifest(bundleDir, paths, { format: BUNDLE_V6_FORMAT }).bytes,
+    buildBundleManifest(bundleDir, paths, { format: BUNDLE_V9_FORMAT }).bytes,
   );
 }
 
 describe("anchored public bundle v6 — portable verification", () => {
-  test("a bundle on the superseded /6 allocation still verifies, page and pin included", async () => {
+  test("a bundle on the /9 allocation verifies, page and pin included", async () => {
+    // No producer emits `/9` yet, so this is the reader-side half of the allocation standing on its
+    // own: the release that flips the producer cannot be cut until the reader it names verifies
+    // these bytes.
     const built = await fixture([{ kind: "rfc3161-lock" }]);
     const bundleDir = detach(built.bundle.bundleDir);
     rmSync(built.workspaceDir, { recursive: true, force: true });
-    moveOntoV6(bundleDir);
+    moveOntoV9(bundleDir);
 
     const verified = await verifyPublicBundle(bundleDir);
-    expect(verified.format).toBe(BUNDLE_V6_FORMAT);
+    expect(verified.format).toBe(BUNDLE_V9_FORMAT);
     expect(verified.checks.at(-1)).toBe("integrity-anchors");
   }, 120_000);
 
-  test("a /9 bundle relabelled to /6 without moving its claim and page is refused", async () => {
+  test("a /6 bundle relabelled to /9 without moving its claim and page is refused", async () => {
     // The half that proves the test above is not simply accepting anything: relabelling alone
-    // leaves a claim pinning the /9 line and a page without the denominator columns, and
+    // leaves a claim pinning the /6 line and a page without the denominator columns, and
     // `claim-consistency` rebuilds both from the format the manifest declares.
     const built = await fixture([{ kind: "rfc3161-lock" }]);
     const bundleDir = detach(built.bundle.bundleDir);
     const paths = (json(bundleDir, "bundle.json").files as Array<{ path: string }>).map((entry) => entry.path);
     writeFileSync(
       join(bundleDir, "bundle.json"),
-      buildBundleManifest(bundleDir, paths, { format: BUNDLE_V6_FORMAT }).bytes,
+      buildBundleManifest(bundleDir, paths, { format: BUNDLE_V9_FORMAT }).bytes,
     );
     await expectRefusal(bundleDir, "is not the exact projection");
   }, 120_000);
@@ -184,7 +187,7 @@ describe("anchored public bundle v6 — portable verification", () => {
     rmSync(built.workspaceDir, { recursive: true, force: true });
 
     const verified = await verifyPublicBundle(bundleDir);
-    expect(verified.format).toBe(BUNDLE_V9_FORMAT);
+    expect(verified.format).toBe(BUNDLE_V6_FORMAT);
     expect(verified.checks).toEqual([
       "manifest",
       "evidence-closure",
@@ -278,7 +281,7 @@ describe("anchored public bundle v6 — portable verification", () => {
     // nothing to say about the declaration it seals.
     expect(built.bundle.files.some((path) => path.startsWith("anchors/"))).toBe(false);
     const verified = await verifyPublicBundle(detach(built.bundle.bundleDir));
-    expect(verified.format).toBe(BUNDLE_V9_FORMAT);
+    expect(verified.format).toBe(BUNDLE_V6_FORMAT);
     expect(verified.checks.at(-1)).toBe("integrity-anchors");
     if (verified.format === "benchmark-product-public-bundle/5") throw new Error("unreachable");
     expect(verified.anchors?.anchors).toHaveLength(0);

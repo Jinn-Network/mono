@@ -65,8 +65,13 @@ export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
  * allocation follows the real material, exactly as `/8`'s did.
  *
  * Additive like every allocation before it: `/2`, `/4`, `/5`, `/6`, `/7`, and `/8` keep their
- * member lists, check lists, and bytes, and only an anchored run that projects no binary
- * qualification emits this one.
+ * member lists, check lists, and bytes.
+ *
+ * **Reader-side only for now.** No producer emits `/9`: the anchored, non-qualifying cell still
+ * materializes `/6`. A `/9` claim would seal `npx @colophon-claims/verify@0.2.1`, and that release
+ * is published, immutable, and predates `/9`, so it refuses `/9` at manifest parse — a sealed
+ * instruction that can never be true, on a bundle that can never be edited. The producer flip
+ * belongs in the change that pins `/9` to the release actually serving it.
  */
 export const BUNDLE_V9_FORMAT = "benchmark-product-public-bundle/9" as const;
 /** Spans every lineage: the four frozen legacy closures, the evidence-native bundle, `/8`, and `/9`. */

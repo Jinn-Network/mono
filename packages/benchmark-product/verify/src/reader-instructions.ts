@@ -66,9 +66,13 @@ export const PUBLIC_BUNDLE_V9_CHECKS = PUBLIC_BUNDLE_V6_CHECKS;
  * Like v8 and for v8's own reason: `/9` ships in the same `0.2` reader line as `/7` and `/8` rather
  * than minting a third. What it must not do is inherit the first public `@0.1` line that `/6`
  * stamps — no `0.1` reader has heard of a page that states the denominator pair, and a claim naming
- * a reader that rebuilds a different page is an instruction to fail. The compatible `@0.2` line is
- * the one a reader runs; which patch release under it actually serves this format is the release
- * train's step, not this allocation's, exactly as it was for `/7` and `/8`.
+ * a reader that rebuilds a different page is an instruction to fail.
+ *
+ * The exact pin below is provisional and nothing seals it yet: no producer emits `/9`, because
+ * `0.2.1` is already published, is immutable, and predates `/9`, so it refuses `/9` at manifest
+ * parse. Unlike `/7` and `/8` — which pinned `0.2.1` while `0.2.1` was still unpublished, and whose
+ * pins the release then made true — this one can only become true by moving to the release that
+ * actually serves `/9`. Repoint it in that change, and flip the producer there too.
  */
 export const PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND = PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND;
 export const PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND =
