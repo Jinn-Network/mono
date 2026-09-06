@@ -121,6 +121,38 @@ describe('parseWithdrawArgv', () => {
     ).toThrow();
   });
 
+  // #2393: both --config forms must be accepted wherever --config is parsed.
+  // The equals form previously survived the splice and hit the
+  // `Unexpected arguments:` throw.
+  it('accepts the --config equals form', () => {
+    expect(() =>
+      parseWithdrawArgv([
+        '--config=/etc/jinn/op-b.json',
+        '--to',
+        '0x000000000000000000000000000000000000dEaD',
+        '--dry-run',
+      ]),
+    ).not.toThrow();
+  });
+
+  it('accepts the --config space-separated form', () => {
+    expect(() =>
+      parseWithdrawArgv([
+        '--config',
+        '/etc/jinn/op-b.json',
+        '--to',
+        '0x000000000000000000000000000000000000dEaD',
+        '--dry-run',
+      ]),
+    ).not.toThrow();
+  });
+
+  it('still rejects a bare --config with no value', () => {
+    expect(() =>
+      parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--config']),
+    ).toThrow('Missing value for --config');
+  });
+
   it('rejects unknown tokens', () => {
     expect(() => parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--what'])).toThrow();
   });

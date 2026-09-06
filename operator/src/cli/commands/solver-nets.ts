@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
 import { findWiringByName } from '../../config/participation.js';
-import { loadConfig } from '../../config.js';
+import { getConfigPathFromArgs, loadConfig } from '../../config.js';
 import {
   buildPredictionOperatorStatus,
   runPredictionSample,
@@ -179,8 +179,7 @@ interface ConfigShape {
 }
 
 function configPathFrom(argv: string[]): string {
-  const idx = argv.indexOf('--config');
-  return idx >= 0 && argv[idx + 1] ? argv[idx + 1]! : DEFAULT_CONFIG_PATH;
+  return getConfigPathFromArgs(argv) ?? DEFAULT_CONFIG_PATH;
 }
 
 function readConfig(path: string): ConfigShape {

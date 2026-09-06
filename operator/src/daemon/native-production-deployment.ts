@@ -29,6 +29,7 @@ import {
   type NativeRoleIdentityRole,
   type RoleIdentitySet,
 } from './role-identities.js';
+import { getConfigPathFromArgs } from '../config/path-args.js';
 import { resolveDefaultStateDir } from '../state-dir.js';
 
 const ZERO_CODE_HASH = /^0x0{64}$/u;
@@ -200,10 +201,7 @@ export function assertNativeTargetInspection(
 }
 
 function configPath(): string {
-  const index = process.argv.indexOf('--config');
-  return index >= 0 && process.argv[index + 1]
-    ? process.argv[index + 1]!
-    : join(resolveDefaultStateDir(), 'config.json');
+  return getConfigPathFromArgs(process.argv) ?? join(resolveDefaultStateDir(), 'config.json');
 }
 
 function loadProductionConfig(): NativeProductConfig {
