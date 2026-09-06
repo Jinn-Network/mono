@@ -123,12 +123,15 @@ export function selectVerification({ repoRoot, changedFiles }) {
   const root = resolve(repoRoot);
   const laneDomains = requireGateCoverage(root);
 
+  // Normalize before the emptiness check: the CLI reads stdin as
+  // `buffer.split('\n')`, so an empty stream arrives as `['']` and a raw
+  // length check would let it through as a proven-irrelevant change set.
+  const normalized = changedFiles.map((path) => path.trim()).filter((path) => path !== '');
+
   // No changed files reported means we cannot prove the change is irrelevant.
-  if (changedFiles.length === 0) {
+  if (normalized.length === 0) {
     return { run: true, reason: 'no changed files reported', selectedDomains: [...laneDomains].sort(), unmatchedPaths: [] };
   }
-
-  const normalized = changedFiles.map((path) => path.trim()).filter((path) => path !== '');
 
   for (const path of normalized) {
     for (const selector of GLOBAL_SELECTORS) {
