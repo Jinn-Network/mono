@@ -154,6 +154,7 @@ export {
   checkJudgeability,
   classifyVersionBump,
   resolveBenchmarkTaskProvenance,
+  TASK_PROVENANCE_EXTENSION_KEY_V1,
 } from "./benchmark/checks.js";
 export type {
   BenchmarkPredecessorCheck,
