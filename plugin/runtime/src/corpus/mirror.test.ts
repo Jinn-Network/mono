@@ -312,15 +312,27 @@ describe("mirror sync", () => {
       expect(posture.revalidateHead).not.toHaveBeenCalled();
     });
 
-    test("a head whose issuedAt is unparseable is never revalidated (#3468)", async () => {
+    // Was "a head whose issuedAt is unparseable is never revalidated": such a head
+    // used to reach `classifyIdleHead`, whose NaN comparison sent it down the chain
+    // path to be refused there. Since #3482 the §5.2 grammar is read at the schema,
+    // so `fetchHead` refuses the head one step earlier and the source fails before
+    // EITHER verification port is consulted. The property the test pins is unchanged
+    // and now strictly stronger: an unreadable instant never reaches revalidation.
+    test("a head whose issuedAt is unparseable is refused before either verification path (#3468, #3482)", async () => {
       const marks = await seeded();
+      const before = await marks.get({ agent: AGENT, name: NAME });
       const posture = spyPosture();
       const { transport } = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "not-a-date" });
 
-      await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+      const outcome = await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
 
-      expect(posture.verify).toHaveBeenCalledTimes(1);
+      expect(outcome.sources[0]!.status).toBe("failed");
+      expect(outcome.sources[0]!.failure?.code).toBe("source-sync-failed");
+      expect(posture.verify).not.toHaveBeenCalled();
       expect(posture.revalidateHead).not.toHaveBeenCalled();
+      // Nothing was adopted and nothing moved: the refusal is fail-closed on the
+      // mark as well as on the two ports.
+      expect(await marks.get({ agent: AGENT, name: NAME })).toEqual(before);
     });
 
     test("a head naming a different chain position keeps the chain path", async () => {

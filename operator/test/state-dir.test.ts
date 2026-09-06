@@ -49,7 +49,7 @@ describe('resolveDefaultStateDir', () => {
     ).toBe(join(dir, '.jinn-operator'));
   });
 
-  it('reads ~/.jinn-client when ~/.jinn-operator is empty and logs the copy-forward', () => {
+  it('reads ~/.jinn-client when ~/.jinn-operator is empty and logs the fallback', () => {
     dir = mkdtempSync(join(tmpdir(), 'jinn-state-dir-'));
     mkdirSync(join(dir, '.jinn-operator'), { recursive: true });
     mkdirSync(join(dir, '.jinn-client'), { recursive: true });
