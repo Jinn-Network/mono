@@ -96,7 +96,43 @@ const CurrentSupplyResponseSchema = z.discriminatedUnion('status', [
     reason: z.literal('incomplete_indexer_evidence'),
     classes: z.tuple([]),
   }).strict(),
-]);
+]).superRefine((result, ctx) => {
+  const bucketMs = 6 * 60 * 60 * 1_000;
+  const generatedAt = Date.parse(result.generatedAt);
+  const windowStart = Date.parse(result.window.start);
+  const windowEnd = Date.parse(result.window.end);
+  const expectedWindowEnd = Math.floor(generatedAt / bucketMs) * bucketMs;
+  if (windowEnd !== expectedWindowEnd) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['window', 'end'],
+      message: 'supply window is not the latest completed bucket at generatedAt',
+    });
+  }
+  if (result.status !== 'available') return;
+
+  let previousWorkClass: string | undefined;
+  result.classes.forEach((entry, index) => {
+    if (previousWorkClass !== undefined && entry.workClass <= previousWorkClass) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['classes', index, 'workClass'],
+        message: 'supply classes must be unique and sorted by workClass',
+      });
+    }
+    previousWorkClass = entry.workClass;
+    for (const field of ['latestAttemptAt', 'latestVerdictAt'] as const) {
+      const timestamp = Date.parse(entry[field]);
+      if (timestamp < windowStart || timestamp >= windowEnd) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['classes', index, field],
+          message: `${field} must fall inside the completed supply window`,
+        });
+      }
+    }
+  });
+});
 
 // ── GraphQL query strings ─────────────────────────────────────────────────────
 

@@ -13,9 +13,9 @@ const WINDOW = {
   })),
 };
 
-function commandWith(response: Record<string, unknown>) {
+function commandWith(response: Record<string, unknown>, network: 'testnet' | 'mainnet' = 'testnet') {
   const loadConfig = vi.fn(() => ({
-    network: 'testnet',
+    network,
     discovery: { mode: 'http', url: 'https://indexer.example' },
   }));
   const getCurrentSupply = vi.fn(async () => response as never);
@@ -81,6 +81,15 @@ describe('jinn supply', () => {
     });
     await runCommand(deps.command, { argv: ['--config', '/tmp/jinn.json'] });
     expect(deps.loadConfig).toHaveBeenCalledWith('/tmp/jinn.json');
+  });
+
+  it('derives the chain ID from the lightweight network config', async () => {
+    const deps = commandWith({
+      schemaVersion: 1, status: 'zero_supply', reason: 'no_requestable_solver_nets',
+      chainId: 8453, generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW, classes: [],
+    }, 'mainnet');
+    await runCommand(deps.command);
+    expect(deps.getCurrentSupply).toHaveBeenCalledWith({ chainId: 8453 });
   });
 
   it('keeps the command dependency boundary config-and-HTTP only', () => {

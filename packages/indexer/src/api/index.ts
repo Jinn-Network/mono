@@ -39,7 +39,7 @@ import schema, {
   task,
   verdict,
 } from 'ponder:schema';
-import { graphql, and, eq, sql } from 'ponder';
+import { graphql, and, eq, inArray, sql } from 'ponder';
 import { Hono } from 'hono';
 import { attributeRuns } from '../builder-attribution.js';
 import {
@@ -62,11 +62,14 @@ import taskCoverage from './task-coverage.js';
 import { PLACEHOLDER_HTML } from './placeholder.js';
 import {
   buildCurrentSupply,
+  completedSupplyWindow,
   type SupplyAttemptRow,
   type SupplyManifestRow,
   type SupplyTaskRow,
   type SupplyVerdictRow,
 } from './supply.js';
+
+const SUPPLY_EVIDENCE_ROW_LIMIT = 10_000;
 
 const app = new Hono();
 
@@ -88,15 +91,74 @@ app.get('/supply', async (c) => {
   }
 
   try {
-    const [manifests, tasks, attempts, verdicts] = await Promise.all([
-      db.select().from(solverNetManifest).where(eq(solverNetManifest.chainId, chainId)),
-      db.select().from(task).where(eq(task.chainId, chainId)),
-      db.select().from(attempt).where(eq(attempt.chainId, chainId)),
-      db.select().from(verdict).where(eq(verdict.chainId, chainId)),
+    const asOfMs = Date.now();
+    const window = completedSupplyWindow(asOfMs);
+    const windowStart = BigInt(Date.parse(window.start) / 1_000);
+    const windowEnd = BigInt(Date.parse(window.end) / 1_000);
+    const [manifests, attempts, verdicts, missingAttemptTimes, missingVerdictTimes] = await Promise.all([
+      db.select().from(solverNetManifest).where(
+        and(
+          eq(solverNetManifest.chainId, chainId),
+          eq(solverNetManifest.status, 'launched'),
+        ),
+      ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1),
+      db.select({
+        taskId: attempt.taskId,
+        attemptIndex: attempt.attemptIndex,
+        operator: attempt.operator,
+        chainId: attempt.chainId,
+        createdAtTimestamp: attempt.createdAtTimestamp,
+      }).from(attempt).where(
+        and(
+          eq(attempt.chainId, chainId),
+          sql`${attempt.createdAtTimestamp} >= ${windowStart}`,
+          sql`${attempt.createdAtTimestamp} < ${windowEnd}`,
+        ),
+      ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1),
+      db.select({
+        taskId: verdict.taskId,
+        attemptIndex: verdict.attemptIndex,
+        verdictIndex: verdict.verdictIndex,
+        verdictCode: verdict.verdictCode,
+        chainId: verdict.chainId,
+        createdAtTimestamp: verdict.createdAtTimestamp,
+      }).from(verdict).where(
+        and(
+          eq(verdict.chainId, chainId),
+          sql`${verdict.createdAtTimestamp} >= ${windowStart}`,
+          sql`${verdict.createdAtTimestamp} < ${windowEnd}`,
+        ),
+      ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1),
+      db.select({ taskId: attempt.taskId }).from(attempt).where(
+        and(eq(attempt.chainId, chainId), eq(attempt.createdAtTimestamp, 0n)),
+      ).limit(1),
+      db.select({ taskId: verdict.taskId }).from(verdict).where(
+        and(eq(verdict.chainId, chainId), eq(verdict.createdAtTimestamp, 0n)),
+      ).limit(1),
     ]);
+
+    let evidenceComplete = manifests.length <= SUPPLY_EVIDENCE_ROW_LIMIT
+      && attempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
+      && verdicts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
+      && missingAttemptTimes.length === 0
+      && missingVerdictTimes.length === 0;
+    const taskIds = [...new Set([
+      ...attempts.map((row) => row.taskId),
+      ...verdicts.map((row) => row.taskId),
+    ])];
+    const tasks = taskIds.length === 0 ? [] : await db.select({
+      id: task.id,
+      manifestDigest: task.manifestDigest,
+      chainId: task.chainId,
+    }).from(task).where(
+      and(eq(task.chainId, chainId), inArray(task.id, taskIds)),
+    ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1);
+    evidenceComplete &&= tasks.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
+
     return c.json(buildCurrentSupply({
       chainId,
-      asOfMs: Date.now(),
+      asOfMs,
+      evidenceComplete,
       manifests: manifests as SupplyManifestRow[],
       tasks: tasks as SupplyTaskRow[],
       attempts: attempts as SupplyAttemptRow[],

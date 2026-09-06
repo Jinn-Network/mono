@@ -77,6 +77,8 @@ export interface SupplyVerdictRow {
 export interface BuildCurrentSupplyInput {
   chainId: number;
   asOfMs: number;
+  /** False when any backing query was capped or encountered legacy rows without event time. */
+  evidenceComplete: boolean;
   manifests: SupplyManifestRow[];
   tasks: SupplyTaskRow[];
   attempts: SupplyAttemptRow[];
@@ -140,6 +142,7 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
   }
 
   const base = baseResult(input);
+  if (!input.evidenceComplete) return unknown(input);
   const windowStart = BigInt(Date.parse(base.window.start) / 1_000);
   const windowEnd = BigInt(Date.parse(base.window.end) / 1_000);
   const launched = input.manifests.filter(
@@ -224,12 +227,15 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
       || row.verdictCode < 0
       || row.verdictCode > 4
     ) return unknown(input);
+    if (row.createdAtTimestamp < windowStart || row.createdAtTimestamp >= windowEnd) continue;
     const attempt = attemptByKey.get(activityKey(row.chainId, row.taskId, row.attemptIndex));
-    if (!attempt) return unknown(input);
+    if (!attempt
+      || attempt.createdAtTimestamp < windowStart
+      || attempt.createdAtTimestamp >= windowEnd) return unknown(input);
     const task = taskById.get(row.taskId);
     if (!task) return unknown(input);
     const workClass = classByDigest.get(task.manifestDigest.toLowerCase());
-    if (!workClass || row.createdAtTimestamp < windowStart || row.createdAtTimestamp >= windowEnd) continue;
+    if (!workClass) continue;
     const aggregate = classRows.get(workClass)!;
     aggregate.verdicts.add(`${row.chainId}:${row.taskId}:${row.attemptIndex}:${row.verdictIndex}`);
     if (row.createdAtTimestamp > aggregate.latestVerdict) aggregate.latestVerdict = row.createdAtTimestamp;
@@ -247,7 +253,7 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
       latestAttemptAt: isoFromSeconds(Number(row.latestAttempt)),
       latestVerdictAt: isoFromSeconds(Number(row.latestVerdict)),
     }))
-    .sort((a, b) => a.workClass.localeCompare(b.workClass));
+    .sort((a, b) => (a.workClass < b.workClass ? -1 : a.workClass > b.workClass ? 1 : 0));
 
   if (classes.length === 0) {
     return { ...base, status: 'zero_supply', reason: 'no_recent_completed_loops', classes: [] };

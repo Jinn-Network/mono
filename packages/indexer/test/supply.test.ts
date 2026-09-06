@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildCurrentSupply, completedSupplyWindow } from '../src/api/supply.js';
 
@@ -47,6 +48,7 @@ function build(overrides: Partial<Parameters<typeof buildCurrentSupply>[0]> = {}
   return buildCurrentSupply({
     chainId: CHAIN_ID,
     asOfMs: AS_OF,
+    evidenceComplete: true,
     manifests: [manifest()],
     tasks: [task()],
     attempts: [attempt()],
@@ -129,6 +131,26 @@ describe('buildCurrentSupply', () => {
     });
   });
 
+  it('does not let a recent verdict make an old attempt look recently active', () => {
+    const result = build({
+      attempts: [attempt({ createdAtTimestamp: BigInt(AS_OF / 1000) - BigInt(50 * HOUR) })],
+      verdicts: [verdict()],
+    });
+    expect(result).toMatchObject({
+      status: 'unknown',
+      reason: 'incomplete_indexer_evidence',
+      classes: [],
+    });
+  });
+
+  it('does not turn a capped or otherwise incomplete evidence read into zero supply', () => {
+    expect(build({ evidenceComplete: false })).toMatchObject({
+      status: 'unknown',
+      reason: 'incomplete_indexer_evidence',
+      classes: [],
+    });
+  });
+
   it.each([
     ['launched manifest enrichment is incomplete', { manifests: [manifest({ manifestEnrichmentStatus: 'pending' })] }],
     ['a relevant timestamp is missing', { attempts: [attempt({ createdAtTimestamp: 0n })] }],
@@ -153,5 +175,20 @@ describe('buildCurrentSupply', () => {
       verdicts: [verdict(), verdict({ taskId: '8', attemptIndex: 1 })],
     });
     expect(result.classes.map((entry) => entry.workClass)).toEqual(['aave.v3', 'prediction.v1']);
+  });
+});
+
+describe('GET /supply evidence reads', () => {
+  it('bounds every result set and time-scopes activity at the database', () => {
+    const source = readFileSync(new URL('../src/api/index.ts', import.meta.url), 'utf8');
+    const route = source.slice(
+      source.indexOf('// ── GET /supply'),
+      source.indexOf('// ── Shared ebu7-schema probe'),
+    );
+    expect(route.match(/\.limit\(/gu)).toHaveLength(6);
+    expect(route).toContain('attempt.createdAtTimestamp} >= ${windowStart}');
+    expect(route).toContain('attempt.createdAtTimestamp} < ${windowEnd}');
+    expect(route).toContain('verdict.createdAtTimestamp} >= ${windowStart}');
+    expect(route).toContain('verdict.createdAtTimestamp} < ${windowEnd}');
   });
 });

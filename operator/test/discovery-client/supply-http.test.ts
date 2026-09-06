@@ -73,6 +73,18 @@ describe('DiscoveryClient.getCurrentSupply', () => {
     ['bad status', { ...available, status: 'maybe' }],
     ['missing buckets', { ...available, window: { ...available.window, buckets: [] } }],
     ['unsafe count', { ...available, classes: [{ ...available.classes[0], verifiedDeliveries: -1 }] }],
+    ['stale window', { ...available, generatedAt: '2026-09-07T13:47:00.000Z' }],
+    ['out-of-window activity', {
+      ...available,
+      classes: [{ ...available.classes[0], latestAttemptAt: available.window.end }],
+    }],
+    ['non-deterministic class order', {
+      ...available,
+      classes: [
+        { ...available.classes[0], workClass: 'z.v1', contractId: 'z' },
+        { ...available.classes[0], workClass: 'a.v1', contractId: 'a' },
+      ],
+    }],
   ])('rejects %s instead of treating it as no supply', async (_label, body) => {
     await expect(clientFor(body).client.getCurrentSupply({ chainId: 84532 }))
       .rejects.toBeInstanceOf(DiscoveryUnavailableError);
