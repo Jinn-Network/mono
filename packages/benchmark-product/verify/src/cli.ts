@@ -40,11 +40,45 @@ export interface VerifierCliDeps {
 }
 
 /**
+ * Protocol namespaces that do not resolve for this reader. URL candidates are classified in the
+ * replacer so an actionable third-party URL remains intact, while scheme-prefixed Jinn names and
+ * the bare extension/method namespaces are treated the same way.
+ */
+const PROTOCOL_IDENTIFIER_CANDIDATE =
+  /https?:\/\/[^\s,;)"']*|jinn\.(?:network|benchmarking)[^\s,;)"']*/gu;
+const INTERNAL_PROTOCOL_URL =
+  /^https?:\/\/(?:[^/?#]*\.)?jinn\.(?:network|benchmarking)(?::[0-9]+)?(?:[/?#]|$)/u;
+const RAW_IDENTIFIER = /urn:[^\s,;)"']+|did:key:z[1-9A-HJ-NP-Za-km-z]+/gu;
+const IDENTIFIER_ALIAS = "<identifier: see --json>";
+
+function aliasIdentifier(match: string): string {
+  return match.endsWith(".") ? `${IDENTIFIER_ALIAS}.` : IDENTIFIER_ALIAS;
+}
+
+/** Removes only Jinn's unresolvable protocol namespaces, preserving actionable outside URLs. */
+function withoutInternalProtocolIdentifiers(message: string): string {
+  return message.replace(PROTOCOL_IDENTIFIER_CANDIDATE, (match) => {
+    if (match.startsWith("http") && !INTERNAL_PROTOCOL_URL.test(match)) return match;
+    return aliasIdentifier(match);
+  });
+}
+
+/** Refusal details keep raw identifiers in `--json`; the human error surface aliases them. */
+function withoutHumanIdentifiers(message: string): string {
+  return withoutInternalProtocolIdentifiers(message).replace(RAW_IDENTIFIER, aliasIdentifier);
+}
+
+/**
  * What this tool does to the platform bytes, stated identically wherever it is stated. The verdict
  * surface said one thing and the usage block another -- "Verification uses …", the noun #2982 ruled
  * overclaims -- because the sentence was written twice (issue #3675).
  */
 const PLATFORM_BYTES_SENTENCE = "Checks run against the exact platform bytes installed from npm." as const;
+
+/** The host gap, stated without handing a reader an unresolvable origin to visit. */
+const IDENTIFIER_DISCLOSURE =
+  "Protocol identifiers are names, not addresses — this verifier fetches nothing\n"
+  + `from them. ${PLATFORM_BYTES_SENTENCE}`;
 
 function usage(): string {
   return "Usage: colophon-verify <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
@@ -62,7 +96,7 @@ function usage(): string {
     + "Exit 0: valid bundle; 1: invalid bundle, or a freeze repository that drifted from it;\n"
     + "     2: usage or operational failure, including a freeze repository that could not be\n"
     + "     rendered from the bundle — the bundle's own verdict is still reported.\n"
-    + `Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet. ${PLATFORM_BYTES_SENTENCE}\n`;
+    + `${IDENTIFIER_DISCLOSURE}\n`;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,8 +141,14 @@ function evaluationNote(entry: AnchorVerificationEntry): string {
       : "";
     return `time basis evaluated against trust material you supplied${evaluated}`;
   }
-  if (entry.status === "pending") return entry.reason ?? "no chain attestation yet";
-  if (entry.status === "invalid") return entry.reason ?? "the proof does not verify";
+  // A provider's free-form reason is authenticated report data, not CLI prose. Keep the exact value
+  // in `--json`, but alias raw identifiers before this untrusted text enters the human report.
+  if (entry.status === "pending") {
+    return entry.reason === undefined ? "no chain attestation yet" : withoutHumanIdentifiers(entry.reason);
+  }
+  if (entry.status === "invalid") {
+    return entry.reason === undefined ? "the proof does not verify" : withoutHumanIdentifiers(entry.reason);
+  }
   // Exhaustive over the four proof statuses: `present` is the only one left. A fifth member of
   // ANCHOR_PROOF_STATUSES fails here rather than silently inheriting this note.
   entry.status satisfies "present";
@@ -130,10 +170,15 @@ function renderAnchor(entry: AnchorVerificationEntry): string {
   return `${head}\n    ${evaluationNote(entry)}\n    record ${entry.recordSha256}`;
 }
 
+/** Keeps the declared provider's useful profile path while dropping its unresolvable host. */
+function anchorProfileName(profile: string): string {
+  return /^https?:\/\/[^/]+\/(?:[^/]+\/)*anchor-profiles\/(.+)$/u.exec(profile)?.[1] ?? profile;
+}
+
 function renderSubject(subject: AnchorSubjectReport): string {
   if (subject.outcome === "declared-but-absent") {
     return `  ${subject.subject}: declared-but-absent — this run declared `
-      + `${subject.declaredProfiles?.join(", ") ?? "an anchor provider"} and the bundle carries no matching anchor`;
+      + `${subject.declaredProfiles?.map(anchorProfileName).join(", ") ?? "an anchor provider"} and the bundle carries no matching anchor`;
   }
   if (subject.outcome === "absent") return `  ${subject.subject}: absent — no anchor was carried and none was declared`;
   return `  ${subject.subject}: anchored`;
@@ -315,7 +360,7 @@ export function renderVerifiedBundle(
   const verdictLine = outcome.notFetched === 0
     ? `Recomputed: ${outcome.passed} of ${totalChecks} checks passed`
     : `Recomputed: ${outcome.passed} of ${totalChecks} checks passed, ${outcome.notFetched} not fetched`;
-  return `${verdictLine}
+  return withoutInternalProtocolIdentifiers(`${verdictLine}
 Bundle: ${identity}
 Format: ${result.format}
 
@@ -324,9 +369,8 @@ ${caveats}
 ${checks}
 ${signers}${artifactContentReport}${anchors}${artifactContentLimit}${anchorLimits}${identityLimits === undefined ? "" : `\n${identityLimits}`}
 No files were uploaded.
-Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.
-${PLATFORM_BYTES_SENTENCE}
-`;
+${IDENTIFIER_DISCLOSURE}
+`);
 }
 
 // ---------------------------------------------------------------------------
@@ -360,18 +404,6 @@ function readBlockHeaders(bytes: Uint8Array, path: string): readonly { height: n
       header: new Uint8Array(Buffer.from(match[2]!.toLowerCase(), "hex")),
     };
   });
-}
-
-/** `urn:…` and `did:key:z…` as they appear inside a refusal message. The base58btc class stops a
- * `did:key` match before a trailing `:reason` suffix the message appended. */
-const RAW_IDENTIFIER = /urn:[^\s,;)"']+|did:key:z[1-9A-HJ-NP-Za-km-z]+/gu;
-
-/** A refusal names the signer it refused, and on the machine surface that identifier is the whole
- * point. On the human surface it is a string a reader cannot act on, so the same rule as the
- * verified report applies: the identifier lives in `--json` (issue #3024). What failed, and where,
- * is untouched. */
-function withoutRawIdentifiers(message: string): string {
-  return message.replace(RAW_IDENTIFIER, "<identifier: see --json>");
 }
 
 interface ParsedArguments {
@@ -458,7 +490,7 @@ function renderFreezeRepoCheck(check: FreezeRepoVerificationResult): string {
       : check.executableBitSkipped === "not-probed"
         ? "\n  note: file modes were not checked (the filesystem could not be probed)"
         : "\n  note: file modes were not checked";
-  return `${head}${pin}${modes}${drift}\n`;
+  return withoutHumanIdentifiers(`${head}${pin}${modes}${drift}\n`);
 }
 
 export async function runVerifierCli(
@@ -466,7 +498,7 @@ export async function runVerifierCli(
   deps: VerifierCliDeps = {},
 ): Promise<VerifierCliResult> {
   const parsed = parseArguments(args);
-  if (parsed === undefined) return { exitCode: 2, stdout: "", stderr: usage() };
+  if (parsed === undefined) return { exitCode: 2, stdout: "", stderr: withoutHumanIdentifiers(usage()) };
 
   const readFile = deps.readFile ?? ((path: string) => new Uint8Array(readFileSync(path)));
   let anchorTrust: PublicBundleAnchorTrustMaterial | undefined;
@@ -476,7 +508,9 @@ export async function runVerifierCli(
     return {
       exitCode: 2,
       stdout: "",
-      stderr: `colophon-verify: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      stderr: withoutHumanIdentifiers(
+        `colophon-verify: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      ),
     };
   }
 
@@ -493,7 +527,7 @@ export async function runVerifierCli(
     const stdout = parsed.json
       ? `${JSON.stringify({ ok: false, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, code, message: error.message })}\n`
       : "";
-    const stderr = parsed.json ? "" : `colophon-verify: ${withoutRawIdentifiers(error.message)}\n`;
+    const stderr = parsed.json ? "" : `colophon-verify: ${withoutHumanIdentifiers(error.message)}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
 
@@ -530,7 +564,7 @@ export async function runVerifierCli(
         code: (cause !== null && typeof cause === "object" && "code" in cause)
           ? String((cause as { code?: unknown }).code)
           : "environment",
-        message: withoutRawIdentifiers(error.message),
+        message: error.message,
       };
     }
   }
@@ -551,7 +585,7 @@ export async function runVerifierCli(
         code: (cause !== null && typeof cause === "object" && "code" in cause)
           ? String((cause as { code?: unknown }).code)
           : "environment",
-        message: withoutRawIdentifiers(error.message),
+        message: error.message,
       };
     }
   }
@@ -576,7 +610,7 @@ export async function runVerifierCli(
     : [
       ...(freezeRepoFailure === undefined ? [] : [`freeze repository not checked: ${freezeRepoFailure.message}`]),
       ...(identityFailure === undefined ? [] : [`domain binding not applied: ${identityFailure.message}`]),
-    ].map((note) => `colophon-verify: ${note}\n`).join("");
+    ].map((note) => withoutHumanIdentifiers(`colophon-verify: ${note}\n`)).join("");
   // A drifted freeze repository is a verdict about the artifact and takes precedence: exit 1 is
   // what the usage text promises for it, and an operational failure on a different flag must not
   // silently re-code that verdict as 2.

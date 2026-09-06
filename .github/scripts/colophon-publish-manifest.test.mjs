@@ -242,12 +242,13 @@ test('Colophon trusted publishing is a separate workflow and never joins the sta
   assert.match(workflow, /transformColophonManifestForPublish|colophon-publish-manifest/u);
 });
 
-test('first-cut public surfaces disclose that spec.jinn.network is not hosted', () => {
+test('first-cut public surfaces disclose origin-free protocol identifiers', () => {
   const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/README.md'), 'utf8');
   const cli = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/src/cli.ts'), 'utf8');
   for (const [label, text] of [['README', readme], ['CLI', cli]]) {
-    assert.match(text, /spec\.jinn\.network/u, label);
-    assert.match(text, /not hosted/iu, label);
+    assert.match(text, /Protocol identifiers[\s\S]{0,64}are names, not addresses/u, label);
+    assert.match(text, /bytes installed from npm/u, label);
+    assert.doesNotMatch(text, /spec\.jinn\.network/u, label);
   }
   assert.match(readme, /What this does not yet prove/u);
 });
