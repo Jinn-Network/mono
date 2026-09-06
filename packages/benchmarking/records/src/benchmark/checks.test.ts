@@ -11,6 +11,7 @@ import {
   checkJudgeability,
   classifyVersionBump,
   resolveBenchmarkTaskProvenance,
+  TASK_PROVENANCE_EXTENSION_KEY_V1,
 } from "./checks.js";
 
 function loadRecord(name: string) {
@@ -364,5 +365,95 @@ describe("checkComparability", () => {
         { versionRobust: true },
       ),
     ).toEqual({ ok: true });
+  });
+});
+
+/**
+ * Issue #4098 / DR-2026-09-05: task provenance also rides the namespaced top-level extension key,
+ * so a profile whose `payloadSchema` closes the payload (`prediction-forecast/1.0` is exactly
+ * `{forecast}`) can still carry it. The two locations are alternatives, never a precedence pair.
+ */
+describe("resolveBenchmarkTaskProvenance — top-level extension location", () => {
+  const TIMESTAMP = "2026-07-29T00:00:00Z";
+
+  function taskWith(fields: Record<string, unknown>): Uint8Array {
+    return sealTask({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      profile: { digest: { sha256: DIGEST_B } },
+      instructions: "do it",
+      outputs: [],
+      evaluation: { digest: { sha256: DIGEST_C } },
+      ...fields,
+    });
+  }
+
+  function resolve(bytes: Uint8Array) {
+    return resolveBenchmarkTaskProvenance(documentDigest(bytes).slice("sha256:".length), () => bytes);
+  }
+
+  test("the extension key is exported, never transcribed by consumers", () => {
+    expect(TASK_PROVENANCE_EXTENSION_KEY_V1).toBe("https://spec.jinn.network/task-provenance/v1");
+  });
+
+  test("admits provenance carried at the top-level extension key, with a closed payload", () => {
+    const bytes = taskWith({
+      payload: { forecast: { marketId: "m" } },
+      [TASK_PROVENANCE_EXTENSION_KEY_V1]: { kind: "synthetic", source: "https://venue.example", timestamp: TIMESTAMP },
+    });
+    expect(resolve(bytes)).toEqual({
+      ok: true,
+      provenance: { timestamp: TIMESTAMP, cluster: { tag: "source", value: "https://venue.example" } },
+    });
+  });
+
+  test("admits a sourceCommitment variant at the extension key", () => {
+    const commitment = `sha256:${DIGEST_A}` as const;
+    const bytes = taskWith({
+      payload: { forecast: { marketId: "m" } },
+      [TASK_PROVENANCE_EXTENSION_KEY_V1]: { sourceCommitment: commitment, timestamp: TIMESTAMP },
+    });
+    expect(resolve(bytes)).toEqual({
+      ok: true,
+      provenance: { timestamp: TIMESTAMP, cluster: { tag: "sourceCommitment", value: commitment } },
+    });
+  });
+
+  test("refuses when BOTH locations are present, rather than inventing a precedence rule", () => {
+    const bytes = taskWith({
+      payload: { provenance: { source: "payload-source", timestamp: TIMESTAMP } },
+      [TASK_PROVENANCE_EXTENSION_KEY_V1]: { source: "extension-source", timestamp: TIMESTAMP },
+    });
+    expect(resolve(bytes)).toEqual({ ok: false, reason: "invalid-provenance" });
+  });
+
+  test("refuses both-present even when the extension value is malformed — presence, not validity, is the ambiguity", () => {
+    const bytes = taskWith({
+      payload: { provenance: { source: "payload-source", timestamp: TIMESTAMP } },
+      [TASK_PROVENANCE_EXTENSION_KEY_V1]: { nonsense: true },
+    });
+    expect(resolve(bytes)).toEqual({ ok: false, reason: "invalid-provenance" });
+  });
+
+  test("refuses when neither location is present, exactly as before", () => {
+    expect(resolve(taskWith({ payload: { forecast: { marketId: "m" } } })))
+      .toEqual({ ok: false, reason: "invalid-provenance" });
+  });
+
+  test.each([
+    ["a non-object value", "not-an-object"],
+    ["an array value", [{ source: "s", timestamp: TIMESTAMP }]],
+    ["neither source nor sourceCommitment", { timestamp: TIMESTAMP }],
+    ["both source and sourceCommitment", { source: "s", sourceCommitment: `sha256:${DIGEST_A}`, timestamp: TIMESTAMP }],
+    ["a missing timestamp", { source: "s" }],
+    ["a non-calendar-strict timestamp", { source: "s", timestamp: "2026-02-30T00:00:00Z" }],
+    ["an empty source", { source: "", timestamp: TIMESTAMP }],
+    ["a malformed sourceCommitment", { sourceCommitment: "not-a-digest", timestamp: TIMESTAMP }],
+    ["an uppercase-hex sourceCommitment", { sourceCommitment: `sha256:${DIGEST_A.toUpperCase()}`, timestamp: TIMESTAMP }],
+  ])("refuses %s at the extension key, on the same ground the payload path refuses on", (_label, value) => {
+    const extensionOnly = taskWith({ payload: { forecast: { marketId: "m" } }, [TASK_PROVENANCE_EXTENSION_KEY_V1]: value });
+    const payloadOnly = taskWith({ payload: { provenance: value } });
+    expect(resolve(extensionOnly)).toEqual({ ok: false, reason: "invalid-provenance" });
+    // The point of the packet: the two locations refuse identically, so neither can drift.
+    expect(resolve(payloadOnly)).toEqual(resolve(extensionOnly));
   });
 });

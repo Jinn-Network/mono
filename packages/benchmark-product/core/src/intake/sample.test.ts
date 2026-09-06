@@ -14,11 +14,12 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resolveBenchmarkTaskProvenance, TASK_PROVENANCE_EXTENSION_KEY_V1 } from "@jinn-network/benchmarking-records";
 import { predictionV1BaselineLauncher } from "@jinn-network/task-execution-launchers";
 import { STAGED_SEALED_TASK_FILENAME } from "@jinn-network/task-execution-workspace";
 import { afterEach, describe, expect, test } from "vitest";
 import { sha256Hex } from "../workspace/sealed-store.js";
-import { buildSampleBenchmark } from "./sample.js";
+import { buildSampleBenchmark, SAMPLE_PROVENANCE_SOURCE } from "./sample.js";
 
 const HEX64 = /^[a-f0-9]{64}$/;
 
@@ -80,6 +81,56 @@ describe("buildSampleBenchmark — shape", () => {
     }
     const marketIds = sample.tasks.map((task) => task.marketId);
     expect(new Set(marketIds).size).toBe(marketIds.length);
+  });
+});
+
+/**
+ * Issue #4098 / DR-2026-09-05. `prediction-forecast/1.0`'s payload is closed to exactly
+ * `{forecast}`, so the sample's provenance rides the namespaced top-level extension key. These
+ * assertions are what make the sample reachable by the five `task-provenance-source` clustering
+ * methods; the acceptance test for that is ./sample-paired-scoring.test.ts.
+ */
+describe("buildSampleBenchmark — task provenance", () => {
+  test("every sample task carries provenance at the top-level extension key, not in the closed payload", async () => {
+    const sample = await buildSampleBenchmark();
+
+    for (const task of sample.tasks) {
+      const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(task.bytes)) as Record<string, unknown>;
+      expect(Object.keys(parsed.payload as object)).toEqual(["forecast"]);
+      expect(parsed[TASK_PROVENANCE_EXTENSION_KEY_V1]).toStrictEqual({
+        kind: "synthetic",
+        source: SAMPLE_PROVENANCE_SOURCE,
+        timestamp: (parsed.payload as { forecast: { observedAt: string } }).forecast.observedAt,
+      });
+    }
+  });
+
+  test("the records resolver admits every sample task, and all three land in ONE source cluster", async () => {
+    const sample = await buildSampleBenchmark();
+
+    const clusters = new Set<string>();
+    for (const task of sample.tasks) {
+      const resolved = resolveBenchmarkTaskProvenance(`sha256:${task.sha256}`, () => task.bytes);
+      expect(resolved).toEqual({
+        ok: true,
+        provenance: expect.objectContaining({ cluster: { tag: "source", value: SAMPLE_PROVENANCE_SOURCE } }),
+      });
+      if (resolved.ok) clusters.add(`${resolved.provenance.cluster.tag}:${resolved.provenance.cluster.value}`);
+    }
+    // One fixed venue origin for all three, deliberately (spec §6): a per-market source would make
+    // every task its own singleton cluster and silently defeat the between-cluster correction.
+    expect(clusters.size).toBe(1);
+  });
+
+  test("provenance timestamps are the variations' own fixed observedAt values, so no wall clock enters the sample", async () => {
+    const first = await buildSampleBenchmark();
+    const second = await buildSampleBenchmark();
+    const timestamps = (sample: typeof first) => sample.tasks.map((task) => {
+      const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(task.bytes)) as Record<string, unknown>;
+      return (parsed[TASK_PROVENANCE_EXTENSION_KEY_V1] as { timestamp: string }).timestamp;
+    });
+    expect(timestamps(second)).toEqual(timestamps(first));
+    expect(timestamps(first)).toEqual(["2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z", "2026-03-01T00:00:00Z"]);
   });
 });
 
