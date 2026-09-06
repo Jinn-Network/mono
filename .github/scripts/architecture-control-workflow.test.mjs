@@ -226,7 +226,10 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   // The jq hop is assigned before it is echoed. Folded into the `echo` argument the
   // substitution is invisible to `set -e`, and a dead jq publishes an empty `run=` that
   // unselects the whole battery at exit 0 (#2456). Executable coverage is below.
-  assert.match(selectionJob, /\n\s+run_value="\$\(jq -r '\.run' <<<"\$\{selection\}"\)"\n/u);
+  assert.match(
+    selectionJob,
+    /\n\s+run_value="\$\(jq -r '\.run' <<<"\$\{selection\}"\)"\n(?:\s*#[^\n]*\n)*\s*case "\$\{run_value\}" in/u,
+  );
   assert.doesNotMatch(selectionJob, /echo "run=\$\(/u);
   // ...and validated before it is published. A jq that succeeds with a non-boolean --
   // no output on an empty `selection`, `null` on a `.run`-less one -- exits 0, so only
@@ -403,7 +406,11 @@ test('a failing jq reds selection instead of publishing an empty run= verdict', 
     /^run_value="\$\(jq -r '\.run' <<<"\$\{selection\}"\)"\n(?:.*\n)*?esac\necho "run=\$\{run_value\}"/mu,
     'echo "run=$(jq -r \'.run\' <<<"${selection}")"',
   );
-  assert.notEqual(foldedBack, script, 'the selection step must assign the jq result before echoing it');
+  assert.notEqual(
+    foldedBack,
+    script,
+    'the selection step must assign the jq result, validate it, and only then echo it',
+  );
   const laundered = runSelectionScript({ script: foldedBack, env, jqStub: FAILING_JQ_STUB });
   assert.equal(laundered.status, 0, 'in argument position the jq failure is masked');
   assert.match(laundered.output, /^run=$/mu);
