@@ -23,7 +23,7 @@ const scalar = (value) => unquote(value.replace(/\s+#.*$/u, ''));
 const jobKeyPattern = /^(?:"([A-Za-z_][A-Za-z0-9_-]*)"|'([A-Za-z_][A-Za-z0-9_-]*)'|([A-Za-z_][A-Za-z0-9_-]*))$/u;
 
 function mappingKey(line) {
-  const match = line.match(/^(\s+)(.+?):\s*(?:#.*)?$/u);
+  const match = line.match(/^(\s+)(.+?):(?:\s+&[A-Za-z_][A-Za-z0-9_-]*)?\s*(?:#.*)?$/u);
   if (!match) return null;
   const key = match[2].match(jobKeyPattern);
   return key ? { indent: match[1].length, name: key[1] ?? key[2] ?? key[3] } : null;
@@ -621,6 +621,15 @@ test('guard checks Yarn installs under single-quoted job IDs with valid punctuat
     writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
       '          node-version: 22',
     ).replace('  verify:', "  'verify-job_1':"));
+    assert.match(yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'), /cache: yarn/u);
+  });
+});
+
+test('guard checks Yarn installs under anchored job IDs', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
+      '          node-version: 22',
+    ).replace('  verify:', '  verify: &verify_job'));
     assert.match(yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'), /cache: yarn/u);
   });
 });
