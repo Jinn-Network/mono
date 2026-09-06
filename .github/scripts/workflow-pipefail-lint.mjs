@@ -479,6 +479,11 @@ function shellTokens(text) {
       // nor closes a compound.
       opensParen: mask[start] === true && text[start] === '(',
       closesParen: mask[index - 1] === true && text[index - 1] === ')',
+      // A shell-syntax `|` or `&` glued to the end of the word. It is a command
+      // separator, so a statement begins right after it — but only when the mask says it
+      // is syntax: a quoted or escaped `|` is an ordinary character.
+      endsSeparator:
+        mask[index - 1] === true && (text[index - 1] === '|' || text[index - 1] === '&'),
     });
   }
   return tokens;
@@ -486,7 +491,8 @@ function shellTokens(text) {
 
 // Words after which the shell begins a new command, so a reserved word standing there
 // is a keyword rather than an argument. `|` and `&` stay inside a word token, only `&&`,
-// `||` and `;` being operators.
+// `||` and `;` being operators — so a word that merely *ends* in one is matched by
+// `endsSeparator` rather than by this set.
 const COMMAND_POSITION_WORDS = new Set(['(', '|', '&', '!', 'then', 'else', 'elif', 'do', '{', 'time']);
 
 const BRACE_TOKENS = new Set(['{', '}']);
@@ -498,6 +504,9 @@ function leadsStatement(previous) {
   // body begins right after it. Without this a compound leading an arm was read as an
   // argument, which is the same false red this positional rule exists to remove.
   if (previous.closesParen === true) return true;
+  // `cat f| while …` tokenizes as one word `cat f|`, so the set lookup below — which
+  // tests the whole value — never sees the pipe that ends it (#4067).
+  if (previous.endsSeparator === true) return true;
   return COMMAND_POSITION_WORDS.has(previous.value);
 }
 
