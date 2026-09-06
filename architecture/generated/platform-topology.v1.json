@@ -15522,6 +15522,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/trust-testing",
         "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/cross-validation-2026-09-06.md",
+        "relativeSource": "fixtures/anchor-kit-v1/cross-validation-2026-09-06.md"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
         "path": "packages/trust/testing/fixtures/anchor-kit-v1/cross-validation.md",
         "relativeSource": "fixtures/anchor-kit-v1/cross-validation.md"
       },
