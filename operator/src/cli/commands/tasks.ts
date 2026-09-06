@@ -1337,18 +1337,18 @@ Options:
   --spec-file <path>  Path to a JSON file containing typed task fields (window, spec, eligibility).
                       Supports registered SolverTypes: portfolio.v0, prediction.v1, prediction.apy.v0.
 
-                      Sentinels resolved at post time:
+                      Sentinel resolved at post time, for prediction.apy.v0 only:
                         window.startTs: 0              → Date.now(); endTs + resolveTs follow
-                        spec.question.threshold:       → the current Chainlink feed price
-                          "current"                      (exactly)
-                          "current+0.5%" / "current-2%"  (percentage offset)
-                          "current+100"  / "current-50"  (absolute offset)
-                      For price-aware thresholds the CLI reads the feed named in
-                      spec.oracle before posting; use BASE_SEPOLIA_RPC_URL to
-                      override the default public RPC.
+                      prediction.v1 resolves no sentinels: its spec file carries
+                      the literal Polymarket binary-question fields (question /
+                      source / resolution / consensusSnapshot / eligibilitySnapshot),
+                      an explicit claimPolicy, and absolute epoch-millisecond
+                      window timestamps — see fixtures/prediction-v1-task.example.json.
+                      The schema requires claimPolicy, but the posted claim slots
+                      come from --max-claims / --required-verdicts, not from the file.
 
 Examples:
-  jinn tasks submit --id eth-up --description "ETH direction" --solver-net prediction --spec-file fixtures/prediction-v1-task.example.json --yes
+  jinn tasks submit --id pm-1 --description "Polymarket forecast" --solver-net prediction --spec-file fixtures/prediction-v1-task.example.json --yes
   jinn tasks submit --id usdc-apy --description "Aave APY" --solver-type prediction.apy.v0 --spec-file fixtures/prediction-apy-v0-intent.example.json --yes
   jinn tasks watch 42 --timeout 600 --json
 `,
