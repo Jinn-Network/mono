@@ -6,6 +6,7 @@ import {
   parseAnnouncementEntry,
   parseHeadTimestamp,
   recordDigest,
+  refreshByWithinCeiling,
   recordPath,
   sealJson,
   type AnnouncementEntry,
@@ -96,11 +97,11 @@ export function adaptRequesterSourceV1Publication(input: {
  * refusal is brought forward to here, using the same reading, and it is placed
  * before `signAnnouncementEntry`/`signHead` so a refusal signs nothing either.
  *
- * This is NOT the §5.2 refresh-window bound. `append`'s window check
- * deliberately exempts this reader, because a head the old requester already
- * minted must not be re-bounded against a clock that has since moved; that
- * exemption is about a window, not about the grammar. The grammar is the one
- * thing `assertIntentOwnership` will apply to these very bytes.
+ * This is NOT `append`'s clock-relative window bound, which deliberately exempts
+ * this reader: a head the old requester already minted must not be re-bounded
+ * against a clock that has since moved. Every predicate here is a function of
+ * the frozen bytes alone, and each one is a predicate `assertIntentOwnership`
+ * will apply to those same bytes later.
  *
  * Unreachable today -- every requester-source-v1 timestamp originates from
  * `new Date(...).toISOString()`, which always produces a conforming spelling.
@@ -122,6 +123,14 @@ function assertV1HeadTimestamps(input: {
   }
   if (!(refreshByMs > issuedAtMs)) {
     throw new Error(`requester source v1 head refreshBy does not follow issuedAt: ${head.refreshBy}`);
+  }
+  // The §5.2 CEILING, which `assertIntentOwnership` also applies to these frozen
+  // bytes, and which is clock-free: it bounds `refreshBy` against this head's own
+  // `issuedAt`, not against now. That is why bringing it forward is safe where
+  // bringing `append`'s `checkRefreshWindow` forward would not be -- the latter
+  // compares an already-minted head against a clock that has since moved.
+  if (!refreshByWithinCeiling(head)) {
+    throw new Error(`requester source v1 head refreshBy exceeds the §5.2 ceiling: ${head.refreshBy}`);
   }
   if (input.previousHeadIssuedAt !== null) {
     const previousMs = parseHeadTimestamp(input.previousHeadIssuedAt);

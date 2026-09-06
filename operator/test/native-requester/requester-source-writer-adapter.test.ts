@@ -197,6 +197,9 @@ describe('requester source v1 compatibility freeze refuses before anything is du
     ['an offset-less refreshBy', '2026-08-03T12:00:00.000Z', '2026-08-04T12:00:00.000', 'refreshBy is invalid'],
     ['a calendar-impossible issuedAt', '2026-02-30T12:00:00.000Z', '2026-08-04T12:00:00.000Z', 'issuedAt is invalid'],
     ['a refreshBy that does not follow issuedAt', '2026-08-03T12:00:00.000Z', '2026-08-03T12:00:00.000Z', 'refreshBy does not follow issuedAt'],
+    // The §5.2 ceiling, which `assertIntentOwnership` applies to these same frozen
+    // bytes and which is a function of the head alone, not of any clock.
+    ['a refreshBy past the §5.2 ceiling', '2026-08-03T12:00:00.000Z', '2027-08-03T12:00:00.000Z', 'exceeds the §5.2 ceiling'],
   ];
 
   for (const [label, issuedAt, refreshBy, message] of cases) {
