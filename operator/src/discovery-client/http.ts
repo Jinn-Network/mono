@@ -1,11 +1,12 @@
 /**
  * HTTP client for the surviving indexer read slice (one-swap R3b, issue #2494).
  *
- * Relocated verbatim out of `discovery/http.ts` — same GraphQL documents, same
+ * Relocated out of `discovery/http.ts` — same GraphQL documents, same
  * transport semantics (`/ready` gate, per-request timeout, transparent 502/503
- * retry), same result projections. `discovery/http.ts` now delegates these four
- * methods here rather than keeping a second copy, so the D-wave deletion of
- * `discovery/` cannot change what these consumers observe.
+ * retry), same result projections. `discovery/http.ts` delegates the relocated
+ * methods here rather than keeping a second copy, and the supply read lives on
+ * the same neutral client, so the D-wave deletion of `discovery/` cannot change
+ * what these consumers observe.
  *
  * Nothing in this module may import from `operator/src/discovery/` — see the
  * module note in `./types.ts`.
@@ -15,6 +16,7 @@ import {
   createHttpCorpusDiscovery,
   DiscoveryUnavailableError as CoreDiscoveryUnavailableError,
 } from '@jinn-network/core/corpus-read';
+import { z } from 'zod';
 
 import type { CorpusQuery, EnvelopeRef } from '../corpus/types.js';
 import {
@@ -22,9 +24,79 @@ import {
   type AutopilotDeliveryCandidateLookup,
   type AutopilotDeliveryRole,
   type CodeDigestRewardRow,
+  type CurrentSupplyResponse,
   type DiscoveryClient,
   type SolverNetManifestSummary,
 } from './types.js';
+
+const IsoTimestampSchema = z.string().datetime({ offset: true });
+const SafeCountSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const SupplyBucketSchema = z.object({
+  start: IsoTimestampSchema,
+  end: IsoTimestampSchema,
+}).strict();
+const SupplyWindowSchema = z.object({
+  start: IsoTimestampSchema,
+  end: IsoTimestampSchema,
+  bucketHours: z.literal(6),
+  buckets: z.array(SupplyBucketSchema).length(8),
+}).strict().superRefine((window, ctx) => {
+  const start = Date.parse(window.start);
+  const end = Date.parse(window.end);
+  const bucketMs = 6 * 60 * 60 * 1_000;
+  if (end - start !== 8 * bucketMs) {
+    ctx.addIssue({ code: 'custom', message: 'supply window must span eight six-hour buckets' });
+  }
+  window.buckets.forEach((bucket, index) => {
+    if (Date.parse(bucket.start) !== start + index * bucketMs
+      || Date.parse(bucket.end) !== start + (index + 1) * bucketMs) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['buckets', index],
+        message: 'supply buckets must be contiguous and cover the window',
+      });
+    }
+  });
+});
+const SupplyClassSchema = z.object({
+  workClass: z.string().min(1),
+  contractId: z.string().min(1),
+  contractVersion: z.string().min(1),
+  acceptingSolverNets: SafeCountSchema.positive(),
+  claimingOperators: SafeCountSchema.positive(),
+  verifiedDeliveries: SafeCountSchema.positive(),
+  latestAttemptAt: IsoTimestampSchema,
+  latestVerdictAt: IsoTimestampSchema,
+}).strict().superRefine((entry, ctx) => {
+  if (entry.workClass !== `${entry.contractId}.${entry.contractVersion}`) {
+    ctx.addIssue({ code: 'custom', path: ['workClass'], message: 'workClass does not match its contract tuple' });
+  }
+});
+const SupplyBaseShape = {
+  schemaVersion: z.literal(1),
+  chainId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  generatedAt: IsoTimestampSchema,
+  window: SupplyWindowSchema,
+};
+const CurrentSupplyResponseSchema = z.discriminatedUnion('status', [
+  z.object({
+    ...SupplyBaseShape,
+    status: z.literal('available'),
+    classes: z.array(SupplyClassSchema).min(1),
+  }).strict(),
+  z.object({
+    ...SupplyBaseShape,
+    status: z.literal('zero_supply'),
+    reason: z.enum(['no_requestable_solver_nets', 'no_recent_completed_loops']),
+    classes: z.tuple([]),
+  }).strict(),
+  z.object({
+    ...SupplyBaseShape,
+    status: z.literal('unknown'),
+    reason: z.literal('incomplete_indexer_evidence'),
+    classes: z.tuple([]),
+  }).strict(),
+]);
 
 // ── GraphQL query strings ─────────────────────────────────────────────────────
 
@@ -559,6 +631,7 @@ export function createHttpDiscoveryClient(
   transport: DiscoveryHttpTransport = createDiscoveryHttpTransport(opts),
 ): DiscoveryClient {
   const { gqlUrl, fetchImpl, ensureReady } = transport;
+  const supplyUrl = `${transport.readyUrl.slice(0, -'/ready'.length)}/supply`;
   const corpusDiscovery = createHttpCorpusDiscovery({
     url: opts.url,
     fetchImpl: transport.baseFetch,
@@ -566,6 +639,42 @@ export function createHttpDiscoveryClient(
     retryDelaysMs: transport.retryDelaysMs,
     fetchTimeoutMs: transport.fetchTimeoutMs,
   });
+
+  async function getCurrentSupply(args: { chainId: number }): Promise<CurrentSupplyResponse> {
+    if (!Number.isSafeInteger(args.chainId) || args.chainId <= 0) {
+      throw new DiscoveryUnavailableError('Supply lookup requires a positive integer chainId');
+    }
+    await ensureReady();
+
+    let response: Response;
+    try {
+      const url = new URL(supplyUrl);
+      url.searchParams.set('chainId', String(args.chainId));
+      response = await fetchImpl(url, { method: 'GET' });
+    } catch (error) {
+      throw new DiscoveryUnavailableError(`Supply endpoint network error: ${String(error)}`, error);
+    }
+    if (!response.ok) {
+      throw new DiscoveryUnavailableError(
+        `Supply endpoint HTTP ${response.status} ${response.statusText}`,
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch (error) {
+      throw new DiscoveryUnavailableError(`Supply endpoint response parse error: ${String(error)}`, error);
+    }
+    const parsed = CurrentSupplyResponseSchema.safeParse(body);
+    if (!parsed.success || parsed.data.chainId !== args.chainId) {
+      const detail = parsed.success
+        ? `response chainId ${parsed.data.chainId} does not match ${args.chainId}`
+        : z.prettifyError(parsed.error);
+      throw new DiscoveryUnavailableError(`Supply endpoint returned invalid evidence: ${detail}`);
+    }
+    return parsed.data as CurrentSupplyResponse;
+  }
 
   async function getAutopilotDeliveryCandidates(args: {
     chainId: number;
@@ -883,6 +992,7 @@ export function createHttpDiscoveryClient(
   }
 
   return {
+    getCurrentSupply,
     getAutopilotDeliveryCandidates,
     listLaunchedSolverNets,
     queryEnvelopes,

@@ -32,7 +32,13 @@
  * test/api.spa-route-order.test.ts.
  */
 import { db } from 'ponder:api';
-import schema, { pluginPublication } from 'ponder:schema';
+import schema, {
+  attempt,
+  pluginPublication,
+  solverNetManifest,
+  task,
+  verdict,
+} from 'ponder:schema';
 import { graphql, and, eq, sql } from 'ponder';
 import { Hono } from 'hono';
 import { attributeRuns } from '../builder-attribution.js';
@@ -54,6 +60,13 @@ import { existsSync } from 'node:fs';
 import explorer from './explorer.js';
 import taskCoverage from './task-coverage.js';
 import { PLACEHOLDER_HTML } from './placeholder.js';
+import {
+  buildCurrentSupply,
+  type SupplyAttemptRow,
+  type SupplyManifestRow,
+  type SupplyTaskRow,
+  type SupplyVerdictRow,
+} from './supply.js';
 
 const app = new Hono();
 
@@ -64,6 +77,35 @@ app.route('/explorer', explorer);
 // under /health rather than /explorer so monitoring tooling can scope a
 // liveness check to the health namespace.
 app.route('/health', taskCoverage);
+
+// ── GET /supply (#2447) ──────────────────────────────────────────────────────
+// Current requestable supply from one chain's native indexed facts. The pure
+// assembler preserves incomplete or contradictory evidence as `unknown`.
+app.get('/supply', async (c) => {
+  const chainId = Number(c.req.query('chainId'));
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    return c.json({ error: 'invalid chainId', detail: 'provide a positive integer ?chainId=' }, 400);
+  }
+
+  try {
+    const [manifests, tasks, attempts, verdicts] = await Promise.all([
+      db.select().from(solverNetManifest).where(eq(solverNetManifest.chainId, chainId)),
+      db.select().from(task).where(eq(task.chainId, chainId)),
+      db.select().from(attempt).where(eq(attempt.chainId, chainId)),
+      db.select().from(verdict).where(eq(verdict.chainId, chainId)),
+    ]);
+    return c.json(buildCurrentSupply({
+      chainId,
+      asOfMs: Date.now(),
+      manifests: manifests as SupplyManifestRow[],
+      tasks: tasks as SupplyTaskRow[],
+      attempts: attempts as SupplyAttemptRow[],
+      verdicts: verdicts as SupplyVerdictRow[],
+    }));
+  } catch (err) {
+    return c.json({ error: 'supply unavailable', detail: String(err) }, 503);
+  }
+});
 
 // ── Shared ebu7-schema probe ──────────────────────────────────────────────────
 // Routes 3 and 5 join against ebu7's `attemptEnvelopeMeta` + `verdict`

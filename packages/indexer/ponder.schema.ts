@@ -150,6 +150,8 @@ export const attempt = onchainTable(
     deliveryRate: t.bigint().notNull(),
     /** Block number of the TaskAttemptCreated event. */
     createdAtBlock: t.bigint().notNull(),
+    /** UTC block timestamp of the TaskAttemptCreated event (unix seconds). */
+    createdAtTimestamp: t.bigint().notNull().default(0n),
     /** Chain ID. */
     chainId: t.integer().notNull(),
   }),
@@ -158,6 +160,7 @@ export const attempt = onchainTable(
     taskIdx: index().on(table.taskId),
     operatorIdx: index().on(table.operator),
     taskOperatorIdx: index().on(table.taskId, table.operator),
+    timestampIdx: index().on(table.createdAtTimestamp),
   }),
 );
 
@@ -188,6 +191,8 @@ export const verdict = onchainTable(
     /** Raw verdict code: 0..4 per the VerdictCode enum. */
     verdictCode: t.integer().notNull(),
     createdAtBlock: t.bigint().notNull(),
+    /** UTC block timestamp of the VerdictDeliveryClaimed event (unix seconds). */
+    createdAtTimestamp: t.bigint().notNull().default(0n),
     chainId: t.integer().notNull(),
   }),
   (table) => ({
@@ -197,6 +202,7 @@ export const verdict = onchainTable(
     evaluatorIdx: index().on(table.evaluator),
     codeIdx: index().on(table.verdictCode),
     blockIdx: index().on(table.createdAtBlock),
+    timestampIdx: index().on(table.createdAtTimestamp),
   }),
 );
 

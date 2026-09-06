@@ -1,7 +1,7 @@
 /**
  * The HTTP lifecycle-evidence read (#2044).
  *
- * A SIBLING module, deliberately not a fifth `DiscoveryClient` method: the
+ * A SIBLING module, deliberately not part of `DiscoveryClient`: the
  * four-method narrowness of `./types.ts` is a design invariant, every consumer
  * narrows with `Pick<DiscoveryClient, 'x'>`, and this read has no consumer today.
  *
