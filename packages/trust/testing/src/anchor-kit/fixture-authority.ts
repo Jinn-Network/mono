@@ -180,6 +180,8 @@ export interface TimeStampTokenMutations {
   readonly additionalExtendedKeyUsage?: boolean;
   /** Rule 9b: no extended key usage extension at all. */
   readonly omitExtendedKeyUsage?: boolean;
+  /** Rule 9c: extended key usage is sole timeStamping but not critical. */
+  readonly nonCriticalExtendedKeyUsage?: boolean;
   /** Rule 10: the TSTInfo `tsa` field names something that is not among the
    * certificate's own subject names. */
   readonly tsaNameMismatch?: boolean;
@@ -290,6 +292,7 @@ interface CertificateInput {
   readonly publicKey: Uint8Array;
   readonly privateKey: Uint8Array;
   readonly extendedKeyUsageOids: readonly string[] | null;
+  readonly extendedKeyUsageCritical: boolean;
 }
 
 function buildSelfSignedCertificate(input: CertificateInput): Uint8Array {
@@ -313,7 +316,7 @@ function buildSelfSignedCertificate(input: CertificateInput): Uint8Array {
         // RFC 3161 requires this extension to be critical as well as sole.
         extension(
           OID_EXT_EXTENDED_KEY_USAGE,
-          true,
+          input.extendedKeyUsageCritical,
           derSequence(...input.extendedKeyUsageOids.map((oid) => derOid(oid))),
         ),
       ]),
@@ -424,6 +427,7 @@ export function createFixtureAuthority(seed: string): FixtureAuthority {
     publicKey,
     privateKey,
     extendedKeyUsageOids: [OID_ID_KP_TIME_STAMPING],
+    extendedKeyUsageCritical: true,
   });
   const otherCertificate = buildSelfSignedCertificate({
     commonName: otherCommonName,
@@ -431,6 +435,7 @@ export function createFixtureAuthority(seed: string): FixtureAuthority {
     publicKey: p256.getPublicKey(decoyPrivateKey, false),
     privateKey: decoyPrivateKey,
     extendedKeyUsageOids: [OID_ID_KP_TIME_STAMPING],
+    extendedKeyUsageCritical: true,
   });
 
   const subjectName = distinguishedName(commonName);
@@ -440,7 +445,9 @@ export function createFixtureAuthority(seed: string): FixtureAuthority {
     const subjectDigest = normalizeSubjectDigest(options.subjectSha256);
 
     // The signer certificate, which the extended-key-usage mutations change.
-    const signerCertificate = options.additionalExtendedKeyUsage || options.omitExtendedKeyUsage
+    const signerCertificate = options.additionalExtendedKeyUsage
+      || options.omitExtendedKeyUsage
+      || options.nonCriticalExtendedKeyUsage
       ? buildSelfSignedCertificate({
         commonName,
         serialHex: KIT_CERTIFICATE_SERIAL_HEX,
@@ -448,7 +455,10 @@ export function createFixtureAuthority(seed: string): FixtureAuthority {
         privateKey,
         extendedKeyUsageOids: options.omitExtendedKeyUsage
           ? null
-          : [OID_ID_KP_TIME_STAMPING, OID_ID_KP_CLIENT_AUTH],
+          : options.additionalExtendedKeyUsage
+            ? [OID_ID_KP_TIME_STAMPING, OID_ID_KP_CLIENT_AUTH]
+            : [OID_ID_KP_TIME_STAMPING],
+        extendedKeyUsageCritical: !options.nonCriticalExtendedKeyUsage,
       })
       : certificate;
 
