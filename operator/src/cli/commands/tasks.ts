@@ -1344,6 +1344,8 @@ Options:
                       source / resolution / consensusSnapshot / eligibilitySnapshot),
                       an explicit claimPolicy, and absolute epoch-millisecond
                       window timestamps — see fixtures/prediction-v1-task.example.json.
+                      The schema requires claimPolicy, but the posted claim slots
+                      come from --max-claims / --required-verdicts, not from the file.
 
 Examples:
   jinn tasks submit --id pm-1 --description "Polymarket forecast" --solver-net prediction --spec-file fixtures/prediction-v1-task.example.json --yes

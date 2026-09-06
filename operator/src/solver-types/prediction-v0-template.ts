@@ -26,7 +26,8 @@
  *      never see the sentinel form.
  *
  * Exported as a pure function with a `readCurrent` dep so it's trivially
- * unit-testable.
+ * unit-testable. Its live callers are `legacyChainlinkPredictionV1` and the
+ * legacy auto-generator in `./prediction-v0-auto.ts`.
  */
 
 import {

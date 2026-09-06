@@ -43,7 +43,7 @@
       "url": "https://polymarket.com/event/example-market",
       "identifiers": {
         "marketId": "example-market",
-        "conditionId": "0xexamplecondition",
+        "conditionId": "0x1f0a9c2d3e4b5a6978c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6",
         "yesTokenId": "yes-example-market",
         "noTokenId": "no-example-market"
       }
@@ -72,5 +72,5 @@
       "selectionReason": "weekly-binary-liquid-clear-rules"
     }
   },
-  "eligibility": { "dedupKey": "polymarket:0xexamplecondition" }
+  "eligibility": { "dedupKey": "polymarket:0x1f0a9c2d3e4b5a6978c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6" }
 }
