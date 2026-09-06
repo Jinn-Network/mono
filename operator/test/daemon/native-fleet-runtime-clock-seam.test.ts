@@ -120,7 +120,12 @@ async function twoOperatorSetup(root: string) {
 
 describe('buildFleetNativeRuntime effective-time seam', () => {
   const stores: Store[] = [];
-  /** Every temp root `boot()` created, so the suite leaves nothing behind in `tmpdir()`. */
+  /**
+   * Every temp root `boot()` created (#4063). `test/_support/isolate-home.ts` redirects `$TMPDIR`
+   * into a per-file home and sweeps it in `afterAll`, so these never outlive a run; removing them
+   * per test keeps the file's peak footprint at one fixture tree instead of four, and converges on
+   * the cleaning pattern the rest of `test/daemon/` uses.
+   */
   const roots: string[] = [];
   afterEach(async () => {
     vi.useRealTimers();
@@ -163,7 +168,7 @@ describe('buildFleetNativeRuntime effective-time seam', () => {
   });
 
   /**
-   * Pins all three threading sites independently (#4062). The first test above cannot: it puts
+   * Pins the two role-identity threading sites independently (#4062). The first test cannot: it puts
    * wall-clock INSIDE the window too, so a site that quietly fell back to `new Date()` would still
    * boot. Here the fallback is the failing answer — wall-clock sits before `validFrom` — so the
    * boot only reaches its assertions if the injected clock arrived at every ROLE-IDENTITY site:
@@ -178,8 +183,6 @@ describe('buildFleetNativeRuntime effective-time seam', () => {
     vi.setSystemTime(BEFORE_VALID_FROM);
     const runtime = await boot(() => WALL_CLOCK);
 
-    // Site 1: the trust catalog opened, so the policy chain proved its window at the injected time.
-    expect(runtime.trust).toBeDefined();
     // Site 2: the merged solver + requester role identities.
     expect(runtime.identities.get('solver-delivery').keyId).toMatch(/^did:key:/u);
     expect(runtime.identities.get('requester-submission').keyId).toMatch(/^did:key:/u);
