@@ -102,7 +102,7 @@ const JQ_STUB = [
  * `gitMode: 'real'` keeps the real git on PATH inside a throwaway repository so a
  * genuinely failing `git diff` (bad object) can be observed rather than simulated.
  */
-function runSelectionScript({ script, env, gitMode = 'stub', jqStub = JQ_STUB }) {
+function runSelectionScript({ script, env, gitMode = 'stub', jqStub = JQ_STUB, selectorStub = SELECTOR_STUB }) {
   const dir = mkdtempSync(join(tmpdir(), 'pac-selection-'));
   try {
     const bin = join(dir, 'bin');
@@ -113,7 +113,7 @@ function runSelectionScript({ script, env, gitMode = 'stub', jqStub = JQ_STUB })
     for (const path of [gitArgsLog, selectorStdinLog, githubOutput]) writeFileSync(path, '');
 
     if (gitMode === 'stub') writeExecutable(join(bin, 'git'), GIT_STUB);
-    writeExecutable(join(bin, 'node'), SELECTOR_STUB);
+    writeExecutable(join(bin, 'node'), selectorStub);
     writeExecutable(join(bin, 'jq'), jqStub);
 
     if (gitMode === 'real') {
@@ -226,11 +226,15 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   // The jq hop is assigned before it is echoed. Folded into the `echo` argument the
   // substitution is invisible to `set -e`, and a dead jq publishes an empty `run=` that
   // unselects the whole battery at exit 0 (#2456). Executable coverage is below.
+  assert.match(selectionJob, /\n\s+run_value="\$\(jq -r '\.run' <<<"\$\{selection\}"\)"\n/u);
+  assert.doesNotMatch(selectionJob, /echo "run=\$\(/u);
+  // ...and validated before it is published. A jq that succeeds with a non-boolean --
+  // no output on an empty `selection`, `null` on a `.run`-less one -- exits 0, so only
+  // an explicit check keeps `run=` / `run=null` from unselecting the battery (#4060).
   assert.match(
     selectionJob,
-    /\n\s+run_value="\$\(jq -r '\.run' <<<"\$\{selection\}"\)"\n\s+echo "run=\$\{run_value\}" >> "\$\{GITHUB_OUTPUT\}"/u,
+    /\n\s+case "\$\{run_value\}" in\n\s+true\|false\) ;;\n\s+\*\) echo "::error::selection produced a non-boolean run value: '\$\{run_value\}'"; exit 1 ;;\n\s+esac\n\s+echo "run=\$\{run_value\}" >> "\$\{GITHUB_OUTPUT\}"/u,
   );
-  assert.doesNotMatch(selectionJob, /echo "run=\$\(/u);
   assert.doesNotMatch(source, /npm (?:publish|install)|yarn npm publish/u);
   // Ban publish-verified-platform script invocations; wiring its test file is allowed.
   assert.doesNotMatch(source, /publish-verified-platform(?!\.test\.mjs)/u);
@@ -396,7 +400,7 @@ test('a failing jq reds selection instead of publishing an empty run= verdict', 
   // returns 0 -- so the step publishes `run=`, `platform-verification-reusable` is
   // skipped, and the terminal gate accepts `skipped`: green, having verified nothing.
   const foldedBack = script.replace(
-    /^run_value="\$\(jq -r '\.run' <<<"\$\{selection\}"\)"\necho "run=\$\{run_value\}"/mu,
+    /^run_value="\$\(jq -r '\.run' <<<"\$\{selection\}"\)"\n(?:.*\n)*?esac\necho "run=\$\{run_value\}"/mu,
     'echo "run=$(jq -r \'.run\' <<<"${selection}")"',
   );
   assert.notEqual(foldedBack, script, 'the selection step must assign the jq result before echoing it');
@@ -414,4 +418,68 @@ test('scheduled/manual audit is read-only, summarizes, and uploads deterministic
   assert.match(source, /GITHUB_STEP_SUMMARY/u);
   assert.match(source, /actions\/upload-artifact@/u);
   assert.doesNotMatch(source, /\b(?:POST|PUT|PATCH|DELETE)\b/u);
+});
+
+// A jq that succeeds with a non-boolean is the other half of the #2456 hole (#4060).
+// `set -e` cannot see these: both exit 0. An empty `selection` makes real jq print
+// nothing (`printf '' | jq -r '.run'`), and a `.run`-less object makes it print
+// `null` -- and `run=` / `run=null` each fail the `== 'true'` gate, skip the
+// reusable call, and satisfy the terminal gate's exact-`skipped` arm.
+const EMPTY_OUTPUT_JQ_STUB = ['#!/bin/bash', 'cat > /dev/null', ''].join('\n');
+const NULL_JQ_STUB = ['#!/bin/bash', 'cat > /dev/null', 'echo null', ''].join('\n');
+
+/** Strip the guard the way a regression would: the assignment and echo stay, the check goes. */
+function stripRunValueGuard(script) {
+  const stripped = script.replace(/^case "\$\{run_value\}" in\n(?:.*\n)*?esac\n/mu, '');
+  assert.notEqual(stripped, script, 'the selection step must validate run_value before publishing it');
+  return stripped;
+}
+
+for (const { label, jqStub, laundered } of [
+  { label: 'an empty selection', jqStub: EMPTY_OUTPUT_JQ_STUB, laundered: /^run=$/mu },
+  { label: 'a selection with no .run key', jqStub: NULL_JQ_STUB, laundered: /^run=null$/mu },
+]) {
+  test(`${label} reds selection instead of publishing a non-boolean run verdict`, () => {
+    const script = extractSelectionScript(readArchitectureControlWorkflow());
+    const env = {
+      EVENT_NAME: 'merge_group',
+      PR_BASE_REF: '',
+      PR_HEAD_REF: '',
+      MG_BASE_SHA: 'base-from-merge-group',
+      GITHUB_SHA: 'checked-out-sha',
+    };
+
+    const guarded = runSelectionScript({ script, env, jqStub });
+    assert.notEqual(guarded.status, 0, 'a non-boolean run value must red the job');
+    assert.doesNotMatch(guarded.output, /run=/u, 'no run= verdict may be published');
+    assert.match(guarded.stdout + guarded.stderr, /::error::selection produced a non-boolean run value/u);
+
+    // Kill-check: without the guard the same script exits 0 and publishes the value,
+    // which is what makes the assertions above load-bearing rather than incidental.
+    const unguarded = runSelectionScript({ script: stripRunValueGuard(script), env, jqStub });
+    assert.equal(unguarded.status, 0, 'unguarded, the non-boolean value is masked');
+    assert.match(unguarded.output, laundered);
+  });
+}
+
+test('a boolean run value still publishes through the guard', () => {
+  const script = extractSelectionScript(readArchitectureControlWorkflow());
+  for (const [selectorStub, expected] of [
+    [SELECTOR_STUB, 'run=true'],
+    [['#!/bin/bash', 'cat > "$SELECTOR_STDIN_LOG"', 'echo \'{ "run": false }\'', ''].join('\n'), 'run=false'],
+  ]) {
+    const passed = runSelectionScript({
+      script,
+      selectorStub,
+      env: {
+        EVENT_NAME: 'merge_group',
+        PR_BASE_REF: '',
+        PR_HEAD_REF: '',
+        MG_BASE_SHA: 'base-from-merge-group',
+        GITHUB_SHA: 'checked-out-sha',
+      },
+    });
+    assert.equal(passed.status, 0, `${expected} must pass the guard`);
+    assert.match(passed.output, new RegExp(`^${expected}$`, 'mu'));
+  }
 });
