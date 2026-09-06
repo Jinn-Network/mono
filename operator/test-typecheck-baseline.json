@@ -9,7 +9,6 @@
   "scripts/release/launch-isolated-solvernet.ts": 3,
   "scripts/release/olas-rails-smoke.test.ts": 3,
   "scripts/release/release-readiness.test.ts": 1,
-  "scripts/release/stage1-closed-loop.ts": 1,
   "scripts/release/substrate-adopt.ts": 3,
   "scripts/release/substrate-copy.ts": 1,
   "scripts/release/substrate-provision.ts": 1,
