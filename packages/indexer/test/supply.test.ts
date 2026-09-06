@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildCurrentSupply, completedSupplyWindow } from '../src/api/supply.js';
+import { buildCurrentSupply, completedSupplyWindow, resolveSupplyChainId } from '../src/api/supply.js';
 import { BASE_SEPOLIA_CHAIN_ID, indexedChainIds } from '../src/chain-config.js';
 
 const CHAIN_ID = 84532;
@@ -295,14 +295,32 @@ describe('served chain set', () => {
     } as NodeJS.ProcessEnv)).toEqual([8453]);
   });
 
+  it('refuses an unserved chain by name instead of answering it', () => {
+    expect(resolveSupplyChainId('8453', [BASE_SEPOLIA_CHAIN_ID])).toEqual({
+      ok: false,
+      error: 'unsupported chainId',
+      detail: 'this indexer serves 84532; it has no evidence about 8453',
+    });
+    expect(resolveSupplyChainId('84532', [BASE_SEPOLIA_CHAIN_ID]))
+      .toEqual({ ok: true, chainId: BASE_SEPOLIA_CHAIN_ID });
+  });
+
+  it.each([undefined, '', '   ', 'abc', '0', '-1', '1.5', 'Infinity', '9007199254740993'])(
+    'refuses %o as a chain id before touching the database',
+    (raw) => {
+      expect(resolveSupplyChainId(raw, [BASE_SEPOLIA_CHAIN_ID])).toMatchObject({
+        ok: false,
+        error: 'invalid chainId',
+      });
+    },
+  );
+
   it('is the guard the route actually applies', () => {
     const source = readFileSync(new URL('../src/api/index.ts', import.meta.url), 'utf8');
     const route = source.slice(
       source.indexOf('// \u2500\u2500 GET /supply'),
       source.indexOf('// \u2500\u2500 Shared ebu7-schema probe'),
     );
-    expect(route).toContain('const servedChainIds = indexedChainIds();');
-    expect(route).toContain("if (!servedChainIds.includes(chainId)) {");
-    expect(route).toContain("error: 'unsupported chainId'");
+    expect(route).toContain("resolveSupplyChainId(c.req.query('chainId'), indexedChainIds())");
   });
 });

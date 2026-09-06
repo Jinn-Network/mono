@@ -65,6 +65,7 @@ import { indexedChainIds } from '../chain-config.js';
 import {
   buildCurrentSupply,
   completedSupplyWindow,
+  resolveSupplyChainId,
   type SupplyAttemptRow,
   type SupplyManifestRow,
   type SupplyTaskRow,
@@ -99,17 +100,11 @@ app.route('/health', taskCoverage);
 // endpoint), and production keeps the previous container serving until the new
 // one is ready, so the exposure is a direct unready-origin call.
 app.get('/supply', async (c) => {
-  const chainId = Number(c.req.query('chainId'));
-  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
-    return c.json({ error: 'invalid chainId', detail: 'provide a positive integer ?chainId=' }, 400);
+  const resolved = resolveSupplyChainId(c.req.query('chainId'), indexedChainIds());
+  if (!resolved.ok) {
+    return c.json({ error: resolved.error, detail: resolved.detail }, 400);
   }
-  const servedChainIds = indexedChainIds();
-  if (!servedChainIds.includes(chainId)) {
-    return c.json({
-      error: 'unsupported chainId',
-      detail: `this indexer serves ${servedChainIds.join(', ')}; it has no evidence about ${chainId}`,
-    }, 400);
-  }
+  const { chainId } = resolved;
 
   try {
     const asOfMs = Date.now();

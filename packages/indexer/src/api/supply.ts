@@ -94,6 +94,36 @@ export interface BuildCurrentSupplyInput {
   verdicts: SupplyVerdictRow[];
 }
 
+export type SupplyChainIdResolution =
+  | { ok: true; chainId: number }
+  | { ok: false; error: string; detail: string };
+
+/**
+ * Resolve the `?chainId=` a supply request may be answered for.
+ *
+ * A chain this deployment does not index has no rows, and "no rows" is
+ * indistinguishable at the database from "this chain is genuinely empty" — so
+ * answering it at all would render total absence of evidence as an
+ * authoritative `zero_supply`. Refusing is the honest reply.
+ */
+export function resolveSupplyChainId(
+  raw: string | undefined,
+  servedChainIds: readonly number[],
+): SupplyChainIdResolution {
+  const chainId = Number(raw);
+  if (raw === undefined || raw.trim() === '' || !Number.isSafeInteger(chainId) || chainId <= 0) {
+    return { ok: false, error: 'invalid chainId', detail: 'provide a positive integer ?chainId=' };
+  }
+  if (!servedChainIds.includes(chainId)) {
+    return {
+      ok: false,
+      error: 'unsupported chainId',
+      detail: `this indexer serves ${servedChainIds.join(', ')}; it has no evidence about ${chainId}`,
+    };
+  }
+  return { ok: true, chainId };
+}
+
 function isoFromSeconds(seconds: number): string {
   return new Date(seconds * 1_000).toISOString();
 }
