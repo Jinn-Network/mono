@@ -13,9 +13,14 @@ import {
   NativeDiscoveryLocalAuthorityError,
   NativeDiscoverySyncError,
   createNativeDiscoveryConsumer,
+  type NativeDiscoveryDecodeInput,
   type NativeDiscoverySource,
 } from '../../src/daemon/native-discovery.js';
 import type { AnnouncedSubmissionCard } from '../../src/daemon/native-submission-facts.js';
+import {
+  NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD,
+  isPoisonQuarantined,
+} from '../../src/daemon/native-discovery-quarantine.js';
 
 const AGENT = 'did:key:zNativeRequester';
 const SOURCE_NAME = 'requester';
@@ -165,6 +170,11 @@ function consumer(input: {
     now: input.now ?? (() => FRESH_FIXTURE_TIME),
   });
 }
+
+const okVerify: NativeDiscoverySource['verify'] = async (input) => {
+  for await (const item of input.entries) void item;
+  return { status: 'ok' };
+};
 
 describe('native discovery consumer', () => {
   it('cold-syncs once, persists an exact signed high-water with queued cards, then returning-syncs only the exact next sequence after restart', async () => {
@@ -1339,6 +1349,175 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
     await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
     expect(synced.takePending()).toHaveLength(1);
     warn.mockRestore();
+  });
+
+  /**
+   * ## The undecodable degrade above used to be permanent (#2473)
+   *
+   * The test directly above pins the #2529 contract — degrade, do NOT advance — and it stays
+   * exactly right for a transient decode fault. What it could not distinguish is a decode that
+   * will never succeed: the same bytes were re-fetched and re-thrown at every poll, the
+   * checkpoint never moved, and that source's queue was wedged for the life of the process.
+   *
+   * These pin the bound. Below the threshold the #2529 behaviour is unchanged, byte for byte.
+   * At the threshold the announcement is quarantined and stepped past, `queue()` runs, and the
+   * checkpoint advances — which is what lets the source resume.
+   */
+  describe('a permanently undecodable announcement quarantines and the checkpoint advances (#2473)', () => {
+    it('degrades below the threshold, then quarantines, advances, and resumes the source', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const store = new Store(':memory:');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const routes = routesFor([first]);
+      const synced = consumer({
+        store,
+        routes,
+        verify: async (input) => {
+          for await (const item of input.entries) void item;
+          return { status: 'ok' };
+        },
+        // Never decodable: the exact shape of a reader that will not catch up on its own.
+        decode: async () => { throw new Error('chainId is not a canonical unsigned integer'); },
+      });
+      const identity = { agent: AGENT, name: SOURCE_NAME };
+
+      for (let poll = 1; poll < NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD; poll += 1) {
+        await expect(synced.sync()).resolves.toMatchObject({
+          accepted: 0,
+          verifiedSources: 0,
+          degraded: [{ source: identity, reason: 'undecodable' }],
+        });
+        // #2529's load-bearing half, unchanged: no checkpoint, so nothing is skipped past.
+        expect(synced.checkpoint(identity)).toBeUndefined();
+        expect(isPoisonQuarantined({
+          store, scope: 'announcement', source: identity, announcementId: 'announcement-0000000000000001',
+        })).toBe(false);
+      }
+
+      // The threshold poll: the source is no longer degraded, and the pass completed.
+      await expect(synced.sync()).resolves.toEqual({
+        accepted: 0,
+        verifiedSources: 1,
+        degraded: [],
+      });
+      expect(isPoisonQuarantined({
+        store, scope: 'announcement', source: identity, announcementId: 'announcement-0000000000000001',
+      })).toBe(true);
+      // Acceptance criterion: the checkpoint ADVANCED past the quarantined entry.
+      expect(synced.checkpoint(identity)?.entryDigest).toEqual(sealJson(first).digest);
+      expect(synced.takePending()).toHaveLength(0);
+      expect(warn.mock.calls.map((call) => String(call[0])).join('\n')).toContain('quarantining');
+      warn.mockRestore();
+    });
+
+    it('resumes the source after quarantine: the next appended entry syncs normally', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const second = entry('0000000000000002', sealJson(first).digest, DIGEST_B);
+      const store = new Store(':memory:');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const decode = async (input: NativeDiscoveryDecodeInput) => {
+        if (input.entry.sequence === '0000000000000001') {
+          throw new Error('chainId is not a canonical unsigned integer');
+        }
+        return cardFor(input.entry.sequence);
+      };
+
+      const poisoned = consumer({ store, routes: routesFor([first]), verify: okVerify, decode });
+      for (let poll = 1; poll <= NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD; poll += 1) {
+        await poisoned.sync();
+      }
+      const identity = { agent: AGENT, name: SOURCE_NAME };
+      expect(poisoned.checkpoint(identity)?.entryDigest).toEqual(sealJson(first).digest);
+
+      // The source appends. A consumer that had been wedged on entry 1 would still collect
+      // nothing here; a quarantined-and-advanced one returning-syncs entry 2 normally.
+      const resumed = consumer({ store, routes: routesFor([first, second]), verify: okVerify, decode });
+      await expect(resumed.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+      expect(resumed.takePending()).toHaveLength(1);
+      expect(resumed.checkpoint(identity)?.entryDigest).toEqual(sealJson(second).digest);
+      warn.mockRestore();
+    });
+
+    it('quarantines one announcement without touching its healthy sibling in the same entry', async () => {
+      const paired: AnnouncementEntry = {
+        ...entry('0000000000000001', null, DIGEST_A),
+        announcements: [
+          {
+            announcementId: 'announcement-poison',
+            action: 'available',
+            record: { kind: 'https://spec.jinn.network/records/submission/v1', digest: DIGEST_A },
+            facts: { taskDigest: DIGEST_A, taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0' },
+          },
+          {
+            announcementId: 'announcement-healthy',
+            action: 'available',
+            record: { kind: 'https://spec.jinn.network/records/submission/v1', digest: DIGEST_B },
+            facts: { taskDigest: DIGEST_B, taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0' },
+          },
+        ],
+      };
+      const store = new Store(':memory:');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const synced = consumer({
+        store,
+        routes: routesFor([paired]),
+        verify: async (input) => {
+          for await (const item of input.entries) void item;
+          return { status: 'ok' };
+        },
+        decode: async (input) => {
+          if (input.announcement.announcementId === 'announcement-poison') {
+            throw new Error('chainId is not a canonical unsigned integer');
+          }
+          return cardFor(input.entry.sequence);
+        },
+      });
+      const identity = { agent: AGENT, name: SOURCE_NAME };
+
+      for (let poll = 1; poll < NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD; poll += 1) {
+        await expect(synced.sync()).resolves.toMatchObject({ degraded: [{ reason: 'undecodable' }] });
+        expect(synced.takePending()).toHaveLength(0);
+      }
+      await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+      expect(synced.takePending()).toHaveLength(1);
+      expect(synced.checkpoint(identity)?.entryDigest).toEqual(sealJson(paired).digest);
+      expect(isPoisonQuarantined({
+        store, scope: 'announcement', source: identity, announcementId: 'announcement-poison',
+      })).toBe(true);
+      expect(isPoisonQuarantined({
+        store, scope: 'announcement', source: identity, announcementId: 'announcement-healthy',
+      })).toBe(false);
+      warn.mockRestore();
+    });
+
+    it('never counts a local-authority fault against the announcement — that stays fatal', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const store = new Store(':memory:');
+      const synced = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async (input) => {
+          for await (const item of input.entries) void item;
+          return { status: 'ok' };
+        },
+        decode: async () => {
+          throw new NativeDiscoveryLocalAuthorityError({
+            cause: new Error('trust catalog changed on disk after the authority was loaded'),
+          });
+        },
+      });
+
+      for (let poll = 1; poll <= NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD + 1; poll += 1) {
+        await expect(synced.sync()).rejects.toThrow('trust catalog changed on disk');
+      }
+      expect(isPoisonQuarantined({
+        store,
+        scope: 'announcement',
+        source: { agent: AGENT, name: SOURCE_NAME },
+        announcementId: 'announcement-0000000000000001',
+      })).toBe(false);
+      expect(synced.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toBeUndefined();
+    });
   });
 
   it('isolates the undecodable source from its siblings', async () => {

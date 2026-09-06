@@ -13,6 +13,7 @@
  */
 import type { NativeDiscoveryConsumer } from './native-discovery.js';
 import type { Store } from '../store/store.js';
+import { clearPoisonFailures, recordPoisonFailure } from './native-discovery-quarantine.js';
 
 export async function drainNativeDiscoveryWithdrawals(input: {
   readonly store: Store;
@@ -30,8 +31,39 @@ export async function drainNativeDiscoveryWithdrawals(input: {
       id: number; card_json: string;
     } | undefined;
     if (target === undefined) {
-      throw new Error('requester withdrawal target is absent from authenticated history');
+      // ## A withdrawal naming an unknown announcement no longer wedges the tick (#2473)
+      //
+      // The refusal is unchanged in kind — this operator will not act on a retraction it
+      // cannot resolve against its own authenticated history — but it used to be unchanged
+      // FOREVER: the withdrawal was never acknowledged, `takePendingWithdrawals()` returned
+      // it again at the next tick, and the throw escaped the whole tick, blocking every
+      // withdrawal queued behind it as well. Bounded retry, then quarantine: the first
+      // failures still throw (an absent target can be a transient read), and the Nth
+      // records the item durably, announces it under the named event code, acknowledges it
+      // so it leaves the pending queue, and lets the rest of the drain proceed.
+      const poisoned = recordPoisonFailure({
+        store: input.store,
+        scope: 'withdrawal',
+        source: withdrawal.source,
+        sequence: withdrawal.sequence,
+        entryDigest: withdrawal.entryDigest,
+        announcementId: withdrawal.announcementId,
+        detail: `withdrawal retracts ${withdrawal.retracts}, which is absent from `
+          + 'this operator\'s authenticated card history',
+        ...(input.now === undefined ? {} : { now: input.now }),
+      });
+      if (!poisoned.quarantined) {
+        throw new Error('requester withdrawal target is absent from authenticated history');
+      }
+      input.discovery.acknowledgeWithdrawal(withdrawal);
+      continue;
     }
+    clearPoisonFailures({
+      store: input.store,
+      scope: 'withdrawal',
+      source: withdrawal.source,
+      announcementId: withdrawal.announcementId,
+    });
     const card = JSON.parse(target.card_json) as {
       record?: { digest?: string };
       facts?: Record<string, unknown>;
