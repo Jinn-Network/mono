@@ -1,8 +1,13 @@
 /**
- * Sentinel resolution for prediction.v1 Task templates.
+ * Sentinel resolution for the legacy Chainlink-threshold Task template.
  *
- * Two sentinels are supported in template JSON (e.g.,
- * `operator/fixtures/prediction-v1-task.example.json`):
+ * This helper backs `legacyChainlinkPredictionV1` in `./prediction-v0.ts`,
+ * which is NOT registered in `SOLVER_TYPES` — `jinn tasks submit --spec-file`
+ * never dispatches here. The registered `prediction.v1` SolverType validates
+ * the Polymarket binary-question shape and resolves no sentinels; its example
+ * lives at `operator/fixtures/prediction-v1-task.example.json` (issue #2314).
+ *
+ * Two sentinels are supported in template JSON:
  *
  *   1. window.startTs = 0 → rewritten as Date.now() at call time; the rest of
  *      the window (endTs) and resolveTs are computed relative to that.
@@ -21,8 +26,7 @@
  *      never see the sentinel form.
  *
  * Exported as a pure function with a `readCurrent` dep so it's trivially
- * unit-testable. Both the `jinn tasks submit --spec-file` path and the
- * future auto-generator (jinn-mono-9ew) call through this helper.
+ * unit-testable.
  */
 
 import {

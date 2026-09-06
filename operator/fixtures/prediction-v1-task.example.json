@@ -1,27 +1,76 @@
 {
   "_comment": [
-    "prediction.v1 Task template. The tasks submit CLI resolves two sentinels:",
-    "  * window.startTs = 0       -> Date.now() at post time; endTs + resolveTs follow",
-    "  * threshold = \"current\"  -> current Chainlink price at post time",
+    "prediction.v1 Task template — the Polymarket binary-question shape that",
+    "SOLVER_TYPES['prediction.v1'] validates (operator/src/solver-types/prediction-v1.ts",
+    "→ PredictionV1TaskSchema). Post it with:",
     "",
-    "Default: a coin-flip direction question: will ETH/USD be higher than right now",
-    "one hour from now, at resolveTs (endTs + 15min)? Swap operator to LT for a",
-    "downside question, or use \"current+0.5%\" / \"current-1%\" for biased thresholds."
+    "  jinn tasks submit --id my-1 --description '...' \\",
+    "    --solver-net <joined-net> --spec-file fixtures/prediction-v1-task.example.json --dry-run",
+    "",
+    "No sentinels are resolved for prediction.v1: every field below is literal.",
+    "window.startTs/endTs are epoch MILLISECONDS and the timestamps here are",
+    "fixed placeholders — edit them, the market identifiers and the snapshots to",
+    "describe a real market before a non-dry-run submit.",
+    "",
+    "The Chainlink-threshold shape this fixture used to carry belongs to the",
+    "unregistered legacyChainlinkPredictionV1 definition",
+    "(operator/src/solver-types/prediction-v0.ts), which jinn tasks submit does",
+    "not dispatch to. See issue #2314.",
+    "",
+    "Prediction SolverNet is frozen per DR-2026-05-11-a",
+    "(log/decisions/2026-05-11-freeze-prediction-solvernet.md); this example is",
+    "kept accurate, not extended."
   ],
   "solverType": "prediction.v1",
-  "window": { "startTs": 0, "endTs": 0 },
+  "role": "restoration",
+  "window": { "startTs": 1767225600000, "endTs": 1767229200000 },
+  "claimPolicy": {
+    "mode": "parallel",
+    "maxClaims": 25,
+    "maxClaimsPerOperator": 1,
+    "claimLeaseTtlSeconds": 1800
+  },
   "spec": {
-    "oracle": {
-      "venue": "chainlink-base-sepolia",
-      "feed": "0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1",
-      "feedDescription": "ETH / USD"
-    },
     "question": {
-      "kind": "threshold",
-      "operator": "GT",
-      "threshold": "current",
-      "resolveTs": 0
+      "kind": "binary",
+      "text": "Will the example market resolve YES?",
+      "yesLabel": "YES",
+      "noLabel": "NO"
+    },
+    "source": {
+      "type": "prediction-market",
+      "venue": "polymarket",
+      "url": "https://polymarket.com/event/example-market",
+      "identifiers": {
+        "marketId": "example-market",
+        "conditionId": "0xexamplecondition",
+        "yesTokenId": "yes-example-market",
+        "noTokenId": "no-example-market"
+      }
+    },
+    "resolution": {
+      "expectedResolutionTime": "2026-01-08T00:00:00.000Z",
+      "rulesText": "Resolves YES if the described outcome occurs before the resolution time.",
+      "rulesUrl": "https://polymarket.com/event/example-market",
+      "timezone": "UTC"
+    },
+    "consensusSnapshot": {
+      "sampledAt": "2026-01-01T00:00:00.000Z",
+      "probabilityYes": "0.62",
+      "method": "best-bid-ask-midpoint",
+      "bestBidYes": "0.60",
+      "bestAskYes": "0.64",
+      "spread": "0.04",
+      "source": "polymarket-clob"
+    },
+    "eligibilitySnapshot": {
+      "sampledAt": "2026-01-01T00:00:00.000Z",
+      "timeToResolutionHours": 168,
+      "liquidityUsd": "10000",
+      "volume24hUsd": "2500",
+      "orderbookAgeSeconds": 0,
+      "selectionReason": "weekly-binary-liquid-clear-rules"
     }
   },
-  "eligibility": { "maxSubmissionDelayMs": 60000 }
+  "eligibility": { "dedupKey": "polymarket:0xexamplecondition" }
 }
