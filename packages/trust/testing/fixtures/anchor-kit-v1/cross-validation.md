@@ -227,7 +227,10 @@ The same command against the canonical token's own certificate reports
 `Verification: OK`, and `openssl x509 -text` prints the extension as
 `X509v3 Extended Key Usage: critical` there and without `critical` here. So the
 criticality flag is the entire difference, and an implementation outside this
-tree agrees it is disqualifying.
+tree agrees it is disqualifying. Both captured production tokens agree in the
+other direction: `openssl x509 -text` on the signer inside `token-digicert.der`
+and `token-sslcom.der` prints `X509v3 Extended Key Usage: critical`, so the rule
+refuses nothing a real authority emits.
 
 Two things this establishes. First, the mutations are real: an independent
 implementation, given the same bytes, reaches the same refusal for its own
