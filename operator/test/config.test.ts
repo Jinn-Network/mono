@@ -8,6 +8,7 @@ import {
   DEFAULT_MAINNET_RPC_URLS,
   loadConfig,
   buildConfigProvenance,
+  getConfigPathFromArgs,
 } from '../src/config.js';
 import { phaseDTransitionUsageSnapshot } from '../src/compatibility/phase-d-transition-usage.js';
 
@@ -1421,5 +1422,51 @@ describe('Phase D legacy wiring diagnostics', () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Issue #2393 — `--config=<path>` (equals form) was silently ignored because the
+ * scan used `indexOf('--config')` only, so callers fell back to the default
+ * config path and boot could load/migrate a different file than intended.
+ */
+describe('getConfigPathFromArgs (#2393)', () => {
+  it('reads the space-separated form', () => {
+    expect(getConfigPathFromArgs(['--config', '/tmp/space.json'])).toBe('/tmp/space.json');
+  });
+
+  it('reads the equals form', () => {
+    expect(getConfigPathFromArgs(['--config=/tmp/equals.json'])).toBe('/tmp/equals.json');
+  });
+
+  it('preserves an equals sign inside the path value', () => {
+    expect(getConfigPathFromArgs(['--config=/tmp/a=b.json'])).toBe('/tmp/a=b.json');
+  });
+
+  it('takes the first occurrence in argv order when the equals form comes first', () => {
+    expect(getConfigPathFromArgs(['--config=/tmp/first.json', '--config', '/tmp/second.json']))
+      .toBe('/tmp/first.json');
+  });
+
+  it('takes the first occurrence in argv order when the space form comes first', () => {
+    expect(getConfigPathFromArgs(['--config', '/tmp/first.json', '--config=/tmp/second.json']))
+      .toBe('/tmp/first.json');
+  });
+
+  it('ignores a trailing bare --config with no value', () => {
+    expect(getConfigPathFromArgs(['run', '--config'])).toBeUndefined();
+  });
+
+  it('ignores an empty equals value', () => {
+    expect(getConfigPathFromArgs(['--config='])).toBeUndefined();
+  });
+
+  it('does not match flags that merely start with --config', () => {
+    expect(getConfigPathFromArgs(['--configfoo', '/tmp/no.json'])).toBeUndefined();
+    expect(getConfigPathFromArgs(['--config-dir=/tmp/no'])).toBeUndefined();
+  });
+
+  it('returns undefined when no --config is present', () => {
+    expect(getConfigPathFromArgs(['run', '--native-config', '/tmp/native.json'])).toBeUndefined();
   });
 });

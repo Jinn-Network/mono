@@ -1476,11 +1476,16 @@ export function loadConfig(configPath?: string): JinnConfig {
 }
 
 /**
- * Get the config file path from --config CLI arg, if provided.
+ * Get the config file path from the --config CLI arg, if provided. Accepts both
+ * `--config <path>` and `--config=<path>`; the first occurrence of either form
+ * in argv order wins. Never logs the candidate value.
  */
 export function getConfigPathFromArgs(argv: string[] = process.argv): string | undefined {
-  const idx = argv.indexOf('--config');
-  return idx >= 0 && argv[idx + 1] ? argv[idx + 1] : undefined;
+  for (const [idx, arg] of argv.entries()) {
+    if (arg === '--config') return argv[idx + 1] || undefined;
+    if (arg.startsWith('--config=')) return arg.slice('--config='.length) || undefined;
+  }
+  return undefined;
 }
 
 /**
