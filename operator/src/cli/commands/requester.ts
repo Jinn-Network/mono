@@ -133,7 +133,8 @@ export function createRequesterCommand(deps: RequesterCommandDeps = PRODUCTION_D
             code: 'funding_required',
             message: result.message,
             hint:
-              `Send Base Sepolia ETH to ${funding.master_address}, then run \`jinn requester init\` again. ` +
+              `Send ${chain === 'base-sepolia' ? 'Base Sepolia' : 'Base'} ETH to ` +
+              `${funding.master_address}, then run \`jinn requester init\` again. ` +
               'This funds the creator Safe deployment only.',
             exampleCli: EXAMPLE_CLI,
             details: {

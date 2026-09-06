@@ -684,7 +684,7 @@ export class FleetBootstrapper {
           message:
             `Your wallet needs ${formatEther(shortfall)} ETH more to deploy your creator Safe ` +
             `(currently ${formatEther(masterBalance)} ETH, need ${formatEther(required)} ETH). ` +
-            `Send Base Sepolia ETH to: ${masterAddress}`,
+            `Send ${this.chain === 'base-sepolia' ? 'Base Sepolia' : 'Base'} ETH to: ${masterAddress}`,
           funding: {
             master_address: masterAddress,
             eth_required: shortfall.toString(),
