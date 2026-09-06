@@ -23,10 +23,8 @@ const TASK_EXECUTION_PACKAGES = [
   ['oci-grader', '@jinn-network/task-execution-oci-grader'],
 ];
 
-// The range is the compatibility contract: all three packages use the v2 exports and may
-// consume compatible v2 fixes. Committed Yarn locks plus `yarn install --immutable` provide
-// concrete artifact integrity; the existing executed golden/vector suites protect canonical
-// bytes. This inventory guard owns only the manifest range and absence of resolution overrides.
+// This guard owns only the declared range and the absence of resolution overrides; the decision
+// behind the range is recorded in packages/task-execution/profiles/README.md.
 const NOBLE_HASHES_RANGE = '^2.2.0';
 const HASH_PRODUCERS = [
   'packages/task-execution/profiles',
