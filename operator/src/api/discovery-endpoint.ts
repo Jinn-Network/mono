@@ -8,6 +8,13 @@
  *   GET /v1/discovery/plugin-scores?cid&limit
  *   GET /v1/discovery/task-post-counts?cid (repeatable)
  *
+ * Every failure detail goes through `sanitizeErrorText` (issue #2416). These
+ * routes are UI-token-gated, but `OnchainDiscoveryAPI` builds a viem client on
+ * the operator's `rpcUrl` and onchain is the DEFAULT discovery mode on
+ * mainnet — so a raw `.message` here shipped a paid provider's key-in-path to
+ * any API reader. `sanitizeErrorText` walks `Error.cause`, so a viem
+ * `HttpRequestError` nested behind a call-level error cannot bypass it.
+ *
  * Wave-4 D4: plugin routes require `pluginReader` (no DiscoveryAPI fallback).
  * `GET /v1/discovery/solvernet-operator-count` retired with the ERC-8004
  * registry client. Task-post counts read the projector via ArchiveReads.
@@ -21,6 +28,7 @@ import {
   PluginPublicationUnavailableError,
   type PluginPublicationReader,
 } from '../plugin-registry/publication-reader.js';
+import { sanitizeErrorText } from '../rpc/transport.js';
 
 export type DiscoveryEndpointConfig = {
   pluginReader: () => PluginPublicationReader | null;
@@ -54,7 +62,7 @@ export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): 
       if (err instanceof PluginPublicationUnavailableError) {
         return c.json({ error: 'discovery_unavailable' }, 503);
       }
-      return c.json({ error: 'internal_error', detail: (err as Error).message }, 503);
+      return c.json({ error: 'internal_error', detail: sanitizeErrorText(err) }, 503);
     }
   });
 
@@ -82,7 +90,7 @@ export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): 
       if (err instanceof PluginPublicationUnavailableError) {
         return c.json({ error: 'discovery_unavailable' }, 503);
       }
-      return c.json({ error: 'internal_error', detail: (err as Error).message }, 503);
+      return c.json({ error: 'internal_error', detail: sanitizeErrorText(err) }, 503);
     }
   });
 
@@ -110,7 +118,7 @@ export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): 
       if (err instanceof ArchiveReadUnavailableError) {
         return c.json({ error: 'discovery_unavailable' }, 503);
       }
-      return c.json({ error: 'internal_error', detail: (err as Error).message }, 503);
+      return c.json({ error: 'internal_error', detail: sanitizeErrorText(err) }, 503);
     }
   });
 
@@ -136,7 +144,7 @@ export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): 
       if (err instanceof PluginPublicationUnavailableError) {
         return c.json({ error: 'discovery_unavailable' }, 503);
       }
-      return c.json({ error: 'internal_error', detail: (err as Error).message }, 503);
+      return c.json({ error: 'internal_error', detail: sanitizeErrorText(err) }, 503);
     }
   });
 }
