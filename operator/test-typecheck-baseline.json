@@ -92,7 +92,6 @@
   "test/daemon/daemon.test.ts": 11,
   "test/daemon/engagement-ledger.test.ts": 3,
   "test/daemon/native-base-sepolia-infrastructure.test.ts": 7,
-  "test/daemon/native-discovery.test.ts": 2,
   "test/daemon/native-evaluator-composition.test.ts": 1,
   "test/daemon/native-evaluator-container-runtime.test.ts": 3,
   "test/daemon/native-evaluator-coordinator.test.ts": 7,
