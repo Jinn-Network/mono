@@ -1475,18 +1475,10 @@ export function loadConfig(configPath?: string): JinnConfig {
   };
 }
 
-/**
- * Get the config file path from the --config CLI arg, if provided. Accepts both
- * `--config <path>` and `--config=<path>`; the first occurrence of either form
- * in argv order wins. Never logs the candidate value.
- */
-export function getConfigPathFromArgs(argv: string[] = process.argv): string | undefined {
-  for (const [idx, arg] of argv.entries()) {
-    if (arg === '--config') return argv[idx + 1] || undefined;
-    if (arg.startsWith('--config=')) return arg.slice('--config='.length) || undefined;
-  }
-  return undefined;
-}
+// Get the config file path from the --config CLI arg (both `--config <path>`
+// and `--config=<path>`). Implementation lives in the dependency-free leaf so
+// call sites outside this module's import graph can share it (#2393).
+export { getConfigPathFromArgs } from './config/path-args.js';
 
 /**
  * Merge one top-level value into the operator config file. Used by local setup

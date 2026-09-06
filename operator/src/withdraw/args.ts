@@ -170,13 +170,18 @@ export function parseWithdrawArgv(argv: string[]): WithdrawParsedArgs {
     masterGasReserveWei = BigInt(s);
   }
 
-  const configIdx = args.indexOf('--config');
+  const configIdx = args.findIndex((a) => a === '--config' || a.startsWith('--config='));
   if (configIdx !== -1) {
-    const configPath = args[configIdx + 1];
-    if (configPath === undefined || configPath.startsWith('--')) {
-      throw new Error('Missing value for --config');
+    if (args[configIdx] === '--config') {
+      const configPath = args[configIdx + 1];
+      if (configPath === undefined || configPath.startsWith('--')) {
+        throw new Error('Missing value for --config');
+      }
+      args.splice(configIdx, 2);
+    } else {
+      // Single-token `--config=<path>` form: one element, not two.
+      args.splice(configIdx, 1);
     }
-    args.splice(configIdx, 2);
   }
 
   const passwordFdIdx = args.indexOf('--password-fd');

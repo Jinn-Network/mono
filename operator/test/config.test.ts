@@ -1461,6 +1461,25 @@ describe('getConfigPathFromArgs (#2393)', () => {
     expect(getConfigPathFromArgs(['--config='])).toBeUndefined();
   });
 
+  // An empty value must not terminate the scan: the old implementation
+  // (`indexOf` + next token) still found the later usable occurrence, and
+  // narrowing to `undefined` here would silently boot against the default
+  // config -- the exact failure mode #2393 exists to eliminate.
+  it('falls through an empty equals value to a later usable occurrence', () => {
+    expect(getConfigPathFromArgs(['--config=', '--config', '/tmp/later.json']))
+      .toBe('/tmp/later.json');
+  });
+
+  it('falls through a bare --config with an empty value to a later usable occurrence', () => {
+    expect(getConfigPathFromArgs(['--config', '', '--config=/tmp/later.json']))
+      .toBe('/tmp/later.json');
+  });
+
+  it('falls through a trailing bare --config with no value at all', () => {
+    expect(getConfigPathFromArgs(['--config=/tmp/first.json', 'run', '--config']))
+      .toBe('/tmp/first.json');
+  });
+
   it('does not match flags that merely start with --config', () => {
     expect(getConfigPathFromArgs(['--configfoo', '/tmp/no.json'])).toBeUndefined();
     expect(getConfigPathFromArgs(['--config-dir=/tmp/no'])).toBeUndefined();
