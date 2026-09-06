@@ -1088,10 +1088,10 @@ function recordClosure(input: MaterializeBundleInput): {
   //
   // The anchored, non-qualifying cell still emits `/6`, and deliberately: `/9` exists, the reader
   // understands it, and this is the one line that moves the cell onto it -- but a `/9` claim seals
-  // `npx @colophon-claims/verify@0.2.1`, and `0.2.1` is already published and immutable, so it
-  // refuses `/9` at manifest parse. Sealing that command would publish an instruction that can
-  // never be true, and a published bundle is not editable. The flip belongs in the change that
-  // pins `/9` to the release actually serving it.
+  // the `npx` command for `@colophon-claims/verify` at `0.2.1`, and that release is already
+  // published and immutable, so it refuses `/9` at manifest parse. Sealing that command would
+  // publish an instruction that can never be true, and a published bundle is not editable. The
+  // flip belongs in the change that pins `/9` to the release actually serving it.
   const format = anchored
     ? binaryQualification
       ? disclosed

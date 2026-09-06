@@ -686,9 +686,9 @@ export interface BuildClaimPackageInput {
    * the format its own manifest declares.
    *
    * The default is `/6` rather than the newer allocation because a pin is sealed forever: `/9`'s
-   * exact pin names `@colophon-claims/verify@0.2.1`, a published, immutable release that predates
-   * `/9` and refuses it at manifest parse. Nothing may seal that command until a release serving
-   * `/9` exists and `/9` pins it.
+   * exact pin names `@colophon-claims/verify` at `0.2.1`, a published, immutable release that
+   * predates `/9` and refuses it at manifest parse. Nothing may seal that command until a release
+   * serving `/9` exists and `/9` pins it.
    */
   readonly anchoredBundleFormat?:
     | "benchmark-product-public-bundle/6"

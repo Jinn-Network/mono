@@ -68,10 +68,11 @@ export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
  * member lists, check lists, and bytes.
  *
  * **Reader-side only for now.** No producer emits `/9`: the anchored, non-qualifying cell still
- * materializes `/6`. A `/9` claim would seal `npx @colophon-claims/verify@0.2.1`, and that release
- * is published, immutable, and predates `/9`, so it refuses `/9` at manifest parse — a sealed
- * instruction that can never be true, on a bundle that can never be edited. The producer flip
- * belongs in the change that pins `/9` to the release actually serving it.
+ * materializes `/6`. A `/9` claim would seal the `npx` command for `@colophon-claims/verify` at
+ * `0.2.1`, and that release is published, immutable, and predates `/9`, so it refuses `/9` at
+ * manifest parse — a sealed instruction that can never be true, on a bundle that can never be
+ * edited. The producer flip belongs in the change that pins `/9` to the release actually serving
+ * it.
  */
 export const BUNDLE_V9_FORMAT = "benchmark-product-public-bundle/9" as const;
 /** Spans every lineage: the four frozen legacy closures, the evidence-native bundle, `/8`, and `/9`. */
