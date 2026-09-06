@@ -387,3 +387,40 @@ describe("anchors — append-only (anchor-evidence design §5 rule 6, §7.1)", (
     }))).toThrowError(/recorded twice/);
   });
 });
+
+/**
+ * Issue #3334. `runBind` refuses a launched run, but its check reads a snapshot and writes later,
+ * so a `bind` that read the state before `runLaunch` stamped `launchedAt` could still land after
+ * it — recording a binding the run never dispatched in, under a census sentence asserting an
+ * execution order derived from post-seal randomness. These are the durable half, holding for any
+ * writer whatever the interleaving, the way the write-once rule already holds bind-vs-bind.
+ */
+describe("binding — never added after launch", () => {
+  const BINDING = { recordSha256: "c".repeat(64), boundAt: "2026-08-17T00:30:00Z" };
+  const launched = { launchedAt: "2026-08-17T01:00:00Z" };
+
+  test("a binding cannot be added to a launched run", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState(launched));
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ ...launched, binding: BINDING })))
+      .toThrowError(/already launched/);
+  });
+
+  test("the binding a run carried before launching is unaffected", () => {
+    // The ordinary sequence: bind, then launch. Stamping `launchedAt` rewrites the whole state,
+    // binding included, so a rule that refused every launched state carrying a binding would
+    // refuse the launch itself.
+    writeRunState(workspaceDir, "draft-1", minimalState({ binding: BINDING }));
+    writeRunState(workspaceDir, "draft-1", minimalState({ ...launched, binding: BINDING }));
+    expect(readRunState(workspaceDir, "draft-1")?.binding).toEqual(BINDING);
+
+    // And every later write of the same launched, bound run still passes.
+    writeRunState(workspaceDir, "draft-1", minimalState({ ...launched, binding: BINDING, closedAt: "2026-08-17T02:00:00Z" }));
+    expect(readRunState(workspaceDir, "draft-1")?.binding).toEqual(BINDING);
+  });
+
+  test("binding an unlaunched run is untouched by the rule", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState());
+    writeRunState(workspaceDir, "draft-1", minimalState({ binding: BINDING }));
+    expect(readRunState(workspaceDir, "draft-1")?.binding).toEqual(BINDING);
+  });
+});
