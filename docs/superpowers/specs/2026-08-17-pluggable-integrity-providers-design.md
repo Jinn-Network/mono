@@ -862,9 +862,9 @@ certificate validity window; malformed `genTime` (fractional zeros, missing
 Zulu); two `SignerInfo`s; missing `signedAttrs`; signing-certificate attribute
 naming a certificate not embedded; `sid` inconsistent with the identified
 certificate; unknown critical TSTInfo extension; `tsa` name not among the
-certificate's subject names; indefinite-length encoding. Plus the regression fixture: an
-existing pre-anchor golden bundle verifies byte-identically under the new
-verifier.
+certificate's subject names; indefinite-length encoding. Plus the regression
+fixture: an existing pre-anchor golden bundle verifies byte-identically under
+the new verifier.
 
 ## 12. Compatibility
 
@@ -1132,8 +1132,8 @@ below tightens the body text, this addendum governs.
   X.509 in core). Issuers must be CA-marked; a leaf byte-identical to a
   supplied root is an RFC 5280 zero-length path, validity-checked.
   Revocation, path-length, and name constraints remain disclosed as unchecked.
-  Verifiers additionally declare their class,
-  posture, and time basis; `present` results carry facts but never `time`.
+  Verifiers additionally declare their class, posture, and time basis;
+  `present` results carry facts but never `time`.
 
 ### 19.3 RFC 3161 profile (§6.1)
 

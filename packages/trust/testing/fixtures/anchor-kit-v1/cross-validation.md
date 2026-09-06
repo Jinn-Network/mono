@@ -194,11 +194,40 @@ Twenty-four are independently refused, with the reason OpenSSL gives:
 | signature made by a different key | `EVP_PKEY_verify: provider signature failure` |
 | extended key usage with an additional usage | `ts_verify_cert: certificate verify error` |
 | no extended key usage extension | `ts_verify_cert: certificate verify error` |
-| timeStamping extended key usage is not critical | `ts_verify_cert: certificate verify error` (`unsuitable certificate purpose`) |
+| timeStamping extended key usage is not critical | `ts_verify_cert: certificate verify error` |
 | tsa name not among the certificate's subject names | `int_ts_RESP_verify_token: tsa name mismatch` |
 | genTime without the Zulu designator | `asn1_ex_c2i: generalizedtime is too short` |
 | genTime without seconds | `asn1_ex_c2i: generalizedtime is too short` |
 | messageImprint is not the subject digest | `ts_check_imprints: message imprint mismatch` |
+
+The three extended-key-usage rows all read `certificate verify error` because
+each mutation mints a *different* signer certificate, which the `kit-authority.pem`
+extracted from the canonical token does not vouch for — OpenSSL stops at the chain
+before it reaches the purpose check. To see the purpose check itself refuse the
+non-critical certificate, make that certificate its own trust anchor, which removes
+the chain objection and leaves criticality as the only remaining fault
+(OpenSSL 3.6.3, run 2026-09-06T04:20Z; this row and this note were added when
+§6.1 rule 9's criticality half was implemented, after the 2026-08-17 transcript
+above):
+
+The token is the one
+`authority.mintTimeStampToken({ subjectSha256, nonCriticalExtendedKeyUsage: true })`
+mints, written to `noncritical.der`:
+
+```
+$ openssl pkcs7 -inform DER -in noncritical.der -print_certs -out nc.pem
+$ openssl ts -verify \
+    -digest 47fe3768e164b8663dd4da743c8f416fa09658c652f21617f45eea8a5a8a705c \
+    -in noncritical.der -token_in -CAfile nc.pem
+ts_verify_cert:certificate verify error:Verify error:unsuitable certificate purpose
+Verification: FAILED
+```
+
+The same command against the canonical token's own certificate reports
+`Verification: OK`, and `openssl x509 -text` prints the extension as
+`X509v3 Extended Key Usage: critical` there and without `critical` here. So the
+criticality flag is the entire difference, and an implementation outside this
+tree agrees it is disqualifying.
 
 Two things this establishes. First, the mutations are real: an independent
 implementation, given the same bytes, reaches the same refusal for its own

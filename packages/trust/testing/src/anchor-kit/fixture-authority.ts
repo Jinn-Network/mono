@@ -313,7 +313,9 @@ function buildSelfSignedCertificate(input: CertificateInput): Uint8Array {
     ...(input.extendedKeyUsageOids === null
       ? []
       : [
-        // RFC 3161 requires this extension to be critical as well as sole.
+        // RFC 3161 requires this extension to be critical as well as sole, so
+        // conformant certificates pass `true` here and only the rule-9c
+        // mutation passes `false`.
         extension(
           OID_EXT_EXTENDED_KEY_USAGE,
           input.extendedKeyUsageCritical,
