@@ -581,6 +581,30 @@ describe("runVerify — pre-report integrity anchors", () => {
     expect(parsed.result.anchors).toBeDefined();
     expect(parsed.result.anchoringWindow).toEqual({ closingOperation: "report" });
   }, 30_000);
+
+  test("CLI human mode does not render terminal controls from malformed anchor metadata", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    const state = readRunState(workspaceDir, "draft-1");
+    if (state?.runSha256 === undefined) throw new Error("sealed run missing");
+    const controlSequence = "\u001b]8;;https://attacker.invalid\u0007forged-link\u001b]8;;\u0007";
+    const provider = `https://provider.invalid/${controlSequence}`;
+    const recordSha256 = putSealedBytes(workspaceDir, canonicalJsonBytes({
+      kind: ANCHOR_EVIDENCE_KIND,
+      subject: { kind: RUN_RECORD_KIND, digest: { sha256: state.runSha256 } },
+      provider,
+      proof: { mediaType: RFC3161_TOKEN_MEDIA_TYPE, content: "AA==" },
+    }));
+    writeRunState(workspaceDir, "draft-1", {
+      ...state,
+      anchors: [{ subject: "lock", provider, recordSha256 }],
+    });
+
+    const human = await runCli(verifyArgs(), cliContext(clock));
+    expect(human.exitCode).toBe(1);
+    expect(human.stderr).toContain("error (record-integrity)");
+    expect(human.stderr).not.toContain(controlSequence);
+  }, 30_000);
 });
 
 describe("runVerify — matrix tamper detection", () => {
