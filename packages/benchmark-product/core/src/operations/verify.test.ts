@@ -573,7 +573,7 @@ describe("runVerify — pre-report integrity anchors", () => {
     expect(human.exitCode, human.stderr).toBe(0);
     expect(human.stdout.split("\n")[0]).toBe("verified draft draft-1: matrix-rederivation, integrity-anchors");
     expect(human.stdout).toContain(`anchor lock: ${OPENTIMESTAMPS_ANCHOR_PROFILE}, authority-time, pending, record ${recordSha256}`);
-    expect(human.stdout).toContain("the pending anchor can still be upgraded and `report` closes the anchoring window.");
+    expect(human.stdout).toContain("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
 
     const json = await runCli(verifyArgs(true), cliContext(clock));
     expect(json.exitCode, json.stderr).toBe(0);

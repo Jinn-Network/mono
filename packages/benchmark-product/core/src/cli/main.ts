@@ -1681,7 +1681,7 @@ async function handleVerify(args: ParsedArgs, context: CliContext, jsonMode: boo
       );
     }
     if (value.anchoringWindow !== undefined) {
-      lines.push("the pending anchor can still be upgraded and `report` closes the anchoring window.");
+      lines.push("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
     }
     return `${lines.join("\n")}\n`;
   });
