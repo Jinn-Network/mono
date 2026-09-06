@@ -6,5 +6,5 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["scripts/**/*.mjs"]
+  "include": ["scripts"]
 }
