@@ -111,6 +111,15 @@ export function addDebugReportRoutes(app: Hono, config: DebugReportRoutesConfig)
   });
 
   // POST /v1/debug-report — assemble and stream the redacted .tar.gz.
+  //
+  // The three raw `err.message` reads below carry a `lint:no-error-leak-allow`
+  // marker (#2416, which widened the guard to reach this file through its
+  // `gather-status.js` import). They are safe by construction, not by
+  // exception: each value is handed to `assembleDebugReport`, whose
+  // `jsonFile()` runs `redactValue` over the whole payload — the bundle
+  // dialect, which strips RPC credentials via `redactRpcUrl` along with
+  // private keys, JWTs and secret-named fields. Masking here as well would
+  // double-redact into the bundle's own vocabulary for no gain.
   app.post('/v1/debug-report', async (c) => {
     let body: Record<string, unknown> = {};
     try {
@@ -127,7 +136,7 @@ export function addDebugReportRoutes(app: Hono, config: DebugReportRoutesConfig)
     } catch (err) {
       status = {
         error: 'status_gather_failed',
-        message: err instanceof Error ? err.message : String(err),
+        message: err instanceof Error ? err.message : String(err),  // lint:no-error-leak-allow — see note above the route
       };
     }
 
@@ -137,7 +146,7 @@ export function addDebugReportRoutes(app: Hono, config: DebugReportRoutesConfig)
     } catch (err) {
       configProvenance = {
         error: 'provenance_failed',
-        message: err instanceof Error ? err.message : String(err),
+        message: err instanceof Error ? err.message : String(err),  // lint:no-error-leak-allow — see note above the route
       };
     }
 
@@ -147,7 +156,7 @@ export function addDebugReportRoutes(app: Hono, config: DebugReportRoutesConfig)
     } catch (err) {
       activityEvents = {
         error: 'activity_events_failed',
-        message: err instanceof Error ? err.message : String(err),
+        message: err instanceof Error ? err.message : String(err),  // lint:no-error-leak-allow — see note above the route
       };
     }
 
