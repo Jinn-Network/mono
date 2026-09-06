@@ -582,6 +582,44 @@ describe('native discovery consumer', () => {
       await expect(replayed.sync()).rejects.toMatchObject({ reason: 'rewound-or-tampered-head' });
     });
 
+    it('recognises the re-sign that advances a leap-second checkpoint (#4096)', async () => {
+      // `parseHeadTimestamp` reads `23:59:60` as `23:59:59.999` (#3482); a bare
+      // `new Date` returns NaN on BOTH sides of `reSignedIdleHead`'s comparison,
+      // and every comparison with NaN is false. So a checkpoint whose recorded
+      // instant is a leap second could never be advanced by an honest idle
+      // re-sign: the re-sign fell through to the sequence guard as
+      // `rewound-or-tampered-head`, which is the exact #2549 symptom #3468
+      // exists to remove. The §5.2 schema admits the leap second, so this is the
+      // one input class where the two readings disagree.
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const store = new Store(':memory:');
+      const seeded = consumer({
+        store,
+        routes: reSignedRoutes(first, '2026-06-30T23:59:60Z', '2026-08-03T01:00:00.000Z'),
+        verify: async () => ({ status: 'ok' }),
+        now: () => new Date('2026-08-02T01:00:00.000Z'),
+      });
+      await seeded.sync();
+      for (const item of seeded.takePending()) seeded.acknowledge(item);
+      expect(seeded.checkpoint({ agent: AGENT, name: SOURCE_NAME })?.signedHighWater).toMatchObject({
+        issuedAt: '2026-06-30T23:59:60Z',
+      });
+
+      const verify = vi.fn(async () => ({ status: 'ok' as const }));
+      const verifyHead = vi.fn(async () => ({ status: 'ok' as const }));
+      const polled = consumer({
+        store,
+        routes: reSignedRoutes(first, '2026-08-02T12:00:00.000Z', '2026-08-03T12:00:00.000Z'),
+        verify,
+        verifyHead,
+        now: () => new Date('2026-08-02T13:00:00.000Z'),
+      });
+
+      await expect(polled.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
+      expect(verifyHead).toHaveBeenCalledOnce();
+      expect(verify).not.toHaveBeenCalled();
+    });
+
     it('still refuses one whose revalidation fails', async () => {
       const { store, first } = await checkpointed();
       const refused = consumer({

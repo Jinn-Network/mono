@@ -13,7 +13,7 @@ import type {
   SourceHead,
   SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
-import { compareCodeUnitStrings, headPath, sealJson } from '@jinn-network/record-discovery-protocol';
+import { compareCodeUnitStrings, headPath, parseHeadTimestamp, sealJson } from '@jinn-network/record-discovery-protocol';
 import {
   coldSync,
   fetchHead,
@@ -433,7 +433,15 @@ function sameHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): bool
 function reSignedIdleHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): boolean {
   const held = checkpoint.signedHighWater;
   if (held.sequence !== head.head.sequence || held.entry !== head.head.entry) return false;
-  return new Date(head.head.issuedAt).getTime() > new Date(held.issuedAt).getTime();
+  // Read both instants with the protocol package's one strict helper (#3482,
+  // #4096) rather than a bare `new Date`. The two readings differ on exactly one
+  // input class the schema now admits -- a leap second, `NaN` under `new Date`
+  // and `23:59:59.999` under `parseHeadTimestamp`. `NaN` kept the refusal, so
+  // this was never a fail-open; what it was is a second answer to a question the
+  // protocol package already owns. An instant that is genuinely unreadable still
+  // yields `NaN` here and still refuses, so a rollback, a backdated re-sign and a
+  // malformed head keep the treatment the comment above describes.
+  return parseHeadTimestamp(head.head.issuedAt) > parseHeadTimestamp(held.issuedAt);
 }
 
 function deduplicateEntries(entries: readonly SyncedEntry[]): SyncedEntry[] {
@@ -813,8 +821,14 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       if (revalidated.status !== 'ok' && revalidated.status !== 'stale') {
         throw new NativeDiscoverySyncError(source, revalidated.status);
       }
+      // `parseHeadTimestamp` (#3482, #4096): the second operand is this module's own
+      // reading of the same `refreshBy` the trust adapter's `isFresh` reads for the
+      // first, and the two must not disagree. Before #3603 both answered `NaN` for a
+      // leap second -- `isFresh` reporting `stale` (so the `||` short-circuited true)
+      // while this operand read `NaN <= now` as `false`, i.e. never-stale. Now both
+      // read the instant, so which operand answers no longer changes the verdict.
       const stale = revalidated.status === 'stale'
-        || new Date(syncedHead.head.refreshBy).getTime() <= (input.now ?? (() => new Date()))().getTime();
+        || parseHeadTimestamp(syncedHead.head.refreshBy) <= (input.now ?? (() => new Date()))().getTime();
       if (stale) {
         // ## A self-hosted source's lapsed head degrades; a peer's still refuses (#2547)
         //
