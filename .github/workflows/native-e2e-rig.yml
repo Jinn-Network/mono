@@ -12,11 +12,11 @@ name: native-e2e-rig
 #     spawns Anvil; a network blip or RPC rate-limit is not a code regression;
 #   - the archive rig spawns a second OS process and a TCP listener.
 # Wiring either onto a blocking gate would put a flake on the merge path.
-# Deterministic blocking coverage is `yarn test:hermetic` in hermetic-gate.yml,
-# including the fixture identity/trust boot leg in
-# `test/daemon/native-fleet-e2e-fixtures.test.ts` (mock-anchored, no chain). This
-# workflow proves the on-chain, finality-gated legs a live fork can provide, as
-# advisory evidence only.
+# Deterministic blocking coverage is split across CI: `yarn test:hermetic` in
+# hermetic-gate.yml covers the snapshot/subprocess loops, while `yarn test` in
+# ci.yml runs `test/daemon/native-fleet-e2e-fixtures.test.ts`, the mock-anchored
+# fixture identity/trust boot leg. This workflow proves the on-chain,
+# finality-gated legs a live fork can provide, as advisory evidence only.
 #
 # Operator-run, non-CI live-fork cutover evidence and the required deploy-PR
 # record are defined in docs/runbooks/cutover-one-swap-drain.md. This workflow is

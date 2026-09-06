@@ -10,6 +10,10 @@ step 7 unfinished.
 > historical), the never-written stage-3/stage-4 runbooks.
 > **Rollback pin (record at PR open, re-check before merge):** `@jinn-network/operator@<version>-canary.sha.<sha40>`
 
+> **Decision (#2472): Option B — human-run evidence.** `e2e:daemon-harness`
+> remains operator-run, non-CI evidence for the one-swap deploy/release cut. It
+> is not a PR-blocking gate; the deploy PR body is the required evidence record.
+
 ## Before this deploy PR merges
 
 - [ ] Rollback pin recorded above, verified installable (`npm view` the exact specifier)
@@ -19,9 +23,9 @@ step 7 unfinished.
       **both** modes:
   - legacy: `cd operator && JINN_E2E_MODE=legacy yarn e2e:daemon-harness`
   - native: `cd operator && yarn e2e:daemon-harness:native`
-      Before cutover, record the exact train SHA, command and mode, non-skipped
-      result, and log or Actions URL for each run in the deploy PR body. The
-      scheduled/manual
+- [ ] Before cutover, record the exact train SHA, command and mode, non-skipped
+      result, and log or Actions URL for **each** live-fork run in the deploy PR
+      body. The scheduled/manual
       [`native-e2e-rig`](../../.github/workflows/native-e2e-rig.yml) is
       supplemental advisory evidence; it does not replace either operator-run
       result or blocking hermetic CI.
