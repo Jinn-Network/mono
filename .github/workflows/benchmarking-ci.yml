@@ -113,9 +113,50 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22.23.1
+          cache: yarn
+          cache-dependency-path: |
+            packages/trust/core/yarn.lock
+            packages/trust/resolve/yarn.lock
+            packages/trust/testing/yarn.lock
+            packages/evidence/protocol/yarn.lock
+            packages/evidence/repository/yarn.lock
+            packages/evidence/discovery/yarn.lock
+            packages/evidence/execution-evidence-builder/yarn.lock
+            packages/evidence/execution-recorder/yarn.lock
+            packages/evidence/attestation-issuer/yarn.lock
+            packages/task-execution/protocol/yarn.lock
+            packages/task-execution/backend/yarn.lock
+            packages/task-execution/profiles/yarn.lock
+            packages/task-execution/backend-local/supervisor/yarn.lock
+            packages/task-execution/backend-local/workspace/yarn.lock
+            packages/task-execution/backend-local/launchers/yarn.lock
+            packages/task-execution/backend-local/assembly/yarn.lock
+            packages/task-execution/testing/yarn.lock
+            packages/discovery/protocol/yarn.lock
+            packages/discovery/serve/yarn.lock
+            packages/discovery/publication/yarn.lock
+            packages/marketplace/binding/yarn.lock
+            packages/marketplace/projector/yarn.lock
+            packages/benchmarking/protocol/yarn.lock
+            packages/benchmarking/records/yarn.lock
+            packages/benchmarking/aggregate/yarn.lock
+            packages/benchmarking/testing/yarn.lock
+            packages/benchmarking/evidence/yarn.lock
+            packages/benchmarking/native-capture/yarn.lock
+            packages/benchmarking/evaluation/yarn.lock
+            packages/benchmarking/run/yarn.lock
+            packages/benchmarking/interop/yarn.lock
+            packages/benchmarking/marketplace/yarn.lock
+            packages/benchmarking/local/yarn.lock
+            packages/benchmarking/publication/yarn.lock
       # A freshly rolled runner image can regress the packed-consumer smoke:
       # node 22.23.2's bundled npm dies with "Cannot read properties of null
       # (reading 'edgesOut')" on yarn-packed tarballs (first seen on the

@@ -48,9 +48,16 @@ jobs:
         working-directory: packages/plugin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: packages/plugin/yarn.lock
       - run: npm install -g npm@11.5.1
       - run: corepack enable
       - run: yarn install --immutable
@@ -84,9 +91,18 @@ jobs:
         working-directory: packages/core
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/plugin/yarn.lock
+            packages/core/yarn.lock
       - run: npm install -g npm@11.5.1
       - run: corepack enable
       - run: yarn --cwd ../plugin install --immutable
@@ -125,9 +141,19 @@ jobs:
         working-directory: packages/layer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/plugin/yarn.lock
+            packages/core/yarn.lock
+            packages/layer/yarn.lock
       - run: npm install -g npm@11.5.1
       - run: corepack enable
       - run: yarn --cwd ../plugin install --immutable
@@ -218,9 +244,19 @@ jobs:
             echo "::error::Checked out ${ACTUAL_SHA}, expected ${RELEASE_SHA}"
             exit 1
           fi
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/plugin/yarn.lock
+            packages/core/yarn.lock
+            packages/layer/yarn.lock
       - name: Verify exact stable pins
         run: |
           node .github/scripts/verify-layer-stable-version.mjs \

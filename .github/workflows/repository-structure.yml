@@ -85,6 +85,8 @@ jobs:
         run: node --test .github/scripts/autopilot-skill-contracts.test.mjs
       - name: Every script test is workflow-wired
         run: node --test .github/scripts/workflow-script-tests.test.mjs
+      - name: Yarn dependency cache contract
+        run: node --test .github/scripts/workflow-yarn-cache.test.mjs
       - name: Published-artifacts-smoke workflow shape
         run: node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs
       - name: Vitest temp-directory sweep seam is wired everywhere
