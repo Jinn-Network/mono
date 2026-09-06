@@ -53,14 +53,44 @@ const API_DIR = join(SRC_ROOT, 'api');
  * The three `rpc/transport.ts` masking helpers are file-scope triggers as well
  * as fixes: a file that imports one has declared it handles RPC-derived error
  * text, so every *other* raw stringification in it comes under this guard.
- * That is how issue #2416's newly-fixed files (discovery-endpoint,
- * rewards-endpoint, admin-endpoint) enter scope — none of them imports viem
- * directly, so the import/usage triggers below are what covers them.
  */
 const MASKED_CALL_MARKERS = ['maskUrlsInMessage', 'sanitizeErrorText', 'sanitizePersistedText'];
-const RPC_ADJACENT_PATTERN = new RegExp(
-  ['from\\s+[\'"]viem(\\/[\\w.-]+)?[\'"]', 'createJinnPublicClient', 'PublicClient', ...MASKED_CALL_MARKERS].join('|'),
+
+/**
+ * Indirect RPC adjacency (issue #2416).
+ *
+ * The triggers above are all *direct*: a file talks to viem itself, or has
+ * already adopted the fix. Neither covers a route that reaches the chain only
+ * through an injected reader — `discovery-endpoint.ts` takes a
+ * `PluginPublicationReader` / `ArchiveReads`, `rewards-endpoint.ts` calls
+ * `gather-status.js`, `admin-endpoint.ts` calls `intents/claim-rewards.js`.
+ * Those routes leaked exactly the same key-in-path, and scoping them by the
+ * masking helper alone would be circular: removing the fix would remove the
+ * file from scope and the guard would go green on the regression it exists to
+ * catch.
+ *
+ * So each entry below names a seam whose *implementation* reaches an RPC
+ * client even though the seam's own module does not import viem. The listed
+ * type/module names are the import-site spelling, which is what survives a
+ * revert of the masking call.
+ */
+const INDIRECT_RPC_PATTERN =
+  /PluginPublicationReader|ArchiveReads|gather-status\.js|intents\/claim-rewards\.js/;
+
+const DIRECT_RPC_PATTERN = new RegExp(
+  [
+    "from\\s+['\"]viem(\\/[\\w.-]+)?['\"]",
+    'createJinnPublicClient',
+    'PublicClient',
+    ...MASKED_CALL_MARKERS,
+  ].join('|'),
 );
+
+/** A file is in scope when it reaches an RPC client directly or through a seam. */
+function isRpcAdjacent(text) {
+  return DIRECT_RPC_PATTERN.test(text) || INDIRECT_RPC_PATTERN.test(text);
+}
+
 const RAW_MESSAGE_PATTERN = /\.message\b|String\(\s*(e|err|error)\w*\s*\)/;
 const ALLOW_MARKER = 'lint:no-error-leak-allow';
 
@@ -90,13 +120,15 @@ export function findErrorLeaks(apiDir, srcRoot) {
   const violations = [];
   for (const file of walk(apiDir)) {
     const text = readFileSync(file, 'utf8');
-    if (!RPC_ADJACENT_PATTERN.test(text)) continue; // not RPC-adjacent — out of scope
+    if (!isRpcAdjacent(text)) continue; // not RPC-adjacent — out of scope
 
     const rel = relative(srcRoot, file).split('\\').join('/');
     text.split('\n').forEach((line, idx) => {
       if (line.includes(ALLOW_MARKER)) return;
-      // already routed through a choke point — the fix, not the leak
-      if (MASKED_CALL_MARKERS.some((m) => line.includes(m))) return;
+      // Already routed through a choke point — the fix, not the leak. A *call*
+      // is required, not a mention: `err.message, // masked by sanitizeErrorText`
+      // must still be flagged.
+      if (MASKED_CALL_MARKERS.some((m) => line.includes(`${m}(`))) return;
       if (RAW_MESSAGE_PATTERN.test(line)) {
         violations.push({ file: `operator/src/${rel}`, line: idx + 1, snippet: line.trim() });
       }
@@ -107,9 +139,19 @@ export function findErrorLeaks(apiDir, srcRoot) {
 
 // CLI entry only — importing this module (the guard's own tests do) must not
 // walk the live tree or call process.exit.
-if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
-  main();
+function invokedDirectly() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    // argv[1] names something unresolvable (an --eval shim, a deleted path).
+    // Treat that as "imported", never as "run": a false positive here would
+    // process.exit out of whatever imported us.
+    return false;
+  }
 }
+
+if (invokedDirectly()) main();
 
 function main() {
   const violations = findErrorLeaks(API_DIR, SRC_ROOT);

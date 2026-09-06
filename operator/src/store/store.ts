@@ -38,7 +38,7 @@ import { TxSubmissionsStore } from './tx-submissions.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import type { VerdictTallyReadModel } from '../types/verdict-tally-read-model.js';
 import type { TxSubmissionKey, TxSubmissionLedgerEntry } from '../tx-retry.js';
-import { sanitizePersistedText } from '../rpc/transport.js';
+import { sanitizeErrorText, sanitizePersistedText } from '../rpc/transport.js';
 
 export type { ActivityEventInput, ActivityEventRow } from './activity-events.js';
 export type { BalanceCacheEntry } from './balance-cache.js';
@@ -669,24 +669,42 @@ export class Store {
     try {
       const tx = this.db.transaction(() => {
         if (this.operatorConfig.getConfigValue(migrationKey) === 'true') return;
-        const rows = this.db.prepare(
+        // Paged rather than a single `.all()`: this runs synchronously in the
+        // Store constructor, inside a write transaction, and `activity_events`
+        // grows without bound on a busy operator — the whole result set must
+        // not be materialized at boot.
+        const select = this.db.prepare(
           `SELECT id, detail FROM activity_events
-           WHERE detail IS NOT NULL
+           WHERE id > @afterId
+             AND detail IS NOT NULL
              AND (detail LIKE '%http://%' OR detail LIKE '%https://%'
-                  OR detail LIKE '%ws://%' OR detail LIKE '%wss://%')`,
-        ).all() as Array<{ id: number; detail: string }>;
+                  OR detail LIKE '%ws://%' OR detail LIKE '%wss://%')
+           ORDER BY id
+           LIMIT @batch`,
+        );
         const update = this.db.prepare('UPDATE activity_events SET detail = ? WHERE id = ?');
-        for (const row of rows) {
-          const masked = sanitizePersistedText(row.detail);
-          if (masked !== row.detail) update.run(masked, row.id);
+        const batch = 500;
+        let afterId = 0;
+        for (;;) {
+          const rows = select.all({ afterId, batch }) as Array<{ id: number; detail: string }>;
+          if (rows.length === 0) break;
+          for (const row of rows) {
+            const masked = sanitizePersistedText(row.detail);
+            if (masked !== row.detail) update.run(masked, row.id);
+            afterId = row.id;
+          }
+          if (rows.length < batch) break;
         }
         this.operatorConfig.setConfigValue(migrationKey, 'true');
       });
       tx();
-    } catch {
-      // A legacy schema variant must never block Store startup. The read-time
-      // mask in `mapRow` still covers every API reader if this scrub is
-      // skipped, and the key stays unset so a later open retries.
+    } catch (err) {
+      // A legacy schema variant must never block Store startup, and the
+      // read-time mask in `mapRow` still covers every API reader if this
+      // scrub is skipped. Warn rather than swallow: the key stays unset, so a
+      // deterministic failure otherwise re-runs this scan silently on every
+      // boot forever.
+      console.warn('[store] legacy activity_events.detail scrub skipped:', sanitizeErrorText(err));
     }
   }
 

@@ -50,6 +50,32 @@ describe('check-no-error-leak guard', () => {
     },
   );
 
+  /**
+   * The regression this guard exists to catch. Scoping the token-gated routes
+   * by the masking helper alone would be circular — reverting the fix would
+   * also revert the file out of scope. Each of these is the PRE-fix shape of a
+   * file #2416 repaired, and each must be flagged on its own imports.
+   */
+  it.each([
+    ['discovery-endpoint (injected reader)', "import type { PluginPublicationReader } from '../plugin-registry/publication-reader.js';"],
+    ['discovery-endpoint (archive reads)', "import type { ArchiveReads } from '../archive/reads.js';"],
+    ['rewards-endpoint', "import { gatherGatheredStatusRaw } from './gather-status.js';"],
+    ['admin-endpoint', "import { claimRewardsIntent } from '../intents/claim-rewards.js';"],
+  ])('flags the pre-fix %s shape, with no masking import present', (_label, importLine) => {
+    const violations = scan({ 'x.ts': `${importLine}\n${RAW}\n` });
+    expect(violations).toHaveLength(1);
+  });
+
+  it('requires a call, not a mention, to treat a line as fixed', () => {
+    expect(
+      scan({
+        'x.ts':
+          "import { sanitizeErrorText } from '../rpc/transport.js';\n" +
+          `${RAW} // masked by sanitizeErrorText upstream\n`,
+      }),
+    ).toHaveLength(1);
+  });
+
   it('still flags a raw conversion in a viem-importing file', () => {
     expect(scan({ 'x.ts': `import { createPublicClient } from 'viem';\n${RAW}\n` })).toHaveLength(1);
   });

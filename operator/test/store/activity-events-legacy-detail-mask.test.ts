@@ -76,14 +76,39 @@ describe('legacy activity_events.detail masking (#2416)', () => {
     expect(readRawDetails(path)[0]).toBe('claim reverted: NotEligible');
   });
 
-  it('re-running the open does not re-mask an already-masked row', () => {
+  it('masks every legacy row, past one batch', () => {
     const path = dbFile();
     new Store(path).close();
-    seedLegacyRow(path, LEGACY_DETAIL);
+    // 600 > the 500-row page size, so this exercises the paging loop rather
+    // than a single pass.
+    for (let i = 0; i < 600; i += 1) seedLegacyRow(path, `${LEGACY_DETAIL} #${i}`);
 
     new Store(path).close();
-    const afterFirst = readRawDetails(path)[0];
+
+    const details = readRawDetails(path);
+    expect(details).toHaveLength(600);
+    expect(details.every((d) => d !== null && !d.includes(RPC_SECRET))).toBe(true);
+    expect(details.every((d) => d !== null && d.includes(RPC_HOST))).toBe(true);
+  });
+
+  /**
+   * The accepted residual, pinned so it stays a decision rather than a
+   * surprise: the scrub is a config-keyed one-shot, so a row written raw AFTER
+   * the key is set (only reachable by downgrading to a pre-#642 daemon) stays
+   * raw on disk. Every API reader is still covered by `mapRow`'s read-time
+   * re-mask; the exposure is limited to a direct SQLite read.
+   */
+  it('does not re-run once keyed', () => {
+    const path = dbFile();
     new Store(path).close();
-    expect(readRawDetails(path)[0]).toBe(afterFirst);
+
+    const raw = new Database(path);
+    raw.prepare(
+      `INSERT INTO activity_events (ts, kind, outcome, detail) VALUES (?, 'tick_error', 'failed', ?)`,
+    ).run(new Date().toISOString(), LEGACY_DETAIL);
+    raw.close();
+
+    new Store(path).close();
+    expect(readRawDetails(path)[0]).toContain(RPC_SECRET);
   });
 });
