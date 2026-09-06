@@ -49,7 +49,7 @@ function humanSupply(result: CurrentSupplyResponse): string {
     lines.push(
       `${entry.workClass}: ${entry.acceptingSolverNets} accepting SolverNet(s), `
       + `${entry.claimingOperators} recent operator(s), `
-      + `${entry.verifiedDeliveries} recent verdict delivery(ies)`,
+      + `${entry.verdictDeliveries} recent verdict delivery(ies)`,
     );
   }
   return lines.join('\n');

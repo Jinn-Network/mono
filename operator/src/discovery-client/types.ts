@@ -199,12 +199,17 @@ export interface SupplyClass {
   contractVersion: string;
   acceptingSolverNets: number;
   claimingOperators: number;
-  verifiedDeliveries: number;
+  /** Verdicts delivered in the window — loop closure, not loop success. */
+  verdictDeliveries: number;
   latestAttemptAt: string;
   latestVerdictAt: string;
 }
 
-/** Network supply proven by native, chain-scoped indexer evidence. */
+/**
+ * Network supply as REPORTED by the configured indexer from native,
+ * chain-scoped evidence. Strictly decoded on arrival, but decoding proves
+ * well-formedness, not integrity: the indexer is the oracle here.
+ */
 export type CurrentSupplyResponse =
   | {
       schemaVersion: 1;

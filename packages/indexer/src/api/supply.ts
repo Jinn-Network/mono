@@ -25,7 +25,14 @@ export interface SupplyClass {
   contractVersion: string;
   acceptingSolverNets: number;
   claimingOperators: number;
-  verifiedDeliveries: number;
+  /**
+   * Verdicts delivered in the window for this class — loop CLOSURE, not loop
+   * success. Every `VerdictCode` counts: the on-chain code defaults to `Pass`
+   * before enrichment (see `api/explorer.ts`), so filtering on it would be
+   * false precision. A requester reads this as "work here reaches an
+   * evaluator", never as "work here passes".
+   */
+  verdictDeliveries: number;
   latestAttemptAt: string;
   latestVerdictAt: string;
 }
@@ -129,6 +136,14 @@ function unknown(input: BuildCurrentSupplyInput): CurrentSupplyResponse {
   };
 }
 
+/** Largest millisecond value `Date` can represent; beyond it `toISOString` throws. */
+const MAX_TIME_MS = 8_640_000_000_000_000;
+
+/** The instant to report on, or `null` when it cannot be rendered at all. */
+function usableAsOfMs(value: number): number | null {
+  return Number.isFinite(value) && Math.abs(value) <= MAX_TIME_MS ? value : null;
+}
+
 function validTimestamp(value: bigint): boolean {
   return value > 0n && value <= BigInt(Number.MAX_SAFE_INTEGER);
 }
@@ -139,9 +154,11 @@ function validTimestamp(value: bigint): boolean {
  * unknown instead of turning missing evidence into a false zero.
  */
 export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSupplyResponse {
-  if (!Number.isSafeInteger(input.chainId) || input.chainId <= 0 || !Number.isFinite(input.asOfMs)) {
-    return unknown(input);
-  }
+  // An unrenderable `asOfMs` is still answered — as `unknown`, stamped with the
+  // real clock. Reporting the caller's own bad value back would throw inside
+  // `baseResult` and turn a guarded input into a 503.
+  if (usableAsOfMs(input.asOfMs) === null) return unknown({ ...input, asOfMs: Date.now() });
+  if (!Number.isSafeInteger(input.chainId) || input.chainId <= 0) return unknown(input);
 
   const base = baseResult(input);
   if (!input.manifestEvidenceComplete) return unknown(input);
@@ -150,12 +167,21 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
   const launched = input.manifests.filter(
     (row) => row.chainId === input.chainId && row.status === 'launched',
   );
-  if (launched.some((row) => row.manifestEnrichmentStatus !== 'ok')) return unknown(input);
-
-  const requestable = launched.filter((row) => row.openRoles.includes('solver'));
-  if (requestable.some((row) => !row.contractId.trim() || !row.contractVersion.trim() || !row.cidKeccak)) {
+  // Completeness is judged over EVERY launched row, before the role filter.
+  // `manifestEnrichmentStatus: 'ok'` does not imply complete fields —
+  // `parseSolverNetManifestLite` degrades a missing/oddly-shaped `roles` to
+  // `[]` — so a row filtered out for having no roles would otherwise leave the
+  // requestable set silently short and turn missing evidence into a false
+  // `no_requestable_solver_nets`.
+  if (launched.some((row) => row.manifestEnrichmentStatus !== 'ok'
+    || row.openRoles.length === 0
+    || !row.contractId.trim()
+    || !row.contractVersion.trim()
+    || !row.cidKeccak)) {
     return unknown(input);
   }
+
+  const requestable = launched.filter((row) => row.openRoles.includes('solver'));
   if (requestable.length === 0) {
     return { ...base, status: 'zero_supply', reason: 'no_requestable_solver_nets', classes: [] };
   }
@@ -231,10 +257,14 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
       || row.verdictCode > 4
     ) return unknown(input);
     if (row.createdAtTimestamp < windowStart || row.createdAtTimestamp >= windowEnd) continue;
+    // The attempt must exist — a verdict with no attempt row is a broken join
+    // and makes the whole answer unknown. Its AGE, however, is ordinary: a task
+    // claimed before the window and delivered inside it is a healthy long loop,
+    // not corruption. Callers therefore supply the attempts referenced by
+    // in-window verdicts regardless of when those attempts were created, and an
+    // out-of-window attempt still never counts toward `operators` below.
     const attempt = attemptByKey.get(activityKey(row.chainId, row.taskId, row.attemptIndex));
-    if (!attempt
-      || attempt.createdAtTimestamp < windowStart
-      || attempt.createdAtTimestamp >= windowEnd) return unknown(input);
+    if (!attempt) return unknown(input);
     const task = taskById.get(row.taskId);
     if (!task) return unknown(input);
     const workClass = classByDigest.get(task.manifestDigest.toLowerCase());
@@ -252,7 +282,7 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
       contractVersion: row.contractVersion,
       acceptingSolverNets: row.manifestIds.size,
       claimingOperators: row.operators.size,
-      verifiedDeliveries: row.verdicts.size,
+      verdictDeliveries: row.verdicts.size,
       latestAttemptAt: isoFromSeconds(Number(row.latestAttempt)),
       latestVerdictAt: isoFromSeconds(Number(row.latestVerdict)),
     }))

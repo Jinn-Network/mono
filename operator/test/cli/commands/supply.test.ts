@@ -40,7 +40,7 @@ describe('jinn supply', () => {
       window: WINDOW,
       classes: [{
         workClass: 'prediction.v1', contractId: 'prediction', contractVersion: 'v1',
-        acceptingSolverNets: 1, claimingOperators: 2, verifiedDeliveries: 3,
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
         latestAttemptAt: '2026-09-06T10:00:00.000Z',
         latestVerdictAt: '2026-09-06T11:00:00.000Z',
       }],

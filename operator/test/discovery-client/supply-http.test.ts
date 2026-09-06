@@ -22,7 +22,7 @@ const available = {
     contractVersion: 'v1',
     acceptingSolverNets: 1,
     claimingOperators: 2,
-    verifiedDeliveries: 3,
+    verdictDeliveries: 3,
     latestAttemptAt: '2026-09-06T10:00:00.000Z',
     latestVerdictAt: '2026-09-06T11:00:00.000Z',
   }],
@@ -72,7 +72,7 @@ describe('DiscoveryClient.getCurrentSupply', () => {
     ['outdated schema', { ...available, schemaVersion: 0 }],
     ['bad status', { ...available, status: 'maybe' }],
     ['missing buckets', { ...available, window: { ...available.window, buckets: [] } }],
-    ['unsafe count', { ...available, classes: [{ ...available.classes[0], verifiedDeliveries: -1 }] }],
+    ['unsafe count', { ...available, classes: [{ ...available.classes[0], verdictDeliveries: -1 }] }],
     ['stale window', { ...available, generatedAt: '2026-09-07T13:47:00.000Z' }],
     ['out-of-window activity', {
       ...available,
@@ -88,6 +88,15 @@ describe('DiscoveryClient.getCurrentSupply', () => {
   ])('rejects %s instead of treating it as no supply', async (_label, body) => {
     await expect(clientFor(body).client.getCurrentSupply({ chainId: 84532 }))
       .rejects.toBeInstanceOf(DiscoveryUnavailableError);
+  });
+
+  it('carries the indexer\'s own refusal through so an unserved chain is actionable', async () => {
+    const { client } = clientFor(
+      { error: 'unsupported chainId', detail: 'this indexer serves 84532; it has no evidence about 8453' },
+      400,
+    );
+    await expect(client.getCurrentSupply({ chainId: 8453 }))
+      .rejects.toThrow(/no evidence about 8453/u);
   });
 
   it('rejects an unavailable route instead of falling back to GraphQL or chain reads', async () => {

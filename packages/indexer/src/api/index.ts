@@ -19,6 +19,7 @@
  * this file alongside the GraphQL middleware if ever needed.
  *
  * Routes:
+ *   GET /supply                          — current requestable supply by ?chainId= (#2447)
  *   GET /builders/:agentId/runs         — builder-attributed run join (attd)
  *   GET /plugins                        — list plug-ins by ?solverNet= or ?builder= (ttz8)
  *   GET /plugins/:cid/scores            — score history for a plug-in CID (ttz8, ebu7 dep)
@@ -60,6 +61,7 @@ import { existsSync } from 'node:fs';
 import explorer from './explorer.js';
 import taskCoverage from './task-coverage.js';
 import { PLACEHOLDER_HTML } from './placeholder.js';
+import { indexedChainIds } from '../chain-config.js';
 import {
   buildCurrentSupply,
   completedSupplyWindow,
@@ -84,10 +86,29 @@ app.route('/health', taskCoverage);
 // ── GET /supply (#2447) ──────────────────────────────────────────────────────
 // Current requestable supply from one chain's native indexed facts. The pure
 // assembler preserves incomplete or contradictory evidence as `unknown`.
+//
+// The route refuses a chain this deployment does not index: an unindexed chain
+// has no rows, and "no rows" is indistinguishable at the database from "this
+// chain is genuinely empty" — answering it would render total absence of
+// evidence as an authoritative `zero_supply`.
+//
+// Sync state is NOT gated here: Ponder owns that signal and exposes it at
+// `/ready`. A cold or backfilling deployment can therefore answer `zero_supply`
+// on this route. Every in-repo consumer passes through `/ready` first
+// (`operator/src/discovery-client/http.ts` calls `ensureReady()` before this
+// endpoint), and production keeps the previous container serving until the new
+// one is ready, so the exposure is a direct unready-origin call.
 app.get('/supply', async (c) => {
   const chainId = Number(c.req.query('chainId'));
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
     return c.json({ error: 'invalid chainId', detail: 'provide a positive integer ?chainId=' }, 400);
+  }
+  const servedChainIds = indexedChainIds();
+  if (!servedChainIds.includes(chainId)) {
+    return c.json({
+      error: 'unsupported chainId',
+      detail: `this indexer serves ${servedChainIds.join(', ')}; it has no evidence about ${chainId}`,
+    }, 400);
   }
 
   try {
@@ -96,7 +117,16 @@ app.get('/supply', async (c) => {
     const windowStart = BigInt(Date.parse(window.start) / 1_000);
     const windowEnd = BigInt(Date.parse(window.end) / 1_000);
     const [manifests, attempts, verdicts, missingAttemptTimes, missingVerdictTimes] = await Promise.all([
-      db.select().from(solverNetManifest).where(
+      db.select({
+        id: solverNetManifest.id,
+        cidKeccak: solverNetManifest.cidKeccak,
+        status: solverNetManifest.status,
+        chainId: solverNetManifest.chainId,
+        openRoles: solverNetManifest.openRoles,
+        contractId: solverNetManifest.contractId,
+        contractVersion: solverNetManifest.contractVersion,
+        manifestEnrichmentStatus: solverNetManifest.manifestEnrichmentStatus,
+      }).from(solverNetManifest).where(
         and(
           eq(solverNetManifest.chainId, chainId),
           eq(solverNetManifest.status, 'launched'),
@@ -138,13 +168,45 @@ app.get('/supply', async (c) => {
     ]);
 
     const manifestEvidenceComplete = manifests.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
-    let activityEvidenceComplete = attempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
+    const activityEvidenceComplete = attempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
       && verdicts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
       && missingAttemptTimes.length === 0
       && missingVerdictTimes.length === 0;
+
+    // A capped or unusable activity read already forces `unknown`; skip the
+    // join reads rather than spending them on an answer that cannot be used.
+    if (!activityEvidenceComplete) {
+      return c.json(buildCurrentSupply({
+        chainId,
+        asOfMs,
+        manifestEvidenceComplete,
+        activityEvidenceComplete: false,
+        manifests: manifests as SupplyManifestRow[],
+        tasks: [],
+        attempts: [],
+        verdicts: [],
+      }));
+    }
+
+    // Attempts referenced by an in-window verdict are fetched WITHOUT the window
+    // filter. A task claimed before the window and delivered inside it is an
+    // ordinary long loop; without its attempt row the assembler would read the
+    // broken join as index corruption and black out the whole chain's answer.
+    // An out-of-window attempt still never counts toward operator liveness.
+    const verdictTaskIds = [...new Set(verdicts.map((row) => row.taskId))];
+    const priorAttempts = verdictTaskIds.length === 0 ? [] : await db.select({
+      taskId: attempt.taskId,
+      attemptIndex: attempt.attemptIndex,
+      operator: attempt.operator,
+      chainId: attempt.chainId,
+      createdAtTimestamp: attempt.createdAtTimestamp,
+    }).from(attempt).where(
+      and(eq(attempt.chainId, chainId), inArray(attempt.taskId, verdictTaskIds)),
+    ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1);
+
     const taskIds = [...new Set([
       ...attempts.map((row) => row.taskId),
-      ...verdicts.map((row) => row.taskId),
+      ...verdictTaskIds,
     ])];
     const tasks = taskIds.length === 0 ? [] : await db.select({
       id: task.id,
@@ -153,16 +215,16 @@ app.get('/supply', async (c) => {
     }).from(task).where(
       and(eq(task.chainId, chainId), inArray(task.id, taskIds)),
     ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1);
-    activityEvidenceComplete &&= tasks.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
 
     return c.json(buildCurrentSupply({
       chainId,
       asOfMs,
       manifestEvidenceComplete,
-      activityEvidenceComplete,
+      activityEvidenceComplete: tasks.length <= SUPPLY_EVIDENCE_ROW_LIMIT
+        && priorAttempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT,
       manifests: manifests as SupplyManifestRow[],
       tasks: tasks as SupplyTaskRow[],
-      attempts: attempts as SupplyAttemptRow[],
+      attempts: [...attempts, ...priorAttempts] as SupplyAttemptRow[],
       verdicts: verdicts as SupplyVerdictRow[],
     }));
   } catch (err) {

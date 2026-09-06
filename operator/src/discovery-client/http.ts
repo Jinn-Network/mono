@@ -64,7 +64,7 @@ const SupplyClassSchema = z.object({
   contractVersion: z.string().min(1),
   acceptingSolverNets: SafeCountSchema.positive(),
   claimingOperators: SafeCountSchema.positive(),
-  verifiedDeliveries: SafeCountSchema.positive(),
+  verdictDeliveries: SafeCountSchema.positive(),
   latestAttemptAt: IsoTimestampSchema,
   latestVerdictAt: IsoTimestampSchema,
 }).strict().superRefine((entry, ctx) => {
@@ -667,7 +667,7 @@ export function createHttpDiscoveryClient(
   transport: DiscoveryHttpTransport = createDiscoveryHttpTransport(opts),
 ): DiscoveryClient {
   const { gqlUrl, fetchImpl, ensureReady } = transport;
-  const supplyUrl = `${transport.readyUrl.slice(0, -'/ready'.length)}/supply`;
+  const supplyUrl = `${transport.readyUrl.replace(/\/ready$/, '')}/supply`;
   const corpusDiscovery = createHttpCorpusDiscovery({
     url: opts.url,
     fetchImpl: transport.baseFetch,
@@ -691,8 +691,18 @@ export function createHttpDiscoveryClient(
       throw new DiscoveryUnavailableError(`Supply endpoint network error: ${String(error)}`, error);
     }
     if (!response.ok) {
+      // Carry the server's own explanation through. A 400 here is the indexer
+      // saying it holds no evidence about this chain at all — the operator has
+      // to see that, not a bare status line they cannot act on.
+      let detail = '';
+      try {
+        const body = await response.text();
+        if (body) detail = `: ${body.slice(0, 500)}`;
+      } catch {
+        detail = '';
+      }
       throw new DiscoveryUnavailableError(
-        `Supply endpoint HTTP ${response.status} ${response.statusText}`,
+        `Supply endpoint HTTP ${response.status} ${response.statusText}${detail}`,
       );
     }
 

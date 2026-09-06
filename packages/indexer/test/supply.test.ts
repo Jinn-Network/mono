@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildCurrentSupply, completedSupplyWindow } from '../src/api/supply.js';
+import { BASE_SEPOLIA_CHAIN_ID, indexedChainIds } from '../src/chain-config.js';
 
 const CHAIN_ID = 84532;
 const AS_OF = Date.parse('2026-09-06T13:47:00.000Z');
@@ -92,7 +93,7 @@ describe('buildCurrentSupply', () => {
       contractVersion: 'v1',
       acceptingSolverNets: 2,
       claimingOperators: 1,
-      verifiedDeliveries: 2,
+      verdictDeliveries: 2,
       latestAttemptAt: '2026-09-06T10:00:00.000Z',
       latestVerdictAt: '2026-09-06T11:00:00.000Z',
     }]);
@@ -106,7 +107,7 @@ describe('buildCurrentSupply', () => {
       verdicts: [verdict({ createdAtTimestamp: end - 1n }), verdict({ verdictIndex: 1, createdAtTimestamp: end })],
     });
     expect(result.status).toBe('available');
-    expect(result.classes[0]?.verifiedDeliveries).toBe(1);
+    expect(result.classes[0]?.verdictDeliveries).toBe(1);
   });
 
   it('excludes evaluator-only and non-launched SolverNets', () => {
@@ -138,10 +139,65 @@ describe('buildCurrentSupply', () => {
       verdicts: [verdict()],
     });
     expect(result).toMatchObject({
-      status: 'unknown',
-      reason: 'incomplete_indexer_evidence',
+      status: 'zero_supply',
+      reason: 'no_recent_completed_loops',
       classes: [],
     });
+  });
+
+  it('counts an in-window verdict whose attempt predates the window as a closed loop', () => {
+    // A long-running task claimed before the window and delivered inside it is
+    // ordinary, not corrupt. It must not black out the chain's whole answer —
+    // and it must not, by itself, make the class look live either: the class
+    // still needs a claiming operator inside the window.
+    const oldAttempt = attempt({
+      taskId: '9',
+      attemptIndex: 3,
+      operator: `0x${'cc'.repeat(20)}`,
+      createdAtTimestamp: BigInt(AS_OF / 1000) - BigInt(50 * HOUR),
+    });
+    const result = build({
+      tasks: [task(), task({ id: '9' })],
+      attempts: [attempt(), oldAttempt],
+      verdicts: [verdict(), verdict({ taskId: '9', attemptIndex: 3 })],
+    });
+    expect(result.status).toBe('available');
+    expect(result.classes).toHaveLength(1);
+    expect(result.classes[0]).toMatchObject({
+      workClass: 'prediction.v1',
+      claimingOperators: 1,
+      verdictDeliveries: 2,
+    });
+  });
+
+  it('still reads a verdict with no attempt row at all as broken evidence', () => {
+    expect(build({ verdicts: [verdict({ attemptIndex: 9 })] }).status).toBe('unknown');
+  });
+
+  it('does not read a degraded empty-role manifest as an absent requestable class', () => {
+    // `parseSolverNetManifestLite` degrades an unusable `roles` to `[]` while
+    // still writing manifestEnrichmentStatus 'ok'. Filtering that row out
+    // before the completeness check turned missing evidence into a false zero.
+    expect(build({ manifests: [manifest({ openRoles: [] })] })).toMatchObject({
+      status: 'unknown',
+      reason: 'incomplete_indexer_evidence',
+    });
+  });
+
+  it('answers an unrenderable clock as unknown rather than throwing', () => {
+    for (const asOfMs of [Number.NaN, Number.POSITIVE_INFINITY, 8.7e15]) {
+      const result = buildCurrentSupply({
+        chainId: CHAIN_ID,
+        asOfMs,
+        manifestEvidenceComplete: true,
+        activityEvidenceComplete: true,
+        manifests: [manifest()],
+        tasks: [task()],
+        attempts: [attempt()],
+        verdicts: [verdict()],
+      });
+      expect(result.status).toBe('unknown');
+    }
   });
 
   it('reports no requestable SolverNets without requiring unrelated activity evidence', () => {
@@ -180,7 +236,6 @@ describe('buildCurrentSupply', () => {
     ['launched manifest enrichment is incomplete', { manifests: [manifest({ manifestEnrichmentStatus: 'pending' })] }],
     ['a relevant timestamp is missing', { attempts: [attempt({ createdAtTimestamp: 0n })] }],
     ['an attempt is orphaned', { attempts: [attempt({ taskId: '404' })] }],
-    ['a verdict is orphaned by attempt index', { verdicts: [verdict({ attemptIndex: 9 })] }],
     ['a cross-chain attempt cannot join', { attempts: [attempt({ chainId: 8453 })] }],
   ])('preserves uncertainty when %s', (_label, overrides) => {
     expect(build(overrides).status).toBe('unknown');
@@ -210,10 +265,44 @@ describe('GET /supply evidence reads', () => {
       source.indexOf('// ── GET /supply'),
       source.indexOf('// ── Shared ebu7-schema probe'),
     );
-    expect(route.match(/\.limit\(/gu)).toHaveLength(6);
+    expect(route.match(/\.limit\(/gu)).toHaveLength(7);
+    // The attempts referenced by in-window verdicts are fetched WITHOUT the
+    // window filter, so a long loop cannot look like a broken join.
+    expect(route).toContain('inArray(attempt.taskId, verdictTaskIds)');
     expect(route).toContain('attempt.createdAtTimestamp} >= ${windowStart}');
     expect(route).toContain('attempt.createdAtTimestamp} < ${windowEnd}');
     expect(route).toContain('verdict.createdAtTimestamp} >= ${windowStart}');
     expect(route).toContain('verdict.createdAtTimestamp} < ${windowEnd}');
+  });
+});
+
+describe('served chain set', () => {
+  it('serves only Base Sepolia by default, so an unindexed chain is refused rather than answered', () => {
+    // Without this, GET /supply?chainId=8453 reads an empty table and returns a
+    // confident `zero_supply` for a chain nothing has ever been indexed for —
+    // total absence of evidence rendered as an authoritative negative.
+    expect(indexedChainIds({} as NodeJS.ProcessEnv)).toEqual([BASE_SEPOLIA_CHAIN_ID]);
+    expect(indexedChainIds({} as NodeJS.ProcessEnv)).not.toContain(8453);
+  });
+
+  it('follows hermetic snapshot mode onto its own chain', () => {
+    expect(indexedChainIds({
+      JINN_INDEXER_SNAPSHOT_ROUTER: '0xrouter',
+      JINN_INDEXER_SNAPSHOT_CHAIN_ID: '31337',
+    } as NodeJS.ProcessEnv)).toEqual([31337]);
+    expect(indexedChainIds({
+      JINN_INDEXER_SNAPSHOT_ROUTER: '0xrouter',
+    } as NodeJS.ProcessEnv)).toEqual([8453]);
+  });
+
+  it('is the guard the route actually applies', () => {
+    const source = readFileSync(new URL('../src/api/index.ts', import.meta.url), 'utf8');
+    const route = source.slice(
+      source.indexOf('// \u2500\u2500 GET /supply'),
+      source.indexOf('// \u2500\u2500 Shared ebu7-schema probe'),
+    );
+    expect(route).toContain('const servedChainIds = indexedChainIds();');
+    expect(route).toContain("if (!servedChainIds.includes(chainId)) {");
+    expect(route).toContain("error: 'unsupported chainId'");
   });
 });
