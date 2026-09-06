@@ -144,12 +144,11 @@ test('isExcludedPath: exact paths and directory prefixes both match, unrelated p
   assert.equal(isExcludedPath('spec/2026-01-01-example.md', DEFAULT_EXCLUSIONS), true);
   assert.equal(isExcludedPath('log/decisions/2026-08-04-x.md', DEFAULT_EXCLUSIONS), true);
   assert.equal(isExcludedPath('docs/press/2026-08-04-x.md', DEFAULT_EXCLUSIONS), true);
-  assert.equal(isExcludedPath('legacy/anything.ts', DEFAULT_EXCLUSIONS), true);
   assert.equal(isExcludedPath('apps/operator-console/app/page.tsx', DEFAULT_EXCLUSIONS), false);
   assert.equal(isExcludedPath('packages/core/schema.json', DEFAULT_EXCLUSIONS), false);
   // A path that merely starts with the same characters as an excluded prefix, without the
   // trailing separator, must not be treated as excluded.
-  assert.equal(isExcludedPath('legacy-lookalike/schema.json', DEFAULT_EXCLUSIONS), false);
+  assert.equal(isExcludedPath('spec-lookalike/schema.json', DEFAULT_EXCLUSIONS), false);
 });
 
 // --- Enforcement (DR-2026-08-04, component C2) ---
@@ -231,7 +230,6 @@ test('the exclusion list is closed: widening it is a reviewed edit', () => {
     'log/',
     'docs/press/',
     'docs/superpowers/',
-    'legacy/',
   ]);
 });
 

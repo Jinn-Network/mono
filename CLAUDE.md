@@ -92,9 +92,6 @@ Routing is governed by three Project (v2) single-select fields set at Friday tri
 ## Repository Structure
 
 ```
-legacy/jinn-cli-agents-reference/  Git subtree — historical Jinn agent repo, retained as
-                 read-only reference (IMPORTANT: see below)
-
 operator/          TypeScript daemon — the main runnable component
   src/
     main.ts              Production entry point (`jinn run` from the published package)
@@ -157,19 +154,6 @@ contracts/       Solidity smart contracts (Hardhat)
 spec/            Dated specification proposals
 docs/            Design specs and implementation plans
 ```
-
-## jinn-cli-agents-reference
-
-**Always check `legacy/jinn-cli-agents-reference/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context. It is retained deliberately as reference material — the `-reference` suffix marks it consulted-but-never-built: it carries no `package.json`, is in no workspace, and nothing in the repository imports from it. Paths below are relative to that directory:
-
-- `contracts/staking/` — JinnRouter.sol (the deployed router), DeliveryActivityChecker, WhitelistedRequesterActivityChecker, deployment JSONs with all on-chain addresses
-- `docs/context/olas-protocol.md` — Full OLAS architecture: governance (veOLAS, Governor, Timelock), registries, tokenomics (Treasury, Dispenser, Depository, Tokenomics epochs)
-- `docs/context/olas-integration.md` — Wallet/key storage, service lifecycle, operating modes
-- `docs/reference/jinn-staking.md` — All deployed staking contracts (V1-V3), parameters, reward economics, veOLAS lock strategy, nominee mechanics
-- `docs/reference/olas-contracts.md` — Base mainnet contract addresses, MechMarketplace ABI
-- `docs/reference/blood-written-rules.md` — Hard-won operational lessons (RPC limits, IPFS, polling, etc.)
-- `docs/runbooks/` — Setup, deployment, recovery, troubleshooting guides
-- `CLAUDE.md` — System architecture overview for the agent orchestration layer
 
 ## Running the Client
 

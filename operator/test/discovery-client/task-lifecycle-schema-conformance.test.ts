@@ -23,12 +23,11 @@
  * 3. The PAGINATION ARGUMENT SURFACE — `limit` / `after` / `orderDirection` and
  *    the `items` + `pageInfo { hasNextPage endCursor }` connection shape — is
  *    not checked against anything, because it is Ponder's GraphQL API rather
- *    than the project's schema file. It is independently corroborated by a
- *    working client against a live Ponder mount:
- *    `legacy/jinn-cli-agents-reference/frontend/explorer/src/lib/subgraph.ts`
- *    (~L190-240) queries with exactly `limit` / `after` / `before` / `orderBy` /
- *    `orderDirection` and reads back `items` + `pageInfo { hasNextPage,
- *    endCursor }`.
+ *    than the project's schema file. It was independently corroborated by a
+ *    working explorer client against a live Ponder mount, which queried with
+ *    exactly `limit` / `after` / `before` / `orderBy` / `orderDirection` and read
+ *    back `items` + `pageInfo { hasNextPage, endCursor }`. That client lived in
+ *    the legacy reference tree retired by issue #2295; git history is its archive.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
