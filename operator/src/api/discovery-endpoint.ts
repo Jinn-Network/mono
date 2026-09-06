@@ -11,9 +11,9 @@
  * Every failure detail goes through `sanitizeErrorText` (issue #2416). These
  * routes are UI-token-gated, but `OnchainDiscoveryAPI` builds a viem client on
  * the operator's `rpcUrl` and onchain is the DEFAULT discovery mode on
- * mainnet — so a raw `.message` here shipped a paid provider's key-in-path to
- * any API reader. `sanitizeErrorText` walks `Error.cause`, so a viem
- * `HttpRequestError` nested behind a call-level error cannot bypass it.
+ * mainnet — so raw error stringification here shipped a paid provider's
+ * key-in-path to any API reader. `sanitizeErrorText` walks `Error.cause`, so a
+ * viem `HttpRequestError` nested behind a call-level error cannot bypass it.
  *
  * Wave-4 D4: plugin routes require `pluginReader` (no DiscoveryAPI fallback).
  * `GET /v1/discovery/solvernet-operator-count` retired with the ERC-8004
