@@ -45,7 +45,7 @@ describe('native discovery poison quarantine', () => {
     for (let attempt = 1; attempt < NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD; attempt += 1) {
       expect(failure()).toEqual({ failures: attempt, quarantined: false });
       expect(isPoisonQuarantined({
-        store, scope: 'announcement', source: SOURCE, announcementId: 'announcement-1',
+        store, scope: 'announcement', source: SOURCE, entryDigest: ENTRY_DIGEST, announcementId: 'announcement-1',
       })).toBe(false);
     }
   });
@@ -61,7 +61,7 @@ describe('native discovery poison quarantine', () => {
       quarantined: true,
     });
     expect(isPoisonQuarantined({
-      store, scope: 'announcement', source: SOURCE, announcementId: 'announcement-1',
+      store, scope: 'announcement', source: SOURCE, entryDigest: ENTRY_DIGEST, announcementId: 'announcement-1',
     })).toBe(true);
     expect(failure().quarantined).toBe(true);
   });
@@ -88,7 +88,7 @@ describe('native discovery poison quarantine', () => {
     failure();
     failure();
     clearPoisonFailures({
-      store, scope: 'announcement', source: SOURCE, announcementId: 'announcement-1',
+      store, scope: 'announcement', source: SOURCE, entryDigest: ENTRY_DIGEST, announcementId: 'announcement-1',
     });
     expect(failure()).toEqual({ failures: 1, quarantined: false });
   });
@@ -98,10 +98,10 @@ describe('native discovery poison quarantine', () => {
       failure();
     }
     clearPoisonFailures({
-      store, scope: 'announcement', source: SOURCE, announcementId: 'announcement-1',
+      store, scope: 'announcement', source: SOURCE, entryDigest: ENTRY_DIGEST, announcementId: 'announcement-1',
     });
     expect(isPoisonQuarantined({
-      store, scope: 'announcement', source: SOURCE, announcementId: 'announcement-1',
+      store, scope: 'announcement', source: SOURCE, entryDigest: ENTRY_DIGEST, announcementId: 'announcement-1',
     })).toBe(true);
   });
 
@@ -110,15 +110,25 @@ describe('native discovery poison quarantine', () => {
       failure();
     }
     expect(isPoisonQuarantined({
-      store, scope: 'withdrawal', source: SOURCE, announcementId: 'announcement-1',
+      store, scope: 'withdrawal', source: SOURCE, entryDigest: ENTRY_DIGEST, announcementId: 'announcement-1',
     })).toBe(false);
     expect(isPoisonQuarantined({
-      store, scope: 'announcement', source: SOURCE, announcementId: 'announcement-2',
+      store, scope: 'announcement', source: SOURCE, entryDigest: ENTRY_DIGEST, announcementId: 'announcement-2',
     })).toBe(false);
     expect(isPoisonQuarantined({
       store,
       scope: 'announcement',
       source: { agent: 'did:key:zOther', name: 'requester' },
+      entryDigest: ENTRY_DIGEST,
+      announcementId: 'announcement-1',
+    })).toBe(false);
+    // The entry digest is part of the key: a corrected re-announcement of the same id, in a
+    // NEW signed entry, is not covered by the old entry's quarantine.
+    expect(isPoisonQuarantined({
+      store,
+      scope: 'announcement',
+      source: SOURCE,
+      entryDigest: `sha256:${'d'.repeat(64)}`,
       announcementId: 'announcement-1',
     })).toBe(false);
   });

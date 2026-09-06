@@ -63,22 +63,31 @@ CREATE TABLE IF NOT EXISTS native_discovery_quarantine (
   scope              TEXT NOT NULL,
   source_agent       TEXT NOT NULL,
   source_name        TEXT NOT NULL,
+  entry_digest       TEXT NOT NULL,
   announcement_id    TEXT NOT NULL,
   sequence           TEXT NOT NULL,
-  entry_digest       TEXT NOT NULL,
   failures           INTEGER NOT NULL,
   detail             TEXT NOT NULL,
   first_failed_at    TEXT NOT NULL,
   last_failed_at     TEXT NOT NULL,
   quarantined_at     TEXT,
-  PRIMARY KEY (scope, source_agent, source_name, announcement_id)
+  PRIMARY KEY (scope, source_agent, source_name, entry_digest, announcement_id)
 );
 `;
 
+/**
+ * The ledger key. It carries `entryDigest` as well as the announcement id, matching the
+ * UNIQUE constraints `native_discovery_cards` and `native_discovery_withdrawals` already use,
+ * and for the same reason: an announcement is identified by the signed ENTRY that carried it,
+ * not by its id alone. Keying on the id alone would mean a source that re-announced a
+ * corrected version of a quarantined id, in a new entry, had it silently skipped forever —
+ * the quarantine would outlive the bytes that earned it.
+ */
 interface PoisonKey {
   readonly store: Store;
   readonly scope: NativeDiscoveryPoisonScope;
   readonly source: SourceIdentity;
+  readonly entryDigest: string;
   readonly announcementId: string;
 }
 
@@ -90,38 +99,37 @@ interface PoisonKey {
  */
 export function recordPoisonFailure(input: PoisonKey & {
   readonly sequence: string;
-  readonly entryDigest: string;
   readonly detail: string;
   readonly now?: () => Date;
 }): { readonly failures: number; readonly quarantined: boolean } {
   const at = (input.now ?? (() => new Date()))().toISOString();
   input.store.db.prepare(
     `INSERT INTO native_discovery_quarantine
-       (scope, source_agent, source_name, announcement_id, sequence, entry_digest,
+       (scope, source_agent, source_name, entry_digest, announcement_id, sequence,
         failures, detail, first_failed_at, last_failed_at, quarantined_at)
      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, NULL)
-     ON CONFLICT(scope, source_agent, source_name, announcement_id) DO UPDATE SET
+     ON CONFLICT(scope, source_agent, source_name, entry_digest, announcement_id) DO UPDATE SET
        failures = native_discovery_quarantine.failures + 1,
        sequence = excluded.sequence,
-       entry_digest = excluded.entry_digest,
        detail = excluded.detail,
        last_failed_at = excluded.last_failed_at`,
   ).run(
     input.scope,
     input.source.agent,
     input.source.name,
+    input.entryDigest,
     input.announcementId,
     input.sequence,
-    input.entryDigest,
     input.detail,
     at,
     at,
   );
   const row = input.store.db.prepare(
     `SELECT failures, quarantined_at FROM native_discovery_quarantine
-      WHERE scope = ? AND source_agent = ? AND source_name = ? AND announcement_id = ?`,
+      WHERE scope = ? AND source_agent = ? AND source_name = ?
+        AND entry_digest = ? AND announcement_id = ?`,
   ).get(
-    input.scope, input.source.agent, input.source.name, input.announcementId,
+    input.scope, input.source.agent, input.source.name, input.entryDigest, input.announcementId,
   ) as { failures: number; quarantined_at: string | null };
 
   if (row.quarantined_at !== null) return { failures: row.failures, quarantined: true };
@@ -131,8 +139,9 @@ export function recordPoisonFailure(input: PoisonKey & {
 
   input.store.db.prepare(
     `UPDATE native_discovery_quarantine SET quarantined_at = ?
-      WHERE scope = ? AND source_agent = ? AND source_name = ? AND announcement_id = ?`,
-  ).run(at, input.scope, input.source.agent, input.source.name, input.announcementId);
+      WHERE scope = ? AND source_agent = ? AND source_name = ?
+        AND entry_digest = ? AND announcement_id = ?`,
+  ).run(at, input.scope, input.source.agent, input.source.name, input.entryDigest, input.announcementId);
 
   const where = `${input.source.agent}/${input.source.name} ${input.scope} `
     + `${input.announcementId} (sequence ${input.sequence}, entry ${input.entryDigest})`;
@@ -161,9 +170,10 @@ export function recordPoisonFailure(input: PoisonKey & {
 export function isPoisonQuarantined(input: PoisonKey): boolean {
   const row = input.store.db.prepare(
     `SELECT quarantined_at FROM native_discovery_quarantine
-      WHERE scope = ? AND source_agent = ? AND source_name = ? AND announcement_id = ?`,
+      WHERE scope = ? AND source_agent = ? AND source_name = ?
+        AND entry_digest = ? AND announcement_id = ?`,
   ).get(
-    input.scope, input.source.agent, input.source.name, input.announcementId,
+    input.scope, input.source.agent, input.source.name, input.entryDigest, input.announcementId,
   ) as { quarantined_at: string | null } | undefined;
   return row !== undefined && row.quarantined_at !== null;
 }
@@ -175,7 +185,9 @@ export function isPoisonQuarantined(input: PoisonKey): boolean {
 export function clearPoisonFailures(input: PoisonKey): void {
   input.store.db.prepare(
     `DELETE FROM native_discovery_quarantine
-      WHERE scope = ? AND source_agent = ? AND source_name = ? AND announcement_id = ?
-        AND quarantined_at IS NULL`,
-  ).run(input.scope, input.source.agent, input.source.name, input.announcementId);
+      WHERE scope = ? AND source_agent = ? AND source_name = ?
+        AND entry_digest = ? AND announcement_id = ? AND quarantined_at IS NULL`,
+  ).run(
+    input.scope, input.source.agent, input.source.name, input.entryDigest, input.announcementId,
+  );
 }

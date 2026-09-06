@@ -1038,6 +1038,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           store: input.store,
           scope: 'announcement',
           source,
+          entryDigest,
           announcementId: announcement.announcementId,
         })) continue;
         let decoded: Card | undefined;
@@ -1066,6 +1067,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
             entryDigest,
             announcementId: announcement.announcementId,
             detail: undecodable.message,
+            ...(input.now === undefined ? {} : { now: input.now }),
           });
           if (!poisoned.quarantined) throw undecodable;
           continue;
@@ -1074,6 +1076,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           store: input.store,
           scope: 'announcement',
           source,
+          entryDigest,
           announcementId: announcement.announcementId,
         });
         if (decoded === undefined) continue;

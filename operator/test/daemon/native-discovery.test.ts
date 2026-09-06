@@ -1390,7 +1390,11 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
         // #2529's load-bearing half, unchanged: no checkpoint, so nothing is skipped past.
         expect(synced.checkpoint(identity)).toBeUndefined();
         expect(isPoisonQuarantined({
-          store, scope: 'announcement', source: identity, announcementId: 'announcement-0000000000000001',
+          store,
+          scope: 'announcement',
+          source: identity,
+          entryDigest: sealJson(first).digest,
+          announcementId: 'announcement-0000000000000001',
         })).toBe(false);
       }
 
@@ -1401,7 +1405,11 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
         degraded: [],
       });
       expect(isPoisonQuarantined({
-        store, scope: 'announcement', source: identity, announcementId: 'announcement-0000000000000001',
+        store,
+        scope: 'announcement',
+        source: identity,
+        entryDigest: sealJson(first).digest,
+        announcementId: 'announcement-0000000000000001',
       })).toBe(true);
       // Acceptance criterion: the checkpoint ADVANCED past the quarantined entry.
       expect(synced.checkpoint(identity)?.entryDigest).toEqual(sealJson(first).digest);
@@ -1482,10 +1490,18 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
       expect(synced.takePending()).toHaveLength(1);
       expect(synced.checkpoint(identity)?.entryDigest).toEqual(sealJson(paired).digest);
       expect(isPoisonQuarantined({
-        store, scope: 'announcement', source: identity, announcementId: 'announcement-poison',
+        store,
+        scope: 'announcement',
+        source: identity,
+        entryDigest: sealJson(paired).digest,
+        announcementId: 'announcement-poison',
       })).toBe(true);
       expect(isPoisonQuarantined({
-        store, scope: 'announcement', source: identity, announcementId: 'announcement-healthy',
+        store,
+        scope: 'announcement',
+        source: identity,
+        entryDigest: sealJson(paired).digest,
+        announcementId: 'announcement-healthy',
       })).toBe(false);
       warn.mockRestore();
     });
@@ -1514,6 +1530,7 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
         store,
         scope: 'announcement',
         source: { agent: AGENT, name: SOURCE_NAME },
+        entryDigest: sealJson(first).digest,
         announcementId: 'announcement-0000000000000001',
       })).toBe(false);
       expect(synced.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toBeUndefined();

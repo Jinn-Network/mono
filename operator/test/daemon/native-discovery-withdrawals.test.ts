@@ -159,6 +159,7 @@ describe('drainNativeDiscoveryWithdrawals', () => {
         store,
         scope: 'withdrawal',
         source: SOURCE,
+        entryDigest: `sha256:${'f'.repeat(64)}`,
         announcementId: 'withdrawal-1',
       })).toBe(true);
       // Loud, and legible without JINN_DEBUG.
@@ -232,6 +233,7 @@ describe('drainNativeDiscoveryWithdrawals', () => {
         store,
         scope: 'withdrawal',
         source: SOURCE,
+        entryDigest: `sha256:${'f'.repeat(64)}`,
         announcementId: 'withdrawal-1',
       })).toBe(false);
     });

@@ -62,6 +62,7 @@ export async function drainNativeDiscoveryWithdrawals(input: {
       store: input.store,
       scope: 'withdrawal',
       source: withdrawal.source,
+      entryDigest: withdrawal.entryDigest,
       announcementId: withdrawal.announcementId,
     });
     const card = JSON.parse(target.card_json) as {
