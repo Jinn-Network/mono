@@ -272,6 +272,19 @@ function yarnInstallLockfiles(step, jobLines, inheritedWorkingDirectory, reposit
   return { found, lockfiles: [...new Set(lockfiles)], unresolved };
 }
 
+// `actions/setup-node` resolves the Yarn cache folder by shelling out to whatever `yarn`
+// is on PATH inside the setup-node step itself. On the runner image that is the bundled
+// global Yarn 1, which refuses any project declaring `packageManager: yarn@4.13.0`. The
+// cache therefore only works when Corepack is enabled by an earlier step in the same job.
+function enablesCorepack(step) {
+  const run = propertyValue(step, 'run');
+  if (run === null) return false;
+  return run
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .some((line) => /(?:^|[;&|(]|\s)corepack\s+enable(?:\s|$)/u.test(line));
+}
+
 export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = root) {
   const violations = [];
   const workflowNames = readdirSync(directory)
@@ -285,6 +298,14 @@ export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = r
     const workflowWorkingDirectory = defaultsWorkingDirectory(sourceLines.slice(0, jobsAt), 0);
     for (const job of jobRanges(source)) {
       const steps = stepsForJob(job.lines);
+      for (let index = 0; index < steps.length; index += 1) {
+        if (!setupNodeAction(steps[index])) continue;
+        if (withValues(steps[index]).get('cache') !== 'yarn') continue;
+        if (steps.slice(0, index).some(enablesCorepack)) continue;
+        violations.push(
+          `${workflowName} job ${job.name}: corepack enable must run before the setup-node step that caches Yarn`,
+        );
+      }
       const jobWorkingDirectory = defaultsWorkingDirectory(job.lines, indentOf(job.lines[0]) + 2)
         ?? workflowWorkingDirectory;
       for (let index = 0; index < steps.length; index += 1) {
@@ -357,6 +378,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
+      - run: corepack enable
       - uses: actions/setup-node@v7
         with:
 ${setupWith}
@@ -419,6 +441,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: dependency
+      - run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -441,6 +464,7 @@ jobs:
         with:
           repository: Jinn-Network/autopilot
           path: .autopilot-pin
+      - run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -536,6 +560,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
+      - run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -564,6 +589,7 @@ jobs:
       matrix:
         component: [one, two]
     steps:
+      - run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -590,6 +616,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
+      - run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -644,3 +671,65 @@ for (const anchor of ['verify.job', 'verify/job']) {
     });
   });
 }
+
+test('guard rejects a cached setup-node step that Corepack has not yet been enabled for', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: app/yarn.lock
+      - run: corepack enable
+      - run: yarn install --immutable
+        working-directory: app
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: corepack enable must run before the setup-node step that caches Yarn',
+    ]);
+  });
+});
+
+test('guard ignores a Corepack command that only appears in a shell comment', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          # corepack enable
+          echo not enabled
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: app/yarn.lock
+      - run: yarn install --immutable
+        working-directory: app
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: corepack enable must run before the setup-node step that caches Yarn',
+    ]);
+  });
+});
+
+test('guard rejects a workflow whose Corepack step is moved after the cached setup-node step', () => {
+  withWorkflowMutation('net-liveness.yml', (source) => source.replace(
+    `      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to \`yarn\`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to \`packageManager: yarn@4.13.0\`.
+        run: corepack enable
+`,
+    '',
+  ), (fixtureWorkflows) => {
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows), [
+      'net-liveness.yml job net-liveness: corepack enable must run before the setup-node step that caches Yarn',
+    ]);
+  });
+});
