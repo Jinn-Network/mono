@@ -373,10 +373,9 @@ following hold — no partial success, no downgrade path:
    signer certificate's public key, via the injected crypto port.
 9. The signer certificate's extended key usage is exactly `id-kp-timeStamping`
    (1.3.6.1.5.5.7.3.8); any additional usage is a refusal. RFC 3161 requires
-   this EKU to be both sole and critical; the sole-usage half is checked, and
-   **extension criticality is not**, because the certificate port does not
-   surface criticality flags. The gap is recorded (§16) rather than papered
-   over.
+   this EKU to be both sole and critical; both properties are checked from the
+   certificate port's `extendedKeyUsageOids` and
+   `extendedKeyUsageCritical` facts.
 10. When the TSTInfo `tsa` field is present, it corresponds to one of the
     subject names in the signer certificate (RFC 3161 §2.4.2).
 11. `genTime` is well-formed GeneralizedTime in Zulu form with seconds (DER
@@ -418,7 +417,8 @@ must cover while consumers perform platform crypto through two injected ports:
 ```
 verifySignature({ algorithmOid, parameters, spkiDer, message, signature }) -> boolean
 readCertificate(certDer) -> { subjectPublicKeyInfoDer, notBefore, notAfter,
-                              extendedKeyUsageOids, subjectNames, sid }
+                              extendedKeyUsageOids, extendedKeyUsageCritical,
+                              subjectNames, sid }
 ```
 
 Both ports are implemented once with `node:crypto` in the standalone verifier
@@ -856,13 +856,13 @@ Fixture families, per provider class:
     anchored limitation fails claim-consistency, and an unanchored bundle whose
     stored claim asserts one fails it too.
 
-RFC 3161-specific negative fixtures (from the §6.1 rule set): missing or
-additional extended key usage; `genTime` outside the certificate validity
-window; malformed `genTime` (fractional zeros, missing Zulu); two
-`SignerInfo`s; missing `signedAttrs`; signing-certificate attribute naming a
-certificate not embedded; `sid` inconsistent with the identified certificate;
-unknown critical TSTInfo extension; `tsa` name not among the certificate's
-subject names; indefinite-length encoding. Plus the regression fixture: an
+RFC 3161-specific negative fixtures (from the §6.1 rule set): missing,
+additional, or non-critical extended key usage; `genTime` outside the
+certificate validity window; malformed `genTime` (fractional zeros, missing
+Zulu); two `SignerInfo`s; missing `signedAttrs`; signing-certificate attribute
+naming a certificate not embedded; `sid` inconsistent with the identified
+certificate; unknown critical TSTInfo extension; `tsa` name not among the
+certificate's subject names; indefinite-length encoding. Plus the regression fixture: an
 existing pre-anchor golden bundle verifies byte-identically under the new
 verifier.
 
@@ -1031,13 +1031,10 @@ Problem-framed, typed, filed only after this design is approved:
    against the kit.
 3. **OpenTimestamps provider** (`feat`) — pending/upgrade lifecycle,
    header-supplied evaluation.
-4. **Certificate-port criticality** (`fix`-grade follow-up) — widen the
-   certificate port to surface extension criticality, closing §6.1 rule 9's
-   recorded gap.
-5. **Dispatch timestamps in the assembly header** (`design` first) — would make
+4. **Dispatch timestamps in the assembly header** (`design` first) — would make
    "anchored before first dispatch" offline-checkable; a different claim and a
    schema change, deliberately not smuggled in here.
-6. **Marketplace composition** (`design` later) — one honesty statement when a
+5. **Marketplace composition** (`design` later) — one honesty statement when a
    run carries both chain-based ordering and proof-carrying anchors.
 
 ## 17. Review disposition
@@ -1134,8 +1131,8 @@ below tightens the body text, this addendum governs.
   (chain-to-caller-roots exceeds the two sketched ports without parsing
   X.509 in core). Issuers must be CA-marked; a leaf byte-identical to a
   supplied root is an RFC 5280 zero-length path, validity-checked.
-  Revocation, path-length, and name constraints are disclosed as unchecked
-  (issue #2761's family). Verifiers additionally declare their class,
+  Revocation, path-length, and name constraints remain disclosed as unchecked.
+  Verifiers additionally declare their class,
   posture, and time basis; `present` results carry facts but never `time`.
 
 ### 19.3 RFC 3161 profile (§6.1)
@@ -1246,5 +1243,5 @@ Provenance: packet PRs #2764, #2765, #2767, #2772, #2773, #2780, #2781,
 #2783; conformance fixtures include two captured production tokens and a
 Bitcoin-attested real proof (block 962949) whose verification was
 independently re-derived during review. Follow-ups filed: #2761 (criticality
-port), #2762, #2763 (design stubs), #2766 and #2782 (pre-existing CI flakes
-surfaced by the program).
+port, implemented), #2762, #2763 (design stubs), #2766 and #2782 (pre-existing
+CI flakes surfaced by the program).

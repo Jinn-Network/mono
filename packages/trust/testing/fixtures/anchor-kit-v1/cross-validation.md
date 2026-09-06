@@ -168,10 +168,10 @@ as the kit's own suite reports them `present` rather than `verified`.
 
 ## 4. The negative fixtures, checked against the same implementation
 
-Each of the twenty-nine RFC 3161 negatives was minted and run through
+Each of the thirty RFC 3161 negatives was minted and run through
 `openssl ts -verify -digest <subject> -token_in -CAfile kit-authority.pem`
 (the wrong-subject case supplies the unrelated digest its own case declares).
-Twenty-three are independently refused, with the reason OpenSSL gives:
+Twenty-four are independently refused, with the reason OpenSSL gives:
 
 | Kit negative | OpenSSL |
 |---|---|
@@ -194,6 +194,7 @@ Twenty-three are independently refused, with the reason OpenSSL gives:
 | signature made by a different key | `EVP_PKEY_verify: provider signature failure` |
 | extended key usage with an additional usage | `ts_verify_cert: certificate verify error` |
 | no extended key usage extension | `ts_verify_cert: certificate verify error` |
+| timeStamping extended key usage is not critical | `ts_verify_cert: certificate verify error` (`unsuitable certificate purpose`) |
 | tsa name not among the certificate's subject names | `int_ts_RESP_verify_token: tsa name mismatch` |
 | genTime without the Zulu designator | `asn1_ex_c2i: generalizedtime is too short` |
 | genTime without seconds | `asn1_ex_c2i: generalizedtime is too short` |
