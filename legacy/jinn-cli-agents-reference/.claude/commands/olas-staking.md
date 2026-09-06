@@ -1,1 +1,0 @@
-../../skills/olas-staking/SKILL.md

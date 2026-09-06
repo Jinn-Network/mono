@@ -103,7 +103,6 @@ export const DEFAULT_EXCLUSIONS = {
     'log/', // decision records (DRs), including DR-2026-08-04 itself
     'docs/press/', // published press releases
     'docs/superpowers/', // dated design specs and implementation plans
-    'legacy/', // frozen legacy surface
   ],
 };
 

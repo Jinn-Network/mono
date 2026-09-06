@@ -1,6 +1,0 @@
-{
-  "scripts": {
-    "setup": "./setup-worktree.sh",
-    "run": "yarn mech"
-  }
-}
