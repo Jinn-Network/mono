@@ -1,7 +1,9 @@
 name: native-e2e-rig
 
-# Native fleet e2e rig (one-swap M7, umbrella #2461, DR-2026-08-05) + the G-archive
-# separate-process consumer. Issue #2472: `e2e:daemon-harness` was wired into NO workflow.
+# Scheduled/manual advisory wiring for `yarn e2e:daemon-harness:native`, covering
+# the one-swap M7 native fleet rig (umbrella #2461, DR-2026-08-05) plus the
+# G-archive separate-process consumer. Native mode must follow the Base Sepolia
+# (chain ID 84532) policy.
 #
 # WHY SCHEDULED + manual, NOT a PR-blocking gate (the flake-honesty rule,
 # memory: dont-over-validate-flaky-nongating-tests / CLAUDE.md workflow rules):
@@ -9,16 +11,18 @@ name: native-e2e-rig
 #   - the native rig forks LIVE Base Sepolia over the network (a public RPC) and
 #     spawns Anvil; a network blip or RPC rate-limit is not a code regression;
 #   - the archive rig spawns a second OS process and a TCP listener.
-# Wiring either onto a blocking gate would put a flake on the merge path. The
-# DETERMINISTIC half of the native boot — the fixture identity/trust boot leg —
-# is already covered on the blocking `client` suite by
-# `test/daemon/native-fleet-e2e-fixtures.test.ts` (mock-anchored, no chain), so
-# a real code regression in the fixtures still reddens PR CI. This job proves the
-# on-CHAIN, finality-gated legs the fork can provide, advisorily.
+# Wiring either onto a blocking gate would put a flake on the merge path.
+# Deterministic blocking coverage is split across CI: `yarn test:hermetic` in
+# hermetic-gate.yml covers the snapshot/subprocess loops, while `yarn test` in
+# ci.yml runs `test/daemon/native-fleet-e2e-fixtures.test.ts`, the mock-anchored
+# fixture identity/trust boot leg. This workflow proves the on-chain,
+# finality-gated legs a live fork can provide, as advisory evidence only.
 #
-# The LIVE G-loop/G-archive gate on real Base Sepolia with two funded operators is
-# DEPLOY-TIME per docs/runbooks/cutover-one-swap-drain.md §8 — this rig makes it
-# runnable and proves as much as an Anvil fork can (see the rig's leg table).
+# Operator-run, non-CI live-fork cutover evidence and the required deploy-PR
+# record are defined in docs/runbooks/cutover-one-swap-drain.md. This workflow is
+# supplemental and does not replace those runs. The LIVE G-loop/G-archive gate
+# on real Base Sepolia with two funded operators remains DEPLOY-TIME per that
+# runbook; this rig proves as much as an Anvil fork can (see its leg table).
 
 on:
   workflow_dispatch: {}
