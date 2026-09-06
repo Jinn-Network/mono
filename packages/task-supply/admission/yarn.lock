@@ -81,7 +81,7 @@ __metadata:
   resolution: "@jinn-network/task-execution-profiles@portal:../../task-execution/profiles::locator=%40jinn-network%2Ftask-admission%40workspace%3A."
   dependencies:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
-    "@noble/hashes": "npm:2.2.0"
+    "@noble/hashes": "npm:^2.2.0"
     ajv: "npm:8.17.1"
     safe-regex: "npm:2.1.1"
     zod: "npm:4.4.3"

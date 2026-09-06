@@ -23,6 +23,36 @@ const TASK_EXECUTION_PACKAGES = [
   ['oci-grader', '@jinn-network/task-execution-oci-grader'],
 ];
 
+// The range is the compatibility contract: all three packages use the v2 exports and may
+// consume compatible v2 fixes. Reproducibility comes from each standalone project's committed
+// Yarn lock selecting one concrete artifact, not from narrowing the public manifest range.
+// Canonical output is guarded independently by the named golden digest/vector tests, so a
+// dependency refresh that changes bytes fails at the behavior boundary rather than being hidden
+// behind a manifest pin or a resolution override.
+const NOBLE_HASHES_RANGE = '^2.2.0';
+const HASH_PRODUCERS = [
+  {
+    directory: 'packages/task-execution/profiles',
+    goldenTests: [
+      ['src/bytes.test.ts', 'reproduces the pinned digest for the key-order-sensitive record'],
+    ],
+  },
+  {
+    directory: 'packages/task-execution/protocol',
+    goldenTests: [
+      ['src/hashing.test.ts', 'matches the known SHA-256 test vector for the ASCII string'],
+      ['src/fixtures.test.ts', 'identical pinned digest (consumer-side)'],
+    ],
+  },
+  {
+    directory: 'packages/evidence/protocol',
+    goldenTests: [
+      ['src/contracts.test.ts', 'hashes the exact bytes with SHA-256'],
+      ['src/fixtures.test.ts', 'keeps every available top-level collection artifact byte-current'],
+    ],
+  },
+];
+
 // Packages OUTSIDE the task-execution tree that a task-execution package may legitimately
 // portal-resolve (backend plan program §7.7: the assembly consumes the evidence CONTRACT
 // packages + the I/O-free execution-recorder producer only — never evidence-local-runtime or
@@ -205,6 +235,24 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(root, external[0]))}`;
 }
 
+function lockedArtifact(lock, selector) {
+  const lines = lock.split('\n');
+  const descriptorIndex = lines.findIndex((line) => {
+    if (!line.startsWith('"') || !line.endsWith('":')) return false;
+    return line.slice(1, -2).split(', ').includes(selector);
+  });
+  assert.notEqual(descriptorIndex, -1, `missing lock descriptor ${selector}`);
+  const entry = lines.slice(descriptorIndex + 1).find((line) => !line.startsWith('  '));
+  const endIndex = entry === undefined
+    ? lines.length
+    : lines.indexOf(entry, descriptorIndex + 1);
+  const block = lines.slice(descriptorIndex + 1, endIndex).join('\n');
+  const version = /^  version: (\d+\.\d+\.\d+)$/mu.exec(block)?.[1];
+  const resolution = /^  resolution: "@noble\/hashes@npm:(\d+\.\d+\.\d+)"$/mu.exec(block)?.[1];
+  assert.ok(version, `${selector} must lock a concrete semantic version`);
+  assert.equal(resolution, version, `${selector} must resolve to its locked concrete artifact`);
+}
+
 test('the task-execution package inventory is explicit and has one manifest', () => {
   // Read live (Global Constraints: package counts are computed against the guard's current
   // total, never a hardcoded guessed number) — TASK_EXECUTION_PACKAGES.length IS that live
@@ -248,6 +296,39 @@ test('task-execution package Jinn dependencies and portal resolutions match the 
       assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
         `${directory} must resolve ${dependencyName} through its matching portal`);
     }
+  }
+});
+
+test('@noble/hashes uses one v2 compatibility range with concrete locks and golden output guards', () => {
+  for (const { directory, goldenTests } of HASH_PRODUCERS) {
+    const manifest = JSON.parse(readFileSync(join(root, directory, 'package.json'), 'utf8'));
+    assert.equal(
+      manifest.dependencies?.['@noble/hashes'],
+      NOBLE_HASHES_RANGE,
+      `${directory} must declare the shared @noble/hashes v2 compatibility range`,
+    );
+
+    const lock = readFileSync(join(root, directory, 'yarn.lock'), 'utf8');
+    lockedArtifact(lock, `@noble/hashes@npm:${NOBLE_HASHES_RANGE}`);
+
+    for (const [testFile, assertion] of goldenTests) {
+      const source = readFileSync(join(root, directory, testFile), 'utf8');
+      assert.ok(
+        source.includes(assertion),
+        `${directory}/${testFile} must retain its canonical-output assertion`,
+      );
+    }
+  }
+});
+
+test('task-execution manifests never override @noble/hashes resolution', () => {
+  for (const [directory] of TASK_EXECUTION_PACKAGES) {
+    const manifest = readPackage(directory);
+    assert.equal(
+      Object.hasOwn(manifest.resolutions ?? {}, '@noble/hashes'),
+      false,
+      `${directory} must select @noble/hashes through its dependency range and committed lock`,
+    );
   }
 });
 
