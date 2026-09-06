@@ -152,7 +152,7 @@ function consumer(input: {
   readonly routes: Map<string, unknown>;
   readonly verify: NativeDiscoverySource['verify'];
   readonly verifyHead?: NativeDiscoverySource['verifyHead'];
-  readonly decode?: ReturnType<typeof createNativeDiscoveryConsumer>['decode'];
+  readonly decode?: (input: NativeDiscoveryDecodeInput) => Promise<AnnouncedSubmissionCard | undefined>;
   readonly now?: () => Date;
   readonly selfServed?: boolean;
 }) {

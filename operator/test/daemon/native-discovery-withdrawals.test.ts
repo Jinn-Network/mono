@@ -220,6 +220,10 @@ describe('drainNativeDiscoveryWithdrawals', () => {
         },
       });
 
+      // Two failures either side of the success, so the assertion discriminates: without the
+      // clear the counter would stand at four by the last pass and the withdrawal would already
+      // be quarantined -- with it, the run after the success starts over from one.
+      await expect(drain()).rejects.toThrow('absent from authenticated history');
       await expect(drain()).rejects.toThrow('absent from authenticated history');
       target = 'announcement-1';
       await expect(drain()).resolves.toBe(1);
@@ -228,6 +232,7 @@ describe('drainNativeDiscoveryWithdrawals', () => {
       // from one rather than tripping the threshold on its first failure.
       acknowledgeWithdrawal.mockClear();
       target = 'announcement-never-seen';
+      await expect(drain()).rejects.toThrow('absent from authenticated history');
       await expect(drain()).rejects.toThrow('absent from authenticated history');
       expect(isPoisonQuarantined({
         store,
