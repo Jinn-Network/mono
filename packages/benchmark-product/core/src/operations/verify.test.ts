@@ -2,30 +2,54 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { parseMatrix, sealMatrix } from "@jinn-network/benchmarking-records";
+import { RUN_RECORD_KIND, parseMatrix, sealMatrix } from "@jinn-network/benchmarking-records";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
-import { canonicalJsonBytes, parseDsseEnvelope, sealDsseEnvelope } from "@jinn-network/trust-core";
+import {
+  ANCHOR_EVIDENCE_KIND,
+  OPENTIMESTAMPS_ANCHOR_PROFILE,
+  RFC3161_TSA_ANCHOR_PROFILE,
+  canonicalJsonBytes,
+  parseDsseEnvelope,
+  sealAnchorEvidence,
+  sealDsseEnvelope,
+} from "@jinn-network/trust-core";
+import type { AnchorProofSource } from "@jinn-network/trust-core";
+import {
+  KIT_AUTHORITY_SEED,
+  KIT_BITCOIN_BLOCK_HEIGHT,
+  KIT_CALENDAR_URI,
+  buildLinearOtsProof,
+  createFixtureAuthority,
+} from "@jinn-network/trust-testing";
+import { runCli } from "../cli/main.js";
+import type { CliContext } from "../cli/result.js";
+import { encodeAnchorProofContent, RFC3161_TOKEN_MEDIA_TYPE } from "../anchor/profiles.js";
+import type { AnchorHttpFetch } from "../anchor/sources.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunState, writeRunState } from "../run/state.js";
-import { claimPackageArtifactPath, runCancelMarkerPath } from "../workspace/layout.js";
+import { claimPackageArtifactPath, runCancelMarkerPath, runStatePath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes, sealedRecordPath, sha256Hex } from "../workspace/sealed-store.js";
 import { LEGACY_VERDICT_EVALUATOR_ID, createVerdictDsseSigner, loadOrCreateVerdictSigningKey, sealVerdictStatement } from "../venue/signing.js";
 import type { LocalVenue } from "../venue/venue.js";
 import { readAuditEntries } from "../audit/journal.js";
 import { armAdd } from "./arms.js";
 import type { OperationContext } from "./context.js";
-import { createDraft, readDraftDocument } from "./drafts.js";
+import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { runCollect } from "./run-collect.js";
 import { runLaunch } from "./run-launch.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
+import { runAnchor } from "./run-anchor.js";
 import { runReport } from "./report.js";
 import { runVerify } from "./verify.js";
 import { sampleInit } from "./sample.js";
 
 let workspaceDir: string;
+
+const TSA_ENDPOINT = "https://timestamp.invalid/tsr";
+const anchorAuthority = createFixtureAuthority(KIT_AUTHORITY_SEED);
 
 beforeEach(() => {
   workspaceDir = mkdtempSync(join(tmpdir(), "bp13-verify-op-"));
@@ -196,18 +220,30 @@ function fakeVenue(backend: ProxiedBackend): LocalVenue {
   };
 }
 
-async function setUpClosedRun(clock: () => string, draftId = "draft-1"): Promise<void> {
+async function setUpClosedRun(
+  clock: () => string,
+  draftId = "draft-1",
+  options: {
+    readonly draftPatch?: unknown;
+    readonly afterLock?: (runSha256: string) => Promise<void>;
+  } = {},
+): Promise<void> {
   initWorkspace(contextFor(clock));
   createDraft(contextFor(clock), { draftId, name: "Verify Test" });
   const sample = await sampleInit(contextFor(clock), { draftId });
   expect(sample.ok).toBe(true);
   if (!sample.ok) throw new Error("unreachable");
+  if (options.draftPatch !== undefined) {
+    updateDraft(contextFor(clock), { draftId, patch: options.draftPatch });
+  }
   armAdd(contextFor(clock), { draftId, armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
   armAdd(contextFor(clock), { draftId, armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
   const quoted = await runQuote(contextFor(clock), { draftId });
   expect(quoted.ok).toBe(true);
   const locked = runLock(contextFor(clock), { draftId });
   expect(locked.ok).toBe(true);
+  if (!locked.ok) throw new Error("unreachable");
+  await options.afterLock?.(locked.result.runSha256);
 
   const { backend } = makeStatefulFakeBackend(workspaceDir, sample.result.evaluationSpecSha256);
   const launched = await runLaunch(contextFor(clock), { draftId }, { createVenue: () => fakeVenue(backend) });
@@ -217,6 +253,68 @@ async function setUpClosedRun(clock: () => string, draftId = "draft-1"): Promise
   expect(collected.ok).toBe(true);
   if (!collected.ok) throw new Error("unreachable");
   expect(readDraftDocument(workspaceDir, draftId).state).toBe("closed");
+}
+
+function rfc3161SourceFor(subjectSha256: string): AnchorProofSource {
+  const minted = anchorAuthority.mintTimeStampToken({ subjectSha256, genTime: "20260805120000Z" });
+  return {
+    profile: RFC3161_TSA_ANCHOR_PROFILE,
+    async obtainProof() {
+      return minted.tokenDer;
+    },
+  };
+}
+
+function calendarBody(height?: number): Uint8Array {
+  return buildLinearOtsProof({
+    fileDigest: new Uint8Array(32),
+    operations: [{ kind: "append", argument: Uint8Array.of(0x6a, 0x69, 0x6e, 0x6e) }, { kind: "sha256" }],
+    attestations: height === undefined
+      ? [{ kind: "pending", uri: KIT_CALENDAR_URI }]
+      : [{ kind: "bitcoin", height }],
+  }).subarray(31 + 1 + 1 + 32);
+}
+
+function calendarTransport(state: { confirmed: boolean }): AnchorHttpFetch {
+  return async (request) => {
+    if (request.url.endsWith("/digest")) return { status: 200, bytes: calendarBody() };
+    return state.confirmed
+      ? { status: 200, bytes: calendarBody(KIT_BITCOIN_BLOCK_HEIGHT) }
+      : { status: 404, bytes: new TextEncoder().encode("Pending confirmation in Bitcoin blockchain") };
+  };
+}
+
+async function addPendingOpenTimestampsAnchor(clock: () => string): Promise<string> {
+  const pending = await runAnchor(
+    contextFor(clock),
+    {
+      draftId: "draft-1",
+      subject: "lock",
+      providerProfile: OPENTIMESTAMPS_ANCHOR_PROFILE,
+      endpoint: KIT_CALENDAR_URI,
+    },
+    { fetch: calendarTransport({ confirmed: false }) },
+  );
+  expect(pending.ok, JSON.stringify(pending)).toBe(true);
+  if (!pending.ok) throw new Error("pending anchor failed");
+  return pending.result.recordSha256;
+}
+
+function cliContext(clock: () => string): CliContext {
+  return { cwd: workspaceDir, clock };
+}
+
+function verifyArgs(json = false): string[] {
+  return [
+    "verify",
+    "--workspace",
+    workspaceDir,
+    "--principal",
+    "sponsor-1",
+    "--draft",
+    "draft-1",
+    ...(json ? ["--json"] : []),
+  ];
 }
 
 /** Closed + reported: the fixture every report-tamper and claim-tamper test starts from. */
@@ -263,6 +361,250 @@ describe("runVerify — happy path", () => {
     },
     30_000,
   );
+});
+
+describe("runVerify — pre-report integrity anchors", () => {
+  test("reports a pending OTS anchor and the still-open anchoring window", async () => {
+    const clock = makeClock();
+    let recordSha256 = "";
+    await setUpClosedRun(clock, "draft-1", {
+      afterLock: async () => { recordSha256 = await addPendingOpenTimestampsAnchor(clock); },
+    });
+
+    const outcome = await runVerify(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    if (!outcome.ok) return;
+
+    expect(outcome.result.checks).toEqual(["matrix-rederivation", "integrity-anchors"]);
+    expect(outcome.result.anchors?.anchors).toEqual([
+      expect.objectContaining({
+        recordSha256,
+        provider: OPENTIMESTAMPS_ANCHOR_PROFILE,
+        subject: "lock",
+        status: "pending",
+        timeBasis: "authority-time",
+      }),
+    ]);
+    expect(outcome.result.anchoringWindow).toEqual({ closingOperation: "report" });
+
+    const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    const afterReport = await runVerify(contextFor(clock), { draftId: "draft-1" });
+    expect(afterReport.ok, JSON.stringify(afterReport)).toBe(true);
+    if (!afterReport.ok) return;
+    expect(afterReport.result.anchors?.anchors[0]?.status).toBe("pending");
+    expect(afterReport.result.anchoringWindow).toBeUndefined();
+    expect(afterReport.result.checks).toEqual([
+      "matrix-rederivation",
+      "report-verification",
+      "claim-consistency",
+      "integrity-anchors",
+    ]);
+  }, 30_000);
+
+  test("does not trust producer bookkeeping to resolve a pending proof", async () => {
+    const clock = makeClock();
+    let pendingRecordSha256 = "";
+    await setUpClosedRun(clock, "draft-1", {
+      afterLock: async (runSha256) => {
+        pendingRecordSha256 = await addPendingOpenTimestampsAnchor(clock);
+        const anchored = await runAnchor(
+          contextFor(clock),
+          {
+            draftId: "draft-1",
+            subject: "lock",
+            providerProfile: RFC3161_TSA_ANCHOR_PROFILE,
+            endpoint: TSA_ENDPOINT,
+          },
+          { sources: { [RFC3161_TSA_ANCHOR_PROFILE]: rfc3161SourceFor(runSha256) } },
+        );
+        expect(anchored.ok, JSON.stringify(anchored)).toBe(true);
+        if (!anchored.ok) throw new Error("complete anchor failed");
+
+        // RunState labels are producer bookkeeping. Make the complete RFC 3161 record claim to be
+        // the OTS pending record's successor; the sealed bytes still identify different providers.
+        const state = readRunState(workspaceDir, "draft-1");
+        if (state === undefined) throw new Error("run state missing");
+        // Bypass the guarded writer deliberately: this is an on-disk corruption test.
+        writeFileSync(runStatePath(workspaceDir, "draft-1"), `${JSON.stringify({
+          ...state,
+          anchors: state.anchors?.map((anchor) => anchor.recordSha256 === anchored.result.recordSha256
+            ? {
+                ...anchor,
+                provider: OPENTIMESTAMPS_ANCHOR_PROFILE,
+                upgradesRecordSha256: pendingRecordSha256,
+              }
+            : anchor),
+        })}\n`);
+      },
+    });
+
+    const outcome = await runVerify(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.anchors?.anchors[0]).toMatchObject({
+      subject: "lock",
+      timeBasis: "authority-time",
+    });
+    expect(outcome.result.anchors?.anchors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ recordSha256: pendingRecordSha256, status: "pending" }),
+      expect.objectContaining({
+        provider: RFC3161_TSA_ANCHOR_PROFILE,
+        status: "present",
+        trustMaterial: "none",
+      }),
+    ]));
+    expect(outcome.result.anchoringWindow).toEqual({ closingOperation: "report" });
+  }, 30_000);
+
+  test("keeps an upgraded pending record listed without warning that its window is open", async () => {
+    const clock = makeClock();
+    let pendingRecordSha256 = "";
+    let upgradedRecordSha256 = "";
+    await setUpClosedRun(clock, "draft-1", {
+      afterLock: async () => {
+        pendingRecordSha256 = await addPendingOpenTimestampsAnchor(clock);
+        const upgraded = await runAnchor(
+          contextFor(clock),
+          {
+            draftId: "draft-1",
+            subject: "lock",
+            providerProfile: OPENTIMESTAMPS_ANCHOR_PROFILE,
+            endpoint: KIT_CALENDAR_URI,
+          },
+          { fetch: calendarTransport({ confirmed: true }) },
+        );
+        expect(upgraded.ok, JSON.stringify(upgraded)).toBe(true);
+        if (!upgraded.ok) throw new Error("anchor upgrade failed");
+        upgradedRecordSha256 = upgraded.result.recordSha256;
+      },
+    });
+
+    const outcome = await runVerify(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.anchors?.anchors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ recordSha256: pendingRecordSha256, status: "pending" }),
+      expect.objectContaining({ recordSha256: upgradedRecordSha256, status: "present" }),
+    ]));
+    expect(outcome.result.anchors?.anchors).toHaveLength(2);
+    expect(outcome.result.anchoringWindow).toBeUndefined();
+  }, 30_000);
+
+  test("reports declared-but-absent anchoring intent before report", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock, "draft-1", {
+      draftPatch: {
+        anchoring: { enabled: false, declaredProviders: [RFC3161_TSA_ANCHOR_PROFILE] },
+      },
+    });
+
+    const outcome = await runVerify(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.anchors).toMatchObject({
+      anchors: [],
+      subjects: [
+        {
+          subject: "lock",
+          outcome: "declared-but-absent",
+          declaredProfiles: [RFC3161_TSA_ANCHOR_PROFILE],
+        },
+        { subject: "matrix", outcome: "absent" },
+      ],
+      invalid: [],
+    });
+  }, 30_000);
+
+  test("refuses an anchor the shared evaluator marks invalid", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    const state = readRunState(workspaceDir, "draft-1");
+    if (state?.runSha256 === undefined) throw new Error("sealed run missing");
+    const token = anchorAuthority.mintTimeStampToken({
+      subjectSha256: state.runSha256,
+      genTime: "20270805120000Z",
+    });
+    const invalid = sealAnchorEvidence({
+      kind: ANCHOR_EVIDENCE_KIND,
+      subject: { kind: RUN_RECORD_KIND, digest: { sha256: state.runSha256 } },
+      provider: RFC3161_TSA_ANCHOR_PROFILE,
+      proof: {
+        mediaType: RFC3161_TOKEN_MEDIA_TYPE,
+        content: encodeAnchorProofContent(token.tokenDer),
+      },
+    });
+    const recordSha256 = putSealedBytes(workspaceDir, invalid.bytes);
+    writeRunState(workspaceDir, "draft-1", {
+      ...state,
+      anchors: [{ subject: "lock", provider: RFC3161_TSA_ANCHOR_PROFILE, recordSha256 }],
+    });
+
+    const outcome = await runVerify(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("record-integrity");
+    expect(outcome.error.detail).toContain("carried anchor is invalid");
+    expect(outcome.error.detail).toContain("after this run's own pre-registered close instant");
+  }, 30_000);
+
+  test("preserves the legacy unanchored closed result shape", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+
+    const outcome = await runVerify(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result).toEqual({
+      draftId: "draft-1",
+      checks: ["matrix-rederivation"],
+      matrixSha256: readRunState(workspaceDir, "draft-1")?.matrixSha256,
+    });
+  }, 30_000);
+
+  test("CLI human and JSON modes expose pending anchors and the report boundary", async () => {
+    const clock = makeClock();
+    let recordSha256 = "";
+    await setUpClosedRun(clock, "draft-1", {
+      afterLock: async () => { recordSha256 = await addPendingOpenTimestampsAnchor(clock); },
+    });
+
+    const human = await runCli(verifyArgs(), cliContext(clock));
+    expect(human.exitCode, human.stderr).toBe(0);
+    expect(human.stdout.split("\n")[0]).toBe("verified draft draft-1: matrix-rederivation, integrity-anchors");
+    expect(human.stdout).toContain(`anchor lock: ${OPENTIMESTAMPS_ANCHOR_PROFILE}, authority-time, pending, record ${recordSha256}`);
+    expect(human.stdout).toContain("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
+
+    const json = await runCli(verifyArgs(true), cliContext(clock));
+    expect(json.exitCode, json.stderr).toBe(0);
+    const parsed = JSON.parse(json.stdout) as { result: { anchors?: unknown; anchoringWindow?: unknown } };
+    expect(parsed.result.anchors).toBeDefined();
+    expect(parsed.result.anchoringWindow).toEqual({ closingOperation: "report" });
+  }, 30_000);
+
+  test("CLI human mode does not render terminal controls from malformed anchor metadata", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    const state = readRunState(workspaceDir, "draft-1");
+    if (state?.runSha256 === undefined) throw new Error("sealed run missing");
+    const controlSequence = "\u001b]8;;https://attacker.invalid\u0007forged-link\u001b]8;;\u0007";
+    const provider = `https://provider.invalid/${controlSequence}`;
+    const recordSha256 = putSealedBytes(workspaceDir, canonicalJsonBytes({
+      kind: ANCHOR_EVIDENCE_KIND,
+      subject: { kind: RUN_RECORD_KIND, digest: { sha256: state.runSha256 } },
+      provider,
+      proof: { mediaType: RFC3161_TOKEN_MEDIA_TYPE, content: "AA==" },
+    }));
+    writeRunState(workspaceDir, "draft-1", {
+      ...state,
+      anchors: [{ subject: "lock", provider, recordSha256 }],
+    });
+
+    const human = await runCli(verifyArgs(), cliContext(clock));
+    expect(human.exitCode).toBe(1);
+    expect(human.stderr).toContain("error (record-integrity)");
+    expect(human.stderr).not.toContain(controlSequence);
+  }, 30_000);
 });
 
 describe("runVerify — matrix tamper detection", () => {
