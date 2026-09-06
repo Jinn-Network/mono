@@ -55,6 +55,7 @@ import {
   formatSequence,
   headPath,
   parseAnnouncementEntry,
+  parseHeadTimestamp,
   parseSourceHead,
   parseWireDsseEnvelope,
   recordDigest,
@@ -1717,7 +1718,14 @@ async function appendRequesterSource(input: {
   const publication = currentAssociation.publication;
   const committed = await input.state.readSource();
   const requestedTimestamp = input.now().getTime();
-  const previousTimestamp = committed.last === undefined ? Number.NEGATIVE_INFINITY : new Date(committed.last.head.issuedAt).getTime();
+  // `parseHeadTimestamp` (#3482, #4096) reads the previous head's `issuedAt`
+  // exactly as the schema and `assertIntentOwnership` will. A bare `new Date`
+  // returned `NaN` for a leap second, and `NaN` does not fail closed here:
+  // `Math.max(x, NaN)` is `NaN`, so the next line's `new Date(NaN).toISOString()`
+  // threw a bare `RangeError` instead of minting the next timestamp. This
+  // operator only ever reads its own `toISOString()`-minted head, so that was
+  // latent, but the shared reading removes the crash rather than documenting it.
+  const previousTimestamp = committed.last === undefined ? Number.NEGATIVE_INFINITY : parseHeadTimestamp(committed.last.head.issuedAt);
   const timestamp = new Date(Math.max(requestedTimestamp, previousTimestamp + 1)).toISOString();
   const command = publication.sequence === ''
     ? {

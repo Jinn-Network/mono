@@ -172,4 +172,17 @@ describe("createTrustAdapter (§10.1: wraps trust-core key-binding resolution)",
     expect(adapter.fresh.isFresh("2026-07-29T00:00:00.000Z", new Date("2026-07-28T12:00:00.000Z"))).toBe(true);
     expect(adapter.fresh.isFresh("2026-07-28T00:00:00.000Z", new Date("2026-07-28T12:00:00.000Z"))).toBe(false);
   });
+
+  it("fresh.isFresh() reads a refreshBy through the protocol's one strict helper, leap seconds included (#3603)", () => {
+    const adapter = createTrustAdapter({ bindingResolver: makeFakeBindingResolver([]), keyCatalog: makeAgentKeyCatalog({}), verifier: fakeVerifier });
+
+    // `parseHeadTimestamp` reads `23:59:60` as `23:59:59.999` (#3482). A bare
+    // `new Date` returned NaN, so a leap-second refreshBy read as stale -- benign,
+    // but a different answer than the schema that admitted it gives.
+    expect(adapter.fresh.isFresh("2026-06-30T23:59:60Z", new Date("2026-06-30T23:00:00.000Z"))).toBe(true);
+    expect(adapter.fresh.isFresh("2026-06-30T23:59:60Z", new Date("2026-07-01T00:00:00.000Z"))).toBe(false);
+
+    // A spelling the §5.2 schema refuses stays unreadable, and unreadable is stale.
+    expect(adapter.fresh.isFresh("2026-07-29T00:00:00", new Date("2026-07-28T12:00:00.000Z"))).toBe(false);
+  });
 });

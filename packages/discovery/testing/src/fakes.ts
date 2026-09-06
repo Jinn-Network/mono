@@ -1,6 +1,7 @@
 import {
   DISCOVERY_SIGNING_SCOPE,
   dssePreAuthEncoding,
+  parseHeadTimestamp,
   recordDigest,
   referenceBearingFields,
   sealJson,
@@ -142,7 +143,11 @@ function makeSignatureVerifier(): SignatureVerifier {
 function makeFreshnessPolicy(): FreshnessPolicy {
   return {
     isFresh(refreshBy: string, now: Date): boolean {
-      return new Date(refreshBy).getTime() > now.getTime();
+      // Mirrors `packages/discovery/client`'s real adapter, which reads head
+      // timestamps through the protocol package's single strict helper (#3482,
+      // #3603). A fake that answered differently on a leap-second `refreshBy`
+      // would make the kit disagree with the adapter it stands in for.
+      return parseHeadTimestamp(refreshBy) > now.getTime();
     },
   };
 }

@@ -11,6 +11,7 @@ import {
   compareCodeUnitStrings,
   headPath,
   parseAnnouncementEntry,
+  parseHeadTimestamp,
   parseSourceHead,
   parseWireDsseEnvelope,
 } from "@jinn-network/record-discovery-protocol";
@@ -207,7 +208,15 @@ export async function resolveHeadAcrossMirrors(
       best === undefined ||
       compareCodeUnitStrings(synced.head.sequence, best.synced.head.sequence) > 0 ||
       (synced.head.sequence === best.synced.head.sequence &&
-        new Date(synced.head.issuedAt).getTime() > new Date(best.synced.head.issuedAt).getTime())
+        // `parseHeadTimestamp`, not `new Date`: the protocol package owns the one
+        // strict reading of a head timestamp (#3482), and this tie-break is the
+        // documented "proceed from the highest" rule (§5.2/§13.3). The readings
+        // disagree on exactly one input class the schema now ADMITS -- a leap
+        // second, which `parseHeadTimestamp` projects onto `23:59:59.999` and
+        // `new Date` reports as `NaN`. Under `NaN` both comparisons are `false`,
+        // so the tie silently fell through to the first-listed mirror instead of
+        // the later head. Fail-closed, but not the rule (#3603).
+        parseHeadTimestamp(synced.head.issuedAt) > parseHeadTimestamp(best.synced.head.issuedAt))
     ) {
       best = { endpoint, synced };
     }

@@ -229,6 +229,35 @@ describe("resolveHeadAcrossMirrors (§5.2/§13.3: cold-start mirror disagreement
     expect(result?.synced.head.sequence).toBe("0000000000000005");
   });
 
+  it("breaks a sequence tie on a leap-second issuedAt instead of falling through to the first mirror (#3603)", async () => {
+    // `parseHeadTimestamp` admits `23:59:60` and projects it onto `23:59:59.999`
+    // (#3482); a bare `new Date` returns NaN, under which both sides of the
+    // tie-break compare `false` and the FIRST-listed mirror wins regardless of
+    // which head is later. Mirror A is listed first and is the earlier head, so
+    // only the shared reading picks B.
+    const mirrorA: SourceEndpoint = { ...ENDPOINT, servingRoot: "https://mirror-a.example" };
+    const mirrorB: SourceEndpoint = { ...ENDPOINT, servingRoot: "https://mirror-b.example" };
+
+    const headAt = (sequence: string, issuedAt: string): SourceHead => ({
+      protocol: "https://spec.jinn.network/record-discovery/v1",
+      origin: "did:key:zAgentSourceOne/feed",
+      sequence,
+      entry: `sha256:${"a".repeat(64)}`,
+      issuedAt,
+      refreshBy: "2026-07-29T12:00:00.000Z",
+    });
+
+    const routes = new Map<string, unknown>([
+      ["https://mirror-a.example" + headPath("feed"), headAt("0000000000000005", "2026-06-30T23:59:59.000Z")],
+      ["https://mirror-b.example" + headPath("feed"), headAt("0000000000000005", "2026-06-30T23:59:60Z")],
+    ]);
+
+    const result = await resolveHeadAcrossMirrors([mirrorA, mirrorB], { transport: makeRoutedTransport(routes) });
+
+    expect(result?.endpoint.servingRoot).toBe("https://mirror-b.example");
+    expect(result?.synced.head.issuedAt).toBe("2026-06-30T23:59:60Z");
+  });
+
   it("skips mirrors that fail to respond", async () => {
     const mirrorA: SourceEndpoint = { ...ENDPOINT, servingRoot: "https://mirror-a.example" };
     const mirrorB: SourceEndpoint = { ...ENDPOINT, servingRoot: "https://mirror-b.example" };
