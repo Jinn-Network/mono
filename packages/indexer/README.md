@@ -73,15 +73,12 @@ See `deploy/README.md` for the full production deployment guide. The short versi
 
 ## Schema-version policy
 
-Any **breaking change** to an existing entity — renaming or removing a column,
-changing a column type — requires a re-sync of the indexed state. The canonical
-Ponder pattern for this is rolling deploys via `DATABASE_SCHEMA` + views (see
-`deploy/README.md` §"Zero-downtime rolling deploys"): the new schema indexes
-from genesis in its own Postgres schema while the old version keeps serving;
-swap when ready.
-
-**Pure-additive changes** (new columns with defaults, new entities, new indexes)
-do not require a re-sync — Ponder handles them automatically.
+Production auto-derives `DATABASE_SCHEMA` from a content hash of
+`ponder.schema.ts`. Any content change — additive or breaking — therefore
+selects a fresh Postgres schema and re-syncs from genesis while the old version
+keeps serving. Ponder does not online-migrate these tables. See
+`deploy/README.md` §"Automated schema derivation" and §"Zero-downtime rolling
+deploys" for the derivation, replay, and cutover contract.
 
 ## Known limitations (v0.1)
 

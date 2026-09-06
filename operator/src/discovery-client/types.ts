@@ -3,13 +3,14 @@
  *
  * One-swap R3b (issue #2494, DR-2026-08-05 addendum 2026-08-10 Decision 2).
  * R3a carved the plugin-publication read path onto `plugin-registry/`; this is
- * the sibling carve for the three HTTP-indexer consumers the ruling kept:
- * `cli/commands/evidence.ts`, `mcp/server.ts`, and `tasks/submit-preflight.ts`
+ * the sibling carve for the HTTP-indexer consumers the ruling kept:
+ * `cli/commands/evidence.ts`, `cli/commands/supply.ts`, `mcp/server.ts`, and
+ * `tasks/submit-preflight.ts`
  * (plus `cli/commands/tasks.ts`'s `watch` verb, which drives the same
  * `getAutopilotDeliveryCandidates` read).
  *
- * The module is deliberately NARROW: it owns only the four methods those
- * consumers actually drive, not the retired ~20-method `DiscoveryAPI`.
+ * The module is deliberately NARROW: it owns only the methods those consumers
+ * actually drive, not the retired ~20-method `DiscoveryAPI`.
  * Wave-4 D4 deleted `operator/src/discovery/`; catalog-row types for
  * `listLaunchedSolverNets` live here.
  *
@@ -31,7 +32,7 @@ export interface SolverNetLifecycleStatus {
 
 /**
  * Catalog-row projection of a launched SolverNet — the return shape of
- * `DiscoveryClient.listLaunchedSolverNets`. Not a fifth method.
+ * `DiscoveryClient.listLaunchedSolverNets`.
  */
 export interface SolverNetManifestSummary {
   manifestCid: string;
@@ -173,6 +174,70 @@ export interface CodeDigestRewardRow {
   gradedScores: number[];
 }
 
+export type SupplyStatus = 'available' | 'zero_supply' | 'unknown';
+
+export type SupplyReason =
+  | 'no_requestable_solver_nets'
+  | 'no_recent_completed_loops'
+  | 'incomplete_indexer_evidence';
+
+export interface SupplyBucket {
+  start: string;
+  end: string;
+}
+
+export interface SupplyWindow {
+  start: string;
+  end: string;
+  bucketHours: 6;
+  buckets: SupplyBucket[];
+}
+
+export interface SupplyClass {
+  workClass: string;
+  contractId: string;
+  contractVersion: string;
+  acceptingSolverNets: number;
+  claimingOperators: number;
+  /** Verdicts delivered in the window — loop closure, not loop success. */
+  verdictDeliveries: number;
+  latestAttemptAt: string;
+  latestVerdictAt: string;
+}
+
+/**
+ * Network supply as REPORTED by the configured indexer from native,
+ * chain-scoped evidence. Strictly decoded on arrival, but decoding proves
+ * well-formedness, not integrity: the indexer is the oracle here.
+ */
+export type CurrentSupplyResponse =
+  | {
+      schemaVersion: 1;
+      status: 'available';
+      chainId: number;
+      generatedAt: string;
+      window: SupplyWindow;
+      classes: SupplyClass[];
+    }
+  | {
+      schemaVersion: 1;
+      status: 'zero_supply';
+      reason: 'no_requestable_solver_nets' | 'no_recent_completed_loops';
+      chainId: number;
+      generatedAt: string;
+      window: SupplyWindow;
+      classes: [];
+    }
+  | {
+      schemaVersion: 1;
+      status: 'unknown';
+      reason: 'incomplete_indexer_evidence';
+      chainId: number;
+      generatedAt: string;
+      window: SupplyWindow;
+      classes: [];
+    };
+
 /**
  * The surviving HTTP-indexer read slice.
  *
@@ -181,6 +246,9 @@ export interface CodeDigestRewardRow {
  * outage rather than as an empty result.
  */
 export interface DiscoveryClient {
+  /** Current requestable supply, with uncertainty preserved explicitly. */
+  getCurrentSupply(args: { chainId: number }): Promise<CurrentSupplyResponse>;
+
   /**
    * Resolve the exact indexed task/attempt/envelope rows for an Autopilot
    * marketplace delivery. Implementations must not substitute recent/global

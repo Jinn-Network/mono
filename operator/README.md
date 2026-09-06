@@ -293,6 +293,7 @@ docker run --rm ghcr.io/jinn-network/operator:latest version --json
 | `jinn balance` | Flat per-wallet balance map |
 | `jinn history` | Recent protocol activity |
 | `jinn rewards` | Earned vs claimed per service |
+| `jinn supply` | Current requestable SolverNet classes from indexed native evidence |
 | `jinn logs` | Structured event stream |
 | `jinn logs --follow` | Live tail of lifecycle events |
 

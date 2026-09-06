@@ -62,6 +62,7 @@ import {
   BASE_SEPOLIA_IDENTITY_REGISTRY_START_BLOCK,
   BASE_SEPOLIA_JINN_ROUTER_ADDRESS,
   BASE_SEPOLIA_JINN_ROUTER_START_BLOCK,
+  indexedChainIds,
 } from './src/chain-config.js';
 import { buildIndexerFallback, parseBaseSepoliaRpcChain, parseRpcChain } from './src/rpc-config.js';
 
@@ -83,7 +84,8 @@ const SNAPSHOT_ROUTER = process.env['JINN_INDEXER_SNAPSHOT_ROUTER'];
 const DEAD_ADDRESS = '0x000000000000000000000000000000000000dEaD' as const;
 
 function buildSnapshotConfig(): ReturnType<typeof createConfig> {
-  const chainId = Number(process.env['JINN_INDEXER_SNAPSHOT_CHAIN_ID'] ?? '8453');
+  // Shared with the API's served-chain guard so the two cannot drift (#2447).
+  const chainId = indexedChainIds()[0]!;
   const startBlock = Number(process.env['JINN_INDEXER_SNAPSHOT_START_BLOCK'] ?? '0');
   const rpc = parseRpcChain(process.env[`PONDER_RPC_URL_${chainId}`], 'http://127.0.0.1:8545');
   return createConfig({
@@ -114,7 +116,8 @@ function buildSnapshotConfig(): ReturnType<typeof createConfig> {
 const testnetConfig = createConfig({
   chains: {
     baseSepolia: {
-      id: 84532,
+      // Shared with the API's served-chain guard so the two cannot drift (#2447).
+      id: indexedChainIds()[0]!,
       rpc: buildIndexerFallback(baseSepoliaUrls),
       // Block-range cap for eth_getLogs: 2000 (issue #592, AC4). Bounds the
       // chunk size so the slowest fallback in the chain (sepolia.base.org at
