@@ -102,7 +102,7 @@ import {
   parseMultisigFromReceipt as parseMultisigFromReceiptImpl,
   parseServiceIdFromReceipt as parseServiceIdFromReceiptImpl,
 } from './steps/receipt-parsing.js';
-import { requesterMinMasterEth } from './requester-init.js';
+import { REQUESTER_SAFE_DEPLOY_ETH, requesterMinMasterEth } from './requester-init.js';
 import { stepFleetSafePredict as stepFleetSafePredictImpl } from './steps/fleet-safe-predict.js';
 import { stepFleetSafeDeploy as stepFleetSafeDeployImpl } from './steps/fleet-safe-deploy.js';
 import { stepFleetIdentityRegister as stepFleetIdentityRegisterImpl } from './steps/fleet-identity-register.js';
@@ -702,7 +702,10 @@ export class FleetBootstrapper {
         address: getAddress(state.fleet_safe_address!) as Address,
       });
       if (safeCode === undefined || safeCode === '0x') {
-        state = await this.stepFleetSafeDeploy(state, mnemonic);
+        // Pass the requester's own agent-funding amount: the default is the
+        // operator's 0.01 ETH, which a master that only cleared the 0.0015 ETH
+        // requester gate cannot afford to send.
+        state = await this.stepFleetSafeDeploy(state, mnemonic, REQUESTER_SAFE_DEPLOY_ETH);
       }
 
       if (state.requester_stage !== 'safe_deployed') {
@@ -1154,8 +1157,14 @@ export class FleetBootstrapper {
     return stepFleetSafePredictImpl(this.stepContext(), state, mnemonic);
   }
 
-  private async stepFleetSafeDeploy(state: FleetState, mnemonic: string): Promise<FleetState> {
-    return stepFleetSafeDeployImpl(this.stepContext(), state, mnemonic);
+  private async stepFleetSafeDeploy(
+    state: FleetState,
+    mnemonic: string,
+    agentFundingWei?: bigint,
+  ): Promise<FleetState> {
+    return agentFundingWei === undefined
+      ? stepFleetSafeDeployImpl(this.stepContext(), state, mnemonic)
+      : stepFleetSafeDeployImpl(this.stepContext(), state, mnemonic, agentFundingWei);
   }
 
   private async stepFleetIdentityRegister(state: FleetState, mnemonic: string): Promise<FleetState> {

@@ -39,7 +39,7 @@ export interface RequesterCommandDeps {
   ensureRequesterSafe(input: {
     readonly earningDir: string;
     readonly chain: 'base' | 'base-sepolia';
-    readonly rpcUrl: string | string[];
+    readonly rpcUrl: string;
     readonly password: string;
   }): Promise<FleetBootstrapResult>;
 }
@@ -52,7 +52,7 @@ const PRODUCTION_DEPS: RequesterCommandDeps = {
     const bootstrapper = new FleetBootstrapper({
       earningDir: input.earningDir,
       chain: input.chain,
-      rpcUrl: Array.isArray(input.rpcUrl) ? input.rpcUrl[0] : input.rpcUrl,
+      rpcUrl: input.rpcUrl,
     });
     return bootstrapper.ensureRequesterSafe(input.password);
   },

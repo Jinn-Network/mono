@@ -11,7 +11,10 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FleetBootstrapper, stage1MinMasterEth } from '../../src/earning/bootstrap.js';
 import { FleetStateStore } from '../../src/earning/store.js';
-import { requesterMinMasterEth } from '../../src/earning/requester-init.js';
+import {
+  REQUESTER_SAFE_DEPLOY_ETH,
+  requesterMinMasterEth,
+} from '../../src/earning/requester-init.js';
 import { encryptMnemonic, generateMnemonic } from '../../src/earning/wallet.js';
 
 const PREDICTED_SAFE = '0xBBBB000000000000000000000000000000000002';
@@ -159,5 +162,31 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     expect(requestFunding.mock.calls.length).toBeLessThan(60);
     expect(result.ok).toBe(false);
     expect(result.funding).toBeDefined();
+  });
+
+  it('funds the deploying EOA with an amount the requester gate can actually cover', async () => {
+    // The gate and the transfer must agree. `stepFleetSafeDeploy` defaults to
+    // the operator's STAGE1_AGENT_ETH (0.01), which a master that only cleared
+    // the 0.0015 requester gate cannot send — it would clear the gate and then
+    // fail on the very next transaction.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
+    dirs.push(earningDir);
+    const store = await seedKeystore(earningDir);
+    await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE });
+    const bootstrapper = buildBootstrapper(earningDir);
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      requesterMinMasterEth(),
+    );
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0x');
+    const deploy = vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy')
+      .mockImplementation(async () => store.load('base'));
+
+    await bootstrapper.ensureRequesterSafe('test-password');
+
+    expect(deploy).toHaveBeenCalledTimes(1);
+    const agentFundingWei = deploy.mock.calls[0]![2] as bigint;
+    expect(agentFundingWei).toBe(REQUESTER_SAFE_DEPLOY_ETH);
+    expect(agentFundingWei).toBeLessThan(requesterMinMasterEth());
   });
 });
