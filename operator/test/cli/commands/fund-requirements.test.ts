@@ -15,6 +15,7 @@ interface MakeDepsOpts {
 
 function makeFakeDeps(opts: MakeDepsOpts = {}): FundRequirementsDeps {
   const plan: FundingPlan = {
+    persona: 'operator',
     satisfied: true,
     partial: false,
     reasons: [],
@@ -173,6 +174,7 @@ describe('fund-requirements command', () => {
     // dependency. We assert that exactly one read-only call is made and the
     // command does not pull in any other dependency that could mutate state.
     const planSpy = vi.fn(async () => ({
+      persona: 'operator',
       satisfied: true,
       partial: false,
       reasons: [],
@@ -205,6 +207,7 @@ describe('fund-requirements command', () => {
     // surface partial=true with `password_missing` so an agent can poll
     // safely without ever supplying secrets to an inspection verb.
     const planSpy = vi.fn(async () => ({
+      persona: 'operator',
       satisfied: false,
       partial: true,
       reasons: ['no_keystore', 'password_missing'],
@@ -232,5 +235,71 @@ describe('fund-requirements command', () => {
     const args = planSpy.mock.calls[0]?.[0] as { password?: string } | undefined;
     expect(args?.password).toBeUndefined();
     expect(exits).toEqual([0]);
+  });
+
+  it('names the requester persona, its shortfall, and what it blocks', async () => {
+    // B0a (#2446): the row a requester reads must not be the operator's.
+    const deps = makeFakeDeps({
+      plan: {
+        persona: 'requester',
+        satisfied: false,
+        partial: false,
+        reasons: [],
+        master: {
+          master_address: '0xREQUESTER',
+          eth_required: '1500000000000000',
+          eth_balance: '0',
+        },
+        safes: [],
+      },
+    });
+    const fr = createFundRequirementsCommand(deps);
+    const { ctx, writes } = makeCommandCtx({ argv: ['--requester'], env: { JINN_PASSWORD: 'test' } });
+    await fr.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.persona).toBe('requester');
+    expect(parsed.requirements[0]).toMatchObject({
+      role: 'requester',
+      address: '0xREQUESTER',
+      blocks: 'tasks-submit',
+    });
+    expect(parsed.requirements[0].reason).toContain('creator Safe');
+    expect(parsed.requirements[0].reason).not.toContain('bootstrap');
+  });
+
+  it('forwards --requester to the read-only plan, and nothing when it is absent', async () => {
+    const seen: Record<string, unknown>[] = [];
+    const spy = (persona: 'operator' | 'requester') => vi.fn(async (options: Record<string, unknown>) => {
+      seen.push(options);
+      return { persona, satisfied: true, partial: false, reasons: [], safes: [] } as FundingPlan;
+    });
+
+    const fr = createFundRequirementsCommand(makeFakeDeps({ planSpy: spy('requester') }));
+    await fr.run(makeCommandCtx({ argv: ['--requester'], env: { JINN_PASSWORD: 'test' } }).ctx);
+    expect(seen[0]).toMatchObject({ requester: true });
+
+    const fr2 = createFundRequirementsCommand(makeFakeDeps({ planSpy: spy('operator') }));
+    await fr2.run(makeCommandCtx({ env: { JINN_PASSWORD: 'test' } }).ctx);
+    // Absent, not `false` — the plan must stay free to infer the persona.
+    expect('requester' in seen[1]!).toBe(false);
+  });
+
+  it('does not send a requester to the operator bootstrap in its partial reasons', async () => {
+    const deps = makeFakeDeps({
+      plan: {
+        persona: 'requester',
+        satisfied: false,
+        partial: true,
+        reasons: ['no_keystore', 'fleet_state_missing'],
+        safes: [],
+      },
+    });
+    const fr = createFundRequirementsCommand(deps);
+    const { ctx, writes } = makeCommandCtx({ argv: ['--requester', '--human'], env: { JINN_PASSWORD: 'test' } });
+    await fr.run(ctx);
+    const rendered = writes.join('');
+    expect(rendered).toContain('jinn requester init');
+    expect(rendered).not.toContain('jinn bootstrap');
+    expect(rendered).not.toContain('jinn run');
   });
 });

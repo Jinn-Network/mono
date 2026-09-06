@@ -16,6 +16,12 @@ import { COMMON_FLAGS } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { emitResult } from '../output.js';
 import {
+  PREDICTION_FORECAST_GOLDEN,
+  isNativeRequesterFixture,
+  nativeRequesterFixtureList,
+  type NativeRequesterFixture,
+} from '../../native-requester/fixtures.js';
+import {
   IdentityStoreError,
   listRoleIdentityKeyIds,
   NATIVE_ROLE_IDENTITY_ROLES,
@@ -76,14 +82,14 @@ export interface NativeRequesterCommandDeps {
   installShutdownHandlers?: (close: () => Promise<void>) => void;
   preflightRequest(input: {
     readonly network: 'base-sepolia';
-    readonly fixture: 'prediction-forecast-golden.json';
+    readonly fixture: NativeRequesterFixture;
     readonly runId: string;
   }): Promise<NativeRequesterPreflightReport>;
   loadExecutor(input: { readonly password: string }): Promise<{
     close?: () => Promise<void>;
     request(input: {
       readonly network: 'base-sepolia';
-      readonly fixture: 'prediction-forecast-golden.json';
+      readonly fixture: NativeRequesterFixture;
       readonly runId: string;
     }): Promise<{
       readonly taskDigest: `sha256:${string}`;
@@ -114,7 +120,7 @@ function invalid(ctx: CommandContext, message: string): never {
   return emitEnvelope({
     code: 'invalid_invocation',
     message,
-    exampleCli: 'jinn native-vertical request --network base-sepolia --fixture prediction-forecast-golden.json --run-id <run-id>',
+    exampleCli: 'jinn native-vertical request --network base-sepolia --fixture <fixture> --run-id <run-id>',
   }, { writer: ctx.writer, exit: ctx.exit });
 }
 
@@ -189,7 +195,7 @@ export function createNativeRequesterCommand(deps?: NativeRequesterCommandDeps):
     name: 'native-vertical',
     summary: 'Native requester vertical and role-identity keygen for Base Sepolia',
     helpText: `Usage:
-  jinn native-vertical request --network base-sepolia --fixture prediction-forecast-golden.json --run-id <run-id>
+  jinn native-vertical request --network base-sepolia --fixture <fixture> --run-id <run-id>
   jinn native-vertical consume --consumer-config <path> [--out <path>]
   jinn native-vertical identity --store <absolute path> --roles requester|admission|solver|evaluator [--create]
 
@@ -204,7 +210,7 @@ Status:
 
 Options (request):
   --network <name>    Must be base-sepolia
-  --fixture <name>    Must be prediction-forecast-golden.json
+  --fixture <name>    One of: ${nativeRequesterFixtureList()}
   --run-id <id>       Durable native requester run identifier
   --execute           Permit the already-preflighted requester operation; also requires JINN_NATIVE_VERTICAL_EXECUTE=1
 
@@ -219,7 +225,7 @@ Options (identity):
   JINN_PASSWORD        Required; identity refuses to run without it (no --password-fd or keystore-file fallback)
 
 Examples:
-  jinn native-vertical request --network base-sepolia --fixture prediction-forecast-golden.json --run-id operator-run-20260802
+  jinn native-vertical request --network base-sepolia --fixture ${PREDICTION_FORECAST_GOLDEN} --run-id operator-run-20260802
   jinn native-vertical consume --consumer-config ./native-consumer.json --out ./native-vertical-verification.json
   JINN_PASSWORD=... jinn native-vertical identity --store /abs/path/roles.enc.json --roles requester --create
 `,
@@ -294,8 +300,9 @@ Examples:
       if (parsed.values.network !== 'base-sepolia') {
         invalid(ctx, 'native-vertical requires --network base-sepolia');
       }
-      if (parsed.values.fixture !== 'prediction-forecast-golden.json') {
-        invalid(ctx, 'native-vertical requires --fixture prediction-forecast-golden.json');
+      const fixture = parsed.values.fixture;
+      if (typeof fixture !== 'string' || !isNativeRequesterFixture(fixture)) {
+        invalid(ctx, `native-vertical requires --fixture <${nativeRequesterFixtureList()}>`);
       }
       if (typeof parsed.values['run-id'] !== 'string' || parsed.values['run-id'].length === 0) {
         invalid(ctx, 'native-vertical requires a non-empty --run-id');
@@ -307,7 +314,7 @@ Examples:
         try {
           preflight = await deps.preflightRequest({
             network: 'base-sepolia',
-            fixture: 'prediction-forecast-golden.json',
+            fixture,
             runId,
           });
         } catch (cause) {
@@ -315,7 +322,7 @@ Examples:
             code: 'bootstrap_incomplete',
             message: 'Native requester preflight refused before execution authority was loaded.',
             hint: 'Correct the chain, contract-code, funding, and transaction-cap checks, then retry.',
-            exampleCli: 'jinn native-vertical request --network base-sepolia --fixture prediction-forecast-golden.json --run-id <run-id>',
+            exampleCli: 'jinn native-vertical request --network base-sepolia --fixture <fixture> --run-id <run-id>',
             details: {
               feature: 'native-vertical',
               state: 'preflight-refused',
@@ -329,7 +336,7 @@ Examples:
             schemaVersion: 1,
             kind: 'native_vertical_request_readiness',
             network: 'base-sepolia',
-            fixture: 'prediction-forecast-golden.json',
+            fixture,
             runId,
             executeAuthorized: false,
             sideEffects: false,
@@ -342,7 +349,7 @@ Examples:
             code: 'invalid_invocation',
             message: 'Native requester execution requires --execute, JINN_NATIVE_VERTICAL_EXECUTE=1, and JINN_PASSWORD.',
             hint: 'Omit --execute for the read-only readiness report.',
-            exampleCli: 'jinn native-vertical request --network base-sepolia --fixture prediction-forecast-golden.json --run-id <run-id>',
+            exampleCli: 'jinn native-vertical request --network base-sepolia --fixture <fixture> --run-id <run-id>',
             details: { feature: 'native-vertical', state: 'execute-authority-missing', sideEffects: false },
           }, { writer: ctx.writer, exit: ctx.exit });
         }
@@ -350,14 +357,14 @@ Examples:
         if (executor.close !== undefined) deps.installShutdownHandlers?.(executor.close);
         const result = await executor.request({
           network: 'base-sepolia',
-          fixture: 'prediction-forecast-golden.json',
+          fixture,
           runId,
         });
         ctx.writer.write(`${JSON.stringify({
           schemaVersion: 1,
           kind: 'native_vertical_request_announced',
           network: 'base-sepolia',
-          fixture: 'prediction-forecast-golden.json',
+          fixture,
           runId,
           executeAuthorized: true,
           sideEffects: true,
@@ -371,7 +378,7 @@ Examples:
         code: 'bootstrap_incomplete',
         message: 'The native requester is feature-disabled in this build.',
         hint: 'Native daemon composition and operational enablement are not yet available.',
-        exampleCli: 'jinn native-vertical request --network base-sepolia --fixture prediction-forecast-golden.json --run-id <run-id>',
+        exampleCli: 'jinn native-vertical request --network base-sepolia --fixture <fixture> --run-id <run-id>',
         details: { feature: 'native-vertical', state: 'feature-disabled' },
       }, { writer: ctx.writer, exit: ctx.exit });
     },
