@@ -375,9 +375,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     },
   });
   const apiToken = resolvedApiToken.token;
+  // An 8-char prefix identifies a >=32-char token without disclosing it. A
+  // shorter operator-supplied token is redacted outright: 8 characters of it
+  // could be the whole credential.
+  const tokenPrefix = apiToken.length >= 32 ? `${apiToken.slice(0, 8)}...` : '<redacted>';
   console.log(
     `[main] DAEMON_API_TOKEN source=${resolvedApiToken.source} file=${daemonApiTokenFilePath} ` +
-    `(${resolvedApiToken.persisted}, prefix=${apiToken.slice(0, 8)}...)`,
+    `(${resolvedApiToken.persisted}, prefix=${tokenPrefix})`,
   );
 
   // The keystore-presence probe happens twice: once now (to decide initial
