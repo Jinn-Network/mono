@@ -273,9 +273,13 @@ test('@noble/hashes uses one v2 compatibility range', () => {
   }
 });
 
-test('task-execution manifests never override @noble/hashes resolution', () => {
-  for (const [directory] of TASK_EXECUTION_PACKAGES) {
-    const manifest = readPackage(directory);
+test('no manifest overrides the @noble/hashes resolution', () => {
+  const directories = [
+    ...TASK_EXECUTION_PACKAGES.map(([directory]) => join('packages', 'task-execution', directory)),
+    ...HASH_PRODUCERS,
+  ];
+  for (const directory of new Set(directories)) {
+    const manifest = JSON.parse(readFileSync(join(root, directory, 'package.json'), 'utf8'));
     assert.equal(
       Object.hasOwn(manifest.resolutions ?? {}, '@noble/hashes'),
       false,
