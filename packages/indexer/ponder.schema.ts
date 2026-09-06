@@ -24,10 +24,10 @@
  *   StakingRewardCheckpoint — from active stOLAS staking proxy Checkpoint;
  *                             earned/checkpointed OLAS by service multisig.
  *
- * Schema-version policy: any breaking change to an existing entity (rename,
- * remove, or type-change of a column) bumps the schema version and triggers a
- * re-sync from the bundled snapshot. Pure-additive changes (new columns, new
- * entities) do not require a re-sync.
+ * Deployment schema policy: production derives DATABASE_SCHEMA from the
+ * content hash of this file. Any content change therefore selects a fresh
+ * namespace and re-syncs from genesis; Ponder does not online-migrate these
+ * tables. See deploy/README.md §Automated schema derivation.
  *
  * NOTE on Task.finalized / Task.refunded:
  *   JinnRouter does not emit standalone TaskFinalized or TaskRefunded events at
@@ -151,7 +151,7 @@ export const attempt = onchainTable(
     /** Block number of the TaskAttemptCreated event. */
     createdAtBlock: t.bigint().notNull(),
     /** UTC block timestamp of the TaskAttemptCreated event (unix seconds). */
-    createdAtTimestamp: t.bigint().notNull().default(0n),
+    createdAtTimestamp: t.bigint().notNull(),
     /** Chain ID. */
     chainId: t.integer().notNull(),
   }),
@@ -192,7 +192,7 @@ export const verdict = onchainTable(
     verdictCode: t.integer().notNull(),
     createdAtBlock: t.bigint().notNull(),
     /** UTC block timestamp of the VerdictDeliveryClaimed event (unix seconds). */
-    createdAtTimestamp: t.bigint().notNull().default(0n),
+    createdAtTimestamp: t.bigint().notNull(),
     chainId: t.integer().notNull(),
   }),
   (table) => ({
@@ -370,10 +370,9 @@ export const solverNetManifest = onchainTable(
     // ── Full launched-SolverNet summary fields (issue #985, criterion 1) ────
     // Additive, non-breaking. Populated by the same IPFS enrichment pass that
     // fills name/description/solverNetId (see handlers.ts). Empty-string /
-    // empty-array defaults when enrichment hasn't landed. Per the schema-
-    // version policy above (lines 22-25), pure-additive columns do NOT bump
-    // the schema version or force a re-sync. `openRoles` mirrors the
-    // pluginPublication.supports text[] column (line 416).
+    // empty-array defaults model enrichment that has not landed during the
+    // fresh replay; they are not online-migration shims. `openRoles` mirrors
+    // the pluginPublication.supports text[] column (line 416).
     network: t.text().notNull().default(''),
     solutionPriceWei: t.text().notNull().default(''),
     verdictPriceWei: t.text().notNull().default(''),

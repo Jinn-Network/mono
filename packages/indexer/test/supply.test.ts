@@ -48,7 +48,8 @@ function build(overrides: Partial<Parameters<typeof buildCurrentSupply>[0]> = {}
   return buildCurrentSupply({
     chainId: CHAIN_ID,
     asOfMs: AS_OF,
-    evidenceComplete: true,
+    manifestEvidenceComplete: true,
+    activityEvidenceComplete: true,
     manifests: [manifest()],
     tasks: [task()],
     attempts: [attempt()],
@@ -143,8 +144,32 @@ describe('buildCurrentSupply', () => {
     });
   });
 
-  it('does not turn a capped or otherwise incomplete evidence read into zero supply', () => {
-    expect(build({ evidenceComplete: false })).toMatchObject({
+  it('reports no requestable SolverNets without requiring unrelated activity evidence', () => {
+    expect(build({
+      activityEvidenceComplete: false,
+      manifests: [manifest({ openRoles: ['evaluator'] })],
+      attempts: [attempt({ createdAtTimestamp: 0n })],
+      verdicts: [verdict({ createdAtTimestamp: 0n })],
+    })).toMatchObject({
+      status: 'zero_supply',
+      reason: 'no_requestable_solver_nets',
+      classes: [],
+    });
+  });
+
+  it('does not turn incomplete activity evidence into zero when a SolverNet is requestable', () => {
+    expect(build({ activityEvidenceComplete: false })).toMatchObject({
+      status: 'unknown',
+      reason: 'incomplete_indexer_evidence',
+      classes: [],
+    });
+  });
+
+  it('does not infer no requestable SolverNets from an incomplete manifest read', () => {
+    expect(build({
+      manifestEvidenceComplete: false,
+      manifests: [manifest({ openRoles: ['evaluator'] })],
+    })).toMatchObject({
       status: 'unknown',
       reason: 'incomplete_indexer_evidence',
       classes: [],

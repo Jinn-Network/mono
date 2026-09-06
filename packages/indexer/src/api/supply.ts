@@ -77,8 +77,10 @@ export interface SupplyVerdictRow {
 export interface BuildCurrentSupplyInput {
   chainId: number;
   asOfMs: number;
-  /** False when any backing query was capped or encountered legacy rows without event time. */
-  evidenceComplete: boolean;
+  /** False when the launched-SolverNet inventory query was capped. */
+  manifestEvidenceComplete: boolean;
+  /** False when an activity query was capped or encountered unusable event time. */
+  activityEvidenceComplete: boolean;
   manifests: SupplyManifestRow[];
   tasks: SupplyTaskRow[];
   attempts: SupplyAttemptRow[];
@@ -142,7 +144,7 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
   }
 
   const base = baseResult(input);
-  if (!input.evidenceComplete) return unknown(input);
+  if (!input.manifestEvidenceComplete) return unknown(input);
   const windowStart = BigInt(Date.parse(base.window.start) / 1_000);
   const windowEnd = BigInt(Date.parse(base.window.end) / 1_000);
   const launched = input.manifests.filter(
@@ -157,6 +159,7 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
   if (requestable.length === 0) {
     return { ...base, status: 'zero_supply', reason: 'no_requestable_solver_nets', classes: [] };
   }
+  if (!input.activityEvidenceComplete) return unknown(input);
 
   const classByDigest = new Map<string, string>();
   const classRows = new Map<string, {

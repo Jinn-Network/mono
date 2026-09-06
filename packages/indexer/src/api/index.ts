@@ -137,8 +137,8 @@ app.get('/supply', async (c) => {
       ).limit(1),
     ]);
 
-    let evidenceComplete = manifests.length <= SUPPLY_EVIDENCE_ROW_LIMIT
-      && attempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
+    const manifestEvidenceComplete = manifests.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
+    let activityEvidenceComplete = attempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
       && verdicts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
       && missingAttemptTimes.length === 0
       && missingVerdictTimes.length === 0;
@@ -153,12 +153,13 @@ app.get('/supply', async (c) => {
     }).from(task).where(
       and(eq(task.chainId, chainId), inArray(task.id, taskIds)),
     ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1);
-    evidenceComplete &&= tasks.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
+    activityEvidenceComplete &&= tasks.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
 
     return c.json(buildCurrentSupply({
       chainId,
       asOfMs,
-      evidenceComplete,
+      manifestEvidenceComplete,
+      activityEvidenceComplete,
       manifests: manifests as SupplyManifestRow[],
       tasks: tasks as SupplyTaskRow[],
       attempts: attempts as SupplyAttemptRow[],
