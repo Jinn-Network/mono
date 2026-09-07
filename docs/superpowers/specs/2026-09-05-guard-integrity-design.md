@@ -169,7 +169,7 @@ handbook, with no mechanism attached.
 
 A periodic vacuity audit of negative assertions would face roughly 200 occurrences in
 `.github/scripts` alone — 161 across 38 files counting `assert.ok(!…)`, `notEqual`,
-`notStrictEqual`, `notDeepEqual`, and `doesNotThrow`, rising to 263 across 55 files once
+`notStrictEqual`, `notDeepEqual`, and `doesNotThrow`, rising to 277 across 54 files once
 equality assertions against `false` are counted too — before counting `operator/test` or any
 package suite. Every one would need a human to reason about reachability. The yield would be low
 — most negative assertions are fine — and the cost recurs on every audit cycle, which is the
