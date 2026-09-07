@@ -150,6 +150,71 @@ CI, so a failure here is an environment or hosting fault rather than a product
 one. If step 4 fails while steps 1–3 pass, the locations were configured after
 the fact — see "fix the public URL first" above.
 
+## Coverage: which sequences are anchored
+
+> **Designed, not implemented** (tracked as #4127). Nothing this runbook serves
+> carries an anchor announcement today, so the walk below currently reports every
+> substantive sequence as unanchored. It is recorded here because the mechanism is
+> ruled and its shape is fixed
+> ([`docs/superpowers/specs/2026-09-01-publication-head-anchoring-design.md`](../superpowers/specs/2026-09-01-publication-head-anchoring-design.md)),
+> and because the walk itself does not change when the mechanism lands. Landing
+> #4127 must clear this marker.
+
+Once head anchoring is live, each substantive entry's digest is anchored through a
+third-party provider, and the resulting `AnchorEvidence` record is announced by a
+later entry on this same chain. That makes coverage a property of the archive
+rather than an operator claim about it: anybody holding the archive — the operator,
+or a stranger who cold-synced it — enumerates exactly which sequences are anchored
+and which are not, from the archive alone.
+
+### The walk
+
+Start from the archive walk in "Verify it from another machine" step 3, which
+already yields every entry oldest-first. Then:
+
+1. **Fix the denominator.** Sequences are fixed-width, gap-free, and increment by
+   one, so the walked entries are the complete list — a missing sequence is a broken
+   chain, not a coverage question. Compute each entry's digest the way the head
+   cites it: `recordDigest(sealJson(entry).bytes)`.
+2. **Classify each entry.** An entry is *anchor-announcing* when every one of its
+   `announcements[]` names `record.kind`
+   `https://spec.jinn.network/records/anchor-evidence/v1`. Every other entry is
+   *substantive*. Anchor-announcing entries are not themselves anchored and are not
+   part of the denominator: anchoring them would not terminate, and truncating one
+   drops nothing a reader loses.
+3. **Collect the anchored set.** Each anchor announcement carries
+   `facts` of the shape `{subject: {kind, digest}, provider, upgrades?}`, and
+   `subject.digest` names the entry that anchor covers. Deduplicate by
+   `subject.digest`: an OpenTimestamps upgrade is announced as a second record
+   naming the pending one through `upgrades`, and both cover the same subject, so
+   count subjects rather than announcements.
+4. **Read off coverage.** A substantive entry is anchored when its digest is in that
+   set. One exclusion: the newest substantive entry is never yet anchored, because
+   its anchor announcement would be a later entry that does not exist yet. That is
+   the mechanism's shape, not a gap.
+5. **Name the gap exactly.** The unanchored substantive sequences are the gap.
+   Because the denominator is exact, report them by sequence rather than as a count
+   or a proportion.
+
+### Reading the result honestly
+
+- **A gap is not misconduct.** Anchor acquisition never blocks an append, by design:
+  a provider outage at append time leaves a visible hole rather than a stalled
+  chain. Nothing in the archive distinguishes an outage from a declined anchor, and
+  this enumeration does not claim to.
+- **Presence is not validity.** The walk reports which entries have an anchor
+  announced, not whether its proof checks. Verifying one is a separate step: fetch
+  the `AnchorEvidence` record by digest from `<base>/records/<sha256>` and verify the
+  proof against the entry digest with your own trust material.
+- **Coverage is not completeness.** An anchored sequence means truncation below that
+  point is detectable to a reader who recorded it, and nothing more. It does not
+  date publication, says nothing about entries the publisher never appended, and
+  does not make this source witnessed. Do not describe it as a transparency log, as
+  witnessed, as append-only proven, or as tamper-proof.
+- **The tripwire is the reader's, not the publisher's.** Coverage read today tells
+  you which sequences you *could* record. It protects you only from the moment you
+  record `(origin, sequence, entryDigest)` and check a later chain against it.
+
 ## Disclosure: why this producer has no disclosure gate
 
 Colophon routes around `packages/evidence/contribution` — the disclosure
