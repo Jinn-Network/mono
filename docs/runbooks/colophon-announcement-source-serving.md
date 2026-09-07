@@ -150,6 +150,49 @@ CI, so a failure here is an environment or hosting fault rather than a product
 one. If step 4 fails while steps 1–3 pass, the locations were configured after
 the fact — see "fix the public URL first" above.
 
+## What the served chain proves — and what it does not
+
+A cold sync that passes proves a specific, bounded set of things: each entry
+links to its predecessor, the sequence is gap-free, every entry and the head
+carry a signature that verifies under this source's `did:key`, and every record
+fetched at its digest path hashes to the digest that was announced. That is
+worth having and it is all of it.
+
+It does not prove the chain is the whole chain. The source is hash-linked,
+sequenced, and signed — but it is hosted entirely by the publisher, and nothing
+outside the workspace has ever observed it. A publisher who truncated the chain
+below some sequence, or replaced a suffix with a differently signed one, would
+produce something internally valid in exactly the way the walk above checks,
+because the publisher holds the key. A reader seeing it for the first time
+cannot tell.
+
+**So do not describe this surface as "witnessed", a "transparency log",
+"append-only proven", or "tamper-proof."** None of those is true here, and the
+distinction is load-bearing rather than pedantic: each of those words promises a
+property that protects a reader who never looked, and this chain has no such
+property. Say what it is — a signed, hash-linked chain the publisher hosts —
+and say what a reader has to do to get anything stronger.
+
+What a reader can do today is hold their own tripwire. Record `(origin,
+sequence, entry)` from the head on every visit. On a later visit, a chain that
+does not still contain that entry digest at that sequence has been rewritten,
+and the reader who kept the record is the one who can see it. That protection
+rests entirely on the reader's own note; it carries no third-party evidence, and
+the publisher cannot know which readers hold which notes.
+
+Head anchoring would raise that ceiling by one step, and only one.
+[The 2026-09-01 head-anchoring design](../superpowers/specs/2026-09-01-publication-head-anchoring-design.md)
+specifies obtaining third-party time evidence over an announcement entry's
+digest and announcing that evidence on the chain, so a reader who recorded an
+anchored entry could refuse a later chain that does not contain it — truncation
+below an anchored point becomes detectable to a reader who recorded it, and
+nothing more. It would still not prove publication-by-time, would still not make
+the stream provably complete, and would still do nothing for a reader who never
+looked. **It is designed, not implemented** (tracked as
+[#4127](https://github.com/Jinn-Network/mono/issues/4127)); nothing this runbook
+serves is anchored today, so state the ceiling above and not this one until it
+ships. §3 and §6 of that design are the authority for both.
+
 ## Disclosure: why this producer has no disclosure gate
 
 Colophon routes around `packages/evidence/contribution` — the disclosure
