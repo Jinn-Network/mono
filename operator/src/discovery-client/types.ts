@@ -218,6 +218,17 @@ export type CurrentSupplyResponse =
       generatedAt: string;
       window: SupplyWindow;
       classes: SupplyClass[];
+      /**
+       * How many launched SolverNet rows the indexer excluded for incomplete
+       * manifest evidence. Absent when none were.
+       *
+       * Present, it means `classes` is known-possibly-SHORT. The listed classes
+       * are still proven live; a class's ABSENCE from the list must be read as
+       * "no evidence", never as "no supply". The indexer reports it rather than
+       * suppressing the whole answer, because one manifest whose enrichment
+       * failed cannot subtract from a class whose own evidence is complete.
+       */
+      incompleteManifestRows?: number;
     }
   | {
       schemaVersion: 1;

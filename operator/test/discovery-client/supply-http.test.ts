@@ -57,6 +57,21 @@ describe('DiscoveryClient.getCurrentSupply', () => {
     ]);
   });
 
+  it('carries the incomplete-manifest marker through decoding', async () => {
+    // The marker is how a caller learns that `classes` may be SHORT. Dropping
+    // it in the decoder would silently restore the "absent class means absent
+    // supply" reading the field exists to prevent.
+    const body = { ...available, incompleteManifestRows: 2 };
+    await expect(clientFor(body).client.getCurrentSupply({ chainId: 84532 })).resolves.toEqual(body);
+  });
+
+  it('rejects a non-positive incomplete-manifest marker', async () => {
+    // Absence, not zero, is how "nothing was excluded" is spelled.
+    await expect(
+      clientFor({ ...available, incompleteManifestRows: 0 }).client.getCurrentSupply({ chainId: 84532 }),
+    ).rejects.toThrow(DiscoveryUnavailableError);
+  });
+
   it('preserves a server unknown response', async () => {
     const unknown = {
       ...available,

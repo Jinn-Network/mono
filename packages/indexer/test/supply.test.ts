@@ -174,6 +174,53 @@ describe('buildCurrentSupply', () => {
     expect(build({ verdicts: [verdict({ attemptIndex: 9 })] }).status).toBe('unknown');
   });
 
+  it('reports a healthy class even when another launched manifest is degraded', () => {
+    // The guard must be MONOTONE. One row whose IPFS enrichment failed — a
+    // permanent state with no retry path — cannot subtract from a class whose
+    // own evidence is complete and whose loops actually closed in the window,
+    // so it must not black out the chain's whole answer.
+    const result = build({
+      manifests: [manifest(), manifest({
+        id: 'bafy-degraded',
+        cidKeccak: `0x${'33'.repeat(32)}`,
+        manifestEnrichmentStatus: 'failed',
+      })],
+    });
+    expect(result.status).toBe('available');
+    expect(result.classes.map((entry) => entry.workClass)).toEqual(['prediction.v1']);
+    // ...and the short list is marked, so an absent class is not read as absent
+    // supply.
+    expect(result.incompleteManifestRows).toBe(1);
+  });
+
+  it('omits the incomplete-rows marker when every launched row is usable', () => {
+    expect(build()).not.toHaveProperty('incompleteManifestRows');
+  });
+
+  it.each([
+    ['no in-window activity', {
+      manifests: [manifest()],
+      attempts: [attempt({ createdAtTimestamp: BigInt(AS_OF / 1000) - BigInt(50 * HOUR) })],
+      verdicts: [verdict({ createdAtTimestamp: BigInt(AS_OF / 1000) - BigInt(50 * HOUR) })],
+    }],
+    ['no requestable role', { manifests: [manifest({ openRoles: ['evaluator'] })] }],
+  ])('still refuses to prove a zero when a degraded row coexists with %s', (_label, overrides) => {
+    // The other direction of the same monotone rule: the degraded row could
+    // have carried the class that IS live, so emptiness stays unproven.
+    expect(build({
+      ...overrides,
+      manifests: [...overrides.manifests, manifest({
+        id: 'bafy-degraded',
+        cidKeccak: `0x${'33'.repeat(32)}`,
+        manifestEnrichmentStatus: 'failed',
+      })],
+    })).toMatchObject({
+      status: 'unknown',
+      reason: 'incomplete_indexer_evidence',
+      classes: [],
+    });
+  });
+
   it('does not read a degraded empty-role manifest as an absent requestable class', () => {
     // `parseSolverNetManifestLite` degrades an unusable `roles` to `[]` while
     // still writing manifestEnrichmentStatus 'ok'. Filtering that row out
@@ -234,6 +281,12 @@ describe('buildCurrentSupply', () => {
 
   it.each([
     ['launched manifest enrichment is incomplete', { manifests: [manifest({ manifestEnrichmentStatus: 'pending' })] }],
+    // `parseSolverNetManifestLite` defaults an absent `contract` tuple to blank
+    // strings while still writing 'ok', so a blank tuple is reachable evidence
+    // loss — publishing it would ship the class `"."`.
+    ['a launched contractId is blank', { manifests: [manifest({ contractId: '  ' })] }],
+    ['a launched contractVersion is blank', { manifests: [manifest({ contractVersion: '' })] }],
+    ['a launched manifest digest is missing', { manifests: [manifest({ cidKeccak: '' })] }],
     ['a relevant timestamp is missing', { attempts: [attempt({ createdAtTimestamp: 0n })] }],
     ['an attempt is orphaned', { attempts: [attempt({ taskId: '404' })] }],
     ['a cross-chain attempt cannot join', { attempts: [attempt({ chainId: 8453 })] }],
@@ -265,7 +318,15 @@ describe('GET /supply evidence reads', () => {
       source.indexOf('// ── GET /supply'),
       source.indexOf('// ── Shared ebu7-schema probe'),
     );
+    // Each capped read asks for ONE row beyond the cap and the completeness
+    // flags compare with `<=`, so a full page is read as truncation rather than
+    // as a proven zero. Counting bare `.limit(` occurrences would not see
+    // either half: dropping the `+ 1`, or flipping a `<=` to `<`, makes every
+    // completeness flag unconditionally true while keeping the count at 7.
+    expect(route.match(/\.limit\(SUPPLY_EVIDENCE_ROW_LIMIT \+ 1\)/gu)).toHaveLength(5);
+    expect(route.match(/\.limit\(1\)/gu)).toHaveLength(2);
     expect(route.match(/\.limit\(/gu)).toHaveLength(7);
+    expect(route.match(/\.length <= SUPPLY_EVIDENCE_ROW_LIMIT/gu)).toHaveLength(5);
     // The attempts referenced by in-window verdicts are fetched WITHOUT the
     // window filter, so a long loop cannot look like a broken join.
     expect(route).toContain('inArray(attempt.taskId, verdictTaskIds)');

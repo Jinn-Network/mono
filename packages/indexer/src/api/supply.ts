@@ -45,6 +45,19 @@ export interface CurrentSupplyResponse {
   window: SupplyWindow;
   classes: SupplyClass[];
   reason?: SupplyReason;
+  /**
+   * How many launched SolverNet rows on this chain carried incomplete manifest
+   * evidence and were therefore excluded from `classes`. Absent when every
+   * launched row was usable, and never present unless `status` is `available`
+   * — an incomplete row can only ever downgrade a would-be zero to `unknown`
+   * (see `buildCurrentSupply`), so it has nothing to mark on the other two.
+   *
+   * Present, it means `classes` is known-possibly-SHORT: a class whose only
+   * manifest rows were the excluded ones is missing entirely. A requester must
+   * therefore read a class's ABSENCE from this response as "no evidence", not
+   * as "no supply"; the classes that ARE listed are still proven.
+   */
+  incompleteManifestRows?: number;
 }
 
 export interface SupplyManifestRow {
@@ -179,9 +192,13 @@ function validTimestamp(value: bigint): boolean {
 }
 
 /**
- * Aggregate requestable supply from native indexed facts. Any incomplete
- * enrichment, unusable event time, or orphaned chain tuple makes the answer
- * unknown instead of turning missing evidence into a false zero.
+ * Aggregate requestable supply from native indexed facts. Unusable event time
+ * and orphaned chain tuples make the whole answer unknown — they are read as
+ * index corruption, which nothing in the response can be trusted against.
+ * Incomplete per-row manifest enrichment is narrower: it excludes its own row
+ * and can only downgrade a would-be `zero_supply` to `unknown`, marked on the
+ * result as `incompleteManifestRows`. Neither path ever turns missing evidence
+ * into a false zero.
  */
 export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSupplyResponse {
   // An unrenderable `asOfMs` is still answered — as `unknown`, stamped with the
@@ -200,19 +217,28 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
   // Completeness is judged over EVERY launched row, before the role filter.
   // `manifestEnrichmentStatus: 'ok'` does not imply complete fields —
   // `parseSolverNetManifestLite` degrades a missing/oddly-shaped `roles` to
-  // `[]` — so a row filtered out for having no roles would otherwise leave the
-  // requestable set silently short and turn missing evidence into a false
+  // `[]`, and defaults an absent `contract` tuple to blank strings — so a row
+  // filtered out for having no roles would otherwise leave the requestable set
+  // silently short and turn missing evidence into a false
   // `no_requestable_solver_nets`.
-  if (launched.some((row) => row.manifestEnrichmentStatus !== 'ok'
-    || row.openRoles.length === 0
-    || !row.contractId.trim()
-    || !row.contractVersion.trim()
-    || !row.cidKeccak)) {
-    return unknown(input);
-  }
+  //
+  // The consequence is deliberately MONOTONE: an unusable row invalidates a
+  // claim of emptiness, never a positive finding. A single manifest whose IPFS
+  // enrichment timed out — there is no retry path; the row stays degraded
+  // until its next `MetadataSet` — must not black out a chain whose other
+  // classes have complete evidence and real in-window loops, because nothing
+  // that row could contain would subtract from them.
+  const complete = launched.filter((row) => row.manifestEnrichmentStatus === 'ok'
+    && row.openRoles.length > 0
+    && row.contractId.trim() !== ''
+    && row.contractVersion.trim() !== ''
+    && Boolean(row.cidKeccak));
+  const incompleteManifestRows = launched.length - complete.length;
 
-  const requestable = launched.filter((row) => row.openRoles.includes('solver'));
+  const requestable = complete.filter((row) => row.openRoles.includes('solver'));
   if (requestable.length === 0) {
+    // An excluded row could have been the requestable one; the zero is unproven.
+    if (incompleteManifestRows > 0) return unknown(input);
     return { ...base, status: 'zero_supply', reason: 'no_requestable_solver_nets', classes: [] };
   }
   if (!input.activityEvidenceComplete) return unknown(input);
@@ -319,7 +345,15 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
     .sort((a, b) => (a.workClass < b.workClass ? -1 : a.workClass > b.workClass ? 1 : 0));
 
   if (classes.length === 0) {
+    // Same monotone rule at the activity layer: an excluded row could have
+    // carried the class that IS live, so the zero stays unproven.
+    if (incompleteManifestRows > 0) return unknown(input);
     return { ...base, status: 'zero_supply', reason: 'no_recent_completed_loops', classes: [] };
   }
-  return { ...base, status: 'available', classes };
+  return {
+    ...base,
+    status: 'available',
+    classes,
+    ...(incompleteManifestRows > 0 ? { incompleteManifestRows } : {}),
+  };
 }

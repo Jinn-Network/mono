@@ -64,6 +64,40 @@ describe('jinn supply', () => {
     expect(raw.join('')).toContain('Do not post work in this class yet.');
   });
 
+  it('warns that the class list is short when the indexer excluded manifest rows', async () => {
+    const deps = commandWith({
+      schemaVersion: 1, status: 'available', chainId: 84532,
+      generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
+      incompleteManifestRows: 2,
+      classes: [{
+        workClass: 'prediction.v1', contractId: 'prediction', contractVersion: 'v1',
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
+        latestAttemptAt: '2026-09-06T10:00:00.000Z',
+        latestVerdictAt: '2026-09-06T11:00:00.000Z',
+      }],
+    });
+    const { raw } = await runCommand(deps.command, { argv: ['--human'] });
+    // Without this the reader takes the list as exhaustive and reads a missing
+    // class as absent supply — the exact misreading the marker exists to stop.
+    expect(raw.join('')).toContain('2 launched SolverNet(s) had incomplete indexer evidence');
+    expect(raw.join('')).toContain('unproven, not absent');
+  });
+
+  it('says nothing about excluded rows when the indexer excluded none', async () => {
+    const deps = commandWith({
+      schemaVersion: 1, status: 'available', chainId: 84532,
+      generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
+      classes: [{
+        workClass: 'prediction.v1', contractId: 'prediction', contractVersion: 'v1',
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
+        latestAttemptAt: '2026-09-06T10:00:00.000Z',
+        latestVerdictAt: '2026-09-06T11:00:00.000Z',
+      }],
+    });
+    const { raw } = await runCommand(deps.command, { argv: ['--human'] });
+    expect(raw.join('')).not.toContain('incomplete indexer evidence');
+  });
+
   it('renders unknown without calling it zero', async () => {
     const deps = commandWith({
       schemaVersion: 1, status: 'unknown', reason: 'incomplete_indexer_evidence',

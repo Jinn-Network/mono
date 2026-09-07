@@ -45,6 +45,14 @@ function humanSupply(result: CurrentSupplyResponse): string {
   }
 
   const lines = ['Live supply is available.', `Window: ${window}`];
+  if (result.incompleteManifestRows !== undefined) {
+    // The listed classes are proven; the LIST may be short. Without this line a
+    // reader would take an absent class as absent supply.
+    lines.push(
+      `Note: ${result.incompleteManifestRows} launched SolverNet(s) had incomplete indexer `
+      + 'evidence and are not represented below. A class missing here is unproven, not absent.',
+    );
+  }
   for (const entry of result.classes) {
     lines.push(
       `${entry.workClass}: ${entry.acceptingSolverNets} accepting SolverNet(s), `
