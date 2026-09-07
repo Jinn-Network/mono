@@ -440,7 +440,8 @@ cannot read it is an instruction to fail. That rule is satisfiable rather than c
 `@colophon-claims/verify@0.2.1`, the registry `latest` since 2026-09-01, lists the metadata-first
 profile among the ones its manifest parse accepts; `@0.2.0` and every earlier line refuse a
 metadata-first bundle there. What a `/5` producer writes today still does not satisfy the gate:
-`PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND` resolves to the `@0.1` line and there is no
+`PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND` — the one line a `/5` claim states, since
+claim-package/3 has a single `command` field — resolves to the `@0.1` line, and there is no
 metadata-first-specific command constant, so a metadata-first bundle whose claim pins `@0.1`
 remains an instruction to fail. The gate is open and unexercised — the profile is a format
 definition and a local derivation of an already-published full-evidence bundle, and no producer
