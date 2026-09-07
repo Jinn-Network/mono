@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish. Must match the selected release tag and operator/package.json at it.'
+        description: 'The X.Y.Z of the selected release tag. Must also equal operator/package.json at it.'
         required: true
         type: string
 

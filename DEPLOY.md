@@ -95,7 +95,7 @@ For a deploy you can reproduce later, edit the `image:` line in
 image: ghcr.io/jinn-network/operator:next
 ```
 
-to an immutable tag or digest:
+to a per-commit tag, or to a digest for a genuinely immutable pin:
 
 ```yaml
 image: ghcr.io/jinn-network/operator:canary-<short>

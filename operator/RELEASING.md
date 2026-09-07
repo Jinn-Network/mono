@@ -144,8 +144,10 @@ If that run goes red, re-run it: `.github/workflows/docker.yml` takes a manual
 `workflow_dispatch` with a `version` input, launched **from the release tag**
 (#2811). The version must match the tag it was launched from and
 `operator/package.json` at it, so a re-run publishes the released commit and
-nothing else. Tags cut before this trigger landed cannot be dispatched — the
-workflow file runs as it exists on the selected ref.
+nothing else. Dispatching an *older* release tag is therefore also the rollback
+lever: it moves `:latest` back to that release's commit. Tags cut before this
+trigger landed cannot be dispatched at all — the workflow file runs as it exists
+on the selected ref.
 
 **Release checklist, after the first cut that publishes under
 `ghcr.io/jinn-network/operator`:** verify `:latest` resolves anonymously
