@@ -509,12 +509,12 @@ test("the golden bundle's default output carries no identifier and no verdict wo
   assert.equal(human.code, undefined);
   assert.doesNotMatch(human.stdout, /urn:/);
   assert.doesNotMatch(human.stdout, /did:key/);
-  // The retired verdict word, over the whole real render rather than a synthetic one (issue #3510).
-  // The vocabulary guard above reads only the first line of `renderVerifiedBundle` on hand-built
-  // shapes; this one runs the real binary, so it also covers the caveats, the check list, the
-  // signer block and the closing lines. Golden is format /2, so the artifact-content and anchor
-  // paragraphs render empty and stay out of reach here — and regenerating it to an anchor-carrying
-  // format would trip this, because `renderAnchor` prints the `verified` proof status verbatim.
+  // The retired verdict word over the whole real render (issue #3510). This is the only assertion
+  // that runs the real binary, and the only one reaching the signer block; the cross-shape test
+  // below owns the artifact-content and anchor paragraphs, which render empty over golden's
+  // format /2. Regenerating golden to an anchor-carrying format would not extend this reach:
+  // `invoke` supplies no anchor trust material and this package ships none, so a well-formed proof
+  // renders `present`, never `verified` (`src/verify.ts`, `anchorTrust`).
   assert.doesNotMatch(human.stdout, /verified|certified|validated|audited/i);
   // The publisher line now carries the bare key fingerprint (issue #2983): with no binding supplied
   // that digest is the only name this key has, and printing nothing would read as nothing to say.
@@ -1063,6 +1063,18 @@ const V8_SHAPE = {
   ...V6_IDENTITIES,
   anchors: { anchors: [], subjects: [], invalid: [] },
 };
+
+test("no paragraph of the default human render carries a retired verdict word (issue #3510)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  // These two shapes are what reaches the paragraphs the golden bundle cannot: `/5` renders the
+  // artifact-content report and its limitation, `/8` the anchor report and the anchor-limits
+  // paragraph. All four render empty over golden's format /2, so the real-binary assertion up in
+  // the golden test guards the signer block and this one guards the rest — they are not two
+  // spellings of the same coverage.
+  for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
+    assert.doesNotMatch(renderVerifiedBundle(shape), /verified|certified|validated|audited/i, shape.format);
+  }
+});
 
 /** The rendered check rows: every line that begins with one of the checks the shape declares. */
 function checkRows(output, checks) {
