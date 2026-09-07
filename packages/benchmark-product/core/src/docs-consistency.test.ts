@@ -461,7 +461,7 @@ describe("product documentation consistency", () => {
     const readme = read(productReadmePath);
     const unpublishedClaims = readme
       .split(/\n\s*\n/u)
-      .filter((block) => /not (?:yet )?published|unpublished|publication remains held/iu.test(block));
+      .filter((block) => /unpublished|\bnot\b(?:\s+\w+){0,2}\s+published/iu.test(block));
     expect(unpublishedClaims.length, "README states its publication holds").toBeGreaterThan(0);
     for (const block of unpublishedClaims) {
       expect(block, block).not.toContain("@colophon-claims/verify");
