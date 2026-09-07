@@ -771,23 +771,43 @@ describe("generated licence text is not writable from a free-text field", () => 
     }))).toThrow(/reads as an SPDX tag/);
   });
 
-  test("refuses a source-manifest descriptor carrying an SPDX tag line", () => {
-    // NOTICE splices every source uri verbatim, and `uri` is `z.string().min(1)` in the sealed
-    // schema -- so the rule the publication fields are held to has to hold here too.
+  /** A one-row source manifest whose `source.uri` is whatever a test wants to splice into NOTICE. */
+  function withSourceUri(uri: string): VerifiedBundleSnapshot {
     const injected = JSON.stringify({
       protocol: "https://spec.jinn.network/binary-judgment/source-manifest-entry/v1",
       provenanceSha256: `sha256:${"e".repeat(64)}`,
-      source: { uri: "https://example.test/x\nSPDX-License-Identifier: GPL-3.0-only", digest: { sha256: "e".repeat(64) } },
+      source: { uri, digest: { sha256: "e".repeat(64) } },
       license: { uri: "https://example.test/LICENSE.txt", digest: { sha256: "b".repeat(64) } },
       attribution: { uri: "https://example.test/ATTRIBUTION.txt", digest: { sha256: "c".repeat(64) } },
       publishedAt: "2026-01-02T03:04:05Z",
     });
-    expect(() => renderFreezeRepo(snapshotOf({
+    return snapshotOf({
       records: [
         { bytes: ITEM_BANK_BYTES, roles: ["item-bank"] },
         { bytes: encoder.encode(`${injected}\n`), roles: ["source-manifest"] },
       ],
-    }))).toThrow(/reads as an SPDX tag/);
+    });
+  }
+
+  test("refuses a source-manifest descriptor carrying an SPDX tag line", () => {
+    // NOTICE splices every source uri verbatim, and `uri` is `z.string().min(1)` in the sealed
+    // schema -- so the rule the publication fields are held to has to hold here too. The value is
+    // a single line and is a tag on its own, so the tag-line guard is the one under test: the two
+    // guards stay independent even now that a descriptor refuses line separators outright.
+    expect(() => renderFreezeRepo(withSourceUri("SPDX-License-Identifier: GPL-3.0-only")))
+      .toThrow(/reads as an SPDX tag/);
+  });
+
+  test("refuses a newline in a source-manifest descriptor, which would forge a NOTICE row", () => {
+    // `renderNotice` emits `  uri:         ${uri}`, so a newline in the value adds a second
+    // row-shaped line to NOTICE that no source manifest row stands behind. RFC 3986 excludes line
+    // terminators from a URI, so nothing legitimate is lost by refusing them (issue #4054).
+    const refusal = expectRefusal(() => renderFreezeRepo(
+      withSourceUri("https://example.test/x\n  uri:         https://evil.test/other"),
+    ));
+    expect(refusal.code).toBe("record-integrity");
+    expect(refusal.issues[0]?.path).toBe("source-manifest.source.uri");
+    expect(refusal.message).toMatch(/control character or line separator/);
   });
 
   test("a multi-line citation with no tag line is still allowed", () => {

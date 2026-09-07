@@ -665,15 +665,22 @@ function readSourceLicences(sourceManifestBytes: readonly Uint8Array[]): readonl
       const entry = parsed.data;
       // `uri` is `z.string().min(1)` in the sealed schema, and `renderNotice` splices each of
       // these into NOTICE verbatim — so the rule the publication fields are held to holds here
-      // too: a generated licence-bearing file is not writable from a free-text field. Multi-line
-      // because nothing forbids a wrapped descriptor; the tag-line check is what matters.
+      // too: a generated licence-bearing file is not writable from a free-text field.
+      //
+      // Single-line, unlike `citation`. NOTICE renders each descriptor as one labelled row
+      // (`  uri:         <value>`), so a newline in the value emits a second row-shaped line that
+      // no source-manifest row stands behind — a forged attribution in a file whose whole job is
+      // to state attributions. Admitting it bought nothing legitimate either: RFC 3986 excludes
+      // line terminators from a URI, and a `source.name` carrying one is not a name. The
+      // "permanently unexportable" argument that keeps `citation` multi-line does not reach here,
+      // because no honest descriptor wraps (issue #4054).
       for (const [field, value] of [
         ["source.uri", entry.source.uri],
         ["source.name", entry.source.name],
         ["license.uri", entry.license.uri],
         ["attribution.uri", entry.attribution.uri],
       ] as const) {
-        if (typeof value === "string") assertRenderableFreeText(`source-manifest.${field}`, value, true);
+        if (typeof value === "string") assertRenderableFreeText(`source-manifest.${field}`, value, false);
       }
       rows.push({
         provenanceSha256: entry.provenanceSha256,
