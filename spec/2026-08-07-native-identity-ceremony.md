@@ -771,7 +771,8 @@ own binding and de-attribute their own past evidence, which is exactly the non-r
 §7.4b forbids and law 6 exists to protect. The rule it breaks is **R1**, which requires an anchor
 "newly submitted for that act" — a pre-existing transaction is exactly not that, so calling such an
 anchor "fresh" uses the word against R1's own meaning. R2, which bans cross-act *reuse*, does not
-reach it. Neither rule is checked: both are authoring convention, per the table above. And because the resolver looks up revocations for the
+reach it. Neither rule is checked: both are authoring convention, per the table above. And
+because the resolver looks up revocations for the
 winning binding's digest alone (`binding-resolver.ts:279`), an earlier-anchored replacement
 binding for the same `(key, agent)` escapes every revocation bound to the record it supersedes —
 revocation defeated, entirely inside the author's own IRI. The actor there is the **catalog
@@ -1070,9 +1071,7 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    exactly when they share `revokedBy` and their `target` set is exactly the preimage's
    `targets` — the compromised-EOA case, one act, one transaction, one finality wait — which
    the preimage turns from an assertion into a published commitment. `effectiveFrom` is
-   millisecond-ISO UTC and MUST be at or before the anchor's block time: the resolver clamps
-   *up*, so an earlier value is harmless and the anchor governs, while a later value silently
-   **delays** the revocation, which is the wrong direction for a security act. The
+   millisecond-ISO UTC and MUST be at or before the anchor's block time. The
    millisecond form is law 2's discipline carried over — `:147` compares the two timestamps
    lexicographically as raw strings, and `…T00:00:00Z` versus `…T00:00:00.000Z` diverge at
    index 19 (`Z` = 0x5A > `.` = 0x2E), so a second-precision `effectiveFrom` is selected as
@@ -1086,10 +1085,11 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    do care — rather than a defense against a live harm. The **at-or-before clause is
    substantive**: the clamp is `max()`, so an `effectiveFrom` set materially later than the anchor
    block time clamps *up* to itself and `checkRevocation` skips every `atTime` before it
-   (`verify.ts:282-286`), delaying a security revocation by exactly that margin. Both halves are
-   listed as authoring convention because the verifier checks neither, not because neither
-   matters. Law 1's
-   anchor-first ordering extends to revocations for the same reason it governs bindings: the
+   (`verify.ts:282-286`), delaying a security revocation by exactly that margin — the wrong
+   direction for a security act. An *earlier* value is harmless, because there the clamp does
+   make the anchor govern. Both halves are listed as authoring convention because the verifier
+   checks neither, not because neither matters. Law 1's anchor-first ordering extends to
+   revocations for the same reason it governs bindings: the
    effective time is not knowable until the anchor mines.
 
 ## 7. Security considerations
@@ -1100,7 +1100,6 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
 > bound (catalog write authority), and both directions it runs in — foreign-IRI takeover and
 > denial via the §7.4a genesis exemption, and retroactive or escaped revocation. §10 (f) carries
 > what closes it.
-
 
 **Clobber and fork risk.** Store creation is exclusive (hard-link `EEXIST` settles races,
 `role-identities.ts:433-451`); `openRoleSigners` inherits it — there is no code path that

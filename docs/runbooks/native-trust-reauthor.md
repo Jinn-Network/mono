@@ -42,8 +42,8 @@ silent-degradation window.
 > was in scope for DR-2026-09-06; **the rest of this procedure needs its own fix and does not
 > have one yet.** A further defect lands once revocations exist: `authorCatalog` writes
 > `revocations: []`, so a wholesale re-author un-revokes everything — see
-> "Why wholesale, not `appendOperator`" below. Treat the steps below as a description of intent, not a runbook to execute,
-> until that lands.
+> "Why wholesale, not `appendOperator`" below. Treat the steps below as a description of intent,
+> not a runbook to execute, until that lands.
 
 Re-run the existing ceremony against the same directory:
 
