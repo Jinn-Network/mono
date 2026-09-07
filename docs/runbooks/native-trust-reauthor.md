@@ -29,6 +29,20 @@ silent-degradation window.
 
 ## The operation
 
+> **This procedure does not execute as written, and the defects run deeper than the anchor
+> choice below.** `jinn ceremony init` refuses while the catalog exists
+> (`operator/src/cli/commands/ceremony.ts:949-966`) and there is no `--force`, so the command
+> below stops at a guard. Moving the catalog aside to get past it has consequences this runbook
+> does not yet cover: `authorCatalog` seals a **version-1 genesis** rather than continuing the
+> policy chain (`packages/trust/authoring/src/catalog.ts:198-215`), which moves
+> `policyGenesisDigest` and fails every *other* operator closed against their pin
+> (`operator/src/daemon/native-trust-catalog.ts:305-307`); and it writes only the re-authoring
+> operator's bindings, so a shared catalog comes back single-operator. A **joined** operator has
+> no path at all, since `join` needs the catalog it appends to. Only the anchor question below
+> was in scope for DR-2026-09-06; **the rest of this procedure needs its own fix and does not
+> have one yet.** Treat the steps below as a description of intent, not a runbook to execute,
+> until that lands.
+
 Re-run the existing ceremony against the same directory:
 
 ```
@@ -52,15 +66,16 @@ signatures over the new anchor's block time (§6 law 2 requires `validFrom`, the
 A re-author touches no key, store, or Agent IRI, so all five terms of the `ceremony-anchor/v1`
 preimage are unchanged and the digest is **identical** to the original ceremony's. Ceremony spec
 §3.2b requires this runbook to state which anchor the re-author takes and the operator to record
-why. State first what the CLI actually does, because it is not what the choice suggests:
+why. This section settles **only** that question; the procedure-level defects are flagged above
+and remain unowned.
 
-**There is no supported re-author path today.** `jinn ceremony init` refuses the moment the
-catalog exists — "a trust catalog already exists …; genesis never overwrites"
-(`operator/src/cli/commands/ceremony.ts:949-966`). `join` refuses the re-author too, though for
-a different reason: it is built to append to an existing catalog, so what stops it is this
-operator's own run receipt, which makes it refuse rather than append a second set of bindings
-for the same operator (`:1224` → `:840-862`). There is no `--force` on either. So "re-run the
-existing ceremony" above does not run: it stops at a guard and mints nothing.
+**Neither verb runs the re-author today.** `jinn ceremony init` refuses the moment the catalog
+exists — "a trust catalog already exists …; genesis never overwrites"
+(`operator/src/cli/commands/ceremony.ts:949-966`). `join` refuses too, though for a different
+reason: it is built to append to an existing catalog, so what stops it is this operator's own
+run receipt (`:1221-1226` → `:840-870`), and all three of its conditions must hold — an operator
+whose receipt is absent gets no refusal from `join`, it appends, which is the binding conflict
+"Why wholesale, not `appendOperator`" warns about. There is no `--force` on either verb.
 
 **Any path past the guard reuses the original anchor, silently.** The only way through is to
 move the existing catalog aside. Doing that leaves the run receipt in place — it lives at
@@ -99,3 +114,30 @@ Neither is right in general — it is a retroactive-authority judgment, left ope
 taken, **write the reason into the re-author's record** alongside the anchor transaction hash,
 and state explicitly whether the receipt was moved aside, since that single act is what decides
 it.
+
+## Why wholesale, not `appendOperator`
+
+Do **not** try to append the re-authored bindings to the existing catalog. `appendOperator` is
+additive, so the old narrow-scope binding would remain alongside the new wide-scope one for the same
+`(key, agent)` pair — which is precisely a binding conflict. `createBindingResolver` reports it and
+`openNativeTrustCatalog` refuses with `conflicting bindings for <key> and <agent>`, leaving the
+operator no better off. `authorCatalog`, which the ceremony command uses, rewrites the catalog and
+does not have this problem.
+
+## Cost and sequencing
+
+Per operator: one anchor transaction plus its finality wait, and a daemon restart. Nothing else.
+
+The window between deploying the code change and completing the re-run is a **hard boot refusal**,
+not a degradation. Sequence accordingly: on a shared deployment, re-author before rolling the code,
+or accept the downtime deliberately.
+
+## Verification
+
+After the re-run, before restarting the fleet:
+
+1. The daemon boots — `RoleIdentitySet.open` is the check that was failing.
+2. Cross-operator discovery resolves. The pinned regression for this is
+   `operator/test/daemon/trust-authoring-round-trip.test.ts` ("cross-operator discovery key resolution
+   over a real catalog"), which drives `createTrustAdapter(...).keys.resolve` over a two-operator
+   authored catalog and asserts the discovery keys come back rather than an empty array.

@@ -585,11 +585,23 @@ to `settlements` — so the `role` **labels** cannot be read off.
 
 For a catalog that has a settlement binding, what the missing labels cost is precision, not
 openability. The ambiguity is confined to the two collision classes, so a third party who knows
-the scopes knows the role assignment up to an ordered selection from each class: at most
-`3! × 2! = 12` candidate preimages. A partial role set is not automatically cheaper, because the
-third party does not know *which* of the three discovery roles were provisioned, only how many —
-`--role-sets requester,solver` (§7's operator B) gives `3P2 × 2P1 = 12` as well. Only a shape
-drawing on a single role family drops the count, to 6.
+the scopes knows the role assignment up to an ordered selection from each class, giving
+`P(3, d) × P(2, s)` candidates for `d` discovery and `s` settlement bindings. Because
+`--role-sets` must always include `requester` (`operator/src/cli/commands/ceremony.ts:250-258`),
+that product is **exactly `3! × 2! = 12` for every provisionable shape that has a settlement
+binding at all** — a partial
+role set is no cheaper, since `--role-sets requester,solver` (§7's operator B) gives
+`P(3,2) × P(2,1) = 12` as well. The shapes with a smaller product are precisely the
+settlement-free ones, and those are unconstructible for the reason below, so no count applies to
+them.
+
+That figure assumes the third party works from **scopes alone**. One who additionally assumes
+the catalog was authored by this CLI can do better on partial shapes, because the four role sets
+are a public partition (`operator/src/cli/commands/native-requester.ts:46-51`): a catalog
+showing `authorizations` and `deliveries` but no `verdicts` was provisioned
+`requester,solver`, which pins the discovery labels to two of the three and leaves two
+candidates rather than twelve. The full nine-role catalog is unaffected either way, so twelve
+remains the honest upper bound and the weaker assumption is the one stated here.
 Enumerating twelve, hashing each, and comparing against the anchor digest either matches —
 opening the commitment and revealing which assignment was authored — or refuses. That is a
 working third-party check, at a cost of twelve sha256 calls and **no re-anchor**.
@@ -930,15 +942,17 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    treats anchors per-reference: `binding-resolver.ts:127-135`); one anchor tx per ceremony
    session is the norm. **Reuse of an existing anchor is permitted exactly when the act
    recomputes the same digest** — §3.2b makes `ceremony-anchor/v1` a pure function of the
-   session tuple, so an interrupted run and a scope re-author both reproduce it. Only the
-   interrupted run reuses it automatically: `reusableAnchor`
-   (`operator/src/cli/commands/ceremony.ts:333-349`) resumes onto the already-mined transaction
-   rather than orphaning it. A re-author never reaches that code — `init` refuses at its
-   catalog-exists guard (`:949-966`) first — so there reuse is a permission the runbook may
-   exercise, not behavior the CLI supplies today. Cross-act reuse is refused by domain
-   separation: a `revocation-anchor/v1` digest can never equal a `ceremony-anchor/v1` one, so
-   a revocation's anchor is always fresh (law 6). Each binding and each revocation declares
-   exactly one anchor (§3.2b).
+   session tuple, so an interrupted run and a scope re-author both reproduce it, and
+   `reusableAnchor` (`operator/src/cli/commands/ceremony.ts:333-349`) resumes onto the
+   already-mined transaction rather than orphaning it. That is not merely the interrupted-run
+   case: `init` refuses outright while the catalog exists (`:949-966`), and the only way past
+   that guard leaves the run receipt in place, so a re-author reuses automatically too unless
+   the receipt is moved aside. **The one act that MUST NOT reuse is a rebind**, whose anchor is
+   always freshly submitted (§3.2b) — the narrow rebind preimage makes a cross-act collision
+   reachable, and reuse would date the replacement binding to the anchor of the binding it
+   replaces. Cross-*preimage* reuse is refused by domain separation: a `revocation-anchor/v1`
+   digest can never equal a `ceremony-anchor/v1` one, so a revocation's anchor is always fresh
+   (law 6). Each binding and each revocation declares exactly one anchor (§3.2b).
 2. **`validFrom = anchor block time`** (and `issuedAt` with it). The resolver computes
    `effectiveStart = max(validFrom, anchorTime)` (`binding-resolver.ts:127-135`), and the
    §7.4a consent-chain leg windows the incumbent `controls` binding at the candidate's
