@@ -74,9 +74,9 @@ by name — `yarn skill:check`, the drift gate for the generated operator skill 
 today**, a month after being filed as the motivating example.
 
 A census of guard-shaped scripts across every workspace `package.json` — names matching
-check / verify / guard / lint / audit, excluding `typecheck` (a compiler invocation, not a guard)
-and excluding the read-only `legacy/jinn-cli-agents-reference/` subtree — funnels 148 raw name
-matches down to 43 non-`typecheck` scripts, then to 34 live candidates, of which 7 are referenced
+check / verify / guard / lint / audit — funnels 148 raw name matches down to 43 once
+`typecheck` (a compiler invocation, not a guard) is excluded, and down to 34 once the
+read-only `legacy/jinn-cli-agents-reference/` subtree is excluded, of which 7 are referenced
 by no workflow and called by no other `package.json` script:
 
 | Script | What it guards | Assessment |
@@ -87,7 +87,7 @@ by no workflow and called by no other `package.json` script:
 | `packages/task-supply/admission: fixtures:check` | drift between the committed append-only prediction-snapshot fixture and its generator | **Genuine gap.** Pure: fixed public inputs and a committed test-only key, no network and no home-directory state. |
 | `operator: substrate:verify` | live-chain substrate state (RPC, funded wallets) | **Correctly unwired.** Not a statically runnable CI guard. |
 | `packages/benchmark-product/core: p5:fixture:check` | drift between the committed P5 micro-slate fixture and its mint | **Correctly unwired.** `--check` re-mints before comparing, so it needs `datasets-server.huggingface.co`, a registry or Docker digest lookup, and a free-disk gate; the script header says so and instructs "Never run in CI". |
-| `packages/benchmark-product/core: demo1:task-evidence:check` | drift between the committed Demo-1 task-evidence and pre-run freeze artifacts and their inputs | **Correctly unwired.** Reads two multi-megabyte pool snapshots from `~/.jinn-client/swe-rebench-v2/` that are not in the repository, and fetches pinned skills and repository evidence over the network. |
+| `packages/benchmark-product/core: demo1:task-evidence:check` | drift between the committed Demo-1 task-evidence and pre-run freeze artifacts and their inputs | **Correctly unwired.** Reads two pool snapshots from `~/.jinn-client/swe-rebench-v2/` that are not in the repository, and fetches pinned skills and repository evidence over the network. |
 
 The last three rows are the load-bearing ones for the design: a blanket "every guard must be
 wired" rule would be wrong, and would be worked around rather than obeyed. The obligation has to
@@ -167,11 +167,13 @@ handbook, with no mechanism attached.
 
 ### F5 — Countermeasure 3 is unbounded as stated
 
-A periodic vacuity audit of negative assertions would face roughly 200 occurrences across 48
-files in `.github/scripts` alone, before counting `operator/test` or any package suite. Every one
-would need a human to reason about reachability. The yield would be low — most negative
-assertions are fine — and the cost recurs on every audit cycle, which is the profile of a
-practice that is adopted once and quietly dropped.
+A periodic vacuity audit of negative assertions would face roughly 200 occurrences in
+`.github/scripts` alone — 161 across 38 files counting `assert.ok(!…)`, `notEqual`,
+`notStrictEqual`, `notDeepEqual`, and `doesNotThrow`, rising to 263 across 55 files once
+equality assertions against `false` are counted too — before counting `operator/test` or any
+package suite. Every one would need a human to reason about reachability. The yield would be low
+— most negative assertions are fine — and the cost recurs on every audit cycle, which is the
+profile of a practice that is adopted once and quietly dropped.
 
 More usefully: every Shape-2 instance in #2443's own table shares one precipitating event. C1's
 prefix check, C1's record-kind assertions, C2's three negative guards, C7's `selfIdentifyingClaim`
@@ -304,9 +306,9 @@ answered.
    name-based. **Answered: as recommended** — discovery is name-based, and the scripts it
    over-catches are carried by the justified exemption set rather than by narrowing the net. The
    corrected census in F2 sharpens what "occasionally" costs: the raw predicate also catches all
-   105 `typecheck` scripts, so #4176 must either exclude `typecheck` by name or carry it wholesale
-   in the exemption set. That is a scoping detail for the implementer, not a change to the
-   ratified answer, which stays name-based discovery.
+   103 `typecheck` scripts in the live tree, so #4176 must either exclude `typecheck` by name or
+   carry it wholesale in the exemption set. That is a scoping detail for the implementer, not a
+   change to the ratified answer, which stays name-based discovery.
 2. **D2a strictness** — *Asked:* should a missing self-red test fail CI, or be a review
    expectation? A mechanical check would have to decide what counts as a constructed input, which
    is the kind of judgment that produces false positives and then exemptions. Recommendation:
