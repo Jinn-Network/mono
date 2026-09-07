@@ -113,6 +113,7 @@ Inputs:
 - audit findings: {AUDIT_FINDINGS}
 - triage classifications: {TRIAGE_CLASSIFICATIONS}
 - closure outcomes: {CLOSURE_OUTCOMES}
+- hermetic-gate scenario verdicts: {HERMETIC_GATE_RESULT}
 - environment-suite verdict + evidence: {ENVIRONMENT_SUITE_RESULT}
 - diff summary: {DIFF_SUMMARY}
 

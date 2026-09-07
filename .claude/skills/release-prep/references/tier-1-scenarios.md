@@ -4,9 +4,10 @@
 > mechanical run-role is retired (see `.claude/skills/release-prep/SKILL.md`);
 > the publish gate is the two SHA-bound check-runs `hermetic-gate` and
 > `environment-suite`. This file is retained because it is the only prose
-> documenting the scenario contracts those workflows still execute.
+> documenting the Tier 1 scenario contracts, including which of them those
+> workflows still execute and which no longer run anywhere.
 
-Three scenarios, all single-operator. They are executed by `hermetic-gate.yml` (which runs `yarn test:hermetic` + `e2e:app-flow`, not the tier orchestrator) rather than by a per-push run of `release-prep`. None of them use the substrate from Plan A — Tier 1 is bootstrap-from-scratch territory.
+Three scenarios, all single-operator. Coverage differs per scenario: T1.1's contract is executed by `hermetic-gate.yml` via `yarn test:hermetic` (`operator/test/hermetic/bootstrap-from-scratch.test.ts`) and T1.4's via that workflow's `e2e:app-flow` step. **T1.2's contract has no home in either gate workflow** — neither `hermetic-gate.yml` nor `environment-suite.yml` runs it, and its only implementation is reachable solely through the retired tier orchestrator, so it is not executed by CI at all. None of the three use the substrate from Plan A — Tier 1 is bootstrap-from-scratch territory.
 
 ## T1.1 — bootstrap-fresh-anvil
 
@@ -24,7 +25,7 @@ Three scenarios, all single-operator. They are executed by `hermetic-gate.yml` (
 
 **What it does:** Spawns a fresh-HOME daemon (setup mode is enough — no bootstrap needed). Queries `/v1/harnesses/readiness` (index) and `/v1/harnesses/:name/readiness` (per harness). Asserts every known harness (`claude-code-learner`, `codex-code-learner`, `hermes-agent`) returns a valid contract response: 200 with correct shape, 404 `{error: 'harness_not_found'}`, or 503 `{error: 'subsystem_not_ready'}`.
 
-**Implementation:** `operator/test/release/tier-1/T1.2-harness-readiness-contract.ts`
+**Implementation:** `operator/test/release/tier-1/T1.2-harness-readiness-contract.ts` — run only by its `release:tier-1:T1.2` vitest wrapper; no gate workflow invokes it.
 
 **Wall-clock budget:** 30s
 
