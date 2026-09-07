@@ -597,8 +597,8 @@ that product is **exactly `3! × 2! = 12` for every provisionable shape that has
 binding at all** — a partial
 role set is no cheaper, since `--role-sets requester,solver` (§7's operator B) gives
 `P(3,2) × P(2,1) = 12` as well. The shapes with a smaller product are precisely the
-settlement-free ones, and those are unconstructible for the reason below, so no count applies to
-them.
+settlement-free ones, and for those the check is unconstructible for the reason below, so no
+count applies to them.
 
 That figure assumes the third party works from **scopes alone**. One who additionally assumes
 the catalog was authored by this CLI can do better on partial shapes, because the four role sets

@@ -59,7 +59,7 @@ It is already idempotent on custody and requires no new tooling. Specifically:
 
 What the re-run does produce: fresh EIP-191 ceremony signatures and a rewritten `trust.json`.
 Whether it also produces a **new on-chain anchor transaction** depends on the choice below, and
-the default is that it does not: on the only path that runs, `reusableAnchor` matches and
+the default is that it does not: unless the receipt is moved aside, `reusableAnchor` matches and
 `session.submit` is never called (`operator/src/cli/commands/ceremony.ts:976`, `:985`), so the
 signatures are over the **original** anchor's block time — `validFrom` is assigned straight from
 the reused locator (`:1029`) and handed to `authorBindings` as both `validFrom` and `issuedAt`
@@ -83,8 +83,8 @@ run receipt (`:1221-1226` → `:840-870`), and all three of its conditions must 
 whose receipt is absent gets no refusal from `join`, it appends, which is the binding conflict
 "Why wholesale, not `appendOperator`" warns about. There is no `--force` on either verb.
 
-**Any path past the guard reuses the original anchor, by default rather than by decision.** The
-only way through is to move the existing catalog aside. Doing that leaves the run receipt in
+**Past the guard, the original anchor is reused by default rather than by decision.** The only
+way through is to move the existing catalog aside. Doing that leaves the run receipt in
 place — it lives at `<dir>/ceremony/receipt.json` (`:266-270`), not in the catalog — so the
 re-run recomputes the identical digest, `reusableAnchor` matches it (`:333-349`), and the
 ceremony resumes onto the **already-mined** anchor. The run does say so, on both surfaces —
