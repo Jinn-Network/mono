@@ -32,7 +32,7 @@ Run-id: <run-id>
 
 ## Hermetic-gate scenarios
 - T1.1: pass (87s)
-- T1.2: pass (22s)
+- T1.4: pass (22s)
 - ...
 
 ## Environment-suite evidence
