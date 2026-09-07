@@ -80,6 +80,11 @@ snapshot; `verifyFreezeRepo(bundleDir, repoDir, deps)` is unchanged. For the sam
 for the snapshot-rendering path the CLI actually runs, so a seam typed against the directory would
 document a call the CLI no longer makes.
 
+Two of those three are breaking for an embedder — the `deps.verify` and `deps.freezeRepo` seam
+changes, which stop a supplied stub type-checking; the added export is not. Together with the
+`colophon-freeze-repo/1` -> `/2` format bump above, which makes a tree published under `/1` report
+drift, the next published cut is therefore at least 0.3.0, not a patch on 0.2.1.
+
 Bundles are also verifiable without this package: `../EXTERNAL-VERIFICATION.md` specifies
 the external path (openssl plus a dependency-free script, shipped here as
 `scripts/external-verify.py`), the JSON Schemas under `schemas/`, and the conformance kit
