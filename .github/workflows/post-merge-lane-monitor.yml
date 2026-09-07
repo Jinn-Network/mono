@@ -1,0 +1,171 @@
+name: Post-merge lane monitor
+
+# Post-merge-only lanes on `next` have no pull request that can go red on their
+# behalf, and they publish to MUTABLE tags that consumers pull. A lane that stops
+# publishing therefore looks exactly like a lane with nothing to publish:
+# `Operator Images` was red for 47 consecutive runs across 25 days (2026-07-24 ->
+# 2026-08-17) and was found by an unrelated adversarial sweep, not by any signal
+# (#2809, #2812).
+#
+# This monitor turns that silence into the alert channel the repository already
+# uses for unattended failures — a labelled Issue, as in npm-publish-monitor.yml,
+# indexer-monitor.yml, and main-next-ancestor-check.yml. No new surface.
+#
+# The lanes it covers, the failure-vs-blip rule, and the issue body all live in
+# .github/scripts/post-merge-lane-health.mjs; this workflow only fetches Actions
+# metadata and applies the result. Adding a lane means editing that registry and
+# the `workflows:` list below together — post-merge-lane-health.test.mjs pins the
+# two to each other.
+on:
+  workflow_run:
+    workflows: [Operator Images, SDK npm Publish, Layer Packages npm Publish, Stack npm Publish]
+    types: [completed]
+  # Bounds detection latency, and is the half that catches a SINGLE failure that no
+  # later push has recovered: that case only becomes alertable once its grace window
+  # elapses, with no completion event left to carry it.
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+# This trusted monitor never checks out or executes code from a monitored revision:
+# `workflow_run` and `schedule` both run this workflow from the default branch.
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: post-merge-lane-monitor
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile post-merge lane alerts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Verify lane-health decision logic
+        run: node --test .github/scripts/post-merge-lane-health.test.mjs
+
+      - name: Open, update, or close lane alerts
+        uses: actions/github-script@v9
+        env:
+          ALERT_LABEL: automated:post-merge-lane-failure
+        with:
+          script: |
+            const {
+              MONITORED_LANES,
+              classifyLane,
+              renderAlert,
+              renderRecovery,
+              titlePrefixFor,
+            } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/post-merge-lane-health.mjs`);
+
+            const repo = context.repo;
+            const label = process.env.ALERT_LABEL;
+            try {
+              await github.rest.issues.createLabel({
+                ...repo,
+                name: label,
+                color: 'D93F0B',
+                description: 'A post-merge-only lane on next is failing',
+              });
+            } catch (error) {
+              if (error.status !== 422) throw error;
+            }
+
+            // Every lane is reconciled on every invocation, whichever lane's
+            // completion woke this run. A dropped or out-of-order workflow_run
+            // delivery then costs at most one scheduled tick, and no lane depends
+            // on its own events arriving.
+            for (const lane of MONITORED_LANES) {
+              // A window, not the full history: the classification needs only the
+              // leading run streak and the newest success behind it.
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                ...repo,
+                workflow_id: lane.file,
+                branch: lane.branch,
+                event: 'push',
+                per_page: 50,
+              });
+              const verdict = classifyLane({
+                lane,
+                runs: data.workflow_runs,
+                now: Date.now(),
+              });
+
+              const titlePrefix = titlePrefixFor(lane);
+              const openAlerts = (await github.paginate(
+                github.rest.issues.listForRepo,
+                { ...repo, state: 'open', labels: label, per_page: 100 },
+              ))
+                .filter((issue) => issue.title.startsWith(titlePrefix))
+                .sort((a, b) => a.number - b.number);
+
+              if (verdict.state !== 'alert') {
+                for (const alert of openAlerts) {
+                  if (verdict.state === 'wait') {
+                    core.info(`${lane.workflow}: failing but unconfirmed; leaving #${alert.number} open.`);
+                    continue;
+                  }
+                  await github.rest.issues.createComment({
+                    ...repo,
+                    issue_number: alert.number,
+                    body: renderRecovery({ lane, verdict }),
+                  });
+                  await github.rest.issues.update({
+                    ...repo,
+                    issue_number: alert.number,
+                    state: 'closed',
+                    state_reason: 'completed',
+                  });
+                  core.notice(`Closed ${lane.workflow} alert #${alert.number}.`);
+                }
+                if (openAlerts.length === 0) core.info(`${lane.workflow}: ${verdict.state}.`);
+                continue;
+              }
+
+              const { title, body } = renderAlert({ lane, verdict });
+              const [canonical, ...duplicates] = openAlerts;
+              if (!canonical) {
+                const created = await github.rest.issues.create({ ...repo, title, body, labels: [label] });
+                core.warning(`Opened ${lane.workflow} alert #${created.data.number}.`);
+                continue;
+              }
+
+              // The body is derived from run data alone, so an unchanged lane
+              // re-renders byte-identically and this comments on genuinely new
+              // failures only, never once per scheduled tick.
+              if (canonical.body !== body || canonical.title !== title) {
+                if (canonical.body !== body) {
+                  await github.rest.issues.createComment({ ...repo, issue_number: canonical.number, body });
+                }
+                await github.rest.issues.update({ ...repo, issue_number: canonical.number, title, body });
+                core.warning(`Updated ${lane.workflow} alert #${canonical.number}.`);
+              } else {
+                core.info(`${lane.workflow} alert #${canonical.number} is current.`);
+              }
+
+              for (const duplicate of duplicates) {
+                await github.rest.issues.createComment({
+                  ...repo,
+                  issue_number: duplicate.number,
+                  body: `Duplicate ${lane.workflow} alert; consolidated into #${canonical.number}.`,
+                });
+                await github.rest.issues.update({
+                  ...repo,
+                  issue_number: duplicate.number,
+                  state: 'closed',
+                  state_reason: 'not_planned',
+                });
+                core.notice(`Closed duplicate ${lane.workflow} alert #${duplicate.number}.`);
+              }
+            }
