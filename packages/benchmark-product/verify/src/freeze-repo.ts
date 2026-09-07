@@ -278,8 +278,15 @@ export function isSpdxLicenseExpression(value: string): boolean {
  *
  * The splitter below therefore recognizes exactly the terminators the classes admit, and nothing
  * outside them can reach a rendered file to be recognized by anyone else.
+ *
+ * Case-insensitive for the same reason the class reaches past U+007F: the readers that matter are.
+ * SPDX 2.3 §D.1 writes the tag one way, but ScanCode, REUSE, and the licence scanners built on
+ * them match it without regard to case, so `spdx-license-identifier: GPL-3.0-only` is a second
+ * licence tag to every one of them even though this guard saw a string SPDX does not spell. A
+ * legitimate field beginning `spdx-anything:` is refused with it, which is the guard's stated job
+ * (issue #4053).
  */
-const SPDX_TAG_LINE = /^[ \t]*SPDX-[A-Za-z][A-Za-z0-9-]*[ \t]*:/u;
+const SPDX_TAG_LINE = /^[ \t]*SPDX-[A-Za-z][A-Za-z0-9-]*[ \t]*:/iu;
 
 function renderableFreeTextProblem(value: string, multiline: boolean): string | undefined {
   // Tab is carried in both cases; CR and LF only where the field is documented as multi-line. CR

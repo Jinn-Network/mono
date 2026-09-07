@@ -717,6 +717,16 @@ describe("generated licence text is not writable from a free-text field", () => 
     }))).toThrow(/reads as an SPDX tag/);
   });
 
+  test("refuses an SPDX tag line in any case, because scanners match case-insensitively", () => {
+    // A scanner reads `spdx-license-identifier:` as the tag it is, so a guard that reads only the
+    // canonical casing refuses nothing a splicer would actually write (issue #4053).
+    for (const tag of ["spdx-license-identifier: GPL-3.0-only", "Spdx-License-Identifier: GPL-3.0-only"]) {
+      expect(() => renderFreezeRepo(snapshotOf({
+        benchmark: withBenchmark({ citation: `Someone, 2026.\n${tag}` }),
+      })), tag).toThrow(/reads as an SPDX tag/);
+    }
+  });
+
   test("refuses every line separator a licence scanner breaks on, not only the ones JS does", () => {
     // A tag-line check that stops at U+007F is bypassed by every reader that does not. Python's
     // str.splitlines() and Java's String.lines() both break on CR, U+0085, U+2028 and U+2029, so
