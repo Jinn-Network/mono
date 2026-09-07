@@ -19,8 +19,9 @@
  *     hot-apply path exists.
  *   - `operator-artifacts-endpoint.ts`'s `POST /v1/operator/pricing` — restart-required since
  *     issue #2427, which removed a hot-apply that reassigned `config.operator` without reaching
- *     any live consumer (artifact packaging, live publishing, and endpoint stamping all read
- *     boot-time snapshots taken in `main.ts`).
+ *     any consumer of the pricing values other than the diagnostic debug-report snapshot
+ *     (artifact packaging, live publishing, and endpoint stamping all read boot-time snapshots
+ *     taken in `main.ts`).
  *
  * The join- and leave-SolverNet endpoints were the third and fourth writers until Wave-4 D1
  * (DR-2026-08-05) retired them with the `joinedSolverNets` claim gate. Join was the one caller

@@ -292,6 +292,12 @@ describe('POST /v1/operator/pricing', () => {
     resetRestartRequiredForTest();
   });
 
+  // The flag is a process-wide singleton; leave it clean for any file that
+  // shares the module under a relaxed-isolation vitest config.
+  afterEach(() => {
+    resetRestartRequiredForTest();
+  });
+
   it('persists future-artifact pricing under config.operator', async () => {
     const store = memoryStore();
     const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));

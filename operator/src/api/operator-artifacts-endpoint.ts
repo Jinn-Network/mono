@@ -462,7 +462,8 @@ export function addOperatorArtifactsRoutes(app: Hono, config: OperatorArtifactsR
     // Issue #2427: this write genuinely needs a restart. Every live pricing
     // consumer (artifact packaging, live publishing, endpoint stamping) reads a
     // boot-time snapshot, so the previous in-memory hot-apply reassigned
-    // `config.operator` without reaching any of them. Set the flag the
+    // `config.operator` without reaching any consumer of the pricing values
+    // other than the diagnostic debug-report snapshot. Set the flag the
     // `restart_required` notification reads, matching the response below.
     markRestartRequired();
 
