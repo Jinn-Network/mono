@@ -97,7 +97,7 @@ What remains is code, across three packages, plus documentation:
   `runSha256` / `matrixSha256` input names, onto an explicit taxonomy
   parameter carrying both the subject→kind map and the subject→digest pairs.
   This is a pure generalization: the classic lineage passes today's taxonomy
-  and its behaviour is unchanged. It also carries the §3 splice-catch policy
+  and its behavior is unchanged. It also carries the §3 splice-catch policy
   (below) as an explicit taxonomy field rather than an unconditional rule.
 - **`packages/benchmark-product/verify/src/verify.ts`** and
   **`packages/benchmarking/evidence/src/portable.ts`** — a `/10` branch that
@@ -219,7 +219,7 @@ not attempted here.
 | # | Work | Blocked on |
 |---|---|---|
 | 1 | The `/10` generation itself — format, claim package, profile IRIs, capability-entry mechanism | issues #3403 → #3406; **not this issue** |
-| 2 | Generalize `evaluateIntegrityAnchors` onto an explicit taxonomy (subject→kind map, subject→digest pairs, splice-catch flag), classic behaviour unchanged | nothing; it is a pure refactor, but it has no second consumer until 3, so it lands with 3 rather than speculatively ahead of it |
+| 2 | Generalize `evaluateIntegrityAnchors` onto an explicit taxonomy (subject→kind map, subject→digest pairs, splice-catch flag), classic behavior unchanged | nothing; it is a pure refactor, but it has no second consumer until 3, so it lands with 3 rather than speculatively ahead of it |
 | 3 | The anchor capability entry: `/10` branches in `verify.ts` and `portable.ts`, the evidence-native taxonomy, the reader-flag activation, the `PUBLIC-BUNDLE.md` `/10` section with the §3 divergence stated | 1 |
 | 4 | The documented re-report of Demo-1 carrying the RFC 3161 token, and the citation updates the new bundle identity forces | 3 |
 
