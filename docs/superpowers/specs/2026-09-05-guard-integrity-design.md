@@ -73,19 +73,37 @@ by name — `yarn skill:check`, the drift gate for the generated operator skill 
 `package.json` script, so it falls outside that population and is **still unowned by any workflow
 today**, a month after being filed as the motivating example.
 
-A census of guard-shaped scripts across every workspace `package.json` (names matching
-check / verify / guard / lint / audit) finds 18, of which 3 are referenced by no workflow:
+A census of guard-shaped scripts across every workspace `package.json` — names matching
+check / verify / guard / lint / audit, excluding `typecheck` (a compiler invocation, not a guard)
+and excluding the read-only `legacy/jinn-cli-agents-reference/` subtree — funnels 148 raw name
+matches down to 43 non-`typecheck` scripts, then to 34 live candidates, of which 7 are referenced
+by no workflow and called by no other `package.json` script:
 
 | Script | What it guards | Assessment |
 |---|---|---|
 | `operator: skill:check` | drift between the generated operator `SKILL.md` tables and the live CLI/MCP registries | **Genuine gap.** The instance #2443 named. |
 | `operator: generate:openapi:check` | drift between the committed OpenAPI artifact and the generator | **Genuine gap.** Its own header describes it as "the same shape as `.github/scripts/generate-architecture.mjs --check`" — and that sibling *is* wired (`platform-architecture-control.yml:50`). The asymmetry is unintentional. |
+| `packages/benchmark-product/core: demo1:verify` | the sealed Demo-1 report — admission of the declared cells, recomputation of every statistic, digest integrity of the evidence bundle, and its ed25519 DSSE signatures | **Genuine gap.** Its own header offers it as the replay "from a clean checkout … with no network", which is the definition of statically runnable. |
+| `packages/task-supply/admission: fixtures:check` | drift between the committed append-only prediction-snapshot fixture and its generator | **Genuine gap.** Pure: fixed public inputs and a committed test-only key, no network and no home-directory state. |
 | `operator: substrate:verify` | live-chain substrate state (RPC, funded wallets) | **Correctly unwired.** Not a statically runnable CI guard. |
+| `packages/benchmark-product/core: p5:fixture:check` | drift between the committed P5 micro-slate fixture and its mint | **Correctly unwired.** `--check` re-mints before comparing, so it needs `datasets-server.huggingface.co`, a registry or Docker digest lookup, and a free-disk gate; the script header says so and instructs "Never run in CI". |
+| `packages/benchmark-product/core: demo1:task-evidence:check` | drift between the committed Demo-1 task-evidence and pre-run freeze artifacts and their inputs | **Correctly unwired.** Reads two multi-megabyte pool snapshots from `~/.jinn-client/swe-rebench-v2/` that are not in the repository, and fetches pinned skills and repository evidence over the network. |
 
-The third row is the load-bearing one for the design: a blanket "every guard must be wired" rule
-would be wrong, and would be worked around rather than obeyed. The obligation has to admit a
-declared, justified exemption — the same shape `workflow-script-tests.test.mjs` already uses for
-`LIVE_TREE_MUTATING_TESTS`.
+The last three rows are the load-bearing ones for the design: a blanket "every guard must be
+wired" rule would be wrong, and would be worked around rather than obeyed. The obligation has to
+admit a declared, justified exemption — the same shape `workflow-script-tests.test.mjs` already
+uses for `LIVE_TREE_MUTATING_TESTS`.
+
+The corrected census strengthens D1 rather than changing it. It reads four genuine gaps against
+three correct exemptions, where the original read two against one: the gap population D1 closes is
+twice the size first claimed, and — more to the point — the exemption population that forces D1 to
+carry a justified `NOT_CI_RUNNABLE` set rather than a blanket rule is three times the size, so both
+halves of the decision are better evidenced than they were.
+
+(Correction, v1.1: v1.0 of this section reported 18 guard-shaped scripts of which 3 were unwired,
+and named only `skill:check`, `generate:openapi:check` and `substrate:verify`. Neither figure
+reproduces; the funnel and the seven-row population above are the measured ones. D1, D2 and D3 are
+unaffected — the census is evidence for them, not a term of them.)
 
 ### F3 — The Shape-1 countermeasure contains a Shape-2 instance
 
@@ -261,7 +279,7 @@ independently valuable and small enough to land on its own.
 | [#4175](https://github.com/Jinn-Network/mono/issues/4175) | `fix` | Make `findOrphanedScriptTests detects a planted orphan` actually plant one — pass it a constructed scripts/workflows pair containing a known orphan and assert it is returned. F3; a live broken guard, and the change is a few lines. | none |
 | [#4176](https://github.com/Jinn-Network/mono/issues/4176) | `chore` | Implement D1: guard-script manifest with a justified `NOT_CI_RUNNABLE` set, name-based discovery, orphan-naming failure message; wire `skill:check` and `generate:openapi:check` to owning workflows in the same PR. | D1 (ratified 2026-09-07) |
 | [#4177](https://github.com/Jinn-Network/mono/issues/4177) | `docs` | Implement D2b: rule 7 sub-bullet in `docs/engineering/handbook.md`, naming `.github/scripts/docs-key-guard.test.mjs` as the canonical `self-test:` example — the form rule 7's boundary-test bullet already uses. CODEOWNER-gated; author and approve under different operator credentials. | D2 (ratified 2026-09-07) |
-| [#4178](https://github.com/Jinn-Network/mono/issues/4178) | `docs` | Implement D3's rename trigger as a classification item under §Review pass in `.claude/skills/review-pr/SKILL.md`, and update the skill-text contract pins in the same change (`.github/scripts/autopilot-skill-contracts.test.mjs`), per `docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md` §7. | D3 (ratified 2026-09-07) |
+| [#4178](https://github.com/Jinn-Network/mono/issues/4178) | `docs` | Implement D3's rename trigger as a classification item under §Review pass in `.claude/skills/review-pr/SKILL.md`, and add the skill-text contract pins for `review-pr` in the same change (`.github/scripts/autopilot-skill-contracts.test.mjs` pins only `fix-child` today, so there are none to update), per `docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md` §7. | D3 (ratified 2026-09-07) |
 
 Issue #4175 does not depend on ratification of anything — it repairs a guard that is broken today
 against the standard the guard's own file already sets elsewhere.
@@ -277,7 +295,11 @@ answered.
    guard and need a justification line? The alternative is an opt-in marker, which is cheaper to
    get right and easier to forget, reintroducing the failure this closes. Recommendation:
    name-based. **Answered: as recommended** — discovery is name-based, and the scripts it
-   over-catches are carried by the justified exemption set rather than by narrowing the net.
+   over-catches are carried by the justified exemption set rather than by narrowing the net. The
+   corrected census in F2 sharpens what "occasionally" costs: the raw predicate also catches all
+   105 `typecheck` scripts, so #4176 must either exclude `typecheck` by name or carry it wholesale
+   in the exemption set. That is a scoping detail for the implementer, not a change to the
+   ratified answer, which stays name-based discovery.
 2. **D2a strictness** — *Asked:* should a missing self-red test fail CI, or be a review
    expectation? A mechanical check would have to decide what counts as a constructed input, which
    is the kind of judgment that produces false positives and then exemptions. Recommendation:
