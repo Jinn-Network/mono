@@ -50,49 +50,41 @@ signatures over the new anchor's block time (§6 law 2 requires `validFrom`, the
 ### Reuse or mint: state the choice, record the reason
 
 A re-author touches no key, store, or Agent IRI, so all five terms of the `ceremony-anchor/v1`
-preimage are unchanged and the digest is **identical** to the original ceremony's. Both options
-are therefore available, and ceremony spec §3.2b requires this runbook to state which it takes
-and the operator to record why:
+preimage are unchanged and the digest is **identical** to the original ceremony's. Ceremony spec
+§3.2b requires this runbook to state which anchor the re-author takes and the operator to record
+why. State first what the CLI actually does, because it is not what the choice suggests:
 
-- **Mint a fresh anchor** — what the steps below do today. The re-authored bindings carry the new
-  anchor's block time, so the widened scope is claimed only from the moment it was widened. The
-  cost is a coverage gap between the old anchor time and the new one: evidence signed inside that
-  window resolves against neither the old bindings (rewritten) nor the new ones (not yet
+**There is no supported re-author path today.** `jinn ceremony init` refuses the moment the
+catalog exists — "a trust catalog already exists …; genesis never overwrites"
+(`operator/src/cli/commands/ceremony.ts:949-966`). `join` refuses the re-author too, though for
+a different reason: it is built to append to an existing catalog, so what stops it is this
+operator's own run receipt, which makes it refuse rather than append a second set of bindings
+for the same operator (`:1224` → `:840-862`). There is no `--force` on either. So "re-run the
+existing ceremony" above does not run: it stops at a guard and mints nothing.
+
+**Any path past the guard reuses the original anchor, silently.** The only way through is to
+move the existing catalog aside. Doing that leaves the run receipt in place — it lives at
+`<dir>/ceremony/receipt.json` (`:266-270`), not in the catalog — so the re-run recomputes the
+identical digest, `reusableAnchor` matches it (`:333-349`), and the ceremony resumes onto the
+**already-mined** anchor, reporting `ceremony_anchor_reused` (`:1002`). The operator gets reuse
+without choosing it.
+
+The two options, and how to actually take each:
+
+- **Reuse the existing anchor** — what happens by default on any path that runs at all, and
+  permitted by §6 law 1 because the digest matches. It preserves the original `validFrom` and
+  effective window, so there is no coverage gap. The cost is retroactivity: the *widened* scope
+  is claimed back over evidence signed before the widening, including evidence a verifier
+  refused at the time for want of that very scope.
+- **Mint a fresh anchor** — requires moving `<dir>/ceremony/receipt.json` aside as well as the
+  catalog, so that `reusableAnchor` finds nothing. The re-authored bindings then carry the new
+  anchor's block time and the widened scope is claimed only from the moment it was widened. The
+  cost is a coverage gap between the old anchor time and the new one: evidence signed inside
+  that window resolves against neither the old bindings (replaced) nor the new ones (not yet
   effective).
-- **Reuse the existing anchor** — permitted, because the digest matches (§6 law 1). It preserves
-  the original `validFrom` and effective window, closing that gap. The cost is retroactivity: the
-  *widened* scope is claimed back over evidence signed before the widening, including evidence a
-  verifier refused at the time for want of that very scope.
 
 Neither is right in general — it is a retroactive-authority judgment, left open at ceremony spec
-§10 (e) and owned by [#4172](https://github.com/Jinn-Network/mono/issues/4172). **Default to
-minting fresh**, which is what these steps do and the option that refuses retroactivity. Reuse
-only deliberately, and write the reason into the re-author's record alongside the anchor
-transaction hash.
-
-## Why wholesale, not `appendOperator`
-
-Do **not** try to append the re-authored bindings to the existing catalog. `appendOperator` is
-additive, so the old narrow-scope binding would remain alongside the new wide-scope one for the same
-`(key, agent)` pair — which is precisely a binding conflict. `createBindingResolver` reports it and
-`openNativeTrustCatalog` refuses with `conflicting bindings for <key> and <agent>`, leaving the
-operator no better off. `authorCatalog`, which the ceremony command uses, rewrites the catalog and
-does not have this problem.
-
-## Cost and sequencing
-
-Per operator: one anchor transaction plus its finality wait, and a daemon restart. Nothing else.
-
-The window between deploying the code change and completing the re-run is a **hard boot refusal**,
-not a degradation. Sequence accordingly: on a shared deployment, re-author before rolling the code,
-or accept the downtime deliberately.
-
-## Verification
-
-After the re-run, before restarting the fleet:
-
-1. The daemon boots — `RoleIdentitySet.open` is the check that was failing.
-2. Cross-operator discovery resolves. The pinned regression for this is
-   `operator/test/daemon/trust-authoring-round-trip.test.ts` ("cross-operator discovery key resolution
-   over a real catalog"), which drives `createTrustAdapter(...).keys.resolve` over a two-operator
-   authored catalog and asserts the discovery keys come back rather than an empty array.
+§10 (e) and owned by [#4172](https://github.com/Jinn-Network/mono/issues/4172). Whichever is
+taken, **write the reason into the re-author's record** alongside the anchor transaction hash,
+and state explicitly whether the receipt was moved aside, since that single act is what decides
+it.

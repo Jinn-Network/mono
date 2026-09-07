@@ -564,44 +564,62 @@ checked today.
 **The defect this preimage carries, stated plainly: it is not *directly* recomputable.** The
 doc comment at `operator/src/cli/commands/ceremony.ts:400-411` claims the preimage makes the
 on-chain transaction say something "true and checkable". Checkable, but not by reading the
-catalog off. Four of the five terms are recoverable from the catalog directly — `protocol` is a
+catalog off. Three of the five terms are recoverable from any catalog — `protocol` is a
 literal, `agent` and `admissionAgent` are binding `agent` fields
-(`operator/src/cli/commands/ceremony.ts:719-721`), `settlementSafe` is read off any
-settlement-scoped binding's ceremony evidence, which the catalog entry carries beside the
-envelope (`operator/src/daemon/native-trust-catalog.ts:183`) and whose third resource is
-`did:pkh:eip155:84532:0x<Safe>` by §2.3b (`:257`, `:553-560`), and each `keyId` is the binding's
-`key.didKey` verbatim (`packages/trust/core/src/key-binding.ts:58-63`). The fifth is not:
-`KeyBinding` carries no `role` field (`:55-74`), and the role→scope map of §3.2a is not
-invertible — the three
-`*-discovery` roles share one scope pair and both settlement roles map to `settlements` — so
-the `role` **labels** cannot be read off a catalog.
+(`operator/src/cli/commands/ceremony.ts:719-721`), and each `keyId` is the binding's
+`key.didKey` verbatim (`packages/trust/core/src/key-binding.ts:58-63`). A fourth,
+`settlementSafe`, is recoverable only from a catalog carrying **at least one settlement-scoped
+binding**: the Safe is written into ceremony evidence under the `isSettlementRole` guard alone
+(`operator/src/cli/commands/ceremony.ts:744`, `packages/trust/authoring/src/roles.ts:128-130`),
+and the catalog stores it nowhere else, so it is read off that binding's evidence — which the
+catalog entry carries beside the envelope (`operator/src/daemon/native-trust-catalog.ts:183`)
+and whose third resource is `did:pkh:eip155:84532:0x<Safe>` by §2.3b (`:257`, `:553-560`). A
+settlement-free provisioning
+carries none: `--role-sets requester` mints only `requester-submission` and
+`requester-discovery` (`operator/src/cli/commands/native-requester.ts:46-51`).
 
-What that costs is precision, not openability. The ambiguity is confined to the two collision
-classes, so a third party who knows the scopes knows the role assignment up to a permutation
-within each: at most `3! × 2! = 12` candidate preimages for a full nine-role ceremony, fewer
-for a partial one. Enumerating twelve, hashing each, and comparing against the anchor digest
-either matches — opening the commitment and revealing which permutation was authored — or
-refuses. That is a working third-party check, at a cost of twelve sha256 calls and **no
-re-anchor**.
+The fifth term is recoverable from no catalog at all: `KeyBinding` carries no `role` field
+(`packages/trust/core/src/key-binding.ts:55-74`), and the role→scope map of §3.2a is not
+invertible — the three `*-discovery` roles share one scope pair and both settlement roles map
+to `settlements` — so the `role` **labels** cannot be read off.
 
-So the honest statement is narrower than "inert", and correspondingly the corrective is less
-urgent than a defect that could never be opened: what `ceremony-anchor/v1` lacks is a
-*direct* recomputation, and a verifier willing to enumerate can check it today against every
-anchor already mined. The corrective is a directly recomputable preimage — drop `role`, or
-commit to a sorted set of `(agent, keyId)` pairs plus the Safe, all readable off the catalog —
+For a catalog that has a settlement binding, what the missing labels cost is precision, not
+openability. The ambiguity is confined to the two collision classes, so a third party who knows
+the scopes knows the role assignment up to an ordered selection from each class: at most
+`3! × 2! = 12` candidate preimages, and no fewer for a partial role set that still populates
+both classes — `--role-sets requester,solver` (§7's operator B) gives `3P2 × 2P1 = 12` as well,
+because the third party does not know *which* of the three discovery roles were provisioned.
+Enumerating twelve, hashing each, and comparing against the anchor digest either matches —
+opening the commitment and revealing which assignment was authored — or refuses. That is a
+working third-party check, at a cost of twelve sha256 calls and **no re-anchor**.
+
+For a settlement-free catalog the check is not merely imprecise, it is **unconstructible**: the
+missing `settlementSafe` is a 160-bit address, not a twelve-way choice. That shape is
+supported and reachable today, so the enumerating check below is available to some catalogs and
+not to others — which is itself an argument for the directly recomputable successor, and is
+recorded as such at §10 (f).
+
+So the honest statement is narrower than "inert": what `ceremony-anchor/v1` lacks is a *direct*
+recomputation, and where the catalog carries a Safe a verifier willing to enumerate can check it
+today against anchors already mined. The corrective is a directly recomputable preimage — drop
+`role`, and commit only to terms every catalog carries, which rules out leaning on the Safe —
 and it is deliberately **not** ratified here: it changes the preimage, which costs every
-existing deployment a re-anchor, and the enumerating check above buys most of the evidentiary
-value at none of that cost. It belongs to the anchor-locator profile document, and changing
-the preimage twice is worse than once. The defect, and the enumerating check that partly
-answers it, are recorded as inputs to that document (§10).
+existing deployment a re-anchor, and the enumerating check buys most of the evidentiary value at
+none of that cost wherever it is constructible at all. It belongs to the anchor-locator profile
+document, and changing the preimage twice is worse than once. The defect, the enumerating check
+that partly answers it, and the settlement-free shape that check cannot reach are recorded as
+inputs to that document (§10).
 
 **Re-author (the scope-widening path) recomputes the same digest.**
 [`docs/runbooks/native-trust-reauthor.md`](../docs/runbooks/native-trust-reauthor.md)
 re-signs bindings without touching keys, stores, or Agent IRIs, so none of the five preimage
 terms change and the digest is identical. The anchor MAY therefore be reused; the existing
 anchor already commits to exactly this tuple and there is no evidentiary reason to mint a
-second. Reuse is not automatically correct: the runbook mints a fresh anchor today
-(`native-trust-reauthor.md:46-48`), and the two options differ semantically. Reuse preserves
+second. Reuse is not automatically correct, and it is also what happens by default: `init`
+refuses outright while the catalog exists (`operator/src/cli/commands/ceremony.ts:949-966`), and
+the only way past that guard leaves the run receipt in place, so `reusableAnchor` (`:333-349`)
+resumes onto the already-mined anchor unless the receipt is moved aside too. The runbook states
+this and both options' costs. They differ semantically. Reuse preserves
 the original `validFrom` and effective window, so the *widened* scope is claimed retroactively
 over evidence signed before the widening; a fresh anchor refuses that retroactivity at the cost
 of a coverage gap between the old anchor time and the new one. The reuse-vs-fresh choice is a
@@ -621,11 +639,20 @@ unchanged from the operator's genesis, so the digest differs from the genesis an
 the replacement `keyId` differs — which rotation guarantees, since rotating to the same key is
 not a rotation.
 
-The two halves are two acts and take **two anchors**: the revocation's is
-`revocation-anchor/v1` and is fresh per law 6; the rebind's is `ceremony-anchor/v1` and is
-subject to law 1. Domain separation keeps them distinct by construction, so neither can be
-mistaken for the other and law 6's cross-act reuse ban is not weakened by the rebind sharing a
-session with the revocation.
+The two halves are two acts and take **two anchors**, and **both are fresh**. The revocation's
+is `revocation-anchor/v1`, fresh per law 6 R1. The rebind's is `ceremony-anchor/v1`, and it is
+newly submitted for that act rather than merely subject to law 1's general reuse permission —
+§3.2 already fixes the surface that way ("revoke + `authorRoleBinding` for the replacement key +
+new anchor"), and stating it normatively closes a case the narrow preimage opens. Law 1 permits
+reuse exactly when the act recomputes the same digest; with the genesis-wide preimage a
+cross-act collision was unreachable, but over replacement bindings alone it is not — re-binding
+a `(role, keyId)` pair that the same agent and Safe bound before recomputes an already-mined
+digest, and reuse would then hand the rebind that older anchor's block time as its `validFrom`.
+That is binding-side retroactivity of exactly the kind R2 forbids for revocations, and it is
+worse here, because the intervening revocation is what makes the case arise at all. Domain
+separation keeps the two preimages distinct by construction, so neither anchor can be mistaken
+for the other and law 6's cross-act ban is not weakened by the rebind sharing a session with the
+revocation.
 
 **Revocation: the `revocation-anchor/v1` preimage, recomputable by design.** `revokeBinding`'s
 body is deferred (§3.2, §9), so no revocation has ever been authored — which is why this is
@@ -677,7 +704,7 @@ its rules are checked is how §3.2a's class of drift happens, so the split is st
 | Canonical block re-read | Enforced (`:1473-1477`) |
 | Exact digest bytes at the declared `inputByteOffset` | Enforced (`:1468-1471`) |
 | Every referenced anchor is declared in `anchors[]`; at least one per record | Enforced (`native-trust-catalog.ts:326-343`) |
-| The `ceremony-anchor/v1` preimage and every canonicalization rule above | Authoring convention. Checkable by a third party only by enumerating the ≤12 role permutations the scope map cannot distinguish, per the defect above — not directly recomputable |
+| The `ceremony-anchor/v1` preimage and every canonicalization rule above | Authoring convention. Not directly recomputable. Checkable by a third party only by enumerating the ≤12 role assignments the scope map cannot distinguish, and only for a catalog carrying a settlement-scoped binding — per the defect above |
 | The ASCII-only restriction | Authoring convention |
 | The self-send anchor-target default | A default, not a rule |
 | `inputByteOffset === 0` for anything Jinn composes | Authoring convention (`packages/trust/authoring/src/anchor.ts:129`) |
@@ -908,9 +935,8 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    rather than orphaning it. A re-author never reaches that code — `init` refuses at its
    catalog-exists guard (`:949-966`) first — so there reuse is a permission the runbook may
    exercise, not behavior the CLI supplies today. Cross-act reuse is refused by domain
-   separation: a
-   `revocation-anchor/v1` digest can never equal a `ceremony-anchor/v1` one, so a
-   revocation's anchor is always fresh (law 6). Each binding and each revocation declares
+   separation: a `revocation-anchor/v1` digest can never equal a `ceremony-anchor/v1` one, so
+   a revocation's anchor is always fresh (law 6). Each binding and each revocation declares
    exactly one anchor (§3.2b).
 2. **`validFrom = anchor block time`** (and `issuedAt` with it). The resolver computes
    `effectiveStart = max(validFrom, anchorTime)` (`binding-resolver.ts:127-135`), and the
@@ -1103,12 +1129,15 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   [#4172](https://github.com/Jinn-Network/mono/issues/4172).
 - **(f) Should a successor binding-anchor preimage be *directly* third-party recomputable, and
   when is the re-anchor worth paying?** §3.2b records, as a named defect, that
-  `ceremony-anchor/v1` commits to `role` labels no third party can read off a catalog. The
-  commitment is still openable — by enumerating the ≤12 permutations the scope map cannot
-  distinguish — so the question is whether a direct recomputation is worth a re-anchor when an
-  enumerating check is already available at no deployment cost. The corrective is a directly
-  recomputable preimage — drop `role`, or commit to a sorted set of `(agent, keyId)` pairs plus
-  the Safe — and it costs every existing deployment a re-anchor.
+  `ceremony-anchor/v1` commits to `role` labels no third party can read off a catalog. For a
+  catalog carrying a settlement-scoped binding the commitment is still openable — by
+  enumerating the ≤12 assignments the scope map cannot distinguish — so there the question is
+  whether a direct recomputation is worth a re-anchor when an enumerating check is already
+  available at no deployment cost. For a settlement-free catalog (`--role-sets requester`) it is
+  not openable at all, because `settlementSafe` appears nowhere in it; that shape has no check
+  short of the successor, which sharpens the question rather than settling it. The corrective is
+  a directly recomputable preimage — drop `role`, and commit to terms every catalog carries —
+  and it costs every existing deployment a re-anchor.
   Reserved as an input to the anchor-locator profile document authored in `Jinn-Network/spec`
   under DR-2026-09-03, together with the `contractAddress` → `to` rename, so the first
   published version is right rather than compatible with a mistake. Owned by
