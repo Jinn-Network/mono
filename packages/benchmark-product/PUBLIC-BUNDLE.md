@@ -310,7 +310,11 @@ and the exact release named here — `0.2.1` — is already published, immutable
 and predates v9, so it refuses a v9 bundle at manifest parse. Sealing it would
 publish an instruction that can never be true. Both the pin and the producer
 move in the release that actually serves this format; until then the exact
-version below is provisional, and only the `@0.2` compatible line is meaningful.
+version below is provisional, and so is the compatible line beside it. `@0.2`
+resolves to `0.2.1` today and refuses v9 for the same reason the exact pin does,
+and the next cut of the reader is a minor rather than a patch, so no `0.2.x`
+will serve v9 either. Which line v9 finally reads on is settled by the release
+that serves it, not by this allocation.
 
 ```bash
 npx @colophon-claims/verify@0.2 <bundle-dir>
@@ -588,7 +592,7 @@ out where it applies.
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1`, publication pending | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/8` | `@0.2.1`, publication pending | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
-| `benchmark-product-public-bundle/9` | `@0.2.1`, provisional — no bundle is materialized on this format | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
+| `benchmark-product-public-bundle/9` | `@0.2.1`, provisional — no bundle is materialized on this format | `@0.2`, provisional with it | seven | `--tsa-root`, `--ots-headers` |
 
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a
