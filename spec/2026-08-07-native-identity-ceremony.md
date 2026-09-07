@@ -586,9 +586,10 @@ to `settlements` — so the `role` **labels** cannot be read off.
 For a catalog that has a settlement binding, what the missing labels cost is precision, not
 openability. The ambiguity is confined to the two collision classes, so a third party who knows
 the scopes knows the role assignment up to an ordered selection from each class: at most
-`3! × 2! = 12` candidate preimages, and no fewer for a partial role set that still populates
-both classes — `--role-sets requester,solver` (§7's operator B) gives `3P2 × 2P1 = 12` as well,
-because the third party does not know *which* of the three discovery roles were provisioned.
+`3! × 2! = 12` candidate preimages. A partial role set is not automatically cheaper, because the
+third party does not know *which* of the three discovery roles were provisioned, only how many —
+`--role-sets requester,solver` (§7's operator B) gives `3P2 × 2P1 = 12` as well. Only a shape
+drawing on a single role family drops the count, to 6.
 Enumerating twelve, hashing each, and comparing against the anchor digest either matches —
 opening the commitment and revealing which assignment was authored — or refuses. That is a
 working third-party check, at a cost of twelve sha256 calls and **no re-anchor**.
