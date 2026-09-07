@@ -189,9 +189,9 @@ below an anchored point becomes detectable to a reader who recorded it, and
 nothing more. It would still not prove publication-by-time, would still not make
 the stream provably complete, and would still do nothing for a reader who never
 looked. **It is designed, not implemented** (tracked as
-[#4127](https://github.com/Jinn-Network/mono/issues/4127)); nothing this runbook
-serves is anchored today, so state the ceiling above and not this one until it
-ships. §3 and §6 of that design are the authority for both.
+[#4127](https://github.com/Jinn-Network/mono/issues/4127)), so nothing this
+runbook serves is anchored today. Until it ships, the ceiling to state is the
+one above. §3 and §6 of that design are the authority for both.
 
 ## Disclosure: why this producer has no disclosure gate
 

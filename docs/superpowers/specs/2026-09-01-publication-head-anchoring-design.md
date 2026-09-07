@@ -120,18 +120,18 @@ timer — which the `head.ts` primitives explicitly exist to support."
 
 That dormancy is a scheduling accident, not a property. Two of the issues this section
 cited as open when it was derived on 2026-09-01 closed COMPLETED that same day, and both
-fixes are on the target base: #3468 described the same re-sign as the expected steady
-state of a live source and showed both consumers refusing it, and its fix (PR #3472)
-admits a same-position re-signed head onto `source-head-revalidation`; #3467 showed the
-`refreshBy` ceiling unenforced on the read side, and its fix (PR #3473) landed
+fixes are in the tree: #3468 described the same re-sign as the expected steady state of a
+live source and showed both consumers refusing it, and its fix (PR #3472) admits a
+same-position re-signed head onto `source-head-revalidation`; #3467 showed the `refreshBy`
+ceiling unenforced on the read side, and its fix (PR #3473) landed
 `packages/discovery/protocol/src/verify/refresh-bound.ts`, which both named verification
-procedures now consult. What has *not* settled is what a head means to a consumer
-generally: #2549 (the idle re-stamp hazard itself) and #3469 (source-head revalidation
-among the named procedures) are still open. A design that bound its subject to the head
-document would still be binding to the least settled object in the system — and, more to
-the point, to one the protocol obliges the publisher to re-sign on a timer. §4.1 does not,
-and §4.1's last bullet states why that argument does not depend on any of these four
-outcomes.
+procedures now consult. What had *not* settled when v0.3 was written is what a head means
+to a consumer generally: #2549 (the idle re-stamp hazard itself) and #3469 (source-head
+revalidation among the named procedures) were both still open then. A design that bound
+its subject to the head document would still be binding to the least settled object in the
+system — and, more to the point, to one the protocol obliges the publisher to re-sign on a
+timer. §4.1 does not, and its last bullet states why that argument does not depend on any
+of these four outcomes.
 
 **The anchor machinery.** `AnchorEvidence` (`packages/trust/core/src/anchor-evidence.ts`)
 is sealed-not-signed, strict-schema, and carries exactly one subject — `{kind, digest}`
@@ -156,7 +156,7 @@ obligation at all.
 | Publication-by-time | no, and not by any anchor (neutral-freeze §7.1) |
 | **Stream integrity — the publisher has not truncated, reordered, or forked its own chain** | **yes, partially: detectable to prior observers** |
 | Stream completeness — the publisher announced everything it should have | no |
-| Freshness / withholding detection | no; that is `refreshBy`, whose ceiling both named verification procedures have enforced since #3467 |
+| Freshness / withholding detection | no; that is `refreshBy`, whose ceiling both named verification procedures have enforced since #3467's fix landed |
 
 The residual is asymmetric in a way worth stating plainly, because it is what makes a
 cheap mechanism worth having. A publisher who forks its chain must produce a fork that
@@ -203,10 +203,10 @@ obligations.
   (`SignedEntry.signature`) and third-party-dated (the anchor). A reader can check both
   without ever trusting the current head — which is the point, since the current head is
   precisely the object under suspicion.
-- **It is stable across the head-freshness work, settled or not.** #3467 and #3468 have
-  since closed COMPLETED and #2549 is still open, and that made no difference to this
-  bullet: all three are questions about what a *head* means to a consumer, and nothing in
-  any of them — or in #3469, still open — can change what an entry digest means.
+- **It is stable across the head-freshness work, settled or not.** #3467 and #3468 closed
+  COMPLETED on 2026-09-01; #2549 and #3469 were still open at v0.3. The bullet reads the
+  same either way, because every one of them is a question about what a *head* means to a
+  consumer, and nothing any of them can decide changes what an entry digest means.
 
 **Ruling.** `subject: "announcement-entry"`, digest `head.entry` with the `sha256:`
 prefix stripped, resolved at the moment of anchoring from the source's own committed
@@ -404,9 +404,10 @@ state completely:
 Steps 1–3 are ordinary consumer operations with existing code. Step 5 is a new consumer
 rule and is **out of scope here**: the in-repo consumer path (`corpus.sources`) is not
 reachable from any entry point today, and the head-freshness family is still mid-flight on
-what a consumer should do with heads generally — #3467 and #3468 have closed COMPLETED, but
-#2549 and #3469 remain open. Specifying a consumer rule into that would collide. §11 files
-it as a follow-up against #3469's named-verification-procedures work, where it belongs.
+what a consumer should do with heads generally — #3467 and #3468 closed COMPLETED on
+2026-09-01, but #2549 and #3469 were still open at v0.3. Specifying a consumer rule into
+that would collide. §11 files it as a follow-up against #3469's
+named-verification-procedures work, where it belongs.
 
 ## 6. What this buys and what it does not
 
@@ -569,7 +570,7 @@ records the numbers so a reader can follow the trail.
    ([#4129](https://github.com/Jinn-Network/mono/issues/4129)), filed against #3469's
    named-verification-procedures work. It was sequenced after #3467 and #3468 settle what a
    head means to a consumer; both closed COMPLETED on 2026-09-01, so that condition is
-   satisfied and #3469 is the remaining dependency.
+   satisfied, and #3469 — still open at v0.3 — is the remaining dependency.
 4. **`docs` — coverage read in the runbook** ([#4130](https://github.com/Jinn-Network/mono/issues/4130)):
    how an operator (or a stranger) enumerates anchored versus unanchored sequences from the
    archive alone. It has nothing to enumerate until item 1 lands.
@@ -601,11 +602,13 @@ records the numbers so a reader can follow the trail.
   `core/src/operations/run-anchor.ts`, `core/src/run/state.ts`, and
   `core/src/run/publication-source.ts`.
 - The head-mutability evidence in §2 and §4.1 comes from the head-freshness family as it
-  stood at that derivation: #2549 (idle re-stamp reads as rollback; dormant — still open),
-  #3467 (`refreshBy` ceiling was unenforced by consumers — closed COMPLETED 2026-09-01,
-  fixed by PR #3473), #3468 (a re-signed idle head was refused as broken-chain — closed
-  COMPLETED 2026-09-01, fixed by PR #3472), #3469 (record source-head revalidation among
-  the named procedures — still open). §4.1's last bullet states why the design's conclusion
+  stood at that derivation, with each status below as of v0.3: #2549 (idle re-stamp reads
+  as rollback; dormant — still open), #3467 (`refreshBy` ceiling was unenforced by
+  consumers — closed COMPLETED 2026-09-01, fixed by PR #3473), #3468 (a re-signed idle head
+  was refused as broken-chain — closed COMPLETED 2026-09-01, fixed by PR #3472), #3469
+  (record source-head revalidation among the named procedures — still open). Every status
+  line here carries a date on purpose: v0.1's did not, which is why they went stale
+  unnoticed and this erratum exists. §4.1's last bullet states why the design's conclusion
   is invariant to every one of these outcomes.
 - Sibling follow-ups from the same parent: #3398 (archive lock index), #3399 (freeze-post
   pointer format), #3401 (stream-integrity disclosure wording).
