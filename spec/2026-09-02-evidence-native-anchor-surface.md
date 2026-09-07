@@ -29,10 +29,21 @@ Both halves of the issue's own suggested remedy are unavailable today:
   inert: no check would read it, and the claim could not name it. That is a
   decorative anchor, which is worse than none.
 - **"or the report republished on format /6"** — `/6` is the anchored member of
-  the *classic* lineage (`/2` → `/4` → `/6` → `/7` → `/8`), whose closure is the
+  the *classic* lineage (`/2` → `/4` → `/6` → `/7` → `/8`; `/3` exists but is an
+  out-of-line allocation — a publication-profile projection its own constant in
+  `packages/benchmark-product/core/src/bundle/manifest.ts` calls "a separate
+  lineage from the frozen classic closures", absent from
+  `SUPPORTED_BUNDLE_FORMATS`, and named in `PUBLIC-BUNDLE.md` only as "the
+  unrelated accounting-only v3"), whose closure is the
   v2 Run/Matrix/Report graph. Demo-1 is evidence-native: its records are
   Benchmark v2, Analysis Manifest, Cohort, Matrix v2 and Report v3, and it has
-  no `run.json`. There is no re-emission of this report onto `/6`.
+  no `run.json`. The refusal is mechanical rather than a matter of lineage
+  taste: `/6`'s mandatory member list is `PUBLIC_BUNDLE_FILES`, which includes
+  `run.json` (`packages/benchmark-product/verify/src/legacy-closures.ts`), so
+  such a bundle would refuse at `mandatory public bundle file "run.json" is
+  missing` (`verify/src/verify.ts`). `/7` and `/8` are dead for the same reason:
+  both take `PUBLIC_BUNDLE_V4_FILES`, which is that same list plus
+  `qualification.json`. There is no re-emission of this report onto `/6`.
 
 This is not an oversight. The approved design records it twice as deferred
 work: §7.4 ("the evidence-native claim-package/3 and public-bundle/5 adopt the
@@ -50,7 +61,7 @@ it needed are now made (§4). The issue is currently typed `fix` with Effort
 Verified in this session, offline, against the committed bytes:
 
 ```
-$ openssl ts -reply -in lock-manifest.tsr -text
+$ openssl ts -reply -in lock-manifest.tsr -text          # (output elided)
 Policy OID: tsa_policy1
 Hash Algorithm: sha256
 Message data: 822b2f7469dc2e58a3e72eee32688614d296ba20fc381d9a074e3935a68622b3
@@ -84,7 +95,11 @@ bundle format `benchmark-product-public-bundle/9`, a claim package
 removes all four. Under the capability rule the surface mints **no public
 identifier of its own**: it registers as a capability entry inside the composed
 generation `benchmark-product-public-bundle/10`, exactly as `external-import`
-registers inside `/8` (#3417) rather than minting a format. `/10`'s own
+is to register inside `/8` (#3417). That precedent is a ratified allocation
+decision rather than shipped code: `packages/benchmark-product/EXTERNAL-RUN-IMPORT.md`
+still reads "**Until it lands:** `colophon publish` refuses", and
+`core/src/operations/publish.ts` still refuses. The rule it establishes is what
+this ruling leans on, not its implementation. `/10`'s own
 allocation — its format IRI, its claim package, its profile IRIs, and the
 mechanism by which a capability entry becomes bundle-visible — belongs to
 the #3403 → #3406 chain and is a prerequisite of this work, not a product of
@@ -109,14 +124,19 @@ What remains is code, across three packages, plus documentation:
 - **`packages/benchmark-product/verify/src/reader-instructions.ts` and
   `packages/benchmark-product/verify/src/freeze-repo.ts`** — the two
   format-keyed registries a new closure must extend:
-  `PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS` (and its per-format check-name
-  list, of which `PUBLIC_BUNDLE_V8_CHECKS` is the current tail) and
+  `PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS`, which carries a `command` /
+  `compatibleCommand` pair per format and nothing else, and
   `FREEZE_REPO_BUNDLE_SUPPORT`, whose `Record<SupportedBundleFormat, …>` makes
   an unstated closure a type error rather than a silent gap. The reader flags
   themselves (`--tsa-root`, `--ots-headers`) need nothing: they are declared
   and parsed format-agnostically in
   `packages/benchmark-product/verify/src/cli.ts` and already reach any closure
-  that evaluates anchors.
+  that evaluates anchors. The check-name list is a separate export from the
+  instructions registry, and the one a `/10` implementer needs is the
+  evidence-native `EVIDENCE_NATIVE_BUNDLE_V5_CHECKS`
+  (`packages/benchmarking/evidence/src/portable.ts`) — not
+  `PUBLIC_BUNDLE_V8_CHECKS`, which sits beside the registry in
+  `reader-instructions.ts` and is the tail of the classic/composed chain.
 - **`packages/benchmark-product/PUBLIC-BUNDLE.md`** — the `/10` section, whose
   own rule is that every format carries its complete recipe pinned at the
   reader line that understands it. That reader line will not exist on npm when
@@ -145,15 +165,28 @@ report has as **`invalid`**, and an `invalid` anchor fails the whole
 verification. The remedy the issue asks for would, implemented naively, break
 the bundle it is meant to strengthen.
 
-The conflict is semantic, not arithmetic. In the classic lineage `closeAt` is a
-Run's own pre-registered close instant, and an anchor obtained after it is
-genuinely suspicious. In the evidence-native lineage `closeAt` is the sealed
-*source cutoff* — here a nominal midnight — and the ordering discipline the
-report actually claims is documented in
+The conflict is semantic, not arithmetic — but the semantic difference is a
+property of *this artifact*, not of the lineage. `closeAt` has the same shape in
+both: a required top-level close instant sitting immediately beside
+`preregistration`, which is the structure `packages/benchmarking/records/README.md`
+describes on the classic Run as "the mandatory `closeAt` stopping rule". It is
+not the source cutoff — the Analysis Manifest carries a distinct *optional
+per-source* `cutoff` field (`SourceBoundarySchema` in
+`packages/benchmarking/protocol/src/manifest.ts`), and the two values coincide
+in Demo-1 only because the seal script writes the same constant into each
+(`core/src/method/skillsbench-demo1-seal.ts`: `cutoff:
+SKILLSBENCH_DEMO1_SEALED_AT` on the source boundary, `closeAt:
+SKILLSBENCH_DEMO1_SEALED_AT` at top level).
+
+What is true of Demo-1 is narrower and enough: its `closeAt` is a *nominal*
+instant — a sealed midnight — that precedes its own retained evidence. The
+splice-catch assumes the close instant is at or after every legitimate anchoring
+moment, and for a manifest sealed this way that assumption does not hold. The
+ordering discipline the report actually claims is documented in
 `docs/superpowers/plans/demo-report-1/anchors/README.md`: a first confirmatory
 dispatch that began ~10:45 UTC was destroyed unread, and dispatch restarted only
 after the 11:11:07 token existed. The anchor precedes every retained cell; it
-does not precede the declared cutoff instant.
+does not precede the declared nominal instant.
 
 Three readings were available, none free:
 
@@ -175,13 +208,25 @@ Three readings were available, none free:
 part of the deliverable, not a follow-up:
 
 1. The taxonomy parameter of §2 carries the splice-catch as an explicit field,
-   so "this lineage does not apply it" is a stated property of the closure
-   rather than a missing branch someone can restore by accident. The classic
-   taxonomy keeps the rule; the evidence-native taxonomy does not carry it.
+   so "this closure does not apply it" is a stated property of the closure
+   rather than a missing branch someone can restore by accident. **The flag is
+   keyed to the closure, not to the manifest**: the classic taxonomy keeps the
+   rule; the evidence-native `/10` taxonomy does not carry it. That keying is
+   the only one the mechanism supports at this head, and it is deliberately
+   broader than its justification — the property that makes the exemption right
+   for Demo-1 is a nominal `closeAt`, and no sealed field distinguishes a
+   nominal close instant from a real stopping one, which is the same gap that
+   made reading (c) unavailable. Narrowing the flag to a manifest-level test is
+   available work once such a field exists; until then the breadth is disclosed
+   rather than assumed, which is what obligations 2 and 3 carry. A session
+   implementing `/10` inherits this scope as stated, not as settled: it may
+   narrow it on evidence, and must not widen it further.
 2. `PUBLIC-BUNDLE.md`'s `/10` section states the divergence in the same place
-   it pins the check tuple: on this lineage `integrity-anchors` does not
-   include the splice-catch, and why.
-3. The reader's own `integrity-anchors` output says so for a `/10` bundle, so a
+   it pins the check tuple: on this closure `integrity-anchors` does not include
+   the splice-catch, why, and that the exemption is closure-wide rather than
+   conditioned on the nominal-`closeAt` property that motivates it.
+3. The reader's own `integrity-anchors` output says so for a `/10` bundle — in
+   the closure-wide form obligation 1 fixes, matching what the code does — so a
    consumer who never reads `PUBLIC-BUNDLE.md` still learns that this check is
    the weaker of the two forms. An anchor whose meaning is narrower than the
    reader assumes is the failure mode this ruling has to avoid.
@@ -200,7 +245,9 @@ no session re-litigates them.
    identifiers §2 of v0.1 costed are therefore **not** minted. A session that
    finds it genuinely needs a new generation number stops and escalates rather
    than allocating one.
-2. **Splice-catch — option (a)**, with the three disclosure obligations of §3.
+2. **Splice-catch — option (a)**, with the three disclosure obligations of §3 —
+   including obligation 1's statement that the exemption is keyed to the closure
+   and is broader than the manifest property that motivates it.
 3. **Producer path — one documented re-report of Demo-1.** Design §19.5 closes
    the anchoring window at `report` and `runAnchor` enforces it; §19.7 lists
    anchoring an already-published bundle as future work. Demo-1 is reported, so
@@ -230,8 +277,8 @@ not attempted here.
 | # | Work | Blocked on |
 |---|---|---|
 | 1 | The `/10` generation itself — format, claim package, profile IRIs, capability-entry mechanism | issues #3403 → #3406; **not this issue** |
-| 2 | Generalize `evaluateIntegrityAnchors` onto an explicit taxonomy (subject→kind map, subject→digest pairs, splice-catch flag), classic behavior unchanged | nothing; it is a pure refactor, but it has no second consumer until 3, so it lands with 3 rather than speculatively ahead of it |
-| 3 | The anchor capability entry: `/10` branches in `verify.ts` and `portable.ts`, the evidence-native taxonomy, the `reader-instructions.ts` and `freeze-repo.ts` entries, the `PUBLIC-BUNDLE.md` `/10` section with the §3 divergence stated | 1 |
+| 2 | Generalize `evaluateIntegrityAnchors` onto an explicit taxonomy (subject→kind map, subject→digest pairs, splice-catch flag), classic behavior unchanged | 3 (no hard dependency; it is a pure refactor, but it has no second consumer until 3, so it is sequenced with 3 rather than landing speculatively ahead of it) |
+| 3 | The anchor capability entry: `/10` branches in `verify.ts` and `portable.ts`, the evidence-native taxonomy, the `reader-instructions.ts` and `freeze-repo.ts` entries, the `PUBLIC-BUNDLE.md` `/10` section with the §3 divergence and its scope stated per §3 obligation 1 | 1 |
 | 4 | The documented re-report of Demo-1 carrying the RFC 3161 token, and the citation updates the new bundle identity forces | 3 |
 
 Acceptance criterion 1 of the issue — the published artifact carrying its
