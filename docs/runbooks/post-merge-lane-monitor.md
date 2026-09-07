@@ -19,6 +19,11 @@ The watched set is the registry `MONITORED_LANES` in
 which understands its canary/stable trains; two monitors on one lane would file competing
 issues.
 
+Release-triggered lanes (`docker.yml`, `promote-main.yml`, `changelog-mirror.yml`) are out of
+scope here: they are not push-to-`next` lanes, they run on a different cadence, and "the last
+run failed" does not mean the same thing for a lane that fires a handful of times a year. They
+have the same silence problem and need their own answer.
+
 ## The signal
 
 [`.github/workflows/post-merge-lane-monitor.yml`](../../.github/workflows/post-merge-lane-monitor.yml)
