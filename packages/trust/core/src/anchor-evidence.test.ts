@@ -182,6 +182,22 @@ describe("validateAnchorEvidence — strict schema battery", () => {
     }))).toContain("SCHEMA_VIOLATION");
   });
 
+  test.each([
+    ["provider", {
+      ...VALID_ANCHOR_EVIDENCE,
+      provider: "https://provider.invalid/\u001b]8;;https://attacker.invalid\u0007forged-link\u001b]8;;\u0007",
+    }],
+    ["subject.kind", {
+      ...VALID_ANCHOR_EVIDENCE,
+      subject: {
+        ...VALID_ANCHOR_EVIDENCE.subject,
+        kind: "https://spec.jinn.network/records/benchmark-run/v1\u009b31m",
+      },
+    }],
+  ])("terminal control characters in %s fail closed", (_field, record) => {
+    expect(codesOf(bytesOf(record))).toContain("SCHEMA_VIOLATION");
+  });
+
   test("an empty proof media type fails closed", () => {
     const bytes = bytesOf({
       ...VALID_ANCHOR_EVIDENCE,
