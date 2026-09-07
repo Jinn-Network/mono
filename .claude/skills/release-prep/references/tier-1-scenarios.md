@@ -1,6 +1,12 @@
 # Tier 1 scenarios
 
-Three scenarios, all single-operator, all run on every push to `next` (canary cadence) plus inside `release-prep` for any candidate version. None of them use the substrate from Plan A — Tier 1 is bootstrap-from-scratch territory.
+> **Superseded run-role, retained contract prose.** The release-prep skill's
+> mechanical run-role is retired (see `.claude/skills/release-prep/SKILL.md`);
+> the publish gate is the two SHA-bound check-runs `hermetic-gate` and
+> `environment-suite`. This file is retained because it is the only prose
+> documenting the scenario contracts those workflows still execute.
+
+Three scenarios, all single-operator. They are executed by `hermetic-gate.yml` (which runs `yarn test:hermetic` + `e2e:app-flow`, not the tier orchestrator) rather than by a per-push run of `release-prep`. None of them use the substrate from Plan A — Tier 1 is bootstrap-from-scratch territory.
 
 ## T1.1 — bootstrap-fresh-anvil
 

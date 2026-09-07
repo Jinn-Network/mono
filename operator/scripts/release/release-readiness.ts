@@ -88,13 +88,13 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
     return `- **${g.id}** [${g.source}]${tag}: ${g.notes}`;
   });
   gapSection('Already met', 'ALREADY-MET', (g) => `- **${g.id}** [${g.source}]: ${g.notes}`);
-  push(`## release-prep evidence`);
+  push(`## Hermetic-gate scenarios`);
   for (const v of input.releasePrepVerdicts) {
     push(`- ${v.scenarioId}: ${v.verdict}${v.failClass ? ` (${v.failClass})` : ''} (${v.wallClockMs}ms)`);
   }
   push();
   if (input.tier3Verdict && input.tier3Evidence) {
-    push(`## Tier 3 evidence (load-bearing)`);
+    push(`## Environment-suite evidence`);
     push(`- Scenario: ${input.tier3Evidence.scenario}`);
     push(`- Hermes model: ${input.tier3Evidence.hermesModel}`);
     push(`- Verdict: ${input.tier3Verdict.verdict} (verdictCode=${input.tier3Evidence.verdictCode})`);
@@ -103,8 +103,8 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
     push(`- Wall-clock: ${input.tier3Verdict.wallClockMs}ms`);
     push();
   } else {
-    push(`## Tier 3 evidence`);
-    push(`SKIPPED (mode=${input.mode}; Tier 3 only runs in human-invoked mode with explicit consent).`);
+    push(`## Environment-suite evidence`);
+    push(`SKIPPED (mode=${input.mode}; the environment suite only runs in human-invoked mode with explicit consent).`);
     push();
   }
   push(`## Walk-through script for human pass`);
@@ -122,7 +122,14 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
     push(input.independentEvidence);
     push();
   }
-  push(`## Marker block (final)`);
+  push(`## Marker block (final, diagnostic-only)`);
+  push();
+  push(
+    `The \`jinn-release-evidence:v1\` block is **not** the publish gate — the two SHA-bound ` +
+      `check-runs (\`hermetic-gate\`, \`environment-suite\`) are. \`npm-publish.yml\` no longer ` +
+      `parses this block; it is retained as a human-readable diagnostic.`,
+  );
+  push();
   push(`<!-- jinn-release-evidence:v1`);
   push(`release-tag=${input.candidateVersion}`);
   push(`release-commit=${input.branchSha}`);
