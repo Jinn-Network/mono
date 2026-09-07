@@ -503,12 +503,20 @@ test("a result without signers keeps the previous human surface", async () => {
   assert.doesNotMatch(output, /Signed by/);
 });
 
-test("the golden bundle's default output carries no identifier while --json carries every one", async () => {
+test("the golden bundle's default output carries no identifier and no verdict word while --json carries every identifier", async () => {
   const golden = fileURLToPath(new URL("../fixtures/public-bundle-conformance-v1/golden", import.meta.url));
   const human = await invoke([golden]);
   assert.equal(human.code, undefined);
   assert.doesNotMatch(human.stdout, /urn:/);
   assert.doesNotMatch(human.stdout, /did:key/);
+  // The retired verdict word, over the whole real render rather than a synthetic one (issue #3510).
+  // The vocabulary guard above this test reads only the first line of `renderVerifiedBundle` on
+  // hand-built shapes, so the signer block, the artifact-content report and its limitation, and the
+  // anchor-limits paragraph are all unreached by it. This test already runs the real binary over a
+  // real bundle, so it is where a `Verified` label reintroduced into any of those paragraphs gets
+  // caught. Same word list as that guard, so the two speak one vocabulary; `report-verification`
+  // and `signature-validity` are check names and match none of it.
+  assert.doesNotMatch(human.stdout, /verified|certified|validated|audited/i);
   // The publisher line now carries the bare key fingerprint (issue #2983): with no binding supplied
   // that digest is the only name this key has, and printing nothing would read as nothing to say.
   assert.match(
