@@ -345,7 +345,9 @@ function files(directory) {
 }
 
 function specifiers(source) {
-  const trivia = String.raw`(?:(?:\s+)|(?:\/\*[\s\S]*?\*\/)|(?:\/\/[^\r\n]*(?:\r?\n|$)))*`;
+  // Linear: one character or one comment per iteration. `(?:\\s+)*` split whitespace runs
+  // exponentially, and a prose `from` before a run of `//` lines took 74 minutes in CI.
+  const trivia = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n|$))*`;
   return [
     new RegExp(String.raw`\bfrom${trivia}["']([^"']+)["']`, 'g'),
     new RegExp(String.raw`\bimport${trivia}["']([^"']+)["']`, 'g'),
