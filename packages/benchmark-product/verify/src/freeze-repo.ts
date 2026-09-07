@@ -464,14 +464,22 @@ function emptyNode(): TreeNode {
  * record. The renderer produces none of these, but this function is reached through the exported
  * `freezeRepoCommitId`, and each of them otherwise yields an oid for a tree no git repository can
  * hold — a worse failure than a refusal, because the number still looks like a commit id.
+ *
+ * The refusals split across two codes, and the split is the caller's contract (issue #4055). A
+ * malformed path — an empty or dot segment, an unpaired surrogate, a NUL — collides with nothing;
+ * it is structurally invalid input, which is what `validation` names. Only the two genuine
+ * collisions below, where one name is claimed twice, are `conflict`: that code says the write
+ * meets existing state, and a caller that retries a `conflict` under another name would retry a
+ * malformed path forever. `refuse` carries the offending path on `issues[].path` either way,
+ * which is where a caller branches.
  */
 function insert(root: TreeNode, path: string, bytes: Uint8Array): void {
   const segments = path.split("/");
   if (segments.some((segment) => segment.length === 0)) {
-    refuse("conflict", path, `"${path}" has an empty path segment; git records no such entry`);
+    refuse("validation", path, `"${path}" has an empty path segment; git records no such entry`);
   }
   if (segments.some((segment) => segment === "." || segment === "..")) {
-    refuse("conflict", path, `"${path}" contains a "." or ".." segment; git records no such entry`);
+    refuse("validation", path, `"${path}" contains a "." or ".." segment; git records no such entry`);
   }
   if (Buffer.from(path, "utf8").toString("utf8") !== path) {
     // A lone surrogate has no UTF-8 encoding, so `Buffer.from` replaces it with U+FFFD — and both
@@ -481,7 +489,7 @@ function insert(root: TreeNode, path: string, bytes: Uint8Array): void {
     // can hold. The round trip is the check because it tests the exact property that matters —
     // that the bytes emitted for this name represent this name.
     refuse(
-      "conflict",
+      "validation",
       path,
       `"${path}" is not representable in UTF-8 (an unpaired surrogate); git tree entry names are UTF-8 bytes`,
     );
@@ -489,7 +497,7 @@ function insert(root: TreeNode, path: string, bytes: Uint8Array): void {
   if (path.includes("\u0000")) {
     // A tree entry is framed as `<mode> <name>\0<oid>`, so a NUL in a name does not merely produce
     // a tree git would refuse — it produces bytes that are not a tree object at all.
-    refuse("conflict", path, `"${path}" contains a NUL; a git tree entry is NUL-terminated and cannot carry one`);
+    refuse("validation", path, `"${path}" contains a NUL; a git tree entry is NUL-terminated and cannot carry one`);
   }
   let node = root;
   for (const [index, segment] of segments.slice(0, -1).entries()) {

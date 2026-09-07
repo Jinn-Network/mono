@@ -21,6 +21,7 @@ import {
 } from "./manifest.js";
 import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT } from "./legacy-closures.js";
 import { BUNDLE_V4_EVIDENCE_ROLES } from "./schema.js";
+import { BenchmarkProductError } from "./profile/errors.js";
 import {
   FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_EXCLUDED_ROLES,
@@ -122,6 +123,18 @@ function snapshotOf(overrides: SnapshotOverrides = {}): VerifiedBundleSnapshot {
 
 function readManifest(tree: ReturnType<typeof renderFreezeRepo>): Record<string, any> {
   return JSON.parse(decoder.decode(tree.files.get(FREEZE_REPO_MANIFEST_FILENAME)!)) as Record<string, any>;
+}
+
+/** The typed refusal a call raised, so a test can assert its `code` and `issues` and not only its
+ * prose: callers branch on the code, so the code is the part a change must not move silently. */
+function expectRefusal(run: () => unknown): BenchmarkProductError {
+  try {
+    run();
+    throw new Error("expected a refusal");
+  } catch (cause) {
+    expect(cause).toBeInstanceOf(BenchmarkProductError);
+    return cause as BenchmarkProductError;
+  }
 }
 
 describe("freeze repository rendering", () => {
@@ -566,19 +579,30 @@ describe("git-tree construction rules the renderer never exercises", () => {
 
   test("refuses a name claimed by both a file and a directory, in either arrival order", () => {
     // Git records one entry per name. Hashing these produced an oid for a tree git cannot hold.
-    expect(() => freezeRepoCommitId(
+    // These two are the set's only real collisions -- one name, two claimants -- so they keep
+    // `conflict` while the malformed-path refusals below take `validation` (issue #4055).
+    const bothOrders = expectRefusal(() => freezeRepoCommitId(
       new Map([["a", encoder.encode("file\n")], ["a/b", encoder.encode("nested\n")]]),
       "identity",
-    )).toThrow(/already a file/);
-    expect(() => freezeRepoCommitId(
+    ));
+    expect(bothOrders.code).toBe("conflict");
+    expect(bothOrders.message).toMatch(/already a file/);
+    const reversed = expectRefusal(() => freezeRepoCommitId(
       new Map([["a/b", encoder.encode("nested\n")], ["a", encoder.encode("file\n")]]),
       "identity",
-    )).toThrow(/already a directory/);
+    ));
+    expect(reversed.code).toBe("conflict");
+    expect(reversed.message).toMatch(/already a directory/);
   });
 
   test("refuses empty, dot, and dot-dot path segments", () => {
+    // A malformed path collides with nothing; it is structurally invalid input, which is what
+    // `validation` names -- and the offending path is on `issues[].path`, where a caller branches.
     for (const path of ["", "a//b", "dir/", "./a", "a/../b"]) {
-      expect(() => freezeRepoCommitId(new Map([[path, encoder.encode("x")]]), "identity"), path).toThrow();
+      const refusal = expectRefusal(() => freezeRepoCommitId(new Map([[path, encoder.encode("x")]]), "identity"));
+      expect(refusal.code, path).toBe("validation");
+      expect(refusal.issues[0]?.path, path).toBe(path);
+      expect(refusal.message, path).toMatch(/git records no such entry/);
     }
   });
 
@@ -587,8 +611,9 @@ describe("git-tree construction rules the renderer never exercises", () => {
     // distinct file sets would return one oid, and two names differing only there would emit a
     // tree body carrying the same name twice.
     for (const name of ["a\uD800", "a\uDC00"]) {
-      expect(() => freezeRepoCommitId(new Map([[name, encoder.encode("x")]]), "identity"), name)
-        .toThrow(/unpaired surrogate/);
+      const refusal = expectRefusal(() => freezeRepoCommitId(new Map([[name, encoder.encode("x")]]), "identity"));
+      expect(refusal.code, name).toBe("validation");
+      expect(refusal.message, name).toMatch(/unpaired surrogate/);
     }
     // A real U+FFFD is ordinary content and still hashes.
     expect(freezeRepoCommitId(new Map([["a\uFFFD", encoder.encode("x")]]), "identity"))
@@ -598,8 +623,9 @@ describe("git-tree construction rules the renderer never exercises", () => {
   test("refuses a NUL in a name, which would not even be a tree object", () => {
     // A tree entry is framed `<mode> <name>\0<oid>`, so a NUL in the name breaks the framing
     // itself rather than merely producing a tree git would decline to hold.
-    expect(() => freezeRepoCommitId(new Map([["a\u0000b", encoder.encode("x")]]), "identity"))
-      .toThrow(/NUL/);
+    const refusal = expectRefusal(() => freezeRepoCommitId(new Map([["a\u0000b", encoder.encode("x")]]), "identity"));
+    expect(refusal.code).toBe("validation");
+    expect(refusal.message).toMatch(/NUL/);
   });
 });
 
