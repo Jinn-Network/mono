@@ -86,8 +86,9 @@ identifier of its own**: it registers as a capability entry inside the composed
 generation `benchmark-product-public-bundle/10`, exactly as `external-import`
 registers inside `/8` (#3417) rather than minting a format. `/10`'s own
 allocation — its format IRI, its claim package, its profile IRIs, and the
-mechanism by which a capability entry becomes bundle-visible — belongs to the
-#3403 → #3406 chain and is a prerequisite of this work, not a product of it.
+mechanism by which a capability entry becomes bundle-visible — belongs to
+the #3403 → #3406 chain and is a prerequisite of this work, not a product of
+it.
 
 What remains is code, across three packages, plus documentation:
 
