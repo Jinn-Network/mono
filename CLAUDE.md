@@ -583,7 +583,7 @@ Read first:
 - [`GROWTH.md`](GROWTH.md) — product-led distribution; positioning derives from the GTM plan and `BRAND.md`.
 - [`docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md`](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) — current product and go-to-market framing.
 
-When the artifact is release-shaped, compose it with `distil-writing` and enforce the rules above by hand.
+When the artifact is release-shaped, apply the External Communication canon named above (`BRAND.md`, `GROWTH.md`, the GTM plan) and enforce the rules above by hand; there is no skill for it.
 
 ### Framing and structure
 
