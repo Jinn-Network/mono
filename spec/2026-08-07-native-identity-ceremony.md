@@ -1058,7 +1058,8 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   claims the *widened* scope retroactively over evidence signed before the widening; a fresh
   anchor refuses that retroactivity and pays a coverage gap between the old anchor time and
   the new one. Which is right in general is a retroactive-authority policy question that
-  exceeds an anchor-format ratification, and it is not settled here.
+  exceeds an anchor-format ratification, and it is not settled here. Owned by
+  [#4172](https://github.com/Jinn-Network/mono/issues/4172).
 - **(f) Should a successor binding-anchor preimage be third-party recomputable, and when is
   the re-anchor worth paying?** §3.2b records, as a named defect, that `ceremony-anchor/v1`
   commits to a `role` term no third party can recover from a catalog, so the commitment can
@@ -1067,7 +1068,10 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   nothing until a verifier checks it, and it costs every existing deployment a re-anchor.
   Reserved as an input to the anchor-locator profile document authored in `Jinn-Network/spec`
   under DR-2026-09-03, together with the `contractAddress` → `to` rename, so the first
-  published version is right rather than compatible with a mistake.
+  published version is right rather than compatible with a mistake. Owned by
+  [#4172](https://github.com/Jinn-Network/mono/issues/4172), which carries both this question
+  and (e) to that document and states the trigger at which the re-anchor becomes worth paying;
+  until a trigger fires, deployments keep `/v1`.
 
 ### Review record (v0.2)
 
