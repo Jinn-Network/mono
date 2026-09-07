@@ -11,7 +11,7 @@
  * PR #2424 review.
  *
  * **Ruling: the mechanism changes; the semantic stays.** This is an explicit, in-memory flag
- * set ONLY by the write paths that the daemon has never hot-applied — exactly what the
+ * set ONLY by the write paths the daemon does not hot-apply — exactly what the
  * pre-#2408 browser `RestartPendingContext` / `onRestartPending` callback tracked:
  *   - `claim-policy-endpoints.ts`'s two PUT handlers (claim policy / execution wiring) — always
  *     restart-required, no hot-apply path exists.

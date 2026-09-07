@@ -12,7 +12,7 @@
  *
  * **`restart_required` mechanism (review finding F1).** NOT config-file-mtime — that fires
  * permanently for onboarding-complete writes, which hot-apply while still bumping the file's
- * mtime, and cannot tell them apart from writes that genuinely need a restart. Reads the
+ * mtime, and mtime cannot tell those apart from writes that genuinely need a restart. Reads the
  * explicit `isRestartRequired()` flag (`restart-required-state.ts`), set only by the write paths
  * the daemon never hot-applies (claim-policy, execution wiring, rpcUrl, and — since issue
  * #2427 — pricing).

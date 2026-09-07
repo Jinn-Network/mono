@@ -391,6 +391,35 @@ describe('POST /v1/operator/pricing', () => {
     expect(isRestartRequired()).toBe(true);
   });
 
+  it('leaves the daemon un-flagged when the config write fails', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, `${JSON.stringify({ network: 'testnet' }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, {
+      store,
+      configPath,
+      persistConfigValue: () => {
+        throw new Error('disk full');
+      },
+    });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        defaultPriceUsdc: '0.001',
+        perArtifactTypePrice: {},
+        donation: { enabled: false },
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    expect(isRestartRequired()).toBe(false);
+  });
+
   it('rejects malformed price strings', async () => {
     const store = memoryStore();
     const app = new Hono();
