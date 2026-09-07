@@ -185,7 +185,7 @@ describe('TaskAttemptCreated → attempt', () => {
           priorityMech: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
           deliveryRate: 12_345n,
         },
-        { block: 41_153_310n },
+        { block: 41_153_310n, timestamp: 1_757_153_600n },
       ),
       context,
       attempt,
@@ -202,6 +202,7 @@ describe('TaskAttemptCreated → attempt', () => {
       priorityMech: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       deliveryRate: 12_345n,
       createdAtBlock: 41_153_310n,
+      createdAtTimestamp: 1_757_153_600n,
       chainId: CHAIN_ID,
     });
   });
@@ -732,7 +733,7 @@ describe('VerdictDeliveryClaimed → verdict', () => {
           requestId: `0x${'bb'.repeat(32)}` as `0x${string}`,
           verdictCode: 1,
         },
-        { block: 41_153_400n },
+        { block: 41_153_400n, timestamp: 1_757_157_200n },
       ),
       context,
       verdict,
@@ -749,6 +750,7 @@ describe('VerdictDeliveryClaimed → verdict', () => {
       requestId: `0x${'bb'.repeat(32)}`,
       verdictCode: 1,
       createdAtBlock: 41_153_400n,
+      createdAtTimestamp: 1_757_157_200n,
       chainId: CHAIN_ID,
     });
   });
