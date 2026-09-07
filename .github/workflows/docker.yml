@@ -9,15 +9,18 @@ name: Docker
 # cycle with no way to retry: one Dockerfile defect (#2809) kept this lane red
 # from 2026-06-09 to 2026-08-18, and `:latest` stayed a 404 for months after the
 # fix merged because nothing could re-run the lane (#2811). A manual run
-# republishes the stable tags from `main`, `next`, or a release tag, and passes
-# the same `operator/package.json` version guard a release run passes.
+# republishes the stable tags from the release tag itself, so `:<version>` and
+# `:latest` carry the released commit whichever trigger produced them. It takes
+# effect for cuts made after this lands: `workflow_dispatch` runs the workflow
+# file as it exists on the dispatched ref, and tags cut before this have no
+# dispatch trigger to select.
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish. Must equal operator/package.json at the selected ref.'
+        description: 'Version to publish. Must match the selected release tag and operator/package.json at it.'
         required: true
         type: string
 
@@ -49,52 +52,56 @@ jobs:
         # and `;`.
         env:
           VERSION_INPUT: ${{ inputs.version }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG_INPUT: ${{ github.event.release.tag_name }}
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            # A manual run publishes `:latest`, so it refuses any ref a release
-            # could not have been cut from. This is an accident guard, not an
-            # authorization boundary: `workflow_dispatch` runs the workflow file
-            # as it exists on the dispatched ref, so anyone who can push a branch
-            # can push one without this check. The boundary is repository write
-            # access, exactly as it is for cutting a release.
+            # A manual run republishes `:<version>` and `:latest`, so it runs
+            # only from the release tag whose content those tags are supposed to
+            # carry. The package.json check below is version-equality, not
+            # commit-equality: a dispatch from a branch would satisfy it whenever
+            # operator/package.json still held the last released version, and
+            # would then publish that branch's HEAD as the release.
             #
             # GITHUB_REF/GITHUB_EVENT_NAME are read from the environment, not
             # interpolated: a ref name may legally contain `$` and backticks.
             case "${GITHUB_REF}" in
-              refs/heads/main|refs/heads/next|refs/tags/v*|refs/tags/client-v*) ;;
+              refs/tags/v*|refs/tags/client-v*) ;;
               *)
-                echo "::error::A manual publish must run from main, next, or a release tag; got: ${GITHUB_REF}"
+                echo "::error::A manual publish must run from a release tag (vX.Y.Z or client-vX.Y.Z); got: ${GITHUB_REF}"
                 exit 1
                 ;;
             esac
-
-            VERSION="${VERSION_INPUT#v}"
-            if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::version input must be <semver>; got: ${VERSION}"
-              exit 1
-            fi
+            RELEASE_TAG="${GITHUB_REF#refs/tags/}"
           else
-            case "${RELEASE_TAG}" in
-              client-v*)
-                VERSION="${RELEASE_TAG#client-v}"
-                ;;
-              v*)
-                VERSION="${RELEASE_TAG#v}"
-                ;;
-              *)
-                echo "::error::Stable client releases must use tags shaped like vX.Y.Z or client-vX.Y.Z"
-                exit 1
-                ;;
-            esac
+            RELEASE_TAG="${RELEASE_TAG_INPUT}"
+          fi
 
-            # Both tag shapes are validated: VERSION reaches `$GITHUB_OUTPUT`
-            # below, where a newline would inject further outputs — including
-            # `image_repo`, which selects the registry this job pushes to.
-            if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::Release tag ${RELEASE_TAG} does not carry a <semver> version; got: ${VERSION}"
+          case "${RELEASE_TAG}" in
+            client-v*)
+              VERSION="${RELEASE_TAG#client-v}"
+              ;;
+            v*)
+              VERSION="${RELEASE_TAG#v}"
+              ;;
+            *)
+              echo "::error::Stable client releases must use tags shaped like vX.Y.Z or client-vX.Y.Z"
               exit 1
-            fi
+              ;;
+          esac
+
+          # Both tag shapes are validated: VERSION reaches `$GITHUB_OUTPUT`
+          # below, where a newline would inject further outputs — including
+          # `image_repo`, which selects the registry this job pushes to.
+          if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag ${RELEASE_TAG} does not carry a <semver> version; got: ${VERSION}"
+            exit 1
+          fi
+
+          # The input is a confirmation, not the source of the version: it must
+          # name the tag the run was launched from.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${VERSION_INPUT#v}" != "${VERSION}" ]; then
+            echo "::error::version input ${VERSION_INPUT} does not match the dispatched tag ${RELEASE_TAG}"
+            exit 1
           fi
 
           # working-directory default is `operator/`, no extra cd.

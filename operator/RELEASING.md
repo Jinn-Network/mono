@@ -140,16 +140,20 @@ Release workflow contract:
   - `ghcr.io/jinn-network/operator:sha-<shortsha>`
   - `ghcr.io/jinn-network/operator:latest`
 
-`.github/workflows/docker.yml` also takes a manual `workflow_dispatch` with a
-`version` input, for republishing those tags without cutting a release (#2811).
-It enforces the same guard: the version must equal `operator/package.json` at
-the selected ref.
+If that run goes red, re-run it: `.github/workflows/docker.yml` takes a manual
+`workflow_dispatch` with a `version` input, launched **from the release tag**
+(#2811). The version must match the tag it was launched from and
+`operator/package.json` at it, so a re-run publishes the released commit and
+nothing else. Tags cut before this trigger landed cannot be dispatched — the
+workflow file runs as it exists on the selected ref.
 
-**After the first cut that publishes under `ghcr.io/jinn-network/operator`**,
-verify `:latest` resolves anonymously and repoint the run-it-now examples in
-`DEPLOY.md`, `deploy/README.md` and `operator/docker-compose.yml` from `:next`
-back to `:latest`. They name `:next` only because the stable tags do not exist
-under this name yet.
+**Release checklist, after the first cut that publishes under
+`ghcr.io/jinn-network/operator`:** verify `:latest` resolves anonymously
+(`docker pull ghcr.io/jinn-network/operator:latest` with no registry auth), then
+repoint the run-it-now examples in `DEPLOY.md`, `deploy/README.md` and
+`operator/docker-compose.yml` from `:next` back to `:latest`, and drop the
+"not published under this name yet" notes in the first two. They name `:next`
+only because the stable tags do not exist under this name yet.
 
 Post-release verification is performed by `yarn release:client --publish`.
 The underlying checks are:

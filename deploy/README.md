@@ -21,9 +21,11 @@ image; everything they share lives here.
 The stable lane also takes a `workflow_dispatch` with a `version` input, so its
 tags can be republished without cutting a release — a release-only trigger is
 what turned one Dockerfile defect into a three-month `:latest` outage (#2811).
-A manual run may only be launched from `main`, `next`, or a release tag, and
-passes the same guard a release run does: the supplied version must equal
-`operator/package.json` at that ref.
+A manual run is launched from the release tag itself, so `:<version>` and
+`:latest` carry the released commit whichever trigger produced them; the version
+input must match both that tag and `operator/package.json` at it. It applies to
+cuts made after this lands — `workflow_dispatch` runs the workflow file as it
+exists on the dispatched ref, and older tags carry no dispatch trigger.
 
 **The stable tags have not been published under this name yet.** `docker.yml`
 was repointed from `ghcr.io/jinn-network/client` to
@@ -40,8 +42,9 @@ dotfile skip (#954), and state-dir derivation under `JINN_STATE_DIR` (#956).
 
 ### `ghcr.io/jinn-network/client` — retired
 
-`client` is the base's former name. It is **frozen at 0.1.9** (its last publish,
-2026-06-09) and no lane pushes to it any more. Its tags stay resolvable so
+`client` is the base's former name. Its release tags are **frozen at 0.1.9**
+(2026-06-09); the canary lane kept pushing `:next` and `:canary-<sha>` there
+until the rename, and no lane pushes to it at all any more. Its tags stay resolvable so
 deployments pinned to them keep working; nothing new should reference it.
 `ghcr.io/jinn-network/operator` is the successor.
 
@@ -131,7 +134,7 @@ the canary needs its own pre-release images — built and **smoke-booted** per p
 to `next` by [`operator-images.yml`](../.github/workflows/operator-images.yml)
 (the container analogue of the npm `canary` dist-tag). On every push to `next` it:
 
-1. builds the base from the commit and publishes `client:{canary-<sha>, next}`;
+1. builds the base from the commit and publishes `operator:{canary-<sha>, next}`;
 2. builds each overlay **`FROM` that exact base digest** (overlay+base welded to
    one commit — never mismatched);
 3. **smoke-boots** each overlay with its baked default CMD and fails the build on
@@ -145,9 +148,9 @@ to `next` by [`operator-images.yml`](../.github/workflows/operator-images.yml)
 specific `:canary-<sha>`), keeping the same `/data` volume + seed env vars. No
 deploy-time build; the running container is the exact CI-smoke-tested artifact.
 
-- **Rollback:** repoint the tag to a known-good `:canary-<sha>` (atomic). Once
-  the stable lane publishes under this name, `:latest` drops the test operator
-  back to the release line.
+- **Rollback:** repoint the tag to a known-good `:canary-<sha>` (atomic). There
+  is no stable overlay tag to fall back to — publishing `operator-*` release
+  images is the deferred follow-up noted below.
 - **One-time:** the new `operator-launcher` / `operator-codex` GHCR packages must
   be **public** (like the base — see *Pulling the base*), or add a `read:packages`
   registry credential on the Railway service.

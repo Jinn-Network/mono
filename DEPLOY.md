@@ -77,9 +77,11 @@ TLS and a trusted proxy in front per §9.
 | Tag | Lane | Moves |
 |---|---|---|
 | `:next`, `:canary-<short>` | `.github/workflows/operator-images.yml` | every push to `next` |
-| `:latest`, `:<version>`, `:sha-<short>` | `.github/workflows/docker.yml` | every named release |
+| `:latest`, `:<version>`, `:sha-<short>` | `.github/workflows/docker.yml` | every named release, or a manual re-run from its tag |
 
-`:next` is the rolling tag and is what the example above runs. The stable tags
+`:next` is the rolling tag and is what the example above runs. It is
+`linux/amd64` only, so it runs under emulation on Apple Silicon; the stable
+tags are multi-arch. The stable tags
 have not been published under this name yet — the lane that publishes them was
 repointed from `ghcr.io/jinn-network/client` to `ghcr.io/jinn-network/operator`
 while it was red, so its first green run under the new name is still pending
