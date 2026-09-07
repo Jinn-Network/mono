@@ -29,18 +29,37 @@ function mappingKey(line) {
   return key ? { indent: match[1].length, name: key[1] ?? key[2] ?? key[3] } : null;
 }
 
-function jobRanges(source) {
+// Indentation width is a style choice, not a schema rule: two spaces is this
+// repository's convention, four is equally valid YAML that Actions runs. Pinning
+// the walk to `parentIndent + 2` made every other width resolve zero jobs and
+// zero steps, and a job that contributes no steps is indistinguishable here from
+// a compliant one — the guard reported green because it had parsed nothing
+// (#4219). Derive the child indent from the document instead of assuming it.
+function childIndent(lines, parentIndent, from = 1) {
+  for (let index = from; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.trim()) continue;
+    const indent = indentOf(line);
+    return indent > parentIndent ? indent : null;
+  }
+  return null;
+}
+
+export function jobRanges(source) {
   const lines = source.split('\n');
   const jobsAt = lines.findIndex((line) => /^jobs:\s*(?:#.*)?$/u.test(line));
   if (jobsAt === -1) return [];
 
   const jobsIndent = indentOf(lines[jobsAt]);
+  let jobIndent = null;
   const starts = [];
   for (let index = jobsAt + 1; index < lines.length; index += 1) {
     const line = lines[index];
     if (line.trim() && indentOf(line) <= jobsIndent) break;
     const key = mappingKey(line);
-    if (key?.indent === jobsIndent + 2) starts.push({ index, name: key.name });
+    if (!key || key.indent <= jobsIndent) continue;
+    if (jobIndent === null) jobIndent = key.indent;
+    if (key.indent === jobIndent) starts.push({ index, name: key.name });
   }
 
   return starts.map((start, position) => ({
@@ -49,17 +68,35 @@ function jobRanges(source) {
   }));
 }
 
-function stepsForJob(lines) {
+export function stepsForJob(lines) {
   const jobIndent = indentOf(lines[0]);
-  const stepsPattern = new RegExp(`^\\s{${jobIndent + 2}}steps:\\s*(?:#.*)?$`, 'u');
+  const stepsIndent = childIndent(lines, jobIndent);
+  if (stepsIndent === null) return [];
+  const stepsPattern = new RegExp(`^\\s{${stepsIndent}}steps:\\s*(?:#.*)?$`, 'u');
   const stepsAt = lines.findIndex((line) => stepsPattern.test(line));
   if (stepsAt === -1) return [];
-  const stepsIndent = indentOf(lines[stepsAt]);
+  // A sequence entry may sit indented under its key or aligned with it; both are
+  // ordinary YAML. Take the indent the first `- ` opener actually uses.
+  let stepIndent = null;
   const starts = [];
   for (let index = stepsAt + 1; index < lines.length; index += 1) {
     const line = lines[index];
-    if (line.trim() && indentOf(line) <= stepsIndent) break;
-    if (indentOf(line) === stepsIndent + 2 && /^\s*-\s+/u.test(line)) starts.push(index);
+    // Blank lines and whole-line comments carry no structure; a comment sitting at
+    // the step indent is not the end of the sequence.
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    const indent = indentOf(line);
+    const opener = /^\s*-\s+/u.test(line);
+    if (stepIndent === null) {
+      if (!opener) {
+        if (indent <= stepsIndent) break;
+        continue;
+      }
+      if (indent < stepsIndent) break;
+      stepIndent = indent;
+    }
+    if (indent < stepIndent) break;
+    if (indent === stepIndent && !opener) break;
+    if (indent === stepIndent) starts.push(index);
   }
   return starts.map((start, position) => lines.slice(start, starts[position + 1] ?? lines.length));
 }
@@ -127,17 +164,21 @@ function setupNodeAction(lines) {
 // workflow reader self-contained. Unknown dynamic directories fail closed below;
 // finite matrix axes and the repository's package-loop form expand to exact paths.
 function defaultsWorkingDirectory(lines, defaultsIndent) {
+  if (defaultsIndent === null) return null;
   const defaultsPattern = new RegExp(`^\\s{${defaultsIndent}}defaults:\\s*(?:#.*)?$`, 'u');
   const defaultsAt = lines.findIndex((line) => defaultsPattern.test(line));
   if (defaultsAt === -1) return null;
 
-  const runIndent = defaultsIndent + 2;
+  const runIndent = childIndent(lines, defaultsIndent, defaultsAt + 1);
+  if (runIndent === null) return null;
   const runPattern = new RegExp(`^\\s{${runIndent}}run:\\s*(?:#.*)?$`, 'u');
   const runAt = lines.findIndex((line, index) => index > defaultsAt && runPattern.test(line));
   if (runAt === -1) return null;
 
+  const workingDirectoryIndent = childIndent(lines, runIndent, runAt + 1);
+  if (workingDirectoryIndent === null) return null;
   const workingDirectoryPattern = new RegExp(
-    `^\\s{${runIndent + 2}}working-directory:\\s*(.+)$`,
+    `^\\s{${workingDirectoryIndent}}working-directory:\\s*(.+)$`,
     'u',
   );
   for (let index = runAt + 1; index < lines.length; index += 1) {
@@ -285,6 +326,13 @@ function enablesCorepack(step) {
     .some((line) => /(?:^|[;&|(]|\s)corepack\s+enable(?:\s|$)/u.test(line));
 }
 
+// CRLF is valid in a YAML file Actions runs. Left in place, every walk here splits
+// on `\n` and carries a trailing `\r` into each line, so no anchored pattern matches
+// and the workflow silently resolves zero steps (#4219).
+function readWorkflow(directory, workflowName) {
+  return readFileSync(join(directory, workflowName), 'utf8').replace(/\r\n/gu, '\n');
+}
+
 export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = root) {
   const violations = [];
   const workflowNames = readdirSync(directory)
@@ -292,7 +340,7 @@ export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = r
     .sort();
 
   for (const workflowName of workflowNames) {
-    const source = readFileSync(join(directory, workflowName), 'utf8');
+    const source = readWorkflow(directory, workflowName);
     const sourceLines = source.split('\n');
     const jobsAt = sourceLines.findIndex((line) => /^jobs:\s*(?:#.*)?$/u.test(line));
     const workflowWorkingDirectory = defaultsWorkingDirectory(sourceLines.slice(0, jobsAt), 0);
@@ -306,8 +354,10 @@ export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = r
           `${workflowName} job ${job.name}: corepack enable must run before the setup-node step that caches Yarn`,
         );
       }
-      const jobWorkingDirectory = defaultsWorkingDirectory(job.lines, indentOf(job.lines[0]) + 2)
-        ?? workflowWorkingDirectory;
+      const jobWorkingDirectory = defaultsWorkingDirectory(
+        job.lines,
+        childIndent(job.lines, indentOf(job.lines[0])),
+      ) ?? workflowWorkingDirectory;
       for (let index = 0; index < steps.length; index += 1) {
         if (!setupNodeAction(steps[index])) continue;
         const installs = steps.slice(index + 1)
@@ -368,8 +418,98 @@ export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = r
   return violations;
 }
 
+// The walks above can only report on steps they resolve, and a job they resolve
+// nothing from looks exactly like a compliant one. This counts `actions/setup-node`
+// two ways — the raw text of the file, and the steps the walk actually returned —
+// so any future workflow shape the walk cannot see fails loudly by name instead of
+// passing silently (#4219).
+export function setupNodeStepCoverage(directory = workflowsDir) {
+  return readdirSync(directory)
+    .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
+    .sort()
+    .map((workflowName) => {
+      const source = readWorkflow(directory, workflowName);
+      const declared = source
+        .split('\n')
+        .filter((line) => /^\s*(?:-\s+)?uses:\s*["']?actions\/setup-node@/u.test(line))
+        .length;
+      const resolved = jobRanges(source)
+        .flatMap((job) => stepsForJob(job.lines))
+        .filter(setupNodeAction)
+        .length;
+      return { workflow: workflowName, declared, resolved };
+    });
+}
+
 test('setup-node caches every later Yarn install with existing lockfiles', () => {
   assert.deepEqual(yarnCacheViolations(), []);
+});
+
+test('the workflow walk resolves every setup-node step present in the source', () => {
+  const blind = setupNodeStepCoverage()
+    .filter(({ declared, resolved }) => declared !== resolved)
+    .map(({ workflow, declared, resolved }) => `${workflow}: ${declared} in source, ${resolved} walked`);
+  assert.deepEqual(blind, []);
+});
+
+test('coverage counting catches a workflow shape the walk cannot see', () => {
+  const fixtureWorkflows = mkdtempSync(join(tmpdir(), 'jinn-workflow-yarn-cache-coverage-'));
+  try {
+    // `steps:` with its sequence entries aligned to the key rather than indented
+    // under it: ordinary YAML, and the shape the pre-#4219 walk resolved as empty.
+    writeFileSync(join(fixtureWorkflows, 'aligned.yml'), `name: aligned fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+    - run: corepack enable
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 22
+    - run: yarn install --immutable
+`);
+    assert.deepEqual(setupNodeStepCoverage(fixtureWorkflows), [
+      { workflow: 'aligned.yml', declared: 1, resolved: 1 },
+    ]);
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureWorkflows).join('\n'),
+      /must declare cache: yarn/u,
+    );
+  } finally {
+    rmSync(fixtureWorkflows, { recursive: true, force: true });
+  }
+});
+
+test('the walk reads four-space and CRLF workflows', () => {
+  const fixtureWorkflows = mkdtempSync(join(tmpdir(), 'jinn-workflow-yarn-cache-shape-'));
+  const body = `name: shape fixture
+jobs:
+    verify:
+        runs-on: ubuntu-latest
+        steps:
+            - run: corepack enable
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: 22
+            - run: yarn install --immutable
+`;
+  try {
+    writeFileSync(join(fixtureWorkflows, 'four-space.yml'), body);
+    writeFileSync(join(fixtureWorkflows, 'crlf.yml'), body.replace(/\n/gu, '\r\n'));
+    assert.deepEqual(setupNodeStepCoverage(fixtureWorkflows), [
+      { workflow: 'crlf.yml', declared: 1, resolved: 1 },
+      { workflow: 'four-space.yml', declared: 1, resolved: 1 },
+    ]);
+    const violations = yarnCacheViolations(fixtureWorkflows, fixtureWorkflows);
+    assert.deepEqual(violations, [
+      'crlf.yml job verify: setup-node must declare cache: yarn',
+      'crlf.yml job verify: setup-node must declare cache-dependency-path',
+      'four-space.yml job verify: setup-node must declare cache: yarn',
+      'four-space.yml job verify: setup-node must declare cache-dependency-path',
+    ]);
+  } finally {
+    rmSync(fixtureWorkflows, { recursive: true, force: true });
+  }
 });
 
 function fixtureWorkflow(setupWith) {
