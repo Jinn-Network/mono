@@ -34,8 +34,9 @@ The self-serve source is now split into Colophon-owned Tier 4 packages:
 - `@colophon-claims/verify` — the smaller reader-only verifier;
 - `@colophon-claims/web` — private source/build input for the local UI.
 
-`@colophon-claims/verify` is published: `latest` is `0.2.1`, so the reader line
-below runs from the registry with nothing checked out.
+`@colophon-claims/verify` is published to npm, `latest` `0.2.1`. The reader
+lines below therefore run straight from the registry; nothing has to be checked
+out to verify a received bundle.
 
 `@colophon-claims/cli` and `@colophon-claims/core` are implemented but not
 published. Registry publication of those two remains held until the exact Jinn
