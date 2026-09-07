@@ -67,11 +67,25 @@ const EXECUTABLE_FILES = new Set([
  */
 const RETIRED_PACKAGES = new Set(['client']);
 
-/** Overlays whose `ARG BASE_TAG` default must resolve to a published base tag. */
-const OVERLAY_DOCKERFILES = [
+/**
+ * Every file that states an `ARG BASE_TAG` default — the two overlay
+ * Dockerfiles and the READMEs that quote them. They must all agree, and must
+ * name a tag that is republished continuously.
+ */
+const BASE_TAG_FILES = [
   'deploy/railway-launcher-operator/Dockerfile',
+  'deploy/railway-launcher-operator/README.md',
   'deploy/railway-operator-codex/Dockerfile',
+  'deploy/railway-operator-codex/README.md',
 ];
+
+/**
+ * Base tags a lane republishes on every push, so they keep resolving between
+ * named cuts. `latest` is deliberately excluded: it moves only on a release,
+ * so a stable lane that stops publishing (#2811) silently breaks every
+ * default-args overlay build.
+ */
+const ROLLING_BASE_TAGS = new Set(['next']);
 
 type PushStep = {
   uses?: string;
@@ -198,8 +212,12 @@ function references(): Reference[] {
 
 describe('GHCR image references', () => {
   const published = publishedTagShapes();
+  const found = references();
 
   it('derives the published packages from the two image lanes', () => {
+    // Pinned so a silent extraction regression (a lane switching to
+    // docker/metadata-action, say) turns this red instead of quietly emptying
+    // the sets every other assertion here reads.
     expect([...published.keys()].sort()).toEqual([
       'operator',
       'operator-codex',
@@ -215,7 +233,7 @@ describe('GHCR image references', () => {
   });
 
   it('names only packages an in-repo lane publishes', () => {
-    const unknown = references().filter(
+    const unknown = found.filter(
       (ref) => !published.has(ref.pkg) && !RETIRED_PACKAGES.has(ref.pkg),
     );
     expect(
@@ -224,7 +242,7 @@ describe('GHCR image references', () => {
   });
 
   it('never runs a retired package', () => {
-    const executed = references().filter(
+    const executed = found.filter(
       (ref) => RETIRED_PACKAGES.has(ref.pkg) && EXECUTABLE_FILES.has(ref.file),
     );
     expect(
@@ -233,34 +251,33 @@ describe('GHCR image references', () => {
   });
 
   it('names only tag shapes those lanes publish', () => {
-    const unpublished = references().filter((ref) => {
-      if (ref.tag === undefined || isPlaceholder(ref.tag)) return false;
+    const unpublished = found.filter((ref) => {
+      const tag = ref.tag;
+      if (tag === undefined || isPlaceholder(tag)) return false;
       const shapes = published.get(ref.pkg);
       if (shapes === undefined) return false;
-      return ![...shapes].some((shape) => matchesShape(ref.tag as string, shape));
+      return ![...shapes].some((shape) => matchesShape(tag, shape));
     });
     expect(
       unpublished.map((ref) => `${ref.file}:${ref.line} ${ref.pkg}:${ref.tag}`),
     ).toEqual([]);
   });
 
-  it('defaults each overlay to a base tag that is published on a rolling cadence', () => {
+  it('states one overlay base-tag default, and a rolling one', () => {
     // The default is the only thing a plain `docker build` of an overlay can
-    // use — CI always overrides it with `BASE_IMAGE=…@sha256:…`. It must name a
-    // tag one of the lanes republishes continuously, so the default keeps
-    // resolving between named cuts. `latest` does not qualify: it moves only on
-    // a release, so a stable lane that stops publishing (#2811) silently breaks
-    // every default-args overlay build.
-    const rolling = new Set(['next']);
-    const defaults = OVERLAY_DOCKERFILES.map((file) => {
+    // use — CI always overrides it with `BASE_IMAGE=…@sha256:…`, which is why
+    // `ARG BASE_TAG=latest` pointing at a 404 stayed invisible to CI.
+    const defaults = BASE_TAG_FILES.map((file) => {
       const match = /^ARG BASE_TAG=(\S+)$/m.exec(read(file));
       return `${file} => ${match?.[1] ?? '<missing>'}`;
     });
-    expect(defaults).toEqual(
-      OVERLAY_DOCKERFILES.map((file) => `${file} => next`),
-    );
-    expect([...rolling].every((tag) => published.get('operator')?.has(tag))).toBe(
-      true,
-    );
+    const stated = new Set(defaults.map((entry) => entry.split(' => ')[1]));
+
+    expect(defaults.filter((entry) => entry.endsWith('<missing>'))).toEqual([]);
+    expect([...stated]).toHaveLength(1);
+    for (const tag of stated) {
+      expect(ROLLING_BASE_TAGS.has(tag)).toBe(true);
+      expect(published.get('operator')?.has(tag)).toBe(true);
+    }
   });
 });

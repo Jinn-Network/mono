@@ -9,8 +9,8 @@ name: Docker
 # cycle with no way to retry: one Dockerfile defect (#2809) kept this lane red
 # from 2026-06-09 to 2026-08-18, and `:latest` stayed a 404 for months after the
 # fix merged because nothing could re-run the lane (#2811). A manual run
-# republishes the stable tags from any ref whose `operator/package.json` matches
-# the supplied version — the same guard a release run passes.
+# republishes the stable tags from `main`, `next`, or a release tag, and passes
+# the same `operator/package.json` version guard a release run passes.
 on:
   release:
     types: [published]
@@ -43,10 +43,27 @@ jobs:
       - name: Resolve release metadata
         id: meta
         shell: bash
+        # The dispatch input reaches the script through the environment, never
+        # through `${{ }}` interpolation, so it cannot be shell-injected.
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
-            VERSION="${VERSION#v}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            # A manual run publishes `:latest`, so it may only be launched from a
+            # ref a release could have been cut from. Write access alone must not
+            # let an arbitrary feature branch become the stable image.
+            #
+            # GITHUB_REF/GITHUB_EVENT_NAME are read from the environment, not
+            # interpolated: a ref name may legally contain `$` and backticks.
+            case "${GITHUB_REF}" in
+              refs/heads/main|refs/heads/next|refs/tags/v*|refs/tags/client-v*) ;;
+              *)
+                echo "::error::A manual publish must run from main, next, or a release tag; got: ${GITHUB_REF}"
+                exit 1
+                ;;
+            esac
+
+            VERSION="${VERSION_INPUT#v}"
             if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "::error::version input must be <semver>; got: ${VERSION}"
               exit 1

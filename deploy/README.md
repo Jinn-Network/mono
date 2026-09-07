@@ -21,8 +21,9 @@ image; everything they share lives here.
 The stable lane also takes a `workflow_dispatch` with a `version` input, so its
 tags can be republished without cutting a release — a release-only trigger is
 what turned one Dockerfile defect into a three-month `:latest` outage (#2811).
-A manual run passes the same guard a release run does: the supplied version must
-equal `operator/package.json` at the selected ref.
+A manual run may only be launched from `main`, `next`, or a release tag, and
+passes the same guard a release run does: the supplied version must equal
+`operator/package.json` at that ref.
 
 **The stable tags have not been published under this name yet.** `docker.yml`
 was repointed from `ghcr.io/jinn-network/client` to
@@ -30,19 +31,19 @@ was repointed from `ghcr.io/jinn-network/client` to
 are 404s until its first green run (#2811). Use `:next` or a `:canary-<short>`
 until then.
 
-### `ghcr.io/jinn-network/client` — retired
-
-`client` is the base's former name. It is **frozen at 0.1.9** (its last publish,
-2026-06-09) and no lane pushes to it any more. Its tags stay resolvable so
-deployments pinned to them keep working; nothing new should reference it.
-`ghcr.io/jinn-network/operator` is the successor.
-
 The base is container-native after **#988**: its entrypoint drops root→node via
 gosu and chowns `$JINN_STATE_DIR`; it bakes the pinned `claude-code` CLI, `gosu`,
 env-based auth (no `~/.claude.json` file), and `JINN_STATE_DIR=/data`; it ships
 **no** `VOLUME` directive (Railway rejects it and a baked VOLUME masks the chown).
 The daemon owns the four former entrypoint workarounds — pidfile reclaim (#955),
 dotfile skip (#954), and state-dir derivation under `JINN_STATE_DIR` (#956).
+
+### `ghcr.io/jinn-network/client` — retired
+
+`client` is the base's former name. It is **frozen at 0.1.9** (its last publish,
+2026-06-09) and no lane pushes to it any more. Its tags stay resolvable so
+deployments pinned to them keep working; nothing new should reference it.
+`ghcr.io/jinn-network/operator` is the successor.
 
 ### Pulling the base
 
@@ -84,14 +85,16 @@ reaches the daemon.
 `BASE_TAG` must point to a base build that includes #988. Default is `next` —
 the rolling tag the canary lane republishes continuously, so a default-args
 `docker build` of an overlay always resolves. Pin it via a `BASE_TAG` Railway
-service variable or `[build.args]` in the recipe's `railway.toml`. CI also pins the base by **immutable digest** through the
+service variable or `[build.args]` in the recipe's `railway.toml`. CI also pins
+the base by **immutable digest** through the
 `BASE_IMAGE` build-arg (`--build-arg BASE_IMAGE=ghcr.io/jinn-network/operator@sha256:…`),
 welding overlay+base to one commit — see the canary lane below.
 
 > **Architecture:** the base + overlay images must be **`linux/amd64`** to run on
 > Railway/Fly. Both lanes publish `linux/amd64` (`docker.yml` also publishes
-> `linux/arm64`), so published images are fine. But a **hand-built single-arch image (e.g. `arm64`
-> from an Apple-Silicon `docker build`) fails to start on Railway** — the deploy
+> `linux/arm64`), so published images are fine. But a **hand-built single-arch
+> image (e.g. `arm64` from an Apple-Silicon `docker build`) fails to start on
+> Railway** — the deploy
 > goes `FAILED` with empty logs (the container can't exec). If you build locally
 > for a deploy, use `docker buildx build --platform linux/amd64 …`. (Verified
 > 2026-06-03: an arm64 launcher overlay `FAILED` on Railway; the amd64 rebuild
