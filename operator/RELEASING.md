@@ -149,6 +149,11 @@ lever: it moves `:latest` back to that release's commit. Tags cut before this
 trigger landed cannot be dispatched at all — the workflow file runs as it exists
 on the selected ref.
 
+Re-running `yarn release:client --publish` afterwards completes the release: its
+`docker.yml` wait accepts a successful `workflow_dispatch` run for the release
+commit, not only a `release`-triggered one, so a dispatched republish clears the
+`publish-wait-docker-workflow` step it would otherwise stay stuck on.
+
 **Release checklist, after the first cut that publishes under
 `ghcr.io/jinn-network/operator`:** verify `:latest` resolves anonymously
 (`docker pull ghcr.io/jinn-network/operator:latest` with no registry auth), then

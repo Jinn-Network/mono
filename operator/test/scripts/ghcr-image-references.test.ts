@@ -46,6 +46,20 @@ const REFERENCING_FILES = [
   'operator/README.md',
   'operator/RELEASING.md',
   'operator/docker-compose.yml',
+  'deploy/railway-launcher-operator/railway.toml',
+  'deploy/railway-operator-codex/railway.toml',
+];
+
+/**
+ * Railway service definitions whose comment block gives an operator a
+ * copy-pasteable `BASE_TAG` override. They sat outside every check above until
+ * their worked example still read `0.1.4` — a tag only ever published under the
+ * retired `client` package — long after the overlays had moved to `operator`.
+ * A bare tag carries no `ghcr.io/` prefix, so the reference scan cannot see it.
+ */
+const BASE_TAG_EXAMPLE_FILES = [
+  'deploy/railway-launcher-operator/railway.toml',
+  'deploy/railway-operator-codex/railway.toml',
 ];
 
 /**
@@ -261,6 +275,28 @@ describe('GHCR image references', () => {
     expect(
       unpublished.map((ref) => `${ref.file}:${ref.line} ${ref.pkg}:${ref.tag}`),
     ).toEqual([]);
+  });
+
+  it('offers only pinnable BASE_TAG examples', () => {
+    // A version-shaped example passes `matchesShape` against the release lane's
+    // `*` and still 404s, because no stable cut has run under this package name
+    // yet (#2811) — a registry fact this file cannot check. So the rule here is
+    // the stricter, repository-checkable one the overlay defaults already obey:
+    // a literal example must be a continuously republished tag. A placeholder
+    // (`canary-<short-sha>`) reads as a shape, not as something to paste, and is
+    // exempt. Relax this once the stable lane has a green run under this name.
+    const examples = BASE_TAG_EXAMPLE_FILES.flatMap((file) =>
+      [...read(file).matchAll(/BASE_TAG\s*=\s*"([^"]+)"/g)].map((match) => ({
+        file,
+        tag: match[1],
+      })),
+    );
+
+    expect(examples.length).toBe(BASE_TAG_EXAMPLE_FILES.length);
+    const unpinnable = examples.filter(
+      (example) => !isPlaceholder(example.tag) && !ROLLING_BASE_TAGS.has(example.tag),
+    );
+    expect(unpinnable.map((example) => `${example.file} => ${example.tag}`)).toEqual([]);
   });
 
   it('states one overlay base-tag default, and a rolling one', () => {

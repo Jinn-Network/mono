@@ -3,11 +3,15 @@ builder = "DOCKERFILE"
 # Pinned to the per-harness overlay Dockerfile, NEVER the repo root (#846 — a
 # root railway.toml hijacks jinn-indexer and every other monorepo service).
 dockerfilePath = "deploy/railway-operator-codex/Dockerfile"
-# The overlay's BASE_TAG build arg defaults to `next`. Pin it to a published
-# base release that includes the container-native changes (#988) via a BASE_TAG
-# service variable, or here:
+# The overlay's BASE_TAG build arg defaults to `next` — the rolling tag the
+# canary lane republishes on every push, so a default-args build always
+# resolves. To pin one build instead, set a BASE_TAG service variable, or
+# override here with an immutable per-commit tag of the
+# ghcr.io/jinn-network/operator package, e.g.:
 #   [build.args]
-#   BASE_TAG = "0.1.4"
+#   BASE_TAG = "canary-<short-sha>"
+# No stable release has been published under this package name yet (#2811), so
+# `latest` and `X.Y.Z` are 404s here and are not pinnable options today.
 
 [deploy]
 restartPolicyType = "ON_FAILURE"
