@@ -23,7 +23,7 @@ import { signTaskV1 } from '../../tasks/signing.js';
 import { TaskPostingService } from '../../tasks/posting-service.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
 import { walletPrivateKeyAtIndex } from '../../earning/wallet.js';
-import { isOperationalServiceStep } from '../../earning/types.js';
+import { isOperationalServiceStep, isRequesterPersona } from '../../earning/types.js';
 import { getConfigPathFromArgs, loadConfig } from '../../config.js';
 import {
   cidFromParticipationDigest,
@@ -194,10 +194,14 @@ function machinePreflightChecks(args: {
  * to pay for. Making this verb actually work for a requester is later work;
  * not routing them at the supplier path is not.
  *
- * Same persona inference as `planFleetFunding`: `safe_deployed` over the
- * requester path is a requester. An operator who ran `jinn requester init`
- * first shares the marker, but they have an operational service and so never
- * reach a refusal at all.
+ * Persona is decided by the shared `isRequesterPersona` predicate — the same
+ * call `planFleetFunding` makes, not a restatement of it. That matters here:
+ * an operator who ran `jinn requester init` first keeps the `safe_deployed`
+ * marker forever, and they *do* reach a refusal at this verb throughout
+ * bootstrap (a service parked at `awaiting_stake`, or `complete` without a
+ * mech address). Testing the marker alone would tell them there is nothing
+ * left to fund while they are parked on the OLAS bond, and would discard the
+ * `jinn fund-requirements` routing that is exactly what unblocks them.
  */
 function requesterSubmitRefusal(): BuildEnvelopeInput {
   return {
@@ -606,11 +610,11 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       }
       machineSignerContext = built.ctx;
       service = pickPrimaryMechService(built.ctx.fleetState.services);
-      isRequester = built.ctx.fleetState.requester_stage === 'safe_deployed';
+      isRequester = isRequesterPersona(built.ctx.fleetState);
     } else {
       const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
       service = raw.fleet?.services.find(s => isOperationalServiceStep(s.step));
-      isRequester = raw.fleet?.requester_stage === 'safe_deployed';
+      isRequester = isRequesterPersona(raw.fleet);
     }
     if (!service?.safe_address) {
       emitEnvelope(
@@ -719,7 +723,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     // text; every other caller keeps the operator wording.
     emitEnvelope(
       built.envelope.code === 'bootstrap_incomplete'
-        && built.envelope.details?.['requesterStage'] === 'safe_deployed'
+        && built.envelope.details?.['requesterPersona'] === true
         ? requesterSubmitRefusal()
         : built.envelope,
       { writer: ctx.writer, exit: ctx.exit },

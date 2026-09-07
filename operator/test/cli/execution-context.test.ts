@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  createCliExecutionContext,
   createCliReadOnlySignerContext,
   createCliSignerContext,
   pickPrimaryMechService,
@@ -108,6 +109,60 @@ describe('createCliReadOnlySignerContext', () => {
     expect(invalidState.ok).toBe(false);
     expect(readFileSync(invalidStatePath, 'utf8')).toBe(invalidBefore);
     expect(readdirSync(earningDir)).toEqual(filesBefore);
+  });
+});
+
+// The `requesterPersona` field on the `bootstrap_incomplete` envelope is a
+// two-file seam: this producer and `jinn tasks submit`'s consumer. The consumer
+// is tested against a mock, so without these two cases dropping the field here
+// would leave that test green while production silently reverted to routing a
+// requester at `jinn bootstrap --json`.
+describe('createCliExecutionContext bootstrap_incomplete persona (issue #2446)', () => {
+  const PASSWORD = 'test-password';
+
+  async function seed(fleet: Partial<ReturnType<typeof createDefaultFleetState>>) {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-exec-persona-'));
+    const earningDir = join(root, 'earning');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(
+      'test test test test test test test test test test test junk',
+      PASSWORD,
+    ));
+    await store.save({
+      ...createDefaultFleetState('base-sepolia'),
+      master_address: '0x0000000000000000000000000000000000000009',
+      ...fleet,
+    });
+    const configPath = join(root, 'config.json');
+    writeFileSync(configPath, JSON.stringify({
+      network: 'testnet',
+      earningDir,
+      rpcUrl: 'http://127.0.0.1:1',
+    }));
+    return createCliExecutionContext({
+      argv: ['--config', configPath],
+      env: { JINN_PASSWORD: PASSWORD },
+    });
+  }
+
+  it('emits requesterPersona true for a requester with no operator state', async () => {
+    const result = await seed({ requester_stage: 'safe_deployed' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.envelope.code).toBe('bootstrap_incomplete');
+    expect(result.envelope.details?.['requesterPersona']).toBe(true);
+  });
+
+  it('emits requesterPersona false once the operator state machine advances', async () => {
+    const result = await seed({
+      requester_stage: 'safe_deployed',
+      fleet_stage: 'stage1',
+      services: [svc({ index: 1, step: 'awaiting_stake' })],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.envelope.code).toBe('bootstrap_incomplete');
+    expect(result.envelope.details?.['requesterPersona']).toBe(false);
   });
 });
 

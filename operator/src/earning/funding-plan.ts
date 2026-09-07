@@ -23,7 +23,13 @@ import { computeRequiredMasterEth } from './bootstrap.js';
 import { requesterMinMasterEth } from './requester-init.js';
 import { detectDeprecatedTestnetSetup } from './testnet-setup-migration.js';
 import { decryptMnemonic, deriveMasterAddress } from './wallet.js';
-import { isOperationalServiceStep, type FleetState, type FundingRequirement, type StakingMode } from './types.js';
+import {
+  isOperationalServiceStep,
+  isRequesterPersona,
+  type FleetState,
+  type FundingRequirement,
+  type StakingMode,
+} from './types.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from './viem-clients.js';
 
 export interface FundingPlanOptions {
@@ -170,17 +176,12 @@ export async function planFleetFunding(
     reasons.push('fleet_state_missing');
   }
 
-  // Persona (B0a, issue #2446). An explicit flag wins; otherwise a fleet that
-  // reached `safe_deployed` over the requester path and has not since started
-  // the operator state machine is a requester. The second half of that test
-  // matters: an operator who ran `jinn requester init` first shares the very
-  // same Safe, and the moment they advance `fleet_stage` or acquire a service
-  // row the operator gate is the honest answer again.
+  // Persona (B0a, issue #2446). An explicit flag wins; otherwise the shared
+  // `isRequesterPersona` predicate decides. It is shared rather than restated
+  // so this gate and `jinn tasks submit`'s refusal cannot drift apart — see
+  // the predicate's own comment for why the marker alone is not enough.
   const persona: 'operator' | 'requester' = options.requester === true
-    || (options.requester === undefined
-      && fleetState?.requester_stage === 'safe_deployed'
-      && fleetState.fleet_stage === 'none'
-      && fleetState.services.length === 0)
+    || (options.requester === undefined && isRequesterPersona(fleetState))
     ? 'requester'
     : 'operator';
 

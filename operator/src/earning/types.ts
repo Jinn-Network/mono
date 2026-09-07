@@ -153,6 +153,35 @@ export const FleetStateSchema = z.object({
 
 export type FleetState = z.infer<typeof FleetStateSchema>;
 
+// ── Persona ──────────────────────────────────────────────────────────────────
+
+/**
+ * Is this fleet a *requester* rather than an operator? (B0a, issue #2446.)
+ *
+ * The single predicate every persona-sensitive surface must call. Three
+ * conditions, all of them load-bearing:
+ *
+ * - `requester_stage === 'safe_deployed'` — a creator Safe was reached over the
+ *   requester path. Nothing ever clears this marker, so on its own it is a
+ *   record of history, not of the present persona.
+ * - `fleet_stage === 'none'` and no service rows — the operator state machine
+ *   has not started. A requester who later runs `jinn bootstrap` shares the
+ *   very same Safe; from the moment they advance `fleet_stage` or acquire a
+ *   service row, the operator answer is the honest one again, even though the
+ *   marker persists.
+ *
+ * Testing only the marker reads a dual-role operator mid-bootstrap as a
+ * requester and tells them there is nothing left to fund, when what they are
+ * parked on is the OLAS bond.
+ */
+export function isRequesterPersona(
+  fleetState: Pick<FleetState, 'requester_stage' | 'fleet_stage' | 'services'> | null | undefined,
+): boolean {
+  return fleetState?.requester_stage === 'safe_deployed'
+    && fleetState.fleet_stage === 'none'
+    && fleetState.services.length === 0;
+}
+
 // ── Factories ────────────────────────────────────────────────────────────────
 
 export function createDefaultFleetState(chain: 'base' | 'base-sepolia' = 'base'): FleetState {

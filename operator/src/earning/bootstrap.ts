@@ -681,7 +681,13 @@ export class FleetBootstrapper {
           address: getAddress(state.fleet_safe_address) as Address,
         });
         if (deployedCode !== undefined && deployedCode !== '0x') {
-          if (state.requester_stage !== 'safe_deployed') {
+          // Back-fill the marker only when this Safe is not already the
+          // operator's. `requester_stage` means "a creator Safe reached over
+          // the *requester* path" (`types.ts`), and an operator re-entering
+          // here after `jinn bootstrap` has a deployed Safe that says nothing
+          // of the sort. Writing it anyway would mint a marker the persona
+          // predicate then has to talk down.
+          if (state.requester_stage !== 'safe_deployed' && state.fleet_stage === 'none') {
             state = await this.store.patchFleet({ requester_stage: 'safe_deployed' });
           }
           return {

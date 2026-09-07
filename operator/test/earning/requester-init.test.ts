@@ -143,6 +143,29 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     expect(result.fleet_state.fleet_safe_address).toBe(PREDICTED_SAFE);
   });
 
+  it('does not mint the requester marker for a Safe deployed over the operator path', async () => {
+    // `requester_stage` means "a creator Safe reached over the *requester*
+    // path". An operator who already ran `jinn bootstrap` and then invokes this
+    // entry point hits the same short-circuit with a Safe that says nothing of
+    // the sort, and back-filling the marker there mints a claim the persona
+    // predicate then has to talk down.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
+    dirs.push(earningDir);
+    const store = await seedKeystore(earningDir);
+    await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE, fleet_stage: 'stage1' });
+    const bootstrapper = buildBootstrapper(earningDir);
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      requesterMinMasterEth(),
+    );
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
+
+    const result = await bootstrapper.ensureRequesterSafe('test-password');
+
+    expect(result.ok).toBe(true);
+    expect(result.fleet_state.requester_stage).toBe('none');
+  });
+
   it('does not re-enter the testnet faucet once the Safe is deployed', async () => {
     // Testnet degrades rather than breaks without the short-circuit: the drained
     // master re-enters the drip loop and spends part of the 4:30 budget on a
