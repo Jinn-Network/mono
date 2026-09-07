@@ -132,6 +132,13 @@ additive, so the old narrow-scope binding would remain alongside the new wide-sc
 operator no better off. `authorCatalog`, which the ceremony command uses, rewrites the catalog and
 does not have this problem.
 
+It has a different one, which is vacuous today and will not stay so. `authorCatalog` writes
+`revocations: []` (`packages/trust/authoring/src/catalog.ts:216`), so a wholesale re-author
+**un-revokes everything**. No revocation can exist yet — `revokeBinding`'s body is unimplemented
+(ceremony spec §3.2, §9) — but DR-2026-09-06 is the change that makes revocations authorable, so
+the first re-author after the first revocation would silently restore a revoked key. Add it to
+the defect list above: this procedure needs its own fix before revocations exist.
+
 ## Cost and sequencing
 
 Per operator: a finality wait and a daemon restart. On the reuse path there is no anchor

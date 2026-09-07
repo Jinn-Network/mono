@@ -663,9 +663,13 @@ newly submitted for that act rather than merely subject to law 1's general reuse
 §3.2 already fixes the surface that way ("revoke + `authorRoleBinding` for the replacement key +
 new anchor"), and stating it normatively closes a case the narrow preimage opens. Law 1 permits
 reuse exactly when the act recomputes the same digest; with the genesis-wide preimage a
-cross-act collision was unreachable, but over replacement bindings alone it is not — re-binding
-a `(role, keyId)` pair that the same agent and Safe bound before recomputes an already-mined
-digest, and reuse would then hand the rebind that older anchor's block time as its `validFrom`.
+cross-act collision was unreachable, but over replacement bindings alone it is not — a prior act
+that anchored **exactly this replacement key set** (a repeated rebind, or a wholesale rebind back
+to a set anchored before) recomputes an already-mined digest, and reuse would then hand the
+rebind that older anchor's block time as its `validFrom`. The precondition is the whole set, not
+one pair: the preimage commits to `keys` entire, so re-binding a single `(role, keyId)` that was
+anchored inside a larger set does not collide. The rule is always-fresh regardless, because the
+narrow preimage is what makes any collision reachable at all.
 That is binding-side retroactivity of exactly the kind R2 forbids for revocations, and it is
 worse here, because the intervening revocation is what makes the case arise at all. Domain
 separation keeps the two preimages distinct by construction, so neither anchor can be mistaken
@@ -731,21 +735,54 @@ its rules are checked is how §3.2a's class of drift happens, so the split is st
 | The `revocation-anchor/v1` preimage (R1–R3) | Authoring convention today; recomputation is possible by construction and is named as implementation work in DR-2026-09-06 §Consequences |
 | R5 (anchor first) | Authoring convention, as law 1 is for bindings. Unobservable after the fact: the anchor time is what the record carries either way |
 
-**The residual, stated with its bounds.** Because the digest's meaning is unchecked, an
-anchor's timestamp can be borrowed from any pre-existing Base Sepolia transaction: a catalog
-author may declare any 32-byte window of any finalized transaction (offset up to 1 MiB) as
-their anchor digest and inherit that block's time. Effective start is
-`max(validFrom, anchorTime)` (`binding-resolver.ts:127-135`) and earlier-anchored wins conflicts
-(§7.3 of the trust-layer design), so an earlier borrowed time is worth something to an
-adversary. The exploitability is bounded, and the bounds are not this amendment's to change: it
-is a borrowed timestamp and not a forged binding, since the DSSE self-signature and the EIP-191
-ceremony are untouched; attaching to someone else's Agent IRI is blocked by the §7.4a consent
-chain regardless of anchor time; joins are serialized through the coordinator, who authors the
-catalog; and grinding a digest to *match* an existing transaction is a preimage problem, so the
-borrowing above is the cheap direction and it only helps within an author's own IRI. What
-closes the residual is digest recomputation — which is why the revocation preimage is the
-substantive decision here and the binding preimage's defect is recorded rather than shrugged
-at.
+**The residual, stated with its bounds — and there is only one bound.** Because the digest's
+meaning is unchecked, an anchor's timestamp can be borrowed from any pre-existing Base Sepolia
+transaction: a catalog author may declare any 32-byte window of any finalized transaction
+(offset up to 1 MiB, `native-trust-catalog.ts:68`) as their anchor digest and inherit that
+block's time. Effective start is `max(validFrom, anchorTime)`
+(`binding-resolver.ts:127-135`) and earlier-anchored wins conflicts (§7.3 of the trust-layer
+design), so an earlier borrowed time is worth a great deal to an adversary. One thing is
+genuinely bounded: it is a borrowed timestamp and not a forged binding, since the DSSE
+self-signature and the EIP-191 ceremony are untouched, and grinding a digest to *match* an
+existing transaction is a preimage problem, so borrowing is the cheap direction.
+
+**Everything else this document previously claimed as a bound is not one, and saying so is the
+point of this section.** An earlier draft asserted that attaching to someone else's Agent IRI is
+blocked by the §7.4a consent chain "regardless of anchor time". It is not: the consent chain's
+first exit is genesis (`packages/trust/core/src/verify.ts:201`, `if (resolved.isGenesis) return
+{ ok: true }`), and genesis is decided *by anchor time* — `isGenesisAmong` calls a binding
+founding when its `effectiveStart` is earliest among every binding asserted for that IRI
+(`binding-resolver.ts:217-223`, applied at `:298`), over the catalog's full list for the agent
+(`native-trust-catalog.ts:367`). A borrowed pre-genesis anchor is therefore precisely the lever
+that opens the exemption, not something the exemption survives. Two further facts make the case
+cheap rather than theoretical: nothing compares a ceremony's `issuedAt` to a clock — authoring
+checks only that it equals `validFrom` (`packages/trust/authoring/src/binding.ts:86-91`) — and
+`authorRoleBinding` sets no `expiresAt` (`:93-113`), so a back-dated binding is still in window
+today.
+
+**The residual runs in the revocation direction too, and there it is sharper.** The enforcement
+table above lists the `revocation-anchor/v1` preimage as authoring convention, so borrowing
+applies verbatim to revocation anchors. A revocation declaring a borrowed pre-evidence anchor
+takes effect before the evidence it revokes (`binding-resolver.ts:137-148`,
+`verify.ts:273-296`), and the authorized signer is the operator's own voucher account or
+`bindings`-scoped key (`verify.ts:252-271`) — so an operator can back-date a revocation of their
+own binding and de-attribute their own past evidence, which is exactly the non-retroactivity
+§7.4b forbids and law 6 R2 exists to protect. R2 bans cross-act *reuse*; a fresh but borrowed
+anchor is neither reuse nor covered. And because the resolver looks up revocations for the
+winning binding's digest alone (`binding-resolver.ts:279`), an earlier-anchored replacement
+binding for the same `(key, agent)` escapes every revocation bound to the record it supersedes —
+revocation of a stolen key defeated, entirely inside the author's own IRI.
+
+**What actually contains all of this is catalog write authority**, and it is procedural, not
+cryptographic: a record must be in the verifier's catalog to be resolved at all, and joins are
+serialized through whoever holds that file. That is the residual's real boundary, and naming it
+as the only one is more useful than the three independent-sounding bounds it replaces. What
+*closes* the residual is digest recomputation — which is why the revocation preimage is the
+substantive decision here, why the binding preimage's defect is recorded rather than shrugged
+at, and why a genesis determination that does not depend on a borrowed anchor time belongs with
+the recomputation work at §10 (f) rather than being asserted as already closed. Nothing above
+changes a decision in DR-2026-09-06; it corrects what that record's decision 6 says the
+verifier's blindness costs.
 
 **This document was wrong about the target.** §3.2's `submitAnchor` comment said the calldata
 goes to "the fixed anchor target". Nothing fixed it, in either sense: no production constant
@@ -1007,8 +1044,11 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    for a binding or for a different revocation act — the resolver takes the **earliest**
    anchor time (`binding-resolver.ts:111-116`) and a revocation's effect is
    `max(effectiveFrom, earliest anchor time)` (`:137-148`, clamp at `:147`), so referencing a
-   binding's anchor drags the revocation's effect back to the binding's own birth, revoking
-   it from the moment it existed. That is a direct violation of "revocation is never
+   binding's anchor — **in combination with R4**, which puts `effectiveFrom` at or before that
+   anchor's block time — drags the revocation's effect back to the binding's own birth, revoking
+   it from the moment it existed. The clamp alone cannot pull the effect below `effectiveFrom`;
+   it is R4 that supplies the other half, so a reader who drops R4 must not conclude R2 has lost
+   its reason. That is a direct violation of "revocation is never
    retroactive: its effect starts at its own anchor time"
    ([`2026-07-27-trust-and-identity-layer-design.md`](../docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md):330-332),
    and it is the sharpest footgun on this surface. One anchor MAY back several revocations
@@ -1018,10 +1058,17 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    millisecond-ISO UTC and MUST be at or before the anchor's block time: the resolver clamps
    *up*, so an earlier value is harmless and the anchor governs, while a later value silently
    **delays** the revocation, which is the wrong direction for a security act. The
-   millisecond form is required for law 2's reason — `:147` compares the two timestamps
+   millisecond form is law 2's discipline carried over — `:147` compares the two timestamps
    lexicographically as raw strings, and `…T00:00:00Z` versus `…T00:00:00.000Z` diverge at
    index 19 (`Z` = 0x5A > `.` = 0x2E), so a second-precision `effectiveFrom` is selected as
-   *greater* than a millisecond-precision anchor time for the same instant. Law 1's
+   *greater* than a millisecond-precision anchor time for the same instant. On the revocation
+   path that selection costs nothing: `checkRevocation` compares the selected time with
+   `compareCalendarStrictRfc3339Instants` (`packages/trust/core/src/verify.ts:282`,
+   `packages/trust/core/src/rfc3339.ts:96-107`), which handles fractions and calls the two
+   spellings **equal**, so no delay materializes and `RevocationSchema` accordingly accepts
+   second precision (`packages/trust/core/src/revocation.ts:30`). R4 is hygiene and consistency
+   with law 2 — where `isWithinWindow`'s raw-string comparisons genuinely do care — not a
+   defense against a live harm; it is listed as authoring convention for that reason. Law 1's
    anchor-first ordering extends to revocations for the same reason it governs bindings: the
    effective time is not knowable until the anchor mines.
 
