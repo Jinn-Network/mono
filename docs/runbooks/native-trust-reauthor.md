@@ -47,6 +47,29 @@ What the re-run does produce: one **new on-chain anchor transaction**, fresh EIP
 signatures over the new anchor's block time (§6 law 2 requires `validFrom`, the ceremony's
 `issuedAt`, and the anchor block time to be the same verbatim string), and a rewritten `trust.json`.
 
+### Reuse or mint: state the choice, record the reason
+
+A re-author touches no key, store, or Agent IRI, so all five terms of the `ceremony-anchor/v1`
+preimage are unchanged and the digest is **identical** to the original ceremony's. Both options
+are therefore available, and ceremony spec §3.2b requires this runbook to state which it takes
+and the operator to record why:
+
+- **Mint a fresh anchor** — what the steps below do today. The re-authored bindings carry the new
+  anchor's block time, so the widened scope is claimed only from the moment it was widened. The
+  cost is a coverage gap between the old anchor time and the new one: evidence signed inside that
+  window resolves against neither the old bindings (rewritten) nor the new ones (not yet
+  effective).
+- **Reuse the existing anchor** — permitted, because the digest matches (§6 law 1). It preserves
+  the original `validFrom` and effective window, closing that gap. The cost is retroactivity: the
+  *widened* scope is claimed back over evidence signed before the widening, including evidence a
+  verifier refused at the time for want of that very scope.
+
+Neither is right in general — it is a retroactive-authority judgment, left open at ceremony spec
+§10 (e) and owned by [#4172](https://github.com/Jinn-Network/mono/issues/4172). **Default to
+minting fresh**, which is what these steps do and the option that refuses retroactivity. Reuse
+only deliberately, and write the reason into the re-author's record alongside the anchor
+transaction hash.
+
 ## Why wholesale, not `appendOperator`
 
 Do **not** try to append the re-authored bindings to the existing catalog. `appendOperator` is
