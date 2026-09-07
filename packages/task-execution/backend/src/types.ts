@@ -54,6 +54,24 @@ export interface ObservationSnapshot {
 /** `recover`'s reconciliation classification (§12.2) — fail loud on `contradictory`. */
 export interface ReconciliationReport {
   classification: "matching" | "absent" | "contradictory";
+  /**
+   * Whether this backend still retains a durable record for the reconciled ref — and therefore
+   * still HOLDS its idempotency key, so submitting different bytes under that key would be
+   * refused `submission-conflict`.
+   *
+   * `classification` alone cannot answer that. `absent` is reached from two opposite states: a
+   * ref the backend cannot resolve at all (nothing retained, the key is free) and an attempt it
+   * fully remembers whose spawn intent left no recoverable shim or outcome (the key is held).
+   * Both are honest `absent` reconciliations; only the second forbids re-sealing. Backends have
+   * always distinguished them in free-form `detail`, which callers must not parse — this is that
+   * same fact, typed.
+   *
+   * Additive and optional by design: a backend that does not report it leaves it `undefined`, and
+   * callers fall back to whatever approximation they used before (see
+   * `backendRetainsSubmission` in `@jinn-network/benchmark-product-core`). `undefined` is
+   * therefore "not reported", never "not retained" — treat it fail-safe, as retained.
+   */
+  retained?: boolean;
   detail?: string;
 }
 

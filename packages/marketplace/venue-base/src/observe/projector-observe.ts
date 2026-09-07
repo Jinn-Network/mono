@@ -151,16 +151,23 @@ export function createProjectorObservePort(input: CreateProjectorObservePortInpu
         (observation): observation is EngagedObservation => isEngaged(observation) && observation.subject === durableAttempt,
       );
       if (chainEngaged === undefined) {
-        return { classification: "absent", detail: `no chain-derived attempt engagement for "${durableAttempt}"` };
+        // Pending scopes already reserve the exact bytes before any chain engagement. Retention
+        // must therefore include them even though only a resolved scope can name an attempt.
+        return {
+          classification: "absent",
+          retained: store.hasScopeForRef(ref),
+          detail: `no chain-derived attempt engagement for "${durableAttempt}"`,
+        };
       }
       if (scope !== undefined && chainEngaged.data.submission !== scope.submissionUri) {
         return {
           classification: "contradictory",
+          retained: true,
           detail: `chain attempt "${durableAttempt}" is bound to Submission "${chainEngaged.data.submission}", `
             + `not the durably recorded "${scope.submissionUri}"`,
         };
       }
-      return { classification: "matching" };
+      return { classification: "matching", retained: true };
     },
 
     async drive(attempt, observations): Promise<void> {

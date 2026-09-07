@@ -481,6 +481,41 @@ function parseItemsFlag(raw: string): number {
   return value;
 }
 
+/**
+ * Parses `--beacon-round`; refuses `"invalid-invocation"` naming `--beacon-round` unless the text
+ * is decimal digits denoting a positive round (issue #3332).
+ *
+ * The shape check is on the TEXT, before conversion, because `Number` is a coercion rather than a
+ * parse: it reads `"1e3"`, `"0x10"`, `"+1"`, `"1."` and `"  1000  "` as integers, and `""` as
+ * zero. `Number.isInteger` then passes and the schema's bound admits the result, so the operator
+ * who mistyped a round is not refused by name -- they get a successfully bound run at a round they
+ * never typed. `bind` is write-once by design (a run binds once, because re-binding is re-drawing),
+ * so a coerced round cannot be corrected by rebinding; and a coerced value that happens to land
+ * after the seal binds cleanly to the wrong round. The web action applies the same rule at its own
+ * entry point (`web/src/app/actions.ts`).
+ *
+ * Leading zeros are admitted: `007` denotes 7 unambiguously, and refusing it would only reject a
+ * spelling the operator meant.
+ */
+function parseBeaconRoundFlag(raw: string): number {
+  if (!/^[0-9]+$/u.test(raw)) {
+    refuse(
+      "invalid-invocation",
+      "--beacon-round",
+      `--beacon-round must be decimal digits denoting a round or block height, got ${JSON.stringify(raw)}`,
+    );
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    refuse(
+      "invalid-invocation",
+      "--beacon-round",
+      `--beacon-round must be a positive round or block height, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return value;
+}
+
 function parseConcurrencyFlag(raw: string): number {
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value < 1 || value > 32) {
@@ -1135,10 +1170,7 @@ function assertAnchorSubject(value: string): AnchorSubject {
  */
 function handleBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
   assertKnownFlags(args, BIND_FLAGS);
-  const round = Number(required(args, "beacon-round"));
-  if (!Number.isInteger(round)) {
-    refuse("invalid-invocation", "bind", "--beacon-round must be an integer round or block height");
-  }
+  const round = parseBeaconRoundFlag(required(args, "beacon-round"));
   const result = runBind(buildOperationContext(args, context), {
     draftId: required(args, "draft"),
     // Source and value are validated by the operation against the beacon registry and the hex

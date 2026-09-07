@@ -26,6 +26,7 @@ import {
   PUBLIC_BUNDLE_V7_CHECKS,
   PUBLIC_BUNDLE_V8_CHECKS,
   SUPPORTED_BUNDLE_FORMATS,
+  BEACON_SOURCES,
 } from "@colophon-claims/verify";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
 import {
@@ -45,6 +46,7 @@ const webReadmePath = resolve(productRoot, "web/README.md");
 const bundleReadmePath = resolve(productRoot, "PUBLIC-BUNDLE.md");
 const inspectRuntimePath = resolve(productRoot, "INSPECT-RUNTIME.md");
 const securityPath = resolve(productRoot, "SECURITY.md");
+const externalVerificationPath = resolve(productRoot, "EXTERNAL-VERIFICATION.md");
 const productDesignPath = resolve(
   repoRoot,
   "docs/superpowers/specs/2026-08-05-benchmark-product-design.md",
@@ -512,5 +514,50 @@ describe("product documentation consistency", () => {
     expect(verification).toContain("NOT EXTRACTION-READY");
     expect(verification).toContain("27 generated operations");
     expect(verification).toContain("six portable checks");
+  });
+  /**
+   * Issue #3333. `EXTERNAL-VERIFICATION.md` publishes the `beacon-binding/1` chain parameters as a
+   * table, which is exactly right -- it is what lets an external reader recompute the postdating
+   * check offline with no Colophon code. But the numbers were duplicated: the document was the
+   * only copy outside `BEACON_SOURCES`, and nothing related the two. Add a source, correct a
+   * genesis, or change a period, and the document drifts silently -- and a reader following the
+   * published table then computes a different instant than the verifier does, which is the one
+   * failure mode this document exists to prevent.
+   *
+   * `MAX_BEACON_ROUND` and the per-source representable ceilings stay unpublished, deliberately:
+   * they are a defensive bound rather than part of the derivation, and `beaconRoundInstant` -- not
+   * the schema -- owns representability (`verify/src/binding/beacon-binding.ts`). Publishing them
+   * would invite a reader to treat a refusal ceiling as a beacon fact.
+   */
+  it("publishes exactly the scheduled beacon sources' own chain parameters", () => {
+    const document = read(externalVerificationPath);
+    const rows = [...document.matchAll(
+      /^\| `(?<source>[^`]+)` \| (?<genesis>\d+) \| (?<period>\d+) \|$/gmu,
+    )].map((match) => ({
+      source: match.groups!["source"]!,
+      genesisTimeSeconds: Number(match.groups!["genesis"]),
+      periodSeconds: Number(match.groups!["period"]),
+    }));
+
+    const scheduled = Object.entries(BEACON_SOURCES)
+      .filter(([, definition]) => definition.timeBasis === "deterministic-round-time")
+      .map(([source, definition]) => ({
+        source,
+        genesisTimeSeconds: (definition as { genesisTimeSeconds: number }).genesisTimeSeconds,
+        periodSeconds: (definition as { periodSeconds: number }).periodSeconds,
+      }));
+
+    // Sorted on both sides so the assertion is about the SET of published parameters, not the
+    // order the document happens to list them in.
+    const bySource = (a: { source: string }, b: { source: string }): number => a.source.localeCompare(b.source);
+    expect([...rows].sort(bySource)).toEqual([...scheduled].sort(bySource));
+
+    // A height-indexed source has no schedule, so publishing a genesis and period for it would be
+    // publishing arithmetic no reader can do. The document names it in prose instead.
+    for (const [source, definition] of Object.entries(BEACON_SOURCES)) {
+      if (definition.timeBasis === "deterministic-round-time") continue;
+      expect(rows.some((row) => row.source === source), source).toBe(false);
+      expect(document).toContain(`\`${source}\` indexes by block height`);
+    }
   });
 });

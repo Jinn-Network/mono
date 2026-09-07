@@ -46,7 +46,7 @@ export const PUBLIC_BUNDLE_V8_CHECKS = [
 /**
  * Like v7 and for the same reason: no released reader before 0.2.1 understands
  * `benchmark-product-public-bundle/8`, and a claim naming a reader that cannot read it would be an
- * instruction to fail. The disclosed closure ships in the same unpublished 0.2.1 line as v7, so it
+ * instruction to fail. The disclosed closure ships in the same 0.2.1 line as v7, so it
  * pins that line rather than minting a third.
  */
 export const PUBLIC_BUNDLE_V8_VERIFICATION_COMMAND = PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND;

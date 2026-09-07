@@ -491,6 +491,19 @@ export function writeRunState(workspaceDir: string, draftId: string, state: RunS
         refuse("conflict", `runs.${draftId}.binding`, "a recorded beacon binding cannot be changed — a run binds once");
       }
     }
+    // Bind-before-launch, durably (issue #3334). `runBind` refuses a launched run too, but its
+    // check reads a snapshot and writes later, so a `bind` that read the state before `runLaunch`
+    // stamped `launchedAt` can still land after it — recording a binding whose derived order the
+    // run never dispatched in, and a census sentence asserting post-seal randomness for a run that
+    // ran in the operator's own sealed order. This is the same standard the write-once rule above
+    // holds bind-vs-bind to, applied to bind-vs-launch, and it holds for any writer.
+    if (current?.launchedAt !== undefined && current.binding === undefined && result.data.binding !== undefined) {
+      refuse(
+        "conflict",
+        `runs.${draftId}.binding`,
+        "this run has already launched — a beacon chosen after execution began binds nothing",
+      );
+    }
     if (current?.publication !== undefined) {
       const stages = [current.publication.registration, current.publication.accounting, current.publication.matrixV2, current.publication.report];
       const hasReceipt = stages.some((stage) => stage.receipt !== undefined);

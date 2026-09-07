@@ -29,6 +29,7 @@ const EVIDENCE_PACKAGES = [
   ['trace', '@jinn-network/evidence-trace'],
   ['trace-decode', '@jinn-network/evidence-trace-decode'],
   ['offer', '@jinn-network/evidence-offer'],
+  ['gate', '@jinn-network/evidence-gate'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -144,6 +145,22 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     optionalDependencies: [],
     peerDependencies: [],
   }],
+  // The gate honors offers over the repository contract's digest-addressed read. It
+  // composes the terms, that contract, and trust-core, and nothing else: a holder selling
+  // bytes runs no discovery, no catalog, and no recorder.
+  ['gate', {
+    dependencies: [
+      '@jinn-network/evidence-offer',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/trust-core',
+    ],
+    devDependencies: [],
+    optionalDependencies: [],
+    peerDependencies: [],
+    // Yarn 4 does not inherit the protocol portal from the portaled evidence-repository
+    // dependency.
+    transitivePortalResolutions: ['@jinn-network/evidence-protocol'],
+  }],
 ]);
 
 function readPackage(directory) {
@@ -202,8 +219,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has eighteen manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 18);
+test('the evidence package inventory is explicit and has nineteen manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 19);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
@@ -256,7 +273,7 @@ test('evidence package Jinn dependencies and portal resolutions match the approv
 });
 
 test('testing entrypoints declare Vitest as an exact optional peer', () => {
-  for (const directory of ['derivation', 'retrieval', 'trace', 'trace-decode', 'offer']) {
+  for (const directory of ['derivation', 'retrieval', 'trace', 'trace-decode', 'offer', 'gate']) {
     const manifest = readPackage(directory);
     assert.deepEqual(manifest.peerDependencies, { vitest: '^4.1.8' });
     assert.deepEqual(manifest.peerDependenciesMeta, {

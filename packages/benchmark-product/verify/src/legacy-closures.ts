@@ -235,7 +235,10 @@ export const LEGACY_CLOSURES: { readonly [F in LegacyBundleFormat]: LegacyClosur
  */
 export function legacyClosure(format: LegacyBundleFormat): LegacyClosure {
   if (!Object.hasOwn(LEGACY_CLOSURES, format)) {
-    refuse("record-integrity", "bundle.manifest.format", `unknown legacy bundle format "${format}"`);
+    // `String(format)`, not bare interpolation: a symbol key passes `Object.hasOwn` correctly but
+    // would throw `TypeError: Cannot convert a Symbol value to a string` on its way into the
+    // message, escaping the very envelope this guard exists to hold the untyped caller inside.
+    refuse("record-integrity", "bundle.manifest.format", `unknown legacy bundle format "${String(format)}"`);
   }
   return LEGACY_CLOSURES[format];
 }

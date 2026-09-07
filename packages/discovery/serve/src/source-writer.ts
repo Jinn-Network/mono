@@ -18,6 +18,7 @@ import {
   headPath,
   nextSequence,
   parseAnnouncementEntry,
+  parseHeadTimestamp,
   parseSourceHead,
   recordDigest,
   recordPath,
@@ -33,8 +34,6 @@ import type { Clock, ReadableImmutableBlobStore, StoredBlob } from "./ports.js";
 const ARCHIVE_PAGE_CONTENT_TYPE = "application/json";
 const DEFAULT_RECORD_CONTENT_TYPE = "application/octet-stream";
 const MAX_CAS_ATTEMPTS = 32;
-/** ECMAScript's time-value limit; beyond it `new Date(ms).toISOString()` throws. */
-const MAX_TIME_VALUE_MS = 8_640_000_000_000_000;
 
 export interface CasSnapshot<T> {
   readonly revision: string;
@@ -483,8 +482,8 @@ async function assertIntentOwnership(
     || head.entry !== intent.receipt.entryDigest
     || head.issuedAt !== signedEntry.entry.timestamp
     || (intent.previousHeadIssuedAt !== null
-      && new Date(head.issuedAt).getTime() <= new Date(intent.previousHeadIssuedAt).getTime())
-    || new Date(head.refreshBy).getTime() <= new Date(head.issuedAt).getTime()
+      && !(parseHeadTimestamp(head.issuedAt) > parseHeadTimestamp(intent.previousHeadIssuedAt)))
+    || !(parseHeadTimestamp(head.refreshBy) > parseHeadTimestamp(head.issuedAt))
     || !refreshByWithinCeiling(head)
   ) {
     throw new SourceWriterIntegrityError("frozen source head does not match the intended source position");
@@ -646,7 +645,14 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
   }
 
   async function append(command: AppendAnnouncementCommand): Promise<DurableSourceReceipt> {
-    const timestampMs = new Date(command.timestamp).getTime();
+    // The head this command will be signed into carries `command.timestamp`
+    // verbatim as its `issuedAt`, and `parseSourceHead` judges that against
+    // the §5.2 grammar (#3482). Admitting a timestamp the schema will later
+    // refuse signs a head, persists the append intent, and only THEN fails --
+    // leaving the intent claimed, so `recover` replays the same failure and
+    // every later append is dead behind it. Reading the timestamp exactly as
+    // the schema will keeps that refusal here, before anything is durable.
+    const timestampMs = parseHeadTimestamp(command.timestamp);
     if (!Number.isFinite(timestampMs)) {
       throw new SourceWriterIntegrityError(`announcement timestamp is invalid: ${command.timestamp}`);
     }
@@ -709,14 +715,14 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     //   `native-solution-corrections`, which adopts the committed receipt -- is helped
     //   by it.
 
-    // `Number.isFinite` above admits timestamps near the ECMAScript Date limit, whose
-    // window end overflows the range and makes `toISOString()` throw a bare RangeError.
-    // Such a head is refused by the bound below anyway; refuse it in this taxonomy.
-    if (Math.abs(timestampMs + refreshWithinMs) > MAX_TIME_VALUE_MS) {
-      throw new SourceWriterIntegrityError(
-        `announcement timestamp is out of representable range: ${command.timestamp}`,
-      );
-    }
+    // No representable-range guard is needed before the arithmetic below. It used to
+    // exist because a bare `new Date(...)` admitted extended-year spellings near the
+    // ECMAScript time-value limit ("+275760-09-13T00:00:00.000Z"), whose window end
+    // overflowed and made `toISOString()` throw a bare RangeError. `parseHeadTimestamp`
+    // now reads the §5.2 grammar, whose year is four digits, so the largest value that
+    // reaches here is year 9999 (~2.54e14 ms) and `refreshWithinMs` is clamped to
+    // `MAX_REFRESH_BY_AHEAD_MS` (24h) at construction -- three orders of magnitude
+    // below the 8.64e15 limit. The extended-year spelling is refused above, as invalid.
     const refreshBy = new Date(timestampMs + refreshWithinMs).toISOString();
     const now = clock.now();
     const windowFailure = checkRefreshWindow({ issuedAt: command.timestamp, refreshBy }, now);
@@ -820,7 +826,7 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
       );
       if (
         previousHead !== null
-        && timestampMs <= new Date(previousHead.issuedAt).getTime()
+        && !(timestampMs > parseHeadTimestamp(previousHead.issuedAt))
       ) {
         throw new SourceWriterIntegrityError("announcement timestamp must strictly advance the signed source head");
       }

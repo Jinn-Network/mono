@@ -35,7 +35,7 @@ import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.j
 // (jinn-mono-u34i). No direct import needed.
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import { ensureUiTokenRecord, defaultTokenPath } from './api/ui-token.js';
-import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
+import { daemonApiTokenPath, resolveDaemonApiToken } from './api/daemon-token.js';
 import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
@@ -364,18 +364,25 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // 8-char prefix. The token is forwarded to the MCP subprocess via
   // `DAEMON_API_TOKEN` env so `acquire_artifact` and
   // `submit_restoration_result` can authenticate their calls back to the
-  // daemon.
-  const envToken = process.env['DAEMON_API_TOKEN']?.trim();
+  // daemon. An env-supplied token is written to the same file (issue #2418)
+  // so the hook never resolves a token this daemon has stopped accepting.
   const daemonApiTokenFilePath = daemonApiTokenPath(config.earningDir);
-  let apiToken: string;
-  if (envToken && envToken.length > 0) {
-    apiToken = envToken;
-  } else {
-    const resolved = ensureDaemonApiToken(daemonApiTokenFilePath);
-    apiToken = resolved.token;
-    const verb = resolved.source === 'generated' ? 'Generated' : 'Loaded';
-    console.log(`[main] ${verb} DAEMON_API_TOKEN at ${daemonApiTokenFilePath} (prefix=${apiToken.slice(0, 8)}...)`);
-  }
+  const resolvedApiToken = resolveDaemonApiToken({
+    path: daemonApiTokenFilePath,
+    envToken: process.env['DAEMON_API_TOKEN'],
+    warn: (message) => {
+      console.warn(`[main] ${message}`);
+    },
+  });
+  const apiToken = resolvedApiToken.token;
+  // An 8-char prefix identifies a >=32-char token without disclosing it. A
+  // shorter operator-supplied token is redacted outright: 8 characters of it
+  // could be the whole credential.
+  const tokenPrefix = apiToken.length >= 32 ? `${apiToken.slice(0, 8)}...` : '<redacted>';
+  console.log(
+    `[main] DAEMON_API_TOKEN source=${resolvedApiToken.source} file=${daemonApiTokenFilePath} ` +
+    `(${resolvedApiToken.persisted}, prefix=${tokenPrefix})`,
+  );
 
   // The keystore-presence probe happens twice: once now (to decide initial
   // setup-mode) and once after we run init below (to flip the controller).

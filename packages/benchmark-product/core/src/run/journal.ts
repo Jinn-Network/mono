@@ -8,23 +8,36 @@
  * `running --resume--> running`: "crash-safe resumption via the records' cell idempotency
  * keys"). One journal per draftId (`runJournalPath`), JSON Lines, entries never rewritten.
  *
- * Twelve entry kinds (driver start/terminals included):
+ * The entry kinds, in `RunJournalEntrySchema` declaration order — that union below is the
+ * authoritative enumeration; this list is its prose gloss and deliberately asserts no count
+ * (an asserted one goes stale the moment a kind is added, and has):
  * - `launched` — the run driver started (one per `runLaunch` call).
+ * - `driver-started` / `driver-succeeded` / `driver-failed` — one driver generation's own
+ *   start and terminal (`launch` or `resume`), so a crashed generation is legible as a gap
+ *   rather than inferred from the cell entries it did or did not reach.
  * - `cell-event` — a solve-side `CellStatusEvent` from `launchAndWatch`/`resumeRun`, verbatim.
  *   Optionally carries `blame` (BP-22): for an "error" terminal, the platform-derived
  *   task-vs-infrastructure attribution `../run/drive.ts` best-effort observed at journal-write
  *   time (`"task" | "infrastructure"`, absent when unobservable — never a reason to fail the
  *   write it enriches).
- * - `submission-accepted` — the exact sealed Submission bytes were stored, keyed by dispatch.
+ * - `submission-captured` — the solve leg's exact sealed Submission bytes were stored BEFORE
+ *   they were offered to the backend (the prospective capture boundary).
  * - `evaluation-submission-captured` — the evaluation leg's exact sealed Submission bytes were
  *   stored BEFORE they were offered to the backend, keyed by the full evaluation coordinate. The
  *   evaluation leg's counterpart to the solve leg's `submission-captured` (#3237): it is what
  *   `runResume`'s replay map reads when a kill lands between backend acceptance and the
  *   `submission-accepted` append that would otherwise be the only record of it.
+ * - `submission-accepted` — the exact sealed Submission bytes were stored, keyed by dispatch.
+ * - `submission-pinning-evidence` — the post-ack proxy's append-only run-pinning gate result for
+ *   an already-accepted Submission, kept separate so acceptance has exactly one writer.
+ * - `observation-accepted` — the exact sealed observation archive formed from the backend's
+ *   accepted snapshot.
  * - `delivery` — the exact sealed Delivery bytes were stored for a dispatch's accounted attempt.
  * - `evaluation` — the evaluation leg reached a terminal (a verdict, or a could-not-grade fact).
  * - `evaluation-retryable-failure` — one typed provider/transport outage left the exact
  *   evaluation leg open without changing solve dispatch or patch identity.
+ * - `external-import` (#2979) — `run.import` wrote this run's evidence from an external harness's
+ *   dump instead of driving it, naming the sealed `ExternalRunImportDeclaration`.
  * - `cancel-requested` (BP-22) — `run.cancel` recorded a cancellation request. Written exactly
  *   once per run, alongside (never instead of) the durable cancel marker
  *   (`./cancel-marker.ts`) — the marker is the fact other operations gate on; this entry is the
@@ -556,7 +569,13 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       fold.evaluationLegs.set(entry.evalIndex, leg);
       fold.detail = entry.detail;
     }
-    // "launched", "external-import", "cancel-requested", and "closed" carry no per-cell accounting.
+    // Every remaining kind carries no per-cell accounting and is deliberately ignored here:
+    // "launched", "driver-started", "driver-succeeded", "driver-failed",
+    // "evaluation-submission-captured", "observation-accepted", "external-import",
+    // "cancel-requested", "closed". "evaluation-submission-captured" is the one worth naming
+    // twice (#3237): a `leg`-marked `submission-captured` would have clobbered the SOLVE leg's
+    // `submissionSha256` and dispatch count above, so its absence from this chain is the safety
+    // property, not an oversight.
   }
 
   const result = new Map<string, CellJournalFold>();

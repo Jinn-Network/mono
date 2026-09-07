@@ -66,6 +66,8 @@ export interface SubmissionScopeStore {
   resolveSubmissionScope(input: RecordSubmissionInput, ownerToken: SubmissionScopeOwnerToken): Promise<void>;
   /** Durable submission -> engagement lookup for the chain-derived half (`projector-observe.ts`). */
   findResolvedScope(submissionUri: SubmissionUri): ResolvedSubmissionScope | undefined;
+  /** Pending scopes hold the same idempotency reservation as resolved scopes. */
+  hasScopeForRef(ref: SubmissionUri | AttemptUri): boolean;
   recordDelivery(attempt: AttemptUri, deliveryBytes: Uint8Array): Promise<void>;
   deliveries(attempt: AttemptUri): Promise<DeliveryRef[]>;
   fetchDelivery(ref: DeliveryRef): Promise<Uint8Array>;
@@ -105,6 +107,9 @@ export function createObserveStore(state: VenueStateDatabase): SubmissionScopeSt
   );
   const selectResolvedBySubmission = state.db.prepare(
     "SELECT * FROM submission_scopes WHERE submission_uri = ? AND resolved_at_ms IS NOT NULL",
+  );
+  const selectRetainedScope = state.db.prepare(
+    "SELECT 1 FROM submission_scopes WHERE submission_uri = ? OR engagement_attempt = ? LIMIT 1",
   );
   const selectPending = state.db.prepare(
     "SELECT * FROM submission_scopes WHERE resolved_at_ms IS NULL ORDER BY requester, idempotency_key",
@@ -346,6 +351,10 @@ export function createObserveStore(state: VenueStateDatabase): SubmissionScopeSt
         ...toRecord(row),
         ...(row.engagement_attempt === null ? {} : { engagementAttempt: row.engagement_attempt as AttemptUri }),
       };
+    },
+
+    hasScopeForRef(ref) {
+      return selectRetainedScope.get(ref, ref) !== undefined;
     },
 
     async recordDelivery(attempt, deliveryBytes) {

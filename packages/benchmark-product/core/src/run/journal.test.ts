@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -685,5 +685,32 @@ describe("evaluation-retryable-failure.category is a closed three-value domain (
       const malformed = { ...retryableEntry("backend-unavailable"), category } as unknown as RunJournalEntry;
       expect(() => appendRunJournalEntry(workspaceDir, "draft-1", malformed)).toThrow();
     }
+  });
+});
+
+describe("the module docblock's kind list (#3633)", () => {
+  // The docblock is the only prose enumeration of this journal's shape in the repo, and it drifted
+  // twice — once silently to fifteen kinds, then again when #3237 added a sixteenth by editing the
+  // bullet list without touching the count. Drift is what this pins, so it reads the source.
+  const source = readFileSync(new URL("./journal.ts", import.meta.url), "utf-8");
+  const docblock = source.slice(0, source.indexOf(" */"));
+  const unionKinds = [...source.matchAll(/kind: z\.literal\("([a-z-]+)"\)/g)].map((match) => match[1]!);
+
+  test("names every kind in the discriminated union", () => {
+    expect(unionKinds.length).toBeGreaterThan(0);
+    expect(unionKinds.filter((kind) => !docblock.includes(`\`${kind}\``))).toEqual([]);
+  });
+
+  test("asserts no kind count, which is what went stale", () => {
+    expect(docblock).not.toMatch(/\b(?:ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|\d+) entry kinds\b/i);
+  });
+
+  test("foldRunJournal's trailing comment names every kind it deliberately ignores", () => {
+    const fold = source.slice(source.indexOf("export function foldRunJournal"), source.indexOf("export function foldRunJournalLineage"));
+    const handled = new Set([...fold.matchAll(/entry\.kind === "([a-z-]+)"/g)].map((match) => match[1]!));
+    const ignoreAt = fold.indexOf("// Every remaining kind carries no per-cell accounting");
+    expect(ignoreAt).toBeGreaterThan(-1);
+    const ignoreComment = fold.slice(ignoreAt);
+    expect(unionKinds.filter((kind) => !handled.has(kind) && !ignoreComment.includes(`"${kind}"`))).toEqual([]);
   });
 });

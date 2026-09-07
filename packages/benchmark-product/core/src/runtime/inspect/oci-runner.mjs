@@ -391,10 +391,17 @@ if (command === "probe-broker") {
     let frameBuffer = "";
     let frameChain = Promise.resolve();
     let relayFailed = false;
-    const pushFrame = (line) => {
+    const pushFrame = (line, afterClose = false) => {
       frameChain = frameChain.then(async () => {
         const frame = JSON.parse(line);
         if (frame?.channel === "sandbox") {
+          // #4024: a sandbox request that arrives in the post-close flush has no client left to
+          // answer. `child.stdin.write` on a closed stdin goes nowhere and throws nothing, so
+          // relaying it would leave this process exiting 0 with an empty stdout -- the exact
+          // shape #3720 set out to eliminate, reached by the one frame kind that fix did not
+          // cover. A request nobody can answer is a relay failure, and takes the same exit-1
+          // path a trailing unparseable frame takes.
+          if (afterClose) throw new Error("worker requested a sandbox operation after its client closed");
           const response = await sandboxController.handle(frame);
           child.stdin.write(`${JSON.stringify(response)}\n`);
         } else if (typeof frame?.ok === "boolean") {
@@ -411,7 +418,18 @@ if (command === "probe-broker") {
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk) => {
         frameBuffer += chunk;
-        if (Buffer.byteLength(frameBuffer) > 24 * 1024 * 1024) child.kill("SIGKILL");
+        // #4026: drop the residue when the cap trips. Before the `close` handler below flushed it,
+        // an oversized buffer was simply never emitted, because a frame was emitted only on a
+        // newline; keeping it now would hand tens of megabytes to `JSON.parse` on the final flush
+        // and, if it happened to parse, relay a frame that blew the very cap this guard enforces.
+        // The SIGKILL cannot reach a client that has already exited, so record the refusal too:
+        // a frame this process would not relay is its own failure, not the worker's success.
+        if (Buffer.byteLength(frameBuffer) > 24 * 1024 * 1024) {
+          frameBuffer = "";
+          relayFailed = true;
+          child.kill("SIGKILL");
+          return;
+        }
         while (frameBuffer.includes("\n")) {
           const newline = frameBuffer.indexOf("\n");
           const line = frameBuffer.slice(0, newline);
@@ -456,7 +474,7 @@ if (command === "probe-broker") {
       if (frameBuffer !== "") {
         const line = frameBuffer;
         frameBuffer = "";
-        pushFrame(line);
+        pushFrame(line, true);
       }
       await frameChain;
       await cleanup();
