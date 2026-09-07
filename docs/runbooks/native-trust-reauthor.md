@@ -57,9 +57,15 @@ It is already idempotent on custody and requires no new tooling. Specifically:
   re-run keeps the operator's identity.
 - The catalog authority key is likewise reopened, so the policy chain continues rather than forking.
 
-What the re-run does produce: one **new on-chain anchor transaction**, fresh EIP-191 ceremony
-signatures over the new anchor's block time (§6 law 2 requires `validFrom`, the ceremony's
-`issuedAt`, and the anchor block time to be the same verbatim string), and a rewritten `trust.json`.
+What the re-run does produce: fresh EIP-191 ceremony signatures and a rewritten `trust.json`.
+Whether it also produces a **new on-chain anchor transaction** depends on the choice below, and
+the default is that it does not: on the only path that runs, `reusableAnchor` matches and
+`session.submit` is never called (`operator/src/cli/commands/ceremony.ts:976`, `:985`), so the
+signatures are over the **original** anchor's block time — `validFrom` is assigned straight from
+the reused locator (`:1029`) and handed to `authorBindings` as both `validFrom` and `issuedAt`
+(`:1030-1036`, `:741`), which is what §6 law 2 requires be the same verbatim string. A new
+transaction is sent only when the run receipt is moved aside as well. Read the next section
+before running anything.
 
 ### Reuse or mint: state the choice, record the reason
 
@@ -77,12 +83,14 @@ run receipt (`:1221-1226` → `:840-870`), and all three of its conditions must 
 whose receipt is absent gets no refusal from `join`, it appends, which is the binding conflict
 "Why wholesale, not `appendOperator`" warns about. There is no `--force` on either verb.
 
-**Any path past the guard reuses the original anchor, silently.** The only way through is to
-move the existing catalog aside. Doing that leaves the run receipt in place — it lives at
-`<dir>/ceremony/receipt.json` (`:266-270`), not in the catalog — so the re-run recomputes the
-identical digest, `reusableAnchor` matches it (`:333-349`), and the ceremony resumes onto the
-**already-mined** anchor, reporting `ceremony_anchor_reused` (`:1002`). The operator gets reuse
-without choosing it.
+**Any path past the guard reuses the original anchor, by default rather than by decision.** The
+only way through is to move the existing catalog aside. Doing that leaves the run receipt in
+place — it lives at `<dir>/ceremony/receipt.json` (`:266-270`), not in the catalog — so the
+re-run recomputes the identical digest, `reusableAnchor` matches it (`:333-349`), and the
+ceremony resumes onto the **already-mined** anchor. The run does say so, on both surfaces —
+`ceremony_anchor_reused` and `anchor reused <hash> at <time> (from a previous run's receipt)`
+(`:1002`, `:1010`) — so this is not silent. It is unchosen: nothing asked the operator which
+anchor they wanted, and the answer follows from a file they moved for an unrelated reason.
 
 The two options, and how to actually take each:
 
@@ -126,7 +134,10 @@ does not have this problem.
 
 ## Cost and sequencing
 
-Per operator: one anchor transaction plus its finality wait, and a daemon restart. Nothing else.
+Per operator: a finality wait and a daemon restart. On the reuse path there is no anchor
+transaction — the wait still runs (`operator/src/cli/commands/ceremony.ts:1014`, unconditional)
+but resolves at once against an already-finalized anchor. Minting fresh adds one anchor
+transaction and a real finality wait. Nothing else.
 
 The window between deploying the code change and completing the re-run is a **hard boot refusal**,
 not a degradation. Sequence accordingly: on a shared deployment, re-author before rolling the code,

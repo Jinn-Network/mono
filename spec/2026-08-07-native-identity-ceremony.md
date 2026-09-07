@@ -489,9 +489,12 @@ This is not over-flexibility. §3.3 fixes the unit of change — a future chain 
 not a parameter — and the *profile* pins chain, encoding, and the shape of the evidence. The
 target is a per-anchor datum inside that profile, on the same footing as the transaction hash;
 elevating it to a profile constant over-fixes the wrong axis. The sibling anchor family agrees
-by construction: Colophon's RFC 3161 and OpenTimestamps profiles carry no target concept at all
-(`packages/benchmark-product/core/src/anchor/profiles.ts:30-35`), because a self-contained
-proof does not need one.
+by construction: Colophon's RFC 3161 and OpenTimestamps profiles
+(`packages/benchmark-product/core/src/anchor/profiles.ts:30-35`) carry no target concept at all —
+an acquisition request is `{subjectSha256, endpoint, signal?}` and a source is `{profile,
+obtainProof}` (`packages/trust/core/src/anchor-provider.ts:166-170`, `:177-180`), where
+`endpoint` names the service asked for a proof and is recorded in no evidence — because a
+self-contained proof does not need one.
 
 **`contractAddress` is a misnomer, and the wire key is frozen anyway.** No contract need exist
 at the target; contract-*creation* transactions are structurally refused, because the reader's
@@ -554,10 +557,12 @@ the bytes:
   `packages/trust/authoring/src/anchor.ts:77-83`.
 
 Ratifying rather than replacing is deliberate. The preimage is a real improvement on the opaque
-constant the e2e fixture used: it is a deterministic function of the session tuple, which is
-what makes `reusableAnchor` (`operator/src/cli/commands/ceremony.ts:333-349`) a correct
-crash-resume — a re-run recomputes the same digest and reuses the already-mined anchor instead
-of orphaning it and sending a second transaction. That is load-bearing operationally, and
+constant the e2e fixture still uses
+(`operator/test/e2e/fixtures/native-fleet/trust-catalog.ts:107`): it is a deterministic function
+of the session tuple, which is what makes `reusableAnchor`
+(`operator/src/cli/commands/ceremony.ts:333-349`) a correct crash-resume — a re-run recomputes
+the same digest and reuses the already-mined anchor instead of orphaning it and sending a second
+transaction. That is load-bearing operationally, and
 replacing the preimage would cost every existing deployment a re-anchor to buy nothing that is
 checked today.
 
@@ -724,6 +729,7 @@ its rules are checked is how §3.2a's class of drift happens, so the split is st
 | The re-author reuse-vs-fresh choice and its recorded reason | Authoring convention |
 | R4 (`effectiveFrom` at or before the anchor's block time) | Authoring convention. Partially enforceable against the observed anchor time, but not ratified as a check: the clamp already makes the anchor govern, and the only harm is a delay the operator chose |
 | The `revocation-anchor/v1` preimage (R1–R3) | Authoring convention today; recomputation is possible by construction and is named as implementation work in DR-2026-09-06 §Consequences |
+| R5 (anchor first) | Authoring convention, as law 1 is for bindings. Unobservable after the fact: the anchor time is what the record carries either way |
 
 **The residual, stated with its bounds.** Because the digest's meaning is unchecked, an
 anchor's timestamp can be borrowed from any pre-existing Base Sepolia transaction: a catalog
