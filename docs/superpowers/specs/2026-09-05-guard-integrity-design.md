@@ -1,8 +1,9 @@
 # Guard Integrity — Proving a Green Check Can Go Red
 
-- **Version:** 1.0
-- **Date:** 2026-09-05
-- **Status:** **Proposed** — design-session output; decisions D1–D3 await an operator ruling
+- **Version:** 1.1
+- **Date:** 2026-09-05; adopted 2026-09-07
+- **Status:** **Adopted** — the operator ruling of 2026-09-07 on PR #4052 adopted D1–D3 as
+  written; the answers are recorded in §7
 - **Shape:** `design` (Issue [#2443](https://github.com/Jinn-Network/mono/issues/2443), Effort High, P2)
 - **Scope:** the class of repository checks that report green while testing nothing — both the
   unwired-guard shape and the vacuous-assertion shape named in #2443 — and the mechanism that
@@ -23,9 +24,9 @@ a workspace `package.json` and whether any workflow invokes it; the handbook's t
 rules; and the negative-assertion population that countermeasure 3 would have to audit.
 
 No implementation was performed — `design` sessions produce a design doc, not code (handbook
-§The shapes of work). Where a finding names a concrete fix, §6 proposes it as follow-up work
-instead of applying it here. The session has no issue-filing authority, so §6 is a proposal for a
-human or a subsequent session to enact, not a record of issues created.
+§The shapes of work). Where a finding names a concrete fix, §6 carries it as follow-up work
+instead of applying it here. The session had no issue-filing authority, so it could only propose
+that work; the operator filed the four issues at ratification, and §6 now records them.
 
 One check could not be run: `yarn skill:check` needs an `operator` dependency install and build,
 which this session did not perform. This document therefore claims only that **nothing runs it**,
@@ -163,7 +164,8 @@ observable event, not a continuous audit obligation.
 
 ## 4. Decisions
 
-Three decisions, each stated as a recommendation for operator ratification.
+Three decisions, each stated as a recommendation for operator ratification. All three were
+adopted as written on 2026-09-07; the wording below stands as it was put.
 
 ### D1 — Extend the wiring obligation to declared guard scripts
 
@@ -249,32 +251,42 @@ so the design accepts the residue rather than pricing in a practice it does not 
 - No tooling to detect vacuity by static analysis. Reachability of a negative assertion is not
   decidable cheaply, and the attempt would produce a guard that itself needs a vacuity audit.
 
-## 6. Proposed follow-up work
+## 6. Follow-up work, as filed
 
-This session produces no implementation. Four follow-up issues are proposed; the first is
+This session produced no implementation. The work is filed as four issues; the first is
 independently valuable and small enough to land on its own.
 
-| # | Shape | Work | Depends on |
+| Issue | Shape | Work | Depends on |
 |---|---|---|---|
-| 1 | `fix` | Make `findOrphanedScriptTests detects a planted orphan` actually plant one — pass it a constructed scripts/workflows pair containing a known orphan and assert it is returned. F3; a live broken guard, and the change is a few lines. | none |
-| 2 | `chore` | Implement D1: guard-script manifest with a justified `NOT_CI_RUNNABLE` set, name-based discovery, orphan-naming failure message; wire `skill:check` and `generate:openapi:check` to owning workflows in the same PR. | D1 ratified |
-| 3 | `docs` | Implement D2b: rule 7 sub-bullet in `docs/engineering/handbook.md`, naming `.github/scripts/docs-key-guard.test.mjs` as the canonical `self-test:` example — the form rule 7's boundary-test bullet already uses. CODEOWNER-gated; author and approve under different operator credentials. | D2 ratified |
-| 4 | `docs` | Implement D3's rename trigger as a classification item under §Review pass in `.claude/skills/review-pr/SKILL.md`, and update the skill-text contract pins in the same change (`.github/scripts/autopilot-skill-contracts.test.mjs`), per `docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md` §7. | D3 ratified |
+| [#4175](https://github.com/Jinn-Network/mono/issues/4175) | `fix` | Make `findOrphanedScriptTests detects a planted orphan` actually plant one — pass it a constructed scripts/workflows pair containing a known orphan and assert it is returned. F3; a live broken guard, and the change is a few lines. | none |
+| [#4176](https://github.com/Jinn-Network/mono/issues/4176) | `chore` | Implement D1: guard-script manifest with a justified `NOT_CI_RUNNABLE` set, name-based discovery, orphan-naming failure message; wire `skill:check` and `generate:openapi:check` to owning workflows in the same PR. | D1 ratified |
+| [#4177](https://github.com/Jinn-Network/mono/issues/4177) | `docs` | Implement D2b: rule 7 sub-bullet in `docs/engineering/handbook.md`, naming `.github/scripts/docs-key-guard.test.mjs` as the canonical `self-test:` example — the form rule 7's boundary-test bullet already uses. CODEOWNER-gated; author and approve under different operator credentials. | D2 ratified |
+| [#4178](https://github.com/Jinn-Network/mono/issues/4178) | `docs` | Implement D3's rename trigger as a classification item under §Review pass in `.claude/skills/review-pr/SKILL.md`, and update the skill-text contract pins in the same change (`.github/scripts/autopilot-skill-contracts.test.mjs`), per `docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md` §7. | D3 ratified |
 
-Issue 1 does not depend on ratification of anything — it repairs a guard that is broken today
+Issue #4175 does not depend on ratification of anything — it repairs a guard that is broken today
 against the standard the guard's own file already sets elsewhere.
 
-## 7. Questions for ratification
+## 7. Questions for ratification, answered
 
-1. **D1 scope** — is name-based discovery (`check` / `verify` / `guard` / `lint` / `audit`) the
-   right default, accepting that it will occasionally catch a script that is not a guard and need
-   a justification line? The alternative is an opt-in marker, which is cheaper to get right and
-   easier to forget, reintroducing the failure this closes. Recommendation: name-based.
-2. **D2a strictness** — should a missing self-red test fail CI, or be a review expectation? A
-   mechanical check would have to decide what counts as a constructed input, which is the kind of
-   judgment that produces false positives and then exemptions. Recommendation: review
-   expectation, backed by the handbook rule, with the mechanical half of the coverage carried by
-   D1 where it can be mechanical.
-3. **D3 residue** — is the untouched pre-ratification Shape-2 population an acceptable residue
-   (§4, D3)? If not, the scoped alternative is a one-time audit bounded to assertions naming any
-   identifier touched by the re-seal, rather than to negative assertions generally.
+Answered by the operator ruling of 2026-09-07 on PR #4052, which adopted D1–D3 as written. The
+questions are kept in their original form so the record shows what was asked, not only what was
+answered.
+
+1. **D1 scope** — *Asked:* is name-based discovery (`check` / `verify` / `guard` / `lint` /
+   `audit`) the right default, accepting that it will occasionally catch a script that is not a
+   guard and need a justification line? The alternative is an opt-in marker, which is cheaper to
+   get right and easier to forget, reintroducing the failure this closes. Recommendation:
+   name-based. **Answered: as recommended** — discovery is name-based, and the scripts it
+   over-catches are carried by the justified exemption set rather than by narrowing the net.
+2. **D2a strictness** — *Asked:* should a missing self-red test fail CI, or be a review
+   expectation? A mechanical check would have to decide what counts as a constructed input, which
+   is the kind of judgment that produces false positives and then exemptions. Recommendation:
+   review expectation, backed by the handbook rule, with the mechanical half of the coverage
+   carried by D1 where it can be mechanical. **Answered: as recommended** — a missing self-red
+   test is a review expectation, not a CI failure. The handbook rule that backs it is the whole
+   of D2b's obligation, which is why it lands as its own issue.
+3. **D3 residue** — *Asked:* is the untouched pre-ratification Shape-2 population an acceptable
+   residue (§4, D3)? If not, the scoped alternative is a one-time audit bounded to assertions
+   naming any identifier touched by the re-seal, rather than to negative assertions generally.
+   **Answered: accepted** — the residue stands as stated, and no one-time audit is commissioned.
+   Forward cover is D2a; the rename trigger is D3's second obligation.
