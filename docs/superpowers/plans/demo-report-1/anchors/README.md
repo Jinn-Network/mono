@@ -29,8 +29,9 @@ anchor existed. Every cell from that dispatch was destroyed unread — the worke
 deleted before any collection — and confirmatory dispatch was restarted only after the token
 above was obtained and verified. The confirmatory evidence set therefore postdates the anchored
 lock in its entirety. These proof bytes are carried here exactly as received; sealing them as
-AnchorEvidence records happens when the pluggable-integrity-providers implementation (PR #2786)
-lands, without changing the bytes.
+AnchorEvidence records happens without changing the bytes. PR #2786 shipped that machinery for
+the classic lineage; this report is evidence-native, so its own carriage waits on the surface
+described below.
 
 ## Which of these the published bundle will carry
 

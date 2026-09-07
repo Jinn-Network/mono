@@ -6,7 +6,7 @@
 | **Date** | 2026-09-07 (v0.1: 2026-09-02) |
 | **Author** | Autopilot implementation session for [#2974](https://github.com/Jinn-Network/mono/issues/2974) (seams read against the attempt base `2112f8468`) |
 | **Shape** | `design` — the session dispatched as `fix` found the work is an allocation, not a fix. This note is the artifact; no code moves with it |
-| **Status** | Adopted — the four questions v0.1 raised are ruled on [#2974](https://github.com/Jinn-Network/mono/issues/2974). Implementation follows against `benchmark-product-public-bundle/10` and is not in this document's scope |
+| **Status** | Adopted — the four questions v0.1 raised are ruled on issue [#2974](https://github.com/Jinn-Network/mono/issues/2974) and on PR #3663. Implementation follows against `benchmark-product-public-bundle/10` and is not in this document's scope |
 | **Answers** | issue [#2974](https://github.com/Jinn-Network/mono/issues/2974) |
 | **Depends on** | [pluggable integrity providers](../docs/superpowers/specs/2026-08-17-pluggable-integrity-providers-design.md) §7.4, §8, §19.5, §19.7; [`packages/benchmark-product/PUBLIC-BUNDLE.md`](../packages/benchmark-product/PUBLIC-BUNDLE.md) §"Anchored bundle v6" and §"Evidence-native bundle v5 and its two profiles"; the composed/capability generation `benchmark-product-public-bundle/10` (issues #3403 → #3406), which does not exist yet |
 | **Does not do** | Allocate anything. Change any frozen format, identifier, check tuple, or sealed record. Touch the sealed Demo-1 artifacts. Define `/10` itself |
@@ -106,8 +106,17 @@ What remains is code, across three packages, plus documentation:
   present.
 - **`packages/benchmark-product/core/scripts/demo1-export-public-bundle.mjs`** —
   anchor sealing and carriage, under the §4 ruling-3 re-report path.
-- **`packages/benchmark-product/verify/src/freeze-repo.ts` and `packages/benchmark-product/verify/src/reader-instructions.ts`** — the
-  reader flags (`--tsa-root`, `--ots-headers`) the entry activates.
+- **`packages/benchmark-product/verify/src/reader-instructions.ts` and
+  `packages/benchmark-product/verify/src/freeze-repo.ts`** — the two
+  format-keyed registries a new closure must extend:
+  `PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS` (and its per-format check-name
+  list, of which `PUBLIC_BUNDLE_V8_CHECKS` is the current tail) and
+  `FREEZE_REPO_BUNDLE_SUPPORT`, whose `Record<SupportedBundleFormat, …>` makes
+  an unstated closure a type error rather than a silent gap. The reader flags
+  themselves (`--tsa-root`, `--ots-headers`) need nothing: they are declared
+  and parsed format-agnostically in
+  `packages/benchmark-product/verify/src/cli.ts` and already reach any closure
+  that evaluates anchors.
 - **`packages/benchmark-product/PUBLIC-BUNDLE.md`** — the `/10` section, whose
   own rule is that every format carries its complete recipe pinned at the
   reader line that understands it. That reader line will not exist on npm when
@@ -179,14 +188,15 @@ part of the deliverable, not a follow-up:
 
 ## 4. The four rulings, as made
 
-Recorded on [#2974](https://github.com/Jinn-Network/mono/issues/2974) and
-reproduced here so no session re-litigates them.
+Ruled on PR #3663 and recorded on issue
+[#2974](https://github.com/Jinn-Network/mono/issues/2974); reproduced here so
+no session re-litigates them.
 
 1. **Allocation — the surface is a capability entry inside `/10`.** The
    composed/capability generation takes `benchmark-product-public-bundle/10`,
    and features register as capability entries inside it rather than minting
-   format numbers. (`/9` was allocated by PR #4090 for the declared/strict
-   denominator pair before the rule was posted, and is grandfathered.) The four
+   format numbers. (`/9` was taken by PR #4090 for issue #3698 before the rule
+   was posted, and is grandfathered.) The four
    identifiers §2 of v0.1 costed are therefore **not** minted. A session that
    finds it genuinely needs a new generation number stops and escalates rather
    than allocating one.
@@ -221,7 +231,7 @@ not attempted here.
 |---|---|---|
 | 1 | The `/10` generation itself — format, claim package, profile IRIs, capability-entry mechanism | issues #3403 → #3406; **not this issue** |
 | 2 | Generalize `evaluateIntegrityAnchors` onto an explicit taxonomy (subject→kind map, subject→digest pairs, splice-catch flag), classic behavior unchanged | nothing; it is a pure refactor, but it has no second consumer until 3, so it lands with 3 rather than speculatively ahead of it |
-| 3 | The anchor capability entry: `/10` branches in `verify.ts` and `portable.ts`, the evidence-native taxonomy, the reader-flag activation, the `PUBLIC-BUNDLE.md` `/10` section with the §3 divergence stated | 1 |
+| 3 | The anchor capability entry: `/10` branches in `verify.ts` and `portable.ts`, the evidence-native taxonomy, the `reader-instructions.ts` and `freeze-repo.ts` entries, the `PUBLIC-BUNDLE.md` `/10` section with the §3 divergence stated | 1 |
 | 4 | The documented re-report of Demo-1 carrying the RFC 3161 token, and the citation updates the new bundle identity forces | 3 |
 
 Acceptance criterion 1 of the issue — the published artifact carrying its
