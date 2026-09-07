@@ -669,6 +669,29 @@ export class FleetBootstrapper {
       const masterAddress = state.master_address!;
       const required = requesterMinMasterEth();
 
+      // Completion short-circuit, mirroring `ensureStage1`'s. It must precede
+      // the funding gate: a first run legitimately spends the master down to
+      // roughly `required - REQUESTER_SAFE_DEPLOY_ETH`, so a gate that ran
+      // unconditionally would tell a requester whose Safe is already deployed
+      // to fund work that is finished — the §4.2 defect this path exists to
+      // close, one beat later. On testnet it would also re-enter the faucet
+      // loop and burn drips on a no-op.
+      if (state.fleet_safe_address) {
+        const deployedCode = await this.publicClient.getCode({
+          address: getAddress(state.fleet_safe_address) as Address,
+        });
+        if (deployedCode !== undefined && deployedCode !== '0x') {
+          if (state.requester_stage !== 'safe_deployed') {
+            state = await this.store.patchFleet({ requester_stage: 'safe_deployed' });
+          }
+          return {
+            ok: true,
+            fleet_state: state,
+            message: `Creator Safe ready at ${state.fleet_safe_address}.`,
+          };
+        }
+      }
+
       let masterBalance = await this.publicClient.getBalance({
         address: masterAddress as Address,
       });

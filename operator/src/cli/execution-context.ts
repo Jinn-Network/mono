@@ -222,7 +222,11 @@ export async function createCliExecutionContext(
         message: 'No fleet service is complete with both a Safe and a mech address.',
         hint: 'Finish bootstrap through mech deployment, or configure testnet mech artifacts.',
         exampleCli: 'jinn bootstrap --json',
-        details: { field: 'fleet' },
+        // Carried so a persona-aware caller can rewrite this refusal without a
+        // second read of the fleet file: a wallet that reached `safe_deployed`
+        // over the requester path (issue #2446) has no service by design, and
+        // pointing it at bootstrap is the operator supplier path.
+        details: { field: 'fleet', requesterStage: fleetState.requester_stage },
       },
     };
   }

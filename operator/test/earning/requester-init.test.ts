@@ -115,7 +115,12 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     expect(result.fleet_state.services).toEqual([]);
   });
 
-  it('is idempotent: a second run redeploys nothing', async () => {
+  it('is idempotent at the balance a first run actually leaves behind', async () => {
+    // The balance matters. A completed first run sends REQUESTER_SAFE_DEPLOY_ETH
+    // to the agent EOA plus gas, so the master lands *below* the pre-deployment
+    // gate. Mocking a comfortable balance here would prove only the getCode
+    // short-circuit and would miss a funding gate that runs ahead of it —
+    // asking a requester whose Safe is deployed to fund work that is finished.
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
     dirs.push(earningDir);
     const store = await seedKeystore(earningDir);
@@ -123,7 +128,7 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     const bootstrapper = buildBootstrapper(earningDir);
 
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
-      50_000_000_000_000_000n,
+      requesterMinMasterEth() - REQUESTER_SAFE_DEPLOY_ETH,
     );
     vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
     const predict = vi.spyOn(bootstrapper as any, 'stepFleetSafePredict');
@@ -132,9 +137,41 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     const result = await bootstrapper.ensureRequesterSafe('test-password');
 
     expect(result.ok).toBe(true);
+    expect(result.funding).toBeUndefined();
     expect(predict).not.toHaveBeenCalled();
     expect(deploy).not.toHaveBeenCalled();
     expect(result.fleet_state.fleet_safe_address).toBe(PREDICTED_SAFE);
+  });
+
+  it('does not re-enter the testnet faucet once the Safe is deployed', async () => {
+    // Testnet degrades rather than breaks without the short-circuit: the drained
+    // master re-enters the drip loop and spends part of the 4:30 budget on a
+    // no-op.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
+    dirs.push(earningDir);
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(generateMnemonic(), 'test-password'));
+    await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE, requester_stage: 'safe_deployed' });
+
+    const requestFunding = vi.fn(async () => ({ ok: true as const, txHash: '0xabc' }));
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      requestFunding,
+      autoTestnetFaucet: true,
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      requesterMinMasterEth() - REQUESTER_SAFE_DEPLOY_ETH,
+    );
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
+
+    const result = await bootstrapper.ensureRequesterSafe('test-password');
+
+    expect(result.ok).toBe(true);
+    expect(requestFunding).not.toHaveBeenCalled();
   });
 
   it('drains the testnet faucet toward the requester target before refusing', async () => {

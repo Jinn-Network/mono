@@ -81,6 +81,41 @@ describe('planFleetFunding — requester persona', () => {
     expect(plan.persona).toBe('requester');
   });
 
+  it('reports no shortfall once the creator Safe is deployed', async () => {
+    // The requester requirement is Safe-deployment gas, so it is spent, not
+    // outstanding, the moment the Safe exists. A completed init leaves the
+    // master below the pre-deployment gate by design; reporting that gap as a
+    // shortfall that "blocks tasks-submit" is false on both halves, and
+    // post-init is exactly the state a requester is in when they ask.
+    const { earningDir } = await seed({
+      requester_stage: 'safe_deployed',
+      fleet_safe_address: '0xBBBB000000000000000000000000000000000002',
+    });
+    const plan = await planFleetFunding({
+      earningDir,
+      chain: 'base-sepolia',
+      chainConfigResolver: fakeChainConfig,
+      publicClientFactory: zeroBalanceClient,
+    });
+    expect(plan.persona).toBe('requester');
+    expect(plan.master).toBeUndefined();
+  });
+
+  it('reports no shortfall post-init even when `--requester` is passed explicitly', async () => {
+    const { earningDir } = await seed({
+      requester_stage: 'safe_deployed',
+      fleet_safe_address: '0xBBBB000000000000000000000000000000000002',
+    });
+    const plan = await planFleetFunding({
+      earningDir,
+      chain: 'base-sepolia',
+      requester: true,
+      chainConfigResolver: fakeChainConfig,
+      publicClientFactory: zeroBalanceClient,
+    });
+    expect(plan.master).toBeUndefined();
+  });
+
   it('returns to the operator gate once the operator state machine advances', async () => {
     // A dual-role operator who ran `jinn requester init` first shares the very
     // same Safe. The moment they start the supplier path the operator target is

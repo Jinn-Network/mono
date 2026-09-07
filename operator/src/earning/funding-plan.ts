@@ -281,8 +281,19 @@ export async function planFleetFunding(
   // this issue names ("asks for 0.02 ETH ... where a requester needs
   // Safe-deployment gas"); both numbers come from the same helper the
   // corresponding mutating gate uses, so neither can drift.
+  // The requester's requirement is Safe-deployment gas, so it drops to zero
+  // once that Safe exists. Without this the read-only plan reports a phantom
+  // shortfall to every requester who has finished init — the state a requester
+  // is in whenever they have a reason to ask — because a completed init
+  // legitimately leaves the master below the pre-deployment gate. Keeping the
+  // condition here is what holds this view in agreement with the completion
+  // short-circuit in `FleetBootstrapper.ensureRequesterSafe`.
+  const creatorSafeDeployed = fleetState !== null
+    && (fleetState.requester_stage === 'safe_deployed'
+      || fleetState.fleet_stage === 'stage1'
+      || fleetState.fleet_stage === 'stage1_and_2');
   const requiredMasterEth = persona === 'requester'
-    ? requesterMinMasterEth()
+    ? (creatorSafeDeployed ? 0n : requesterMinMasterEth())
     : computeRequiredMasterEth({
       services: fleetState?.services ?? [],
       minEoaGasEth: config.minEoaGasEth,

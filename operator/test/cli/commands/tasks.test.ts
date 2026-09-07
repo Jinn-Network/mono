@@ -306,6 +306,91 @@ describe('tasks submit machine contract', () => {
     expect(made.exits).toEqual([11]);
   });
 
+  describe('requester persona (issue #2446)', () => {
+    // `jinn requester init` prints `jinn tasks submit` as the requester's next
+    // step, but registers no service by design. The refusal that meets them
+    // must not route them into `jinn bootstrap` — the operator supplier path
+    // they deliberately did not pay for.
+    const REQUESTER_FLEET = {
+      requester_stage: 'safe_deployed' as const,
+      services: [] as Array<{ step: string; safe_address?: string }>,
+    };
+
+    function expectNoOperatorRouting(envelope: { message: string; hint?: string; exampleCli?: string }) {
+      const text = [envelope.message, envelope.hint ?? '', envelope.exampleCli ?? ''].join(' ');
+      expect(text).not.toMatch(/Run `jinn bootstrap`/);
+      expect(text).not.toMatch(/jinn bootstrap --/);
+      expect(text).not.toContain('jinn run');
+    }
+
+    it('refuses a dry-run in requester terms', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-requester-'));
+      const config = join(dir, 'config.json');
+      writeFileSync(config, '{}');
+      gatherIntrospectionRaw.mockResolvedValueOnce({ fleet: REQUESTER_FLEET } as never);
+      const made = makeCommandCtx({
+        argv: [
+          'submit', '--id', 'req-1', '--description', 'do the thing',
+          '--config', config, '--dry-run', '--json',
+        ],
+      });
+
+      await tasksCommand.run(made.ctx);
+
+      const output = JSON.parse(made.writes.at(-1)!);
+      expect(output.code).toBe('bootstrap_incomplete');
+      expect(output.message).toContain('jinn requester init');
+      expectNoOperatorRouting(output);
+    });
+
+    it('refuses a confirmed submission in requester terms', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-requester-'));
+      const config = join(dir, 'config.json');
+      writeFileSync(config, '{}');
+      createCliExecutionContext.mockResolvedValueOnce({
+        ok: false,
+        envelope: {
+          code: 'bootstrap_incomplete',
+          message: 'No fleet service is complete with both a Safe and a mech address.',
+          hint: 'Finish bootstrap through mech deployment, or configure testnet mech artifacts.',
+          exampleCli: 'jinn bootstrap --json',
+          details: { field: 'fleet', requesterStage: 'safe_deployed' },
+        },
+      });
+      const made = makeCommandCtx({
+        argv: [
+          'submit', '--id', 'req-1', '--description', 'do the thing',
+          '--config', config, '--yes', '--json',
+        ],
+      });
+
+      await tasksCommand.run(made.ctx);
+
+      const output = JSON.parse(made.writes.at(-1)!);
+      expect(output.code).toBe('bootstrap_incomplete');
+      expectNoOperatorRouting(output);
+    });
+
+    it('keeps the operator wording for an operator', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-operator-'));
+      const config = join(dir, 'config.json');
+      writeFileSync(config, '{}');
+      gatherIntrospectionRaw.mockResolvedValueOnce({ fleet: { services: [] } } as never);
+      const made = makeCommandCtx({
+        argv: [
+          'submit', '--id', 'op-1', '--description', 'do the thing',
+          '--config', config, '--dry-run', '--json',
+        ],
+      });
+
+      await tasksCommand.run(made.ctx);
+
+      const output = JSON.parse(made.writes.at(-1)!);
+      expect(output.code).toBe('bootstrap_incomplete');
+      expect(output.hint).toContain('jinn bootstrap');
+    });
+  });
+
   it('dry-run validates without constructing a posting context', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-'));
     const file = join(dir, 'request.json');
