@@ -83,6 +83,17 @@ The two options, and how to actually take each:
   that window resolves against neither the old bindings (replaced) nor the new ones (not yet
   effective).
 
+  > **Before moving the receipt aside, confirm the native config carries `agentIri` — and
+  > `admissionAgent`, if this operator provisions admission.** The receipt is the *fallback*
+  > source for both: identity resolution prefers the config and falls back to the receipt, and
+  > if neither has them it **mints a fresh `urn:uuid:`**
+  > (`operator/src/cli/commands/ceremony.ts:376-389`). With both the config keys and the receipt
+  > gone, the re-author silently becomes a re-mint — a new operator identity, every peer's
+  > configuration invalidated — which is precisely what this runbook exists to avoid. The
+  > dangerous state is the one `refuseConfigWriteBackPending` flags: sealed on chain, config
+  > write-back never completed. There the receipt is the *only* record of the Agent IRI, and
+  > moving it aside destroys it. Copy it somewhere, do not delete it.
+
 Neither is right in general — it is a retroactive-authority judgment, left open at ceremony spec
 §10 (e) and owned by [#4172](https://github.com/Jinn-Network/mono/issues/4172). Whichever is
 taken, **write the reason into the re-author's record** alongside the anchor transaction hash,
