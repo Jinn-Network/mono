@@ -18,11 +18,21 @@ import {
 } from '../../tx-retry.js';
 import { STAGE1_AGENT_ETH } from '../bootstrap.js';
 
-/** Deploy the predicted fleet Safe. Funds the agent EOA from master if needed. */
+/**
+ * Deploy the predicted fleet Safe. Funds the agent EOA from master if needed.
+ *
+ * `agentFundingWei` is what master transfers to the agent EOA before the
+ * deploy. It defaults to the operator's `STAGE1_AGENT_ETH`, which is sized for
+ * Safe deploy *plus* ERC-8004 register *plus* setAgentWallet. The requester
+ * path (B0a, issue #2446) buys only the deploy and passes its own, much
+ * smaller amount; the caller's funding gate and this transfer must agree, or
+ * master clears the gate and then cannot afford the transfer.
+ */
 export async function stepFleetSafeDeploy(
   ctx: StepContext,
   state: FleetState,
   mnemonic: string,
+  agentFundingWei: bigint = STAGE1_AGENT_ETH,
 ): Promise<FleetState> {
   const agentAddress = deriveAgentAddress(mnemonic, 1);
   const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
@@ -30,17 +40,18 @@ export async function stepFleetSafeDeploy(
   const fleetSafe = state.fleet_safe_address!;
 
   // Fund agent EOA so it can pay for Safe deploy + setAgentWallet gas.
-  // 0.01 ETH covers Safe deploy (~250k gas) + register (~80k) + setAgentWallet
-  // (~200k) at testnet gas prices comfortably. STAGE1_AGENT_ETH is the
-  // module-level constant used both here and in `stage1MinMasterEth` so the
-  // gate and the transfer agree (jinn-mono-u34i).
+  // The operator default, 0.01 ETH, covers Safe deploy (~250k gas) + register
+  // (~80k) + setAgentWallet (~200k) at testnet gas prices comfortably.
+  // STAGE1_AGENT_ETH is the module-level constant used both here and in
+  // `stage1MinMasterEth` so the gate and the transfer agree (jinn-mono-u34i);
+  // `agentFundingWei` lets a caller with a smaller gate keep that agreement.
   const masterAccount = deriveMasterSigner(mnemonic);
   const masterWallet = createJinnWalletClient(ctx.config.rpcUrl, ctx.chain, masterAccount);
   const agentBalance = await ctx.publicClient.getBalance({
     address: getAddress(agentAddress) as Address,
   });
-  if (agentBalance < STAGE1_AGENT_ETH) {
-    const fundAmount = STAGE1_AGENT_ETH - agentBalance;
+  if (agentBalance < agentFundingWei) {
+    const fundAmount = agentFundingWei - agentBalance;
     console.error(
       `[fleet-bootstrap] Stage 1: funding fleet agent EOA with ${fundAmount} wei from master`,
     );

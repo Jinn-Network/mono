@@ -564,6 +564,7 @@ describe('dual-role: operator-then-builder (52x3.7 r83r)', () => {
       fleet_safe_address: opAccount.address,       // EOA acts as Safe for stub
       fleet_identity_registry: registry.address,
       fleet_stage: 'stage1',
+      requester_stage: 'none',
     };
 
     let publishedCid2: string | undefined;

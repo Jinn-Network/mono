@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli/index.js';
 import { createNativeRequesterCommand } from '../../src/cli/commands/native-requester.js';
 import type { CommandContext } from '../../src/cli/command.js';
+import {
+  NATIVE_REQUESTER_FIXTURES,
+  PREDICTION_FORECAST_GOLDEN,
+  nativeRequesterFixtureList,
+} from '../../src/native-requester/fixtures.js';
 
 function captureIo() {
   const writes: string[] = [];
@@ -44,15 +49,88 @@ describe('native requester CLI surface', () => {
     expect(result.details?.state).not.toBe('feature-disabled');
   });
 
-  it('documents the accepted request shape', async () => {
+  it('documents the accepted request shape and the fixture registry', async () => {
     const io = captureIo();
 
     await runCli(['native-vertical', '--help'], { writer: io.writer, exit: io.exit, stdoutIsTty: false });
 
-    expect(io.writes.join('')).toContain(
-      'jinn native-vertical request --network base-sepolia --fixture prediction-forecast-golden.json --run-id <run-id>',
+    const help = io.writes.join('');
+    expect(help).toContain(
+      'jinn native-vertical request --network base-sepolia --fixture <fixture> --run-id <run-id>',
     );
+    // B0a (#2446): the accepted set is rendered from the registry, so a second
+    // fixture appears in the help without touching this command's source.
+    expect(help).toContain(`One of: ${nativeRequesterFixtureList()}`);
     expect(io.exits).toEqual([]);
+  });
+
+  it('accepts every fixture in the registry and refuses anything else', async () => {
+    for (const fixture of NATIVE_REQUESTER_FIXTURES) {
+      const io = captureIo();
+      await runCli([
+        'native-vertical', 'request',
+        '--network', 'base-sepolia',
+        '--fixture', fixture,
+        '--run-id', 'operator-run-20260802',
+      ], { writer: io.writer, exit: io.exit, stdoutIsTty: false });
+      expect(JSON.parse(io.writes.at(-1)!).code).not.toBe('invalid_invocation');
+    }
+
+    const io = captureIo();
+    await runCli([
+      'native-vertical', 'request',
+      '--network', 'base-sepolia',
+      '--fixture', 'not-a-registered-fixture.json',
+      '--run-id', 'operator-run-20260802',
+    ], { writer: io.writer, exit: io.exit, stdoutIsTty: false });
+    // The refusal is the FIRST thing written: argv validation precedes any
+    // config, chain, or role work. (Under a real `process.exit` it is also the
+    // last; the injected no-op exit lets the command fall through.)
+    const envelope = JSON.parse(io.writes[0]!);
+    expect(envelope.code).toBe('invalid_invocation');
+    expect(io.exits[0]).toBe(11);
+    // The refusal names the accepted set rather than one hardcoded literal.
+    expect(envelope.message).toContain(nativeRequesterFixtureList());
+  });
+
+  it('carries the requested fixture through to preflight and the readiness report', async () => {
+    const seen: string[] = [];
+    const command = createNativeRequesterCommand({
+      async preflightRequest(input) {
+        seen.push(input.fixture);
+        return {
+          chainId: 84532,
+          contractsVerified: true,
+          contractCodeVerified: true,
+          fundingVerified: true,
+          transactionCapsVerified: true,
+        };
+      },
+      async loadExecutor() { throw new Error('must not load execution authority'); },
+    });
+    const { io, ctx } = context([
+      'request', '--network', 'base-sepolia',
+      '--fixture', PREDICTION_FORECAST_GOLDEN,
+      '--run-id', 'operator-run-20260802',
+    ]);
+    await command.run(ctx);
+    expect(seen).toEqual([PREDICTION_FORECAST_GOLDEN]);
+    expect(JSON.parse(io.writes.at(-1)!).fixture).toBe(PREDICTION_FORECAST_GOLDEN);
+  });
+
+  it('ships the request and consume paths enabled, not feature-disabled', async () => {
+    // The shipped registry entry wires production deps. Regression guard for
+    // the B0a criterion that the feature-disable is lifted (#2446).
+    for (const argv of [
+      ['native-vertical', 'request', '--network', 'base-sepolia',
+        '--fixture', PREDICTION_FORECAST_GOLDEN, '--run-id', 'operator-run-20260802'],
+      ['native-vertical', 'consume', '--consumer-config', '/nonexistent/native-consumer.json'],
+    ]) {
+      const io = captureIo();
+      await runCli(argv, { writer: io.writer, exit: io.exit, stdoutIsTty: false });
+      const envelope = JSON.parse(io.writes.at(-1)!);
+      expect(envelope.details?.state).not.toBe('feature-disabled');
+    }
   });
 
   it('reports read-only readiness without loading execution authority', async () => {

@@ -6,7 +6,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
 import { COMMON_FLAGS, type CommandContext, type CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
-import { emitEnvelope } from '../../errors/envelope.js';
+import { emitEnvelope, type BuildEnvelopeInput } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import {
@@ -23,7 +23,7 @@ import { signTaskV1 } from '../../tasks/signing.js';
 import { TaskPostingService } from '../../tasks/posting-service.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
 import { walletPrivateKeyAtIndex } from '../../earning/wallet.js';
-import { isOperationalServiceStep } from '../../earning/types.js';
+import { isOperationalServiceStep, isRequesterPersona } from '../../earning/types.js';
 import { getConfigPathFromArgs, loadConfig } from '../../config.js';
 import {
   cidFromParticipationDigest,
@@ -181,6 +181,40 @@ function machinePreflightChecks(args: {
         );
       }
     },
+  };
+}
+
+/**
+ * Requester-shaped refusal for `jinn tasks submit` (issue #2446 §4.2).
+ *
+ * `jinn requester init` prints this verb as the requester's next step, and
+ * top-level help lists it as the third requester step — but init deliberately
+ * registers no service, so the refusal a requester meets here would otherwise
+ * tell them to run `jinn bootstrap`: the operator supplier path they chose not
+ * to pay for. Making this verb actually work for a requester is later work;
+ * not routing them at the supplier path is not.
+ *
+ * Persona is decided by the shared `isRequesterPersona` predicate — the same
+ * call `planFleetFunding` makes, not a restatement of it. That matters here:
+ * an operator who ran `jinn requester init` first keeps the `safe_deployed`
+ * marker forever, and they *do* reach a refusal at this verb throughout
+ * bootstrap (a service parked at `awaiting_stake`, or `complete` without a
+ * mech address). Testing the marker alone would tell them there is nothing
+ * left to fund while they are parked on the OLAS bond, and would discard the
+ * `jinn fund-requirements` routing that is exactly what unblocks them.
+ */
+function requesterSubmitRefusal(): BuildEnvelopeInput {
+  return {
+    code: 'bootstrap_incomplete',
+    message:
+      'Posting a Task from the CLI still needs an operational service, which '
+      + '`jinn requester init` does not create. The requester posting path is not '
+      + 'available yet.',
+    hint:
+      'Your creator Safe is ready — there is nothing further for you to fund or run. '
+      + '`jinn bootstrap` would onboard you as an operator, which is the supplier side, '
+      + 'not the requester side.',
+    details: { field: 'fleet.services', expected: 'at least one operational service' },
   };
 }
 
@@ -567,6 +601,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   if (dryRun) {
     let service: { safe_address?: string | null } | undefined;
     let machineSignerContext: CliSignerContext | undefined;
+    let isRequester = false;
     if (machineRequest) {
       const built = await createCliReadOnlySignerContext({ argv: ctx.argv, env: ctx.env });
       if (!built.ok) {
@@ -575,20 +610,24 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       }
       machineSignerContext = built.ctx;
       service = pickPrimaryMechService(built.ctx.fleetState.services);
+      isRequester = isRequesterPersona(built.ctx.fleetState);
     } else {
       const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
       service = raw.fleet?.services.find(s => isOperationalServiceStep(s.step));
+      isRequester = isRequesterPersona(raw.fleet);
     }
     if (!service?.safe_address) {
       emitEnvelope(
-        {
-          code: 'bootstrap_incomplete',
-          message:
-            'No bootstrapped service available to submit Tasks from. Run `jinn bootstrap` first.',
-          hint: 'Run `jinn fund-requirements` to see outstanding funding, then `jinn bootstrap`.',
-          exampleCli: 'jinn bootstrap --human',
-          details: { field: 'fleet.services', expected: 'at least one operational service' },
-        },
+        isRequester
+          ? requesterSubmitRefusal()
+          : {
+            code: 'bootstrap_incomplete',
+            message:
+              'No bootstrapped service available to submit Tasks from. Run `jinn bootstrap` first.',
+            hint: 'Run `jinn fund-requirements` to see outstanding funding, then `jinn bootstrap`.',
+            exampleCli: 'jinn bootstrap --human',
+            details: { field: 'fleet.services', expected: 'at least one operational service' },
+          },
         { writer: ctx.writer, exit: ctx.exit },
       );
       return;
@@ -678,7 +717,17 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       );
       return;
     }
-    emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
+    // The shared execution-context refusal ("Finish bootstrap through mech
+    // deployment") is the same wrong turn as the dry-run one above, reached by
+    // a requester who confirmed with --yes. Substitute the requester-shaped
+    // text; every other caller keeps the operator wording.
+    emitEnvelope(
+      built.envelope.code === 'bootstrap_incomplete'
+        && built.envelope.details?.['requesterPersona'] === true
+        ? requesterSubmitRefusal()
+        : built.envelope,
+      { writer: ctx.writer, exit: ctx.exit },
+    );
     return;
   }
 

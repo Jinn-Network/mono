@@ -9,7 +9,12 @@ import { loadConfig, getConfigPathFromArgs, type JinnConfig } from '../config.js
 import { getChainConfig, type ChainConfig } from '../earning/contracts.js';
 import { getJinnRouterAddress } from '../contracts/addresses.js';
 import { FleetStateStore } from '../earning/store.js';
-import { isOperationalServiceStep, type FleetState, type ServiceState } from '../earning/types.js';
+import {
+  isOperationalServiceStep,
+  isRequesterPersona,
+  type FleetState,
+  type ServiceState,
+} from '../earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from '../earning/wallet.js';
 import { base as baseChain, baseSepolia } from 'viem/chains';
 import { createJinnPublicClient, createJinnWalletClient } from '../earning/viem-clients.js';
@@ -222,7 +227,14 @@ export async function createCliExecutionContext(
         message: 'No fleet service is complete with both a Safe and a mech address.',
         hint: 'Finish bootstrap through mech deployment, or configure testnet mech artifacts.',
         exampleCli: 'jinn bootstrap --json',
-        details: { field: 'fleet' },
+        // Carried so a persona-aware caller can rewrite this refusal without a
+        // second read of the fleet file: a wallet that is *presently* a
+        // requester (issue #2446) has no service by design, and pointing it at
+        // bootstrap is the operator supplier path. The derived boolean travels,
+        // never the raw marker — the marker outlives the requester phase, so a
+        // consumer testing it alone would mis-read a dual-role operator
+        // mid-bootstrap, and one whose service is `complete` but mech-less.
+        details: { field: 'fleet', requesterPersona: isRequesterPersona(fleetState) },
       },
     };
   }

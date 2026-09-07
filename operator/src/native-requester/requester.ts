@@ -92,17 +92,23 @@ import {
   freezeRequesterSourceV1Intent,
 } from './requester-source-writer-adapter.js';
 
-// Public, stable product fixture name. The admission package may retain its
-// internal snapshot fixture directory; that storage detail must not leak into
-// the accepted requester command contract.
-const FIXTURE = 'prediction-forecast-golden.json' as const;
+import {
+  NATIVE_REQUESTER_FIXTURES,
+  PREDICTION_FORECAST_GOLDEN,
+  isNativeRequesterFixture,
+  nativeRequesterFixtureList,
+  type NativeRequesterFixture,
+} from './fixtures.js';
+
+const FIXTURE = PREDICTION_FORECAST_GOLDEN;
 
 /**
- * The single today-mode requester fixture name, exported so a composing host (the fleet posting
- * write path, one-swap M5e) can name the `NativeRequesterRequest.fixture` it drives `request()`
- * with without duplicating the literal. `request()` still refuses any other value.
+ * The requester fixture name, exported so a composing host (the fleet posting write path,
+ * one-swap M5e) can name the `NativeRequesterRequest.fixture` it drives `request()` with
+ * without duplicating the literal.
  */
 export const NATIVE_REQUESTER_FIXTURE = FIXTURE;
+export { NATIVE_REQUESTER_FIXTURES, isNativeRequesterFixture };
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 export const NATIVE_REQUESTER_ASSOCIATION_FACT = 'https://spec.jinn.network/facts/native-requester-association/v1';
 const UINT256_MAX = (1n << 256n) - 1n;
@@ -129,7 +135,7 @@ export interface NativeRequesterRoles {
 
 export interface NativeRequesterRequest {
   readonly network: 'base-sepolia';
-  readonly fixture: typeof FIXTURE;
+  readonly fixture: NativeRequesterFixture;
   readonly runId: string;
 }
 
@@ -2049,7 +2055,9 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
     },
     async request(input): Promise<NativeRequesterResult> {
       assertRunId(input.runId);
-      if (input.fixture !== FIXTURE) throw new Error(`native requester fixture must be ${FIXTURE}`);
+      if (!isNativeRequesterFixture(input.fixture)) {
+        throw new Error(`native requester fixture must be one of: ${nativeRequesterFixtureList()}`);
+      }
       // This assertion is intentionally before role load, template signing, or post construction.
       const chain = assertBaseSepoliaTarget(input.network, await deps.readChain());
       // Complete the reusable requester-scope/WAL recovery pass before loading product keys or

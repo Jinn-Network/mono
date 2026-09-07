@@ -21,6 +21,13 @@ export function renderTopLevelHelp(commands: CommandModule[]): string {
   lines.push('  fleet scale --to N                    Grow or shrink the fleet');
   lines.push('  fleet retire <index>                  Retire one service');
   lines.push('');
+  lines.push('Requester map:');
+  lines.push('  New requester: install the client, then run `jinn requester init`.');
+  lines.push('');
+  lines.push('  jinn requester init                   Wallet, keystore, and creator Safe');
+  lines.push('  jinn fund-requirements --requester    Show the requester funding gap');
+  lines.push('  jinn tasks submit                     Post work');
+  lines.push('');
   lines.push('Operator map:');
   lines.push('  New operator: install the client, then run `jinn run`.');
   lines.push('');

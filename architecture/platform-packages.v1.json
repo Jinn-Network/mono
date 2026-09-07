@@ -508,7 +508,7 @@
       "name": "@jinn-network/operator",
       "path": "operator",
       "domain": "operator",
-      "role": "operator daemon and application",
+      "role": "operator daemon and application, and the requester CLI (consumer class 1)",
       "tier": 4,
       "classification": "product",
       "stability": "transitional",
