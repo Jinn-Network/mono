@@ -43,15 +43,21 @@ jobs:
       - name: Resolve release metadata
         id: meta
         shell: bash
-        # The dispatch input reaches the script through the environment, never
-        # through `${{ }}` interpolation, so it cannot be shell-injected.
+        # Both the dispatch input and the release tag reach the script through
+        # the environment, never through `${{ }}` interpolation, so neither can
+        # be shell-injected — a git ref name may legally contain `$`, backticks
+        # and `;`.
         env:
           VERSION_INPUT: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            # A manual run publishes `:latest`, so it may only be launched from a
-            # ref a release could have been cut from. Write access alone must not
-            # let an arbitrary feature branch become the stable image.
+            # A manual run publishes `:latest`, so it refuses any ref a release
+            # could not have been cut from. This is an accident guard, not an
+            # authorization boundary: `workflow_dispatch` runs the workflow file
+            # as it exists on the dispatched ref, so anyone who can push a branch
+            # can push one without this check. The boundary is repository write
+            # access, exactly as it is for cutting a release.
             #
             # GITHUB_REF/GITHUB_EVENT_NAME are read from the environment, not
             # interpolated: a ref name may legally contain `$` and backticks.
@@ -69,23 +75,26 @@ jobs:
               exit 1
             fi
           else
-            RELEASE_TAG="${{ github.event.release.tag_name }}"
             case "${RELEASE_TAG}" in
               client-v*)
                 VERSION="${RELEASE_TAG#client-v}"
                 ;;
               v*)
                 VERSION="${RELEASE_TAG#v}"
-                if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                  echo "::error::Release tag ${RELEASE_TAG} does not look like v<semver>; got version: ${VERSION}"
-                  exit 1
-                fi
                 ;;
               *)
                 echo "::error::Stable client releases must use tags shaped like vX.Y.Z or client-vX.Y.Z"
                 exit 1
                 ;;
             esac
+
+            # Both tag shapes are validated: VERSION reaches `$GITHUB_OUTPUT`
+            # below, where a newline would inject further outputs — including
+            # `image_repo`, which selects the registry this job pushes to.
+            if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Release tag ${RELEASE_TAG} does not carry a <semver> version; got: ${VERSION}"
+              exit 1
+            fi
           fi
 
           # working-directory default is `operator/`, no extra cd.
