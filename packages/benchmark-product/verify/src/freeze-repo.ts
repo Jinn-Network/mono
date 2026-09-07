@@ -210,6 +210,38 @@ const SPDX_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9.+-]*$/u;
 const SPDX_IDSTRING = /^[A-Za-z0-9][A-Za-z0-9.-]*$/u;
 
 /**
+ * How deeply an expression may nest its parentheses before this module refuses to parse it. The
+ * grammar below is a recursive descent — the readable form of Annex D, and worth keeping — so a
+ * value nesting deeply enough exhausts the stack and leaves as a RangeError instead of a boolean
+ * or a typed refusal (issue #3898). Measured on this Node build the cliff is between 4000 and
+ * 6000, and it moves with the caller's own stack depth, so the cap sits far below it rather than
+ * near it: a real SPDX expression nests one or two deep, which leaves ~60x headroom above
+ * anything anyone writes and ~60x clearance below anything that breaks.
+ */
+const SPDX_MAX_NESTING_DEPTH = 64;
+
+/**
+ * The deepest parenthesis nesting in a value, counted rather than parsed. Iterative on purpose:
+ * the check that guards a recursive parser must not itself recurse, and counting means the two
+ * callers below cannot come to disagree about which values are too deep. Unbalanced parentheses
+ * are the grammar's business, not this function's — it reports the running maximum and lets the
+ * parser refuse the shape.
+ */
+function spdxNestingDepth(value: string): number {
+  let depth = 0;
+  let deepest = 0;
+  for (const character of value) {
+    if (character === "(") {
+      depth += 1;
+      if (depth > deepest) deepest = depth;
+    } else if (character === ")" && depth > 0) {
+      depth -= 1;
+    }
+  }
+  return deepest;
+}
+
+/**
  * The same grammar, widened to the SPDX 2.3 Annex D licence EXPRESSION: `id`, `id+`,
  * `id WITH exception`, and those joined by `AND` / `OR` with optional parentheses. A publication
  * licensed `Apache-2.0 OR MIT` is an ordinary dual licence, and the short-identifier check alone
@@ -221,6 +253,9 @@ const SPDX_IDSTRING = /^[A-Za-z0-9][A-Za-z0-9.-]*$/u;
  * names no one page.
  */
 export function isSpdxLicenseExpression(value: string): boolean {
+  // Checked here and not only in `spdxLicenseProblem` because this predicate is exported: it has
+  // to be safe standing alone, not merely safe behind the caller that happens to guard it.
+  if (spdxNestingDepth(value) > SPDX_MAX_NESTING_DEPTH) return false;
   const tokens = value.trim().split(/\s+/u).flatMap((token) => token.match(/\(|\)|[^()]+/gu) ?? []);
   if (tokens.length === 0) return false;
   let index = 0;
@@ -329,6 +364,12 @@ export function spdxLicenseProblem(value: string): string | undefined {
   if (freeText !== undefined) return freeText;
   if (value !== value.trim() || /\s\s|[^\S ]/u.test(value)) {
     return "is padded or separated by something other than single spaces; a freeze repository renders it onto an SPDX-License-Identifier line exactly as declared";
+  }
+  // Ahead of the grammar so the reason names the real problem. The predicate refuses an
+  // over-deep value too, but its one bit cannot say why, and "is not an SPDX licence expression"
+  // is a misleading thing to tell someone whose expression is well-formed.
+  if (spdxNestingDepth(value) > SPDX_MAX_NESTING_DEPTH) {
+    return `nests parentheses more deeply than this renderer parses (limit ${SPDX_MAX_NESTING_DEPTH}); a freeze repository will not present a value it cannot parse as a licence identifier`;
   }
   if (!isSpdxLicenseExpression(value)) {
     return "is not an SPDX licence expression (SPDX 2.3 Annex D grammar); a freeze repository renders it as one and will not present free text as a licence identifier";

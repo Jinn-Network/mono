@@ -507,6 +507,22 @@ describe("freeze repository fail-closed rules", () => {
     expect(() => renderFreezeRepo(snapshotOf({ benchmark }))).toThrow(/not an SPDX licence expression/);
   });
 
+  test("refuses a stack-deep licence as a typed record-integrity refusal, not a RangeError", () => {
+    // What a caller sees is the point: an export that raises RangeError out of the recursive
+    // descent has told the reader nothing, and no caller branches on it (issue #3898).
+    const refusal = expectRefusal(() => renderFreezeRepo(snapshotOf({
+      benchmark: {
+        protocol: "https://spec.jinn.network/benchmarking/v1",
+        name: "Deep", description: "", version: "1.0.0",
+        license: `${"(".repeat(10000)}MIT${")".repeat(10000)}`,
+        items: [], reveal: { policy: "immediate" },
+      },
+    })));
+    expect(refusal.code).toBe("record-integrity");
+    expect(refusal.issues[0]?.path).toBe("benchmark.json.license");
+    expect(refusal.message).toMatch(/nests parentheses/);
+  });
+
   test("carries every screening role the catalog can assign, including the transcript", () => {
     // The screening branch's records are freeze artifacts; omitting one silently would drop
     // evidence from the published tree with nothing in it saying so.
@@ -680,6 +696,21 @@ describe("the SPDX licence expression grammar", () => {
     expect(spdxLicenseProblem("MIT\nOR Apache-2.0")).toMatch(/control character or line separator/);
     expect(spdxLicenseProblem("internal use only")).toMatch(/not an SPDX licence expression/);
     expect(spdxLicenseProblem("Apache-2.0 OR MIT")).toBeUndefined();
+  });
+
+  test("refuses nesting deeper than it parses, rather than overflowing the stack", () => {
+    // The grammar is a recursive descent, so a value whose parentheses nest deeply enough
+    // exhausts the stack and leaves as a RangeError -- an untyped throw out of an exported
+    // predicate that documents a boolean (issue #3898). The cap refuses first, and it measures
+    // depth rather than recursing, so both surfaces agree by construction.
+    const deep = `${"(".repeat(10000)}MIT${")".repeat(10000)}`;
+    expect(isSpdxLicenseExpression(deep)).toBe(false);
+    expect(spdxLicenseProblem(deep)).toMatch(/nests parentheses/);
+    // Inclusive at the cap, so the boundary is pinned and not merely "somewhere near 64".
+    expect(isSpdxLicenseExpression(`${"(".repeat(64)}MIT${")".repeat(64)}`)).toBe(true);
+    // The rule is depth, not group count: a flat expression of any length is untouched. Real SPDX
+    // expressions nest one or two deep, so the cap refuses nothing anyone writes.
+    expect(spdxLicenseProblem("(MIT) AND (Apache-2.0) AND (CC0-1.0)")).toBeUndefined();
   });
 
   test("a dual-licensed publication renders, and cites no single list entry", () => {
