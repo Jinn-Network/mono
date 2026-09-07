@@ -140,6 +140,17 @@ Release workflow contract:
   - `ghcr.io/jinn-network/operator:sha-<shortsha>`
   - `ghcr.io/jinn-network/operator:latest`
 
+`.github/workflows/docker.yml` also takes a manual `workflow_dispatch` with a
+`version` input, for republishing those tags without cutting a release (#2811).
+It enforces the same guard: the version must equal `operator/package.json` at
+the selected ref.
+
+**After the first cut that publishes under `ghcr.io/jinn-network/operator`**,
+verify `:latest` resolves anonymously and repoint the run-it-now examples in
+`DEPLOY.md`, `deploy/README.md` and `operator/docker-compose.yml` from `:next`
+back to `:latest`. They name `:next` only because the stable tags do not exist
+under this name yet.
+
 Post-release verification is performed by `yarn release:client --publish`.
 The underlying checks are:
 

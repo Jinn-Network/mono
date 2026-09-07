@@ -67,27 +67,39 @@ echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env
 docker compose up -d
 ```
 
-The compose file pulls `ghcr.io/jinn-network/operator:latest`, mounts a `jinn-data`
+The compose file pulls `ghcr.io/jinn-network/operator:next`, mounts a `jinn-data`
 volume at `/data`, and publishes `7331:7331`. Local v1 keeps the API on
 loopback; do **not** set `JINN_API_BIND_HOST=0.0.0.0` unless you have put
 TLS and a trusted proxy in front per §9.
 
-**Pin the image for a reproducible deploy.** `:latest` is fine for a quick try.
+**Which tag to run.** Two lanes publish this image:
+
+| Tag | Lane | Moves |
+|---|---|---|
+| `:next`, `:canary-<short>` | `.github/workflows/operator-images.yml` | every push to `next` |
+| `:latest`, `:<version>`, `:sha-<short>` | `.github/workflows/docker.yml` | every named release |
+
+`:next` is the rolling tag and is what the example above runs. The stable tags
+have not been published under this name yet — the lane that publishes them was
+repointed from `ghcr.io/jinn-network/client` to `ghcr.io/jinn-network/operator`
+while it was red, so its first green run under the new name is still pending
+(#2811). Until then `:latest` and `:<version>` are 404s here.
+
+**Pin the image for a reproducible deploy.** `:next` is fine for a quick try.
 For a deploy you can reproduce later, edit the `image:` line in
 `operator/docker-compose.yml` from:
 
 ```yaml
-image: ghcr.io/jinn-network/operator:latest
+image: ghcr.io/jinn-network/operator:next
 ```
 
-to a fixed release tag:
+to an immutable tag or digest:
 
 ```yaml
-image: ghcr.io/jinn-network/operator:<version>
+image: ghcr.io/jinn-network/operator:canary-<short>
 ```
 
-Per-release tags `:<version>`, `:sha-<short>`, and `:latest` are published on
-every GitHub Release (see [`deploy/README.md`](deploy/README.md)).
+See [`deploy/README.md`](deploy/README.md) for the full tag contract.
 
 `GET /health`, `GET /ready`, and `GET /metrics` are the unauthenticated
 liveness/readiness/metrics surface. `GET /v1/status` is operator-class and
@@ -133,8 +145,8 @@ A reverse proxy in front of `:7331` must forward `X-Forwarded-Proto` and
 ### Railway (daemon only)
 
 Run the same image as a Railway service: point **Source → Image** at
-`ghcr.io/jinn-network/operator:<version>` (the package is public — no registry
-auth), attach a `/data` volume (`railway volume add --mount-path /data`), set
+`ghcr.io/jinn-network/operator:canary-<short>` (the package is public — no
+registry auth), attach a `/data` volume (`railway volume add --mount-path /data`), set
 `JINN_PASSWORD`, `CLAUDE_CODE_OAUTH_TOKEN`, and `JINN_API_BIND_HOST=0.0.0.0` in
 the Variables panel (the bind-host override is required — Railway's edge proxy
 cannot reach a loopback-bound process), and enable a public domain over port

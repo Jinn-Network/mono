@@ -1,8 +1,25 @@
 name: Docker
 
+# The stable lane for the operator base image. It publishes `:<version>`,
+# `:sha-<short>` and `:latest` — the tags DEPLOY.md and deploy/README.md hand to
+# operators.
+#
+# `workflow_dispatch` exists because `release: published` fires once per named
+# cut and never again. A red run therefore strands `:latest` for a whole release
+# cycle with no way to retry: one Dockerfile defect (#2809) kept this lane red
+# from 2026-06-09 to 2026-08-18, and `:latest` stayed a 404 for months after the
+# fix merged because nothing could re-run the lane (#2811). A manual run
+# republishes the stable tags from any ref whose `operator/package.json` matches
+# the supplied version — the same guard a release run passes.
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish. Must equal operator/package.json at the selected ref.'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,7 +32,10 @@ defaults:
 jobs:
   build-and-push:
     name: Build & Push OCI Image
-    if: startsWith(github.event.release.tag_name, 'client-v') || startsWith(github.event.release.tag_name, 'v')
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || startsWith(github.event.release.tag_name, 'client-v')
+      || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -24,28 +44,37 @@ jobs:
         id: meta
         shell: bash
         run: |
-          RELEASE_TAG="${{ github.event.release.tag_name }}"
-          case "${RELEASE_TAG}" in
-            client-v*)
-              VERSION="${RELEASE_TAG#client-v}"
-              ;;
-            v*)
-              VERSION="${RELEASE_TAG#v}"
-              if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo "::error::Release tag ${RELEASE_TAG} does not look like v<semver>; got version: ${VERSION}"
-                exit 1
-              fi
-              ;;
-            *)
-              echo "::error::Stable client releases must use tags shaped like vX.Y.Z or client-vX.Y.Z"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            VERSION="${VERSION#v}"
+            if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::version input must be <semver>; got: ${VERSION}"
               exit 1
-              ;;
-          esac
+            fi
+          else
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+            case "${RELEASE_TAG}" in
+              client-v*)
+                VERSION="${RELEASE_TAG#client-v}"
+                ;;
+              v*)
+                VERSION="${RELEASE_TAG#v}"
+                if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                  echo "::error::Release tag ${RELEASE_TAG} does not look like v<semver>; got version: ${VERSION}"
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "::error::Stable client releases must use tags shaped like vX.Y.Z or client-vX.Y.Z"
+                exit 1
+                ;;
+            esac
+          fi
 
           # working-directory default is `operator/`, no extra cd.
           PACKAGE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
           if [ "${VERSION}" != "${PACKAGE_VERSION}" ]; then
-            echo "::error::Release tag version ${VERSION} does not match operator/package.json version ${PACKAGE_VERSION}"
+            echo "::error::Requested version ${VERSION} does not match operator/package.json version ${PACKAGE_VERSION}"
             exit 1
           fi
 
