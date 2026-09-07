@@ -1,13 +1,16 @@
 # DR-2026-09-07 — Retrieval-visibility is a publisher recommendation, not a permission
 
 - **Date:** 2026-09-07.
-- **Status:** **Proposed — awaiting operator ratification.** Design issue #1994 is
-  discussion-first and blocked on human by its own acceptance text. Nothing in this record
-  is enacted; no ratified spec is edited by the change that carries it.
+- **Status:** Accepted — operator ruling on [PR #4149](https://github.com/Jinn-Network/mono/pull/4149)
+  (Ritsu, 2026-09-07): all five rulings ratified as written, and this record's discriminator
+  (§The discriminator) adopted as the going-forward rule for what belongs on a record. That
+  ruling discharges design issue #1994's "discussion-first — blocked on human" condition.
+  Enactment is carried by the follow-ups named in §Consequences; this record edits no
+  ratified spec and changes no behavior.
 - **Owning docs:** [`docs/superpowers/specs/2026-07-17-corpus-supply-design.md`](../../docs/superpowers/specs/2026-07-17-corpus-supply-design.md) §5
   (the two-tier serving rule, W2 made precise).
-- **Would amend on ratification:** corpus-supply-design §5 (the mark's contract, and the
-  standing of the engine-autoload carve-out); the semantics note on #1824.
+- **Amends, through the follow-ups in §Consequences:** corpus-supply-design §5 (the mark's
+  contract, and the standing of the engine-autoload carve-out); the semantics note on #1824.
 - **Relates to:** #1994 (this record); #1824 (introduced the mark); #1967 / [`2026-07-22-scrub-redesign-design.md`](../../docs/superpowers/specs/2026-07-22-scrub-redesign-design.md)
   (the consent and distribution thread); [DR-2026-07-17](./2026-07-17-stage2-charter.md)
   Decision 4 (the policy-admission amendment to W2) and Decision 1 (the parked
@@ -172,6 +175,10 @@ publication gate, where nothing reads today.
 
 ## Consequences on ratification
 
+Ratification makes these due. This record enacts none of them — it is the decision, not its
+execution — so an item still listed below means the follow-through is outstanding, never
+that the ruling is unsettled.
+
 - Amend corpus-supply-design §5: the mark is a publisher recommendation; the overlay pattern
   is named and consumers declare theirs; the autoload bullet becomes a worked example rather
   than an exception.
@@ -186,7 +193,7 @@ publication gate, where nothing reads today.
   the published projection. A constant field that reads as a permission is a trap for the
   next reader, and it is the reason this gap went unnoticed.
 
-## Open question for the operator
+## The product question, and its answer
 
 Ruling 4 needs one product and legal call this record should not make: is the contributor
 grant a single bit ("published means retrievable by anyone"), or a small vocabulary over
@@ -200,3 +207,10 @@ would be guessing at the classes, and the guess would be baked into signed recor
 cannot be revised without re-minting — the precise failure this record diagnoses for
 `retrievalVisible`. Adding a class to a vocabulary later is a schema-additive change;
 retracting a class contributors relied on is not.
+
+**Answer.** The operator ratified this record as proposed, which adopts the recommendation:
+a single grant. No separate ruling was given on the boolean-versus-enumeration shape, so the
+recommendation stands as the working answer rather than as an independently reasoned one —
+enough to write the field against, and revisable while it is unwritten. The shape is fixed
+when ruling 4 lands with the scrub-redesign lane (#1967 §6), which is also the last moment
+it can change cheaply: after that the grant is minted into signed records.
