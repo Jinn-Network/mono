@@ -1064,18 +1064,6 @@ const V8_SHAPE = {
   anchors: { anchors: [], subjects: [], invalid: [] },
 };
 
-test("no paragraph of the default human render carries a retired verdict word (issue #3510)", async () => {
-  const { renderVerifiedBundle } = await import("../dist/index.js");
-  // These two shapes are what reaches the paragraphs the golden bundle cannot: `/5` renders the
-  // artifact-content report and its limitation, `/8` the anchor report and the anchor-limits
-  // paragraph. All four render empty over golden's format /2, so the real-binary assertion up in
-  // the golden test guards the signer block and this one guards the rest — they are not two
-  // spellings of the same coverage.
-  for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
-    assert.doesNotMatch(renderVerifiedBundle(shape), /verified|certified|validated|audited/i, shape.format);
-  }
-});
-
 /** The rendered check rows: every line that begins with one of the checks the shape declares. */
 function checkRows(output, checks) {
   return checks.map((check) => {
@@ -1159,5 +1147,19 @@ test("no check name is renamed by the gloss (issue #3861)", async () => {
     for (const check of shape.checks) {
       assert.match(output, new RegExp(`^${check} `, "m"), `${check} must print verbatim at the start of its row`);
     }
+  }
+});
+
+// ── The retired verdict word, across every rendered paragraph (issue #3510) ─────────────────────
+
+test("no paragraph of the default human render carries a retired verdict word (issue #3510)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  // These two shapes are what reaches the paragraphs the golden bundle cannot: `/5` renders the
+  // artifact-content report and its limitation, `/8` the anchor report and the anchor-limits
+  // paragraph. All four render empty over golden's format /2, so the real-binary assertion up in
+  // the golden test guards the signer block and this one guards the rest — they are not two
+  // spellings of the same coverage.
+  for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
+    assert.doesNotMatch(renderVerifiedBundle(shape), /verified|certified|validated|audited/i, shape.format);
   }
 });
