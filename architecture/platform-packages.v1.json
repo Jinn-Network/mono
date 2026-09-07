@@ -278,7 +278,7 @@
       "stable": true
     },
     "implementations-v1": {
-      "expectedPackageCount": 62,
+      "expectedPackageCount": 63,
       "publishPolicies": [
         "canary-and-stable"
       ],

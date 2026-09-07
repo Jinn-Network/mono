@@ -2,10 +2,10 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalPolicy": 2,
-    "implementationsV1": 62,
-    "inventory": 99,
+    "implementationsV1": 63,
+    "inventory": 100,
     "otherPackagesRootEntries": 15,
-    "packagesRootEntries": 93,
+    "packagesRootEntries": 94,
     "sealedPlatformV1": 14
   },
   "graph": {
@@ -18578,7 +18578,7 @@
         "sealed-platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 62,
+      "expectedPackageCount": 63,
       "packages": [
         "@jinn-network/attestation-issuer",
         "@jinn-network/benchmarking-aggregate",
