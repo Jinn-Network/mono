@@ -9,6 +9,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // task-execution-testing's runtime closure includes backend-local/{supervisor,workspace,
 // launchers,assembly} plus the assembly's evidence contract deps.
 const dependencyChain = [
+  ["@jinn-network/contract-abis", join(packageRoot, "..", "..", "contract-abis")],
   ["@jinn-network/evidence-protocol", join(packageRoot, "..", "..", "evidence", "protocol")],
   ["@jinn-network/evidence-repository", join(packageRoot, "..", "..", "evidence", "repository")],
   ["@jinn-network/evidence-discovery", join(packageRoot, "..", "..", "evidence", "discovery")],
