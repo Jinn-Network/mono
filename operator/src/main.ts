@@ -718,9 +718,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       operatorArtifacts: {
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
         operatorConfig: operatorArtifactsConfig,
-        onOperatorConfigUpdated: (operator) => {
-          config.operator = operator;
-        },
       },
       // Issue #420: one-click operator debug report. The bundle assembler
       // reads the live resolved `config` so the download reflects env

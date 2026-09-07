@@ -2,12 +2,13 @@
  * Explicit restart-required flag (issue #2408, PR #2424 review finding F1).
  *
  * Spec §6.5's parenthetical mechanism sketch was "config-file-newer-than-boot" (mtime
- * comparison). That fires PERMANENTLY for any operator who completes onboarding or edits
- * pricing: both `main.ts`'s `markOnboardingComplete` write path and
- * `operator-artifacts-endpoint.ts`'s `POST /v1/operator/pricing` bump the config file's mtime
- * WHILE ALSO hot-applying in-memory (`config.onOperatorConfigUpdated`) — no restart is actually
- * needed, but mtime can't distinguish "wrote and hot-applied" from "wrote and needs a restart".
- * There is also a stale-`daemonStartedAt` edge in setup mode. See the PR #2424 review.
+ * comparison). That fires PERMANENTLY for any operator who completes onboarding: `main.ts`'s
+ * `markOnboardingComplete` write path bumps the config file's mtime WHILE ALSO hot-applying
+ * in-memory — no restart is actually needed. Pricing writes bump the same mtime but DO
+ * genuinely need a restart (their consumers are boot-time snapshots; see below), and mtime
+ * cannot tell the two apart: it can't distinguish "wrote and hot-applied" from "wrote and
+ * needs a restart". There is also a stale-`daemonStartedAt` edge in setup mode. See the
+ * PR #2424 review.
  *
  * **Ruling: the mechanism changes; the semantic stays.** This is an explicit, in-memory flag
  * set ONLY by the write paths that the daemon has never hot-applied — exactly what the
@@ -16,6 +17,10 @@
  *     restart-required, no hot-apply path exists.
  *   - `setup-endpoints.ts`'s rpcUrl (network config) endpoint — always restart-required, no
  *     hot-apply path exists.
+ *   - `operator-artifacts-endpoint.ts`'s `POST /v1/operator/pricing` — restart-required since
+ *     issue #2427, which removed a hot-apply that reassigned `config.operator` without reaching
+ *     any live consumer (artifact packaging, live publishing, and endpoint stamping all read
+ *     boot-time snapshots taken in `main.ts`).
  *
  * The join- and leave-SolverNet endpoints were the third and fourth writers until Wave-4 D1
  * (DR-2026-08-05) retired them with the `joinedSolverNets` claim gate. Join was the one caller

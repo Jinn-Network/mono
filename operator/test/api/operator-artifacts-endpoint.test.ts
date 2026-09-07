@@ -1,10 +1,14 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { Hono } from 'hono';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../src/store/store.js';
 import { addOperatorArtifactsRoutes } from '../../src/api/operator-artifacts-endpoint.js';
+import {
+  isRestartRequired,
+  resetRestartRequiredForTest,
+} from '../../src/api/restart-required-state.js';
 
 let stores: Store[] = [];
 
@@ -284,6 +288,10 @@ describe('GET /v1/operator/artifacts', () => {
 });
 
 describe('POST /v1/operator/pricing', () => {
+  beforeEach(() => {
+    resetRestartRequiredForTest();
+  });
+
   it('persists future-artifact pricing under config.operator', async () => {
     const store = memoryStore();
     const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
@@ -352,6 +360,37 @@ describe('POST /v1/operator/pricing', () => {
     });
   });
 
+  // Issue #2427: the pricing write is genuinely restart-required — every live
+  // consumer snapshots `config.operator` at boot — so it must set the explicit
+  // flag the `restart_required` notification reads, not only claim it in the body.
+  it('marks the daemon restart-required on a successful write', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, `${JSON.stringify({ network: 'testnet' }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    expect(isRestartRequired()).toBe(false);
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        publicEndpoint: 'https://op.example.com',
+        defaultPriceUsdc: '0.001',
+        perArtifactTypePrice: {},
+        donation: { enabled: false },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { restartRequired: boolean };
+    expect(body.restartRequired).toBe(true);
+    expect(isRestartRequired()).toBe(true);
+  });
+
   it('rejects malformed price strings', async () => {
     const store = memoryStore();
     const app = new Hono();
@@ -375,5 +414,6 @@ describe('POST /v1/operator/pricing', () => {
     });
 
     expect(res.status).toBe(400);
+    expect(isRestartRequired()).toBe(false);
   });
 });
