@@ -1,13 +1,18 @@
 import { readFileSync } from "node:fs";
-import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
+import { SUPPORTED_BUNDLE_FORMATS, type VerifiedBundleSnapshot } from "./manifest.js";
 import {
   bundleIdentityLabel,
   describeRecomputedChecks,
   summarizeVerificationOutcome,
   type VerificationCheckName,
 } from "./outcome.js";
-import { verifyPublicBundle, type PublicBundleVerificationResult, type VerifyPublicBundleDeps } from "./verify.js";
-import { verifyFreezeRepo, type FreezeRepoVerificationResult } from "./freeze-repo.js";
+import {
+  verifyPublicBundleSnapshot,
+  type PublicBundleVerificationResult,
+  type VerifiedPublicBundleSnapshot,
+  type VerifyPublicBundleDeps,
+} from "./verify.js";
+import { verifyFreezeRepoSnapshot, type FreezeRepoVerificationResult } from "./freeze-repo.js";
 import type {
   AnchorSubjectReport,
   AnchorVerificationEntry,
@@ -29,14 +34,27 @@ export interface VerifierCliResult {
 }
 
 export interface VerifierCliDeps {
+  /**
+   * Returns the verification AND the authenticated snapshot it was computed from, because
+   * `--freeze-repo` renders its tree from that same snapshot. The alternative — verifying once for
+   * the verdict and again inside the freeze check — ran the second pass without the `--tsa-root` /
+   * `--ots-headers` material the caller supplied, so its anchor outcomes could differ from the
+   * reported ones with nothing saying so.
+   */
   readonly verify?: (
     bundleDir: string,
     options?: VerifyPublicBundleDeps,
-  ) => Promise<PublicBundleVerificationResult>;
+  ) => Promise<VerifiedPublicBundleSnapshot>;
   /** Test seam for the trust-material files the flags name. Defaults to the real filesystem. */
   readonly readFile?: (path: string) => Uint8Array;
-  /** Test seam for the freeze-repository comparison. Defaults to the real one. */
-  readonly freezeRepo?: (bundleDir: string, repoDir: string) => Promise<FreezeRepoVerificationResult>;
+  /**
+   * Test seam for the freeze-repository comparison. Defaults to the real one, which renders from
+   * the snapshot `verify` already returned rather than re-reading the bundle directory.
+   */
+  readonly freezeRepo?: (
+    snapshot: VerifiedBundleSnapshot,
+    repoDir: string,
+  ) => FreezeRepoVerificationResult | Promise<FreezeRepoVerificationResult>;
 }
 
 /**
@@ -480,9 +498,9 @@ export async function runVerifierCli(
     };
   }
 
-  let result: Awaited<ReturnType<typeof verifyPublicBundle>>;
+  let verified: VerifiedPublicBundleSnapshot;
   try {
-    result = await (deps.verify ?? verifyPublicBundle)(
+    verified = await (deps.verify ?? verifyPublicBundleSnapshot)(
       parsed.bundleDir,
       anchorTrust === undefined ? {} : { anchorTrust },
     );
@@ -496,6 +514,8 @@ export async function runVerifierCli(
     const stderr = parsed.json ? "" : `colophon-verify: ${withoutRawIdentifiers(error.message)}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
+
+  const result: PublicBundleVerificationResult = verified.verification;
 
   // A supplied binding is resolved only after the bundle verifies, for the same reason the freeze
   // repository is: the check needs the signer set, and a bundle that does not verify has no signer
@@ -538,13 +558,13 @@ export async function runVerifierCli(
   // The freeze repository is checked only after the bundle itself verifies: a tree derived from
   // records that do not verify has nothing to be consistent with. Its own failures are scoped to
   // it: a bundle that cannot be RENDERED as a freeze repository — no licence declared, a licence
-  // that is not an SPDX short identifier, an unreadable repository directory — is not thereby an
+  // that is not an SPDX licence expression, an unreadable repository directory — is not thereby an
   // invalid bundle, and the bundle verdict already computed above is reported either way.
   let freezeRepo: FreezeRepoVerificationResult | undefined;
   let freezeRepoFailure: { readonly code: string; readonly message: string } | undefined;
   if (parsed.freezeRepoDir !== undefined) {
     try {
-      freezeRepo = await (deps.freezeRepo ?? verifyFreezeRepo)(parsed.bundleDir, parsed.freezeRepoDir);
+      freezeRepo = await (deps.freezeRepo ?? verifyFreezeRepoSnapshot)(verified.snapshot, parsed.freezeRepoDir);
     } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause));
       freezeRepoFailure = {
