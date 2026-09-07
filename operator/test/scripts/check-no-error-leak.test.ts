@@ -12,10 +12,18 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { ErrorLeakViolation } from '../../scripts/check-no-error-leak.mjs';
 import { findErrorLeaks } from '../../scripts/check-no-error-leak.mjs';
 
-/** Build a throwaway `src/api` tree and scan it. */
-function scan(files: Record<string, string>) {
+/**
+ * Build a throwaway `src/api` tree and scan it.
+ *
+ * The return type is named rather than inferred so the guard's declared
+ * contract is stated at the point of use: a later change to what
+ * `check-no-error-leak.d.mts` exports fails here instead of quietly reshaping
+ * every assertion below.
+ */
+function scan(files: Record<string, string>): ErrorLeakViolation[] {
   const srcRoot = mkdtempSync(join(tmpdir(), 'jinn-leak-guard-'));
   const apiDir = join(srcRoot, 'api');
   mkdirSync(apiDir, { recursive: true });
