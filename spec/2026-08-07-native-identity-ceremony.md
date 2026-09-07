@@ -751,7 +751,8 @@ point of this section.** An earlier draft asserted that attaching to someone els
 blocked by the §7.4a consent chain "regardless of anchor time". It is not: the consent chain's
 first exit is genesis (`packages/trust/core/src/verify.ts:201`, `if (resolved.isGenesis) return
 { ok: true }`), and genesis is decided *by anchor time* — `isGenesisAmong` calls a binding
-founding when its `effectiveStart` is earliest among every binding asserted for that IRI
+founding when its `effectiveStart` is earliest among every binding asserted for that IRI, ties
+broken by digest
 (`binding-resolver.ts:217-223`, applied at `:298`), over the catalog's full list for the agent
 (`native-trust-catalog.ts:367`). A borrowed pre-genesis anchor is therefore precisely the lever
 that opens the exemption, not something the exemption survives. Two further facts make the case
@@ -767,11 +768,25 @@ takes effect before the evidence it revokes (`binding-resolver.ts:137-148`,
 `verify.ts:273-296`), and the authorized signer is the operator's own voucher account or
 `bindings`-scoped key (`verify.ts:252-271`) — so an operator can back-date a revocation of their
 own binding and de-attribute their own past evidence, which is exactly the non-retroactivity
-§7.4b forbids and law 6 R2 exists to protect. R2 bans cross-act *reuse*; a fresh but borrowed
-anchor is neither reuse nor covered. And because the resolver looks up revocations for the
+§7.4b forbids and law 6 exists to protect. The rule it breaks is **R1**, which requires an anchor
+"newly submitted for that act" — a pre-existing transaction is exactly not that, so calling such an
+anchor "fresh" uses the word against R1's own meaning. R2, which bans cross-act *reuse*, does not
+reach it. Neither rule is checked: both are authoring convention, per the table above. And because the resolver looks up revocations for the
 winning binding's digest alone (`binding-resolver.ts:279`), an earlier-anchored replacement
 binding for the same `(key, agent)` escapes every revocation bound to the record it supersedes —
-revocation of a stolen key defeated, entirely inside the author's own IRI.
+revocation defeated, entirely inside the author's own IRI. The actor there is the **catalog
+author**, not the key's thief: a non-genesis replacement still needs §7.4a's self-extension exit,
+which `voucherIdentityEquals` against the incumbent voucher gates (`verify.ts:205-210`). That makes
+the shared-catalog case the sharp one, where whoever holds the file can defeat another party's
+revocation.
+
+The foreign-IRI lever above also has a **denial limb**, and it is the worse of the two. The
+attacker's record is `relationship: "controls"` unconditionally
+(`packages/trust/authoring/src/binding.ts:107`) with an earlier `effectiveStart` and no
+`expiresAt`, so `findIncumbentControlVoucher` selects it as the victim's incumbent
+(`binding-resolver.ts:204-212`); the victim's own binding is then non-genesis, carries no matching
+voucher and no `consent`, and fails the consent chain outright (`verify.ts:245-249`). One borrowed
+anchor buys both takeover and denial of the legitimate key.
 
 **What actually contains all of this is catalog write authority**, and it is procedural, not
 cryptographic: a record must be in the verifier's catalog to be resolved at all, and joins are
@@ -1066,13 +1081,26 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    `compareCalendarStrictRfc3339Instants` (`packages/trust/core/src/verify.ts:282`,
    `packages/trust/core/src/rfc3339.ts:96-107`), which handles fractions and calls the two
    spellings **equal**, so no delay materializes and `RevocationSchema` accordingly accepts
-   second precision (`packages/trust/core/src/revocation.ts:30`). R4 is hygiene and consistency
-   with law 2 — where `isWithinWindow`'s raw-string comparisons genuinely do care — not a
-   defense against a live harm; it is listed as authoring convention for that reason. Law 1's
+   second precision (`packages/trust/core/src/revocation.ts:30`). So the **millisecond form** is
+   hygiene and consistency with law 2 — where `isWithinWindow`'s raw-string comparisons genuinely
+   do care — rather than a defense against a live harm. The **at-or-before clause is
+   substantive**: the clamp is `max()`, so an `effectiveFrom` set materially later than the anchor
+   block time clamps *up* to itself and `checkRevocation` skips every `atTime` before it
+   (`verify.ts:282-286`), delaying a security revocation by exactly that margin. Both halves are
+   listed as authoring convention because the verifier checks neither, not because neither
+   matters. Law 1's
    anchor-first ordering extends to revocations for the same reason it governs bindings: the
    effective time is not knowable until the anchor mines.
 
 ## 7. Security considerations
+
+> **Anchor-digest residual.** The largest security-relevant gap on this surface is not in this
+> section: it is that no verifier checks what an anchor digest is a digest of, so an anchor's
+> timestamp can be borrowed from any pre-existing transaction. §3.2b states it, its one real
+> bound (catalog write authority), and both directions it runs in — foreign-IRI takeover and
+> denial via the §7.4a genesis exemption, and retroactive or escaped revocation. §10 (f) carries
+> what closes it.
+
 
 **Clobber and fork risk.** Store creation is exclusive (hard-link `EEXIST` settles races,
 `role-identities.ts:433-451`); `openRoleSigners` inherits it — there is no code path that
@@ -1206,6 +1234,22 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   short of the successor, which sharpens the question rather than settling it. The corrective is
   a directly recomputable preimage — drop `role`, and commit to terms every catalog carries —
   and it costs every existing deployment a re-anchor.
+
+  **The trigger is not an evidentiary question alone, and this is the input that was missing.**
+  The same recomputation is what shuts the borrowed-anchor residual of §3.2b: a verifier that
+  recomputes the preimage and refuses a mismatch forces an adversary to find an old-calldata
+  window equal to the hash of a tuple they control, which is a multi-target second-preimage
+  search and infeasible. That closes the §7.4a genesis exemption, because the exemption is
+  reachable *only* through a borrowed anchor time. Whoever writes the trigger is deciding a
+  security question, not only a legibility one, and "until a trigger fires, deployments keep
+  `/v1`" is the standing exposure rather than a neutral hold. Two bounds on the claim, so the
+  successor is not over-scoped: recomputation **converts** the residual rather than eliminating
+  it — the preimage carries no timestamp, so an adversary who genuinely submitted an anchor over
+  a tuple at time T can still present that early time later, at the cost of real gas and
+  foresight of both the victim IRI and their own keys — and it does nothing for a catalog whose
+  records an attacker cannot get in front of a verifier, which is the procedural bound §3.2b
+  names as the residual's real one.
+
   Reserved as an input to the anchor-locator profile document authored in `Jinn-Network/spec`
   under DR-2026-09-03, together with the `contractAddress` → `to` rename, so the first
   published version is right rather than compatible with a mistake. Owned by

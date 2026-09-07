@@ -40,7 +40,9 @@ silent-degradation window.
 > operator's bindings, so a shared catalog comes back single-operator. A **joined** operator has
 > no path at all, since `join` needs the catalog it appends to. Only the anchor question below
 > was in scope for DR-2026-09-06; **the rest of this procedure needs its own fix and does not
-> have one yet.** Treat the steps below as a description of intent, not a runbook to execute,
+> have one yet.** A further defect lands once revocations exist: `authorCatalog` writes
+> `revocations: []`, so a wholesale re-author un-revokes everything — see
+> "Why wholesale, not `appendOperator`" below. Treat the steps below as a description of intent, not a runbook to execute,
 > until that lands.
 
 Re-run the existing ceremony against the same directory:
@@ -132,12 +134,15 @@ additive, so the old narrow-scope binding would remain alongside the new wide-sc
 operator no better off. `authorCatalog`, which the ceremony command uses, rewrites the catalog and
 does not have this problem.
 
-It has a different one, which is vacuous today and will not stay so. `authorCatalog` writes
-`revocations: []` (`packages/trust/authoring/src/catalog.ts:216`), so a wholesale re-author
-**un-revokes everything**. No revocation can exist yet — `revokeBinding`'s body is unimplemented
-(ceremony spec §3.2, §9) — but DR-2026-09-06 is the change that makes revocations authorable, so
-the first re-author after the first revocation would silently restore a revoked key. Add it to
-the defect list above: this procedure needs its own fix before revocations exist.
+It has a different one, and it belongs on the defect list at the top of this runbook.
+`authorCatalog` writes `revocations: []` (`packages/trust/authoring/src/catalog.ts:216`), so a
+wholesale re-author **un-revokes everything**. `appendOperator` does not have this problem — it
+rewrites around the loaded file and preserves `revocations` — so this is specific to the verb the
+ceremony command actually uses. Jinn cannot author a revocation yet (`revokeBinding`'s body is
+unimplemented, ceremony spec §3.2, §9), though a hand-written catalog entry resolves today because
+the schema carries `revocations` and the opener honors them. DR-2026-09-06 does not itself make
+revocations authorable; it unblocks the §9 rotation follow-up that will. Either way this procedure
+needs its own fix before the first revocation exists.
 
 ## Cost and sequencing
 
