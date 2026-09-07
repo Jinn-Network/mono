@@ -44,7 +44,8 @@ describe('prediction.v1 SolverTypeDefinition registration', () => {
       source: { type: 'prediction-market', venue: 'polymarket' },
       consensusSnapshot: { method: 'best-bid-ask-midpoint', source: 'polymarket-clob' },
     });
-    expect(overlay.window!.endTs).toBeGreaterThan(overlay.window!.startTs);
+    const window = overlay.window as { startTs: number; endTs: number };
+    expect(window.endTs).toBeGreaterThan(window.startTs);
   });
 
   it('rejects the legacy Chainlink-threshold shape the fixture used to carry (#2314 regression)', async () => {

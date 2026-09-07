@@ -22,7 +22,6 @@
     "kept accurate, not extended."
   ],
   "solverType": "prediction.v1",
-  "role": "restoration",
   "window": { "startTs": 1767225600000, "endTs": 1767229200000 },
   "claimPolicy": {
     "mode": "parallel",
