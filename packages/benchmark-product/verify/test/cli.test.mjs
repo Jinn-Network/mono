@@ -510,12 +510,11 @@ test("the golden bundle's default output carries no identifier and no verdict wo
   assert.doesNotMatch(human.stdout, /urn:/);
   assert.doesNotMatch(human.stdout, /did:key/);
   // The retired verdict word, over the whole real render rather than a synthetic one (issue #3510).
-  // The vocabulary guard above this test reads only the first line of `renderVerifiedBundle` on
-  // hand-built shapes, so the signer block, the artifact-content report and its limitation, and the
-  // anchor-limits paragraph are all unreached by it. This test already runs the real binary over a
-  // real bundle, so it is where a `Verified` label reintroduced into any of those paragraphs gets
-  // caught. Same word list as that guard, so the two speak one vocabulary; `report-verification`
-  // and `signature-validity` are check names and match none of it.
+  // The vocabulary guard above reads only the first line of `renderVerifiedBundle` on hand-built
+  // shapes; this one runs the real binary, so it also covers the caveats, the check list, the
+  // signer block and the closing lines. Golden is format /2, so the artifact-content and anchor
+  // paragraphs render empty and stay out of reach here — and regenerating it to an anchor-carrying
+  // format would trip this, because `renderAnchor` prints the `verified` proof status verbatim.
   assert.doesNotMatch(human.stdout, /verified|certified|validated|audited/i);
   // The publisher line now carries the bare key fingerprint (issue #2983): with no binding supplied
   // that digest is the only name this key has, and printing nothing would read as nothing to say.
