@@ -36,7 +36,7 @@ function run({ conclusion, hoursAgo, event = 'push', branch = 'next', status = '
     conclusion,
     event,
     head_branch: branch,
-    head_sha: `${number}`.padStart(40, 'a'),
+    head_sha: `${number}`.repeat(8).slice(0, 40),
     html_url: `https://github.com/o/r/actions/runs/${90000 + number}`,
     created_at: at,
     run_started_at: at,

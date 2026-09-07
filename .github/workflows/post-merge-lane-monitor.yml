@@ -28,7 +28,10 @@ on:
   workflow_dispatch:
 
 # This trusted monitor never checks out or executes code from a monitored revision:
-# `workflow_run` and `schedule` both run this workflow from the default branch.
+# `workflow_run` and `schedule` both run this workflow from the default branch. That is
+# also why it stays inert until the Monday cut promotes `main` past this commit; validate
+# it with one `workflow_dispatch` run after that, per
+# docs/runbooks/post-merge-lane-monitor.md.
 permissions:
   actions: read
   contents: read
@@ -82,13 +85,19 @@ jobs:
               if (error.status !== 422) throw error;
             }
 
-            // Every lane is reconciled on every invocation, whichever lane's
-            // completion woke this run. A dropped or out-of-order workflow_run
-            // delivery then costs at most one scheduled tick, and no lane depends
-            // on its own events arriving.
-            for (const lane of MONITORED_LANES) {
-              // A window, not the full history: the classification needs only the
-              // leading run streak and the newest success behind it.
+            const openAlertsFor = async (lane) => {
+              const prefix = titlePrefixFor(lane);
+              return (await github.paginate(
+                github.rest.issues.listForRepo,
+                { ...repo, state: 'open', labels: label, per_page: 100 },
+              ))
+                .filter((issue) => issue.title.startsWith(prefix))
+                .sort((a, b) => a.number - b.number);
+            };
+
+            const reconcileLane = async (lane) => {
+              // A window, not the full history: the classification needs only the leading
+              // run streak and the newest success behind it.
               const { data } = await github.rest.actions.listWorkflowRuns({
                 ...repo,
                 workflow_id: lane.file,
@@ -96,26 +105,21 @@ jobs:
                 event: 'push',
                 per_page: 50,
               });
-              const verdict = classifyLane({
-                lane,
-                runs: data.workflow_runs,
-                now: Date.now(),
-              });
-
-              const titlePrefix = titlePrefixFor(lane);
-              const openAlerts = (await github.paginate(
-                github.rest.issues.listForRepo,
-                { ...repo, state: 'open', labels: label, per_page: 100 },
-              ))
-                .filter((issue) => issue.title.startsWith(titlePrefix))
-                .sort((a, b) => a.number - b.number);
+              const verdict = classifyLane({ lane, runs: data.workflow_runs, now: Date.now() });
+              const openAlerts = await openAlertsFor(lane);
 
               if (verdict.state !== 'alert') {
+                if (openAlerts.length === 0) {
+                  core.info(`${lane.workflow}: ${verdict.state}.`);
+                  return;
+                }
+                // Only a proven recovery closes an alert. A `wait` verdict is a lane that is
+                // still red and merely not yet re-confirmed, which is not evidence of health.
+                if (verdict.state === 'wait') {
+                  core.info(`${lane.workflow}: still failing; leaving ${openAlerts.length} alert(s) open.`);
+                  return;
+                }
                 for (const alert of openAlerts) {
-                  if (verdict.state === 'wait') {
-                    core.info(`${lane.workflow}: failing but unconfirmed; leaving #${alert.number} open.`);
-                    continue;
-                  }
                   await github.rest.issues.createComment({
                     ...repo,
                     issue_number: alert.number,
@@ -129,8 +133,7 @@ jobs:
                   });
                   core.notice(`Closed ${lane.workflow} alert #${alert.number}.`);
                 }
-                if (openAlerts.length === 0) core.info(`${lane.workflow}: ${verdict.state}.`);
-                continue;
+                return;
               }
 
               const { title, body } = renderAlert({ lane, verdict });
@@ -138,12 +141,12 @@ jobs:
               if (!canonical) {
                 const created = await github.rest.issues.create({ ...repo, title, body, labels: [label] });
                 core.warning(`Opened ${lane.workflow} alert #${created.data.number}.`);
-                continue;
+                return;
               }
 
-              // The body is derived from run data alone, so an unchanged lane
-              // re-renders byte-identically and this comments on genuinely new
-              // failures only, never once per scheduled tick.
+              // The body is derived from run data alone, so an unchanged lane re-renders
+              // byte-identically. This comments on genuinely new failures only, never once
+              // per scheduled tick.
               if (canonical.body !== body || canonical.title !== title) {
                 if (canonical.body !== body) {
                   await github.rest.issues.createComment({ ...repo, issue_number: canonical.number, body });
@@ -168,4 +171,23 @@ jobs:
                 });
                 core.notice(`Closed duplicate ${lane.workflow} alert #${duplicate.number}.`);
               }
+            };
+
+            // Every lane is reconciled on every invocation, whichever lane's completion woke
+            // this run, so a dropped or out-of-order workflow_run delivery costs at most one
+            // scheduled tick. Lanes are isolated from each other too: this monitor exists
+            // because a silent guard is worse than none, so one lane's failed read must not
+            // stop the others from filing. Errors are collected and rethrown, leaving the run
+            // red rather than quietly incomplete.
+            const failures = [];
+            for (const lane of MONITORED_LANES) {
+              try {
+                await reconcileLane(lane);
+              } catch (error) {
+                core.error(`${lane.workflow}: reconciliation failed - ${error.message}`);
+                failures.push(`${lane.workflow}: ${error.message}`);
+              }
+            }
+            if (failures.length > 0) {
+              throw new Error(`Lane reconciliation failed:\n${failures.join('\n')}`);
             }

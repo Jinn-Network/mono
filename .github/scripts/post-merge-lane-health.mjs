@@ -58,13 +58,15 @@ export const MONITORED_LANES = Object.freeze([
     workflow: 'Layer Packages npm Publish',
     file: 'layer-npm-publish.yml',
     branch: 'next',
-    staleArtifact: 'The layer packages’ canary dist-tags keep resolving to the last versions this lane published.',
+    staleArtifact:
+      'The canary dist-tags for the layer packages keep resolving to the last versions this lane published.',
   }),
   Object.freeze({
     workflow: 'Stack npm Publish',
     file: 'stack-npm-publish.yml',
     branch: 'next',
-    staleArtifact: 'The stack packages’ canary dist-tags keep resolving to the last versions this lane published.',
+    staleArtifact:
+      'The canary dist-tags for the stack packages keep resolving to the last versions this lane published.',
   }),
 ]);
 

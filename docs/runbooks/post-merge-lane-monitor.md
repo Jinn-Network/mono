@@ -39,6 +39,15 @@ Runs that decide nothing are discarded first: `cancelled` (concurrency supersede
 So a genuine infrastructure blip costs nothing, and a real break reaches the issue tracker
 within 24 hours plus one six-hourly tick — inside one working day.
 
+## When it starts working
+
+GitHub runs `workflow_run`, `schedule`, and `workflow_dispatch` workflows from the
+**default branch only**. This repository promotes `main` from `next` at the Monday named
+cut, so the monitor is inert between merging to `next` and that promotion. After the first
+promotion that carries it, validate it with one `workflow_dispatch` run before trusting it
+— the same "enable after a manual run validates" discipline as `indexer-monitor.yml` and
+`broadcast-bot.yml`. A dispatch against healthy lanes is a no-op that logs one line per lane.
+
 ## Reading an alert
 
 The body names the failing run, the first failure of the streak, and the **last successful
@@ -53,6 +62,17 @@ comment means a new failing run.
 Fix or re-run the lane. A later successful run closes the alert; it reopens on its own if
 the lane goes red again. Closing it by hand without fixing the lane only defers the next
 alert to the next failing run.
+
+## The monitor's own health
+
+One lane's failed read cannot suppress the others: each lane is reconciled inside its own
+try/catch, and collected errors are rethrown at the end so the run still goes red. What the
+monitor cannot do is alert on its own total failure — nothing watches the watchman, and
+building a second monitor to do it only moves the problem. Two things bound that residual gap:
+the registry test runs pre-merge in `Repository structure`, so the realistic drift (a lane
+renamed, moved, or deleted out from under the registry) is caught before it can land; and the
+monitor re-runs the same test as its first step, so a run that gets that far has already proved
+its own registry.
 
 ## Adding a lane
 
