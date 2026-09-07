@@ -58,6 +58,7 @@ import { IDENTITY_REGISTRY_ABI } from './abis/IdentityRegistry.js';
 import { EXTERNAL_STAKING_DISTRIBUTOR_ABI } from './abis/ExternalStakingDistributor.js';
 import { STOLAS_STAKING_PROXY_ABI } from './abis/StolasStakingProxy.js';
 import {
+  BASE_SEPOLIA_CHAIN_ID,
   BASE_SEPOLIA_IDENTITY_REGISTRY_ADDRESS,
   BASE_SEPOLIA_IDENTITY_REGISTRY_START_BLOCK,
   BASE_SEPOLIA_JINN_ROUTER_ADDRESS,
@@ -116,8 +117,13 @@ function buildSnapshotConfig(): ReturnType<typeof createConfig> {
 const testnetConfig = createConfig({
   chains: {
     baseSepolia: {
-      // Shared with the API's served-chain guard so the two cannot drift (#2447).
-      id: indexedChainIds()[0]!,
+      // The same constant `indexedChainIds()` returns for this (non-snapshot)
+      // deployment, so the API's served-chain guard cannot drift from what is
+      // synced (#2447). Read directly rather than through the helper: this
+      // object is constructed even in snapshot mode — where it is discarded and
+      // used only for its type — and the helper would then stamp the snapshot's
+      // chain id onto a config carrying Base Sepolia addresses.
+      id: BASE_SEPOLIA_CHAIN_ID,
       rpc: buildIndexerFallback(baseSepoliaUrls),
       // Block-range cap for eth_getLogs: 2000 (issue #592, AC4). Bounds the
       // chunk size so the slowest fallback in the chain (sepolia.base.org at
