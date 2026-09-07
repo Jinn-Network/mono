@@ -189,12 +189,18 @@ already yields every entry oldest-first. Then:
    naming the pending one through `upgrades`, and both cover the same subject, so
    count subjects rather than announcements.
 4. **Read off coverage.** A substantive entry is anchored when its digest is in that
-   set. One exclusion: the newest substantive entry is never yet anchored, because
-   its anchor announcement would be a later entry that does not exist yet. That is
-   the mechanism's shape, not a gap.
-5. **Name the gap exactly.** The unanchored substantive sequences are the gap.
-   Because the denominator is exact, report them by sequence rather than as a count
-   or a proportion.
+   set. Normalize the two spellings before comparing: `recordDigest` returns
+   `sha256:<hex>`, while an `AnchorEvidence` record's own subject carries the bare
+   hex in a digest set (`{"sha256": "<hex>"}`).
+5. **Separate the gap from the tail.** The unanchored substantive sequences are the
+   gap — with one caveat at the tip. An entry's anchor is announced by a *later*
+   entry, so a substantive append whose anchor-announcing append has not landed yet
+   reads as unanchored until it does. If the newest entry on the chain is substantive
+   rather than anchor-announcing, treat its sequence as pending rather than as a gap;
+   once the chain is at rest every substantive entry including the last one is either
+   anchored or a real gap.
+6. **Name what is left exactly.** Because the denominator is exact, report the
+   remaining unanchored sequences by sequence rather than as a count or a proportion.
 
 ### Reading the result honestly
 
