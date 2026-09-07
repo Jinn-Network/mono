@@ -120,7 +120,7 @@ describe("publication registration authority and exact public chain", () => {
       RUN_RECORD_KIND,
     ]);
     expect(ordered.at(-1)?.receipt.record?.digest).toBe(`sha256:${runSha256}`);
-  }, 30_000);
+  });
 
   test("recovers the same Run receipt and registration digests after a completed-plan crash before its RunState checkpoint", async () => {
     const now = clock();
@@ -160,7 +160,7 @@ describe("publication registration authority and exact public chain", () => {
     expect(recovered.publication!.registration.announcedAt).toBe(frozenAt);
     expect(recovered.publication!.registration.digests).toEqual(expectedDigests);
     expect((await source.writer.readState())!.last).toEqual(sourceHeadBeforeRetry);
-  }, 30_000);
+  });
 
   test("refuses authorless source-absent records; durable origins become exact verify-origin records", async () => {
     const now = clock();
@@ -216,5 +216,5 @@ describe("publication registration authority and exact public chain", () => {
     });
     expect(registered.ok, JSON.stringify(registered)).toBe(true);
     expect(verified).toHaveLength(raw.tasks.length + 1);
-  }, 30_000);
+  });
 });

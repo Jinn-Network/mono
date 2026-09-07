@@ -281,7 +281,7 @@ describe("DeepSWE v1.1 official-suite intake", () => {
     expect(selected.ok).toBe(false);
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/maxPerCell of at least 3/u);
-  }, 30_000);
+  });
 
   test("official suite refuses binary-instrument majority-k", async () => {
     const context = await prepareDraft("binary");
@@ -293,7 +293,7 @@ describe("DeepSWE v1.1 official-suite intake", () => {
     expect(selected.ok).toBe(false);
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/binary-instrument/u);
-  }, 30_000);
+  });
 
   test("one-task qualify refuses unless COLOPHON_DEEPSWE_ONE_TASK_QUALIFY=1", () => {
     const script = join(dirname(fileURLToPath(import.meta.url)), "../../../scripts/deepswe-v1.1-one-task-qualify.mjs");

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from "vitest";
 
-import { resolveRuntimeConfig } from "../config.js";
+import { ENVIRONMENT_KEYS, resolveRuntimeConfig } from "../config.js";
 
 const base = {
   env: {} as Readonly<Record<string, string | undefined>>,
@@ -22,6 +22,7 @@ describe("corpus configuration", () => {
     expect(config.corpus.sources).toEqual([]);
     expect(config.corpus.maxEntriesPerSync).toBe(500);
     expect(config.corpus.syncTimeoutMs).toBe(30_000);
+    expect(config.corpus.syncIntervalMs).toBe(300_000);
     expect(config.corpus.acknowledgeUnverifiedChain).toBe(false);
     expect(config.corpus.trust).toBeUndefined();
   });
@@ -51,6 +52,28 @@ describe("corpus configuration", () => {
     expect(config.corpus.sources).toHaveLength(1);
     expect(config.corpus.sources[0]!.servingRoot).toBe("https://archive.test");
     expect(config.corpus.trust).toBeUndefined();
+  });
+
+  test("rejects a sync interval below one second", () => {
+    expect(() =>
+      resolveRuntimeConfig({ ...base, file: { corpus: { syncIntervalMs: 999 } } }),
+    ).toThrow(/syncIntervalMs/);
+  });
+
+  test("rejects a sync interval above one day", () => {
+    expect(() =>
+      resolveRuntimeConfig({ ...base, file: { corpus: { syncIntervalMs: 86_400_001 } } }),
+    ).toThrow(/syncIntervalMs/);
+  });
+
+  test("the sync interval is file-only — no environment key moves it (custody law C2)", () => {
+    expect(Object.values(ENVIRONMENT_KEYS)).toEqual(["JINN_PLUGIN_HOME", "JINN_PLUGIN_LOG_LEVEL"]);
+    const config = resolveRuntimeConfig({
+      ...base,
+      env: { JINN_PLUGIN_CORPUS_SYNC_INTERVAL_MS: "1000" },
+      file: { corpus: { syncIntervalMs: 60_000 } },
+    });
+    expect(config.corpus.syncIntervalMs).toBe(60_000);
   });
 
   test("rejects a non-https serving root", () => {

@@ -102,7 +102,7 @@ const JQ_STUB = [
  * `gitMode: 'real'` keeps the real git on PATH inside a throwaway repository so a
  * genuinely failing `git diff` (bad object) can be observed rather than simulated.
  */
-function runSelectionScript({ script, env, gitMode = 'stub' }) {
+function runSelectionScript({ script, env, gitMode = 'stub', jqStub = JQ_STUB }) {
   const dir = mkdtempSync(join(tmpdir(), 'pac-selection-'));
   try {
     const bin = join(dir, 'bin');
@@ -114,7 +114,7 @@ function runSelectionScript({ script, env, gitMode = 'stub' }) {
 
     if (gitMode === 'stub') writeExecutable(join(bin, 'git'), GIT_STUB);
     writeExecutable(join(bin, 'node'), SELECTOR_STUB);
-    writeExecutable(join(bin, 'jq'), JQ_STUB);
+    writeExecutable(join(bin, 'jq'), jqStub);
 
     if (gitMode === 'real') {
       execFileSync('git', ['init', '-q', dir], { stdio: 'ignore' });
@@ -191,12 +191,17 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   assert.match(selectionJob, /fetch-depth: 0/u);
   assert.match(selectionJob, /timeout-minutes: 5/u);
   assert.match(selectionJob, /PR_BASE_REF: \$\{\{ github\.base_ref \}\}/u);
+  assert.match(selectionJob, /PR_HEAD_REF: \$\{\{ github\.head_ref \}\}/u);
   assert.match(selectionJob, /MG_BASE_SHA: \$\{\{ github\.event\.merge_group\.base_sha \}\}/u);
   // The base-ref carve-out is asserted as one contiguous block, before the fast-lane
   // unselect, so a future edit cannot reorder them and silently thin the hotfix lane.
+  // The head-ref clause is part of that same contiguous block: the standing
+  // release-review PR (`base:main head:next`, issue #2831) mirrors merge-group runs
+  // that already verified every commit it carries, so it takes the fast lane while
+  // every other `main`-targeting head — the real hotfixes — still verifies in full.
   assert.match(
     selectionJob,
-    /^\s+pull_request\)\n\s+if \[ "\$\{PR_BASE_REF\}" = main \]; then\n\s+echo '[^']*'\n\s+echo 'run=true' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0\n\s+fi\n\s+echo 'pr-fast-lane: full verification runs on the merge group'\n\s+echo 'run=false' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0/mu,
+    /^\s+pull_request\)\n\s+if \[ "\$\{PR_BASE_REF\}" = main \] && \[ "\$\{PR_HEAD_REF\}" != next \]; then\n\s+echo '[^']*'\n\s+echo 'run=true' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0\n\s+fi\n\s+echo 'pr-fast-lane: full verification runs on the merge group'\n\s+echo 'run=false' >> "\$\{GITHUB_OUTPUT\}"\n\s+exit 0/mu,
   );
   // The PR lane must not diff at all — a surviving pull_request base/head pair would mean
   // fast mode was only half-applied and the PR lane still paid for selection.
@@ -218,6 +223,14 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   assert.match(selectionJob, /run: \|\n\s+set -o pipefail\n/u);
   assert.match(selectionJob, /if \[ -z "\$\{diff_base\}" \] \|\| \[ -z "\$\{diff_head\}" \]; then/u);
   assert.match(selectionJob, /::error::selection endpoints unresolved on \$\{EVENT_NAME\}/u);
+  // The jq hop is assigned before it is echoed. Folded into the `echo` argument the
+  // substitution is invisible to `set -e`, and a dead jq publishes an empty `run=` that
+  // unselects the whole battery at exit 0 (#2456). Executable coverage is below.
+  assert.match(
+    selectionJob,
+    /\n\s+run_value="\$\(jq -r '\.run' <<<"\$\{selection\}"\)"\n\s+echo "run=\$\{run_value\}" >> "\$\{GITHUB_OUTPUT\}"/u,
+  );
+  assert.doesNotMatch(selectionJob, /echo "run=\$\(/u);
   assert.doesNotMatch(source, /npm (?:publish|install)|yarn npm publish/u);
   // Ban publish-verified-platform script invocations; wiring its test file is allowed.
   assert.doesNotMatch(source, /publish-verified-platform(?!\.test\.mjs)/u);
@@ -243,6 +256,7 @@ test('the selection script resolves its diff endpoints from the event it is give
     env: {
       EVENT_NAME: 'pull_request',
       PR_BASE_REF: 'next',
+      PR_HEAD_REF: 'autopilot/1',
       MG_BASE_SHA: '',
       GITHUB_SHA: 'checked-out-sha',
     },
@@ -257,6 +271,7 @@ test('the selection script resolves its diff endpoints from the event it is give
     env: {
       EVENT_NAME: 'pull_request',
       PR_BASE_REF: 'main',
+      PR_HEAD_REF: 'fix/hotfix-branch',
       MG_BASE_SHA: '',
       GITHUB_SHA: 'checked-out-sha',
     },
@@ -265,12 +280,30 @@ test('the selection script resolves its diff endpoints from the event it is give
   assert.equal(hotfix.gitArgs, '');
   assert.match(hotfix.output, /^run=true$/mu);
 
+  // Release-review lane: the standing `base:main head:next` PR resynchronizes on every
+  // push to `next` and mirrors merge groups that already verified the same commits, so
+  // it unselects like the fast lane rather than paying the full battery again (#2831).
+  const releaseReview = runSelectionScript({
+    script,
+    env: {
+      EVENT_NAME: 'pull_request',
+      PR_BASE_REF: 'main',
+      PR_HEAD_REF: 'next',
+      MG_BASE_SHA: '',
+      GITHUB_SHA: 'checked-out-sha',
+    },
+  });
+  assert.equal(releaseReview.status, 0, releaseReview.stderr);
+  assert.equal(releaseReview.gitArgs, '');
+  assert.match(releaseReview.output, /^run=false$/mu);
+
   // The merge-group head is `GITHUB_SHA`, not a second payload field.
   const mergeGroup = runSelectionScript({
     script,
     env: {
       EVENT_NAME: 'merge_group',
       PR_BASE_REF: '',
+      PR_HEAD_REF: '',
       MG_BASE_SHA: 'base-from-merge-group',
       GITHUB_SHA: 'checked-out-sha',
     },
@@ -282,7 +315,7 @@ test('the selection script resolves its diff endpoints from the event it is give
   // Any other event verifies in full without consulting a diff at all.
   const dispatch = runSelectionScript({
     script,
-    env: { EVENT_NAME: 'workflow_dispatch', PR_BASE_REF: '', MG_BASE_SHA: '', GITHUB_SHA: 'checked-out-sha' },
+    env: { EVENT_NAME: 'workflow_dispatch', PR_BASE_REF: '', PR_HEAD_REF: '', MG_BASE_SHA: '', GITHUB_SHA: 'checked-out-sha' },
   });
   assert.equal(dispatch.status, 0, dispatch.stderr);
   assert.match(dispatch.output, /^run=true$/mu);
@@ -299,6 +332,7 @@ test('the selection script refuses to unselect when a diff endpoint is unresolve
     env: {
       EVENT_NAME: 'merge_group',
       PR_BASE_REF: '',
+      PR_HEAD_REF: '',
       MG_BASE_SHA: '',
       GITHUB_SHA: 'checked-out-sha',
     },
@@ -335,6 +369,40 @@ test('a failing git diff reds selection instead of silently unselecting verifica
   });
   assert.equal(unguarded.status, 0, 'without pipefail the broken diff is masked');
   assert.match(unguarded.output, /^run=false$/mu);
+});
+
+// Stands in for a `jq` that dies on its input -- a malformed `selection` exits 5. The
+// selector's own output is well-formed by construction, so this is the transport
+// failure (a truncated pipe, an OOM-killed jq) rather than a selector bug.
+const FAILING_JQ_STUB = ['#!/bin/bash', 'cat > /dev/null', "echo 'jq: parse error' >&2", 'exit 5', ''].join('\n');
+
+test('a failing jq reds selection instead of publishing an empty run= verdict', () => {
+  const script = extractSelectionScript(readArchitectureControlWorkflow());
+  const env = {
+    EVENT_NAME: 'merge_group',
+    PR_BASE_REF: '',
+    PR_HEAD_REF: '',
+    MG_BASE_SHA: 'base-from-merge-group',
+    GITHUB_SHA: 'checked-out-sha',
+  };
+
+  const guarded = runSelectionScript({ script, env, jqStub: FAILING_JQ_STUB });
+  assert.notEqual(guarded.status, 0, 'a failing jq must red the job');
+  assert.doesNotMatch(guarded.output, /run=/u, 'no run= verdict may be published');
+
+  // The same script with the assignment folded back into the `echo` argument is the
+  // defect being guarded, and running it proves the assertion above is load-bearing.
+  // `set -e` does not see a command substitution in an argument position -- `echo`
+  // returns 0 -- so the step publishes `run=`, `platform-verification-reusable` is
+  // skipped, and the terminal gate accepts `skipped`: green, having verified nothing.
+  const foldedBack = script.replace(
+    /^run_value="\$\(jq -r '\.run' <<<"\$\{selection\}"\)"\necho "run=\$\{run_value\}"/mu,
+    'echo "run=$(jq -r \'.run\' <<<"${selection}")"',
+  );
+  assert.notEqual(foldedBack, script, 'the selection step must assign the jq result before echoing it');
+  const laundered = runSelectionScript({ script: foldedBack, env, jqStub: FAILING_JQ_STUB });
+  assert.equal(laundered.status, 0, 'in argument position the jq failure is masked');
+  assert.match(laundered.output, /^run=$/mu);
 });
 
 test('scheduled/manual audit is read-only, summarizes, and uploads deterministic evidence', () => {

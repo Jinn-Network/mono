@@ -259,10 +259,22 @@ export function createLocalCorpusPorts(options: LocalCorpusPortsOptions): LocalC
 export function resolveCorpusBinIoFields(options: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly homeDirectory: string;
+  /**
+   * The entry point's reader for the host's configuration document — the same
+   * one it hands `BinIo.readConfigFile`, so the ports composed here and the
+   * configuration `main` resolves name the same followed archives. A reader
+   * that throws is an unreadable or malformed document, and falls into the
+   * same no-fields path as an unresolvable one.
+   */
+  readonly readConfigFile?: () => unknown;
 }): LocalCorpusPorts | Record<string, never> {
   let config: RuntimeConfig;
   try {
-    config = resolveRuntimeConfig({ env: options.env, homeDirectory: options.homeDirectory });
+    config = resolveRuntimeConfig({
+      env: options.env,
+      homeDirectory: options.homeDirectory,
+      file: options.readConfigFile?.(),
+    });
   } catch {
     return {};
   }

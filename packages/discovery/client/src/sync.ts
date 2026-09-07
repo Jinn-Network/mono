@@ -70,14 +70,24 @@ function isWireEnvelopeCandidate(value: unknown): boolean {
   );
 }
 
-async function fetchJson(url: string, transport: Transport): Promise<unknown> {
-  const response = await transport.fetch(url);
+async function fetchJson(url: string, transport: Transport, signal: AbortSignal | undefined): Promise<unknown> {
+  const response = await transport.fetch(url, signal === undefined ? undefined : { signal });
   return JSON.parse(new TextDecoder().decode(response.bytes));
 }
 
-/** Fetches and parses a source's head, whether published (DSSE-enveloped) or unpublished (bare), §5.5. */
-export async function fetchHead(source: SourceEndpoint, transport: Transport): Promise<SyncedHead> {
-  const parsed = await fetchJson(source.servingRoot + headPath(source.name), transport);
+/**
+ * Fetches and parses a source's head, whether published (DSSE-enveloped) or unpublished (bare), §5.5.
+ *
+ * The optional `signal` bounds the network read. A caller with a deadline MUST
+ * pass it: this is the first network read of a sync and the one a black-holed
+ * peer hangs on, before any cooperative between-entry check can run (#3222).
+ */
+export async function fetchHead(
+  source: SourceEndpoint,
+  transport: Transport,
+  signal?: AbortSignal,
+): Promise<SyncedHead> {
+  const parsed = await fetchJson(source.servingRoot + headPath(source.name), transport, signal);
   if (isWireEnvelopeCandidate(parsed)) {
     const decoded = parseWireDsseEnvelope(parsed);
     const head = parseSourceHead(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(decoded.payloadBytes)));
@@ -99,8 +109,12 @@ interface WireArchivePage {
   entries: WireSignedEntry[];
 }
 
-async function fetchPage(url: string, transport: Transport): Promise<WireArchivePage> {
-  return (await fetchJson(url, transport)) as WireArchivePage;
+async function fetchPage(
+  url: string,
+  transport: Transport,
+  signal: AbortSignal | undefined,
+): Promise<WireArchivePage> {
+  return (await fetchJson(url, transport, signal)) as WireArchivePage;
 }
 
 function toSyncedEntries(page: WireArchivePage): SyncedEntry[] {
@@ -125,12 +139,12 @@ function pageUrl(source: SourceEndpoint, page: string): string {
  */
 export async function* coldSync(
   source: SourceEndpoint,
-  ports: { transport: Transport },
+  ports: { transport: Transport; signal?: AbortSignal },
 ): AsyncIterable<SyncedEntry> {
   const pagesNewestFirst: WireArchivePage[] = [];
   let url: string | undefined = source.archiveRootUrl;
   while (url !== undefined) {
-    const page: WireArchivePage = await fetchPage(url, ports.transport);
+    const page: WireArchivePage = await fetchPage(url, ports.transport, ports.signal);
     pagesNewestFirst.push(page);
     url = page.prevArchive === null ? undefined : pageUrl(source, page.prevArchive);
   }
@@ -148,12 +162,12 @@ export async function* coldSync(
 export async function* returningSync(
   source: SourceEndpoint,
   hwm: SourceCursor,
-  ports: { transport: Transport },
+  ports: { transport: Transport; signal?: AbortSignal },
 ): AsyncIterable<SyncedEntry> {
   const collected: SyncedEntry[] = [];
   let url: string | undefined = source.archiveRootUrl;
   while (url !== undefined) {
-    const page: WireArchivePage = await fetchPage(url, ports.transport);
+    const page: WireArchivePage = await fetchPage(url, ports.transport, ports.signal);
     const synced = toSyncedEntries(page);
     const reachedHwm = synced.some((signed) => compareCodeUnitStrings(signed.entry.sequence, hwm.sequence) <= 0);
     collected.push(...synced.filter((signed) => compareCodeUnitStrings(signed.entry.sequence, hwm.sequence) > 0));
@@ -179,13 +193,13 @@ export interface ResolvedMirrorHead {
  */
 export async function resolveHeadAcrossMirrors(
   mirrors: readonly SourceEndpoint[],
-  ports: { transport: Transport },
+  ports: { transport: Transport; signal?: AbortSignal },
 ): Promise<ResolvedMirrorHead | undefined> {
   let best: ResolvedMirrorHead | undefined;
   for (const endpoint of mirrors) {
     let synced: SyncedHead;
     try {
-      synced = await fetchHead(endpoint, ports.transport);
+      synced = await fetchHead(endpoint, ports.transport, ports.signal);
     } catch {
       continue;
     }

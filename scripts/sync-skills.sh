@@ -18,6 +18,9 @@
 #   ./scripts/sync-skills.sh          # write mirrors
 #   ./scripts/sync-skills.sh --check  # exit 1 on drift, write nothing
 #
+# Both modes also fail on a dangling symlink anywhere under the canonical tree
+# or a generated mirror.
+#
 # SYNC_SKILLS_ROOT overrides the repo root (tests only).
 set -euo pipefail
 
@@ -82,6 +85,7 @@ if [[ ${#SKILLS[@]} -gt 0 ]]; then
 fi
 
 DRIFT=0
+DANGLING=0
 
 report_drift() {
   echo "drift: $1" >&2
@@ -157,6 +161,26 @@ prune_stale() {
   done < <(mirror_entries "${target_dir}")
 }
 
+# Dangling symlinks are the drift the mirror generator cannot see by name: a
+# link inside a canonical skill whose target moved, or a mirror link left over
+# from a deleted skill. `find -type l` does not follow symlinks, so scanning a
+# mirror sees only its own top-level links and never re-reports canonical
+# content through them.
+check_dangling() {
+  local dir="$1"
+  local link
+
+  [[ -d "${dir}" ]] || return 0
+
+  while IFS= read -r link; do
+    [[ -n "${link}" ]] || continue
+    if [[ ! -e "${link}" ]]; then
+      DANGLING=1
+      report_drift "dangling symlink ${link} -> $(readlink "${link}")"
+    fi
+  done < <(find "${dir}" -type l | LC_ALL=C sort)
+}
+
 for target in "${MIRRORS[@]}"; do
   if [[ "${CHECK}" -eq 0 ]]; then
     mkdir -p "${target}"
@@ -171,14 +195,28 @@ for target in "${MIRRORS[@]}"; do
   prune_stale "${target}"
 done
 
+# Runs in both modes: write repairs the mirrors above, but the canonical tree is
+# never a write target, so a dangling link there can only be reported.
+for target in "${CANON}" "${MIRRORS[@]}"; do
+  check_dangling "${target}"
+done
+
 if [[ "${CHECK}" -eq 1 ]]; then
   if [[ "${DRIFT}" -ne 0 ]]; then
     echo "skill mirror drifted; run ./scripts/sync-skills.sh and commit the generated trees" >&2
+    if [[ "${DANGLING}" -ne 0 ]]; then
+      echo "a dangling symlink under ${CANON} is not generated - fix or remove it by hand" >&2
+    fi
     exit 1
   fi
   echo "Skill mirrors match ${CANON}"
   printf '  %s\n' "${MIRRORS[@]}"
   exit 0
+fi
+
+if [[ "${DANGLING}" -ne 0 ]]; then
+  echo "dangling symlink(s) remain; the generator never writes ${CANON}, so fix or remove them by hand" >&2
+  exit 1
 fi
 
 echo "Synced skills from ${CANON} into:"

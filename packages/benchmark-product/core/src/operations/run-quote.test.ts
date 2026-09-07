@@ -72,7 +72,7 @@ describe("runQuote — lifecycle transition (real venue)", () => {
 
     const entries = readAuditEntries(workspaceDir);
     expect(entries[entries.length - 1]).toMatchObject({ action: "quote", subject: "draft-1", outcome: "ok" });
-  }, 30_000);
+  });
 
   test("re-quoting an already-quoted draft is idempotent on state (stays 'quoted') and refreshes RunState", async () => {
     const clock = makeClock();
@@ -87,7 +87,7 @@ describe("runQuote — lifecycle transition (real venue)", () => {
 
     const entries = readAuditEntries(workspaceDir);
     expect(entries.filter((entry) => entry.action === "quote")).toHaveLength(2);
-  }, 30_000);
+  });
 
   test("refuses illegal-transition from a state other than draft/quoted", async () => {
     const clock = makeClock();
@@ -98,7 +98,7 @@ describe("runQuote — lifecycle transition (real venue)", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("illegal-transition");
-  }, 30_000);
+  });
 
   test("a quote with ok:false (hard-cap breach) still persists and returns as a successful operation", async () => {
     const clock = makeClock();
@@ -125,7 +125,7 @@ describe("runQuote — lifecycle transition (real venue)", () => {
     const entries = readAuditEntries(workspaceDir);
     // A quote's own ok:false is not an operation failure — the audit outcome is "ok".
     expect(entries[entries.length - 1]).toMatchObject({ action: "quote", outcome: "ok" });
-  }, 30_000);
+  });
 
   test("compile validation failures (fewer than 2 arms) surface as a typed operation error, not a silent quote", async () => {
     const clock = makeClock();
@@ -142,7 +142,7 @@ describe("runQuote — lifecycle transition (real venue)", () => {
 
     // The draft state is unchanged — a failed operation never partially advances the lifecycle.
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("draft");
-  }, 30_000);
+  });
 
   test("gating: quote is ungated — a bare workspace member with no grants can quote", async () => {
     const clock = makeClock();
@@ -151,7 +151,7 @@ describe("runQuote — lifecycle transition (real venue)", () => {
 
     const outcome = await runQuote(contextFor(clock, "agent-1"), { draftId: "draft-1" });
     expect(outcome.ok).toBe(true);
-  }, 30_000);
+  });
 });
 
 describe("runQuote — dependency-injected venue (test seam)", () => {

@@ -1,0 +1,12 @@
+{
+  "name": "consumer-archive-root-inside-serving-root",
+  "kind": "consumer",
+  "description": "§7 item 3: a root-relative archiveRoot resolves inside the serving root that served the document and is accepted — the companion that keeps the containment refusal from being satisfied by refusing everything.",
+  "input": {
+    "servingRoot": "https://peer.example/archive",
+    "archiveRoot": "/archive/entries/0000000000000001.json"
+  },
+  "expect": {
+    "rejected": false
+  }
+}

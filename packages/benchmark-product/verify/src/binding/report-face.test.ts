@@ -121,7 +121,7 @@ describe("runBindingSentence", () => {
       expect(chosen).not.toContain("drawn, not chosen");
       expect(chosen).not.toContain("would have required predicting that value");
       expect(chosen).toContain("one of several the operator could have realized");
-      expect(chosen).toContain("different slate from the same inputs");
+      expect(chosen).toContain("possibly different slate from the same inputs");
     });
 
     test("the operator-chosen sentence names the residue in plain words", () => {
@@ -155,7 +155,7 @@ describe("runBindingSentence", () => {
       const sentence = runBindingSentence(sampled("bitcoin/mainnet"));
       expect(sentence).toContain("drawn from a value this bundle cannot place after the seal");
       expect(sentence).not.toContain("drawn, not chosen");
-      expect(sentence).toContain("different slate from the same inputs");
+      expect(sentence).toContain("possibly different slate from the same inputs");
     });
 
     test("the census sentence gains the residue and nothing stronger", () => {
@@ -202,7 +202,7 @@ describe("runBindingSentence", () => {
     test("the census residue is about the ORDER, and never contradicts the population claim", () => {
       const chosen = runBindingSentence(census("drand/quicknet", CHOSEN_ROUND));
       expect(chosen).toContain("none could be selected after the fact");
-      expect(chosen).toContain("different order from the same inputs");
+      expect(chosen).toContain("possibly different order from the same inputs");
       expect(chosen).not.toContain("slate from the same inputs");
     });
   });
@@ -224,6 +224,9 @@ describe("runBindingSentence", () => {
         // The residue paragraph is retracted, not merely joined by a stronger one.
         expect(declared).not.toContain("What choosing remains is the source");
         expect(declared).not.toContain("could have bound a different one");
+        // The connective belongs to THIS branch (#3525): "Nor" continues the negative clause
+        // before it, and the chosen-round branch's opener would not.
+        expect(declared).not.toContain("The source was not:");
       },
     );
 
@@ -239,7 +242,26 @@ describe("runBindingSentence", () => {
     test.each([true, false])("a chosen round on a scheduled source still states the source (declared=%s)", (declared) => {
       const sentence = runBindingSentence(census("drand/quicknet", CHOSEN_ROUND, declared));
       expect(sentence).toContain("one of several the operator could have realized");
-      expect(sentence).toContain(declared ? "Nor was the source:" : "What choosing remains is the source");
+      expect(sentence).toContain(declared ? "The source was not:" : "What choosing remains is the source");
+    });
+
+    // #3525. The clause after the colon is the same on both branches; only the connective moves,
+    // because on this branch the sentence before it asserts a choice rather than denying one, and
+    // "Nor" continuing from a positive statement reads as a contradiction of it.
+    test("the declared-source connective follows the clause before it on each branch", () => {
+      const sealDerived = runBindingSentence(census("drand/quicknet", SEAL_DERIVED_ROUND, true));
+      const chosen = runBindingSentence(census("drand/quicknet", CHOSEN_ROUND, true));
+      expect(sealDerived).toContain("The round was not the operator's to pick either");
+      expect(sealDerived).toContain("Nor was the source:");
+      expect(sealDerived).not.toContain("The source was not:");
+      expect(chosen).toContain("was still the operator's choice");
+      expect(chosen).toContain("The source was not:");
+      expect(chosen).not.toContain("Nor was the source:");
+      // Only the connective differs: the property both branches state is one string.
+      const property = "the sealed record names the beacon this run binds to, so a binding naming "
+        + "any other source is refused.";
+      expect(sealDerived).toContain(property);
+      expect(chosen).toContain(property);
     });
 
     // AC3: declaring the source fixes the BEACON, not the height inside it. A face that read
@@ -266,6 +288,59 @@ describe("runBindingSentence", () => {
       expect(runBindingSentence(census("bitcoin/mainnet", 900_000, true)))
         .not.toBe(runBindingSentence(census("bitcoin/mainnet")));
     });
+  });
+
+  /**
+   * Issue #3429. Two precision defects in copy this repo holds to a high bar: the alternatives
+   * clauses universally quantified "different", which a one-item census falsifies outright and a
+   * two-item one falsifies for roughly half of all rounds; and the beacon was named by a round on
+   * a source that indexes by height, in a sentence whose whole point is that distinction.
+   */
+  describe("precision", () => {
+    test.each(["census", "sampled"] as const)(
+      "the chosen-round alternatives clause claims a possibly different derivation in %s mode",
+      (mode) => {
+        const derived = mode === "census" ? "order" : "slate";
+        const sentence = mode === "census"
+          ? runBindingSentence(census("drand/quicknet", CHOSEN_ROUND))
+          : runBindingSentence(sampled("drand/quicknet", CHOSEN_ROUND));
+        expect(sentence).toContain(`possibly different ${derived} from the same inputs`);
+        // The bare universal is the claim the code cannot support: a beacon value does not move
+        // every derivation, so "an available alternative deriving a different X" is false of the
+        // rounds that happen to derive the same one.
+        expect(sentence).not.toContain(`alternative deriving a different ${derived}`);
+      },
+    );
+
+    test.each(["census", "sampled"] as const)(
+      "the height alternatives clause claims a possibly different derivation in %s mode",
+      (mode) => {
+        const derived = mode === "census" ? "order" : "slate";
+        const sentence = mode === "census"
+          ? runBindingSentence(census("bitcoin/mainnet"))
+          : runBindingSentence(sampled("bitcoin/mainnet"));
+        expect(sentence).toContain(`possibly different ${derived} from the same inputs`);
+        expect(sentence).not.toContain(`alternative deriving a different ${derived}`);
+      },
+    );
+
+    test("a scheduled source's beacon is named by its round", () => {
+      expect(runBindingSentence(census())).toContain(`drand quicknet round ${SEAL_DERIVED_ROUND}`);
+      expect(runBindingSentence(sampled())).toContain(`drand quicknet round ${SEAL_DERIVED_ROUND}`);
+    });
+
+    // The sentence that carries this name then turns on the beacon being a height rather than a
+    // round, so naming it "round 900000" contradicts the paragraph it opens.
+    test.each(["census", "sampled"] as const)(
+      "a height-indexed source's beacon is named by its height in %s mode",
+      (mode) => {
+        const sentence = mode === "census"
+          ? runBindingSentence(census("bitcoin/mainnet"))
+          : runBindingSentence(sampled("bitcoin/mainnet"));
+        expect(sentence).toContain("Bitcoin mainnet height 900000");
+        expect(sentence).not.toContain("Bitcoin mainnet round");
+      },
+    );
   });
 });
 

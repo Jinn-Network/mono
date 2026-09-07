@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { dirname } from "node:path";
-
 import type {
   HighWaterMark,
   HighWaterMarkStore,
@@ -9,6 +7,7 @@ import type {
 } from "@jinn-network/record-discovery-protocol";
 import { z } from "zod";
 
+import { writeFileAtomically } from "./atomic-write.js";
 import { CORPUS_ERROR_CODES, CorpusMirrorError, describeError, nodeErrorCode } from "./errors.js";
 import type { CorpusFilesystem } from "./fs.js";
 import { compareCodeUnitStrings } from "./order.js";
@@ -100,21 +99,9 @@ export function createFileHighWaterMarkStore(options: {
     }
     const body = `${JSON.stringify({ format: HIGH_WATER_MARK_FORMAT, marks: ordered }, null, 2)}\n`;
 
-    const nonce = tempNonce();
-    const temporaryPath = `${options.filePath}.${nonce}.tmp`;
     try {
-      await options.fs.mkdir(dirname(options.filePath), { recursive: true, mode: 0o700 });
-      await options.fs.unlink(temporaryPath).catch(() => undefined);
-      const handle = await options.fs.open(temporaryPath, "wx", 0o600);
-      try {
-        await handle.writeFile(body, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await options.fs.rename(temporaryPath, options.filePath);
+      await writeFileAtomically({ fs: options.fs, filePath: options.filePath, body, tempNonce });
     } catch (error) {
-      await options.fs.unlink(temporaryPath).catch(() => undefined);
       throw new CorpusMirrorError(
         CORPUS_ERROR_CODES.highWaterMarkIo,
         `Unable to write the mirror state file at ${options.filePath}.`,

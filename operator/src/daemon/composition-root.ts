@@ -427,6 +427,21 @@ export interface CompositionRootInput {
    * assemble a real `ProjectorLoop`/`ClaimGate`/`EngagementLedger` rather than stubs.
    */
   readonly store: Store;
+  /**
+   * Host-supplied launchers considered alongside `ALL_LAUNCHERS` when resolving this
+   * composition's `executionWiring`. Each entry carries the executable its own `plan()` argv
+   * spawns, because `resolveLauncherCommand` only knows the shipped launcher ids.
+   *
+   * The seam exists so a hermetic rig can dispatch a work kind the shipped registry has no
+   * launcher for (the swe-rebench-v2 e2e's canned-patch stub) without a test stub — or an
+   * env-gated branch selecting one — landing in the production launcher list. Omitted by
+   * `main.ts` and every production host: the shipped registry is then the whole set, exactly
+   * as before.
+   *
+   * An entry whose id collides with a shipped launcher (or another entry) is refused at
+   * composition build time — see `buildLaunchers`.
+   */
+  readonly extraLaunchers?: readonly { readonly launcher: LauncherContract; readonly command: string }[];
   /** Projector poll interval (ms). Defaults to 5000, matching `LOOP_REGISTRY`'s entry. */
   readonly projectorPollIntervalMs?: number;
   readonly logger?: { info(m: string): void; warn(m: string): void };
@@ -569,24 +584,50 @@ function buildVerifiedExecutable(command: string): VerifiedExecutable {
   return { path, digest };
 }
 
-function buildLaunchers(
+/**
+ * Selects the launchers this composition's `executionWiring` names, out of the shipped
+ * `ALL_LAUNCHERS` plus any host-supplied `extraLaunchers`. An extra is selected only when a
+ * wiring entry names its id, so passing extras a wiring never asks for is inert.
+ *
+ * Exported for test only (the seam decides *whether* an injected launcher is selected at all;
+ * `buildOperatorComposition` is too heavy a fixture to assert that through). Production callers
+ * reach it through `buildOperatorComposition`.
+ */
+export function buildLaunchers(
   wiring: readonly ExecutionWiringEntry[],
   mode: CompositionRootInput['mode'],
+  extra: CompositionRootInput['extraLaunchers'] = [],
 ): readonly LauncherContract[] {
   const aliases = mode === 'legacy' ? LEGACY_HARNESS_TO_LAUNCHER_ID : HARNESS_TO_LAUNCHER_ID;
   const wanted = new Set(
     wiring.map((entry) => aliases[entry.harness] ?? entry.harness),
   );
-  return ALL_LAUNCHERS.filter((launcher) => wanted.has(launcher.id));
+  const available = [...ALL_LAUNCHERS, ...extra.map((entry) => entry.launcher)];
+  // Refuse a duplicate id loudly rather than carrying both contracts: the downstream consumers
+  // disagree about which one wins (`buildLauncherDeployments` keys by id, so the injected
+  // command wins for both iterations, while `buildNativeLauncherCapabilityPort`'s `find` hits
+  // whichever contract comes first — the shipped one, since `ALL_LAUNCHERS` is prepended). A
+  // collision therefore pairs a shipped launcher's `capabilities()`/`plan()` with an injected
+  // executable. A host that reuses an id has a wiring bug; say so at composition build time.
+  const seen = new Set<string>();
+  for (const launcher of available) {
+    if (seen.has(launcher.id)) {
+      throw new Error(`extraLaunchers id "${launcher.id}" collides with another launcher; use a distinct id`);
+    }
+    seen.add(launcher.id);
+  }
+  return available.filter((launcher) => wanted.has(launcher.id));
 }
 
 export function buildLauncherDeployments(
   launchers: readonly LauncherContract[],
   config: JinnConfig,
+  extra: CompositionRootInput['extraLaunchers'] = [],
 ): Readonly<Record<string, LauncherDeployment>> {
+  const extraCommands = new Map(extra.map((entry) => [entry.launcher.id, entry.command]));
   const deployments: Record<string, LauncherDeployment> = {};
   for (const launcher of launchers) {
-    const command = resolveLauncherCommand(launcher.id, config);
+    const command = extraCommands.get(launcher.id) ?? resolveLauncherCommand(launcher.id, config);
     if (command === undefined) continue;
     const executable = buildVerifiedExecutable(command);
     deployments[launcher.id] = {
@@ -2403,8 +2444,8 @@ export async function buildOperatorComposition(
   const evidence = await openOperatorEvidence({ rootDir: input.evidenceRoot });
 
   const wiring = toPipelineWiring(config.executionWiring ?? []);
-  const launchers = buildLaunchers(wiring, input.mode);
-  const launcherDeployments = buildLauncherDeployments(launchers, config);
+  const launchers = buildLaunchers(wiring, input.mode, input.extraLaunchers);
+  const launcherDeployments = buildLauncherDeployments(launchers, config, input.extraLaunchers);
   const workspaceRuntime = buildWorkspaceRuntimePorts();
 
   const backendConfig: LocalTaskExecutionBackendConfig = {

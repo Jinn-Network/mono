@@ -3,5 +3,11 @@
   "compilerOptions": {
     "rootDir": "."
   },
+  // `exclude` is inherited through `extends`, and the base config excludes `test` -- so before
+  // issue #2665 this config's `include` was inert for the test tree: only test files reachable by
+  // import from `src`/`scripts` were ever checked, and standalone e2e entrypoints
+  // (`task-creator-marketplace.ts` among them) were checked by nothing at all. The override is
+  // what makes this config do what its name says.
+  "exclude": ["node_modules", "dist"],
   "include": ["src", "test", "scripts"]
 }

@@ -60,7 +60,19 @@ colophon publication serve --workspace <dir> --principal <id> \
 
 It binds `127.0.0.1:8787` by default, refreshes the well-known document, serves
 until SIGINT/SIGTERM, and prints the bound URL. `--port 0` binds an ephemeral
-port.
+port. `--workspace` must name an existing Colophon workspace: a directory that
+is not one is refused, so a stale path is a message rather than a bound socket
+over an empty archive.
+
+`--source` is optional. Omitted, the name is read from this workspace's runs:
+the single configured `publication.source.name` if they agree, the default
+`colophon-benchmarks` if no run configures one, and a refusal naming the
+candidates if they disagree — pass `--source` to settle it.
+
+The refresh takes the source lock, so it prints a line before it starts and
+another naming lock contention if it has to wait for another product process
+mid-announce. That wait is bounded and clears on its own; the bind follows it
+either way.
 
 This process terminates plain HTTP only. Put it behind a reverse proxy that
 terminates TLS and forwards the archive mount path unchanged; the served paths

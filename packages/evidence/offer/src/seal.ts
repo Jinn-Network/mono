@@ -106,10 +106,17 @@ function validate(document: unknown): OfferRecord {
  * holding an unpaired UTF-16 surrogate. Those reach here from a hostile envelope, not only
  * from a local producer, so trust-core's `TrustCoreError` is converted rather than allowed
  * to escape: this boundary promises `category: "invalid-document"` and the class alone.
+ *
+ * The try encloses the canonicalizer and nothing else. Shaping runs ahead of it because it
+ * already throws this module's own per-path `InvalidOfferError`, and converting that a
+ * second time would trade a located diagnostic for a pathless one whose message is the
+ * generic constructor string — `describe` reads `.message`, and the informative text lives
+ * in `.errors`.
  */
 function canonicalBytes(record: OfferRecord): Uint8Array {
+  const shaped = withoutUndefinedMembers(record, "");
   try {
-    return canonicalJsonBytes(withoutUndefinedMembers(record, ""));
+    return canonicalJsonBytes(shaped);
   } catch (cause) {
     invalid("", `offer document is not canonicalizable JSON: ${describe(cause)}`);
   }

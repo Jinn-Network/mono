@@ -338,6 +338,7 @@ export interface OpenEvidenceJournalPublicDiscoveryOptions {
 export function openEvidenceJournalPublicDiscovery(
   options: OpenEvidenceJournalPublicDiscoveryOptions,
 ): LocalPublicDiscoveryBridge {
+  const now = options.now ?? (() => new Date());
   const sourceId = formatOrigin(options.source.agent, options.source.name);
   const sourceStates = new FileCasStore<DurableSourceState>(
     join(options.stateDir, "source-state.json"),
@@ -352,6 +353,8 @@ export function openEvidenceJournalPublicDiscovery(
   const writer = createDurableSourceWriter({
     source: options.source,
     signer: options.signer,
+    // One clock for the bridge and for the head bound it mints (#3481).
+    clock: { now },
     blobs: options.blobs,
     states: sourceStates as SourceStateStore,
     intents: sourceIntents as SourceAppendIntentStore,
@@ -385,7 +388,7 @@ export function openEvidenceJournalPublicDiscovery(
       options.stateDir,
       sourceId,
     ),
-    now: options.now ?? (() => new Date()),
+    now,
   });
 }
 

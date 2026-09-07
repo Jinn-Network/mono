@@ -88,6 +88,53 @@ Everything above is created **owner-only** — directories `0700`, files `0600` 
 same exposure class the host already keeps its own session logs in. Capture adds a copy
 inside that class; it does not open a new one.
 
+### What an adapter reports so the record conforms
+
+A session feed carries the turns and tool calls by default. Three further facts are optional in
+the schema and required for full Execution Evidence v1 conformance; a host adapter that drives a
+repository-changing session — Autopilot's, for instance — reports all three. They close the two
+capture gaps the `autopilot-issue-1697` protocol fixture recorded
+(`packages/evidence/protocol/fixtures/autopilot-issue-1697/`).
+
+| Feed fact | What it binds | Where it lands in the record |
+| --- | --- | --- |
+| `repository-state` event, at most once | repository IRI, base commit, base tree, and optionally branch and target base | the `inputs/repository.json` dataset, with the commit and tree as identifiers |
+| `controlled-input` event, repeatable | the exact bytes of one producer-controlled input — `workflow`, `skill`, `prompt`, or `config` | one digest-bound `inputs/controlled/…` artifact carrying its role |
+| `model.service` on `session-open` | the hosted model's service IRI, version, deployment, and provider | an `opaque` runtime component, the protocol's shape for a service no producer can content-address |
+
+Controlled-input bytes travel **inline** (base64), not by path: a feed-supplied filesystem path
+would make the capture layer an arbitrary-file-read primitive driven by host-written data. They
+are bounded at 256 KiB each and 32 per session; a feed past either bound is refused, not
+truncated.
+
+Every one of these facts is optional, so a feed that omits them parses and seals exactly as
+before — the feed version is unchanged.
+
+**Segregating secrets is the adapter's job, at the source.** This runtime binds what it is
+given and does not scrub (below), so a prompt or effective configuration must be assembled
+without credentials rather than cleaned afterwards. The derivation and scrub pipeline is the
+safety net for the public projection, not the plan.
+
+The Hermes adapter emits two of the three on its own, at session start
+(`plugin/adapter-hermes/__init__.py`): it derives the model service identity from the provider
+and model it already knows, and reads the base commit, tree, remote, branch, and upstream from
+the working directory's repository. The third — **which** workflow, skill, prompt, and
+configuration bytes count as controlled — is a host decision, written through
+`SessionFeed.controlled_input`.
+
+Every writer validates what the runtime would refuse and drops that one event instead. This
+matters because a malformed feed is refused *whole*: one bad base commit would otherwise cost
+every event in the session.
+
+**The declared media type steers the public projection, in both directions.** A projection
+withholds an artifact whose `encodingFormat` matches no `artifactRules` entry, and a policy set
+to `withhold-record` withholds the whole record
+(`packages/evidence/derivation/src/artifact-transform.ts`). So a controlled input declared with
+an exotic media type seals locally and then drops out of — or blocks — the public derivative;
+and an input mislabelled as a type with a permissive rule would be carried into one. The runtime
+does not inspect the bytes against the declared type, so the label is the adapter's assertion.
+Declare what the bytes actually are.
+
 ### This runtime does not scrub at capture time
 
 Sealing binds the feed's exact bytes, so a capture-time scrub would both destroy the material
@@ -98,14 +145,25 @@ relevance component, using the derivation detector model. This runtime's job is 
 what makes that possible:
 
 1. **The feed is kept verbatim** as a digest-bound artifact. The detector needs the real text
-   to find anything.
+   to find anything. One exception, stated because it defeats a plaintext scan of the feed:
+   a `controlled-input` event carries its bytes **base64-encoded**, so the decoded plaintext
+   exists only in the sealed artifact. A detector run over feed bytes will not see it.
 2. **Feed lines are never reordered or rewritten**, and every trace span carries
    `jinn.trace.source.ordinal` — the 0-based line ordinal. An exclusion decision taken
    per feed line therefore has a stable identifier that maps back to spans.
-3. **Message content is confined to the feed** — except for two derived artifacts that quote
-   the user, and which the index-time detector must therefore also scan:
-   `input/session-task.json` and `results/session-summary.json` both embed the session
-   summary, which falls back to the first line of the first user turn.
+3. **Message content is confined to the feed** — except for the artifacts below, which the
+   index-time detector must therefore also scan:
+   - `input/session-task.json` and `results/session-summary.json` both embed the session
+     summary, which falls back to the first line of the first user turn;
+   - `inputs/controlled/…` carries producer-controlled bytes verbatim. The `prompt` and
+     `config` roles are the material most likely to hold a credential, and this is why
+     segregating secrets at the source is the adapter's obligation rather than a cleanup step;
+   - `inputs/repository.json` and `runtime/model-service.json` carry the repository, commit,
+     tree, and hosted-service identity the host reported.
+
+   None of these reach the relevance index as excerpts — trace spans are built only from turn
+   and tool-call events — so they do not widen the local re-injection loop. They are listed
+   because they are durable archive content that a scan must still cover.
 4. **The retention watermark** at `<home>/capture/retention.json` gives the index a time
    boundary: captures older than the window are excluded from retrieval.
 

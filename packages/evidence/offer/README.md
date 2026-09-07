@@ -171,3 +171,10 @@ envelopes under `fixtures/offer/` were sealed with. That signer emits a hash, no
 cryptographic signature: DSSE signature checking is an injected port throughout this tree, so
 the fixtures' signature bytes are opaque to every code path they exercise. It is for fixtures
 and tests only.
+
+The corpus under `fixtures/offer/` carries two refused groups, and they refuse at different
+boundaries. `invalid-<name>.json` documents are refused by the schema. `unsealable-<name>.json`
+documents pass the schema and are refused by the canonicalizer: the schema is extension-open,
+so a namespaced key may carry a value outside the I-JSON subset — a non-integral or non-finite
+number, or a string holding an unpaired UTF-16 surrogate. The kit asserts both, because an
+implementation that silently seals one of those produces bytes no one else can reproduce.

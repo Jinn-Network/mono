@@ -147,6 +147,8 @@ jobs:
         id: source
         run: |
           set -euo pipefail
+          # pipefail-lint: allow -- `ls-remote` is asked for one exact tag ref, so the
+          # pipeline carries at most two lines and never fills the pipe buffer.
           TAG_SHA="$(git ls-remote origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}' | head -n1)"
           if [ -z "${TAG_SHA}" ]; then
             echo "::error::Release tag ${RELEASE_TAG} does not exist on origin"

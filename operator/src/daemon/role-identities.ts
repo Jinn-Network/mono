@@ -20,6 +20,7 @@ import {
 } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
+import { resolveBindingForAgent } from '@jinn-network/trust-core';
 import type { BindingResolver } from '@jinn-network/trust-core';
 import {
   IdentityStore,
@@ -118,7 +119,11 @@ export class RoleIdentitySet {
       if (!required.has(role)) continue;
       const publicKey = createPublicKey({ key: Buffer.from(stored.publicKeyDer, 'base64'), format: 'der', type: 'spki' });
       const privateKey = createPrivateKey({ key: Buffer.from(stored.privateKeyDer, 'base64'), format: 'der', type: 'pkcs8' });
-      const resolved = await input.bindingResolver.resolveBinding(
+      // `resolveBindingForAgent` narrows to the claimed agent before the key
+      // and window guards below, so a foreign binding is refused as unresolved
+      // rather than as a key mismatch (issue #3629).
+      const resolved = await resolveBindingForAgent(
+        input.bindingResolver,
         { key: stored.keyId, agent: input.agent },
         effectiveTime,
       );
@@ -238,7 +243,8 @@ export class RoleIdentitySet {
     const effective = Date.parse(atTime);
     if (!Number.isFinite(effective)) return { ok: false, reason: 'invalid-effective-time' };
     const identity = this.get(role);
-    const resolved = await this.bindingResolver.resolveBinding(
+    const resolved = await resolveBindingForAgent(
+      this.bindingResolver,
       { key: identity.keyId, agent: this.agent },
       atTime,
     );

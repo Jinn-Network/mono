@@ -12,11 +12,13 @@ import {
   MEDIA_HEAD,
   RECORD_DISCOVERY_VERSION,
   archivePagePath,
+  checkRefreshWindow,
   dssePreAuthEncoding,
   formatOrigin,
   headPath,
   nextSequence,
   parseAnnouncementEntry,
+  parseHeadTimestamp,
   parseSourceHead,
   recordDigest,
   recordPath,
@@ -27,7 +29,7 @@ import {
 import type { ArchivePage } from "./archive.js";
 import { signAnnouncementEntry, type ScopedDiscoverySigner } from "./entry-signing.js";
 import { MAX_REFRESH_BY_AHEAD_MS, signHead, type DsseEnvelope } from "./head.js";
-import type { ReadableImmutableBlobStore, StoredBlob } from "./ports.js";
+import type { Clock, ReadableImmutableBlobStore, StoredBlob } from "./ports.js";
 
 const ARCHIVE_PAGE_CONTENT_TYPE = "application/json";
 const DEFAULT_RECORD_CONTENT_TYPE = "application/octet-stream";
@@ -174,6 +176,12 @@ export interface DurableSourceWriterOptions {
   readonly intents: SourceAppendIntentStore;
   readonly faults?: SourceWriterFaultInjector;
   readonly refreshWithinMs?: number;
+  /**
+   * Source of the wall-clock reading each append's head is bounded against
+   * (#3481). Defaults to real time; injected by tests and by the operator
+   * daemon, which owns the host clock it publishes under.
+   */
+  readonly clock?: Clock;
 }
 
 export class SourceAnnouncementConflictError extends Error {
@@ -474,8 +482,8 @@ async function assertIntentOwnership(
     || head.entry !== intent.receipt.entryDigest
     || head.issuedAt !== signedEntry.entry.timestamp
     || (intent.previousHeadIssuedAt !== null
-      && new Date(head.issuedAt).getTime() <= new Date(intent.previousHeadIssuedAt).getTime())
-    || new Date(head.refreshBy).getTime() <= new Date(head.issuedAt).getTime()
+      && !(parseHeadTimestamp(head.issuedAt) > parseHeadTimestamp(intent.previousHeadIssuedAt)))
+    || !(parseHeadTimestamp(head.refreshBy) > parseHeadTimestamp(head.issuedAt))
     || !refreshByWithinCeiling(head)
   ) {
     throw new SourceWriterIntegrityError("frozen source head does not match the intended source position");
@@ -513,6 +521,7 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     throw new SourceWriterIntegrityError("refreshWithinMs must be a positive finite duration");
   }
   const refreshWithinMs = Math.min(requestedRefreshWithinMs, MAX_REFRESH_BY_AHEAD_MS);
+  const clock: Clock = options.clock ?? { now: () => new Date() };
 
   if (options.signer.keyId.length === 0) {
     throw new SourceWriterIntegrityError("durable source signer keyId must not be empty");
@@ -636,10 +645,102 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
   }
 
   async function append(command: AppendAnnouncementCommand): Promise<DurableSourceReceipt> {
-    const timestampMs = new Date(command.timestamp).getTime();
+    // The head this command will be signed into carries `command.timestamp`
+    // verbatim as its `issuedAt`, and `parseSourceHead` judges that against
+    // the §5.2 grammar (#3482). Admitting a timestamp the schema will later
+    // refuse signs a head, persists the append intent, and only THEN fails --
+    // leaving the intent claimed, so `recover` replays the same failure and
+    // every later append is dead behind it. Reading the timestamp exactly as
+    // the schema will keeps that refusal here, before anything is durable.
+    const timestampMs = parseHeadTimestamp(command.timestamp);
     if (!Number.isFinite(timestampMs)) {
       throw new SourceWriterIntegrityError(`announcement timestamp is invalid: ${command.timestamp}`);
     }
+
+    // The head this append will mint takes `issuedAt` from the caller's timestamp
+    // verbatim, and §5.2 rule 3 makes that value load-bearing for acceptance: a
+    // consumer refuses a head issued further ahead than one freshness window
+    // (`head-issued-ahead`). Bound it here, with the very predicate the reading side
+    // applies, so the source does not sign and publish a head every consumer
+    // permanently refuses. Before this bound the only symptom was a peer's logs (#3481).
+    //
+    // Be precise about what this compares (#3571): the *caller's* timestamp against
+    // *this host's* clock. Where the caller derives its timestamp from that same clock,
+    // a uniformly fast host is not caught -- `issuedAt` and `now` move together, the
+    // difference is ~0, and the head is still issued past every correctly-clocked
+    // consumer's window. That case is caught on the read side instead, by the
+    // `self-source-future-head` boot degrade in `operator/src/daemon/native-discovery.ts`
+    // (#3467/#3473). What this bound genuinely catches is a caller timestamp that
+    // *disagrees* with the host clock: a `createdAt` frozen while the clock was fast and
+    // published after a correction (`native-signed-source` passes it straight through),
+    // the head-monotonicity bump in `operator/src/native-requester/requester.ts`
+    // (`max(now, prevIssuedAt + 1)`) forcing a timestamp past an already poisoned head,
+    // an injected or misconfigured clock, and the empty-window and out-of-range shapes.
+    //
+    // `checkRefreshWindow`'s default ceiling is deliberate: the writer's own
+    // `refreshWithinMs` may be far tighter than the profile bound, and the skew
+    // allowance a consumer grants is the profile's, not this writer's.
+    //
+    // Two carve-outs, both for heads that already exist rather than heads being minted:
+    //
+    // - Recovery does not repeat this check. `assertIntentOwnership` replays frozen,
+    //   already-signed bytes, and `recover()` runs at the top of every append -- so
+    //   re-bounding a head that was in-window when minted would not delay it, it would
+    //   wedge the source. Once the intent is durable, finishing the commit is the only
+    //   safe act. The same reasoning exempts the operator's pre-C6 requester-source-v1
+    //   compatibility reader, which freezes a head the old requester already minted.
+    // - An idempotent replay of an already-committed announcement returns its receipt
+    //   unconditionally (#3569). The window verdict is computed here but raised inside
+    //   the CAS loop, *after* the committed-announcement short-circuit and still before
+    //   the first write -- so a backwards clock correction of more than one window (an
+    //   NTP fix on a badly fast host, exactly the population this bound exists for)
+    //   cannot make a published announcement stop being acknowledgeable.
+    //
+    //   The refusal still writes, signs and stages nothing *of its own*. The one
+    //   side-effecting thing it now runs first is the `recover()` at the top of the
+    //   loop, which may finish a pre-existing durable intent -- another append's
+    //   already-signed bytes, under the carve-out above. That is deliberate: a pending
+    //   intent for this same announcementId is not yet visible in state, so refusing
+    //   ahead of recovery would refuse a replay of work that is already durable, which
+    //   is the wedge the carve-out exists to avoid.
+    //
+    //   Be honest about the rest of the reordering too. The input-shape checks (facts
+    //   ceiling, record-required, digest and mediaType agreement, withdrawn-carries-no-
+    //   record), `loadState`'s ownership assertion, and the mismatched-fingerprint
+    //   `SourceAnnouncementConflictError` now all precede the window refusal. So a
+    //   command that is malformed *and* out-of-window reports the malformation, not the
+    //   clock, and a replay under a committed announcementId with different bytes still
+    //   raises the conflict rather than the clock error. Nothing in-repo keys off that
+    //   precedence, and the one consumer that discriminates the conflict --
+    //   `native-solution-corrections`, which adopts the committed receipt -- is helped
+    //   by it.
+
+    // No representable-range guard is needed before the arithmetic below. It used to
+    // exist because a bare `new Date(...)` admitted extended-year spellings near the
+    // ECMAScript time-value limit ("+275760-09-13T00:00:00.000Z"), whose window end
+    // overflowed and made `toISOString()` throw a bare RangeError. `parseHeadTimestamp`
+    // now reads the §5.2 grammar, whose year is four digits, so the largest value that
+    // reaches here is year 9999 (~2.54e14 ms) and `refreshWithinMs` is clamped to
+    // `MAX_REFRESH_BY_AHEAD_MS` (24h) at construction -- three orders of magnitude
+    // below the 8.64e15 limit. The extended-year spelling is refused above, as invalid.
+    const refreshBy = new Date(timestampMs + refreshWithinMs).toISOString();
+    const now = clock.now();
+    const windowFailure = checkRefreshWindow({ issuedAt: command.timestamp, refreshBy }, now);
+    const refuseMintedWindow = (failure: NonNullable<typeof windowFailure>): never => {
+      if (failure === "head-issued-ahead") {
+        throw new SourceWriterIntegrityError(
+          "announcement timestamp is further ahead of this source's clock than the freshness window allows"
+          + ` (issuedAt ${command.timestamp}, now ${now.toISOString()},`
+          + ` ceiling ${MAX_REFRESH_BY_AHEAD_MS / 3_600_000}h); check this host's clock`,
+        );
+      }
+      // Reachable: a sub-millisecond `refreshWithinMs` truncates to an empty window, which
+      // §5.2 rule 1 refuses. Before this check such a writer minted it silently.
+      throw new SourceWriterIntegrityError(
+        "announcement timestamp yields a head freshness window no consumer accepts"
+        + ` -- it is empty or wider than the ceiling (${failure})`,
+      );
+    };
 
     const announcement = freezeJson(command.announcement);
     if (
@@ -693,6 +794,9 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
         return existing.receipt;
       }
 
+      // Past the idempotent-replay short-circuit and still before the first write.
+      if (windowFailure !== undefined) refuseMintedWindow(windowFailure);
+
       if (announcement.action === "withdrawn") {
         const target = state.value.announcements[announcement.retracts];
         if (target === undefined || target.action !== "available") {
@@ -722,7 +826,7 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
       );
       if (
         previousHead !== null
-        && timestampMs <= new Date(previousHead.issuedAt).getTime()
+        && !(timestampMs > parseHeadTimestamp(previousHead.issuedAt))
       ) {
         throw new SourceWriterIntegrityError("announcement timestamp must strictly advance the signed source head");
       }
@@ -771,7 +875,7 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
         sequence,
         entry: entryDigest,
         issuedAt,
-        refreshBy: new Date(timestampMs + refreshWithinMs).toISOString(),
+        refreshBy,
       };
       const headEnvelope = await signHead(head, options.signer);
       await assertSignerEnvelope(

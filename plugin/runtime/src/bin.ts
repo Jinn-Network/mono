@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import type { Transport as McpTransport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { DsseChainVerifier, DsseSigner } from "@jinn-network/trust-core";
 import type { Transport, VerifyDriver } from "@jinn-network/record-discovery-client";
 import { createEvidenceRetrievalFailure } from "@jinn-network/evidence-retrieval";
@@ -13,11 +14,13 @@ import { openLocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
 
 import { createCaptureCapability } from "./capture/capability.js";
 import {
+  createNodeRuntimeConfigFileReader,
   nodeIndexDatabaseIo,
   nodeSensitivityNonceIo,
 } from "./bin-node-fs.js";
 import type { RuntimeCapability } from "./capability.js";
 import { createCorpusCapability, type CorpusCapability } from "./corpus/capability.js";
+import { createCorpusSyncCapability } from "./corpus/sync-loop.js";
 import type { CorpusAdmission as MirrorCorpusAdmission } from "./corpus/admission.js";
 import type { CorpusFilesystem } from "./corpus/fs.js";
 import type { CorpusRetrieval } from "./corpus/retrieve.js";
@@ -29,6 +32,7 @@ import { isRuntimeRole, type RuntimeRole } from "./mcp/identifiers.js";
 import { createCorpusAdmissionFilter, type AdmissionFilter } from "./relevance/admission.js";
 import {
   createSensitivityClassifier,
+  createTraceSpanSource,
   openRelevanceIndex,
   type RelevanceIndex,
 } from "./relevance/index.js";
@@ -38,9 +42,10 @@ import { resolveCorpusBinIoFields } from "./session-host-corpus.js";
 import { RUNTIME_VERSION } from "./version.js";
 
 const USAGE = [
-  "usage: jinn-plugin-runtime [serve|health]",
+  "usage: jinn-plugin-runtime [serve|mirror|health]",
   "",
   "  serve    run the runtime until SIGINT or SIGTERM (default)",
+  "  mirror   sync the corpus mirror on a standing loop until SIGINT or SIGTERM",
   "  health   print one JSON health report and exit",
   "",
   "  serve [--role tools|session]  MCP surface role (default: tools)",
@@ -129,6 +134,27 @@ export interface BinIo {
    * `corpus-chain-verification` health check.
    */
   readonly corpusVerifyDriver?: VerifyDriver;
+  /**
+   * Reads the host's optional configuration document. Injected like every other
+   * port here, so a test drives it without a real filesystem — and shared with
+   * the corpus composition root, which must resolve over the SAME document or
+   * the composed ports and the resolved configuration would disagree about
+   * which archives this install follows.
+   *
+   * Absent means no document, which is exactly a default install.
+   */
+  readonly readConfigFile?: () => unknown;
+  /**
+   * Test seam for the MCP transport, forwarded verbatim to the MCP capability.
+   * Absent — every production path — binds stdio, exactly as before.
+   *
+   * It exists so a test can drive the REAL `buildServeCapabilities` over a
+   * linked in-memory pair instead of hand-assembling a parallel composition.
+   * A hand-built one drifts silently, and the half that drifted first was the
+   * search-time sensitivity gate: the parallel client stubbed the classifier
+   * out entirely (Finding 10).
+   */
+  readonly mcpTransport?: McpTransport;
 }
 
 /** `serve [--role tools|session]`. Default `tools`: read-only MCP without capture signer. */
@@ -205,6 +231,7 @@ export function buildServeCapabilities(
   const mcp = createMcpCapability({
     role,
     version: RUNTIME_VERSION,
+    ...(io.mcpTransport === undefined ? {} : { transport: io.mcpTransport }),
     resolve: async (context) => {
       if (!hasCorpusPorts(io) && !corpusResidualLogged) {
         corpusResidualLogged = true;
@@ -250,6 +277,55 @@ export function buildServeCapabilities(
   return capabilities;
 }
 
+/**
+ * `mirror`: the corpus mirror as a standing service. Deliberately NOT an MCP
+ * surface — this process exists to keep the mirror and the relevance index
+ * current, and every tool an agent would call is `serve`'s to expose.
+ *
+ * The sync capability is registered AFTER the corpus capability, so the
+ * runtime's reverse-order stop tears the loop down before the corpus surfaces
+ * it borrows per cycle go away.
+ */
+export function buildMirrorCapabilities(io: BinIo): readonly RuntimeCapability[] {
+  if (!hasCorpusPorts(io)) {
+    throw new PluginRuntimeError(
+      RUNTIME_ERROR_CODES.configInvalid,
+      "the mirror command requires the corpus ports on BinIo: without them there is nothing to sync",
+    );
+  }
+
+  const corpus = createCorpusCapability({
+    transport: io.corpusTransport!,
+    fs: io.corpusFs!,
+    dsseVerifier: io.dsseVerifier!,
+    readPolicyVersions: io.readPolicyVersions!,
+    ...(io.corpusVerifyDriver === undefined ? {} : { verifyDriver: io.corpusVerifyDriver }),
+  });
+
+  const sync = createCorpusSyncCapability({
+    // Thunks: each of these is built per operation and throws until the
+    // corpus capability has started.
+    mirror: () => corpus.mirror,
+    reader: () => corpus.reader,
+    retrieval: () => corpus.retrieval,
+    fs: io.corpusFs!,
+    openIndex: async (config) =>
+      openRelevanceIndex({
+        databasePath: config.indexPath,
+        classifier: await createSensitivityClassifier({
+          noncePath: config.sensitivity.noncePath,
+          knownIdentities: config.sensitivity.knownIdentities,
+          nonceIo: nodeSensitivityNonceIo,
+        }),
+        indexIo: nodeIndexDatabaseIo,
+      }),
+    spanSource: createTraceSpanSource(),
+    openLocalRuntime: (config) => openLocalEvidenceRuntime({ rootDir: config.archiveDirectory }),
+  });
+
+  return [corpus, sync];
+}
+
 export async function main(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
@@ -265,7 +341,7 @@ export async function main(
     io.writeOut(RUNTIME_VERSION);
     return 0;
   }
-  if (command !== "serve" && command !== "health") {
+  if (command !== "serve" && command !== "health" && command !== "mirror") {
     io.writeErr(`unknown command: ${command}`);
     io.writeErr(USAGE);
     return 2;
@@ -273,7 +349,11 @@ export async function main(
 
   let config;
   try {
-    config = resolveRuntimeConfig({ env, homeDirectory: io.homeDirectory });
+    config = resolveRuntimeConfig({
+      env,
+      homeDirectory: io.homeDirectory,
+      file: io.readConfigFile?.(),
+    });
   } catch (error) {
     io.writeErr(`configuration failed: ${describeUnknownError(error)}`);
     return 2;
@@ -303,7 +383,9 @@ export async function main(
       capabilities:
         command === "health"
           ? buildHealthCapabilities(io.captureSigner)
-          : buildServeCapabilities(role!, io, () => runtime.health()),
+          : command === "mirror"
+            ? buildMirrorCapabilities(io)
+            : buildServeCapabilities(role!, io, () => runtime.health()),
     });
   } catch (error) {
     io.writeErr(`configuration failed: ${describeUnknownError(error)}`);
@@ -312,7 +394,7 @@ export async function main(
 
   // Register signal handlers before the first await so the process stays alive under
   // top-level await while serve waits for shutdown.
-  const shutdown = command === "serve" ? io.untilShutdown() : null;
+  const shutdown = command === "serve" || command === "mirror" ? io.untilShutdown() : null;
 
   if (command === "health") {
     await runtime.start();
@@ -358,15 +440,20 @@ if (isProcessEntry()) {
 
   const env = readConfigEnvFromProcess();
   const homeDirectory = process.env.JINN_PLUGIN_HOME ?? join(homedir(), ".jinn-plugin");
+  // One reader, both consumers: `main` below and the corpus composition root
+  // beside it resolve the same document. A read failure is replayed to
+  // whichever of them asks second, so it stays `main`'s to report.
+  const readConfigFile = createNodeRuntimeConfigFileReader(homeDirectory);
 
   process.exitCode = await main(process.argv.slice(2), env, {
     writeOut: (line) => process.stdout.write(`${line}\n`),
     writeErr: (line) => process.stderr.write(`${line}\n`),
     homeDirectory,
     untilShutdown,
+    readConfigFile,
     // The corpus composition root. Unresolvable configuration yields no
     // fields, so `main` still owns the `configuration failed` message and its
     // exit code rather than this block replacing it with a crash.
-    ...resolveCorpusBinIoFields({ env, homeDirectory }),
+    ...resolveCorpusBinIoFields({ env, homeDirectory, readConfigFile }),
   });
 }

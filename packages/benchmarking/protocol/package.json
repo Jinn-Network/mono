@@ -32,7 +32,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "prepack": "yarn build"
+    "prepack": "yarn build",
+    "generate:fixtures": "yarn build && node scripts/write-golden-fixtures.mjs"
   },
   "dependencies": {
     "@jinn-network/evidence-protocol": "0.1.0",

@@ -10,7 +10,7 @@
  */
 
 import { createPublicKey, verify as cryptoVerify } from "node:crypto";
-import { chmodSync, mkdtempSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -29,12 +29,13 @@ import {
 import { parseWellKnownDocument } from "@jinn-network/record-discovery-serve";
 import type { DsseEnvelope } from "@jinn-network/trust-core";
 import { createWorkspaceLayout } from "../workspace/workspace.js";
-import { publicationServeRoot } from "../workspace/layout.js";
+import { publicationServeRoot, runsDir, runStatePath } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import {
   createWorkspacePublicationSource,
   refreshWorkspacePublicationWellKnown,
+  resolveWorkspacePublicationSourceName,
   withWorkspacePublicationSourceLock,
 } from "./publication-source.js";
 import { startPublicationArchiveServer, type PublicationArchiveServer } from "./publication-serve.js";
@@ -262,9 +263,89 @@ describe("public archive server", () => {
     }
   });
 
+
+  test("refuses a directory that is not a Colophon workspace before creating anything in it", async () => {
+    // The whole point of the refusal: `loadOrCreateReportSigningKey` is load-OR-CREATE, so a
+    // mistyped `--workspace` used to mint a signing identity at the wrong path and exit 0.
+    const notAWorkspace = mkdtempSync(join(tmpdir(), "publication-serve-not-a-workspace-"));
+    await expect(startPublicationArchiveServer({ workspaceDir: notAWorkspace, sourceName: SOURCE_NAME, port: 0 }))
+      .rejects.toThrow(/not a workspace/);
+    // Nothing was created: no signing key, no serving root, no venue directory.
+    expect(readdirSync(notAWorkspace)).toEqual([]);
+  });
+
+  test("announces a progress line before the refresh so a long wait reads as work", async () => {
+    const workspaceDir = workspace("publication-serve-progress-");
+    await announce(workspaceDir, "only", "2026-08-13T12:00:00Z");
+    const lines: string[] = [];
+    const server = await startPublicationArchiveServer({
+      workspaceDir, sourceName: SOURCE_NAME, port: 0, onProgress: (line) => lines.push(line),
+    });
+    try {
+      expect(lines[0]).toContain("refreshing");
+      expect(lines[0]).toContain(SOURCE_NAME);
+      // Ordering is the assertion: the line must precede the outcome it explains the wait for.
+      expect(server.wellKnown).toBe("published");
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("names lock contention as the cause while it waits, and still binds", async () => {
+    const workspaceDir = workspace("publication-serve-contended-");
+    await announce(workspaceDir, "only", "2026-08-13T12:00:00Z");
+    const lines: string[] = [];
+    // Hold the source lock across the start so the acquire inside the refresh is contended.
+    const held = withWorkspacePublicationSourceLock(workspaceDir, async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 150));
+    });
+    const server = await startPublicationArchiveServer({
+      workspaceDir, sourceName: SOURCE_NAME, port: 0, onProgress: (line) => lines.push(line),
+    });
+    try {
+      await held;
+      expect(lines.some((line) => /lock/i.test(line))).toBe(true);
+      // Bind ordering and the three-way outcome are untouched by the reporting.
+      expect(server.wellKnown).toBe("published");
+    } finally {
+      await server.close();
+    }
+  });
+
   test("rejects a port outside the valid range before binding anything", async () => {
     const workspaceDir = workspace("publication-serve-port-");
     await expect(startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 70_000 }))
       .rejects.toThrow(/port must be an integer/);
+  });
+});
+
+describe("workspace publication source name", () => {
+  function writeRunPublicationSource(workspaceDir: string, draftId: string, name: string): void {
+    mkdirSync(runsDir(workspaceDir), { recursive: true });
+    // Only the publication block is read; a partial document keeps the fixture honest about
+    // exactly which field the resolution rule consults.
+    writeFileSync(runStatePath(workspaceDir, draftId), JSON.stringify({
+      publication: { source: { agentKeyRef: "workspace-owner", name } },
+    }), "utf8");
+  }
+
+  test("falls back to the default name for a workspace with no runs", () => {
+    const workspaceDir = workspace("publication-source-name-none-");
+    expect(resolveWorkspacePublicationSourceName(workspaceDir)).toBe(SOURCE_NAME);
+  });
+
+  test("uses the one configured name rather than the constant", () => {
+    const workspaceDir = workspace("publication-source-name-one-");
+    writeRunPublicationSource(workspaceDir, "draft-a", "house-benchmarks");
+    writeRunPublicationSource(workspaceDir, "draft-b", "house-benchmarks");
+    expect(resolveWorkspacePublicationSourceName(workspaceDir)).toBe("house-benchmarks");
+  });
+
+  test("refuses rather than guessing when configured names disagree", () => {
+    const workspaceDir = workspace("publication-source-name-many-");
+    writeRunPublicationSource(workspaceDir, "draft-a", "house-benchmarks");
+    writeRunPublicationSource(workspaceDir, "draft-b", "guest-benchmarks");
+    expect(() => resolveWorkspacePublicationSourceName(workspaceDir))
+      .toThrow(/guest-benchmarks[\s\S]*house-benchmarks|house-benchmarks[\s\S]*guest-benchmarks/);
   });
 });

@@ -4,6 +4,7 @@
 - **Status:** **Proposed.** Decisions 1–5 are operative for implementation planning; Decision 6
   (the network-policy ruling) is deliberately **gated on evidence that does not exist yet** and
   closes only when the static admission stage reports its number.
+- **Superseded in part by [DR-2026-09-04](./2026-09-04-colophon-surrounds-the-run.md) at its ratification:** closed; Colophon creates no benchmarks and the Demo-1 method leaves the product.
 - **Owning docs:** [`docs/superpowers/plans/demo-report-1/E1-comparison-frame.md`](../../docs/superpowers/plans/demo-report-1/E1-comparison-frame.md)
   §0.1 and §2.3 (source decision); [`docs/superpowers/plans/demo-report-1/E1-pre-run-freeze.md`](../../docs/superpowers/plans/demo-report-1/E1-pre-run-freeze.md)
   (frozen source and resumption boundary);

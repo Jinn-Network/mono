@@ -264,6 +264,23 @@ describe("v2 recompute: the join edges v1 left out", () => {
     }
   });
 
+  it("carries the composite's lineage edge, and omits it on a composite that supersedes nothing", async () => {
+    // Without a fixture that gives it a value, deleting the emission leaves the suite green.
+    const document = await goldenJson("composite/composed.json");
+    const superseding = sealCryptoEnvironmentRecord({
+      ...document,
+      supersedes: { digest: { sha256: LINEAGE } },
+    });
+    expect((await cryptoEnvironmentRecomputeV2(superseding, noReferences)).supersedesDigest)
+      .toBe(prefixedDigest(LINEAGE));
+
+    const plain = await cryptoEnvironmentRecomputeV2(
+      sealCryptoEnvironmentRecord(document),
+      noReferences,
+    );
+    expect(Object.hasOwn(plain, "supersedesDigest")).toBe(false);
+  });
+
   it("names the miss-policy body the composite pins", async () => {
     const document = await goldenJson("composite/composed.json");
     const missBody = (document.composition as { missPolicy: { body: { digest: { sha256: string } } } })

@@ -5,6 +5,7 @@ import {
   dssePreAuthEncoding,
   formatOrigin,
   headPath,
+  parseHeadTimestamp,
   refreshByWithinCeiling,
   sealJson,
 } from "@jinn-network/record-discovery-protocol";
@@ -68,6 +69,11 @@ export async function signHead(head: SourceHead, signer: DsseSigner): Promise<Ds
  * profile's bound (`MAX_REFRESH_BY_AHEAD_MS`) ahead of the new `issuedAt`,
  * regardless of the requested `refreshWithinMs`.
  *
+ * Throws on a `prev.issuedAt` that is not an offset-bearing RFC 3339 date-time
+ * (§5.2, #3482): an offset-less one is read as host-LOCAL time, so the
+ * successor's `issuedAt` -- and with it whether it is monotonic at all --
+ * would depend on where the source happens to be maintained.
+ *
  * A non-positive or non-finite `refreshWithinMs` falls back to the profile
  * bound rather than collapsing the window: a head with `refreshBy` equal to
  * its own `issuedAt` is one both named verification procedures refuse (§5.2 --
@@ -76,7 +82,10 @@ export async function signHead(head: SourceHead, signer: DsseSigner): Promise<Ds
  * no consumer can accept.
  */
 export function refreshHead(prev: SourceHead, clock: Clock, refreshWithinMs: number = MAX_REFRESH_BY_AHEAD_MS): SourceHead {
-  const prevIssuedAtMs = new Date(prev.issuedAt).getTime();
+  const prevIssuedAtMs = parseHeadTimestamp(prev.issuedAt);
+  if (Number.isNaN(prevIssuedAtMs)) {
+    throw new Error(`refreshHead: previous head's issuedAt "${prev.issuedAt}" is not an offset-bearing RFC 3339 date-time.`);
+  }
   const nowMs = clock.now().getTime();
   const issuedAtMs = Math.max(nowMs, prevIssuedAtMs + 1);
   const requestedAheadMs = Number.isFinite(refreshWithinMs) && refreshWithinMs > 0
@@ -150,11 +159,17 @@ function decodeHeadTimestamps(payload: string): { issuedAt: string; refreshBy: s
  * Whether a sequence of successive head envelopes maintains freshness
  * (§7 item 3): `issuedAt` strictly increases across the sequence, and each
  * head's `refreshBy` stays ahead of its own `issuedAt`.
+ *
+ * The timestamps are read strictly (§5.2, #3482) -- these envelopes are
+ * decoded straight off the wire, never through `parseSourceHead`, so a head
+ * whose timestamps are not offset-bearing would otherwise be judged against
+ * the kit runner's own zone and hand the same bytes opposite verdicts on two
+ * machines. An unreadable timestamp fails the conformance check.
  */
 export function maintainsFreshness(headEnvelopes: Array<{ payload: string }>): boolean {
   const heads = headEnvelopes.map((envelope) => decodeHeadTimestamps(envelope.payload));
   for (let index = 1; index < heads.length; index += 1) {
-    if (new Date(heads[index]!.issuedAt).getTime() <= new Date(heads[index - 1]!.issuedAt).getTime()) return false;
+    if (!(parseHeadTimestamp(heads[index]!.issuedAt) > parseHeadTimestamp(heads[index - 1]!.issuedAt))) return false;
   }
-  return heads.every((head) => new Date(head.refreshBy).getTime() > new Date(head.issuedAt).getTime());
+  return heads.every((head) => parseHeadTimestamp(head.refreshBy) > parseHeadTimestamp(head.issuedAt));
 }

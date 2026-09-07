@@ -7,6 +7,7 @@ import {
 } from "@jinn-network/benchmarking-protocol";
 import { recordDigest } from "@jinn-network/evidence-protocol";
 import type { SkillsBenchDemo1Declaration } from "./skillsbench-demo1-declaration.js";
+import { SKILLSBENCH_DEMO1_METHOD_IDS, SKILLSBENCH_DEMO1_METHOD_VERSION } from "./skillsbench-demo1-stats.js";
 
 /**
  * Deterministic sealing of Demo-1's Benchmark Definition and Analysis Manifest.
@@ -17,6 +18,19 @@ import type { SkillsBenchDemo1Declaration } from "./skillsbench-demo1-declaratio
  * committed preregistration file and the final bundle must carry the same manifest bytes.
  *
  * Nothing here reads a cell, a reward, or any outcome.
+ *
+ * ERRATUM (issue #2973). The analysis plan below now cites Demo-1's own
+ * `jinn.demo1.method/*` identifiers, owned by `skillsbench-demo1-stats.ts` — the module that
+ * actually computes these numbers. The confirmatory records published on 2026-08-20 cite
+ * `jinn.benchmarking.method/{manipulation-check,paired-delta,variance-decomposition}@1`
+ * instead, and `paired-delta@1` is a registered method whose implementation
+ * (`packages/benchmarking/aggregate/src/registry.ts`: clustered BCa bootstrap over binary pass
+ * rates) did not produce them. Those published bytes are deliberately NOT rewritten: the sealed
+ * Analysis Manifest digest carries third-party time evidence and the report envelope is
+ * DSSE-signed, so editing a preregistration after the fact would be a worse integrity failure
+ * than the mis-citation. The divergence is disclosed in `demo1-report.md`. Consequence: re-running
+ * `demo1-preregister.mjs` no longer reproduces the committed, anchored
+ * `E1-demo1-preregistration.v1.json`, and must not be used to overwrite it.
  */
 export const SKILLSBENCH_DEMO1_SEALED_AT = "2026-08-18T00:00:00.000Z" as const;
 export const SKILLSBENCH_DEMO1_SOURCE_COMMIT = "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af" as const;
@@ -128,9 +142,9 @@ export function sealDemo1Manifest(
       excludedMember: "count-attrition",
     },
     analysisPlan: [
-      { id: "jinn.benchmarking.method/manipulation-check", version: "1", parameters: { control: "C-no-instructions", population: "slate" } },
-      { id: "jinn.benchmarking.method/paired-delta", version: "1", parameters: { pairedBy: "task", arms: ["A-native-skill", "B-flat-claude-md"], population: "informative-subset", informativeRule: "C-no-instructions equals zero in every replicate AND max(mean A, mean B) greater than zero", equivalenceMarginPpm: 150000 } },
-      { id: "jinn.benchmarking.method/variance-decomposition", version: "1", parameters: { components: ["replicate-noise", "task-heterogeneity"], population: "slate" } },
+      { id: SKILLSBENCH_DEMO1_METHOD_IDS.manipulationCheck, version: SKILLSBENCH_DEMO1_METHOD_VERSION, parameters: { control: "C-no-instructions", population: "slate" } },
+      { id: SKILLSBENCH_DEMO1_METHOD_IDS.pairedMeanDelta, version: SKILLSBENCH_DEMO1_METHOD_VERSION, parameters: { pairedBy: "task", arms: ["A-native-skill", "B-flat-claude-md"], population: "informative-subset", informativeRule: "C-no-instructions equals zero in every replicate AND max(mean A, mean B) greater than zero", equivalenceMarginPpm: 150000 } },
+      { id: SKILLSBENCH_DEMO1_METHOD_IDS.varianceDecomposition, version: SKILLSBENCH_DEMO1_METHOD_VERSION, parameters: { components: ["replicate-noise", "task-heterogeneity"], population: "slate" } },
     ],
     closeAt: SKILLSBENCH_DEMO1_SEALED_AT,
     preregistration: stage === "final" ? "local-sealed-before-selection" : "post-hoc-exploratory",

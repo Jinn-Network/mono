@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "digests": {
+    "benchmark": "sha256:b25de022420ea8e7f9c52c2bd1b34113626ec381cbbb6310e722a4c243424ad8",
+    "manifest": "sha256:f848f94369b7b8d91dc2f0e7a0e67b940e60f234d907248c40f5693d97f391b6",
+    "cohortAbc": "sha256:ba4faf08c1b635548cff91ca5b55321652984e9a783bd532536dd84706261c65",
+    "matrixAbc": "sha256:f7c33c3871202411b67cb526149c2d4eda53cce7a9817a1d8cee8775aa855a7d",
+    "reportPayloadAbc": "sha256:41bf277546e711f401356805548651b1afa98ada7049b59955db77b4b01241df",
+    "reportEnvelopeAbc": "sha256:72a2299704d6f38bb57f17052c2503fc6142ea5c86641b345025081ad4618526",
+    "cohortAbcd": "sha256:be0179884bafb91a391dd392e9cb16f71f6bf78d5d6c1e7f43dec8f3b1b52327",
+    "matrixAbcd": "sha256:e4facd9fde6f565720ab818a4f0d4ad517b11a29ae6b9497306667ca8c6da6d3",
+    "reportPayloadAbcd": "sha256:d61944fb714bc71ce8eecea25ee17db06670aa7385c445fee3caa1a664b4c7c0",
+    "reportEnvelopeAbcd": "sha256:5b1a010cd100705a5cdfb74cc30d3bc234e5b52314d0c47aabd28911c1756335",
+    "claimPackage": "sha256:d7ae86cdc5d4752eced90069f2cbd9c40d8f1a73e05a3809040611919cc59a54",
+    "bundleManifest": "sha256:b5598274cf7b0c6524710910f93c70e6ebddd5bcdf1b425af2cc72c0b2790b82",
+    "metadataFirstBundleManifest": "sha256:396c3bf11e9e40b753cc55c7be2b7765dda73afc70bdc4e00e4ecffc597b912a"
+  }
+}

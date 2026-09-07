@@ -33,9 +33,13 @@ export default defineConfig({
     // re-run, and 33003612122 failed `src/operations/run-launch.test.ts` at 5000ms on a case whose
     // real cost is milliseconds (issue #2766).
     //
-    // 30s is not a guess: 114 tests across 18 files in this suite already carry a hand-applied
-    // `}, 30_000)` added one flake at a time since 2026-08-10, so it is the bound the suite has
-    // already converged on — this hoists it to cover the tests nobody has been bitten by yet.
+    // 30s is not a guess: 114 tests across 18 files in this suite had each grown a hand-applied
+    // `}, 30_000)`, added one flake at a time since 2026-08-10, so it is the bound the suite had
+    // already converged on test by test. Hoisting it here covered the tests nobody had been
+    // bitten by yet; those 114 overrides then only restated this line, and were removed (#3358).
+    // `src/suite-timeouts.test.ts` is what now holds the floor they used to hold individually, so
+    // lowering this value fails there rather than silently un-protecting 18 files. A per-test
+    // bound above 30s is still an ordinary thing to write, and several files do.
     // It matches `operator/vitest.config.ts`, which raised the same 5s default for the same
     // reason. A genuine hang still fails fast relative to a suite that runs for tens of minutes.
     // Hooks take the same bound: the per-test `beforeEach` in these files does workspace

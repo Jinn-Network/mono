@@ -48,9 +48,12 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-function binding(key: string): ResolvedBinding {
+// A conforming `BindingResolver` never resolves by key alone, so the fixture echoes
+// the queried Agent IRI back on the binding it returns (issue #3629).
+function binding(key: string, agent: string): ResolvedBinding {
   return {
     binding: {
+      agent,
       key: { didKey: key, keyid: key },
       // Every scope a native role can require, including the announce-plane scope the three
       // `*-discovery` roles gained in issue #2525 and the admission-receipt scope the `admission`
@@ -113,7 +116,7 @@ async function fixture(input: {
   const root = await mkdtemp(join(tmpdir(), "jinn-native-evaluator-composition-"));
   roots.push(root);
   const resolver: BindingResolver = {
-    resolveBinding: vi.fn(async (query) => binding(query.key)),
+    resolveBinding: vi.fn(async (query) => binding(query.key, query.agent)),
   };
   const roles = await openRoleIdentitySet({
     storePath: join(root, "identity", "roles.enc.json"),

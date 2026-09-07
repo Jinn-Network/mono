@@ -35,6 +35,19 @@ export function createHttpPingTransport(
 ): PingTransport {
   return {
     async announce(headUrl: string): Promise<void> {
+      // Why this one keeps the default `redirect: "follow"` while the two GET
+      // transports enforce a per-hop origin rule (#3432).
+      //
+      // The redirect guard exists because a peer-operated serving root can
+      // forward a request the operator's containment check already approved,
+      // and the daemon then READS what it finds there. A ping is the opposite
+      // shape on every axis that matters: it is a POST this operator emits, its
+      // destination is an operator-configured endpoint rather than anything a
+      // peer introduced, its body carries nothing confidential (a head URL that
+      // is public by construction), and the response is inspected for a status
+      // and then discarded -- no bytes ever enter a trust decision. A ping is an
+      // unauthenticated hint that carries no trust either way (§7 item 4): a
+      // lost ping costs latency, never correctness.
       const response = await fetchLike(endpointUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },

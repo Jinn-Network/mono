@@ -78,6 +78,29 @@ describe('spawnMultiOpDaemons', () => {
       rpcUrl: 'https://base-sepolia.example/dummy',
       pollIntervalMs: 5000,
     });
+    // Fixed on purpose, and deliberately BELOW 32768. These ports are bound by
+    // a spawned child, not by the test, so `listen(0)` is not available here —
+    // and the two remaining options are not equivalent. A port under the
+    // ephemeral band (32768-65535) is one no sibling vitest worker's `listen(0)`
+    // can ever be handed, so a fixed reservation has NO window at all;
+    // `allocateAnvilPort()` would move these into the band and open an
+    // allocate-then-rebind window that the dummy daemon — no `'error'` handler —
+    // would lose as a child crash surfacing as a 30s readiness timeout.
+    //
+    // The second describe below reserves its three ports the same way, for the
+    // same reason: the registry's ordering puts a below-band reservation ahead
+    // of `allocateAnvilPort()` for a child-process bind unconditionally, and
+    // three sequential single-port call sites are not the "many ports, or
+    // several instances inside one file" case that makes a fixed reservation
+    // impractical (#3582). A shorter allocate-then-rebind window is still a
+    // window, and this dummy daemon has no `'error'` handler, so losing that
+    // race surfaces as a 30s readiness timeout rather than as an EADDRINUSE.
+    // Both forms beat the `pickPort()` blind random guess they replaced, which
+    // sat inside the band and never checked the port was free at all.
+    //
+    // Registered in the port registry in
+    // test/release/tier-1/T1.2-harness-readiness-contract.ts. See issue #1627
+    // and docs/runbooks/testing.md, "Worker parallelism and ports".
     await fs.writeFile(path.join(opAHome, '.jinn-client', 'config.json'), minimalCfg(7732));
     await fs.writeFile(path.join(opBHome, '.jinn-client', 'config.json'), minimalCfg(7733));
   });
@@ -129,6 +152,16 @@ describe('spawnMultiOpDaemons', () => {
  * bootstrap window, which is the exact behaviour the lifetime log is
  * supposed to capture (the load-bearing assertion of this fix).
  */
+// Fixed and below the ephemeral band, on the same reasoning as the first
+// describe: a child process binds these, so `listen(0)` is unavailable, and a
+// below-band reservation has no allocate-then-rebind window at all. One per
+// test — the three run sequentially today, and a number each keeps that true
+// if one ever becomes concurrent. Registered in
+// test/release/tier-1/T1.2-harness-readiness-contract.ts.
+const LOG_CAPTURE_PORT = 7735;
+const NO_LOG_DIR_PORT = 7736;
+const FATAL_HANDSHAKE_PORT = 7737;
+
 describe('spawnMultiOpDaemons — lifetime log capture', () => {
   let tmpRoot: string;
   let dummyBinPath: string;
@@ -146,13 +179,8 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
     await fs.rm(tmpRoot, { recursive: true, force: true });
   });
 
-  /** Allocate a port likely to be free. Random in the ephemeral range. */
-  function pickPort(): number {
-    return 40000 + Math.floor(Math.random() * 20000);
-  }
-
   it('streams stdout + stderr to the per-daemon log file for the full lifetime', async () => {
-    const apiPort = pickPort();
+    const apiPort = LOG_CAPTURE_PORT;
     const logDir = path.join(tmpRoot, 'logs');
     const handle = await spawnMultiOpDaemons({
       ops: [{ name: 'op-a', home: opAHome, apiPort }],
@@ -197,7 +225,7 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
   }, 30000);
 
   it('does not write a log file when logDir is omitted (back-compat)', async () => {
-    const apiPort = pickPort();
+    const apiPort = NO_LOG_DIR_PORT;
     const handle = await spawnMultiOpDaemons({
       ops: [{ name: 'op-a', home: opAHome, apiPort }],
       readyTimeoutMs: 10000,
@@ -213,7 +241,7 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
   }, 30000);
 
   it('keeps the fatal daemon envelope in the readiness error after handshake output', async () => {
-    const apiPort = pickPort();
+    const apiPort = FATAL_HANDSHAKE_PORT;
     const fatalBinPath = path.join(tmpRoot, 'fatal-after-handshake.cjs');
     await fs.writeFile(fatalBinPath, HANDSHAKE_THEN_FATAL_SOURCE);
 

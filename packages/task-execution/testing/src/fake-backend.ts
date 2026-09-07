@@ -412,9 +412,9 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
     // compare against, so an in-scope ref is always "matching".
     try {
       this.resolveAttempt(ref);
-      return { classification: "matching" };
+      return { classification: "matching", retained: true };
     } catch {
-      return { classification: "absent", detail: `no durable record for ref "${ref}"` };
+      return { classification: "absent", retained: false, detail: `no durable record for ref "${ref}"` };
     }
   }
 

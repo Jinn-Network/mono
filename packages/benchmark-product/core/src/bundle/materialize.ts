@@ -56,14 +56,8 @@ import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/sig
 import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
-import {
-  BUNDLE_V4_FORMAT,
-  BUNDLE_V6_FORMAT,
-  BUNDLE_V7_FORMAT,
-  BUNDLE_V8_FORMAT,
-  buildBundleManifest,
-  verifyBundleManifest,
-} from "./manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT } from "../legacy-closures.js";
+import { BUNDLE_V8_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildPublicAssets } from "./assets.js";
@@ -105,31 +99,6 @@ import {
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
 import { derivePublicComparison } from "@colophon-claims/verify";
-
-export const PUBLIC_BUNDLE_FILES = [
-  "static-bundle.json",
-  "benchmark.json",
-  "run.json",
-  "matrix.json",
-  "report.json",
-  "report-envelope.json",
-  "claim-package.json",
-  "verdicts.json",
-  "evidence.json",
-  "verification/assembly.jsonl",
-  "trust/public-keys.json",
-  "index.html",
-  "badge.svg",
-  "social-card.svg",
-  "README.md",
-  "share.txt",
-] as const;
-
-export const PUBLIC_BUNDLE_V4_FILES = [
-  ...PUBLIC_BUNDLE_FILES.slice(0, 7),
-  "qualification.json",
-  ...PUBLIC_BUNDLE_FILES.slice(7),
-] as const;
 
 const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
 
@@ -277,7 +246,7 @@ function recordClosure(input: MaterializeBundleInput): {
   readonly files: Map<string, Uint8Array>;
   readonly evidenceRecords: Map<string, Set<BundleV4EvidenceRole>>;
   readonly format:
-    | "benchmark-product-public-bundle/2"
+    | typeof BUNDLE_FORMAT
     | typeof BUNDLE_V4_FORMAT
     | typeof BUNDLE_V6_FORMAT
     | typeof BUNDLE_V7_FORMAT
@@ -600,6 +569,12 @@ function recordClosure(input: MaterializeBundleInput): {
       // whose ledger happened to be unsorted refused at the schema instead of publishing. No
       // previously producible bundle moves: an unsorted projection never got past this parse, so
       // the only lists this sort can reorder are ones that could not be published at all.
+      //
+      // MIRRORED by `verify/src/verify.ts`'s `projectAdmissionExclusions`, which re-derives these
+      // exact three fields with this exact sort from its own admission replay and refuses a bundle
+      // whose carried list differs (issue #3246). The two sides are duplicated rather than shared
+      // because the verifier is a standalone published package that re-states `core` instead of
+      // importing it; change one and the other refuses every bundle, so change both.
       exclusions: admission.excluded
         .map((entry) => ({
           itemSha256: entry.itemSha256,
@@ -1131,7 +1106,7 @@ function recordClosure(input: MaterializeBundleInput): {
         : BUNDLE_V6_FORMAT
       : binaryQualification
         ? BUNDLE_V4_FORMAT
-        : "benchmark-product-public-bundle/2",
+        : BUNDLE_FORMAT,
   };
 }
 

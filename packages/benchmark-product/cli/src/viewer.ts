@@ -3,11 +3,17 @@ import { lstatSync, realpathSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { extname, resolve } from "node:path";
 import {
+  BUNDLE_V4_FORMAT,
+  BUNDLE_V5_FORMAT,
+  BUNDLE_V7_FORMAT,
+  BUNDLE_V8_FORMAT,
   PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
+  bundleIdentityLabel,
+  isMetadataFirstBundle,
   summarizeVerificationOutcome,
   verifyPublicBundleSnapshot,
   type PublicComparisonCell,
@@ -86,26 +92,28 @@ function viewerHtml(
     : `<p class="deferred-note">${outcome.artifactContent.notFetched} artifact ${outcome.artifactContent.notFetched === 1 ? "body was" : "bodies were"} not fetched. This bundle carries their exact digests, not their bytes, so nothing here says what they contain. Check fetched bytes against those digests yourself, or verify the full-evidence bundle.</p>`;
   // The anchored binary-qualification closure is the one format the @0.1 line cannot read
   // (issue #3205), so it is named before the fall-through rather than inheriting it.
-  const verificationCommand = verification.format === "benchmark-product-public-bundle/5"
+  const verificationCommand = verification.format === BUNDLE_V5_FORMAT
     ? PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND
-    : verification.format === "benchmark-product-public-bundle/8"
+    : verification.format === BUNDLE_V8_FORMAT
       ? PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND
-      : verification.format === "benchmark-product-public-bundle/7"
+      : verification.format === BUNDLE_V7_FORMAT
         ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
-        : verification.format === "benchmark-product-public-bundle/4"
+        : verification.format === BUNDLE_V4_FORMAT
           ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
           : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
   // No released npx line understands the metadata-first profile -- an older reader refuses it at
   // manifest parse -- so this page offers the local command that does work instead of an
-  // instruction to fail.
-  const copyCommand = outcome.artifactContent === undefined
-    ? `${verificationCommand} ${JSON.stringify(bundleDir)}`
-    : `colophon bundle verify --bundle ${JSON.stringify(bundleDir)}`;
-  const qualification = verification.format === "benchmark-product-public-bundle/5"
+  // instruction to fail. The key is the bundle's declared profile, not whether a body happened to
+  // be deferred: a metadata-first bundle with every declared artifact carried defers nothing and
+  // would otherwise be handed the npx line that refuses it (issue #3313).
+  const copyCommand = isMetadataFirstBundle(verification)
+    ? `colophon bundle verify --bundle ${JSON.stringify(bundleDir)}`
+    : `${verificationCommand} ${JSON.stringify(bundleDir)}`;
+  const qualification = verification.format === BUNDLE_V5_FORMAT
     ? undefined
     : verification.qualification;
   const heading = comparison === undefined
-    ? verification.format === "benchmark-product-public-bundle/5"
+    ? verification.format === BUNDLE_V5_FORMAT
       ? "Verified evidence-native benchmark"
       : "Verified binary qualification"
     : `Complete comparison on ${comparison.tasks.length} ${comparison.sampleKind === "bundled-prediction" ? "sample " : ""}tasks`;
@@ -117,7 +125,7 @@ function viewerHtml(
   const workspaceAction = canStartWorkspace
     ? '<form method="post" action="/use-my-work"><button class="primary" type="submit">Use my work</button></form>'
     : '<p><strong>Use my work:</strong> run <code>colophon open</code> from a terminal with the full product installed.</p>';
-  const identity = verification.identity.startsWith("sha256:") ? verification.identity : `sha256:${verification.identity}`;
+  const identity = bundleIdentityLabel(verification);
   const evidencePath = availablePaths.has("evidence.json") ? "evidence.json" : "claim-package.json";
   const reportSection = availablePaths.has("index.html")
     ? '<section><h2>Published report</h2><p>This script-free report is inside the immutable bundle. The live result above was computed from the exact authenticated bytes when this local viewer started.</p><iframe title="Published Colophon benchmark report" src="/bundle/index.html"></iframe></section>'

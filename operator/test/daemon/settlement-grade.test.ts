@@ -733,15 +733,37 @@ describe('executorBinding against a REAL LocalTaskExecutionBackend delivery (fin
 
     const ack = await backend.submit(task, submission);
     if (!ack.accepted) throw new Error(`submit rejected: ${ack.error.message}`);
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      const snapshot = await backend.observe(ack.submission);
-      if (snapshot.descriptor.derived.terminal) {
-        if (snapshot.descriptor.derived.state !== 'delivered') {
-          throw new Error(`attempt did not deliver: ${snapshot.descriptor.derived.state}`);
+    // Wall-clock deadline, not a fixed iteration count. The old `attempt < 200`
+    // budget was only ~2.3s of polling, which a contended CI runner (3 forked
+    // vitest workers on 4 vCPUs) starves past -- and on exhaustion the loop fell
+    // through SILENTLY, so a starved poll surfaced as "expected exactly one
+    // delivery" below and pointed the reader at the backend instead of at the
+    // runner. Same edit as test/bridge/converged-delivery-legacy-evaluator.ts.
+    // Issue #1627.
+    //
+    // 10s, deliberately a third of the 30s `testTimeout` rather than half of it,
+    // so the diagnostic below wins the race against the generic vitest timeout
+    // in the exact case it was written for.
+    const deadline = Date.now() + 10_000;
+    let lastState: string | undefined;
+    let terminal = false;
+    while (Date.now() < deadline) {
+      const polled = await backend.observe(ack.submission);
+      lastState = polled.descriptor.derived.state;
+      if (polled.descriptor.derived.terminal) {
+        if (lastState !== 'delivered') {
+          throw new Error(`attempt did not deliver: ${lastState}`);
         }
+        terminal = true;
         break;
       }
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    if (!terminal) {
+      throw new Error(
+        `attempt never reached a terminal state within 10000ms (last observed state: ${lastState ?? 'none'}). ` +
+          'This is a starved poll on a contended runner, not a lost delivery -- see issue #1627.',
+      );
     }
     const snapshot = await backend.observe(ack.submission);
     const [deliveryRef] = await backend.deliveries(snapshot.descriptor.attempt);

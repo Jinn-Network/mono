@@ -30,6 +30,7 @@ const BOOLEAN_FLAGS = new Set([
   "json",
   "include-native-artifacts",
   "ack-provider-network-costs",
+  "ack-sample-size",
 ]);
 
 /**

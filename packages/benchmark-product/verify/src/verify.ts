@@ -7,8 +7,10 @@ import {
 } from "@jinn-network/benchmarking-evidence";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import {
+  BENCHMARKING_METHOD_IDS,
   DISCLOSURE_SPECIFICATION_EXTENSION,
   cellIdempotencyKey,
+  compareCodeUnitStrings,
   expectedCellSet,
   parseBenchmark,
   parseMatrix,
@@ -92,8 +94,13 @@ import {
   type VerifiedBundleSnapshot,
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
-import { PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, BUNDLE_V8_FORMAT } from "./manifest.js";
+import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT } from "./manifest.js";
+import {
+  LEGACY_ANCHOR_MEMBER_PATTERN,
+  PUBLIC_BUNDLE_V4_FILES,
+  legacyClosure,
+  type LegacyBundleFormat,
+} from "./legacy-closures.js";
 import {
   DISCLOSURE_SPECIFICATION_BUNDLE_ROLE,
   DisclosureProjectionError,
@@ -112,6 +119,7 @@ import {
   verifyBinaryJudgmentAdmissionClosure,
   type AdmissionAuthorityRole,
   type AdmissionSha256,
+  type VerifiedBinaryJudgmentAdmissionExclusion,
 } from "./admission/verification.js";
 import { readAdmissionVerdictEnvelope } from "./admission/result-evaluation.js";
 import {
@@ -156,12 +164,7 @@ export type PublicBundleVerificationCheck =
   | "disclosure-specification";
 
 export interface LegacyPublicBundleVerificationResult extends PublicBundleSignerDisclosure {
-  readonly format:
-    | "benchmark-product-public-bundle/2"
-    | "benchmark-product-public-bundle/4"
-    | "benchmark-product-public-bundle/6"
-    | "benchmark-product-public-bundle/7"
-    | "benchmark-product-public-bundle/8";
+  readonly format: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT;
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
@@ -349,6 +352,36 @@ function sameCanonical(left: unknown, right: unknown): boolean {
   return equalBytes(canonicalJsonBytes(left as never), canonicalJsonBytes(right as never));
 }
 
+/**
+ * `qualification.exclusions` re-derived from the replayed admission closure, so the carried list is
+ * COMPARED rather than taken on the producer's word. Without this the exclusion list -- the record
+ * of exactly what was dropped from the slate and why -- is the one part of the qualification
+ * projection a cold verifier never re-derives: `BundleQualificationSchema` only proves each entry's
+ * two digests are reachable and carry the `source-item` role, never that the entry exists, names
+ * that replacement, or gives that reason (issue #3246).
+ *
+ * MIRROR of `benchmark-product/core/src/bundle/materialize.ts`'s qualification `exclusions`
+ * projection: same three fields, same `itemSha256` code-unit sort. The sort is not cosmetic on
+ * either side -- `admission.excluded` arrives in REPLACEMENT-LEDGER order, which carries no
+ * sortedness guarantee, while `BundleQualificationSchema` requires the projection sorted and
+ * unique, so a verifier that skipped the sort would refuse every published bundle whose ledger
+ * happened to be unsorted. The two sides are duplicated rather than shared because this is a
+ * standalone published verifier that deliberately re-states `core` instead of importing it (see
+ * `profile/claim-consistency.ts`'s own mirror note); `materialize.ts` carries the matching note
+ * naming this function, so neither side can be changed while believing it is the only one.
+ */
+function projectAdmissionExclusions(
+  excluded: readonly VerifiedBinaryJudgmentAdmissionExclusion[],
+): readonly { readonly itemSha256: string; readonly replacementItemSha256: string; readonly reason: string }[] {
+  return excluded
+    .map((entry) => ({
+      itemSha256: entry.itemSha256,
+      replacementItemSha256: entry.replacementItemSha256,
+      reason: entry.reason,
+    }))
+    .sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
+}
+
 function verifyEvidenceNativeSignature(input: EvidenceNativeSignatureVerificationInput): boolean {
   try {
     const key = createPublicKey({ key: Buffer.from(input.publicKeyBytes), format: "der", type: "spki" });
@@ -487,19 +520,20 @@ export async function verifyPublicBundleSnapshot(
   };
   const checks: PublicBundleVerificationCheck[] = ["manifest"];
   const manifestPaths = new Set(checked.manifest.files.map((file) => file.path));
-  // Three independent axes, five formats. The qualification axis decides the mandatory member list,
-  // the evidence-catalog grammar, and the trust grammar; the anchor axis decides the `anchors/`
+  // The four frozen closures answer from the frozen table (`legacy-closures.ts`); `/8` is a new
+  // closure rather than a fifth cell in a module that is closed, so its shape is stated here.
+  // Three independent axes: the qualification axis decides the mandatory member list, the
+  // evidence-catalog grammar, and the trust grammar; the anchor axis decides the `anchors/`
   // allowlist and the `integrity-anchors` check; the disclosure axis decides the Report-extension
   // edge and the `disclosure-specification` check. v6 is v2 plus anchors, v7 is v4 plus anchors
-  // (issue #3205), v8 is v7 plus disclosure (issue #2839) — no axis reinterprets another.
-  const carriesQualification = checked.manifest.format === BUNDLE_V4_FORMAT
-    || checked.manifest.format === BUNDLE_V7_FORMAT
-    || checked.manifest.format === BUNDLE_V8_FORMAT;
-  const carriesAnchors = checked.manifest.format === BUNDLE_V6_FORMAT
-    || checked.manifest.format === BUNDLE_V7_FORMAT
-    || checked.manifest.format === BUNDLE_V8_FORMAT;
-  const carriesDisclosure = checked.manifest.format === BUNDLE_V8_FORMAT;
-  const mandatoryFiles = carriesQualification ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
+  // (issue #3205), v8 is v7 plus disclosure (issue #2839) — no axis reinterprets another. v8 adds
+  // no mandatory MEMBER: the sealed disclosure record travels at the already-allowlisted
+  // `records/<sha256>.bin` path, so its list is v7's, which is v4's.
+  const declaredFormat = checked.manifest.format;
+  const carriesDisclosure = declaredFormat === BUNDLE_V8_FORMAT;
+  const { carriesQualification, carriesAnchors, mandatoryFiles } = carriesDisclosure
+    ? { carriesQualification: true, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_V4_FILES }
+    : legacyClosure(declaredFormat);
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
@@ -519,12 +553,10 @@ export async function verifyPublicBundleSnapshot(
   for (const path of manifestPaths) {
     if (/^native\/inspect\/[a-f0-9]{64}\.eval$/u.test(path)) expectedPaths.add(path);
   }
-  // `anchors/<sha256>.bin` is allowlisted only by the closure versions that define it: an anchor
-  // member in a v2 or v4 bundle is a non-allowlisted file, exactly as it was before these formats.
   const anchorPaths: string[] = [];
   if (carriesAnchors) {
     for (const path of manifestPaths) {
-      if (/^anchors\/[a-f0-9]{64}\.bin$/u.test(path)) {
+      if (LEGACY_ANCHOR_MEMBER_PATTERN.test(path)) {
         expectedPaths.add(path);
         anchorPaths.push(path);
       }
@@ -579,6 +611,46 @@ export async function verifyPublicBundleSnapshot(
     report = parseReport(reportBytes);
   } catch (cause) {
     refuse("record-integrity", "evidence-closure", `primary benchmark record is invalid: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  // ── The qualification axis is BOUND to the sealed Report method (issue #3245) ──────────────
+  //
+  // Everything above reads the qualification axis off `bundle.json`'s format literal alone, and
+  // the whole truth-admission closure hangs off it: the mandatory member list, the evidence and
+  // trust grammars, `qualification.json`'s presence, and — downstream — the admission-manifest
+  // replay, item coverage, instrument pins, and the binary intake roots. Unbound, the literal is
+  // a self-assertion: an honest `/7` relabels to `/6` (and `/4` to `/2`) by dropping the
+  // qualification document and the admission-only evidence records, rewriting `evidence.json` and
+  // `trust/public-keys.json` into their `/2` grammars, and recomputing the manifest.
+  // `claim-package.json` survives byte-unchanged, so `claim-consistency` still passes.
+  //
+  // What that downgrade did NOT do, measured against a real anchored `/7` fixture, is verify:
+  // `buildPublicAssets` dispatches on the sealed Report's method too, so the last step of the run
+  // found a binary Report where the comparison profile was expected and threw. So the closure was
+  // never actually open — but what closed it was an unstructured `Error` from the PRESENTATION
+  // layer, raised after every admission-bearing check had already been accepted, and only because
+  // assets happen to be method-dispatched. That is an accident, not an invariant, and it is not a
+  // refusal: the reader surfaces it as a crash rather than as a named disagreement.
+  //
+  // The producer has always held the other half of this binding: `materializeBundle` refuses when
+  // its claim schema and `report.method.id` disagree about binary qualification. This is the
+  // reader's counterpart, stated against the same fact, so the two agree by construction.
+  //
+  // Read here, before the report envelope is verified, so the refusal fires before the wrong
+  // closure runs. That ordering costs nothing: `report.json` is authenticated by
+  // `report-verification` below, which byte-compares it against the payload recovered from
+  // `report-envelope.json` under the carried report key — so rewriting `method.id` to agree with
+  // a downgraded format only MOVES the refusal there, it never removes one.
+  //
+  // Bidirectional deliberately. One predicate closes the `/7`→`/6` downgrade, the pre-existing
+  // `/4`→`/2` one, and the inverse smuggle of a non-binary Report onto a qualifying format.
+  if ((report.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument) !== carriesQualification) {
+    refuse(
+      "record-integrity",
+      "bundle.json",
+      `bundle format ${checked.manifest.format} declares`
+      + ` ${carriesQualification ? "a qualifying" : "a non-qualifying"} closure, but its sealed`
+      + ` Report declares method ${report.method.id}`,
+    );
   }
   const identities = {
     benchmarkSha256: sha256(benchmarkBytes),
@@ -786,6 +858,7 @@ export async function verifyPublicBundleSnapshot(
       || verifiedAdmission.manifest.truthAdmission !== qualification.truthAdmission
       || !sameCanonical(verifiedAdmission.classes, qualification.candidateClasses)
       || !sameCanonical(verifiedAdmission.strata, qualification.strata)
+      || !sameCanonical(qualification.exclusions, projectAdmissionExclusions(verifiedAdmission.excluded))
     ) refuse("record-integrity", "qualification.json", "qualification admission projection differs from portable replay");
     for (const record of verifiedAdmission.reachableRecords) {
       for (const role of record.roles) addRole(expectedRoles, record.sha256.slice("sha256:".length), role);

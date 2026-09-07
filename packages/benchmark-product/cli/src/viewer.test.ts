@@ -108,7 +108,8 @@ function metadataFirstSnapshot(notFetchedDigests: readonly string[]): VerifiedPu
         "matrix-rederivation", "report-verification", "claim-consistency",
       ],
       artifactContent: {
-        status: "not-fetched",
+        // The status the verifier itself derives: `verified` exactly when no body was deferred.
+        status: notFetchedDigests.length === 0 ? "verified" : "not-fetched",
         verified: 2,
         notFetched: notFetchedDigests.length,
         notFetchedDigests,
@@ -154,6 +155,24 @@ describe("verified bundle viewer", () => {
     expect(page).toContain("3 artifact bodies were not fetched.");
     // No released npx reader understands this profile, so the page must not hand out one.
     expect(page).not.toContain("npx @colophon-claims/verify@0.1");
+    expect(page).toContain("colophon bundle verify --bundle");
+  });
+
+  test("offers the profile-aware command for a metadata-first bundle that deferred nothing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "colophon-viewer-metadata-first-complete-"));
+    roots.push(root);
+    writeFileSync(join(root, "report.json"), "{}");
+    // A metadata-first bundle whose declared artifacts are only signer public keys defers no body,
+    // so `artifactContent.status` reads `verified`. The declared profile is still metadata-first,
+    // and no released npx reader line understands it (issue #3313).
+    const snapshot = metadataFirstSnapshot([]);
+    const viewer = await createVerifiedBundleViewer(root, 0, { verify: async () => snapshot });
+    viewers.push(viewer);
+    const session = await claim(viewer);
+    const page = await (await fetch(session.base, { headers: { cookie: session.cookie } })).text();
+
+    expect(page).toContain("7 of 7 bundle checks passed.");
+    expect(page).not.toContain("npx @colophon-claims/verify@");
     expect(page).toContain("colophon bundle verify --bundle");
   });
 

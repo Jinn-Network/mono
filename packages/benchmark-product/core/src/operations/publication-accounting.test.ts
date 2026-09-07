@@ -203,7 +203,7 @@ describe("publication.accounting operation", () => {
     expect(state.reportPayloadSha256).toBeUndefined();
     expect(state.reportRecordSha256).toBeUndefined();
     expect(state.publication!.report.state).toBe("not-started");
-  }, 30_000);
+  });
 
   test("publishes accounting-only cancellation with no runtime execution", async () => {
     const now = clock();
@@ -218,7 +218,7 @@ describe("publication.accounting operation", () => {
       expect(state.reportRecordSha256).toBeUndefined();
       expect(state.publication!.report.state).toBe("not-started");
     }
-  }, 30_000);
+  });
 
   test("retains every replacement dispatch in Accounting lineage", async () => {
     const now = clock();
@@ -232,7 +232,7 @@ describe("publication.accounting operation", () => {
     if (!result.ok) return;
     const accounting = parseBenchmarkAccounting(getSealedBytes(workspaceDir, result.result.accountingSha256));
     expect(accounting.cells.find((candidate) => candidate.cellKey === cell.cellKey)!.dispatches.map((dispatch) => dispatch.index)).toEqual([1, 2]);
-  }, 30_000);
+  });
 
   test("refuses a dispatched cell without exact capture before any source append", async () => {
     const now = clock();
@@ -245,7 +245,7 @@ describe("publication.accounting operation", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.detail).toMatch(/missing pre-submit Submission capture|no pre-submit exact Submission capture/);
     expect((await source.writer.readState())!.last).toEqual(head);
-  }, 30_000);
+  });
 
   test("replays identical input bytes and timestamps after a crash between append and cutoff checkpoint", async () => {
     const now = clock();
@@ -263,7 +263,7 @@ describe("publication.accounting operation", () => {
     const after = Object.values((await source.writer.readState())!.announcements).find((entry) => entry.receipt.record?.digest === `sha256:${submissionSha256}`)!.receipt;
     expect(after.entryDigest).toBe(before.entryDigest);
     expect(readRunState(workspaceDir, "draft-1")!.publication!.accounting.announcedAt).toBe(frozenAt);
-  }, 30_000);
+  });
 
   test("keeps Matrix v2 resumable when a writer-owned scope record becomes unavailable", async () => {
     const now = clock();
@@ -278,7 +278,7 @@ describe("publication.accounting operation", () => {
     expect(state.publication!.accounting.state).toBe("in-progress");
     expect(state.publication!.matrixV2.state).toBe("in-progress");
     expect(state.matrixV2Sha256).toBeUndefined();
-  }, 30_000);
+  });
 
   test.each(["entry", "source"] as const)("refuses a sealed accounting cutoff with a tampered %s", async (tamper) => {
     const now = clock();
@@ -298,7 +298,7 @@ describe("publication.accounting operation", () => {
     expect(state.publication!.accounting.state).toBe("in-progress");
     expect(state.publication!.matrixV2.state).toBe("in-progress");
     expect(state.matrixV2Sha256).toBeUndefined();
-  }, 30_000);
+  });
 
   test("refuses unproven third-party Delivery before append, then verifies its exact origin; workspace-authored Delivery needs no origin verifier", async () => {
     const now = clock();
@@ -353,7 +353,7 @@ describe("publication.accounting operation", () => {
     const dispatch = accounting.cells.find((candidate) => candidate.cellKey === cell.cellKey)!.dispatches[0]!;
     expect(dispatch.attempt).toBe(attempt);
     expect(dispatch.nativeArtifacts).toEqual(expect.arrayContaining([expect.objectContaining({ role: HARBOR_LOGS_ROLE, availability: "collection-failed" })]));
-  }, 30_000);
+  });
 
   test("reports missing required Harbor archive evidence as indeterminate and refuses before append", async () => {
     const now = clock();
@@ -368,5 +368,5 @@ describe("publication.accounting operation", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.detail).toMatch(/harbor-(durable-dispatch-archive|required-native-evidence).*indeterminate|harbor-required-native-evidence is fail/);
     expect((await source.writer.readState())!.last).toEqual(head);
-  }, 30_000);
+  });
 });

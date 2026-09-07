@@ -204,6 +204,26 @@ async function keepViewerOpen(
   return result(0, `Viewer: ${visibleUrl}\nStopped the viewer; bundle files were retained.\n`);
 }
 
+/**
+ * The local-publish answer. Its check line says `Recomputed:`, the verb issue #2982 ruled for the
+ * standalone reader: this tool recomputes the arithmetic, closure, and consistency of the bytes it
+ * just wrote, and establishes nothing about whether the recorded outcomes reflect real executions.
+ * Reading `Verified:` here while the reader printed `Recomputed:` left the two Colophon CLIs
+ * disagreeing about what the same six checks establish, on the surface a claim's own author reads
+ * first (issue #3674).
+ *
+ * The sample publishes the fixed six-check closure -- `quickstart/sample-lifecycle.mjs` pins those
+ * six as `expectedBundleChecks` -- so the denominator is that closure's, not the passed count's.
+ */
+export function localPublishAnswer(published: {
+  readonly bundle: string;
+  readonly receipt: string;
+  readonly identity: string;
+  readonly checksPassed: number;
+}): string {
+  return `Published locally; nothing was uploaded.\nBundle: ${published.bundle}\nReceipt: ${published.receipt}\nIdentity: sha256:${published.identity}\nRecomputed: ${published.checksPassed} of 6 checks passed\nComplete comparison; no comparative winner stated.\n`;
+}
+
 async function runDemo(
   argv: readonly string[],
   cwd: string,
@@ -240,7 +260,12 @@ async function runDemo(
       buildMetadata,
     );
     if (json) return result(0, `${JSON.stringify({ ok: true, result: evidence })}\n`);
-    const answer = `Published locally; nothing was uploaded.\nBundle: ${evidence.output.bundle}\nReceipt: ${join(evidence.output.root, "quickstart-receipt.json")}\nIdentity: sha256:${evidence.digests.bundleIdentity}\nVerified: ${evidence.portableChecks.length} of 6 checks passed\nComplete comparison; no comparative winner stated.\n`;
+    const answer = localPublishAnswer({
+      bundle: evidence.output.bundle,
+      receipt: join(evidence.output.root, "quickstart-receipt.json"),
+      identity: evidence.digests.bundleIdentity,
+      checksPassed: evidence.portableChecks.length,
+    });
     if (noOpen) return result(0, answer);
     const viewer = await createVerifiedBundleViewer(evidence.output.bundle, 0, {
       ...(agentDataDir === undefined ? {} : {

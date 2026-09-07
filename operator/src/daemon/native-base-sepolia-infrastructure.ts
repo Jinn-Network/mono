@@ -250,6 +250,14 @@ const MAX_RECORD_REDIRECTS = 5;
  *
  * `resolveContainedUrl` brings origin AND path-prefix containment, credential refusal, scheme
  * refusal and `..` normalization with it, so this states the policy rather than re-deriving it.
+ *
+ * The roots are classified ONCE, by the caller, before this closure is built (#3457). A root that
+ * is not an absolute HTTP(S) URL makes `resolveContainedUrl` throw for EVERY candidate, and the
+ * blanket catch below cannot tell that apart from "this candidate is outside the root" — so an
+ * operator who wrote `records.peer.example` without its scheme saw every one of that peer's
+ * records refused with a message naming only the peer's destination. Such a root is named at
+ * construction and dropped here: it can never admit anything, so dropping it is behavior-
+ * preserving and it leaves this catch meaning only what it says.
  */
 function containedByConfiguredRoot(roots: readonly string[]): (url: URL) => boolean {
   const configured = [...roots];
@@ -261,6 +269,33 @@ function containedByConfiguredRoot(roots: readonly string[]): (url: URL) => bool
       return false;
     }
   });
+}
+
+/**
+ * Splits the configured record roots into the ones that can ever admit a destination and the ones
+ * that cannot, applying exactly `resolveContainedUrl`'s own two root refusals (#3457).
+ */
+function classifyConfiguredRoots(roots: readonly string[]): {
+  readonly usable: readonly string[];
+  readonly unusable: readonly { readonly root: string; readonly detail: string }[];
+} {
+  const usable: string[] = [];
+  const unusable: { root: string; detail: string }[] = [];
+  for (const root of roots) {
+    let parsed: URL;
+    try {
+      parsed = new URL(root);
+    } catch {
+      unusable.push({ root, detail: 'it is not an absolute URL' });
+      continue;
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      unusable.push({ root, detail: `scheme ${parsed.protocol} is not HTTP(S)` });
+      continue;
+    }
+    usable.push(root);
+  }
+  return { usable, unusable };
 }
 
 export function createBaseSepoliaRecordTransport(input: {
@@ -276,6 +311,9 @@ export function createBaseSepoliaRecordTransport(input: {
    * `exactLocation` already makes when it SYNTHESIZES a requester record location, but nothing
    * validates it — configure a peer by a proxy hostname it does not advertise and its records are
    * refused rather than fetched.
+   *
+   * Written for the operator, who reads neither this file nor `origin-policy.ts`, in
+   * `docs/operator/native-record-sources.md` (#3460).
    */
   readonly recordOrigins: readonly string[];
   readonly fetchImpl: (request: string | URL, init?: RequestInit) => Promise<Response>;
@@ -291,15 +329,35 @@ export function createBaseSepoliaRecordTransport(input: {
     input.ipfsFetchTimeoutMs, 'JINN_NATIVE_IPFS_FETCH_TIMEOUT_MS', DEFAULT_IPFS_FETCH_TIMEOUT_MS);
   const httpTimeoutMs = resolveFetchTimeoutMs(
     input.httpFetchTimeoutMs, 'JINN_NATIVE_HTTP_FETCH_TIMEOUT_MS', DEFAULT_HTTP_FETCH_TIMEOUT_MS);
-  const allowRecordLocation = containedByConfiguredRoot(input.recordOrigins);
+  const configuredRoots = classifyConfiguredRoots(input.recordOrigins);
+  for (const { root, detail } of configuredRoots.unusable) {
+    // Once, at construction, in the operator's own configuration vocabulary — not once per refused
+    // candidate, which would bury it (#3457).
+    console.warn(
+      `[native-records] configured record origin ${JSON.stringify(root)} is unusable: ${detail}; `
+      + 'every locator announced under it is refused (publicBaseUrl / recordSources[].baseUrl)',
+    );
+  }
+  const allowRecordLocation = containedByConfiguredRoot(configuredRoots.usable);
 
   // A hung fetch is abandoned via an AbortSignal AND an independent timeout race, so even a transport
   // that ignores the signal cannot leave the caller waiting past the bound. A timeout REJECTS (it is
   // a miss/error, never valid empty bytes), so the digest check below still guards every byte that
   // does arrive — fail-closed is preserved. `fetchBytes` spends ONE budget across a whole redirect
   // chain (see there), so the bound stays a bound on the caller's wait, not on a single hop.
-  const fetchWithTimeout = async (url: URL, timeoutMs: number, init?: RequestInit): Promise<Response> => {
-    if (timeoutMs <= 0) return input.fetchImpl(url, init);
+  //
+  // The bound covers the WHOLE hop, not time-to-headers (#3458). The predecessor cleared its timer
+  // in a `finally` that ran the moment the fetch settled — which is when the response HEADERS
+  // arrive — and the body was read afterwards with the timer cleared and `abort()` never called. A
+  // peer that answered 200 and then trickled one byte per minute held the caller indefinitely: the
+  // same `loop 'work' stale` symptom the #30 bound exists to prevent, reached through the body
+  // instead of the headers. Taking a continuation rather than returning the `Response` is what
+  // closes that: the body read happens inside the guarded region.
+  const withFetchDeadline = async <T>(
+    timeoutMs: number,
+    run: (signal: AbortSignal | undefined) => Promise<T>,
+  ): Promise<T> => {
+    if (timeoutMs <= 0) return run(undefined);
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_resolve, reject) => {
@@ -308,11 +366,64 @@ export function createBaseSepoliaRecordTransport(input: {
         reject(new Error(`native public record fetch timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     });
+    const running = run(controller.signal);
+    // The race's loser still settles. Once the timeout has won, `running` rejects on the abort with
+    // nothing awaiting it, which Node reports as an unhandled rejection.
+    void running.catch(() => undefined);
     try {
-      return await Promise.race([input.fetchImpl(url, { ...init, signal: controller.signal }), timeout]);
+      return await Promise.race([running, timeout]);
     } finally {
       if (timer !== undefined) clearTimeout(timer);
     }
+  };
+
+  /**
+   * Reads a response body, stopping the moment it crosses `maxBytes`.
+   *
+   * A `Content-Length` check alone only bounds an honest source (#3458): a chunked response omits
+   * the header entirely, and buffering the whole body through `arrayBuffer()` before measuring it
+   * hands any contained peer an unbounded allocation in a long-lived daemon. Same shape as
+   * `transport-http`'s `readBounded` on the archive path; the refusal vocabulary stays this
+   * transport's own, which is what its callers and tests read.
+   */
+  const readBoundedBytes = async (response: Response, signal: AbortSignal | undefined): Promise<Uint8Array> => {
+    const oversize = (): Error => new Error(`native public record exceeds the ${maxBytes}-byte size limit`);
+    const length = response.headers.get('content-length');
+    if (length !== null && Number(length) > maxBytes) throw oversize();
+    const body = response.body;
+    if (body === null) {
+      const whole = new Uint8Array(await response.arrayBuffer());
+      if (whole.byteLength > maxBytes) throw oversize();
+      return whole;
+    }
+    const reader = body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      for (;;) {
+        // The body is the second place a peer can hold the caller. `fetch`'s own signal aborts the
+        // underlying request, but a signal that fires BETWEEN chunks is only observed if the loop
+        // looks, so it looks.
+        signal?.throwIfAborted();
+        // eslint-disable-next-line no-await-in-loop -- a stream is sequential by definition.
+        const { value, done } = await reader.read();
+        if (value !== undefined) {
+          total += value.byteLength;
+          if (total > maxBytes) throw oversize();
+          chunks.push(value);
+        }
+        if (done) break;
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
   };
 
   /**
@@ -322,7 +433,7 @@ export function createBaseSepoliaRecordTransport(input: {
    * The per-hop half is not belt-and-braces: a destination guard that inspects only the requested
    * URL is worth nothing if the server at that URL can then post a forwarding address. The default
    * `redirect: "follow"` let a contained locator answer `302 Location: http://127.0.0.1:8545/` and
-   * walked the daemon there. Same shape as `transport-http`'s `fetchWithinOrigin` on the archive
+   * walked the daemon there. Same shape as `transport-http`'s `requestWithinOrigin` on the archive
    * path, with containment in place of same-origin because containment is what a locator has.
    *
    * Two consequences of that substitution, stated rather than left to be inferred:
@@ -354,7 +465,15 @@ export function createBaseSepoliaRecordTransport(input: {
     const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : undefined;
     for (let hop = 0; ; hop += 1) {
       if (current.protocol !== 'https:' && current.protocol !== 'http:') {
-        throw new Error('native public record locations must use HTTP(S)');
+        // A REFUSAL, not a plain error (#3457). `reportRefusedRecordDestination` matches on this
+        // class, so a plain `Error` here was swallowed by all three fallthrough call sites exactly
+        // as every refusal was before #3446 — the one destination class #3431's acceptance
+        // criterion does not enumerate, and reachable both from an announced `file:` locator and
+        // from a contained peer answering `302 Location: file:///etc/passwd`.
+        throw new NativeRecordDestinationError(
+          current.toString(),
+          `scheme ${current.protocol} is not HTTP(S)`,
+        );
       }
       if (!allow(current)) {
         throw new NativeRecordDestinationError(
@@ -371,35 +490,45 @@ export function createBaseSepoliaRecordTransport(input: {
           throw new Error(`native public record fetch timed out after ${timeoutMs}ms`);
         }
       }
+      const hopInit = { ...currentInit, redirect: 'manual' as const };
+      // The whole hop — request, redirect classification and the bounded body read — runs inside
+      // the deadline (#3458), so the bound is on the caller's wait rather than on time-to-headers.
       // eslint-disable-next-line no-await-in-loop -- a redirect chain is sequential by definition.
-      const response = await fetchWithTimeout(current, remainingMs, { ...currentInit, redirect: 'manual' });
-      const location = RECORD_REDIRECT_STATUSES.has(response.status) ? response.headers.get('location') : null;
-      if (location === null || location.trim() === '') {
+      const outcome = await withFetchDeadline(remainingMs, async (signal): Promise<
+        { readonly kind: 'bytes'; readonly bytes: Uint8Array }
+        | { readonly kind: 'redirect'; readonly status: number; readonly location: string }
+      > => {
+        const response = await input.fetchImpl(
+          current,
+          signal === undefined ? hopInit : { ...hopInit, signal },
+        );
+        const location = RECORD_REDIRECT_STATUSES.has(response.status) ? response.headers.get('location') : null;
+        if (location !== null && location.trim() !== '') {
+          // Nothing reads a redirect's body; release the connection rather than leaving it held for
+          // the length of the chain.
+          void response.body?.cancel().catch(() => undefined);
+          return { kind: 'redirect', status: response.status, location };
+        }
         // Includes a redirect status carrying no Location, which is malformed and reported as the
         // HTTP error it is rather than followed.
         if (!response.ok) throw new Error(`native public record retrieval failed with status ${response.status}`);
-        const length = response.headers.get('content-length');
-        if (length !== null && Number(length) > maxBytes) {
-          throw new Error(`native public record exceeds the ${maxBytes}-byte size limit`);
-        }
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (bytes.byteLength > maxBytes) {
-          throw new Error(`native public record exceeds the ${maxBytes}-byte size limit`);
-        }
-        return bytes;
-      }
-      // Nothing reads a redirect's body; release the connection rather than leaving it held for
-      // the length of the chain.
-      void response.body?.cancel().catch(() => undefined);
-      if (hop >= MAX_RECORD_REDIRECTS) {
-        throw new NativeRecordDestinationError(location, `more than ${MAX_RECORD_REDIRECTS} redirects`);
-      }
-      if (response.status !== 307 && response.status !== 308) currentInit = { ...init, method: 'GET' };
+        return { kind: 'bytes', bytes: await readBoundedBytes(response, signal) };
+      });
+      if (outcome.kind === 'bytes') return outcome.bytes;
+      // Resolved BEFORE the cap check so the cap error names an absolute URL (#3457): a relative
+      // `Location` otherwise produced lines like `refused destination ../abc: more than 5
+      // redirects`, the one destination in this file that was not a resolved absolute URL.
+      let next: URL;
       try {
-        current = new URL(location, current);
+        next = new URL(outcome.location, current);
       } catch {
-        throw new NativeRecordDestinationError(location, 'the redirect target is not a resolvable URL');
+        throw new NativeRecordDestinationError(outcome.location, 'the redirect target is not a resolvable URL');
       }
+      if (hop >= MAX_RECORD_REDIRECTS) {
+        throw new NativeRecordDestinationError(next.toString(), `more than ${MAX_RECORD_REDIRECTS} redirects`);
+      }
+      if (outcome.status !== 307 && outcome.status !== 308) currentInit = { ...init, method: 'GET' };
+      current = next;
     }
   };
 
@@ -1615,7 +1744,7 @@ export async function createNativeInfrastructure(
     ipfsApiUrl: input.ipfs.apiUrl,
     // The record origins this operator configured (#3431): its own serving plane plus every
     // configured record source. A peer-announced locator outside them is refused before the fetch.
-    recordOrigins: [input.publicBaseUrl, ...(input.recordSources ?? []).map(({ baseUrl }) => baseUrl)],
+    recordOrigins: [input.publicBaseUrl, ...input.recordSources.map(({ baseUrl }) => baseUrl)],
     fetchImpl: globalThis.fetch.bind(globalThis),
   });
   const requester = input.role === 'requester'

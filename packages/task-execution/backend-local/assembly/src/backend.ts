@@ -1584,6 +1584,10 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       // cheapest diagnostic there is; keep them.
       const spawn: SpawnRequest & { readonly stdoutPath: string; readonly stderrPath: string } = {
         argv: plan.argv,
+        // temp-env: the plan's own env pins TMPDIR/TMP/TEMP at the attempt's `tmp` (the launchers'
+        // `baseEnv`) and `executionEnv`'s allowlist carries all three through; both lines are held
+        // by their own regression assertions. The carriage is real but reaches this site through a
+        // runtime provisioner object, which the repository scan reads no further than.
         env: provisioner.executionEnv({ env: plan.env, cwd: plan.cwd }),
         cwd: plan.cwd,
         stdoutPath: join(this.paths(attempt).logs, HARNESS_STDOUT_LOG),
@@ -1591,6 +1595,8 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       };
       const planBytes = serializeCanonicalJson({
         argv: [...plan.argv],
+        // temp-env: the launch plan as it is recorded in the journal, not an environment handed to a
+        // child. What the harness actually receives is built above, from the same plan.
         env: { ...plan.env },
         cwd: plan.cwd,
         validExitCodes: [...plan.validExitCodes],
@@ -2697,8 +2703,16 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     try {
       attempt = this.resolveAttempt(ref);
     } catch {
-      return { classification: "absent", detail: `no durable record for ref "${ref}"` };
+      // Nothing durable under this ref, so its idempotency key is FREE — the one `absent` a
+      // caller may re-seal under (#3634). Everything `reconcileResolvedRef` reports below
+      // concerns an attempt this backend durably remembers, whose key is HELD whatever the
+      // classification, which is why the stamp is applied here rather than at each return.
+      return { classification: "absent", retained: false, detail: `no durable record for ref "${ref}"` };
     }
+    return { ...(await this.reconcileResolvedRef(attempt)), retained: true };
+  }
+
+  private async reconcileResolvedRef(attempt: AttemptUri): Promise<ReconciliationReport> {
     const events = this.journal(attempt).read();
     const record = foldAttemptRecord(events);
     const paths = this.paths(attempt);

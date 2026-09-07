@@ -26,7 +26,24 @@ export const PRODUCT_ERROR_CODES = [
   "illegal-transition",
   /** The acting principal is not a workspace member or lacks the required grant. */
   "authority-denied",
-  /** Stored sealed bytes fail their digest check on read. */
+  /**
+   * The sealed record a reader was handed does not hold up: its stored bytes fail their digest
+   * check on read, OR the record disagrees with itself, with what carries it, or with what this
+   * verifier can read.
+   *
+   * Issue #3944: the narrower "digest check on read" reading never described everything this
+   * code carries. It is raised for a bundle manifest entry that is unsafe, missing, or not the
+   * regular file it claims to be; for a carried record that disagrees with the sealed record it
+   * cites; and, since issue #3855, for a sealed Report whose results do not carry its own
+   * method's shape, whose method version this verifier does not support, and whose method has no
+   * claim-package projection wired at all.
+   *
+   * Those last two are a fact about the READER's tooling, not about the publisher, and they are
+   * deliberately here rather than under a compat code of their own: the v1 code set has no
+   * compat member, and `execution` ("the verifier broke") is strictly worse for the same reader.
+   * A compat code, if one is ever added, is a taxonomy change owned by the packet that adds
+   * compat semantics -- see the reserved-code note above for the mechanism.
+   */
   "record-integrity",
   /** The audit journal on disk is not well-formed, ordered JSONL. */
   "journal-integrity",

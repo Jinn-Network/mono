@@ -268,4 +268,75 @@ describe('assembleTaskLifecycleEvidence (#2044)', () => {
     expect(map.get('7')!.authoritative.attempts[0]!.attemptEnvelopeCandidates
       .map((c) => c.publisherAgentId)).toEqual(['1', '2']);
   });
+  // #3116 — a repeated primary key inside ONE leg. The module already withdraws
+  // for the adjacent cross-leg race; the cheap in-leg case was the one left
+  // unguarded, and it builds a silently wrong spine rather than an obviously
+  // missing one.
+  it('withdraws the read when one tasks leg repeats a task id', () => {
+    const onUnplaceableRow = vi.fn();
+    const map = assembleTaskLifecycleEvidence({
+      // Without the guard the second `out.set` drops the first row's facts
+      // while the caller still sees a task under that id.
+      tasks: [task({ taskId: '7', maxClaims: 1 }), task({ taskId: '7', maxClaims: 9 })],
+      attempts: [],
+      verdicts: [],
+      onUnplaceableRow,
+    });
+    expect(map.size).toBe(0);
+    expect(onUnplaceableRow).toHaveBeenCalledWith(
+      'tasks',
+      expect.stringContaining('taskId=7'),
+    );
+  });
+
+  it('withdraws the read when one attempts leg repeats a primary key', () => {
+    // Two spine rows, `attemptIndex` keeps the second, and every verdict then
+    // attaches to that copy while the first shows none.
+    const onUnplaceableRow = vi.fn();
+    const map = assembleTaskLifecycleEvidence({
+      tasks: [task()],
+      attempts: [attempt({ attemptIndex: 0 }), attempt({ attemptIndex: 0 })],
+      verdicts: [],
+      onUnplaceableRow,
+    });
+    expect(map.size).toBe(0);
+    expect(onUnplaceableRow).toHaveBeenCalledWith(
+      'attempts',
+      expect.stringContaining('attemptIndex=0'),
+    );
+  });
+
+  it('withdraws the read when one verdicts leg repeats a primary key', () => {
+    const onUnplaceableRow = vi.fn();
+    const map = assembleTaskLifecycleEvidence({
+      tasks: [task()],
+      attempts: [attempt()],
+      verdicts: [verdict({ verdictIndex: 0 }), verdict({ verdictIndex: 0 })],
+      onUnplaceableRow,
+    });
+    expect(map.size).toBe(0);
+    expect(onUnplaceableRow).toHaveBeenCalledWith(
+      'verdicts',
+      expect.stringContaining('verdictIndex=0'),
+    );
+  });
+
+  it('still accepts the same index on different tasks and chains', () => {
+    // The guard keys on the table's real primary key, so these are distinct
+    // rows and must survive it.
+    const map = assembleTaskLifecycleEvidence({
+      tasks: [task({ taskId: '7' }), task({ taskId: '8' })],
+      attempts: [
+        attempt({ taskId: '7', attemptIndex: 0 }),
+        attempt({ taskId: '8', attemptIndex: 0, requestId: hex32('b1') }),
+      ],
+      verdicts: [
+        verdict({ taskId: '7', attemptIndex: 0, verdictIndex: 0 }),
+        verdict({ taskId: '8', attemptIndex: 0, verdictIndex: 0, requestId: hex32('d1') }),
+      ],
+    });
+    expect(map.size).toBe(2);
+    expect(map.get('7')!.authoritative.attempts[0]!.verdicts).toHaveLength(1);
+    expect(map.get('8')!.authoritative.attempts[0]!.verdicts).toHaveLength(1);
+  });
 });

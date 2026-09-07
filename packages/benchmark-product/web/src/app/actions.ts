@@ -24,6 +24,8 @@ import {
   runAnchor,
   runBind,
   runLock,
+  draftSampleSizeAdvisory,
+  formatSampleSizeAdvisory,
   publicationAccounting,
   publicationConfigure,
   publicationRegister,
@@ -47,6 +49,7 @@ import {
   profileArmPinning,
   readAgentProfile,
   updateDraft,
+  bundleIdentityLabel,
   summarizeVerificationOutcome,
   verifyPublicBundle,
 } from "@colophon-claims/core";
@@ -175,17 +178,19 @@ export async function guidedVerifyBundleAction(_previous: GuiActionState, formDa
     return {
       status: "success",
       result: {
-        identity: `sha256:${verification.identity}`,
+        identity: bundleIdentityLabel(verification),
         checks: verification.checks,
         statement: `${outcome.passed} of ${outcome.total} checks passed.${deferred} The bundle was not uploaded or changed.`,
       },
     };
   } catch {
+    // Verification threw, so there is no result to read a check count off. Naming a number here
+    // would state a denominator no bundle format promises, which is the defect issue #3311 closes.
     return {
       status: "error",
       error: {
         code: "record-integrity",
-        detail: "This directory did not pass all six bundle checks. Colophon did not change it or print a verified result.",
+        detail: "This directory did not pass the bundle checks. Colophon did not change it or print a verified result.",
       },
     };
   }
@@ -442,6 +447,52 @@ function requireProviderAcknowledgement(draftId: string, formData: FormData): Gu
   };
 }
 
+/**
+ * The seal-time sample-size advisory gate (issue #2978), on the surface where the lock is a button.
+ *
+ * The same two-step exchange the CLI runs, in the shape this surface has: the first submit is
+ * refused and the refusal detail carries the widths, so the operator reads what the declared n can
+ * actually deliver before the acknowledgement they are about to check means anything. Gating here
+ * rather than only in the CLI is the point of the gate -- this is the surface reached by the
+ * operator least likely to have worked the interval out for themselves.
+ *
+ * `absent` when there is no advisory to show: the draft is unquoted or carries no benchmark, and
+ * `runLock` below is the one place that says so. A context that cannot even be built is the same
+ * case for the same reason -- it fails loudly in the operation, not silently in the gate.
+ *
+ * The result is discriminated rather than `GuiActionState | undefined` so the caller DERIVES
+ * `acknowledgedSampleSizeAdvisory` from what this gate actually showed (issue #3803). Asserting the
+ * flag beside the call made a swallowed throw indistinguishable from a satisfied gate: the seal
+ * would then claim an operator was shown a width they were never shown, which is the one thing this
+ * feature exists to prevent. `absent` seals no advisory, which is the honest reading of "nothing
+ * was displayed", and it holds by construction rather than by an argument across two files.
+ */
+type SampleSizeGate =
+  | { readonly kind: "absent" }
+  | { readonly kind: "acknowledged" }
+  | { readonly kind: "refused"; readonly state: GuiActionState };
+
+function requireSampleSizeAcknowledgement(draftId: string, formData: FormData): SampleSizeGate {
+  let planned;
+  try {
+    planned = draftSampleSizeAdvisory(createProductOperationContext().workspaceDir, draftId);
+  } catch {
+    return { kind: "absent" };
+  }
+  if (planned === undefined) return { kind: "absent" };
+  if (field(formData, "ack-sample-size") === "acknowledged") return { kind: "acknowledged" };
+  return {
+    kind: "refused",
+    state: {
+      status: "error",
+      error: {
+        code: "invalid-invocation",
+        detail: `${formatSampleSizeAdvisory(planned)}\nThe lock is irreversible. Change the sample size now, or check the sample-size acknowledgement to seal at this n.`,
+      },
+    },
+  };
+}
+
 export async function runQuoteAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
   const acknowledgement = requireProviderAcknowledgement(draftId, formData);
@@ -462,8 +513,13 @@ export async function runLockAction(_previous: GuiActionState, formData: FormDat
   const draftId = field(formData, "draftId");
   const acknowledgement = requireProviderAcknowledgement(draftId, formData);
   if (acknowledgement !== undefined) return acknowledgement;
+  const sampleSize = requireSampleSizeAcknowledgement(draftId, formData);
+  if (sampleSize.kind === "refused") return sampleSize.state;
   return executeOperation(async (context) => {
-    const locked = runLock(context, { draftId });
+    const locked = runLock(context, {
+      draftId,
+      acknowledgedSampleSizeAdvisory: sampleSize.kind === "acknowledged",
+    });
     if (locked.ok) await anchorAfterLockIfConfigured(context, draftId);
     return locked;
   }, { revalidate: ["/workspace", `/workspace/${draftId}`] });
@@ -517,11 +573,22 @@ export async function runAnchorAction(_previous: GuiActionState, formData: FormD
 export async function runBindAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
   const source = field(formData, "beaconSource");
-  const round = Number(field(formData, "beaconRound"));
+  const roundText = field(formData, "beaconRound");
   const value = field(formData, "beaconValue");
   return executeOperation((context) => {
-    if (!Number.isInteger(round)) {
-      throw new ProductContextConfigurationError("beaconRound must be an integer round or block height");
+    // The shape check is on the TEXT, before conversion (issue #3332). `Number` coerces rather
+    // than parses: it reads "1e3", "0x10", "+1" and "1." as integers and "" as zero, and
+    // `Number.isInteger` then passes, so an operator who mistyped a round was not refused by
+    // name -- they got a successfully bound run at a round they never typed. `bind` is write-once
+    // (a run binds once, because re-binding is re-drawing), so that cannot be corrected by
+    // rebinding, and a coerced value landing after the seal binds cleanly to the wrong round.
+    // The CLI applies the same rule at its own entry point (`core/src/cli/main.ts`).
+    if (!/^[0-9]+$/u.test(roundText)) {
+      throw new ProductContextConfigurationError("beaconRound must be decimal digits denoting a round or block height");
+    }
+    const round = Number(roundText);
+    if (!Number.isSafeInteger(round) || round < 1) {
+      throw new ProductContextConfigurationError("beaconRound must be a positive round or block height");
     }
     return runBind(context, { draftId, beacon: { source: source as BeaconReference["source"], round, value } });
   }, { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });

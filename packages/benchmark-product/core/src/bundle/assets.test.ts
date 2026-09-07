@@ -564,7 +564,54 @@ describe("binary qualification public assets", () => {
     expect(() => buildPublicAssets({ ...binary, binaryQualification: undefined })).toThrow(/require exactly one/u);
     expect(() => buildPublicAssets({ ...fixture(), binaryQualification: binary.binaryQualification })).toThrow(/require exactly one/u);
   });
+
+  // Issue #3643: the mismatch above refuses with the package's typed error, so a caller can branch
+  // on `code` and `issues[].path` -- the stated contract -- rather than on the prose message. Pinned
+  // structurally: this suite lives in `core` and the thrown class is `verify`'s, so `instanceof`
+  // would compare two different classes even when the shape is exactly right.
+  test("the admission/instrument mismatch refuses with a typed code and path", () => {
+    const binary = binaryAssetFixture();
+    for (const input of [
+      { ...binary, binaryQualification: undefined },
+      { ...fixture(), binaryQualification: binary.binaryQualification },
+    ]) {
+      expect(() => buildPublicAssets(input)).toThrow(expect.objectContaining({
+        name: "BenchmarkProductError",
+        code: "record-integrity",
+        issues: [expect.objectContaining({ path: "bundle.presentation" })],
+      }));
+    }
+  });
+
+  // Issue #3754: the projection's per-element checks refuse too, at the source that carries the
+  // malformed fact. These are the checks nothing earlier settles -- `profile/claim.ts` carries
+  // `arms` through verbatim into the claim it rebuilds, so a bundle whose claim mirrors its Report
+  // byte for byte passes `claim-consistency` and arrives here intact. Same structural pinning as
+  // the test above, and for the same reason.
+  test("a malformed per-arm fact refuses at the source that carries it", () => {
+    const cases = [
+      { path: "report.json", mutate: (input: PublicAssetInput) => ({ ...input, report: withMalformedArmN(input.report) }) },
+      { path: "claim-package.json", mutate: (input: PublicAssetInput) => ({ ...input, claim: withMalformedArmN(input.claim) }) },
+    ];
+    for (const { path, mutate } of cases) {
+      expect(() => buildPublicAssets(mutate(fixture()))).toThrow(expect.objectContaining({
+        name: "BenchmarkProductError",
+        code: "record-integrity",
+        issues: [expect.objectContaining({ path })],
+      }));
+    }
+  });
 });
+
+/** Replaces the first arm's `n` with a string -- wilson@1's shape with one exact fact off-type. */
+function withMalformedArmN<T extends { readonly results: unknown }>(record: T): T {
+  const clone = structuredClone(record) as {
+    results: { perSubject: { results: { arms: Record<string, { n: unknown }> } }[] };
+  };
+  const arms = clone.results.perSubject[0]!.results.arms;
+  arms[Object.keys(arms)[0]!]!.n = "3";
+  return clone as unknown as T;
+}
 
 /**
  * P4b Task 6 (`docs/superpowers/plans/demo-report-1/2026-08-12-P4b-implementation-plan.md`):
@@ -802,3 +849,115 @@ describe("task-selection provenance is not projected onto the face", () => {
     }
   });
 });
+
+/**
+ * Issue #3856: the three converted `assets.ts` refusals PR #3741 left unpinned.
+ *
+ * `wilsonProjection`'s per-arm check is already pinned above. `comparisonProjection`,
+ * `judgeInterval`, and `pairwiseDisagreementAssetProjection`'s per-pair check carry the same
+ * stated contract -- `code` plus `issues[].path` -- with no test, so reverting any of them to a
+ * bare throw compiles, typechecks, and passes. Same structural pinning as the cases above, and for
+ * the same reason: this suite lives in `core` and the thrown class is `verify`'s.
+ *
+ * Each case is mutation-checked -- reverting its `refuse` to `throw new Error` fails it.
+ *
+ * Every fixture below malforms ONLY the field its target check reads. The outer shape checks in
+ * `pairwiseDisagreementAssetProjection` and `pairedMajorityDeltaAssetProjection` deliberately stay
+ * bare (they are shadowed by strictly stronger siblings in `profile/claim.ts`), so a malformation
+ * that tripped one of those would assert nothing about the per-element check underneath it.
+ */
+describe("issue #3856: every converted projection refusal is pinned at both sources", () => {
+  const refusalAt = (path: string) => expect.objectContaining({
+    name: "BenchmarkProductError",
+    code: "record-integrity",
+    issues: [expect.objectContaining({ path })],
+  });
+
+  /** Report first, claim second (`buildPublicAssets`), so a claim-side case must leave the report
+   * intact or it refuses at `report.json` and proves nothing about the second source. */
+  function bothSources(
+    base: PublicAssetInput,
+    malform: <T extends { readonly results: unknown }>(record: T) => T,
+  ): void {
+    expect(() => buildPublicAssets({ ...base, report: malform(base.report) }))
+      .toThrow(refusalAt("report.json"));
+    expect(() => buildPublicAssets({ ...base, claim: malform(base.claim) }))
+      .toThrow(refusalAt("claim-package.json"));
+  }
+
+  /** Replaces the single subject's results with the value the mutator returns for them. */
+  function withSubjectResults<T extends { readonly results: unknown }>(
+    record: T,
+    mutate: (results: Record<string, unknown>) => void,
+  ): T {
+    const clone = structuredClone(record) as { results: { perSubject: { results: Record<string, unknown> }[] } };
+    mutate(clone.results.perSubject[0]!.results);
+    return clone as unknown as T;
+  }
+
+  test("comparisonProjection refuses at the source that carries the malformed comparison", () => {
+    bothSources(pairedFixture(INTERVAL_PRESENT), (record) =>
+      withSubjectResults(record, (results) => { results["delta"] = 0.1667; }));
+  });
+
+  test("pairwiseDisagreementAssetProjection's per-pair check refuses at the source that carries it", () => {
+    bothSources(pairwiseFixture(), (record) =>
+      withSubjectResults(record, (results) => {
+        (results["pairs"] as { n: unknown }[])[0]!.n = "6";
+      }));
+  });
+
+  // `judgeInterval` is the only converted site reached from two callers, and the
+  // `paired-majority-delta@1` one is where `profile/claim.ts` types `interval` as no more than
+  // `typeof … === "object"` -- so on this path the per-field check is genuinely reader-first with
+  // nothing upstream settling it. Exercised through that caller for exactly that reason.
+  test("judgeInterval refuses at the source that carries the malformed interval, through paired-majority-delta@1", () => {
+    bothSources(pairedMajorityFixture(), (record) =>
+      withSubjectResults(record, (results) => {
+        (results["interval"] as Record<string, unknown>)["lower"] = 0.01;
+      }));
+  });
+});
+
+/** `pairwise-disagreement@1`'s smallest well-formed asset input: one arm pair with an interval.
+ * Built the way `pairedFixture` is -- only `method`/`results` are swapped onto the wilson
+ * fixture's scaffolding, since nothing else on a bundle depends on which method produced it. */
+function pairwiseFixture(): PublicAssetInput {
+  const results = {
+    pairs: [{
+      armA: "armA",
+      armB: "armB",
+      n: 6,
+      disagreements: 1,
+      rate: "0.1667",
+      interval: { lower: "0.0100", upper: "0.3200", alpha: "0.05" },
+    }],
+    conflicted: { count: 0, cellKeys: [] },
+  };
+  return methodFixture("jinn.benchmarking.method/pairwise-disagreement", results);
+}
+
+/** `paired-majority-delta@1`'s smallest well-formed asset input, and `judgeInterval`'s second
+ * caller. */
+function pairedMajorityFixture(): PublicAssetInput {
+  const results = {
+    baseline: "armA",
+    candidate: "armB",
+    n: 6,
+    delta: "0.1667",
+    interval: { lower: "0.0100", upper: "0.3200", alpha: "0.05" },
+    reasons: [],
+    conflicted: { count: 0, cellKeys: [] },
+  };
+  return methodFixture("jinn.benchmarking.method/paired-majority-delta", results);
+}
+
+function methodFixture(methodId: string, results: Record<string, unknown>): PublicAssetInput {
+  const base = fixture();
+  const wrapped = { perSubject: [{ subjectSha256: SHA.matrix, results }] };
+  return {
+    ...base,
+    report: { ...base.report, method: { id: methodId, version: "1", parameters: {} }, results: wrapped },
+    claim: { ...base.claim, method: { ...base.claim.method, id: methodId, parameters: {} }, results: wrapped },
+  } as unknown as PublicAssetInput;
+}

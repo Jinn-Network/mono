@@ -63,6 +63,15 @@ emitted from the record's own statement rather than through the fail-closed refe
 path the same-tree digests use. Reference-bearing labels an indexing relation; it does not by
 itself promise the target is retrievable.
 
+That leaves the leaf emitting its edges two ways, and the asymmetry is visible on a card. The
+same-tree edges predating this change — `matrix.v2`'s `runDigest` and `run.v2`'s
+`benchmarkDigest` — are gated on `referencedKindOk`, which fetches the target and re-parses it,
+while every edge added here comes off the record's own statement. So a holder who cannot
+retrieve the Run or Benchmark record publishes a card carrying all the new edges and silently
+missing the primary one. §12 declines to require that a card carry every edge its profile
+declares, so this is not a rule violation; it is a difference in what a missing target costs,
+and a reader comparing two cards of the same kind should know which fields can drop out.
+
 Audited and unchanged: `report.v1`/`.v2` already declare their subject matrices;
 `reportPayloadDigest` is the record's own payload, which is identity rather than an edge. An
 accounting record's `scope.streams[].through.entry` is a stream cursor rather than a dependency,

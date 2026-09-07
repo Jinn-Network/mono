@@ -8,11 +8,19 @@ on:
     paths:
       - 'packages/core/**'
       - '.github/workflows/core-ci.yml'
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - 'packages/plugin/**'
   push:
     branches: [main]
     paths:
       - 'packages/core/**'
       - '.github/workflows/core-ci.yml'
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - 'packages/plugin/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

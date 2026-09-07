@@ -90,5 +90,6 @@ export type {
   CanonicalVerdictSettlement,
   VerdictPortDeps,
   VerdictPorts,
+  VerdictSafeBroadcaster,
   VerdictTransactionIdentity,
 } from "./verdict.js";

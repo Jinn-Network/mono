@@ -6,11 +6,12 @@ Verify a public Colophon claim bundle without the Colophon app or any execution 
 npx @colophon-claims/verify@0.2 ./bundle
 ```
 
-Use `--json` for machine-readable output. The reader runs the checks declared by the
-bundle format, covering its manifest, evidence closure, calculations, report, and claim
-consistency. Exit status is `0` when the bundle is valid for the format and profile it
-declares, `1` for an invalid bundle, and `2` for usage or operational failures. A check a
-profile defers is reported as deferred, never as passed, and never as a failure.
+Use `--json` for machine-readable output. The reader runs the checks the bundle's declared
+format closes over, and its verdict names each one — different formats close over different
+checks, so the list is the bundle's, not this README's. Exit status is `0` when the bundle
+is valid for the format and profile it declares, `1` for an invalid bundle, and `2` for
+usage or operational failures. A check a profile defers is reported as deferred, never as
+passed, and never as a failure.
 
 This 0.2 reader supports public bundle formats v2, v4, v5, v6, v7, and v8. It
 intentionally rejects the unrelated accounting bundle v3. Formats v2 and v4 run six
@@ -31,10 +32,36 @@ For this release, `@jinn-network/*` is pinned to the exact
 `0.1.0-canary.sha.0533a224cf99f06d7facf0c23455f2781a5b9e62` receipt.
 It is not a floating `@canary` dependency and is not a stable stack release.
 
+`summarizeVerificationOutcome` is new since the 0.2.1 cut. For a `result.format` it does not
+recognize it refuses rather than returning a check denominator: it throws with `.name`
+`BenchmarkProductError` and `.code` `record-integrity`. No published 0.2.x release exported
+this function, so there is no upgrade path on which its behavior changed.
+
 Verification opens no network connection, reads no account or API credential, and uploads
-nothing. It checks the bundle's integrity, evidence closure, calculations, report, and claim
-consistency. It does not prove that the producing machine was honest or that the compared
-identities are independent parties.
+nothing. It recomputes the checks the bundle's declared format closes over, against the bytes
+the bundle carries and nothing else. It does not prove that the producing machine was honest
+or that the compared identities are independent parties.
+
+## Freeze-artifact repositories
+
+A qualification bundle (v4, v7, or v8) can be projected into a public repository of its freeze
+artifacts — item bank, sources, admission decisions, labels, judge instruments, and the
+screening material. That repository is a **derived artifact, never the claim of record**:
+the sealed records stay the source of truth, and the tree is a pure function of the bundle,
+so anyone can regenerate it and diff it. To check a published one against its bundle:
+
+```sh
+npx @colophon-claims/verify@0.2 ./bundle --freeze-repo ./published-repo
+```
+
+Exit status is `1` when the tree does not match, and every missing, unexpected, or changed
+member is named. The check is byte-for-byte and also reports the git-visible drift that
+leaves bytes untouched — a member replaced by a symlink, and an executable bit wherever the
+filesystem holding the tree carries one — because those move the commit oid a freeze
+announcement pins. `executableBitChecked` reports whether that second dimension was read,
+and where it was not the report names which of the two reasons applied. Rendering a
+repository from a bundle is `colophon freeze-repo export` in the product CLI; the layout
+and the licence scaffolding are specified in `../PUBLIC-BUNDLE.md`.
 
 Bundles are also verifiable without this package: `../EXTERNAL-VERIFICATION.md` specifies
 the external path (openssl plus a dependency-free script, shipped here as

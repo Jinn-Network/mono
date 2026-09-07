@@ -124,6 +124,28 @@ Confirmatory cells were collected after that anchor. Exploration cells in `E1-ar
 
 `yarn demo1:verify` must show 22 checks passing, including preregistration byte-equality against `E1-demo1-preregistration.v1.json`.
 
+## Erratum: method identifier in the sealed records (2026-09-02)
+
+The sealed Analysis Manifest and the signed report record cite the paired estimate as
+`jinn.benchmarking.method/paired-delta` version `1`. That identifier is a registered method whose
+implementation — `packages/benchmarking/aggregate/src/registry.ts` — is a clustered BCa bootstrap
+over binary pass rates. It is not what computed the numbers above.
+
+The numbers were computed by Demo-1's own module,
+`packages/benchmark-product/core/src/method/skillsbench-demo1-stats.ts`: a paired **Student-t**
+interval over continuous per-task reward deltas (t-critical 2.16, df = 13, SE = 0.082, as stated
+under Result). The manipulation check and variance decomposition were computed by the same module
+and were cited under the same shared namespace. No number on this page changes; only the citation
+was wrong.
+
+The published bytes are left as sealed. The Analysis-manifest digest above carries third-party
+time evidence and the report envelope is DSSE-signed, so re-sealing a preregistration after the
+fact would be a worse integrity failure than the mis-citation. From issue #2973 onward the seal
+code cites `jinn.demo1.method/{manipulation-check,paired-mean-delta,variance-decomposition}@1`,
+owned by the module that computes them, and a regression test fails on any future collision with
+the registry namespace. `E1-demo1-preregistration.v1.json` is therefore historical: it must not be
+regenerated.
+
 ## What this does not yet prove
 
 - That native Agent Skills beat, match, or lose to `CLAUDE.md` on any model other than `claude-haiku-4-5-20251001`.

@@ -5,6 +5,9 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import pathlib
+import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -179,7 +182,9 @@ def test_the_hooks_write_the_feed_the_runtime_will_seal(monkeypatch, tmp_path, l
     jinn._on_session_end(session_id="s", completed=True, interrupted=False, input_tokens=10, output_tokens=5)
 
     events = [json.loads(line) for line in (tmp_path / "capture" / "sessions" / "cap-1" / "feed.ndjson").read_text(encoding="utf-8").splitlines()]
-    assert [event["type"] for event in events] == [
+    # repository-state is an observation of the working directory, so it is present only when
+    # one is readable; the turn sequence around it is what this test pins.
+    assert [event["type"] for event in events if event["type"] != "repository-state"] == [
         "session-open", "environment", "user-turn", "tool-call", "assistant-turn", "tokens", "session-close",
     ]
     assert events[-1]["outcome"] == "completed"
@@ -220,3 +225,197 @@ def _pinned():
 
 def _raise_start_failed():
     raise importlib.import_module("jinn_plugin.mcp_client").McpClientError("start-failed", "runtime exited")
+
+
+def test_session_start_reports_the_model_service_and_the_base_repository_state(
+    monkeypatch, tmp_path, lines
+):
+    """The two facts this tree can observe are actually emitted, not merely emittable."""
+    install_client(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        jinn,
+        "_observe_repository_state",
+        lambda cwd: {
+            "repository": "https://github.com/Jinn-Network/mono",
+            "base_commit": "4f0e2b7c1a9d8e3f5b6a7c8d9e0f1a2b3c4d5e6f",
+            "base_tree": "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567",
+            "branch": "autopilot/3223",
+            "target_base": "next",
+        },
+    )
+    jinn._on_session_start(session_id="s", platform="cli", cwd=str(tmp_path))
+    jinn._on_pre_llm_call(
+        session_id="s", user_message="x", is_first_turn=True, model="anthropic/claude-opus-5"
+    )
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "capture" / "sessions" / "cap-1" / "feed.ndjson")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert events[0]["model"]["service"] == {
+        "iri": "https://spec.jinn.network/services/anthropic/claude-opus-5",
+        "name": "anthropic claude-opus-5",
+    }
+    state = next(event for event in events if event["type"] == "repository-state")
+    assert state["baseCommit"] == "4f0e2b7c1a9d8e3f5b6a7c8d9e0f1a2b3c4d5e6f"
+    assert state["baseTree"] == "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567"
+    assert state["targetBase"] == "next"
+
+
+def test_an_unreadable_repository_costs_the_base_state_and_nothing_else(
+    monkeypatch, tmp_path, lines
+):
+    install_client(monkeypatch, tmp_path)
+    monkeypatch.setattr(jinn, "_observe_repository_state", lambda cwd: None)
+    jinn._on_session_start(session_id="s", platform="cli", cwd=str(tmp_path))
+    assert (
+        jinn._on_pre_llm_call(session_id="s", user_message="x", is_first_turn=True, model="m")
+        is None
+    )
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "capture" / "sessions" / "cap-1" / "feed.ndjson")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [event["type"] for event in events] == ["session-open", "environment", "user-turn"]
+
+
+@pytest.mark.parametrize(
+    "remote,expected",
+    [
+        ("git@github.com:Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        ("ssh://git@github.com/Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        ("https://github.com/Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        ("https://github.com/Jinn-Network/mono", "https://github.com/Jinn-Network/mono"),
+        ("", ""),
+        # A local remote names a filesystem path, often carrying a username. The record is
+        # durable and publicly projectable, so it is dropped rather than normalized.
+        ("file:///Users/someone/src/mono", ""),
+        ("/Users/someone/src/mono", ""),
+        ("C:\\Users\\someone\\mono", ""),
+        # A token in the remote is unrevocable once sealed into an append-only archive.
+        (
+            "https://x-access-token:ghs_LIVETOKEN0123456789@github.com/example/repo.git",
+            "https://github.com/example/repo",
+        ),
+        ("https://TOKEN@github.com/example/repo", "https://github.com/example/repo"),
+        # In an explicit ssh:// URL, ":NNNN" is a port, not the first path segment.
+        # An SSH port names the SSH daemon, so it does not survive the rewrite to https;
+        # a port on a scheme that is kept does survive.
+        (
+            "ssh://git@gitlab.example.com:29418/team/repo.git",
+            "https://gitlab.example.com/team/repo",
+        ),
+        ("git://github.com:9418/Jinn-Network/mono.git", "git://github.com:9418/Jinn-Network/mono"),
+        # RFC 3986 puts the userinfo boundary at the last "@" before the host.
+        ("https://user:pa@ss@github.com/example/repo.git", "https://github.com/example/repo"),
+        ("ssh://git@github.com/Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        ("git://github.com/Jinn-Network/mono.git", "git://github.com/Jinn-Network/mono"),
+        # A remote the runtime would refuse whole; the adapter must not write it.
+        ("https://exa mple.com/x", ""),
+        # An ssh_config `Host` alias resolves only on the machine holding the alias, and would
+        # not join with the identity every other operator seals for the same repository.
+        ("git@ritsuJinn:Jinn-Network/mono.git", ""),
+        ("ssh://git@ritsuJinn/Jinn-Network/mono.git", ""),
+        ("https://localhost:8080/team/repo.git", ""),
+        # One repository must not seal as two identities because a host was spelled in caps.
+        ("HTTPS://GitHub.com/Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        ("git@GitHub.com:Jinn-Network/mono.git", "https://github.com/Jinn-Network/mono"),
+        # The scp branch has no userinfo to drop, so a surviving "@" is a credential, not a
+        # username: `user` binds to the first "@" while `path` happily admits the rest.
+        ("git@x-access-token:ghs_LIVETOKEN0123456789@github.com/example/repo", ""),
+        # Permissive host and port groups feed the writer; the runtime refuses the whole feed
+        # for either, so neither may leave this function.
+        ("https://ex[ample.com/example/repo", ""),
+        ("https://github.com:99999999/example/repo", ""),
+    ],
+)
+def test_a_git_remote_becomes_an_absolute_iri(remote, expected):
+    """The record requires an absolute IRI; an SSH remote is not one."""
+    assert jinn._repository_iri(remote) == expected
+
+
+def test_observing_the_repository_reads_the_commit_and_tree_this_session_started_from(tmp_path):
+    """A repository with a known remote, not this checkout's: an operator may hold an alias."""
+    run = lambda *args: subprocess.run(
+        ("git", "-C", str(tmp_path), *args), check=True, capture_output=True
+    )
+    run("init", "-q", "-b", "work")
+    run("config", "user.email", "t@example.com")
+    run("config", "user.name", "t")
+    run("config", "remote.origin.url", "git@github.com:Jinn-Network/mono.git")
+    (tmp_path / "f.txt").write_text("x", encoding="utf-8")
+    run("add", "f.txt")
+    run("commit", "-qm", "seed")
+
+    observed = jinn._observe_repository_state(str(tmp_path))
+    assert observed is not None
+    assert re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", observed["base_commit"])
+    assert re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", observed["base_tree"])
+    assert observed["repository"] == "https://github.com/Jinn-Network/mono"
+    assert observed["branch"] == "work"
+
+
+def test_observing_a_repository_whose_remote_names_no_public_identity_reports_nothing(tmp_path):
+    """An alias-only remote costs the record; a confident wrong identity would cost more."""
+    run = lambda *args: subprocess.run(
+        ("git", "-C", str(tmp_path), *args), check=True, capture_output=True
+    )
+    run("init", "-q")
+    run("config", "user.email", "t@example.com")
+    run("config", "user.name", "t")
+    run("config", "remote.origin.url", "git@ritsuJinn:Jinn-Network/mono.git")
+    (tmp_path / "f.txt").write_text("x", encoding="utf-8")
+    run("add", "f.txt")
+    run("commit", "-qm", "seed")
+
+    assert jinn._observe_repository_state(str(tmp_path)) is None
+
+
+def test_observing_a_directory_that_is_not_a_repository_reports_nothing(tmp_path):
+    assert jinn._observe_repository_state(str(tmp_path)) is None
+
+
+def test_observing_reports_nothing_without_a_working_directory():
+    assert jinn._observe_repository_state(None) is None
+
+
+def _make_repo(path, remote):
+    """A real repository with one commit, so the reads under test have something to read."""
+    path.mkdir(parents=True, exist_ok=True)
+    run = lambda *args: subprocess.run(
+        ["git", "-C", str(path), *args], capture_output=True, check=True
+    )
+    run("init", "-q")
+    run("config", "user.email", "t@example.test")
+    run("config", "user.name", "T")
+    run("config", "commit.gpgsign", "false")
+    (path / "f.txt").write_text(path.name, encoding="utf-8")
+    run("add", "f.txt")
+    run("commit", "-qm", "one")
+    run("remote", "add", "origin", remote)
+    return path
+
+
+def test_the_base_state_comes_from_the_session_directory_not_the_process_directory(
+    monkeypatch, tmp_path
+):
+    """An orchestrator dispatches a session into a worktree while sitting elsewhere.
+
+    Reading the process directory would seal a confident, wrong answer to exactly the question
+    this record exists to answer.
+    """
+    elsewhere = _make_repo(tmp_path / "repoA", "https://github.com/example/repoA.git")
+    session = _make_repo(tmp_path / "repoB", "https://github.com/example/repoB.git")
+    monkeypatch.chdir(elsewhere)
+
+    observed = jinn._observe_repository_state(str(session))
+    assert observed is not None
+    assert observed["repository"] == "https://github.com/example/repoB"
+    assert observed["base_commit"] == subprocess.run(
+        ["git", "-C", str(session), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()

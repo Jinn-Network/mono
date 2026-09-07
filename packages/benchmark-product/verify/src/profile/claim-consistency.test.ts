@@ -627,3 +627,178 @@ describe("assertClaimConsistency: paired-estimate limitation (packet #2837, port
     )).not.toThrow();
   });
 });
+
+/**
+ * Issue #3855: the projection rebuild is on the reader path -- `assertClaimConsistency` calls
+ * `buildClaimPackage` on every successful verification -- so a sealed Report whose results do not
+ * carry the shape its own method produces is a named disagreement with the record a reader was
+ * handed, not an internal fault. It refuses with the package's typed error, at `report.json`, the
+ * source that carries the malformed fact. Pinned structurally on `name` / `code` / `issues[].path`
+ * rather than on the prose: messages are free to change, codes and paths are the contract.
+ */
+describe("issue #3855: the projection rebuild refuses at the source that carries the malformed fact", () => {
+  /** A Run whose sealed plan carries the method under test, so the assurance cross-check upstream
+   * of the projection passes and the projection itself is what the assertion reaches. */
+  function planFor(method: ReportRecord["method"]): RunRecord {
+    return {
+      ...runRecord,
+      analysisPlan: [{ method: method.id, version: method.version, parameters: { verdictRule: RESOLVED_ASSURANCE.verdictRule } }],
+    } as unknown as RunRecord;
+  }
+
+  function projectFrom(results: unknown, method?: ReportRecord["method"]): ClaimPackage {
+    const plannedRun = method === undefined ? runRecord : planFor(method);
+    return buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord: plannedRun,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord: {
+        ...reportRecord,
+        ...(method === undefined ? {} : { method }),
+        results,
+      } as unknown as ReportRecord,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, plannedRun),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+    });
+  }
+
+  const refusal = { name: "BenchmarkProductError", code: "record-integrity", issues: [expect.objectContaining({ path: "report.json" })] };
+
+  test("a Report carrying no single-subject results wrapper refuses", () => {
+    expect(() => projectFrom({ perSubject: [] })).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a Report whose results do not carry its method's shape refuses", () => {
+    expect(() => projectFrom({ perSubject: [{ results: { conflicted: { count: 0, cellKeys: [] } } }] }))
+      .toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a Report naming a method with no claim-package projection refuses", () => {
+    const method = { id: "jinn.benchmarking.method/not-wired", version: BENCHMARKING_METHOD_VERSION, parameters: {} };
+    expect(() => projectFrom(reportRecord.results, method as ReportRecord["method"]))
+      .toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a Report naming an unsupported version of a wired method refuses", () => {
+    const method = { id: BENCHMARKING_METHOD_IDS.pairwiseDisagreement, version: "99", parameters: {} };
+    expect(() => projectFrom(reportRecord.results, method as ReportRecord["method"]))
+      .toThrow(expect.objectContaining(refusal));
+  });
+
+  /**
+   * Issue #3942: the four cases above pin four of the ten conversions. The six below pin the
+   * rest, one per site, so no conversion can be reverted to a bare throw with the suite still
+   * green. Each fixture is a WELL-FORMED result wrapper for its own method with exactly ONE
+   * field malformed, so `singleSubjectResults` and the two bare outer checks in
+   * `buildClaimPackage` itself are not what trips -- the target check is.
+   */
+  const wrap = (results: unknown) => ({ perSubject: [{ results }] });
+  const versioned = (id: string) => ({ id, version: "99", parameters: {} } as unknown as ReportRecord["method"]);
+  const supported = (id: string) =>
+    ({ id, version: BENCHMARKING_METHOD_VERSION, parameters: {} } as unknown as ReportRecord["method"]);
+
+  /** paired-delta@1's well-formed comparison shape; `pairs` is the field each case malforms. */
+  const pairedDeltaResults = {
+    pairs: 2,
+    delta: "0.5000",
+    interval: { alpha: "0.05", low: "0.0000", high: "1.0000" },
+    reasons: [],
+    pairing: { taskDigests: [digest("1")] },
+    clustering: { basis: "source", clusters: 1 },
+    excluded: { count: 0, cellKeys: [] },
+    conflicted: { count: 0, cellKeys: [] },
+    bootstrap: { seed: 1, resamples: 1 },
+  } as const;
+
+  /** binary-instrument@1 carries only `conflicted` through this projection. */
+  const binaryInstrumentResults = { conflicted: { count: 0, cellKeys: [] } } as const;
+
+  /** pairwise-disagreement@1's well-formed pairs/conflicted shape. */
+  const pairwiseDisagreementResults = {
+    pairs: [{ armA: "armA", armB: "armB", n: 2, disagreements: 1, rate: "0.5000" }],
+    conflicted: { count: 0, cellKeys: [] },
+  } as const;
+
+  /** paired-majority-delta@1's well-formed baseline/candidate/delta shape. */
+  const pairedMajorityDeltaResults = {
+    baseline: "armA",
+    candidate: "armB",
+    n: 2,
+    delta: "0.5000",
+    interval: null,
+    reasons: [],
+    clusters: { count: 1 },
+    byCandidateClass: [],
+    byStratum: [],
+    exclusions: [],
+    conflicted: { count: 0, cellKeys: [] },
+  } as const;
+
+  test("a paired-delta@1 Report whose comparison shape is malformed refuses", () => {
+    expect(() => projectFrom(
+      wrap({ ...pairedDeltaResults, pairs: "2" }),
+      supported(BENCHMARKING_METHOD_IDS.pairedDelta),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a binary-instrument@1 Report whose conflicted shape is malformed refuses", () => {
+    expect(() => projectFrom(
+      wrap({ conflicted: { count: "0", cellKeys: [] } }),
+      supported(BENCHMARKING_METHOD_IDS.binaryInstrument),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a pairwise-disagreement@1 Report whose pairs/conflicted shape is malformed refuses", () => {
+    expect(() => projectFrom(
+      wrap({ ...pairwiseDisagreementResults, pairs: {} }),
+      supported(BENCHMARKING_METHOD_IDS.pairwiseDisagreement),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a paired-majority-delta@1 Report whose baseline/candidate/delta shape is malformed refuses", () => {
+    expect(() => projectFrom(
+      wrap({ ...pairedMajorityDeltaResults, baseline: 1 }),
+      supported(BENCHMARKING_METHOD_IDS.pairedMajorityDelta),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a Report naming an unsupported binary-instrument version refuses", () => {
+    expect(() => projectFrom(
+      wrap(binaryInstrumentResults),
+      versioned(BENCHMARKING_METHOD_IDS.binaryInstrument),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
+  test("a Report naming an unsupported paired-majority-delta version refuses", () => {
+    expect(() => projectFrom(
+      wrap(pairedMajorityDeltaResults),
+      versioned(BENCHMARKING_METHOD_IDS.pairedMajorityDelta),
+    )).toThrow(expect.objectContaining(refusal));
+  });
+
+  /** The two throws `buildClaimPackage` keeps bare are internal faults, not reader-facing: the
+   * CALLER derives both facts they assert. `execution` stays the right code for them, so they must
+   * NOT be typed -- this pins that boundary rather than only the conversions. */
+  test("the assurance-primitive mismatch stays an untyped internal fault", () => {
+    expect(() => buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: { ...RESOLVED_ASSURANCE, minVerdicts: 99 } },
+    })).toThrow(expect.objectContaining({ name: "Error" }));
+  });
+});

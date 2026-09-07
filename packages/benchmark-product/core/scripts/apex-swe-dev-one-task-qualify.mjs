@@ -112,7 +112,7 @@ const quoted = parseEnvelope(await colophon(["quote", ...common, "--draft", draf
 if (quoted.presentation?.suite?.coverage !== "one_task") fail(`expected one_task, got ${quoted.presentation?.suite?.coverage}`);
 if (quoted.presentation?.suite?.executionConformance !== true) fail("expected executionConformance true");
 if (quoted.presentation?.suite?.leaderboardSubmitReady !== false) fail("one_task must not be leaderboardSubmitReady");
-parseEnvelope(await colophon(["lock", ...common, "--draft", draftId, "--json"]));
+parseEnvelope(await colophon(["lock", "--ack-sample-size", ...common, "--draft", draftId, "--json"]));
 const manifest = ApexSweDevSelectionManifestSchema.parse(
   JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(workspace, selected.selectionManifestSha256))),
 );

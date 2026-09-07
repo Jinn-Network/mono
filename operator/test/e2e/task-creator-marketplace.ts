@@ -14,34 +14,66 @@
  *      generator (`selectNextPostingCandidates`) and posted on-chain with the
  *      complexity-weighted escrow (`resolveMintedTaskDeliveryRate` →
  *      `computeEscrowWei`), not the flat mech rate.
- *   2. A claim attempt by the MINTER operator is refused (`syntheticClaimBlocked`,
- *      enforced live at `harnesses/engine/engine.ts:1134`).
+ *   2. A minter's claim of its own mint is refused, proven on the surviving live
+ *      consumer of `syntheticClaimBlocked` — `LearnerHarness.canAttempt`
+ *      (`harnesses/impls/learner/harness.ts`). The former live-daemon leg (start
+ *      the minter's daemon, prove it never emits a claimTx) is gone with the
+ *      TaskEngine that enforced it: post-Wave-4 D1 the composition `WorkLoop` is
+ *      the only claim path, its predicate is manifest-digest based
+ *      (`buildClaimPredicate`), and it never consults `syntheticClaimBlocked`.
+ *      Running a second daemon on the same manifest would therefore prove nothing
+ *      about the guard and could win the `maxClaims: 1` race, breaking assertion 3.
  *   3. A claim by a second operator identity succeeds; the mock solver
- *      (StubHarness, env-gated, no Claude/Docker) returns the gold patch once
- *      and a garbage patch once, across two on-chain postings of the same
- *      minted instance.
+ *      (the launcher-shaped canned-patch stub in `_swe-rebench-v2-stub-launcher.ts`,
+ *      no Claude/Docker) returns the gold patch once and a garbage patch once,
+ *      across two on-chain postings of the same minted instance.
  *   4. The evaluator grades both: gold ⇒ pass verdict, garbage ⇒ fail verdict.
  *   5. `computeExemplarPairYield` over the two verified trajectories counts
  *      exactly one exemplar pair for the minted instance, attributed to the
  *      minted (not baseline) bucket of `buildTaskCreatorMetricReport`.
  *
  * Scoping (see task-5-report.md for the full rationale):
- *   - REAL on-chain: task posting (createTask), the minter's refused claim
- *     attempt (a live Daemon that never emits a claimTx), the solver's real
- *     claim + solution delivery (a live Daemon via MechAdapter), and the
- *     verdict settlement (claimEvaluation → deliverToMarketplace →
- *     claimVerdictDelivery, Safe-mediated production `contracts.ts` calls).
- *   - FAKED (per controller resolution #3, matching task-creator-harvest-e2e.test.ts):
- *     the solver is a StubHarness returning a canned patch (no Claude); the
- *     evaluator grade is a deterministic score chosen by this script instead
- *     of running the real Docker-backed `SweRebenchV2Evaluator` (which needs
- *     a cloned upstream repo + Docker and is not wired for injectable stubs
- *     through `buildHarnesses`). computeExemplarPairYield is driven directly
- *     on the two real on-chain verdict outcomes rather than through the full
- *     yield-report/Docker pipeline.
+ *   - REAL on-chain: task posting (`createTask`) plus the solver's claim and
+ *     marketplace delivery through a live Daemon's legacy composition `WorkLoop`.
+ *   - DIRECT/in-process: the minter guard is exercised through
+ *     `LearnerHarness.canAttempt`; no minter daemon runs. The verdict leg invokes
+ *     Safe-mediated production ports, but currently fails at `openVerdictAttempt`
+ *     before a verdict is delivered or claimed.
+ *   - FAKED (per controller resolution #3, matching
+ *     task-creator-harvest-e2e.test.ts): the solver is the launcher-shaped stub
+ *     returning a canned patch (no Claude); the evaluator grade is a deterministic
+ *     score chosen by this script instead of the Docker-backed evaluator.
+ *
+ * Wave-4 D1 re-scope (issue #2667): the solve/claim leg runs on the composition
+ * `WorkLoop` (`startSweRebenchSolverDaemon`'s `composition` option → `startDaemon`'s
+ * `enableComposition`), which is the only claim path left after the engine-watcher's
+ * deletion. The composition dispatches through `LauncherContract`s rather than the
+ * `HarnessRegistry`, so the canned patch is served by a launcher-shaped stub injected
+ * through `buildOperatorComposition`'s `extraLaunchers` seam.
+ *
+ * Former blocker, now cleared by issue #2665: `submitSelfEvaluation` hands
+ * `createDirectSafeBroadcaster` to venue-base's `createVerdictPorts`, which used to demand a
+ * whole `BaseVenueSafeBroadcaster`. #2665 gave the direct broadcaster the block identity and
+ * logs `openVerdictAttempt` decodes, and narrowed the port's own input to
+ * `VerdictSafeBroadcaster` (`Pick<..., 'execute'>`) — the surface it actually consumes; it
+ * never calls `classify()`. Assertions 4 and 5 therefore reach the chain.
+ *
+ * Remaining blocker (issue #3715): assertions 4 and 5 do not yet pass. This is a
+ * legacy-lane E2E gap, not a gap in the explicitly selected native composition.
+ * The first full run (CI `workflow_dispatch`, 2026-09-04) cleared assertions 1-3 and then
+ * reverted on `TCAttemptNotSubmitted(1, 0)`: this helper explicitly builds
+ * `buildOperatorComposition({ mode: 'legacy' })` and runs its `WorkLoop` with
+ * `acceptLegacyCards: true`, but that legacy loop lacks router solution settlement. When
+ * `compositionMode: "native"` is explicitly configured, production `main.ts` selects
+ * `mode: 'native'`, passes `nativeClaimRuntime`, threads
+ * `composition.nativeSolutionCoordinator` into `WorkLoop`, and constructs the coordinator with
+ * `buildNativeSolutionSettlementPort`; the coordinator persistently begins, broadcasts, and
+ * records settlement. The old optional `MechAdapter.submitSolutionDelivery` is not the native
+ * mechanism. Issue #3715 owns the legacy-lane repair; this E2E remains unchanged until then.
  *
  * Public command: `yarn e2e:task-creator`.
  */
+import { createHash } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -63,7 +95,6 @@ import {
   bootstrapStakedOperator,
   deployMinimalV3Stack,
   startSweRebenchSolverDaemon,
-  startDaemon,
   waitForDaemonClaim,
   waitForDelivery,
   ANVIL_PRIVATE_KEYS,
@@ -113,6 +144,9 @@ import {
 } from '../../src/solver-types/_swe-rebench-v2-harvest.js';
 import { resolveMintedTaskDeliveryRate } from '../../src/solver-types/_swe-rebench-v2-escrow.js';
 import { syntheticClaimBlocked } from '../../src/solver-types/_swe-rebench-v2-synthetic-claim.js';
+import { LearnerHarness } from '../../src/harnesses/impls/learner/index.js';
+import type { HarnessAdapter, TaskSessionInputs } from '../../src/harnesses/impls/learner/types.js';
+import type { Task } from '../../src/types/task.js';
 import {
   computeExemplarPairYield,
   buildTaskCreatorMetricReport,
@@ -212,8 +246,18 @@ async function postMintedTask(args: {
     ...unsignedTaskDoc,
     signature: { algo: 'secp256k1' as const, signer: creator.address, hash: signed.hash, sig: signed.sig },
   };
+  // `taskCidDigest` MUST be a real sha256 digest of the exact posted bytes, not an opaque
+  // mock-gateway lookup key: the projector's TEP admission path re-derives
+  // `sha256(fetchedBytes)` and cross-checks it against this on-chain value
+  // (`resolveTaskProjection`'s digest join, `projector-enrich.ts`) before admitting the
+  // event. A keccak key made every posting drop with "on-chain anchor ... disagrees with
+  // synthesized legacy SignedTaskV1 digest", so the WorkLoop never saw a card to claim.
+  // Mirrors the identical fix already carried by `postSignedTaskOnChain`
+  // (`_daemon-harness-helpers.ts`) and real production posting (`uploadToIpfs` +
+  // `cidToDigestHex`). The CID the daemon derives from the event
+  // (`f01551220${digest.slice(2)}`) is unchanged.
   const taskJson = JSON.stringify(signedTaskDoc);
-  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
+  const taskCidDigest = `0x${createHash('sha256').update(taskJson).digest('hex')}` as `0x${string}`;
   mockIpfs.register(taskCidDigest, signedTaskDoc);
   const taskCid = `f01551220${taskCidDigest.slice(2)}`;
 
@@ -286,13 +330,18 @@ async function submitSelfEvaluation(args: {
   const evaluationTaskCidDigest = keccak256(
     toBytes(`evaluation:${posted.taskCid}:${posted.taskId}:${args.attemptIndex}`),
   ) as Hex;
+  // One broadcaster per Safe (finding E5 / composition design §6.1): the verdict port and both
+  // legacy Safe writes below share it, so they never open independent nonce stacks against the
+  // evaluator Safe. Issue #2665: those two writes previously omitted `broadcaster` entirely,
+  // which is the 3rd of 7-9 positional parameters -- every later argument was shifted one place.
+  const evaluatorBroadcaster = createDirectSafeBroadcaster(
+    publicClient,
+    walletClient,
+    evaluator.safeAddress as Address,
+  );
   const claimEvalResult = await createVerdictPorts({
     publicClient,
-    broadcaster: createDirectSafeBroadcaster(
-      publicClient,
-      walletClient,
-      evaluator.safeAddress as Address,
-    ) as never,
+    broadcaster: evaluatorBroadcaster,
     safeAddress: evaluator.safeAddress as Address,
     routerAddress: v3Env.routerAddress as Address,
     mechAddress: v3Env.mockMechAddress as Address, // self-eval: same mech the solver claimed with
@@ -326,6 +375,7 @@ async function submitSelfEvaluation(args: {
   await callDeliverToMarketplace(
     publicClient,
     walletClient,
+    evaluatorBroadcaster,
     evaluator.safeAddress as Address,
     v3Env.mockMechAddress as Address,
     [claimEvalResult.requestId as Hex],
@@ -336,6 +386,7 @@ async function submitSelfEvaluation(args: {
   const verdictTxHash = await claimDelivery(
     publicClient,
     walletClient,
+    evaluatorBroadcaster,
     evaluator.safeAddress as Address,
     v3Env.routerAddress as Address,
     claimEvalResult.requestId as Hex,
@@ -357,13 +408,22 @@ async function submitSelfEvaluation(args: {
   return { verdictCode, verdictTxHash };
 }
 
+/**
+ * Minimal adapter satisfying `LearnerHarnessConfig.adapter`. Assertion 2 exercises only
+ * `canAttempt`, which never runs a session — mirrors `test/harnesses/learner-freeze-ignore.test.ts`.
+ */
+class NoOpStubAdapter implements HarnessAdapter {
+  readonly name = 'noop';
+  readonly allowsHarnessSelfModification = false;
+  async runTask(_inputs: TaskSessionInputs): Promise<void> {}
+}
+
 async function main(): Promise<void> {
   console.log('\n=== task-creator-marketplace e2e (WP6 / Task 5) ===');
   await compileContracts();
   const fixture = await setupAnvilFixture();
   const mockIpfs = await startMockIpfsServer();
 
-  let daemonA: RunningDaemon | undefined;
   let daemonB: RunningDaemon | undefined;
 
   try {
@@ -389,25 +449,25 @@ async function main(): Promise<void> {
     console.log(`V3 router: ${v3Env.routerAddress}`);
     console.log(`mock mech (operator B): ${v3Env.mockMechAddress}`);
 
-    // ── Start operator A's (minter) and operator B's (solver) daemons BEFORE
-    // posting any task. MechAdapter's on-chain task-discovery cursor
-    // (`requestBlockCursor`) is initialized to the CURRENT block at daemon
-    // startup (adapter.ts initialize()) and only scans forward from there —
-    // a task posted before the daemon starts is permanently invisible to it. ──
+    // ── Start operator B's (solver) daemon BEFORE posting any task. The
+    // projector's log cursor starts at the current block at composition build time
+    // and only scans forward — a task posted before the daemon starts is
+    // permanently invisible to it.
+    //
+    // Operator A keeps its identity (it is the mint's `minterSafe` and the posted
+    // tasks' creator Safe) but runs NO daemon: see assertion 2 in the file header
+    // for why a live minter daemon can no longer prove the synthetic-claim guard. ──
     const stubFixturesDir = mkdtempSync(join(tmpdir(), 'tc-marketplace-e2e-fixtures-'));
     writeFileSync(join(stubFixturesDir, `${MINTED_INSTANCE_ID}.patch`), GOLD_PATCH);
 
-    console.log('\nstarting operator A (minter) daemon — must never claim...');
-    daemonA = await startSweRebenchSolverDaemon(fixture, operatorA, mockIpfs.baseUrl, v3Env, mockIpfs.baseUrl, {
-      instanceLabel: 'op-a-minter',
-      fixturesDir: stubFixturesDir,
-      instanceMatcher: MINTED_INSTANCE_ID,
-    });
-    console.log('starting operator B (solver) daemon...');
+    console.log('starting operator B (solver) daemon on the composition WorkLoop...');
     daemonB = await startSweRebenchSolverDaemon(fixture, operatorB, mockIpfs.baseUrl, v3Env, mockIpfs.baseUrl, {
       instanceLabel: 'op-b-solver',
       fixturesDir: stubFixturesDir,
       instanceMatcher: MINTED_INSTANCE_ID,
+      // Anchors the claim predicate's wiring entry on the same manifest digest
+      // `postMintedTask` writes on chain (`keccak256(KNOWN_MANIFEST_CID)`).
+      composition: { manifestCid: KNOWN_MANIFEST_CID },
     });
 
     // ── Assertion 1a: seed a minted pool entry + prove the generator selects it ──
@@ -528,16 +588,31 @@ async function main(): Promise<void> {
     );
     console.log(`  [OK] syntheticClaimBlocked(provenance, minterSafe) = "${directBlockReason}"`);
 
-    let minterClaimed = false;
-    try {
-      await waitForDaemonClaim(fixture, posted1, operatorA, v3Env, 8_000);
-      minterClaimed = true;
-    } catch {
-      // Expected: timeout — the live engine (engine.ts:1134) blocked the claim
-      // attempt off-chain before any claimTask tx was ever sent.
-    }
-    assert(!minterClaimed, 'ASSERTION 2 FAILED: minter operator A actually claimed its own synthetic task on-chain');
-    console.log('  [OK] operator A (minter) never issued a claimTask tx for its own minted task (8s live-daemon window)');
+    // The guard's surviving LIVE consumer: the learner harness's solver-side
+    // admission gate. Same posted eligibility the on-chain task carries, plus the
+    // `claimantSafe` the engine used to inject — refused for the minter, admitted
+    // for a third-party solver.
+    const learner = new LearnerHarness({ adapter: new NoOpStubAdapter() });
+    const admissionTask = (claimantSafe: string): Task => ({
+      id: 'tc-marketplace-e2e-admission',
+      description: `SWE-rebench v2 minted instance ${MINTED_INSTANCE_ID}`,
+      solverType: 'swe-rebench-v2.v1',
+      eligibility: { ...eligibility, claimantSafe },
+    });
+
+    const minterAdmission = await learner.canAttempt(admissionTask(operatorA.safeAddress));
+    assert(
+      !minterAdmission.ok && minterAdmission.reason.toLowerCase().includes('minter'),
+      `ASSERTION 2 FAILED: LearnerHarness.canAttempt admitted the minter — got ${JSON.stringify(minterAdmission)}`,
+    );
+    console.log(`  [OK] LearnerHarness.canAttempt(minterSafe) refused: "${minterAdmission.reason}"`);
+
+    const solverAdmission = await learner.canAttempt(admissionTask(operatorB.safeAddress));
+    assert(
+      solverAdmission.ok,
+      `ASSERTION 2 FAILED: LearnerHarness.canAttempt refused a third-party solver — got ${JSON.stringify(solverAdmission)}`,
+    );
+    console.log('  [OK] LearnerHarness.canAttempt(third-party solver Safe) admitted');
 
     // ── Assertion 3a + 4a: operator B claims + delivers GOLD; self-evaluates PASS ──
     console.log('\n--- Assertion 3+4 (posting 1/2, gold): claim, deliver, grade PASS ---');
@@ -629,7 +704,6 @@ async function main(): Promise<void> {
 
     console.log('\n=== task-creator-marketplace e2e — ALL 5 ASSERTIONS PASSED ===');
   } finally {
-    await daemonA?.stop().catch(() => {});
     await daemonB?.stop().catch(() => {});
     await mockIpfs.close();
     await fixture.teardown();

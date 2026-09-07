@@ -96,6 +96,35 @@ const INVALID = {
   },
 };
 
+/**
+ * Documents the schema accepts and the canonicalizer refuses. Written as raw JSON text, not
+ * built as objects like every other corpus here: `JSON.stringify` renders a non-finite
+ * number as `null`, so `1e400` is not expressible through the object path at all. The exact
+ * bytes are what these fixtures are for, so the text is the source.
+ */
+const UNSEALABLE = {
+  "non-integral-extension-number": '"com.example.x": 1.5',
+  "non-finite-extension-number": '"com.example.x": 1e400',
+  "unpaired-surrogate-extension-string": '"com.example.x": "\\ud800"',
+};
+
+const unsealableDocument = (member) => `{
+  "kind": ${JSON.stringify(OFFER_RECORD_KIND)},
+  "subject": ${JSON.stringify(SUBJECT)},
+  "rails": [
+    {
+      "rail": ${JSON.stringify(USDC_BASE)},
+      "to": "0x2222222222222222222222222222222222222222",
+      "amount": "1500000"
+    }
+  ],
+  "gate": {
+    "uri": ${JSON.stringify(GATE.uri)}
+  },
+  ${member}
+}
+`;
+
 const files = new Map();
 const decoder = new TextDecoder();
 
@@ -119,6 +148,10 @@ for (const [name, document] of Object.entries(INVALID)) {
     join(offerFixtures, `invalid-${name}.json`),
     `${JSON.stringify(document, null, 2)}\n`,
   );
+}
+
+for (const [name, member] of Object.entries(UNSEALABLE)) {
+  files.set(join(offerFixtures, `unsealable-${name}.json`), unsealableDocument(member));
 }
 
 if (write) {

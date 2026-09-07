@@ -8,6 +8,7 @@ import {
   assertResolvedHermesModel,
   assertResolvedHermesModelFromConfig,
   formatResolvedHermesModelGuardEvidence,
+  RESOLVED_HERMES_MODEL_MISMATCH_MARKER,
   parseT31ResolvedModelGuardPolicy,
   readResolvedHermesModelFromConfig,
 } from '../../../../src/harnesses/impls/hermes-agent/resolved-model-guard.js';
@@ -183,6 +184,19 @@ describe('readResolvedHermesModelFromConfig / assertResolvedHermesModelFromConfi
   });
 });
 
+describe('RESOLVED_HERMES_MODEL_MISMATCH_MARKER', () => {
+  it('is the literal prefix of the mismatch message, so a log scanner cannot drift from it', () => {
+    const err = new ResolvedHermesModelMismatchError({
+      requestedModel: 'deepseek/deepseek-v4-flash',
+      requestedProvider: 'openrouter',
+      resolvedModel: 'anthropic/claude-opus-4.6',
+      resolvedProvider: 'anthropic',
+      configPath: '/tmp/config.yaml',
+    });
+    expect(err.message).toContain(RESOLVED_HERMES_MODEL_MISMATCH_MARKER);
+  });
+});
+
 describe('parseT31ResolvedModelGuardPolicy', () => {
   it('is inactive when T3.1 expected-model env is unset so normal operator selection is unchanged', () => {
     expect(parseT31ResolvedModelGuardPolicy({
@@ -200,5 +214,23 @@ describe('parseT31ResolvedModelGuardPolicy', () => {
       requested: { model: 'deepseek/deepseek-v4-flash', provider: 'openrouter' },
       approvedOverride: { model: 'google/gemini-2.5-flash', provider: 'openrouter' },
     });
+  });
+
+  it('rejects an approved provider declared without an approved model', () => {
+    expect(() =>
+      parseT31ResolvedModelGuardPolicy({
+        JINN_T31_EXPECTED_HERMES_MODEL: 'deepseek/deepseek-v4-flash',
+        JINN_T31_EXPECTED_HERMES_PROVIDER: 'openrouter',
+        JINN_T31_APPROVED_HERMES_PROVIDER: 'openrouter',
+      }),
+    ).toThrow(/approved provider without an approved model/i);
+  });
+
+  it('ignores a stray approved provider when the guard itself is inactive', () => {
+    expect(
+      parseT31ResolvedModelGuardPolicy({
+        JINN_T31_APPROVED_HERMES_PROVIDER: 'openrouter',
+      }),
+    ).toBeUndefined();
   });
 });

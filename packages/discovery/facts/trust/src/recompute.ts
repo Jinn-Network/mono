@@ -75,9 +75,11 @@ export const trustPolicyRecompute: RecordFactRecompute = async (bytes) => {
 // --- v2 revisions (join-edge completeness, protocol design §12 amendment 2026-08-28) --------
 //
 // Every added field is a digest the record states in its own sealed bytes, read through the same
-// structural `validate*` path v1 uses, so `refs` stays unused. A subject descriptor and a
-// ceremony reference carry bare-hex `digest.sha256`; they are lifted into the `sha256:` spelling
-// every other digest fact on these cards already carries, so one card never mixes two spellings.
+// structural `validate*` path v1 uses, so `refs` stays unused. A subject descriptor carries
+// bare-hex `digest.sha256` (`ResourceDescriptorSchema`, in-toto's spelling), and is lifted into
+// the `sha256:` spelling every other digest fact on these cards already carries, so one card
+// never mixes two spellings. A ceremony reference is already `sha256:`-prefixed
+// (`CeremonyReferenceSchema.digest` is `Sha256DigestSchema`) and is emitted unlifted.
 // Reference-bearing labels the indexing relation; it does not by itself promise the target is a
 // retrievable announceable record (ceremony evidence and time anchors are artifacts, not records).
 

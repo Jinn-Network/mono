@@ -121,6 +121,26 @@ describe("colophon import item-bank", () => {
     expect(wrongProfile.exitCode).toBe(2);
     expect(JSON.parse(wrongProfile.stdout)).toMatchObject({ ok: false, error: { code: "invalid-invocation" } });
 
+    // Free text reaching `--license` seals a record whose licence the freeze-repository export
+    // then refuses to render, after publication. The flag is where that costs a second.
+    const freeText = await runCli([
+      "import", "item-bank",
+      "--workspace", workspaceDir,
+      "--principal", "sponsor-1",
+      "--profile", "binary-judgment@2",
+      "--draft", "d1",
+      "--items", itemsPath,
+      "--sources", sourcesPath,
+      "--admissions", admissionsPath,
+      "--license", "internal use only",
+      "--json",
+    ], { cwd: root, clock: () => "2026-08-15T11:01:03.000Z" });
+    expect(freeText.exitCode).toBe(2);
+    expect(JSON.parse(freeText.stdout)).toMatchObject({
+      ok: false,
+      error: { code: "invalid-invocation", detail: expect.stringContaining("SPDX short identifier") },
+    });
+
     writeFileSync(itemsPath, `\uFEFF${renderCanonicalJsonl([{
       protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL,
       item,

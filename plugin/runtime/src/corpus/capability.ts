@@ -17,6 +17,7 @@ import {
   type CorpusAdmission,
 } from "./admission.js";
 import {
+  SYNC_TRUNCATED_REASON,
   UNVERIFIED_CHAIN_ACKNOWLEDGEMENT,
   createDriverChainVerification,
   createRejectingChainVerification,
@@ -67,7 +68,13 @@ interface Started {
   readonly chainVerification: ChainVerification;
   /** Why the configured posture is not the live one, when they differ. */
   readonly chainVerificationShortfall?: "driver-unavailable";
-  /** Head-signature refusals observed since start, newest wins, keyed by `agent/name`. */
+  /**
+   * Chain-verification refusals observed since start, newest wins, keyed by
+   * `agent/name`. The value is the posture's `reason` — whatever it refused
+   * on, which is the head signature, the entry linkage (`broken-chain`), or
+   * this runtime's own per-pass bound (`sync-truncated`), not head signatures
+   * alone.
+   */
   readonly chainRejections: Map<string, string>;
   readonly log: RuntimeLogger;
   readonly policyError?: string;
@@ -199,7 +206,13 @@ export function createCorpusCapability(
                 ? // This one genuinely repairs the state: clearing the position
                   // makes the next sync a cold walk from genesis.
                   `Delete the mirror state file at ${state.config.mirrorStatePath} to re-sync from genesis.`
-                : "Run a mirror sync; the runtime also syncs opportunistically at session start.",
+                : // Both processes that reach this row are addressed: a `serve`
+                  // session syncs opportunistically at session start, and the
+                  // standing `mirror` service is already doing it on its own
+                  // interval — telling that one to run a sync would be telling
+                  // it to do what it does.
+                  "Run a mirror sync, or leave the `mirror` service to its next cycle; a " +
+                  "`serve` session also syncs opportunistically at session start.",
         },
         // This check measures whether THIS INSTALL is configured and composed
         // coherently. When there was no way to inject a verification driver at
@@ -216,12 +229,12 @@ export function createCorpusCapability(
         // Empty by configuration, exactly as `corpus-mirror` treats a
         // followed-nothing install: with no archives there is no producer to
         // admit, so an absent trust policy is not a fault. Reporting it as one
-        // made every default `serve` process red — no in-repo entry point
-        // passes a config `file`, so `corpus.trust` is `undefined` on every
-        // real launch — with a remedy naming two keys nothing reads, which is
-        // the operator-unfixable remedy spec §9.3 forbids by name. Declining a
-        // trust policy WHILE following archives is still a fault, and stays
-        // red. See Finding F-C7-1.
+        // made every default `serve` process red — an install with no
+        // `config.json` leaves `corpus.trust` `undefined` — with a remedy
+        // naming two keys that install declares nothing in. Declining a trust
+        // policy WHILE following archives is still a fault, and stays red.
+        // (F-C7-1's wider gap — that no entry point read a config file at all
+        // — is closed: `createNodeRuntimeConfigFileReader` supplies one.)
         checks.push({
           name: "corpus-trust-policy",
           ok: followed === 0,
@@ -425,6 +438,32 @@ export function createCorpusCapability(
     const configured = state.corpus.chainVerification;
     if (configured === "verified" && state.chainVerificationShortfall === undefined) {
       const refused = [...state.chainRejections.entries()];
+      // `sync-truncated` is the one reason in this map the archive did not
+      // cause -- it is this runtime abandoning the walk at its own per-pass
+      // bound (#3252). Sending that operator to the archive's head signature
+      // and entry linkage is the phantom hunt the refusal exists to prevent,
+      // so its remedy is emitted separately. Both can be present at once: a
+      // real install can have one truncated source and one genuinely broken
+      // one, and each needs its own next step.
+      const truncated = refused.some((entry) => entry[1] === SYNC_TRUNCATED_REASON);
+      const archiveFaulted = refused.some((entry) => entry[1] !== SYNC_TRUNCATED_REASON);
+      const remedies: string[] = [];
+      if (truncated) {
+        remedies.push(
+          `A \`${SYNC_TRUNCATED_REASON}\` refusal is this runtime's own doing, not the ` +
+            "archive's: the mirror abandoned the walk at its per-pass entry bound, so the " +
+            "entry the head cites was never fetched and the chain could not be verified. " +
+            "Raise `corpus.maxEntriesPerSync` (default 500, ceiling 10,000) above that " +
+            "source's backlog and the next pass verifies it.",
+        );
+      }
+      if (archiveFaulted) {
+        remedies.push(
+          "A refused archive is serving a chain this runtime cannot verify; the reason above " +
+            "names which check failed — start from the archive's head signature, the signing " +
+            "keys this runtime resolves for it, and the entry linkage it served.",
+        );
+      }
       return {
         name,
         ok: refused.length === 0,
@@ -435,12 +474,7 @@ export function createCorpusCapability(
               `archive(s) were refused at their last verification: ${refused
                 .map(([source, reason]) => `${source} (${reason})`)
                 .join(", ")}.`,
-        remedy:
-          refused.length === 0
-            ? null
-            : "A refused archive is serving a chain this runtime cannot verify; the reason above " +
-              "names which check failed — start from the archive's head signature, the signing " +
-              "keys this runtime resolves for it, and the entry linkage it served.",
+        remedy: remedies.length === 0 ? null : remedies.join(" "),
       };
     }
     if (state.corpus.sources.length === 0) {

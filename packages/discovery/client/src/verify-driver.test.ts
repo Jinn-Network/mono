@@ -234,9 +234,11 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
 
     const trust = createTrustAdapter({
       bindingResolver: {
-        async resolveBinding(): Promise<ResolvedBinding | null> {
+        async resolveBinding(query): Promise<ResolvedBinding | null> {
           return {
-            binding: { scope: [DISCOVERY_SIGNING_SCOPE], key: { keyid: "key-1", publicKey: "pubkey-key-1", algorithm: "ed25519" } } as never,
+            // A conforming resolver never resolves by key alone, so the binding
+            // it returns carries the queried Agent IRI (issue #3629).
+            binding: { agent: query.agent, scope: [DISCOVERY_SIGNING_SCOPE], key: { keyid: "key-1", publicKey: "pubkey-key-1", algorithm: "ed25519" } } as never,
             envelopeBytes: new Uint8Array(),
             bindingDigest: `sha256:${"0".repeat(64)}`,
             effectiveStart: "2026-01-01T00:00:00.000Z",

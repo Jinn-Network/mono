@@ -209,7 +209,10 @@ describe("createCancellationAwareBackend", () => {
       principal: "sponsor-1",
     });
 
-    await expect.poll(() => cancellations.length, { timeout: 1_000 }).toBe(1);
+    // `expect.poll` returns the moment the condition holds, so the bound is pure scaffolding: it
+    // only decides how long a descheduled worker is allowed to be starved before the test calls
+    // it a failure. 1s was inside the starvation window this suite actually sees (#3354).
+    await expect.poll(() => cancellations.length, { timeout: 10_000 }).toBe(1);
     expect(composition.signal.aborted).toBe(false);
     terminal = true;
     await composition.backend.observe(ATTEMPT);

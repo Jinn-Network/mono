@@ -33,6 +33,10 @@ export interface ImportBinaryItemBankInput {
   readonly name?: string;
   readonly description?: string;
   readonly version?: string;
+  /** SPDX identifier sealed onto the Benchmark record; the licence data a freeze repository's
+   * generated LICENSE, NOTICE, and SPDX metadata come from (issue #2870). */
+  readonly license?: string;
+  readonly citation?: string;
   readonly parserInvalidPolicy?: "reject" | "abstain";
 }
 
@@ -97,6 +101,8 @@ export function importBinaryItemBank(
         description: input.description ?? draft.spec.description ?? "",
         version: input.version ?? "1.0.0",
         author,
+        ...(input.license === undefined ? {} : { license: input.license }),
+        ...(input.citation === undefined ? {} : { citation: input.citation }),
         ...(input.parserInvalidPolicy === undefined
           ? {}
           : { parserInvalidPolicy: input.parserInvalidPolicy }),

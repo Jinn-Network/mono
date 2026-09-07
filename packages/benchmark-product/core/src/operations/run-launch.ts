@@ -42,7 +42,6 @@ import {
   resumeRun,
   type LaunchOptions,
 } from "@jinn-network/benchmarking-run";
-import type { SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse, toErrorEnvelope } from "../errors.js";
@@ -57,6 +56,7 @@ import {
 } from "../run/drive.js";
 import { createProductLaunchCapture } from "../run/publication-capture.js";
 import { createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
+import { reconcileReplayedSubmission } from "../run/replayed-submission-recovery.js";
 import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import {
   appendRunJournalEntry,
@@ -67,6 +67,7 @@ import {
 } from "../run/journal.js";
 import { requireRunState, writeRunState, type PublicationState } from "../run/state.js";
 import { readRunBindingCarriage } from "../binding/carriage.js";
+import type { VerifiedRunBinding } from "@colophon-claims/verify";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
@@ -145,8 +146,22 @@ interface LoadedRun {
    * `expectedCellSet`'s order. Read here rather than at each dispatch site so the first launch and
    * every resume use the one order: applying it to only one of them would mean the order the run
    * bound itself to was not the order it ran in.
+   *
+   * On the `running` load (`runResume`) this is the order the run dispatches in. On the `locked`
+   * load (`runLaunch`) it is only a pre-launch reading: `launchedAt` is not stamped yet, so a
+   * concurrent `bind` can still land, and the first launch re-reads it afterwards
+   * (`dispatchTaskOrderAtLaunch`, issue #3334).
    */
   readonly dispatchTaskOrder?: readonly string[];
+}
+
+/**
+ * The binding's order as `orderCellsByTask` wants it: task digests without the `sha256:` prefix,
+ * matching `CellCoord.taskDigest`. `undefined` for an unbound run, which is `orderCellsByTask`'s
+ * identity.
+ */
+function dispatchTaskOrderOf(binding: VerifiedRunBinding | undefined): readonly string[] | undefined {
+  return binding === undefined ? undefined : binding.order.map((item) => item.slice("sha256:".length));
 }
 
 function loadLockedOrRunningRun(workspaceDir: string, draftId: string, expectedState: "locked" | "running"): LoadedRun {
@@ -167,14 +182,14 @@ function loadLockedOrRunningRun(workspaceDir: string, draftId: string, expectedS
     refuse("conflict", `drafts.${draftId}.taskSet`, `draft ${draftId} has no attached benchmark`);
   }
   const benchRecord = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
-  const binding = readRunBindingCarriage(workspaceDir, runState);
+  const dispatchTaskOrder = dispatchTaskOrderOf(readRunBindingCarriage(workspaceDir, runState));
   return {
     document,
     benchRecord,
     runRecord,
     runSha256: runState.runSha256,
     owner: runState.owner,
-    ...(binding === undefined ? {} : { dispatchTaskOrder: binding.order.map((item) => item.slice("sha256:".length)) }),
+    ...(dispatchTaskOrder === undefined ? {} : { dispatchTaskOrder }),
   };
 }
 
@@ -521,6 +536,19 @@ export function runLaunch(
       const runState = requireRunState(clockedContext.workspaceDir, input.draftId);
       writeRunState(clockedContext.workspaceDir, input.draftId, { ...runState, launchedAt: at });
 
+      // Read the binding AFTER `launchedAt` is durable, not from the pre-launch load (issue
+      // #3334). `loadLockedOrRunningRun` above read it a few statements earlier, and a `bind` from
+      // another process could still have landed in between: that binding would then be recorded
+      // and reported while this launch dispatched in `expectedCellSet`'s order, so `run status`
+      // would assert an execution order derived from post-seal randomness for a run that ran in
+      // the operator's own sealed order. `writeRunState` now refuses that late bind outright, and
+      // reading here is the other half: the order dispatched is the one committed at the moment
+      // this run became launched.
+      const dispatchTaskOrderAtLaunch = dispatchTaskOrderOf(readRunBindingCarriage(
+        clockedContext.workspaceDir,
+        requireRunState(clockedContext.workspaceDir, input.draftId),
+      ));
+
       appendRunJournalEntry(clockedContext.workspaceDir, input.draftId, { kind: "launched", at: context.clock() });
 
       // From the SEALED Run record, never the draft — the Run is the pre-registration (BP-21).
@@ -604,7 +632,7 @@ export function runLaunch(
                 capture,
                 hostTerminalFacts: composeHostTerminalFacts(clockedContext.workspaceDir, deps.hostTerminalFacts),
                 maxConcurrentCells,
-                ...(loaded.dispatchTaskOrder === undefined ? {} : { dispatchTaskOrder: loaded.dispatchTaskOrder }),
+                ...(dispatchTaskOrderAtLaunch === undefined ? {} : { dispatchTaskOrder: dispatchTaskOrderAtLaunch }),
               });
               await driveCellEvents(driveDeps, events);
               return { draft };
@@ -685,6 +713,16 @@ export function runResume(
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
         } else if (entry.kind === "submission-accepted" && entry.leg !== "evaluation") {
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
+        } else if (entry.kind === "evaluation-submission-captured") {
+          // Pre-submit capture, one leg down (#3237). `submission-accepted` alone is written
+          // AFTER the backend has accepted, so a kill in that gap leaves the acceptance durable
+          // in the backend and invisible here — and re-minting under the same idempotency key
+          // loses the verdict permanently. This entry is written before the bytes are offered,
+          // so the map covers that gap the way `submission-captured` covers the solve leg's.
+          journaledEvaluationSubmissions.set(
+            `${entry.cellKey}::${entry.dispatch}::e${entry.evalIndex}::a${entry.evaluationAttempt}`,
+            entry.submissionSha256,
+          );
         } else if (entry.kind === "submission-accepted" && entry.evalIndex !== undefined) {
           journaledEvaluationSubmissions.set(
             `${entry.cellKey}::${entry.dispatch}::e${entry.evalIndex}::a${entry.evaluationAttempt ?? 1}`,
@@ -773,35 +811,19 @@ export function runResume(
                     `${cell.cellKey}::${cell.dispatch}`,
                   );
                   if (submissionSha256 === undefined) continue;
-                  const submissionBytes = getSealedBytes(
-                    clockedContext.workspaceDir,
-                    submissionSha256,
-                  );
-                  const submission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
-                    submissionBytes,
-                  )) as { readonly submission?: unknown };
-                  if (
-                    typeof submission.submission !== "string"
-                    || !submission.submission.startsWith("urn:uuid:")
-                  ) {
-                    refuse(
-                      "record-integrity",
-                      `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
-                      "captured outstanding Submission carries no valid Submission URI",
-                    );
-                  }
-                  const reconciliation = await backend.recover(
-                    submission.submission as SubmissionUri,
-                  );
-                  if (reconciliation.classification === "contradictory") {
-                    refuse(
-                      "record-integrity",
-                      `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
-                      `backend recovery contradicted the captured Submission${
-                        reconciliation.detail === undefined ? "" : `: ${reconciliation.detail}`
-                      }`,
-                    );
-                  }
+                  // One preamble, shared with the evaluation leg's replay block
+                  // (`../run/replayed-submission-recovery.ts`), so the ref discipline both
+                  // enforce cannot drift between them.
+                  await reconcileReplayedSubmission({
+                    backend,
+                    submissionBytes: getSealedBytes(
+                      clockedContext.workspaceDir,
+                      submissionSha256,
+                    ),
+                    refusalPath: `runs.${input.draftId}.${cell.cellKey}.${cell.dispatch}`,
+                    invalidUriMessage: "captured outstanding Submission carries no valid Submission URI",
+                    contradictionMessage: "backend recovery contradicted the captured Submission",
+                  });
                 }
 
                 cancellation = createCancellationAwareBackend(backend, {

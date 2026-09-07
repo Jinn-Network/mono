@@ -92,8 +92,7 @@ screening does not move the format, so such a bundle is still `.../2`, and the
 own, so no line refuses it on the pin. What the bundle's own `index.html` and
 share text instruct, and what reproduces the producer's exact release, is the
 `@0.2.1` line its claim names. Take the line from the claim package's
-`verification.command` rather than inferring it from the format string; the
-publication caveat stated for v7 below applies to that `@0.2.1` too.
+`verification.command` rather than inferring it from the format string.
 
 ### Binary qualification bundle v4
 
@@ -132,8 +131,10 @@ npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
 
 `@0.1.0` is the exact producer-side release inside that line. A v4 whose
-screening was prompted pins `@0.2.1` instead, with `@0.2` compatible and `@0.2.0`
-on bundles materialized before `0.2.1` existed:
+screening was prompted pins `@0.2.1` instead, with `@0.2` as the compatible line
+and `@0.1` refusing outright. `0.2.1` accepts the historical `@0.2.0` command as
+well as its own, so the compatible line reads a prompted v4 materialized before
+`0.2.1` existed too:
 
 ```bash
 npx @colophon-claims/verify@0.2.1 <bundle-dir>
@@ -144,7 +145,11 @@ fourth axis, and only anchoring, qualification, and disclosure select the format
 — so take the line from the claim package's own `verification.command`, or read
 `method.parameters.promptedScreeningProfile`, which is
 `"prompted-codex-screening/v1"` on a prompted bundle and absent otherwise. The
-publication caveat stated for v7 below applies to a prompted v4's `@0.2.1` too.
+refusal a prompted v4 earns from a reader too old for it is not v7's: v7 is
+refused on the format, before the claim is read, while a prompted v4 is a format
+`0.1.0` and `0.2.0` both support and is refused on the claim inside it. That
+case is described in
+[A listed format is not on its own a verdict either](#reading-a-bundle-with-a-reader-that-is-too-old).
 
 V4 carries no anchors, so the anchor trust-material flags below do not apply to
 it. It returns the same **six checks** as v2 on both lines: the qualification
@@ -303,23 +308,27 @@ stated for v6 above; supplying neither leaves a well-formed anchor at `present`
 rather than `verified`. V7 returns the same **seven checks** as v6, in the same
 order.
 
-**`0.2.1` is not published yet, and `@0.2` will refuse a v7 bundle.** The reader
-is cut by a manual, demand-gated workflow that no one has fired, so today
-`@0.2.1` does not resolve and `@0.2` resolves to `0.2.0`, whose supported
-formats stop at public-bundle/6. Running the compatible line against a v7 bundle
-therefore produces the version-mismatch refusal described in
-[Reading a bundle with a reader that is too old](#reading-a-bundle-with-a-reader-that-is-too-old),
-not a verdict about the bundle. Until the release is cut, read a v7 bundle with
-the installed product,
+**`0.2.1` is published, and both lines above resolve to it.** That release has
+since been cut: `0.2.1` is the registry's `latest` for
+`@colophon-claims/verify`, so `@0.2.1` resolves exactly, and `@0.2` — a range,
+not a pin — now resolves to `0.2.1` rather than to `0.2.0`. The compatible line
+therefore reads a v7 bundle. An explicit `@0.2.0`, and any line at `@0.1`, still
+refuses one with the version-mismatch described in [Reading a bundle with a
+reader that is too old](#reading-a-bundle-with-a-reader-that-is-too-old), which
+is a fact about the reader and not a verdict about the bundle.
+
+The installed product exposes the same reader implementation,
 
 ```bash
 colophon bundle verify --bundle <bundle-dir> --json
 ```
 
-which wraps the same reader implementation, or with a reader built from the
-`0.2.1` source. The product verb takes no trust-material flags and passes none,
-so under it a well-formed anchor reports `present` and never `verified`; only
-the `npx` reader can carry an anchor further, and only once the release exists.
+but it is now the harder route rather than the fallback: `@colophon-claims/cli`
+and `@colophon-claims/core` are implemented and still unpublished, so the
+product verb needs a mono checkout while the `npx` line above needs nothing. The
+product verb also takes no trust-material flags and passes none, so under it a
+well-formed anchor reports `present` and never `verified`; only the `npx` reader
+can carry an anchor further.
 
 ### Evidence-native bundle v5 and its two profiles
 
@@ -425,13 +434,19 @@ bundle at manifest parse rather than misreading it as a full-evidence bundle wit
 Read a metadata-first bundle with a reader that lists the profile among the ones it supports.
 
 That is also the publication gate. `claim-package/3`'s `verification.command` names the reader a
-bundle instructs its readers to use, and no released reader line understands this profile yet, so
-**nothing may publish a metadata-first bundle until its claim package pins a reader release that
-declares the profile** — a claim naming a reader that cannot read it is an instruction to fail.
-Today the profile is a format definition and a local derivation of an already-published
-full-evidence bundle; no producer emits one. The local viewer, which is the one surface that can
-be pointed at a hand-derived metadata-first bundle, offers the local `colophon bundle verify`
-command instead of an `npx` line that would refuse.
+bundle instructs its readers to use, so **nothing may publish a metadata-first bundle until its
+claim package pins a reader release that declares the profile** — a claim naming a reader that
+cannot read it is an instruction to fail. That rule is satisfiable rather than closed:
+`@colophon-claims/verify@0.2.1`, the registry `latest` since 2026-09-01, lists the metadata-first
+profile among the ones its manifest parse accepts; `@0.2.0` and every earlier line refuse a
+metadata-first bundle there. What a `/5` producer writes today still does not satisfy the gate:
+`PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND` resolves to the `@0.1` line and there is no
+metadata-first-specific command constant, so a metadata-first bundle whose claim pins `@0.1`
+remains an instruction to fail. The gate is open and unexercised — the profile is a format
+definition and a local derivation of an already-published full-evidence bundle, and no producer
+emits one. The local viewer, which is the one surface that can be pointed at a hand-derived
+metadata-first bundle, offers the local `colophon bundle verify` command; a reader handed such a
+bundle can also run `npx @colophon-claims/verify@0.2.1 <bundle-dir>`.
 
 ### Disclosed anchored binary qualification bundle v8
 
@@ -484,11 +499,13 @@ npx @colophon-claims/verify@0.2.1 <bundle-dir> \
 ```
 
 `--tsa-root` and `--ots-headers` carry the meaning and the defaults stated for
-v6. The publication caveat stated for v7 applies here unchanged: `0.2.1` is not
-published yet, `@0.2` resolves to `0.2.0`, and `0.2.0` refuses a v8 bundle with
-the same version-mismatch refusal it gives a v7 one. Until the release is cut,
-read a v8 bundle with `colophon bundle verify --bundle <bundle-dir> --json` or
-with a reader built from the `0.2.1` source.
+v6. The publication note stated for v7 applies here unchanged: `0.2.1` is
+published as `latest`, so `@0.2.1` and the compatible `@0.2` both resolve to it
+and both read a v8 bundle, while an explicit `@0.2.0` refuses one with the same
+version-mismatch refusal it gives a v7 one. `colophon bundle verify --bundle
+<bundle-dir> --json` wraps the same reader, but — as for v7 — the product CLI is
+still unpublished, so that route needs a mono checkout the `npx` line does
+not.
 
 ## Portable verification
 
@@ -510,13 +527,13 @@ out where it applies.
 | `bundle.json` format | Pinned line | Compatible line | Checks | Anchor flags |
 | --- | --- | --- | --- | --- |
 | `benchmark-product-public-bundle/2`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
-| `benchmark-product-public-bundle/2`, prompted screening | `@0.2.1`, publication pending (`@0.2.0` if already materialized) | `@0.2`; `@0.1` also verifies, since claim-package/1 states no reader requirement | six | not applicable |
+| `benchmark-product-public-bundle/2`, prompted screening | `@0.2.1` (`@0.2.0` if already materialized) | `@0.2`; `@0.1` also verifies, since claim-package/1 states no reader requirement | six | not applicable |
 | `benchmark-product-public-bundle/4`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
-| `benchmark-product-public-bundle/4`, prompted screening | `@0.2.1`, publication pending (`@0.2.0` if already materialized) | `@0.2`, and only for a bundle pinning `@0.2.0`; `@0.1` refuses | six | not applicable |
+| `benchmark-product-public-bundle/4`, prompted screening | `@0.2.1` (`@0.2.0` if already materialized) | `@0.2`, which reads either pin; `@0.1` refuses | six | not applicable |
 | `benchmark-product-public-bundle/5` | `@0.1` | none pinned | seven | not applicable |
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
-| `benchmark-product-public-bundle/7` | `@0.2.1`, publication pending | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
-| `benchmark-product-public-bundle/8` | `@0.2.1`, publication pending | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
+| `benchmark-product-public-bundle/7` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
+| `benchmark-product-public-bundle/8` | `@0.2.1` | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
 
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a
@@ -529,21 +546,45 @@ rather than from the format.
 Every row runs as `npx @colophon-claims/verify<line> <bundle-dir>`, with the anchor flags appended
 where the row lists them.
 
-**Publication pending is not a formality.** The `0.2.1` reader that public-bundle/7,
-public-bundle/8, and every prompted bundle pin is cut by a manual, demand-gated workflow that has
-not been fired, so no `0.2.1` exists on the registry today. `@0.2.1` does not resolve, and `@0.2`
-resolves to `0.2.0`, which supports public-bundle/2, /4, /5, and /6 and refuses /7 and /8. Until the
-release is cut, read anything that pins `@0.2.1` with `colophon bundle verify --bundle <bundle-dir>
---json`, which wraps the same reader, or with a reader built from the `0.2.1` source.
+The qualification axis, unlike prompted screening, is not left to the format string's word. Across
+the legacy lineage and v8 — every row above but `.../5`, whose evidence-native closure is read by a
+different path — a reader binds that axis to the sealed Report: the Report's method is
+`binary-instrument@1` exactly when the format literal is a qualifying one (`.../4`, `.../7`,
+`.../8`), and any disagreement refuses under `record-integrity` at path `bundle.json`. The binding
+runs in both directions, so it closes the relabeling of a qualifying bundle down to its
+non-qualifying sibling — `.../7` presented as `.../6`, `.../4` as `.../2`, which otherwise passes
+every admission-bearing check, because dropping `qualification.json` and the admission-only evidence
+records leaves `claim-package.json` byte-unchanged and `claim-consistency` still passing — and the
+inverse smuggle of a non-binary Report onto a qualifying format. What it establishes is agreement,
+not truth: it says the format literal describes the Report the bundle actually seals, never that the
+Report's own method claim is correct. That remains what the Report's signature and the
+`report-verification` check are for.
 
-A prompted /4 bundle fails differently from a /7 or /8 one under `@0.2`, and the distinction
-matters when you read the refusal. `0.2.0` supports the format and carries the prompted-screening
-branch, so it parses `bundle.json`; what it requires of claim-package/2 is the command `@0.2.0`
-exactly, so it accepts a prompted bundle materialized before `0.2.1` existed and refuses a newer
-one on the claim, with `binary claim package must pin verifier 0.2.0/@0.2`. That is a
-reader-too-old refusal, not a fact about the bundle. A prompted /2 is refused by neither line:
-claim-package/1 carries no reader requirement, so an older reader verifies it while the bundle's
-own assets name `@0.2.1`.
+**This binding is a `0.2.1` guarantee**, and `0.2.1` is the published `latest` — see the note
+below. An earlier reader does not make the relabeled bundle verify: `0.1.0` and `0.2.0` still stop
+the `.../7` and `.../4` downgrades, because their presentation projection dispatches on the sealed
+Report's method too and finds a binary Report where the comparison profile was expected. But they
+stop it as an untyped crash from the last step of the run rather than as this named refusal, so do
+not read a missing `record-integrity`-at-`bundle.json` signature on an older line as the check not
+having fired.
+
+**`0.2.1` is published, and `@0.2` moved with it.** The `0.2.1` reader that public-bundle/7,
+public-bundle/8, and every prompted bundle pin has since been cut, and `0.2.1` is the registry's
+`latest` for `@colophon-claims/verify`. `@0.2.1` resolves exactly, and `@0.2` is a range rather
+than a pin, so it resolves to `0.2.1` too and no longer stops at the `0.2.0` support set. Both
+lines read public-bundle/2, /4, /5, /6, /7, and /8. `colophon bundle verify --bundle <bundle-dir>
+--json` wraps the same reader and remains available, but it is no longer the only route:
+`@colophon-claims/cli` and `@colophon-claims/core` are implemented and still unpublished, so the
+product verb needs a mono checkout that the `npx` line does not.
+
+An explicitly pinned `@0.2.0` is now the reader too old for a `@0.2.1`-pinned bundle, and a
+prompted /4 fails differently under it from a /7 or /8. `0.2.0` supports the /4 format and carries
+the prompted-screening branch, so it parses `bundle.json`; what it requires of claim-package/2 is
+the command `@0.2.0` exactly, so it accepts a prompted bundle materialized before `0.2.1` existed
+and refuses a newer one on the claim, with `binary claim package must pin verifier 0.2.0/@0.2`.
+That is a reader-too-old refusal, not a fact about the bundle. `0.2.1` accepts both commands, so it
+refuses neither. A prompted /2 is refused by no line at all: claim-package/1 carries no reader
+requirement, so even `@0.1` verifies it while the bundle's own assets name `@0.2.1`.
 
 Claim-package/1, claim-package/2, and claim-package/4 — the claims of public-bundle/2,
 public-bundle/4, and public-bundle/6 — stamp the same first public line, `@0.1.0` / `@0.1`, with one
@@ -608,8 +649,9 @@ colophon-verify: bundle.json does not satisfy the manifest schema
 with exit code 1 and, under `--json`, `"code":"record-integrity"`. That is the same code and the
 same message a genuinely corrupt or tampered manifest earns. **A valid bundle read by a reader
 that is too old is indistinguishable from an invalid bundle on the human surface.** An auditor
-who runs `@0.1` or `@0.2` against a public-bundle/7 or public-bundle/8 bundle sees exactly this,
-and the bundle is fine.
+who runs `@0.1`, or an explicitly pinned `@0.2.0`, against a public-bundle/7 or public-bundle/8
+bundle sees exactly this, and the bundle is fine. The `@0.2` range no longer produces it: it
+resolves to `0.2.1`, which reads both formats.
 
 Tell the two apart with `--json`, which names both sides of the mismatch:
 
@@ -625,9 +667,11 @@ A listed format is not on its own a verdict either. A reader can support the for
 too old for the claim inside it — a prompted-screening public-bundle/4 is a format both `0.1.0` and
 `0.2.0` support, while its claim pins `@0.2.1`, so each of those readers parses `bundle.json` and
 then refuses the claim: `binary claim package must pin verifier 0.1.0/@0.1` under `@0.1`, and
-`binary claim package must pin verifier 0.2.0/@0.2` under `@0.2`. A refusal that names the pinned
-verifier is that mismatch, not a fact about the bytes. Before treating any refusal as a failing
-bundle, check that the line you ran is the one the claim package's `verification.command` names.
+`binary claim package must pin verifier 0.2.0/@0.2` under an explicitly pinned `@0.2.0`. The `@0.2`
+range is not one of them any more, since it resolves to `0.2.1`, which accepts that claim. A
+refusal that names the pinned verifier is that mismatch, not a fact about the bytes. Before
+treating any refusal as a failing bundle, check that the line you ran is the one the claim
+package's `verification.command` names.
 
 The reverse direction is safe. A newer reader keeps every earlier format in `supportedFormats`,
 so `0.2.1` reads a public-bundle/2 bundle exactly as `0.1.0` does; the line pinned inside the
@@ -743,6 +787,125 @@ effect but does not gate one: no verdict, threshold, or selection was registered
 That limitation stays separate from power or minimum-detectable-effect disclosures;
 an interval withheld for insufficient pairs or clusters is not the same claim as a
 completed interval whose sensitivity is below a target effect.
+
+## Freeze-artifact repository
+
+A sealed bundle is digest-addressed; a human audience clones, browses, and diffs a
+repository. `colophon freeze-repo export --bundle <dir> --out <dir>` projects a
+qualification bundle's freeze artifacts into one, and
+`colophon freeze-repo verify --bundle <dir> --repo <dir>` checks a published tree
+against the bundle it claims to be derived from.
+
+The export accepts the closures that carry the qualification graph, and only those:
+`benchmark-product-public-bundle/4`, `benchmark-product-public-bundle/7`, and
+`benchmark-product-public-bundle/8`. Every other closure is refused rather than
+projected into an empty repository. The accepted set is a table keyed by every
+supported bundle format, so a new closure version cannot land without stating what
+it means to this projection.
+
+A `/8` bundle's freeze artifacts are a `/7` bundle's exactly. The sealed
+disclosure-specification record that closure adds is claim-side — it states the
+variables that produced the score, and its `disclosure-specification` evidence role
+is not a freeze-artifact role, so it stays in the bundle a reader verifies, where
+that bundle's own `disclosure-specification` check reads it. The tree rendered from
+such a bundle says so in its generated `README.md`; a tree rendered from a closure
+that carries no such record is byte-identical to what it always was.
+
+The repository is a **derived artifact**, not the claim of record — the same
+doctrine the Inspect View export carries. The sealed records remain the sole
+source of truth; what the projection adds is that the derivation is a function
+rather than a hand assembly, so a published tree cannot drift from the bundle
+without the check saying so.
+
+The format is `colophon-freeze-repo/1`, and the determinism claim is stated for
+it exactly: for a given format version the rendered tree is a pure function of the
+bundle bytes. No clock, no locale, no filesystem enumeration order, and no tool
+version reaches the tree. A renderer change is therefore a format bump, not silent
+drift.
+
+The layout:
+
+- `freeze.json` — every rendered path with its byte length and SHA-256, the
+  publication's licence data, and the protocol identifier each role's records
+  declare. It does not restate the source rows: those are carried byte for byte
+  under `artifacts/source-manifest/` and rendered into `NOTICE` and
+  `metadata/spdx.json`, and re-serializing schema-parsed objects here would make
+  these bytes a function of the verifier's schema shape as well as of the bundle.
+  It does not list itself: its own digest is not knowable before it is written.
+- `bundle/` — `bundle.json`, `benchmark.json`, `evidence.json`, and
+  `qualification.json`, copied byte for byte.
+- `artifacts/<role>/<sha256>.<json|bin>` — the sealed freeze records, grouped by
+  the evidence role the bundle's own catalog assigns. The extension is `.json`
+  when the record's exact bytes parse as JSON and `.bin` when they do not; the
+  stem is the SHA-256 of those bytes, so a file's name is its own check. The freeze artifacts are the
+  admission/qualification graph: the item bank and its sources, the admission
+  decisions and their ledger, label resolutions, analysis contexts, judge
+  instruments, and the human-review and screening material including the sampling
+  script. The Run/Matrix/Report execution graph is deliberately absent: that is the
+  claim, and the claim belongs in the bundle a reader verifies. Two later catalog
+  roles are absent for the same reason rather than by oversight: `snapshot-probe`
+  is the pre-run snapshot-serving probe sealed alongside the runtime-selection
+  manifest, which evidences how the Run's arms were served, and
+  `disclosure-specification` hangs off the Report extension. Both are execution
+  evidence that merely arrives later in the catalog's frozen append order. The
+  carried and excluded role lists are asserted to partition the catalog, so a role
+  appended there fails the suite until it is placed in one of them.
+- `LICENSE`, `NOTICE`, `metadata/spdx.json` — generated from the bundle's licence
+  data, never hand-written. The publication licence is the SPDX identifier the
+  sealed Benchmark record declares; the per-source attribution and licence
+  descriptors come from the sealed source-manifest rows. `LICENSE` states the
+  identifier and its canonical SPDX URL rather than reproducing licence text the
+  bundle does not carry. `NOTICE` carries the modification notice, and it states the
+  fact rather than inverting it: the bundle carries no upstream source bytes at
+  all, so no member is an unmodified upstream copy. Every member under
+  `artifacts/` is a Colophon-authored or Colophon-derived sealed record over
+  sources the manifest names by URI and digest. The licence identifier must be an
+  SPDX short identifier: the export checks it against the SPDX 2.3 Annex A
+  grammar, so free text is a refusal rather than a rendered
+  `SPDX-License-Identifier:` line. The grammar is not the SPDX licence list, and
+  the export deliberately does not carry a list that would date — so `LICENSE`
+  cites the SPDX list address for the identifier and says in as many words that
+  an identifier the list does not carry will not resolve there. A `LicenseRef-`
+  identifier, which SPDX defines as off-list, gets no address at all.
+- `README.md` — the doctrine, the layout, and the check.
+
+The tree's **git commit hash is the value a freeze announcement pins**. It is
+computed in-process from the rendered tree with a fixed identity and a zero
+timestamp, so it is a function of the bundle rather than of the machine that ran
+the export. Both verbs report it, and the generated `README.md` carries the exact
+recipe that commits the tree to that oid:
+
+```sh
+export GIT_AUTHOR_NAME=Colophon GIT_AUTHOR_EMAIL=freeze@colophon.invalid
+export GIT_COMMITTER_NAME=Colophon GIT_COMMITTER_EMAIL=freeze@colophon.invalid
+export GIT_AUTHOR_DATE='@0 +0000' GIT_COMMITTER_DATE='@0 +0000'
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+git init --quiet && git add -A -f
+git commit --quiet --no-gpg-sign -m 'Colophon freeze <identity>'
+```
+
+The configuration neutralization is part of the recipe, not hygiene around it: a
+reader's own `commit.gpgsign` adds a `gpgsig` header, `core.autocrlf` rewrites the
+bytes, `init.templateDir` and `core.hooksPath` run code, and a `core.excludesFile`
+matching `*.bin` makes `git add -A` silently drop every record under `artifacts/`.
+Each yields a different oid, the last of them with nothing said. The renderer's own
+parity test neutralizes exactly these, and the published recipe states the same.
+
+Every member is mode `100644`. An executable bit, or a member replaced by a
+symlink, changes what git records and therefore the pinned commit even though the
+bytes read back identical — so `freeze-repo verify` reports both as drift, and it
+treats a nested `.git` directory as ordinary content, skipping only the root one.
+The symlink half holds everywhere. The executable-bit half holds wherever the
+filesystem carries the bit, which the check establishes by probe rather than
+assumption; where it does not, or where the probe cannot be run, the mode
+dimension is dropped and `executableBitChecked` says so.
+
+The standalone verifier package checks a published tree with no product install:
+`colophon-verify <bundle> --freeze-repo <dir>`, exit `1` on drift.
+
+A bundle with no qualification graph has no freeze artifacts, and a Benchmark
+record that declares no licence has no licence data to generate scaffolding from.
+Both are refusals, not empty repositories.
 
 ## Trust, privacy, and limitations
 

@@ -85,6 +85,24 @@ function emitTickErrorOrRaceLost(
   return 'tick_error';
 }
 
+/**
+ * Crash handler shared by every long-running daemon loop.
+ *
+ * `sanitizeErrorText` (not `err.message`) is deliberate: it walks the
+ * `Error.cause` chain, so a loop crash carries the same depth of diagnostic
+ * as the mech adapter's `claim_failed` path, and masks URLs with the one
+ * host-only dialect rather than a second vocabulary (#642, #3037).
+ */
+export function emitLoopCrash(label: string, errorCode: string, err: unknown): void {
+  console.error(`[daemon] ${label} crashed:`, err);
+  emitStructured({
+    kind: 'error',
+    message: `${label} loop crashed`,
+    errorCode,
+    details: { error: sanitizeErrorText(err) },
+  });
+}
+
 export interface DaemonConfig {
   adapter: ExecutionAdapter;
   /**
@@ -467,132 +485,52 @@ export class Daemon {
 
     if (this.rewardClaimLoop) {
       this.loopPromises.push(
-        this.rewardClaimLoop.run().catch(err => {
-          console.error('[daemon] reward-claim crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'reward-claim loop crashed',
-            errorCode: 'reward_claim_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
+        this.rewardClaimLoop.run().catch(err => emitLoopCrash('reward-claim', 'reward_claim_crashed', err)),
       );
     }
     if (this.balanceTopupLoop) {
       this.loopPromises.push(
-        this.balanceTopupLoop.run().catch(err => {
-          console.error('[daemon] balance-topup crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'balance-topup loop crashed',
-            errorCode: 'balance_topup_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
+        this.balanceTopupLoop.run().catch(err => emitLoopCrash('balance-topup', 'balance_topup_crashed', err)),
       );
     }
     if (this.evictionLoop) {
       this.loopPromises.push(
-        this.evictionLoop.run().catch(err => {
-          console.error('[daemon] eviction-check crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'eviction-check loop crashed',
-            errorCode: 'eviction_check_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
+        this.evictionLoop.run().catch(err => emitLoopCrash('eviction-check', 'eviction_check_crashed', err)),
       );
     }
     if (this.harvestLoop) {
       this.loopPromises.push(
-        this.harvestLoop.run().catch(err => {
-          console.error('[daemon] harvest crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'harvest loop crashed',
-            errorCode: 'harvest_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
+        this.harvestLoop.run().catch(err => emitLoopCrash('harvest', 'harvest_crashed', err)),
       );
     }
     if (this.checkpointLoop) {
       this.loopPromises.push(
-        this.checkpointLoop.run().catch(err => {
-          console.error('[daemon] checkpoint-loop crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'checkpoint loop crashed',
-            errorCode: 'checkpoint_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
+        this.checkpointLoop.run().catch(err => emitLoopCrash('checkpoint', 'checkpoint_crashed', err)),
       );
     }
     if (this.workLoop) {
       this.loopPromises.push(
-        this.workLoop.run().catch(err => {
-          console.error('[daemon] work loop crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'work loop crashed',
-            errorCode: 'work_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
+        this.workLoop.run().catch(err => emitLoopCrash('work', 'work_crashed', err)),
       );
     }
     if (this.evaluatorLoop) {
       this.loopPromises.push(
-        this.evaluatorLoop.run().catch(err => {
-          console.error('[daemon] evaluator loop crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'evaluator loop crashed',
-            errorCode: 'evaluator_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
+        this.evaluatorLoop.run().catch(err => emitLoopCrash('evaluator', 'evaluator_crashed', err)),
       );
     }
     if (this.postingLoop) {
       this.loopPromises.push(
-        this.postingLoop.run().catch(err => {
-          console.error('[daemon] posting loop crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'posting loop crashed',
-            errorCode: 'posting_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
+        this.postingLoop.run().catch(err => emitLoopCrash('posting', 'posting_crashed', err)),
       );
     }
     if (this.projectorLoop) {
       this.loopPromises.push(
-        this.projectorLoop.run().catch(err => {
-          console.error('[daemon] projector loop crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'projector loop crashed',
-            errorCode: 'projector_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
+        this.projectorLoop.run().catch(err => emitLoopCrash('projector', 'projector_crashed', err)),
       );
     }
     if (this.evidenceDriverLoop) {
       this.loopPromises.push(
-        this.evidenceDriverLoop.run().catch(err => {
-          console.error('[daemon] evidence-driver loop crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'evidence-driver loop crashed',
-            errorCode: 'evidence_driver_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
+        this.evidenceDriverLoop.run().catch(err => emitLoopCrash('evidence-driver', 'evidence_driver_crashed', err)),
       );
     }
     // #1043 loop watchdog. Armed by default (2026-08-10 decision 3, #2461/
@@ -655,15 +593,7 @@ export class Daemon {
         isActive: () => this.cachedShutdownState === 'running',
       });
       this.loopPromises.push(
-        this.watchdogLoop.run().catch(err => {
-          console.error('[daemon] watchdog crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'watchdog loop crashed',
-            errorCode: 'watchdog_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
+        this.watchdogLoop.run().catch(err => emitLoopCrash('watchdog', 'watchdog_crashed', err)),
       );
     }
 

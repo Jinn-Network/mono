@@ -10,6 +10,10 @@ on:
       - 'packages/contract-abis/**'
       - 'packages/benchmarking/records/**'
       - 'packages/task-execution/protocol/**'
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - 'packages/trust/core/**'
   push:
     branches: [main, next]
     paths:
@@ -19,6 +23,10 @@ on:
       - 'packages/contract-abis/**'
       - 'packages/benchmarking/records/**'
       - 'packages/task-execution/protocol/**'
+      # Transitive `portal:` closure of the workspaces above (#3573). Each is built
+      # from source into this lane, so a change confined to one of them changes what
+      # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - 'packages/trust/core/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

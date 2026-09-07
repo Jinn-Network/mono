@@ -7,7 +7,7 @@ import {
   headPath,
   sealJson,
 } from "@jinn-network/record-discovery-protocol";
-import type { Transport, TransportResponse } from "@jinn-network/record-discovery-client";
+import type { Transport, TransportResponse, VerifyDriver } from "@jinn-network/record-discovery-client";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFollowedSourceAdmission } from "./admission.js";
 import {
   UNVERIFIED_CHAIN_ACKNOWLEDGEMENT,
+  createDriverChainVerification,
   createRejectingChainVerification,
   createUnverifiedChainVerification,
 } from "./chain-verification.js";
@@ -311,15 +312,27 @@ describe("mirror sync", () => {
       expect(posture.revalidateHead).not.toHaveBeenCalled();
     });
 
-    test("a head whose issuedAt is unparseable is never revalidated (#3468)", async () => {
+    // Was "a head whose issuedAt is unparseable is never revalidated": such a head
+    // used to reach `classifyIdleHead`, whose NaN comparison sent it down the chain
+    // path to be refused there. Since #3482 the §5.2 grammar is read at the schema,
+    // so `fetchHead` refuses the head one step earlier and the source fails before
+    // EITHER verification port is consulted. The property the test pins is unchanged
+    // and now strictly stronger: an unreadable instant never reaches revalidation.
+    test("a head whose issuedAt is unparseable is refused before either verification path (#3468, #3482)", async () => {
       const marks = await seeded();
+      const before = await marks.get({ agent: AGENT, name: NAME });
       const posture = spyPosture();
       const { transport } = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "not-a-date" });
 
-      await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+      const outcome = await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
 
-      expect(posture.verify).toHaveBeenCalledTimes(1);
+      expect(outcome.sources[0]!.status).toBe("failed");
+      expect(outcome.sources[0]!.failure?.code).toBe("source-sync-failed");
+      expect(posture.verify).not.toHaveBeenCalled();
       expect(posture.revalidateHead).not.toHaveBeenCalled();
+      // Nothing was adopted and nothing moved: the refusal is fail-closed on the
+      // mark as well as on the two ports.
+      expect(await marks.get({ agent: AGENT, name: NAME })).toEqual(before);
     });
 
     test("a head naming a different chain position keeps the chain path", async () => {
@@ -428,6 +441,39 @@ describe("mirror sync", () => {
   test("honours the per-pass entry bound", async () => {
     const outcome = await mirror({ maxEntriesPerSync: 0 }).syncOnce();
     expect(outcome.sources[0]!.entriesWalked).toBe(0);
+  });
+
+  // #3252: the walk yields oldest-first, so the entries the bound drops are
+  // the NEWEST ones -- including the one the head cites. Handing that cut
+  // chain to a verifying driver gets `broken-chain` back for a chain this
+  // mirror is the one that cut, and because the mark only advances on a clean
+  // verification the next pass cuts it identically. The bound is a fact about
+  // the walk, so it travels with the walk to whatever posture judges it.
+  test("a walk cut by the per-pass bound is never handed to the verification driver", async () => {
+    const verifySource = vi.fn(async () => ({ status: "broken-chain" }) as never);
+    const outcome = await mirror({
+      maxEntriesPerSync: 0,
+      chainVerification: createDriverChainVerification({ verifySource } as unknown as VerifyDriver),
+    }).syncOnce();
+
+    expect(verifySource).not.toHaveBeenCalled();
+    expect(outcome.status).toBe("failed");
+    expect(outcome.sources[0]!.failure).toEqual({
+      code: "chain-verification-rejected",
+      message: "sync-truncated",
+    });
+  });
+
+  // The gate is specific to truncation: an uncut walk is judged on the
+  // source's own evidence, which for this fixture's bare head is its missing
+  // head signature.
+  test("an uncut walk is judged on the source's evidence, not refused as truncated", async () => {
+    const verifySource = vi.fn(async () => ({ status: "ok" }) as never);
+    const outcome = await mirror({
+      chainVerification: createDriverChainVerification({ verifySource } as unknown as VerifyDriver),
+    }).syncOnce();
+
+    expect(outcome.sources[0]!.failure?.message).toBe("head-unsigned");
   });
 
   test("reports partial when one of two sources fails", async () => {

@@ -367,6 +367,22 @@ export interface FleetNativeRuntimeInput {
    * the operator through `NativeAnnouncementRecordError`, but not what was rejected or why.
    */
   readonly logger?: { warn(message: string): void };
+  /**
+   * The effective time this boot proves its trust-policy and role-binding windows against. TEST
+   * SEAM ONLY: production omits it, and every consumer then falls back to its own `new Date()` —
+   * the exact wall-clock behavior this boot had before the seam existed (#2490).
+   *
+   * It exists because a fork-based rig cannot use wall-clock. `native-fleet-loop.ts` forks Base
+   * Sepolia and authors its trust catalog against a real on-chain anchor, whose block time drifts
+   * ahead of the host clock; booting at the anchor's `validFrom` is what keeps the §7.4a window
+   * checks self-consistent. Without this the rig could only open the identity sets by hand and
+   * stopped short of the real `buildFleetNativeRuntime` boot.
+   *
+   * Threaded to the three effective-time readers this function owns and nowhere else: the trust
+   * catalog open, the merged solver+requester role-identity opens, and the admission role-identity
+   * open. Nothing downstream of the returned runtime reads it — the loops keep their own clocks.
+   */
+  readonly now?: () => Date;
 }
 
 function required<T>(value: T | undefined, key: string): T {
@@ -414,11 +430,18 @@ export async function buildFleetNativeRuntime(
     );
   }
 
+  // Required at the point the transport's destination policy is decided, rather than left to the
+  // `?? []` this replaced (#3461). `JinnConfig` cannot mark the key required — it is the
+  // legacy-shaped config — but an omission was never survivable: `buildFleetNativeDiscovery`,
+  // called unconditionally further down, already refuses it. The `?? []` only moved the refusal
+  // past a transport silently built with an empty origin set. Placed after the identity-store
+  // refusals above so their message ordering is unchanged.
+  const recordSources = required(config.recordSources, 'recordSources');
   const records = createBaseSepoliaRecordTransport({
     ipfsApiUrl,
     // The record origins this operator configured (#3431): its own serving plane plus every
     // configured record source. A peer-announced locator outside them is refused before the fetch.
-    recordOrigins: [publicBaseUrl, ...(config.recordSources ?? []).map(({ baseUrl }) => baseUrl)],
+    recordOrigins: [publicBaseUrl, ...recordSources.map(({ baseUrl }) => baseUrl)],
     fetchImpl: input.fetchImpl ?? globalThis.fetch,
   });
   // One `createViemBaseSepoliaReadClients` call supplies both trust-catalog chain reads: the
@@ -429,6 +452,8 @@ export async function buildFleetNativeRuntime(
     expectedPolicyGenesisDigest: trustPolicyGenesisDigest,
     anchorClient: createBaseSepoliaFinalizedAnchorClient(trustReads.anchor),
     settlementOwnershipClient: trustReads.settlementOwnership,
+    // `openNativeTrustCatalog` takes an instant, not a clock; omitted, it reads `new Date()` itself.
+    ...(input.now === undefined ? {} : { now: input.now() }),
   });
 
   // Two stores, one Agent, one merged set — see RoleIdentitySet.merge. Every key still proved its
@@ -444,6 +469,7 @@ export async function buildFleetNativeRuntime(
       password: input.password,
       bindingResolver: trust.bindingResolver,
       verifyRoleBinding: trust.verifyRoleBinding,
+      ...(input.now === undefined ? {} : { now: input.now }),
     }))),
   );
 
@@ -504,7 +530,7 @@ export async function buildFleetNativeRuntime(
       exactDocuments: exactDocumentsByDigest,
       resolveEvaluationSpec: buildNativeEvaluationSpecResolver(
         records,
-        selectFleetRequesterSources(config.recordSources).map(({ baseUrl }) => baseUrl),
+        selectFleetRequesterSources(recordSources).map(({ baseUrl }) => baseUrl),
       ),
       // #29: the same chain-direct settlement reader the single-host solver wires as the settlement
       // port's `canonicalReader`. Without it the fleet settlement port derives finality solely from
@@ -532,7 +558,7 @@ export async function buildFleetNativeRuntime(
   // self-resolution depend on the operator having listed itself as a peer.
   const nativeRecordBytes = buildFleetDeliveryBytesResolver(
     (url) => records.byLocation(url),
-    [publicBaseUrl, ...(config.recordSources ?? []).map(({ baseUrl }) => baseUrl)],
+    [publicBaseUrl, ...recordSources.map(({ baseUrl }) => baseUrl)],
   );
   // ENGAGEMENT-keyed readers for the TODAY generation this fleet actually pins (`chain` above is
   // `BASE_SEPOLIA_TODAY`), whose delivery events carry no digest for `nativeRecordBytes` to key
@@ -578,7 +604,7 @@ export async function buildFleetNativeRuntime(
   const discovery = await buildFleetNativeDiscovery({
     store: input.store,
     trust,
-    recordSources: config.recordSources,
+    recordSources,
     // #2547: this operator's own archive origin, so a self-hosted requester source's idle-lapsed
     // head degrades rather than deadlocking the solver loop's boot `sync()`.
     selfBaseUrl: publicBaseUrl,
@@ -602,6 +628,7 @@ export async function buildFleetNativeRuntime(
     nativeRequesterStateDir,
     authorityTime: createBaseSepoliaAuthorityTime(input.publicClient).latestFinalized,
     canonicalTaskCreated: (expected) => solverReads.canonicalTaskCreated(expected),
+    ...(input.now === undefined ? {} : { now: input.now }),
   });
 
   return {
@@ -641,6 +668,8 @@ async function buildFleetRequesterWriteAuthority(input: {
   readonly nativeRequesterStateDir: string;
   readonly authorityTime: () => Promise<NativeAuthorityTimeAnchor>;
   readonly canonicalTaskCreated: CanonicalTaskCreatedReader;
+  /** See {@link FleetNativeRuntimeInput.now}. Omitted in production. */
+  readonly now?: () => Date;
 }): Promise<FleetRequesterWriteAuthority | undefined> {
   const admissionAgent = input.config.admissionAgent;
   const admissionStore = input.config.identityStores?.admission;
@@ -667,6 +696,7 @@ async function buildFleetRequesterWriteAuthority(input: {
     password: input.password,
     bindingResolver: input.trust.bindingResolver,
     verifyRoleBinding: input.trust.verifyRoleBinding,
+    ...(input.now === undefined ? {} : { now: input.now }),
   });
 
   const roles: NativeRequesterRoles = {

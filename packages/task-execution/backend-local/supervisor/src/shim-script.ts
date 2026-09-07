@@ -208,6 +208,10 @@ async function main(): Promise<void> {
   const stderr = openLogFd(spec.stderrPath);
   const harness = spawn(spec.argv[0]!, spec.argv.slice(1), {
     cwd: spec.cwd,
+    // temp-env: `spec.env` is the backend-written spawn request, whose temp names were pinned by
+    // the launcher's plan and filtered by the provisioner's allowlist before it was serialized.
+    // The shim resolves secret references into it and pins nothing of its own: a temp directory
+    // chosen here would silently override the one the attempt was confined to.
     env: resolvedEnv,
     detached: true,
     stdio: ["ignore", stdout, stderr],

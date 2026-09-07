@@ -16,9 +16,9 @@ import { resolve } from 'node:path';
 import { test } from 'node:test';
 
 import {
-  artifactValue,
   restoredArtifactNames,
   restoredArtifacts,
+  uploadedArtifactNames,
 } from './workflow-artifact-steps.mjs';
 import { citedPrecedents } from './workflow-precedent-citations.mjs';
 
@@ -27,23 +27,6 @@ const workflow = readFileSync(
   resolve(root, '.github/workflows/policy-ci.yml'),
   'utf8',
 );
-
-function uploadedArtifactNames(source) {
-  const names = [];
-  const lines = source.split('\n');
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].includes('uses: actions/upload-artifact')) continue;
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      const name = artifactValue(lines[cursor], 'name');
-      if (name) {
-        names.push(name);
-        break;
-      }
-      if (/^\s+- /.test(lines[cursor])) break;
-    }
-  }
-  return names;
-}
 
 test('every uploaded distribution is restored by name, never by pattern', () => {
   const uploaded = uploadedArtifactNames(workflow);

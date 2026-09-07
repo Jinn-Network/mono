@@ -8,7 +8,9 @@ const IPFS_FETCH_TIMEOUT_MS = 15_000;
  */
 const IPFS_TOTAL_FETCH_TIMEOUT_MS = 45_000;
 /**
- * Cap on any single gateway response, JSON or raw. Corpus manifests and
+ * Default cap on any single gateway response, JSON or raw; a caller that
+ * legitimately reads larger payloads may raise it per call through
+ * {@link FetchFromIpfsOptions.maxResponseBytes} (#3441). Corpus manifests and
  * donation artifacts are JSON envelopes orders of magnitude smaller than this
  * (#3410); the raw-bytes path added in #3438 also carries source-bundle files
  * and sealed documents, which are larger but nowhere near this. A response
@@ -16,7 +18,7 @@ const IPFS_TOTAL_FETCH_TIMEOUT_MS = 45_000;
  * size this against the largest legitimate *source file*, not against the
  * JSON envelopes alone.
  */
-const MAX_IPFS_RESPONSE_BYTES = 8 * 1024 * 1024;
+export const DEFAULT_MAX_IPFS_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_IPFS_REDIRECT_HOPS = 3;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const FALLBACK_IPFS_GATEWAY_BASE = 'https://ipfs.io/ipfs/';
@@ -140,6 +142,19 @@ function isHostInGatewayFamily(host: string, gatewayHost: string): boolean {
 }
 
 /**
+ * The port a request to `url` actually reaches. `URL.port` is the empty string
+ * whenever the port is the scheme default, so comparing it raw makes
+ * `http://gw.example` (80) and `https://gw.example` (443) look identical
+ * (#3439). Resolving the default first keeps an http-to-https hop
+ * distinguishable, which the downgrade rule cannot catch because it only fires
+ * in the other direction.
+ */
+function effectivePort(url: URL): string {
+  if (url.port !== '') return url.port;
+  return url.protocol === 'https:' ? '443' : '80';
+}
+
+/**
  * A gateway may legitimately redirect the path form of a CID to its subdomain
  * form, so hops are allowed inside the configured gateway's host family. They
  * are never allowed to leave it, to reach a different port on it, to downgrade
@@ -159,12 +174,11 @@ function assertRedirectAllowed(next: URL, current: URL, gateway: URL): void {
     throw new Error(`IPFS redirect leaves the configured gateway (${next.hostname})`);
   }
   // Host family alone would let a self-hosted gateway (`http://127.0.0.1:8080/ipfs/`)
-  // pivot onto any other service on the same host. `URL.port` is '' for the
-  // scheme default, so the comparison is already normalized.
-  if (next.port !== gateway.port) {
-    throw new Error(
-      `IPFS redirect changes the gateway port (${next.port === '' ? 'default' : next.port})`,
-    );
+  // pivot onto any other service on the same host. Compare the ports the
+  // requests actually reach, not the literal `URL.port` (#3439).
+  const nextPort = effectivePort(next);
+  if (nextPort !== effectivePort(gateway)) {
+    throw new Error(`IPFS redirect changes the gateway port (${nextPort})`);
   }
 }
 
@@ -181,12 +195,12 @@ async function discardBody(response: Response): Promise<void> {
   }
 }
 
-/** Read a response body as bytes, refusing anything past the byte cap. */
-async function readBoundedBytes(response: Response): Promise<Uint8Array> {
+/** Read a response body as bytes, refusing anything past `maxBytes`. */
+async function readBoundedBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
   const declared = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > MAX_IPFS_RESPONSE_BYTES) {
+  if (Number.isFinite(declared) && declared > maxBytes) {
     await discardBody(response);
-    throw new IpfsResponseTooLargeError(MAX_IPFS_RESPONSE_BYTES, declared);
+    throw new IpfsResponseTooLargeError(maxBytes, declared);
   }
   const body = response.body;
   if (!body) return new Uint8Array(0);
@@ -199,8 +213,8 @@ async function readBoundedBytes(response: Response): Promise<Uint8Array> {
       if (done) break;
       if (!value) continue;
       total += value.byteLength;
-      if (total > MAX_IPFS_RESPONSE_BYTES) {
-        throw new IpfsResponseTooLargeError(MAX_IPFS_RESPONSE_BYTES);
+      if (total > maxBytes) {
+        throw new IpfsResponseTooLargeError(maxBytes);
       }
       chunks.push(value);
     }
@@ -220,9 +234,9 @@ async function readBoundedBytes(response: Response): Promise<Uint8Array> {
   return joined;
 }
 
-/** Read a response body as text, refusing anything past the byte cap. */
-async function readBoundedText(response: Response): Promise<string> {
-  const joined = await readBoundedBytes(response);
+/** Read a response body as text, refusing anything past `maxBytes`. */
+async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
+  const joined = await readBoundedBytes(response, maxBytes);
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(joined);
   } catch {
@@ -275,10 +289,10 @@ async function fetchThroughGateway(url: URL, signal: AbortSignal): Promise<Respo
   }
 }
 
-async function fetchJson(url: URL, signal: AbortSignal): Promise<unknown> {
+async function fetchJson(url: URL, signal: AbortSignal, maxBytes: number): Promise<unknown> {
   const response = await fetchThroughGateway(url, signal);
   const contentType = response.headers.get('content-type') ?? '';
-  const text = await readBoundedText(response);
+  const text = await readBoundedText(response, maxBytes);
   try {
     return JSON.parse(text) as unknown;
   } catch {
@@ -286,8 +300,8 @@ async function fetchJson(url: URL, signal: AbortSignal): Promise<unknown> {
   }
 }
 
-async function fetchBytes(url: URL, signal: AbortSignal): Promise<Uint8Array> {
-  return readBoundedBytes(await fetchThroughGateway(url, signal));
+async function fetchBytes(url: URL, signal: AbortSignal, maxBytes: number): Promise<Uint8Array> {
+  return readBoundedBytes(await fetchThroughGateway(url, signal), maxBytes);
 }
 
 export type FetchFromIpfsOptions = {
@@ -298,7 +312,23 @@ export type FetchFromIpfsOptions = {
    * - string → alternate fallback (normalized via `normalizeIpfsGatewayBase`)
    */
   fallbackGatewayBase?: string | false;
+  /**
+   * Byte cap for one gateway response, defaulting to
+   * {@link DEFAULT_MAX_IPFS_RESPONSE_BYTES}. Raise it only for a call site that
+   * legitimately reads larger payloads (#3441) — the default is sized for JSON
+   * envelopes and source files, and a caller that raises it accepts buffering
+   * that many bytes. Values below 1 fall back to the default.
+   */
+  maxResponseBytes?: number;
 };
+
+function resolveMaxResponseBytes(opts?: FetchFromIpfsOptions): number {
+  const requested = opts?.maxResponseBytes;
+  if (typeof requested !== 'number' || !Number.isFinite(requested) || requested < 1) {
+    return DEFAULT_MAX_IPFS_RESPONSE_BYTES;
+  }
+  return Math.floor(requested);
+}
 
 function resolveFallbackGatewayBases(
   opts?: FetchFromIpfsOptions,
@@ -311,6 +341,42 @@ function resolveFallbackGatewayBases(
 }
 
 /**
+ * Resolve one CID path against its gateway base and refuse anything that leaves
+ * the base's `/ipfs/` prefix (#3440).
+ *
+ * The CID reaches this from a manifest, so plain interpolation let
+ * `../../evil` walk out of the prefix and issue `GET /evil` against the
+ * gateway. Resolving through `URL` normalizes the `..` segments; comparing the
+ * result back against the base then also rejects the absolute-path (`/admin`)
+ * and absolute-URL (`https://evil/`) shapes. A strict CID regex would be the
+ * wrong guard: `buildIpfsFetchCidPathCandidates` documents `<cid>/path/to/file`
+ * as a legitimate gateway path.
+ *
+ * `URL` does not decode percent-encoded segments, so a `%2e%2e%2f` spelling
+ * still leaves the prefix intact here and is resolved, if at all, by the
+ * gateway. That is unchanged from the pre-guard behaviour and stays bounded by
+ * the same two properties: the origin is pinned, and the bytes are sha256-gated
+ * downstream in `acquire.ts`.
+ */
+function resolveGatewayCandidateUrl(
+  baseUrl: string,
+  cidPath: string,
+): { url: URL } | { reason: string } {
+  let base: URL;
+  let resolved: URL;
+  try {
+    base = new URL(baseUrl);
+    resolved = new URL(cidPath, base);
+  } catch {
+    return { reason: 'candidate URL could not be parsed' };
+  }
+  if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) {
+    return { reason: 'candidate URL escapes the gateway path prefix' };
+  }
+  return { url: resolved };
+}
+
+/**
  * Run every gateway x CID candidate through `read`, under one whole-operation
  * deadline. Shared by the JSON and raw-bytes entry points so both inherit the
  * same redirect revalidation, byte cap, and deadline (#3438).
@@ -319,7 +385,7 @@ async function fetchCandidatesFromIpfs<T>(
   gatewayUrl: string,
   cid: string,
   opts: FetchFromIpfsOptions | undefined,
-  read: (url: URL, signal: AbortSignal) => Promise<T>,
+  read: (url: URL, signal: AbortSignal, maxBytes: number) => Promise<T>,
   failureLabel: string,
 ): Promise<T> {
   const primary = normalizeIpfsGatewayBase(gatewayUrl);
@@ -327,9 +393,10 @@ async function fetchCandidatesFromIpfs<T>(
     ['primary', primary] as const,
     ...resolveFallbackGatewayBases(opts),
   ];
-  const attempts: Array<readonly [string, string]> = [];
+  const maxBytes = resolveMaxResponseBytes(opts);
+  const attempts: Array<readonly [string, string, string]> = [];
   for (const cidPath of buildIpfsFetchCidPathCandidates(cid)) {
-    for (const [name, baseUrl] of gateways) attempts.push([name, `${baseUrl}${cidPath}`] as const);
+    for (const [name, baseUrl] of gateways) attempts.push([name, baseUrl, cidPath] as const);
   }
 
   const errors: string[] = [];
@@ -339,7 +406,7 @@ async function fetchCandidatesFromIpfs<T>(
   const causes: unknown[] = [];
   const deadline = Date.now() + IPFS_TOTAL_FETCH_TIMEOUT_MS;
   for (let index = 0; index < attempts.length; index += 1) {
-    const [name, url] = attempts[index];
+    const [name, baseUrl, cidPath] = attempts[index];
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
       const message = `whole-operation timeout after ${IPFS_TOTAL_FETCH_TIMEOUT_MS}ms`;
@@ -357,21 +424,21 @@ async function fetchCandidatesFromIpfs<T>(
     );
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), attemptMs);
-    // Parsed once here rather than inside the catch, so a URL this candidate
-    // cannot even parse is reported as a candidate failure instead of escaping
-    // as a bare TypeError that discards the other candidates' errors.
-    let target: URL;
-    try {
-      target = new URL(url);
-    } catch {
-      const message = `${name}: candidate URL could not be parsed`;
+    // Resolved once here rather than inside the catch, so a candidate that
+    // cannot be parsed or that escapes the gateway prefix is reported as a
+    // candidate failure instead of escaping as a bare throw that discards the
+    // other candidates' errors.
+    const candidate = resolveGatewayCandidateUrl(baseUrl, cidPath);
+    if (!('url' in candidate)) {
+      const message = `${name}: ${candidate.reason}`;
       errors.push(message);
       causes.push(new Error(message));
       clearTimeout(timer);
       continue;
     }
+    const target = candidate.url;
     try {
-      return await read(target, controller.signal);
+      return await read(target, controller.signal, maxBytes);
     } catch (error) {
       errors.push(
         `${name}:${displayUrl(target)}: ` +

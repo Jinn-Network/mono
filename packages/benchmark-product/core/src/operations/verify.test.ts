@@ -459,7 +459,7 @@ describe("runVerify — refusals", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("conflict");
-  }, 30_000);
+  });
 });
 
 describe("runVerify — audit journal", () => {
@@ -481,5 +481,5 @@ describe("runVerify — audit journal", () => {
     expect(failed.ok).toBe(false);
     entries = readAuditEntries(workspaceDir);
     expect(entries[entries.length - 1]).toMatchObject({ action: "run.verify", outcome: "record-integrity" });
-  }, 30_000);
+  });
 });

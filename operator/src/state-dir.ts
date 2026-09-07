@@ -3,8 +3,9 @@
  *
  * Fresh installs use `~/.jinn-operator`. Existing installs that still have a
  * populated `~/.jinn-client` and an empty `~/.jinn-operator` keep reading the
- * legacy directory; one log line names the future copy-forward. `JINN_STATE_DIR`
- * always wins. `JINN_EARNING_DIR` remains a per-key override at its call sites.
+ * legacy directory permanently — one log line names it, and nothing copies it
+ * forward (DR-2026-09-02). `JINN_STATE_DIR` always wins. `JINN_EARNING_DIR`
+ * remains a per-key override at its call sites.
  * When `env` is passed without `home`, `HOME` / `USERPROFILE` on that bag win
  * over `homedir()`, so MCP and stop-hook callers that inject HOME resolve the
  * same tree the daemon would.
@@ -17,7 +18,7 @@ export const LEGACY_STATE_DIR_NAME = '.jinn-client';
 export const STATE_DIR_NAME = '.jinn-operator';
 
 export const STATE_DIR_FALLBACK_LOG =
-  'using ~/.jinn-client; a future run will copy this state to ~/.jinn-operator';
+  'using ~/.jinn-client; set JINN_STATE_DIR to override';
 
 export function dirIsNonEmpty(path: string): boolean {
   if (!existsSync(path)) return false;
@@ -69,6 +70,18 @@ export function resolveDefaultStateDir(options?: {
     cachedValue = value;
   }
   return value;
+}
+
+/**
+ * Where a daemon rooted at `stateDir` keeps its per-harness impl state, absent an
+ * explicit `engine.implStateDirRoot` / `JINN_ENGINE_IMPL_STATE_DIR_ROOT`. Lives
+ * here rather than in `config.ts` because the T3.1 real-network gate has to
+ * resolve a *spawned* daemon's Hermes config from the outside, and a second
+ * hand-written copy of this join is exactly the drift that made its resolver
+ * silently stale.
+ */
+export function defaultImplStateDirRoot(stateDir: string): string {
+  return join(stateDir, 'engine', 'impl-state');
 }
 
 export function joinDefaultStateDir(...segments: string[]): string {

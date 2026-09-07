@@ -133,20 +133,6 @@ export async function verifyOffer(
     };
   }
 
-  // Defense in depth against a resolver that resolved by key alone: `resolveBinding` is
-  // contracted never to do that, but an echoed holder would let a forged offer supersede
-  // the victim's genuine ones. The sibling money-adjacent check asserts the same thing.
-  if (outcome.resolvedBinding.binding.agent !== input.holder) {
-    return {
-      ok: false,
-      reason: "binding-not-resolved",
-      detail: "the offer signature resolved to a different Agent IRI than the claimed holder",
-      offer: parsed.offer,
-      digest: parsed.digest,
-      resolvedBinding: outcome.resolvedBinding,
-    };
-  }
-
   return {
     ok: true,
     offer: parsed.offer,

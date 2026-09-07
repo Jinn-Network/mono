@@ -112,6 +112,50 @@ describe("createTrustAdapter (§10.1: wraps trust-core key-binding resolution)",
     expect(await adapter.keys.everBound("did:key:zAgentSourceOne", "key-unknown")).toBe(false);
   });
 
+  /**
+   * A key-only resolver: it matches on `keyid` and ignores `query.agent`, then
+   * returns the binding it found -- carrying the OTHER agent's IRI. `BindingResolver`
+   * is contracted never to resolve by key alone, so this is a non-conforming
+   * resolver standing in for a realistic cache bug (issue #3629).
+   */
+  function makeKeyOnlyBindingResolver(seeds: FakeBindingSeed[]): BindingResolver {
+    const conforming = makeFakeBindingResolver(seeds);
+    return {
+      async resolveBinding(query: BindingResolverQuery, atTime: string): Promise<ResolvedBinding | null> {
+        const seed = seeds.find((s) => s.keyid === query.key);
+        if (seed === undefined) return null;
+        return conforming.resolveBinding({ ...query, agent: seed.agent }, atTime);
+      },
+    };
+  }
+
+  it("resolve() drops a binding a key-only resolver returned for another agent", async () => {
+    const resolver = makeKeyOnlyBindingResolver([
+      { agent: "did:key:zAgentSourceTwo", keyid: "key-1", validFrom: "2026-01-01T00:00:00.000Z", validTo: null, scope: DISCOVERY_SIGNING_SCOPE },
+    ]);
+    const entries = [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }];
+    const catalog = makeAgentKeyCatalog({ "did:key:zAgentSourceOne": entries, "did:key:zAgentSourceTwo": entries });
+    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier });
+
+    // Active and in-scope on every axis `isActiveForDiscoverySigning` checks --
+    // only the agent differs, so nothing below the resolution would catch it.
+    expect(await adapter.keys.resolve("did:key:zAgentSourceOne", new Date("2026-07-28T12:00:00.000Z"))).toEqual([]);
+    expect(await adapter.keys.resolve("did:key:zAgentSourceTwo", new Date("2026-07-28T12:00:00.000Z")))
+      .toEqual([{ keyid: "key-1", publicKey: "pubkey-key-1", algorithm: "ed25519" }]);
+  });
+
+  it("everBound() reports false for a binding a key-only resolver returned for another agent", async () => {
+    const resolver = makeKeyOnlyBindingResolver([
+      { agent: "did:key:zAgentSourceTwo", keyid: "key-1", validFrom: "2026-01-01T00:00:00.000Z", validTo: null, scope: DISCOVERY_SIGNING_SCOPE },
+    ]);
+    const entries = [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }];
+    const catalog = makeAgentKeyCatalog({ "did:key:zAgentSourceOne": entries, "did:key:zAgentSourceTwo": entries });
+    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier });
+
+    expect(await adapter.keys.everBound("did:key:zAgentSourceOne", "key-1")).toBe(false);
+    expect(await adapter.keys.everBound("did:key:zAgentSourceTwo", "key-1")).toBe(true);
+  });
+
   it("sigs.verify() delegates to the injected raw verifier", async () => {
     const adapter = createTrustAdapter({ bindingResolver: makeFakeBindingResolver([]), keyCatalog: makeAgentKeyCatalog({}), verifier: fakeVerifier });
     const pae = dssePreAuthEncoding("application/vnd.jinn.record-discovery.head.v1+json", new TextEncoder().encode("{}"));

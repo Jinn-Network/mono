@@ -8,6 +8,7 @@
   [#2745](https://github.com/Jinn-Network/mono/issues/2745)). Amended
   2026-08-18 to name the two Inspect doors **Inspect task** vs **Inspect
   eval** and to seal `protocol: "inspect-eval"`.
+- **Superseded in part by [DR-2026-09-04](./2026-09-04-colophon-surrounds-the-run.md) at its ratification:** running decisions superseded; named protocol, comparability and derived View export stand; bringing a completed Inspect evaluation becomes the product path.
 - **Owning docs:** the publication interoperability profile; Colophon
   self-serve; the benchmark-product GTM plan (copy); product-design pointer
   addendum; Inspect runtime adapter notes.

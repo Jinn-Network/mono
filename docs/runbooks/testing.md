@@ -196,9 +196,286 @@ Use **Node 22** where possible (`engines` in `operator/package.json`). CI should
 
 ## CI gates
 
-- Every PR: `yarn typecheck` + `yarn test`.
+- Every PR that touches the operator lane (the `changes` job in `ci.yml` gates
+  this): `yarn typecheck` + `yarn typecheck:test` + `yarn lint:no-late-mount`
+  + `yarn lint:no-error-leak` + `yarn lint:no-fixed-test-port` + `node --test
+  scripts/check-no-fixed-test-port.test.mjs` + `yarn test`.
 - Nightly / release: all `yarn e2e*` scenarios serially.
-- E2E tests use `allocateAnvilPort()` so parallelism is safe when we add it.
+- The default suite already runs in parallel on CI — three forked workers over
+  ~850 files. See [Worker parallelism and ports](#worker-parallelism-and-ports)
+  for what that shares and the rules that follow from it, including the three
+  sanctioned ways to get a port.
+
+### `yarn typecheck:test` is a ratchet, not a zero-error gate
+
+`yarn typecheck` compiles `tsconfig.json`, which excludes `test/` and
+`scripts/`. Nothing type-checked those trees, and defects survived a green
+required check because of it — an `as never` papering over a broken port
+contract, and calls passing 6 positional arguments to functions requiring 7.
+`yarn typecheck:test` (issue #2665) closes that hole.
+
+The tree does not compile clean today, so the check compares against
+`operator/test-typecheck-baseline.json`, which records a **known error count per
+file**. It fails when a file gains errors, and — this is the part that surprises
+people — **it also fails when a count drops**. An unrecorded improvement rots
+the baseline, and the drop-detection is what makes the ratchet
+non-bypassable: any path where `tsc` silently checks nothing yields an empty
+count set, which reads as an improvement and goes red. There is no false-green
+input.
+
+So an ordinary PR that happens to fix a type error under `operator/test/`, or
+adds a test file that carries one, turns this check red. The remedy either way
+is to re-record the baseline:
+
+```bash
+cd operator
+yarn typecheck          # builds the sdk/stack/plugin/core portal dist/ trees
+yarn typecheck:test --update
+git add test-typecheck-baseline.json
+```
+
+`yarn typecheck` first is not optional. `typecheck:test` builds only
+`@jinn-network/jinn-layer`; the other four portal trees the test compile
+resolves against come from `yarn typecheck`, which CI runs immediately before
+this gate. Recording a baseline without them would capture a different build
+state. Running `yarn typecheck:test` on an unbuilt tree stops with a message
+naming that prerequisite rather than printing a spurious regression list
+(issue #3734).
+
+Shrinking the baseline is tracked separately in issue #3735; casting errors
+away is explicitly not the remedy, since that is the defect class the gate
+exists to remove.
+
+## Worker parallelism and ports
+
+`operator/vitest.config.ts` overrides none of `pool`, `isolate`,
+`fileParallelism`, or `maxWorkers`, so vitest 4 resolves them to `forks`,
+`true`, `true`, and `max(availableParallelism() - 1, 1)`. This repository is
+public, so `ubuntu-latest` is a 4-vCPU runner and **CI runs three forked
+workers** over ~850 test files.
+
+**What that isolates.** `forks` plus `isolate: true` gives every test *file* a
+fresh child process, and `test/_support/isolate-home.ts` gives that process a
+fresh `$HOME` and `$TMPDIR`. Module state, globals, `process.env`, and home
+directories therefore cannot leak between files — not by discipline, by
+construction.
+
+**What it does not.** Four things stay shared across workers: the 127.0.0.1 TCP
+port space, filesystem paths outside the isolated home, the repository checkout
+itself, and the machine's CPU and memory. Every flake measured under #1627 came
+from the last two.
+
+### Never hard-code a port in 32768–65535
+
+That band is the **union** of the two OS defaults this suite runs on: the Linux
+`ip_local_port_range` default (32768–60999, the CI runners) and the macOS
+ephemeral range (49152–65535, the laptops). Neither contains the other —
+32768–49151 is Linux-only and 61000–65535 is macOS-only — so guarding either
+one alone leaves a live hole on the other platform. A sibling worker's
+`listen(0)` can be handed any port in the band, so a test that hard-codes one
+can have it taken mid-run. Three sanctioned forms, in preference order:
+
+| The port is bound by | Use |
+|---|---|
+| the test itself | `listen(0, '127.0.0.1')`, then read `server.address().port` — the kernel assigns and holds atomically, so there is no allocate-then-rebind window. Always preferred where it is available. |
+| a child process (Anvil, Ponder, a spawned daemon) | either a **fixed port below 32768** reserved in the port registry, or `await allocateAnvilPort()` from `@test/chain/port-allocator.js` when a fixed reservation is impractical (many ports, or several instances inside one file). The tradeoff: the allocator has a narrow allocate-then-rebind window, the fixed reservation has none but must be unique repo-wide. |
+| nothing — the assertion *is* "nothing is listening here" | a fixed port **below 32768**, with a comment saying why |
+
+The invariant under all three: **never a literal inside 32768–65535 in a
+port-shaped position** — a `.listen(` argument, a port-shaped object key, a
+port-ish `const`, or a `return` from inside a port-ish block, and in the object
+key and `const` cases every element of an array bound
+there. Those are the positions the lint can see; a port buried in a
+URL string (`fetch('http://127.0.0.1:45020/health')`) is outside it, and so are
+the other gaps listed under "What this guard does not catch" in the header of
+[`operator/scripts/check-no-fixed-test-port.mjs`](../../operator/scripts/check-no-fixed-test-port.mjs),
+which also names the two false positives the guard can still produce and the
+marker that resolves them.
+The rule still applies to them; only the enforcement stops. The registry of
+fixed below-band ports currently in use lives in the header of
+[`operator/test/release/tier-1/T1.2-harness-readiness-contract.ts`](../../operator/test/release/tier-1/T1.2-harness-readiness-contract.ts) —
+add to it when you reserve one.
+
+`yarn lint:no-fixed-test-port` enforces this. It also fails if
+`operator/vitest.config.ts` acquires a parallelism pin or an isolation
+opt-out: `isolate: false`, `singleFork` / `singleThread: true`,
+`fileParallelism: false`, `maxWorkers` / `maxForks` / `minForks` /
+`maxThreads` / `minThreads` pinned to 1, `maxConcurrency: 1`, or a `pool:`
+override. Switching parallelism off would make every cross-worker collision
+vanish locally and silently retire the reason these rules exist. `isolate:
+false` is the worst of the set: it also retires the fresh-process-per-file
+property that [the measurement](#the-measurement-1627-2026-08-27) rests on,
+and it does so while leaving the suite green.
+
+A line carrying `lint:no-fixed-test-port-allow` is skipped, on all three rules.
+For any form written across lines — a multi-line array, a multi-line
+`.listen(` — the marker goes on the **literal's** line, not on the `ports: [`
+or `.listen(` line above it: the literal is where the violation is reported.
+Suppressing a parallelism pin is the one use that should give you pause: the
+guard's premise is that changing parallelism is a deliberate decision that
+edits the guard in the same commit, so a marker there is a note to the next
+reader that you chose not to. The guard is a stack of
+regexes over source text and both of its failure modes are expensive on a
+required gate, so its behaviour is pinned by a fixture table,
+`operator/scripts/check-no-fixed-test-port.test.mjs`, which CI runs under
+`node --test` in the same job — including its traversal, its bail paths and
+its exit codes, driven over throwaway directory trees. Change a rule and change
+the table with it.
+
+### Beware fixed time and iteration budgets
+
+A `for (let i = 0; i < 200; i++) { await sleep(10) }` poll is a ~2s budget on an
+idle laptop and a coin flip on a runner where three workers share four vCPUs.
+Two rules:
+
+- Bound a wait by **wall clock**, not by iteration count.
+- **Assert on exhaustion.** A loop that falls through silently reports the
+  starvation as whatever the next assertion happens to check, which sends the
+  reader to the wrong subsystem entirely.
+
+### The measurement (#1627, 2026-08-27)
+
+Two instruments, and only one of them is CI-equivalent.
+
+**The mined CI history is.** Every past `Typecheck & Test` job ran the suite on
+the real runner under the real topology, so each is a genuine sample of the
+thing under diagnosis: **1176 executed `check` jobs across 70 days**
+(2026-06-18 to 2026-08-27; runs where the `changes` gate skipped `check` are
+excluded). Every rate below comes from this instrument, so here is how to
+re-derive it — the numbers are a point-in-time reading of a moving window, not
+a committed artifact, and a later run will not reproduce them exactly:
+
+```bash
+gh run list --repo Jinn-Network/mono --workflow ci.yml \
+  --created 2026-06-18..2026-08-27 --limit 2000 \
+  --json databaseId --jq '.[].databaseId' > runs.txt
+# One `check` job per run, skipping runs where the `changes` gate never started it.
+while read -r id; do
+  gh api "repos/Jinn-Network/mono/actions/runs/$id/jobs?per_page=100" \
+    --jq '.jobs[] | select(.name == "Typecheck & Test") | [.id, .conclusion] | @tsv'
+done < runs.txt > check-jobs.tsv
+# The failure logs the classification below reads.
+mkdir -p logs && awk -F'\t' '$2 == "failure" { print $1 }' check-jobs.tsv |
+  while read -r job; do
+    gh api "repos/Jinn-Network/mono/actions/jobs/$job/logs" > "logs/$job.txt"
+  done
+grep -rl 'EADDRINUSE' logs/ | wc -l   # the port-collision census: 0
+```
+
+**The local runs are a lower-contention approximation.** The full suite was run
+at the CI *worker count* — three — but on a 12-core macOS host, so the
+contention ratio is 3 workers over 12 cores, not CI's 3 over 4 vCPU. Contention
+is the exact variable the diagnosis blames, so a bare local run at
+`--maxWorkers=3` is not a CI stand-in — the 3-of-20 single-file reproduction
+below needed a separately applied 8-way CPU load on top of it:
+
+```bash
+cd operator
+yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && yarn build:layer
+SKIP_HL_TESTS=1 ./node_modules/.bin/vitest run --maxWorkers=3
+```
+
+Results:
+
+- **Zero** EADDRINUSE across all 228 retrieved vitest-step failure logs. Zero
+  contact with the real `~/.jinn-client`; every home-related error names an
+  isolated `/tmp/jinn-home-*` path. No cross-file global-state leakage, as the
+  `forks` + `isolate` topology predicts.
+- Failures attributable to cross-worker interference: **70 of 1176 (5.95%)**
+  over the window, but bimodal around the fix for #2641 — **6.83% before**,
+  **2.22% after**. 64 of those 70 were that one already-fixed cause: two tests
+  ran `npm pack --dry-run` in the live checkout, whose prepack swapped
+  `node_modules/@jinn-network` symlinks for seconds and killed whichever
+  concurrent workers were spawning children through the tree. The remediation
+  (`operator/test/_support/pack-probe.ts`, a throwaway-copy pack probe) is in
+  the current tree.
+- The residual class is load-sensitive budgets, not state leakage. Fixed under
+  #1627: `swe-rebench-v2-generator-cooldown.test.ts` (a re-publication gate
+  comparing two ISO millisecond timestamps, in a block that needs
+  `shouldAdvanceTime: true` — so it required two consecutive awaited writes to
+  land in the same millisecond; 1 of 5 local full-suite runs, and 3 of 20
+  single-file runs under the added 8-way CPU load, went red before the fix and
+  0 of 20 after) and
+  `converged-delivery-legacy-evaluator.test.ts` (the 200x10ms poll above,
+  independently confirmed by a CI run that failed on attempt 1 and passed on
+  attempt 2 of the *same* run — a same-tree flip, which is the only
+  pass/fail evidence that proves a flake rather than a moving base).
+- **No broad serialization was added**, and none is warranted: nothing measured
+  was cross-worker *state* leakage, so `isolate: true` is doing its job.
+- **Confirmed 2026-08-28.** Six further full-suite runs at `--maxWorkers=3` on
+  the same host — three on the review session's starting head and one on each
+  of the three heads its fixes produced: 841 files / 7512 tests passed on each,
+  exit 0, zero `EADDRINUSE`. The home stat manifest below was taken once before
+  the first run and re-compared against that same baseline afterwards, so its
+  unchanged result covers the six runs cumulatively.
+
+**Both budgets named but not fixed under #1627 were resolved on 2026-09-05
+(#3581), one each way.**
+
+`test/cli/native-identity.test.ts` — **fixed.** The reproduction the #1627 pass
+lacked turned up on the first attempt: the `real two-process concurrent
+--create` race took **~56s of a flat 60s budget on an idle 12-core laptop**
+(~8-11s per iteration over 6 iterations, 18 real CLI process boots), and the
+same test went red at **60017ms on a CI `Typecheck & Test` job on 2026-09-05**
+— a ~7% margin, on a 4-vCPU runner sharing itself with two sibling workers. The
+fix applies both rules above: the loop is bounded by wall clock (a 60s budget,
+and the next iteration starts only if the slowest one seen so far still fits in
+what is left), it asserts on exhaustion if not even one race completes, and the
+`testTimeout` moved to 90s so it is a backstop rather than the thing that ends
+the loop. A race test's coverage is probabilistic, so the currency spent under
+load is iterations, not reliability. Verified: green idle (50.8s) and green
+under an added 8-way CPU load at load average 35 (48.7s).
+
+`test/_support/chain/anvil.test.ts` / `olas-funding.test.ts` — **measured, and
+left alone.** Anvil readiness against a live Base-mainnet fork was timed over
+13 spawns, 5 idle and 8 under an added 8-way CPU load: median **1.13s**, min
+0.97s, max **5.34s**, zero timeouts. The 15s budget is ~13x the median and
+~2.8x the worst observed. The tail is network-bound (fetching fork state), not
+CPU-bound, which is why the loaded runs look like the idle ones. Mining the CI
+history the same way as the census above — the last 300 `ci.yml` runs, which
+held 297 `check` jobs but only **5** `Typecheck & Test` failures, every one of
+those logs retrieved — found **zero** occurrences of `anvil did not become
+ready` (and one of the `native-identity` timeout above, which is how that one
+was caught). Five failure logs is a thin instrument; treat this as "no evidence
+of a problem", not as a measured rate. The wait already follows both rules (a
+`Date.now()` deadline, and a throw naming the budget and the port), and there
+is nothing here to fix on evidence. Re-derive with a spawn-and-poll loop
+against `spawnAnvilFork`'s own arguments if the picture changes.
+
+**Verifying that no test touched the real home.** The in-suite guards —
+`operator/test/config/home-isolation.test.ts`,
+`operator/test/config/tmp-isolation.test.ts`, and
+`.github/scripts/vitest-tmp-isolation.test.mjs` — pin the wiring from three
+angles and no fourth was added. They cannot, however, catch an out-of-band
+write (a `process.chdir`, a `'/tmp/…'` literal, a spawned child whose env
+allowlist drops `TMPDIR`), so the reproduction runs took an external stat
+manifest of `~/.jinn-operator` and `~/.jinn-client` before and after each run:
+
+```bash
+snap() {
+  for d in "$HOME/.jinn-operator" "$HOME/.jinn-client"; do
+    # Exclude ~/.jinn-client/autopilot: a running autopilot writes there
+    # concurrently and guarantees a false positive.
+    [ -d "$d" ] && find "$d" -path "$HOME/.jinn-client/autopilot" -prune -o -print0 |
+      xargs -0 stat -f '%N %m %z'   # GNU: stat -c '%n %Y %s'
+  done | sort
+}
+snap > before.txt && <the suite run> ; snap > after.txt && diff before.txt after.txt
+git -C <checkout> status --porcelain   # and nothing written into the tree
+```
+
+Across the five original runs and the five confirmation runs: no new entries,
+no mtime or size change, and nothing written into the checkout.
+
+### Run `yarn test`, not a bare `vitest run`
+
+`yarn test` is `build:sdk && build:stack && build:plugin && build:core &&
+build:layer && vitest run`. A bare `vitest run` on an unbuilt tree produces
+hundreds of `Failed to resolve entry for package "@jinn-network/core"`-style
+failures — an unbuilt portal `dist/`, not a flake. The same error appears if
+anything rebuilds the portal chain *while* vitest is running, because the
+rebuild relinks `node_modules/@jinn-network` underneath the live workers. Never
+run `yarn typecheck` or `yarn build` concurrently with the suite.
 
 ## Temp directories and `$HOME`
 

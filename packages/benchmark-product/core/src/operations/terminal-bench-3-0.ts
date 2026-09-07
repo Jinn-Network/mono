@@ -1,5 +1,5 @@
 /** Audited product operations for Terminal-Bench 3.0 official-suite selection. */
-import { BENCHMARK_RECORD_KIND } from "@jinn-network/benchmarking-records";
+import { BENCHMARK_RECORD_KIND, BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
 import { isDraftMutable } from "../domain/lifecycle.js";
@@ -55,7 +55,7 @@ export async function executeSelectTerminalBench30Runtime(context: OperationCont
   const at = context.clock();
   const current = readDraftDocument(context.workspaceDir, input.draftId);
     if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse Terminal-Bench 3.0 selection");
-    if (current.spec.analysis?.method === "jinn.benchmarking.method/binary-instrument") {
+    if (current.spec.analysis?.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
       refuse("validation", `drafts.${input.draftId}.spec.analysis`, "Terminal-Bench 3.0 official suite refuses binary-instrument majority-k; use wilson@1 over judged replicates");
     }
     const replacement = current.spec.policy.replacement;

@@ -261,7 +261,7 @@ describe("runResults — full document", () => {
     const path = resultsArtifactPath(workspaceDir, "draft-1");
     expect(existsSync(path)).toBe(true);
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(results);
-  }, 30_000);
+  });
 
   test("stays available from reported while an incomplete pre-BP-40 closure refuses publication honestly", async () => {
     const clock = makeClock();
@@ -278,7 +278,7 @@ describe("runResults — full document", () => {
     expect(publish.ok).toBe(false);
     if (!publish.ok) expect(publish.error.issues?.[0]?.path).toContain("records/");
     expect(runResults(contextFor(clock), { draftId: "draft-1" }).ok).toBe(true);
-  }, 30_000);
+  });
 
   test("reloads the exact sealed Report and stored claim package after reporting without recomputing them", async () => {
     const clock = makeClock();
@@ -308,7 +308,7 @@ describe("runResults — full document", () => {
     });
 
     expect(JSON.parse(readFileSync(resultsArtifactPath(workspaceDir, "draft-1"), "utf8"))).toEqual(reloaded.result);
-  }, 30_000);
+  });
 
   test("fails closed when a reported draft's stored claim package no longer satisfies its schema", async () => {
     const clock = makeClock();
@@ -321,7 +321,7 @@ describe("runResults — full document", () => {
     expect(reloaded.ok).toBe(false);
     if (reloaded.ok) return;
     expect(reloaded.error).toMatchObject({ code: "record-integrity" });
-  }, 30_000);
+  });
 });
 
 describe("runResults — an expected-but-never-dispatched cell", () => {
@@ -379,7 +379,7 @@ describe("runResults — an expected-but-never-dispatched cell", () => {
     // Every axis's unverifiable count includes this never-dispatched cell.
     expect(outcome.result.venueHonesty.unverifiableAxisCounts.harness).toBeGreaterThanOrEqual(1);
     expect(outcome.result.venueHonesty.unverifiableAxisCounts.isolation).toBeGreaterThanOrEqual(1);
-  }, 30_000);
+  });
 });
 
 describe("runResults — dissent visibility", () => {
@@ -438,7 +438,7 @@ describe("runResults — dissent visibility", () => {
       if (cell.cellKey === firstEvaluation.cellKey) continue;
       expect(cell.verdicts, cell.cellKey).toHaveLength(1);
     }
-  }, 30_000);
+  });
 });
 
 describe("runResults — failure block, sourced from the run journal fold (BP-22)", () => {
@@ -642,5 +642,5 @@ describe("runResults — failure block, sourced from the run journal fold (BP-22
       "report-verification",
       "claim-consistency",
     ]);
-  }, 30_000);
+  });
 });

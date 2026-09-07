@@ -1690,6 +1690,9 @@ async function appendRequesterSource(input: {
   const writer = createDurableSourceWriter({
     source: input.source,
     signer,
+    // The same clock that allocates the append timestamp below bounds the head it mints
+    // (#3481), so the two can never disagree about what "now" is.
+    clock: { now: input.now },
     blobs: requesterBlobStore(input.state.records),
     states: createRequesterSourceStateStore({
       state: input.state,

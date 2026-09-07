@@ -38,11 +38,21 @@ export type {
   SealSessionResult,
   SealedCapture,
 } from "./capture/capability.js";
-export { parseSessionFeed } from "./capture/feed.js";
+export {
+  CONTROLLED_INPUT_MAX_BYTES,
+  CONTROLLED_INPUT_MAX_COUNT,
+  CONTROLLED_INPUT_ROLES,
+  parseSessionFeed,
+} from "./capture/feed.js";
 export type {
+  AbsoluteIriString,
   AssistantTurnEvent,
+  ControlledInput,
+  ControlledInputEvent,
+  ControlledInputRole,
   FeedLine,
   ParsedSessionFeed,
+  RepositoryStateEvent,
   SessionCloseEvent,
   SessionFeedEvent,
   SessionOpenEvent,
@@ -50,16 +60,25 @@ export type {
   UserTurnEvent,
 } from "./capture/feed.js";
 export {
+  BASE_COMMIT_PROPERTY,
+  BASE_TREE_PROPERTY,
+  BRANCH_PROPERTY,
   CAPTURE_LICENSE,
+  CONTROLLED_INPUT_ROLE_PROPERTY,
+  MODEL_SERVICE_ENTITY_ID,
   PRODUCER_IRI,
   PRODUCER_NAME,
+  REPOSITORY_BASE_STATE_ENTITY_ID,
+  REPOSITORY_STATE_ENTITY_ID,
   SESSION_FEED_FORMAT_IRI,
   SESSION_FEED_MEDIA_TYPE,
   SESSION_FEED_VERSION,
   SESSION_ID_PROPERTY,
+  TARGET_BASE_PROPERTY,
   TRACE_BUILDER_ID,
   TRACE_BUILDER_VERSION,
   TRACE_RECORD_IDENTIFIER_PROPERTY,
+  controlledInputEntityId,
   executorIri,
 } from "./capture/identity.js";
 export {

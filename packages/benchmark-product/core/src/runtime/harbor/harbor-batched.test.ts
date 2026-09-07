@@ -26,6 +26,73 @@ import { harborRetrySnapshotDir } from "./retry-bind.js";
 import { readHarborDispatchArchive } from "./venue.js";
 import type { HarborSelectionManifest } from "./manifest.js";
 
+type JournalEntries = ReturnType<typeof readRunJournalEntries>;
+
+/** Every cell event the journal holds, as `kind#dispatch`, for a failure message that names it. */
+function describeCellEvents(entries: JournalEntries): readonly string[] {
+  return entries.flatMap((entry) => entry.kind === "cell-event"
+    ? [`${entry.event.kind}#${String((entry.event as { readonly dispatch?: number }).dispatch)}`]
+    : []);
+}
+
+/** What the journal actually held, for a wait that gave up. */
+function describeJournal(entries: JournalEntries): string {
+  const byKind = new Map<string, number>();
+  for (const entry of entries) byKind.set(entry.kind, (byKind.get(entry.kind) ?? 0) + 1);
+  const counts = [...byKind].map(([kind, count]) => `${kind} x${count}`).join(", ") || "(empty)";
+  const cells = describeCellEvents(entries).join(", ");
+  return cells === "" ? counts : `${counts}; cell events: ${cells}`;
+}
+
+/** Whether the journal already carries a cell event of this kind on this dispatch. */
+function hasCellEvent(entries: JournalEntries, kind: string, dispatch: number): boolean {
+  return entries.some((entry) => entry.kind === "cell-event"
+    && entry.event.kind === kind
+    && (entry.event as { readonly dispatch?: number }).dispatch === dispatch);
+}
+
+/**
+ * Reads the run journal until it holds the events an assertion is about to `find`.
+ *
+ * `runLaunch` resolving is not the same fact as the journal having reached its final shape — the
+ * replacement events are written as the observer reaps trials — and a bare `find(...)` that loses
+ * that race feeds `undefined` to the matcher, which then reports `expected undefined to match
+ * object` and names neither the precondition nor what it did see (#3355).
+ */
+async function journalUntil(
+  workspaceDir: string,
+  draftId: string,
+  predicate: (entries: JournalEntries) => boolean,
+  what: string,
+): Promise<JournalEntries> {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const entries = readRunJournalEntries(workspaceDir, draftId);
+    if (predicate(entries)) return entries;
+    if (Date.now() >= deadline) {
+      throw new Error(`the run journal never ${what}; it held: ${describeJournal(entries)}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+/**
+ * Waits for a directory the observer fills to reach its expected size. Same race as `journalUntil`:
+ * `runCollect` resolving is not the same fact as every mapping and archive index being on disk
+ * (#3355).
+ */
+async function directoryUntil(directory: string, expected: number, what: string): Promise<readonly string[]> {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const entries = existsSync(directory) ? readdirSync(directory) : [];
+    if (entries.length >= expected) return entries;
+    if (Date.now() >= deadline) {
+      throw new Error(`${what}: expected ${expected} entries under ${directory}, found ${entries.length}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 const names = ["t00", "t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09", "t10", "t11"] as const;
 const image = `registry.example/tb21@sha256:${"c".repeat(64)}`;
 const arms: HarborSelectionManifest["arms"] = [
@@ -269,23 +336,27 @@ describe("Harbor per-arm batched Job", () => {
       jobRoot,
       fallbackTaskDigest: "ef".repeat(32),
       taskNameByDigest: { ["ef".repeat(32)]: "t00" },
-      timeoutMs: 5_000,
+      // Give-up deadline only. Both bounds here were scaffolding sized for an unloaded runner
+      // (5s outer, 3s inner) and a descheduled worker spends either without doing work (#3354).
+      // The inner wait is kept below the outer one so its message — which names the predicate
+      // that never held — is the failure that surfaces.
+      timeoutMs: 20_000,
     });
-    const waitUntil = async (predicate: () => boolean): Promise<void> => {
-      const deadline = Date.now() + 3_000;
+    const waitUntil = async (predicate: () => boolean, what: string): Promise<void> => {
+      const deadline = Date.now() + 15_000;
       while (!predicate()) {
-        if (Date.now() >= deadline) throw new Error("timed out waiting for Harbor observer");
+        if (Date.now() >= deadline) throw new Error(`timed out waiting for Harbor observer: ${what}`);
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     };
-    await waitUntil(() => existsSync(mappingDir) && readdirSync(mappingDir).length >= 1);
+    await waitUntil(() => existsSync(mappingDir) && readdirSync(mappingDir).length >= 1, "the first dispatch was never mapped");
     writeFileSync(join(trial, "result.json"), JSON.stringify({ id: "trial-1", status: "error" }));
-    await waitUntil(() => existsSync(snapshotPath));
+    await waitUntil(() => existsSync(snapshotPath), "the dispatch-1 retry snapshot was never written");
     rmSync(trial, { recursive: true, force: true });
     mkdirSync(trial, { recursive: true });
     writeFileSync(join(trial, "config.json"), JSON.stringify({ task: { name: "t00" }, attempt: 1 }));
     writeFileSync(join(trial, "result.json"), JSON.stringify({ id: "trial-1", status: "success" }));
-    await waitUntil(() => existsSync(mappingDir) && readdirSync(mappingDir).length >= 2);
+    await waitUntil(() => existsSync(mappingDir) && readdirSync(mappingDir).length >= 2, "the replacement dispatch was never mapped");
     writeFileSync(join(jobRoot, "result.json"), JSON.stringify({ id: jobName, n_total_trials: 1, stats: { n_retries: 1 } }));
     await observing;
     const mapped = await readdir(mappingDir);
@@ -294,7 +365,11 @@ describe("Harbor per-arm batched Job", () => {
     expect([...docs.map((doc) => doc.trialId)].sort()).toEqual(["trial-1.g1", "trial-1.g2"]);
     expect(docs.some((doc) => doc.jinnIdentity.split(":").at(-1) === "2")).toBe(true);
     expect(existsSync(snapshotPath)).toBe(true);
-  });
+    // An intentional bound above the suite default, not a leftover of the kind #3358 removed.
+    // This case makes three sequential 15s waits inside a 20s observer, so the default 30s would
+    // fire first and replace those waits' messages — the whole point of naming them — with an
+    // opaque test timeout. It has to exceed what it contains.
+  }, 90_000);
 
   test("replacement grain is in-job-retry once dispatch 2 is mapped, else follow-up after the planned job finishes", async () => {
     const plannedRoot = join(root, "planned-job");
@@ -332,15 +407,23 @@ describe("Harbor per-arm batched Job", () => {
     const invocations = (await readFile(join(root, "harbor-invocations.log"), "utf8")).trim().split("\n").filter(Boolean);
     expect(invocations).toEqual(["run", "run"]);
 
-    const deliveries = readRunJournalEntries(workspaceDir, "batched").filter((entry) => entry.kind === "delivery");
+    // Observed failing as `expected [...] to have a length of 10 but got 9` on a loaded run: the
+    // tenth delivery had not reached the journal yet when `runCollect` resolved. Same class as the
+    // salvage case below, so it waits on the same fact rather than assuming it (#3355).
+    const deliveries = (await journalUntil(
+      workspaceDir,
+      "batched",
+      (entries) => entries.filter((entry) => entry.kind === "delivery").length >= 10,
+      "recorded all 10 deliveries",
+    )).filter((entry) => entry.kind === "delivery");
     expect(deliveries).toHaveLength(10);
     const predictions = new Set(deliveries.map((entry) => new TextDecoder().decode(getSealedBytes(workspaceDir, entry.outputs[0]!.sha256))));
-    expect(predictions.size).toBe(10);
+    expect(predictions.size, `${deliveries.length} deliveries carried ${predictions.size} distinct predictions`).toBe(10);
 
-    const mapped = await readdir(join(artifactsDir(workspaceDir), "harbor", "mappings", "by-dispatch"));
+    const mapped = await directoryUntil(join(artifactsDir(workspaceDir), "harbor", "mappings", "by-dispatch"), 10, "not every dispatch was mapped");
     expect(mapped).toHaveLength(10);
 
-    const indexes = await readdir(join(artifactsDir(workspaceDir), "harbor", "archives", "by-dispatch"));
+    const indexes = await directoryUntil(join(artifactsDir(workspaceDir), "harbor", "archives", "by-dispatch"), 10, "not every dispatch was archived");
     expect(indexes).toHaveLength(10);
     for (const name of indexes) {
       const index = JSON.parse(await readFile(join(artifactsDir(workspaceDir), "harbor", "archives", "by-dispatch", name), "utf8")) as { archiveSha256: string };
@@ -371,7 +454,15 @@ describe("Harbor per-arm batched Job", () => {
     const launched = await runLaunch(context, { draftId: "salvage" });
     expect(launched.ok, JSON.stringify(launched)).toBe(true);
 
-    const events = readRunJournalEntries(workspaceDir, "salvage").filter((entry) => entry.kind === "cell-event");
+    const events = (await journalUntil(
+      workspaceDir,
+      "salvage",
+      (entries) => hasCellEvent(entries, "error", 1)
+        && hasCellEvent(entries, "dispatch", 1)
+        && hasCellEvent(entries, "dispatch", 2)
+        && hasCellEvent(entries, "delivered", 2),
+      "recorded the dispatch-1 dispatch and error alongside the dispatch-2 dispatch and delivery",
+    )).filter((entry) => entry.kind === "cell-event");
     const firstError = events.find((entry) => entry.kind === "cell-event" && entry.event.kind === "error" && entry.event.dispatch === 1);
     const firstDispatch = events.find((entry) => entry.kind === "cell-event" && entry.event.kind === "dispatch" && entry.event.dispatch === 1
       && firstError?.kind === "cell-event" && entry.event.cellKey === firstError.event.cellKey);
@@ -388,7 +479,7 @@ describe("Harbor per-arm batched Job", () => {
       .toBe(replacementDispatch?.kind === "cell-event" ? replacementDispatch.event.attempt : undefined);
 
     const invocations = (await readFile(join(root, "harbor-invocations.log"), "utf8")).trim().split("\n").filter(Boolean);
-    expect(invocations).toHaveLength(3);
+    expect(invocations, `Harbor was invoked ${invocations.length} times: ${invocations.join(", ")}`).toHaveLength(3);
 
     const configs = (await readFile(join(root, "harbor-job-configs.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as {
       job_name: string;

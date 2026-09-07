@@ -309,6 +309,43 @@ else in the stack:
   goes backward, or two signed heads claiming the same sequence with different entry digests,
   is **provable equivocation** — both artifacts are signed (§5.3).
 
+**Amendment 2026-09-02 (the freshness window is checked against the verifier's clock).**
+The bound above, measured only between the head's own two timestamps, does not by itself
+bound anything a consumer cares about: both timestamps are the source's to choose, so a head
+issued in 2099 with a conformant 24-hour window passes the ceiling and stays live for
+decades — and on first adoption, or through the §13.3 cold mirror-set comparison, which
+prefers the highest `(sequence, issuedAt)`, that head also becomes the consumer's high-water
+mark and refuses every honest head after it. A verifier therefore checks the window as a
+whole, in this order, and refuses the head on the first rule it violates:
+
+1. `refreshBy` MUST be strictly after `issuedAt`. An empty or inverted window is a shape no
+   conforming source produces, and accepting one accepts a head that is expired at birth.
+2. `refreshBy` MUST be at most one profile window ahead of `issuedAt` — the ceiling above.
+3. `issuedAt` MUST be at most one profile window ahead of the verifier's own clock. A head is
+   not issued further into the future than one window is long.
+
+Rule 3 introduces no second constant and no second knob: it reuses the profile's own ceiling
+as the clock-skew allowance, which is far more tolerance than real clock disagreement needs
+and far less than an honest source would ever consume, since a live source issues at its own
+`now`. A profile that pins a tight ceiling therefore pins an equally tight skew allowance —
+one parameter, chosen once. Together the three rules bound a valid head's `refreshBy` to at
+most twice the profile window past the verifier's clock: finite, which is the property this
+section is after.
+
+**A deployment profile may only tighten.** The published-source default is the ceiling; a
+profile (the marketplace profile does) may pin a smaller window, never a larger one, and a
+verifier handed a wider value MUST clamp it back to the published-source ceiling rather than
+honor it. The clamp is normative, not advisory: it is what stops a caller re-opening the
+window by passing a bigger number.
+
+The two refusals are named once, here, and reused verbatim by both named verification
+procedures (§10.3):
+
+- **`refresh-by-ceiling`** — rules 1–2 together. It covers the *empty or inverted* window
+  as well as the too-wide one; an operator reading this slug for a collapsed window should not
+  go looking for an over-long one.
+- **`head-issued-ahead`** — rule 3.
+
 ### 5.3 Chain rules
 
 1. Entries are append-only and immutable; `previous` linkage MUST verify on sync.
@@ -493,6 +530,18 @@ layouts are additional profiles over the same layout grammar (§22) — exposes:
    projections, declared substrate). The well-known document's schema is part of the
    protocol, not implementation-discretionary; it *introduces* sources, but acceptance is
    always policy plus `source-chain-verification` — introduction is never trust.
+
+   Every URL the document introduces is **contained**: a source's advertised archive root
+   MUST resolve inside the serving root that served the document — same origin, and under
+   that root's own path prefix — and a consumer MUST refuse one that does not, rather than
+   fetch it. This is what makes introduction safe to read at all: the document is written by
+   the peer, so without containment a `.well-known` read is an arbitrary-destination fetch
+   the consumer performs on the peer's instruction. Containment restricts the URL, not the
+   socket, so the guarantee is exactly this and no more: a peer may move a request only
+   within an origin the operator already chose. A consumer enforcing containment MUST apply
+   the same rule per redirect hop, or a peer simply posts a forwarding address instead. The
+   one origin change a consumer MAY permit is a same-host plain-to-TLS upgrade on default
+   ports, which moves neither host nor port and strictly increases assurance.
 4. **Announcement pings** — optional, unauthenticated hints ("head moved") over any transport
    (HTTP ping, webhook, gossip). IPNI's split, kept exactly: pings trigger a pull; all trust
    lives in the pulled, verified chain. Consumers MUST debounce pings and rate-limit
@@ -734,8 +783,14 @@ Accepting a synced source means, in order:
    accountability, not the acceptance path) — this asymmetry is exactly what makes rotation
    survivable (§10.1) while denying a compromised *old* key the power to vouch a competing
    head or resurrect history;
-3. verify the head's `refreshBy` freshness and `issuedAt` monotonicity against any
-   previously seen head;
+3. verify the head's freshness window against §5.2's three rules — `refreshBy` strictly
+   after `issuedAt`, at most one profile window past it, and `issuedAt` at most one profile
+   window past the verifier's clock, with a wider supplied bound clamped back to the
+   published-source ceiling — **before** asking whether the head is fresh, since a head that
+   over-sets `refreshBy` or issues itself into the future is always fresh and the clock can
+   never catch it. The window is also checked before the high-water mark is read or
+   advanced, so a head that breaks it can never become the monotonicity floor. Then verify
+   `refreshBy` freshness, and then `issuedAt` monotonicity against any previously seen head;
 4. verify chain linkage from the head's entry digest back to the consumer's high-water mark —
    or, on first adoption of the source, to genesis (§5.3 rule 5);
 5. verify entry signatures (published-source profile) as *corroboration*: an entry
@@ -746,9 +801,23 @@ Accepting a synced source means, in order:
 6. check sequence contiguity (increment-by-one, §5.1) and fork-absence;
 7. advance the high-water mark.
 
+Step 7 is the *only* step that writes it. A verification that ends in any of the typed
+failures below leaves the stored mark exactly as it found it — a refusal never advances
+the anti-rollback floor, whatever the reason for the refusal, and the §18 kit asserts this
+of every non-`ok` source-chain vector rather than of the future-dated one alone. The rule
+matters most where the refusal is *about* the floor (a future-dated head, §5.2 rule 3), but
+it is general: a mark advanced on the way to a refusal is a mark advanced on evidence the
+consumer went on to reject.
+
 Failures are typed, not boolean: `stale` (refreshBy expired), `forked` (equivocation —
-evidence-bearing), `broken-chain` (linkage, contiguity, or duplicate-`announcementId`
-failure), `unauthorized-signer` (including the old-key head case).
+evidence-bearing), `broken-chain` (linkage, contiguity, duplicate-`announcementId`, or
+freshness-window failure), `unauthorized-signer` (including the old-key head case). The two
+freshness-window refusals §5.2 names — `refresh-by-ceiling` (empty, inverted, or too-wide
+window) and `head-issued-ahead` (issued too far past the verifier's clock) — surface here as
+`broken-chain` with `at` set to that slug, so they read alongside the entry ceilings the
+linkage walk enforces. A head-only revalidation procedure, which has no chain to fold them
+into, MUST surface the same two slugs as top-level statuses under the same spelling: one
+vocabulary, whichever procedure reports the defect.
 
 ### 10.4 Named verification: item verification
 
@@ -1130,8 +1199,11 @@ The kit precedes all real implementations (the CSI discipline, again):
 
 - **Golden vectors:** valid chains; forked chains (including fork-at-shared-`previous`);
   broken linkage; sequence gaps and duplicates (must reject); duplicate `announcementId`
-  (must reject); stale heads; rolled-back heads; `issuedAt` regressions; a competing head
-  signed by a rotated-out key (must reject); entries with bad facts cards; facts requiring
+  (must reject); stale heads; rolled-back heads; `issuedAt` regressions; a head issued
+  further ahead of the verifier's clock than one profile window (must reject
+  `head-issued-ahead`, §5.2 rule 3, and persist no high-water mark) and a head whose window
+  is inverted (must reject `refresh-by-ceiling`, §5.2 rule 1); a competing head signed by a
+  rotated-out key (must reject); entries with bad facts cards; facts requiring
   unavailable referenced bytes (must yield `indeterminate` and fail closed at decision
   grade); genesis edge cases (pinned first sequence, `previous: null` uniqueness);
   withdrawal of foreign announcements, withdrawal-of-withdrawal, and missing reason codes
@@ -1156,7 +1228,8 @@ The kit precedes all real implementations (the CSI discipline, again):
   withdrawal of a retrospective-kind item (must not prune the decision store); `reorged`
   withdrawal (must trigger recompute).
 - **Named checks in isolation:** `source-chain-verification` outcomes (`stale`, `forked`,
-  `broken-chain`, `unauthorized-signer`), `facts-consistency` (all three outcomes),
+  `broken-chain` (including `at: refresh-by-ceiling` and `at: head-issued-ahead`),
+  `unauthorized-signer`), `facts-consistency` (all three outcomes),
   `derivation-consistency` (present, fabricated, reorged-away).
 
 ## 19. Declared impact

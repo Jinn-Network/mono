@@ -11,6 +11,8 @@ import {
   loadGoldenDocument,
   loadGoldenEnvelope,
   loadInvalidDocument,
+  loadUnsealableDocument,
+  UNSEALABLE_OFFERS,
   type GoldenOfferName,
 } from "./fixtures.js";
 import { OFFER_RECORD_KIND, OFFER_RECORD_MEDIA_TYPE } from "./identifiers.js";
@@ -43,7 +45,7 @@ const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 /**
  * Record conformance for the offer kind: identifier pinning, schema validation,
  * producer-side re-seal to the pinned bytes, consumer-side digest checking without
- * re-canonicalization, extension round-tripping, and the refused corpus.
+ * re-canonicalization, extension round-tripping, and the two refused corpora.
  *
  * Any implementation that produces or consumes offers runs this driver to prove it
  * reproduces the frozen record surface. It asserts what an offer *is*; it asserts nothing
@@ -96,6 +98,29 @@ export function describeOfferRecordConformance(): void {
 
     test.each(INVALID_OFFERS)("the refused corpus refuses %s", async (name: string) => {
       expect(OfferRecordSchema.safeParse(await loadInvalidDocument(name)).success).toBe(false);
+    });
+
+    // The schema is extension-open, so a namespaced key may carry a value outside the
+    // I-JSON subset the canonicalizer accepts. That refusal is part of what the kind is:
+    // an implementation that silently seals a non-I-JSON number produces bytes no one else
+    // can reproduce. It is a second group rather than more names in the list above because
+    // these documents pass the schema — the assertion that proves it is here, not implied.
+    describe.each(UNSEALABLE_OFFERS)("the unsealable corpus: %s", (name: string) => {
+      test("passes the schema", async () => {
+        expect(OfferRecordSchema.safeParse(await loadUnsealableDocument(name)).success).toBe(true);
+      });
+
+      test("is refused at the sealing boundary as an invalid document", async () => {
+        const document = await loadUnsealableDocument(name);
+        try {
+          sealOfferPayload(document);
+          expect.unreachable("an unsealable document must throw");
+        } catch (error) {
+          // On `category`, never on the class: this driver also runs against a packed copy
+          // of the package, where the class a consumer imports need not be this one.
+          expect((error as { readonly category?: unknown }).category).toBe("invalid-document");
+        }
+      });
     });
   });
 }

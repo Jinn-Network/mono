@@ -227,13 +227,21 @@ node "$COLOPHON" arm add --workspace "$WS" --principal operator --draft tb21-one
 node "$COLOPHON" method terminal-bench-2.1 --workspace "$WS" --principal operator \
   --draft tb21-one --slice 1 --host "$WS/host.json" --json
 node "$COLOPHON" quote --workspace "$WS" --principal operator --draft tb21-one --json
-node "$COLOPHON" lock --workspace "$WS" --principal operator --draft tb21-one
+node "$COLOPHON" lock --ack-sample-size --workspace "$WS" --principal operator --draft tb21-one
 node "$COLOPHON" launch --workspace "$WS" --principal operator --draft tb21-one
 node "$COLOPHON" collect --workspace "$WS" --principal operator --draft tb21-one --json
 node "$COLOPHON" export --workspace "$WS" --principal operator --draft tb21-one --arm oracle-a --json
 node "$COLOPHON" export --workspace "$WS" --principal operator --draft tb21-one --arm oracle-b --json
 node "$COLOPHON" report --workspace "$WS" --principal operator --draft tb21-one --json
 ```
+
+`--ack-sample-size` is required on every lock. Before running the block above,
+run the lock once on its own without the flag: it refuses, and the refusal
+prints the widest 95% interval this run's per-arm n can produce, alongside the
+widths at roughly double and half that n. Read those widths, decide whether the
+declared n is the sample size this run needs, and only then run the block. The
+acknowledged n and width are sealed into the Run and reprinted on the lock's
+stdout above the run digest.
 
 Launch starts **one** `harbor run` per arm (planned job). Expect about 10
 judged cells (1 task × 2 arms × 5). Oracle usually succeeds, so in-job retries

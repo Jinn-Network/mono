@@ -121,6 +121,13 @@ evidence postdates the anchor.
 the manifest and break the byte-equality that proves the lock preceded the data. The declaration
 in `src/method/skillsbench-demo1-current.ts` is frozen.
 
+The script enforces that itself, and for **either** stage: it refuses to write when its output
+already exists unless `SKILLSBENCH_DEMO1_PREREGISTER_OUT` names somewhere else. If you hit that
+refusal, the bytes are also no longer reproducible for a second reason — the #2973 method-identifier
+change, which is why `E1-demo1-preregistration.v1.json` is historical. See **Erratum: method
+identifier in the sealed records** in [`demo1-report.md`](demo1-report.md) before reaching for the
+override.
+
 ---
 
 ## 5. Inviolable rules

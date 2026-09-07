@@ -35,9 +35,13 @@ export class NativeDiscoverySourceResolutionError extends Error {
    *   source asserted NOTHING, so there is nothing to distrust; the consumer degrades that source
    *   for the poll and retries at the next one. This is the live F2 failure: a peer that is simply
    *   not up yet, or restarting, must not kill this operator's daemon.
-   * - `unintroduced` — the serving root ANSWERED, and its answer does not uniquely introduce this
-   *   identity (or has no introduction document at all). That is a statement about identity, so it
-   *   stays the hard refusal it has always been.
+   * - `unintroduced` — the serving root ANSWERED, and its answer failed a check. That is a
+   *   statement about identity, so the source is refused, never degraded-and-retried. Two cases
+   *   sit here and they no longer refuse alike: an answer that does not uniquely introduce this
+   *   identity (or has no introduction document at all) still aborts the whole poll, the hard
+   *   refusal this class has always been; an answer naming a destination outside the serving root
+   *   wraps a `ContainedOriginError`, which `native-discovery.ts` isolates to this one source as
+   *   `refused-destination` (#3433).
    */
   readonly kind: 'unreachable' | 'unintroduced';
 
@@ -217,9 +221,12 @@ export function buildNativeDiscoverySources(input: {
       try {
         archiveRootUrl = absolute(base, candidates[0]!.archiveRoot);
       } catch (cause) {
-        // The serving root ANSWERED, and its answer names a destination outside itself. That is a
-        // statement about identity, so it refuses like every other bad introduction rather than
-        // degrading the source for the poll.
+        // The serving root ANSWERED, and its answer names a destination outside itself. This
+        // source is refused — it yields nothing — but the refusal no longer aborts the whole poll:
+        // `native-discovery.ts`'s `degradedReason` recognises the wrapped `ContainedOriginError`
+        // and isolates it to this source as `refused-destination` (#3433). See the
+        // `NativeDiscoveryDegradedReason` doc there for why the blast radius, and only the blast
+        // radius, narrowed.
         throw new NativeDiscoverySourceResolutionError(
           configured.agent,
           configured.name,

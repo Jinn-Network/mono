@@ -27,6 +27,7 @@ const input = {
   head,
   headSignature: envelope,
   entries: [],
+  truncated: false,
   firstAdoption: true,
 };
 
@@ -144,5 +145,25 @@ describe("driver-backed chain verification", () => {
       status: "rejected",
       reason: "verification-failed",
     });
+  });
+});
+
+describe("a walk the mirror itself truncated (#3252)", () => {
+  const truncated = { ...input, truncated: true };
+
+  test("the driver posture refuses it without asking the driver to verify it", async () => {
+    const verifySource = vi.fn(async () => ({ status: "broken-chain" }) as never);
+    const driver = { verifySource } as unknown as VerifyDriver;
+
+    await expect(createDriverChainVerification(driver).verify(truncated)).resolves.toEqual({
+      status: "rejected",
+      reason: "sync-truncated",
+    });
+    expect(verifySource).not.toHaveBeenCalled();
+  });
+
+  test("the unverified posture still admits it, so a capped mirror keeps making progress", async () => {
+    const verification = createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT);
+    await expect(verification.verify(truncated)).resolves.toEqual({ status: "ok" });
   });
 });

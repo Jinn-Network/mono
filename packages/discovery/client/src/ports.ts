@@ -21,12 +21,32 @@ export interface TransportResponse {
   bytes: Uint8Array;
 }
 
+/**
+ * Per-call transport options. Optional, and every field in it is optional, so
+ * an existing `Transport` implementation that declares `fetch(url)` alone
+ * still satisfies the port -- a function of lower arity is assignable to one
+ * of higher arity.
+ */
+export interface TransportFetchOptions {
+  /**
+   * Aborts the network read itself.
+   *
+   * A caller-side deadline that is only consulted BETWEEN reads bounds
+   * nothing: a peer that accepts a connection and never answers holds the
+   * caller inside a single `fetch` forever, which is exactly how a standing
+   * sync loop stops rescheduling and never comes back (#3222). The signal has
+   * to reach the primitive, so it is declared here rather than composed
+   * around the call.
+   */
+  signal?: AbortSignal;
+}
+
 // The method name is quoted -- see the identical note in protocol's
 // verify/ports.ts: the discovery tree's ambient-network guard is a textual
 // regex scanner and cannot distinguish a same-named port-method declaration
 // from a call to the banned global `fetch`.
 export interface Transport {
-  "fetch"(url: string): Promise<TransportResponse>;
+  "fetch"(url: string, options?: TransportFetchOptions): Promise<TransportResponse>;
 }
 
 /** An open server-push subscription (long-poll/WS/SSE, one normative HTTP profile fixed at implementation, §9.4). */

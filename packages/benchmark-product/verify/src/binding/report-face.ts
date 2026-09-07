@@ -13,10 +13,11 @@
  *   the verified binding itself, so the text is identical for every reader.
  *
  * A third rule follows from issues #3322 and #3426: **a sentence claims unchosen-ness only where
- * the seal established it**, separately for the round and for the source. A beacon that merely postdates the seal makes the value unpredictable and
- * leaves the operator choosing among the values that postdate it. So both sentences carry
- * `roundChoiceClause`, which asserts the second property under `seal-derived` and retracts it under
- * `operator-chosen` rather than letting either branch imply it.
+ * the seal established it**, separately for the round and for the source. A beacon that merely
+ * postdates the seal makes the value unpredictable and leaves the operator choosing among the
+ * values that postdate it. So both sentences carry `roundChoiceClause`, which asserts the second
+ * property under `seal-derived` and retracts it under `operator-chosen` rather than letting either
+ * branch imply it.
  *
  * A fourth rule is this module's own, and is the whole point of the originating issue: **the census
  * sentence says it is the weaker binding.** Ordering-only binding shows the run's order was fixed by
@@ -45,9 +46,17 @@ export function runBindingClass(binding: VerifiedRunBinding | undefined): RunBin
   return binding.mode === "sampled" ? "beacon-drawn-slate" : "beacon-ordering-only";
 }
 
-/** `<source display name> round <n>`, the one rendering every sentence below uses. */
+/**
+ * `<source display name> <round|height> <n>`, the one rendering every sentence below uses. The
+ * index word keys on the source's own time basis (issue #3429): `attributive-height` sources index
+ * by block height, and the clauses that follow this name turn on exactly that distinction --
+ * "No round follows from a seal on a height-indexed source" reads as a contradiction of a beacon
+ * the same sentence has just called a round.
+ */
 function beaconName(binding: VerifiedRunBinding): string {
-  return `${BEACON_SOURCES[binding.beacon.source].displayName} round ${binding.beacon.round}`;
+  const source = BEACON_SOURCES[binding.beacon.source];
+  const index = source.timeBasis === "attributive-height" ? "height" : "round";
+  return `${source.displayName} ${index} ${binding.beacon.round}`;
 }
 
 /**
@@ -85,21 +94,35 @@ function roundChoiceClause(binding: VerifiedRunBinding): string {
   // census the population is the whole declared one whatever round applies, and only the ORDER
   // moves.
   const derived = binding.mode === "sampled" ? "slate" : "order";
+  // "possibly different", never "different" (issue #3429). The alternatives clause sizes a
+  // residue, and a bare universal overstates it: a one-item census derives the same order from
+  // every beacon value, and a two-item one from roughly half of all rounds. What the procedure
+  // supports is that another round MIGHT have derived another result, which is the whole of the
+  // residue and is what the clause claims.
+
   // What a declared source does and does not settle, stated once and appended to whichever round
   // clause applies. Under `seal-declared` the beacon is fixed outright on a scheduled source; on a
   // height-indexed one it fixes only WHICH CHAIN, and the round clause below still concedes the
   // height. Under `operator-chosen` this is the residue PR #3375 could only report.
-  const sourceClause = binding.sourceBasis === "seal-declared"
-    ? "Nor was the source: the sealed record names the beacon this run binds to, so a binding naming any "
-      + "other source is refused."
-    : "What choosing remains is the source — the seal names no beacon, so an operator could have bound "
-      + "a different one, and this procedure admits a beacon indexed by block height where no round "
-      + "follows from a seal at all.";
+  //
+  // The declared branch takes its connective from the caller (#3525) because the two round clauses
+  // that append this say opposite things before it: "Nor" continues the seal-derived branch's
+  // denial, and would read as a contradiction after the chosen-round branch's concession that the
+  // round WAS the operator's. The property after the colon is one string on both branches -- only
+  // the word joining it to the sentence before moves. The residue opens on its own subject and
+  // follows either clause, so it needs no such split.
+  const sourceClause = (connective: string): string =>
+    binding.sourceBasis === "seal-declared"
+      ? `${connective}: the sealed record names the beacon this run binds to, so a binding naming `
+        + "any other source is refused."
+      : "What choosing remains is the source — the seal names no beacon, so an operator could have "
+        + "bound a different one, and this procedure admits a beacon indexed by block height where "
+        + "no round follows from a seal at all.";
   if (binding.roundBasis === "seal-derived") {
     // Only a scheduled source reaches here: `requiredBeaconRound` derives nothing for a height, so
     // an `attributive` binding is `operator-chosen` by construction.
     return "The round was not the operator's to pick either: it is the first round this source publishes after "
-      + `the seal, so the seal instant alone fixes it. ${sourceClause}`;
+      + `the seal, so the seal instant alone fixes it. ${sourceClause("Nor was the source")}`;
   }
   if (binding.postSeal === "attributive") {
     // Say no more here than the postdating clause two sentences earlier already conceded. Claiming
@@ -113,15 +136,16 @@ function roundChoiceClause(binding: VerifiedRunBinding): string {
         + "choice"
       : "No round follows from a seal on a height-indexed source, so this height was the operator's choice";
     return `${declared} — and on the reader's side it is the chain, not this bundle, that places it after the `
-      + `seal at all. Any other height would have derived a different ${derived} from the same inputs.`;
+      + `seal at all. Any other height the chain carries was an available alternative deriving a possibly `
+      + `different ${derived} from the same inputs.`;
   }
   // A chosen round on a scheduled source. The source clause still applies here -- a declared source
   // narrows what could have been chosen even when the round was -- and omitting it would leave this
   // one branch of the three saying nothing about the source at all.
   return `Which post-seal value applied was still the operator's choice: this binding names a round selected after `
     + `the seal, and every round the source published in between was an available alternative deriving a `
-    + `different ${derived} from the same inputs. The value could not have been predicted; this ${derived} is `
-    + `nonetheless one of several the operator could have realized by waiting. ${sourceClause}`;
+    + `possibly different ${derived} from the same inputs. The value could not have been predicted; this ${derived} is `
+    + `nonetheless one of several the operator could have realized by waiting. ${sourceClause("The source was not")}`;
 }
 
 /**
@@ -193,5 +217,8 @@ export function runBoundVenueLimits(
   limits: readonly string[],
   binding: VerifiedRunBinding | undefined,
 ): readonly string[] {
+  // binding-carriage: forwards this function's own parameter; the obligation belongs to whoever
+  // supplies it, and every such caller is pinned in `binding-face-carriage.test.ts`. Listed there
+  // as the forwarding origin rather than left implicit, so the forward is stated (#3757).
   return binding === undefined ? limits : [...limits, runBindingSentence(binding)];
 }

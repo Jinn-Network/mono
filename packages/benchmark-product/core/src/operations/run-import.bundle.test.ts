@@ -30,7 +30,7 @@ import { expectedCellSet, parseBenchmark, parseMatrix, parseRun } from "@jinn-ne
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
 import { materializePublicBundle } from "../bundle/materialize.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { BUNDLE_FORMAT } from "../bundle/manifest.js";
+import { BUNDLE_FORMAT } from "../legacy-closures.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { publicBundlesDir } from "../workspace/layout.js";
 import { externalRunImportMarker } from "../run/imported-run.js";

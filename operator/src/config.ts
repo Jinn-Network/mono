@@ -22,7 +22,11 @@ import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
 import { parseRpcUrls } from './rpc/transport.js';
-import { defaultConfigPath, resolveDefaultStateDir } from './state-dir.js';
+import {
+  defaultConfigPath,
+  defaultImplStateDirRoot,
+  resolveDefaultStateDir,
+} from './state-dir.js';
 import { canonicalLocalHttpBaseUrl } from './local-provider-url.js';
 import {
   CONFIG_SHAPE_VERSION,
@@ -840,7 +844,7 @@ export const JinnConfigSchema = z.object({
 
 const DEFAULT_ENGINE = {
   workingDirRoot: join(DEFAULT_STATE_DIR, 'engine', 'work'),
-  implStateDirRoot: join(DEFAULT_STATE_DIR, 'engine', 'impl-state'),
+  implStateDirRoot: defaultImplStateDirRoot(DEFAULT_STATE_DIR),
 } as const;
 
 /**
@@ -1289,7 +1293,7 @@ export function loadConfig(configPath?: string): JinnConfig {
       ? (merged['engine'] as Record<string, unknown>)
       : {};
     if (engineObj['implStateDirRoot'] === undefined) {
-      engineObj['implStateDirRoot'] = join(stateDir, 'engine', 'impl-state');
+      engineObj['implStateDirRoot'] = defaultImplStateDirRoot(stateDir);
       merged['engine'] = engineObj;
     }
   }
