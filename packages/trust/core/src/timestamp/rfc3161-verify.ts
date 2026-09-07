@@ -825,14 +825,14 @@ function verifyTimeStampToken(
   }
 
   // --- Rule 9: extended key usage is exactly id-kp-timeStamping -----------
-  // Extension criticality is a recorded gap (§16): the certificate port does
-  // not surface criticality flags, so the sole-usage half is checked and the
-  // critical half is not -- named rather than papered over.
   const usages = certificate.extendedKeyUsageOids;
   if (usages.length !== 1 || usages[0] !== OID_ID_KP_TIME_STAMPING) {
     refuse(
       `The signer certificate's extended key usage is [${usages.join(", ")}], not exactly id-kp-timeStamping (§6.1 rule 9).`,
     );
+  }
+  if (!certificate.extendedKeyUsageCritical) {
+    refuse("The signer certificate's extended-key-usage extension is not critical (§6.1 rule 9).");
   }
 
   // --- Rule 10: the tsa field, when present -------------------------------
