@@ -284,6 +284,13 @@ independently valuable and small enough to land on its own.
 Issue #4175 does not depend on ratification of anything — it repairs a guard that is broken today
 against the standard the guard's own file already sets elsewhere.
 
+One scoping question is left open by v1.1's census correction. The #4176 row names the two
+scripts F2 named in v1.0; the corrected census finds two more genuine gaps —
+`packages/benchmark-product/core: demo1:verify` and `packages/task-supply/admission: fixtures:check`.
+Whether #4176 grows to wire all four or the extra pair gets its own issue is an operator call;
+this document records the gap rather than assigning it, because rescoping a filed issue is not
+a design session's to do.
+
 ## 7. Questions for ratification, answered
 
 Answered by the operator ruling of 2026-09-07 on PR #4052, which adopted D1–D3 as written. The
