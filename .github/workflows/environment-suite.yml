@@ -162,10 +162,19 @@ jobs:
       # NOTE: every step below carries `if: steps.resolve.outputs.skip != 'true'`
       # so the Thursday skip-if-unchanged short-circuit (§8) cleanly no-ops the
       # whole run when next HEAD already has an environment-suite verdict.
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - if: steps.resolve.outputs.skip != 'true'
         uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            operator/yarn.lock
+            contracts/yarn.lock
       - if: steps.resolve.outputs.skip != 'true'
         run: corepack enable
       - if: steps.resolve.outputs.skip != 'true'
