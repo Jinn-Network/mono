@@ -25,6 +25,7 @@ import { dirname, join, relative, sep } from "node:path";
 import {
   BUNDLE_V5_FORMAT,
   BUNDLE_V8_FORMAT,
+  BUNDLE_V10_FORMAT,
   SUPPORTED_BUNDLE_FORMATS,
   type SupportedBundleFormat,
   type VerifiedBundleSnapshot,
@@ -74,6 +75,10 @@ export const FREEZE_REPO_BUNDLE_SUPPORT: Record<SupportedBundleFormat, FreezeRep
   [BUNDLE_V6_FORMAT]: { qualification: false, disclosure: false },
   [BUNDLE_V7_FORMAT]: { qualification: true, disclosure: false },
   [BUNDLE_V8_FORMAT]: { qualification: true, disclosure: true },
+  // The composed presentation generation is v6's closure with a different report page (issue
+  // #4191), so it means to this projection exactly what v6 means: no qualification graph, so no
+  // freeze artifacts, so the export refuses it.
+  [BUNDLE_V10_FORMAT]: { qualification: false, disclosure: false },
 };
 
 /** The accepted formats, in the order `SUPPORTED_BUNDLE_FORMATS` declares them. */

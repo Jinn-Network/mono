@@ -94,9 +94,10 @@ import {
   type VerifiedBundleSnapshot,
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
-import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT } from "./manifest.js";
+import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V10_FORMAT } from "./manifest.js";
 import {
   LEGACY_ANCHOR_MEMBER_PATTERN,
+  PUBLIC_BUNDLE_FILES,
   PUBLIC_BUNDLE_V4_FILES,
   legacyClosure,
   type LegacyBundleFormat,
@@ -164,7 +165,7 @@ export type PublicBundleVerificationCheck =
   | "disclosure-specification";
 
 export interface LegacyPublicBundleVerificationResult extends PublicBundleSignerDisclosure {
-  readonly format: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT;
+  readonly format: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT | typeof BUNDLE_V10_FORMAT;
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
@@ -529,11 +530,19 @@ export async function verifyPublicBundleSnapshot(
   // (issue #3205), v8 is v7 plus disclosure (issue #2839) — no axis reinterprets another. v8 adds
   // no mandatory MEMBER: the sealed disclosure record travels at the already-allowlisted
   // `records/<sha256>.bin` path, so its list is v7's, which is v4's.
+  //
+  // `/10` is stated here for the same reason `/8` is, and moves NONE of those three axes: it is
+  // v6's closure exactly — v2's member list, no qualification, anchors, the same seven checks —
+  // differing only in which report page `buildPublicAssets` renders (issue #4191). A presentation
+  // generation that changed a member or a check would be claiming the render proves something the
+  // records did not already prove.
   const declaredFormat = checked.manifest.format;
   const carriesDisclosure = declaredFormat === BUNDLE_V8_FORMAT;
   const { carriesQualification, carriesAnchors, mandatoryFiles } = carriesDisclosure
     ? { carriesQualification: true, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_V4_FILES }
-    : legacyClosure(declaredFormat);
+    : declaredFormat === BUNDLE_V10_FORMAT
+      ? { carriesQualification: false, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_FILES }
+      : legacyClosure(declaredFormat);
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
