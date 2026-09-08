@@ -2,15 +2,16 @@
 
 | | |
 |---|---|
-| **Version** | 0.1 |
-| **Date** | 2026-09-06 |
-| **Author** | Autopilot design session (Codex); source citations read against attempt base `9b08b1b05` |
+| **Version** | 0.2 |
+| **Date** | 2026-09-06 (v0.1 same day; v0.2 2026-09-07 applies the §13 ruling) |
+| **Author** | Autopilot design session (Codex); source citations read against attempt base `9b08b1b05`. v0.2 landing pass re-derived §2 against `b5bff3e21` |
 | **Shape** | `design`; implementation is separate |
-| **Status** | proposed; awaiting operator decision |
+| **Status** | ruled — operator 2026-09-07; §13's four contract items are closed ([#4109 comment 5570964693](https://github.com/Jinn-Network/mono/pull/4109#issuecomment-5570964693)) |
 | **Issue** | [#2762](https://github.com/Jinn-Network/mono/issues/2762) |
-| **Depends on** | [benchmark product design](./2026-08-05-benchmark-product-design.md); [pluggable integrity providers](./2026-08-17-pluggable-integrity-providers-design.md) §8, §9, §16.5; [public bundle contract](../../../packages/benchmark-product/PUBLIC-BUNDLE.md) |
-| **Related** | [bundle capability composition](./2026-08-29-bundle-capability-composition-design.md), proposed but not implemented |
+| **Depends on** | [benchmark product design](./2026-08-05-benchmark-product-design.md); [pluggable integrity providers](./2026-08-17-pluggable-integrity-providers-design.md) §8, §9, §16.5; [public bundle contract](../../../packages/benchmark-product/PUBLIC-BUNDLE.md); [bundle capability composition](./2026-08-29-bundle-capability-composition-design.md) — the composed generation this design registers an entry into; the standing format-allocation ruling ([#3405 comment 5570723386](https://github.com/Jinn-Network/mono/issues/3405#issuecomment-5570723386)) |
+| **Related** | [PR #4105](https://github.com/Jinn-Network/mono/pull/4105) (issue #2763), which contributes its own section to the same claim package; [PR #4090](https://github.com/Jinn-Network/mono/pull/4090) (issue #3698), which holds `benchmark-product-public-bundle/9` |
 | **Does not do** | establish a trusted dispatch clock, prove backend receipt or execution timing, carry the raw run journal, or raise any execution/evaluation evidence to `attested` |
+| **v0.2 changes** | Records the operator ruling. Contract items 1, 3, and 4 were adopted as written, so §1, §2, §3, §5.1, §7.2, and §9.1–§9.7 are unchanged — in particular the exact permitted copy and its allowlist and denylist are untouched. Item 2 was amended: the bundle-side home moves from a standalone `benchmark-product-public-bundle/9` closure to a registered `dispatch-boundaries` capability entry in the composed generation `benchmark-product-public-bundle/10`, and `benchmark-product.claim-package/7` becomes that generation's shared claim package rather than this feature's own. §0, §4.1, §4.2, §5.2, §6, §7.1, §8, §9.8, §10, §11, and §12 follow. New §13 records the ruling. |
 
 ## 0. Decision in plain language
 
@@ -31,17 +32,23 @@ producer supplies the dispatch clock, a copied bundle cannot prove that the
 producer did not omit an unmatched local capture, and the timestamp authority's
 independence remains a reader trust judgment.
 
-The change receives new immutable closure identifiers:
+The change lands under three identifiers:
 
-- `benchmark-product-assembly/3`;
-- `benchmark-product-public-bundle/9`; and
-- `benchmark-product.claim-package/7`.
+- `benchmark-product-assembly/3`, a new immutable assembly closure;
+- a registered `dispatch-boundaries` capability entry in the composed public
+  bundle generation `benchmark-product-public-bundle/10`; and
+- a `dispatchBoundary` section in `benchmark-product.claim-package/7`, that
+  generation's shared claim package.
 
-Bundle `/9` is deliberately `/8` plus dispatch-boundary evidence. This is the
-smallest closure that upgrades the product's current disclosed, anchored,
-binary-qualification bundle without waiting on the still-proposed capability
-composition refactor or minting every combination of the old closure matrix.
-All earlier formats and claim packages remain byte-immutable.
+The bundle side is an entry, not a closure of its own.
+`benchmark-product-public-bundle/9` is allocated elsewhere —
+[PR #4090](https://github.com/Jinn-Network/mono/pull/4090) (issue #3698) took it
+for `/6`'s closure plus the declared/strict denominator pair — and the standing
+format-allocation ruling puts the composed generation at `/10` and directs
+features to register as capability entries inside it rather than mint their own
+numbers ([#3405 comment 5570723386](https://github.com/Jinn-Network/mono/issues/3405#issuecomment-5570723386)).
+Dispatch-boundary evidence is one such entry. All earlier assembly formats,
+bundle formats, and claim packages remain byte-immutable.
 
 ## 1. Problem and claim boundary
 
@@ -205,9 +212,10 @@ dispatch-ordering claim.
 
 ### 4.1 Producer and workspace verification
 
-Before emitting `/9`, materialization and the workspace's own verification
-must rederive `dispatchBoundaries` from the complete local journal and require
-byte equality with the assembly projection. They must also:
+Before emitting a bundle that declares `dispatch-boundaries`, materialization
+and the workspace's own verification must rederive `dispatchBoundaries` from the
+complete local journal and require byte equality with the assembly projection.
+They must also:
 
 1. validate every source entry against `RunJournalEntrySchema`;
 2. reconstruct every `entrySha256` from the complete canonical source entry;
@@ -227,9 +235,10 @@ crash. An accepted edge without a matching capture is invalid.
 
 ### 4.2 Copied-bundle verification
 
-The standalone verifier runs a new `dispatch-boundaries` check after
-`evidence-closure` and before `claim-consistency`. It operates only on bytes
-already authenticated by `bundle.json` and must:
+The standalone verifier runs the `dispatch-boundaries` check whenever the
+manifest's capability vector declares the token; its position in the composed
+check list is the registry's `order` (§6.1). It operates only on bytes already
+authenticated by `bundle.json` and must:
 
 - enforce the `/3` event union, non-empty array, and strictly increasing
   `journalIndex` values;
@@ -286,54 +295,105 @@ real civil dates, explicit `Z` or numeric offset, exact arbitrary fractional
 precision, and valid leap-second placement. The original spelling remains in
 the event. The run journal's currently weaker syntactic regex does not weaken
 the public contract; a legacy timestamp that cannot pass strict validation
-prevents `/9` publication.
+prevents the producer from declaring `dispatch-boundaries`.
 
-## 6. Bundle and claim versions
+## 6. Bundle and claim carriage
 
-### 6.1 Public bundle `/9`
+### 6.1 The `dispatch-boundaries` capability entry
 
-`benchmark-product-public-bundle/9` is exactly the current `/8` closure plus:
+This design allocates no bundle format number. Per the standing
+format-allocation ruling, the composed/capability generation is
+`benchmark-product-public-bundle/10`, and a feature registers as a capability
+entry inside it rather than minting its own closure
+([#3405 comment 5570723386](https://github.com/Jinn-Network/mono/issues/3405#issuecomment-5570723386)).
+Dispatch-boundary evidence is one entry, named in the manifest's capability
+vector by the token `dispatch-boundaries`.
 
-- assembly `/3` instead of `/2`;
-- the CAS records reachable only from `dispatchBoundaries`; and
-- `dispatch-boundaries` inserted before `claim-consistency` in the check list.
+The registry entry (capability composition §4) is:
 
-It retains `/8`'s qualification, anchors, disclosure record, trust material,
-and all existing checks. It does not reinterpret those members.
+| Field | Value |
+|---|---|
+| `token` | `dispatch-boundaries` |
+| `requires` / `conflicts` | none |
+| `refines` | the grammar of the `verification/assembly.jsonl` member: `benchmark-product-assembly/2` is replaced by `/3` |
+| `mandatoryFiles` | none beyond the assembly member it refines |
+| `memberPatterns` | none new — every referenced Submission lives at the existing `records/<sha256>.bin` shape under its existing `solve-submission` or `evaluation-submission` role |
+| `claimSection` | `dispatchBoundary` |
+| `checks` | `dispatch-boundaries` |
+| `minimumReaderRelease` | the first `@colophon-claims/verify` release implementing the token |
+| `activation` | the run projects at least one prospective capture (§3.3) |
 
-The complete ordered check list is:
+Three consequences follow from that shape. They are stated rather than left
+implicit, because each is a place where an entry behaves differently from the
+standalone closure this section used to describe.
 
-1. `manifest`;
-2. `evidence-closure`;
-3. `dispatch-boundaries`;
-4. `trust`;
-5. `matrix-rederivation`;
-6. `report-verification`;
-7. `claim-consistency`;
-8. `integrity-anchors`; and
-9. `disclosure-specification`.
+**It is a refining capability, and it claims the assembly grammar.** Capability
+composition §5.1 splits capabilities into additive and refining; this one
+replaces an existing member's grammar, so it is refining. Its §5.2 permits at
+most one registered capability per `refines` target, enforced by a registry test
+at build time. `dispatch-boundaries` is therefore the sole refiner of the
+assembly grammar, and a second capability wanting to refine the same member is a
+design-time conflict to be resolved deliberately rather than a runtime surprise.
+It does not collide with `binary-qualification`, whose targets are the
+evidence-catalog and trust grammars.
 
-`dispatch-boundaries` precedes `claim-consistency` because claim package `/7`
-contains a projection derived from that check's authenticated input.
+**It requires nothing, including anchoring.** The evidence is meaningful on its
+own: it discloses pre-submit boundaries whether or not the bundle carries an
+anchor. Only the honesty upgrade needs one, and §7.1's predicate is where that
+condition lives. A bundle that declares `dispatch-boundaries` with no anchor, or
+with only a chain-time anchor, is valid and publishes the facts without the
+upgraded copy — the case §8's table already records.
 
-The activation predicate is biconditional: a producer emits `/9` exactly when
-the `/8` closure applies and it can establish a complete, non-empty local
-dispatch-boundary projection. A `/9` bundle with assembly `/2`, a `/2`–`/8`
-bundle with assembly `/3`, or an earlier assembly containing
-`dispatchBoundaries` is invalid. A producer unable to establish the new
-closure refuses `/9`; it never backfills from acceptance evidence and never
-emits upgraded honesty copy on an earlier format.
+**Its check does not, and need not, precede `claim-consistency`.** The
+superseded standalone closure ordered them that way because the claim's derived
+section reads the boundary evidence. Capability composition §6 appends
+capability checks after the base checks, so that position is unavailable — and
+it is not required. `claim-consistency` derives the `dispatchBoundary` section
+from the assembly bytes the `manifest` check has already authenticated, through
+the same shared pure function the producer uses. This is how the `anchors`
+section already works: `claim-consistency` byte-compares it while
+`integrity-anchors` runs afterward and performs the token verification
+([`claim.ts`](../../../packages/benchmark-product/verify/src/profile/claim.ts)).
+The `dispatch-boundaries` check's own work — record authentication, coordinate
+bindings, and role bindings (§4.2) — has no reason to precede a byte comparison
+over bytes those base checks already authenticated.
 
-This deliberately serves the product's current flagship closure rather than
-allocating the full cross-product of base, qualification, anchoring,
-disclosure, and dispatch evidence. When the proposed capability-composition
-design is revised around the already-shipped `/8`, dispatch evidence should
-become one must-understand capability. That migration is not a dependency and
-does not change `/9` after publication.
+The check list is consequently not a per-format constant.
+`expectedChecks(vector)` returns the base checks followed by each declared
+capability's checks in registry `order`. For the vector carrying the product's
+current flagship closure plus this entry — `anchoring`,
+`binary-qualification`, `disclosure-specification`, `dispatch-boundaries` —
+that derivation yields `manifest`, `evidence-closure`, `trust`,
+`matrix-rederivation`, `report-verification`, and `claim-consistency`, followed
+by `integrity-anchors`, `disclosure-specification`, and `dispatch-boundaries`
+in whatever total order the registry's `order` column fixes. This design
+constrains that column no further than the determinism rule already does.
 
-### 6.2 Claim package `/7`
+Declaration remains biconditional with the evidence. That is the refusal
+discipline the superseded closure carried, re-expressed at the entry level: a
+declared `dispatch-boundaries` requires assembly `/3` with a non-empty
+`dispatchBoundaries` array, and an undeclared capability requires an assembly
+carrying no such array. A bundle declaring the token over assembly `/2`, or
+carrying `dispatchBoundaries` while its vector omits the token, is refused. A
+producer unable to establish the projection withholds the declaration; it never
+backfills from acceptance evidence and never emits upgraded honesty copy on a
+bundle that does not declare the token.
 
-`benchmark-product.claim-package/7` is claim package `/6` plus:
+Because the entry lives inside the composed generation, this design now depends
+on the capability registry and the `/10` cutover that create it, and its
+implementation sequences behind them (§10). That dependency is the cost the
+ruling accepted in exchange for not minting a fourth closure number for a fourth
+combination.
+
+### 6.2 The `dispatchBoundary` claim section
+
+`benchmark-product.claim-package/7` is the composed generation's shared claim
+package, not this feature's own. Its sections are the base claim's plus one
+optional section per capability, under the biconditional rule: capability
+declared ⇔ its section present. A declared capability with a missing section is
+refused; an undeclared capability's section present is refused.
+
+`dispatch-boundaries` contributes one section, `dispatchBoundary`:
 
 ```json
 {
@@ -360,9 +420,18 @@ does not change `/9` after publication.
 `first` carries the complete first event, including kind-specific members;
 `earliestRecorded` carries the stable identity and timestamp of the minimum
 event. The producer and verifier derive this section through one shared pure
-function from the authenticated assembly. `claim-consistency` byte-compares
-the result. The claim's verification instructions name the release that first
-understands `/9` and its full check list.
+function from the authenticated assembly. `claim-consistency` byte-compares the
+result. The claim's verification instructions are not hand-written here: the
+named release is derived as the maximum `minimumReaderRelease` over the declared
+capabilities, so this entry supplies a registry column rather than an
+instruction row.
+
+Because `/7` is the generation's package rather than this feature's, its
+allocation is coordinated rather than owned.
+[PR #4105](https://github.com/Jinn-Network/mono/pull/4105) (issue #2763) names
+the same number for the same reason, and under the ruling that is correct: both
+features contribute sections to one package. Neither mints a competing number,
+and neither section's presence implies the other's.
 
 Claim-package `/1` through `/6` remain unchanged. In particular, the existing
 `venueHonesty` text on every earlier bundle is byte-stable.
@@ -373,7 +442,7 @@ Claim-package `/1` through `/6` remain unchanged. In particular, the existing
 
 The new honesty value is available only when all of the following are true:
 
-1. the bundle is `/9` and its `dispatch-boundaries` check passes;
+1. the bundle declares `dispatch-boundaries` and that check passes;
 2. the assembly has a derived `earliestRecordedDispatch`;
 3. a carried lock-subject anchor is structurally complete, digest- and
    kind-matching, and uses the RFC 3161 authority-time profile;
@@ -395,7 +464,8 @@ venueHonesty.preRegistration =
   "structural-append-order-and-anchored-time-before-recorded-dispatch"
 ```
 
-Otherwise `/9` retains the strongest existing value justified by its anchors.
+Otherwise the bundle retains the strongest existing value justified by its
+anchors.
 
 ### 7.2 Exact permitted copy
 
@@ -441,17 +511,17 @@ visible. Dispatch timestamps replace none of them.
 
 | Condition | Producer | Standalone verifier | Honesty result |
 |---|---|---|---|
-| No capture event | retain an earlier closure | `/9` is invalid | no dispatch-ordering copy |
-| Invalid calendar timestamp | refuse `/9` | `record-integrity` | no upgrade |
-| Accepted edge lacks matching capture | refuse `/9` | `record-integrity` | no upgrade |
-| Capture record bytes missing or digest/coordinate mismatched | refuse `/9` | `record-integrity` | no upgrade |
+| No capture event | withhold the declaration | a declared capability with no event is invalid | no dispatch-ordering copy |
+| Invalid calendar timestamp | withhold the declaration | `record-integrity` | no upgrade |
+| Accepted edge lacks matching capture | withhold the declaration | `record-integrity` | no upgrade |
+| Capture record bytes missing or digest/coordinate mismatched | withhold the declaration | `record-integrity` | no upgrade |
 | Repeated coordinate with different capture digests | preserve both events | valid if both records and bindings validate | both affect the minimum |
 | Capture has no accepted edge | preserve it | valid | it still affects the minimum |
-| Rows reordered or `entrySha256` altered | refuse `/9` | `record-integrity` | no upgrade |
+| Rows reordered or `entrySha256` altered | withhold the declaration | `record-integrity` | no upgrade |
 | Producer clock regresses | preserve journal order and exact times | valid | compare anchor against the minimum time |
 | `genTime == earliestRecordedDispatch.at` | publish facts | valid | no upgrade |
 | Only a chain-time anchor is present | publish facts | valid | retain existing anchor wording |
-| Local journal and assembly projection differ | refuse `/9` | not externally decidable for omitted unmatched captures | no publication from the conforming producer |
+| Local journal and assembly projection differ | withhold the declaration | not externally decidable for omitted unmatched captures | no publication from the conforming producer |
 
 Failures are loud where the authenticated bundle is internally contradictory.
 Limitations are explicit where no copied artifact can decide the fact.
@@ -498,12 +568,19 @@ its source positions, and the limitation are sufficient for this claim.
 Rejected. Both are published contracts. Older readers must refuse a new
 closure, not accept an old format while silently ignoring new semantics.
 
-### 9.8 Wait for capability composition
+### 9.8 Allocate a standalone bundle closure
 
-Rejected as a dependency. That design is still proposed and its planned `/8`
-allocation has been overtaken by the shipped disclosed closure. `/9` solves
-this issue against repository reality; later composition may register the
-same semantics without rewriting `/9`.
+Rejected by operator ruling. v0.1 proposed `benchmark-product-public-bundle/9`
+as `/8` plus dispatch evidence, treating capability composition as related work
+rather than a dependency. Two facts closed that option. `/9` was already
+allocated to [PR #4090](https://github.com/Jinn-Network/mono/pull/4090)
+(issue #3698) for a different closure, and the standing format-allocation ruling
+directs features to register as capability entries in the composed generation
+rather than mint numbers
+([#3405 comment 5570723386](https://github.com/Jinn-Network/mono/issues/3405#issuecomment-5570723386)).
+Taking the next free number instead would have reinstated exactly the
+per-feature minting that ruling abolishes. The cost accepted in exchange is a
+real sequencing dependency on the registry and cutover work (§10).
 
 ## 10. Implementation sequence
 
@@ -516,17 +593,25 @@ Implementation should land as stacked, independently verifiable packets:
    identity, carry all referenced Submission bytes, and add local
    journal-to-assembly equality checks. Cover solve, evaluation re-seal,
    retries, rejection, cancellation, and crash recovery.
-3. **Bundle `/9` and verifier check.** Add the manifest closure, reader
-   instructions, record roles, check ordering, outcome denominator, and
-   tamper tests. Verify a copied bundle without workspace access.
-4. **Claim package `/7` and honesty.** Add the derived boundary section, strict
-   RFC 3161 predicate, exact copy, claim-consistency rules, and negative tests
-   for equality, chain-time anchors, invalid times, omission, and clock
-   regression.
+3. **Capability entry and verifier check.** Sequenced behind the capability
+   registry and the `/10` cutover that create the composed generation. Register
+   the `dispatch-boundaries` entry — token, refinement target, claim section,
+   check, activation predicate, and minimum reader release — then add the check
+   itself, the record roles, the derived outcome denominator, and tamper tests.
+   Verify a copied bundle without workspace access.
+4. **Claim section and honesty.** Add the derived `dispatchBoundary` section to
+   claim package `/7`, coordinating that allocation with
+   [PR #4105](https://github.com/Jinn-Network/mono/pull/4105) (issue #2763)
+   rather than minting a second number, plus the strict RFC 3161 predicate,
+   exact copy, claim-consistency rules, and negative tests for equality,
+   chain-time anchors, invalid times, omission, and clock regression.
 5. **Public documentation and release line.** Update `PUBLIC-BUNDLE.md`,
    `EXTERNAL-VERIFICATION.md`, package exports, public schemas, packed-package
    tests, and docs-consistency pins. Prove the released reader line verifies a
-   real `/9` bundle end to end.
+   real bundle declaring `dispatch-boundaries` end to end.
+
+Packets 1 and 2 touch only the assembly contract and the producer's projection;
+they do not wait on the composed generation. Packets 3 through 5 do.
 
 No packet may synthesize missing capture evidence or weaken an earlier format
 to keep its slice green.
@@ -551,21 +636,34 @@ The implementation bar is:
   exact text;
 - chain-time, pending, matrix-only, equal-time, and later-time anchors never
   select it;
-- every `/2`–`/8` and claim-package `/1`–`/6` golden remains byte-identical;
-- the docs-consistency suite has a total row for `/9` and the reader release it
-  pins; and
+- every `/2`–`/9` bundle golden and every claim-package `/1`–`/6` golden remains
+  byte-identical;
+- the registry entry satisfies the composition invariants: a unique token, a
+  position in the registry's total order, sole refinement of the assembly
+  grammar, and a `minimumReaderRelease` naming a real published release;
+- the generated-lattice conformance covers this token — for every satisfiable
+  vector that omits `dispatch-boundaries`, planting a `dispatchBoundaries` array
+  is refused as non-allowlisted, and declaring the token without one is refused
+  as a missing member;
+- the docs-consistency suite has a total row for `/10` and the reader release
+  its vector derives; and
 - core and verifier typecheck, test, build, parity, and package-smoke commands
   pass, followed by the Benchmark Product CI lane.
 
 This satisfies issue #2762 by specifying dispatch timestamps in the assembly
 header and giving an exact allowlist and denylist for the upgraded honesty
-claim. Approval of this document authorizes implementation planning; it does
-not itself authorize code or format activation.
+claim. The operator ruling recorded in §13 closes the four contract questions
+and authorizes implementation planning against this document. It does not by
+itself activate a format: packets 3 through 5 land only behind the composed
+generation they register into.
 
 ## 12. Headless decision log
 
-No human was present during this design session. The session therefore took
-the convention-preserving options required by the headless workflow:
+No human was present during the v0.1 design session. That session therefore
+took the convention-preserving options required by the headless workflow. The
+operator has since ruled (§13). Where a ruling amends a pick, the amendment is
+recorded on the item and the original is kept as historical context rather than
+rewritten away.
 
 1. **Event array over scalar** — selected because evidence stays attributable
    and retry history cannot be hidden by one summary value.
@@ -580,11 +678,82 @@ the convention-preserving options required by the headless workflow:
 6. **Minimum timestamp for the anchor gate** — selected because it remains
    conservative when the producer clock regresses.
 7. **New `/3`, `/9`, and `/7` contracts** — selected because existing formats
-   are allocated and immutable; `/9` extends the current flagship closure.
+   were allocated and immutable, and `/9` appeared to be the next free bundle
+   number extending the current flagship closure. **Amended by the ruling
+   (§13, item 2):** `/9` was already taken, and the composed generation is
+   `/10`, so the bundle side became a registered capability entry and `/7`
+   became that generation's shared claim package. Assembly `/3` stands.
 8. **Do not block on capability composition** — selected because that proposal
-   is unresolved and its planned number conflicts with shipped reality.
+   was unresolved and its planned number conflicted with shipped reality.
+   **Reversed by the ruling (§13, item 2):** composition is now this design's
+   sequencing dependency, and the standing allocation ruling supplies the
+   generation number that the composition document itself still spells from a
+   stale allocation.
 9. **Byte-level claim with explicit residuals** — selected because it makes the
    newly reproducible comparison legible without laundering producer time into
    trusted execution evidence.
-10. **Human approval remains required** — this document is marked proposed and
-    the design lifecycle parks its draft PR rather than self-declaring approval.
+10. **Human approval remains required** — this document was marked proposed and
+    the design lifecycle parked its draft PR rather than self-declaring
+    approval. **Discharged:** the operator ruled on 2026-09-07 and §13 records
+    the outcome. This version is ruled, not proposed.
+
+## 13. Operator rulings
+
+v0.1 posed four contract items and parked for a decision. They are **ruled**.
+Source: the operator comment on
+[#4109](https://github.com/Jinn-Network/mono/pull/4109#issuecomment-5570964693)
+(comment 5570964693), from the 2026-09-07 session, recorded here for the
+implementation packets. None of the four remains a question.
+
+Each block restates the v0.1 item in its original wording so the mapping is
+unambiguous, then records the ruling. The ruling is the operator's meaning. The
+v0.1 pick is historical context only and is not restated as if it were still
+open.
+
+**Item 1 — the assembly event model.**
+
+> `benchmark-product-assembly/3` carries every solve and evaluation pre-submit
+> capture as a journal-ordered event with its producer timestamp and canonical
+> source-entry identity.
+
+**Ruling:** adopted as written. §3 is unchanged, including the event identity
+`(journalIndex, entrySha256)`, the refusal to deduplicate by coordinate, and the
+inclusion of abandoned, rejected, retried, and re-sealed captures.
+
+**Item 2 — where the bundle and claim sides live.**
+
+> `benchmark-product-public-bundle/9` extends the shipped `/8` flagship closure,
+> and `benchmark-product.claim-package/7` carries the derived first/minimum
+> boundary facts.
+
+**Ruling: amended.** `benchmark-product-public-bundle/9` is not available; it is
+allocated to [PR #4090](https://github.com/Jinn-Network/mono/pull/4090)
+(issue #3698). Per the standing allocation ruling and its amendment
+([#3405 comment 5570723386](https://github.com/Jinn-Network/mono/issues/3405#issuecomment-5570723386)),
+the composed/capability generation is `benchmark-product-public-bundle/10` and
+features register as entries inside it. The assembly-header extension therefore
+lands as an entry in `/10`, and `benchmark-product.claim-package/7` is
+coordinated with [PR #4105](https://github.com/Jinn-Network/mono/pull/4105),
+which names it as well. Nothing else in the contract changes. §6 and §9.8 carry
+the amendment; §10 and §11 carry its sequencing and acceptance consequences.
+
+**Item 3 — what selects the upgraded honesty text.**
+
+> Only strict RFC 3161 `genTime <` every published producer capture timestamp
+> selects the upgraded honesty text.
+
+**Ruling:** adopted as written. §7.1's predicate is unchanged: equality does not
+qualify, chain-time anchors and OpenTimestamps block heights do not qualify, and
+pending or matrix-only anchors do not qualify.
+
+**Item 4 — what the claim may and may not say.**
+
+> The claim says only that the encoded times compare in that order. It
+> explicitly does not claim trusted dispatch time, backend receipt/execution
+> ordering, completeness of unmatched local captures, authority independence, or
+> attestation.
+
+**Ruling:** adopted as written. §7.2's exact permitted copy, its allowlist, and
+its denylist are unchanged, and the pre-existing run-before-lock, rehearsal,
+selective-publication, owner-control, agent-distinctness, self-reported-cost,
+and per-axis pinning limitations remain visible alongside it.
