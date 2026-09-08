@@ -96,6 +96,7 @@ import {
 } from "./manifest.js";
 import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V10_FORMAT } from "./manifest.js";
 import {
+  BUNDLE_V6_FORMAT,
   LEGACY_ANCHOR_MEMBER_PATTERN,
   PUBLIC_BUNDLE_FILES,
   PUBLIC_BUNDLE_V4_FILES,
@@ -1944,6 +1945,12 @@ export async function verifyPublicBundleSnapshot(
       : {}),
     ...(assembly.header.rehearsal === undefined ? {} : { rehearsal: assembly.header.rehearsal }),
     ...(claimAnchors === undefined ? {} : { anchors: claimAnchors }),
+    // claim-package/4 admits two reader pins, one per format that carries it (issue #4191), so the
+    // rebuild is told which format the BUNDLE declares. Passed for the two anchored, non-qualifying
+    // formats only — every other closure derives its pin from facts the rebuild already has.
+    ...(declaredFormat === BUNDLE_V6_FORMAT || declaredFormat === BUNDLE_V10_FORMAT
+      ? { anchoredBundleFormat: declaredFormat }
+      : {}),
     ...(claimDisclosure === undefined ? {} : { disclosure: claimDisclosure }),
   });
   checks.push("claim-consistency");
