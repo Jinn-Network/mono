@@ -5,6 +5,7 @@ on:
     branches: [main, next]
     paths:
       - '.github/workflows/indexer-enrichment-ci.yml'
+      - 'packages/contract-abis/**'
       - 'packages/indexer-enrichment/**'
       - 'packages/indexer/**'
       - 'packages/sdk/**'
@@ -18,6 +19,7 @@ on:
     branches: [main, next]
     paths:
       - '.github/workflows/indexer-enrichment-ci.yml'
+      - 'packages/contract-abis/**'
       - 'packages/indexer-enrichment/**'
       - 'packages/indexer/**'
       - 'packages/sdk/**'

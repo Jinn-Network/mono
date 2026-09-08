@@ -152,6 +152,7 @@ jobs:
             '^operator/package\.json$'
             '^operator/yarn\.lock$'
             '^\.github/workflows/jinn-agent-ci\.yml$'
+            '^packages/contract-abis/'
             '^packages/discovery/client/'
             '^packages/discovery/facts/offers/'
             '^packages/discovery/facts/task-execution/'

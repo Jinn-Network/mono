@@ -146,6 +146,7 @@ jobs:
             '^\.github/scripts/publish-layer-stable\.test\.mjs$'
             '^\.github/scripts/verify-layer-stable-version\.mjs$'
             '^docs/runbooks/layer-npm-publishing\.md$'
+            '^packages/contract-abis/'
             '^packages/discovery/client/'
             '^packages/discovery/facts/offers/'
             '^packages/discovery/facts/task-execution/'

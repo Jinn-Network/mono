@@ -17,6 +17,7 @@ on:
       # Transitive `portal:` closure of the workspaces above (#3573). Each is built
       # from source into this lane, so a change confined to one of them changes what
       # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/contract-abis/**"
       - "packages/discovery/protocol/**"
       - "packages/evidence/protocol/**"
       - "packages/marketplace/binding/**"
@@ -38,6 +39,7 @@ on:
       # Transitive `portal:` closure of the workspaces above (#3573). Each is built
       # from source into this lane, so a change confined to one of them changes what
       # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/contract-abis/**"
       - "packages/discovery/protocol/**"
       - "packages/evidence/protocol/**"
       - "packages/marketplace/binding/**"
