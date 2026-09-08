@@ -155,6 +155,15 @@ jobs:
           # `run=`, skip the reusable call, and satisfy the terminal gate's `skipped`
           # arm: green with nothing verified (issue #2456).
           run_value="$(jq -r '.run' <<<"${selection}")"
+          # ...and validated before it is published. `set -e` catches a jq that dies; it
+          # cannot catch one that succeeds with a non-boolean. An empty `selection` makes
+          # jq print nothing and a `.run`-less one makes it print `null`, both at exit 0,
+          # and either value unselects the whole battery through the same `skipped` hop
+          # (issue #4060).
+          case "${run_value}" in
+            true|false) ;;
+            *) echo "::error::selection produced a non-boolean run value: '${run_value}'"; exit 1 ;;
+          esac
           echo "run=${run_value}" >> "${GITHUB_OUTPUT}"
 
   platform-release-surface:

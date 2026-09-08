@@ -237,6 +237,11 @@ const RFC3161_NEGATIVES: readonly {
     mutations: { omitExtendedKeyUsage: true },
   },
   {
+    name: "the timeStamping extended key usage is not critical",
+    family: "§6.1 rule 9",
+    mutations: { nonCriticalExtendedKeyUsage: true },
+  },
+  {
     name: "the tsa field names a subject the signer certificate does not present",
     family: "§6.1 rule 10",
     mutations: { tsaNameMismatch: true },

@@ -1578,3 +1578,47 @@ test('a guard on a function definition does not reach the deferred body (#4000)'
     ['error:head'],
   );
 });
+
+test('a glued trailing `|` or `&` still leaves the next word in command position (#4067)', () => {
+  // `shellTokens` keeps a single `|` or `&` inside the word it is glued to, so `cat f|`
+  // is one token and the `COMMAND_POSITION_WORDS` lookup — which tests the whole value —
+  // missed it. The compound keyword after the pipe was demoted to an argument, the
+  // compound never matched, and the `|| true` guarding it was lost.
+  for (const line of [
+    'cat f| while read -r l; do producer | head -1; done || true',
+    'true| case "$x" in a) producer | head -1 ;; esac || true',
+    'true| if true; then producer | head -1; fi || true',
+    'true| for i in 1; do producer | head -1; done || true',
+    'true 2>&1| while read -r l; do producer | head -1; done || true',
+    '{ echo a; }| while read -r l; do producer | head -1; done || true',
+    'true& case "$x" in a) producer | head -1 ;; esac || true',
+  ]) {
+    assert.deepEqual(severities(line, { shell: 'bash' }), [], line);
+  }
+
+  // The glue survives the logical-line join, so the trailing-pipe continuation style
+  // reaches the same rule.
+  assert.deepEqual(
+    severities(
+      ['cat f|', 'while read -r l; do', '  producer | head -1', 'done || true'].join('\n'),
+      { shell: 'bash' },
+    ),
+    [],
+  );
+
+  // A literal `|`/`&` ending a word is not shell syntax, so it does not open a command
+  // position: the reserved word after it stays an argument, which is what #4015 fixed.
+  for (const bare of ['echo a\\| case', 'echo a\\& case', 'echo "a|" case', "echo 'a|' case"]) {
+    assert.deepEqual(
+      severities(['(', `  ${bare}`, '  producer | head -1', ') || true'].join('\n'), { shell: 'bash' }),
+      [],
+      bare,
+    );
+  }
+
+  // A genuinely unguarded pipeline after a glued pipe still reports.
+  assert.deepEqual(
+    severities('cat f| while read -r l; do producer | head -1; done', { shell: 'bash' }),
+    ['error:head'],
+  );
+});

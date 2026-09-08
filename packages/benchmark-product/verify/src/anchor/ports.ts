@@ -32,11 +32,6 @@
  *   `SignerInfo.sid` naming a serial whose leading octet has the high bit set.
  *   Everything Node *does* expose exactly -- the SubjectPublicKeyInfo export,
  *   the validity dates, the extended key usage list -- comes from Node.
- * - **Extension criticality is not checkable here.** `X509Certificate` surfaces
- *   no criticality flags, so §6.1 rule 9's "sole usage" half is enforced and its
- *   "critical" half is not. The gap is recorded (design §16, issue #2761) rather
- *   than papered over with a hand-rolled extension parser.
- *
  * Every port follows the package's port convention: one object argument, plain
  * data in and out, and a `try`/`catch` that answers `false` rather than
  * throwing -- a platform refusal is an answer, not an exception the rule engine
@@ -76,6 +71,7 @@ import type {
 
 const OID_EXT_SUBJECT_KEY_IDENTIFIER = "2.5.29.14";
 const OID_EXT_SUBJECT_ALT_NAME = "2.5.29.17";
+const OID_EXT_EXTENDED_KEY_USAGE = "2.5.29.37";
 const OID_MGF1 = "1.2.840.113549.1.1.8";
 
 const CONTEXT_CONSTRUCTED_0 = 0xa0;
@@ -267,6 +263,17 @@ function extensionValue(extensions: readonly DerElement[], oid: string): Uint8Ar
   return undefined;
 }
 
+/** The `critical BOOLEAN DEFAULT FALSE` field. DER omits the default, so only
+ * an explicitly encoded TRUE makes an extension critical. */
+function extensionCritical(extensions: readonly DerElement[], oid: string): boolean {
+  for (const extension of extensions) {
+    const parts = children(extension);
+    if (readDerOid(parts[0]!) !== oid) continue;
+    return parts[1]?.identifier === DER_TAG.BOOLEAN && parts[1].content[0] === 0xff;
+  }
+  return false;
+}
+
 /** Calendar-strict RFC 3339 UTC at second precision -- the spelling every other
  * trust instant uses, so one comparator judges them all. `toISOString` would add
  * a `.000` fraction that says nothing the seconds do not. */
@@ -309,6 +316,10 @@ export const anchorCertificateReader: AnchorCertificateReader = {
       // Node names the extended-key-usage OID array `keyUsage`; the key-usage
       // bit string is `X509Certificate.keyUsage`'s neighbour and is not this.
       extendedKeyUsageOids: certificate.keyUsage ?? [],
+      extendedKeyUsageCritical: extensionCritical(
+        structural.extensions,
+        OID_EXT_EXTENDED_KEY_USAGE,
+      ),
       subjectNames: [
         encodeDerElement(GENERAL_NAME_DIRECTORY, structural.subjectDer),
         ...(subjectAltName === undefined
@@ -403,9 +414,8 @@ export const anchorChainVerifier: AnchorChainVerifier = {
  * required before the name check, and the signature is verified after it,
  * because `checkIssued` proves relationship and not authorship.
  *
- * **Disclosed gaps**, in the style §16 uses for the extension-criticality gap
- * (issue #2761's family): this walk checks issuance, key usage, basic
- * constraints, and validity at the caller's instant. It does **not** check
+ * **Disclosed gaps:** this walk checks issuance, key usage, basic constraints,
+ * and validity at the caller's instant. It does **not** check
  * revocation (no CRL or OCSP is fetched -- acquisition never runs at
  * verification time, §4.3), `pathLenConstraint`, or name constraints. A verifier
  * that needs those runs its own path validation over the same carried chain;
