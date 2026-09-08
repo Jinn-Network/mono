@@ -36,6 +36,8 @@ import {
   REPORT_PROSE_RULES,
   REPORT_PROSE_WORD_CEILINGS,
   authoredReportProse,
+  authoredReportProseBlocks,
+  reportProseStatements,
   reportProseWordCount,
   reviewReportProse,
   unreviewedReportProse,
@@ -312,9 +314,9 @@ describe("the published report page", () => {
 
 /**
  * The pairwise branch's own frozen list, in the same register as `FROZEN_REPORT_PROSE_FINDINGS`
- * and read off a real run of the review, not transcribed from a design. Three of the five restate
- * the published page's own entries and cross-reference their rulings; the fourth is a defect this
- * review is the first thing to see.
+ * and read off a real run of the review, not transcribed from a design. Four of the five restate
+ * entries the published page already carries and cross-reference their rulings; the third is a
+ * defect this review is the first thing to see.
  */
 const PAIRWISE_PROFILE_FINDINGS: readonly FrozenReportProseFinding[] = [
   {
@@ -419,7 +421,35 @@ describe.each([
   });
 });
 
-describe.each(["wilson", "pairwise", "binary"] as const)("%s prose length", (profile) => {
+/**
+ * The cost `reviewReportProse` names for counting repetition over paragraphs and captions only:
+ * "a fact a heading genuinely does restate goes unreported here", true so long as no heading
+ * carries the text of a paragraph or caption. That is a claim about the rendered pages, not about
+ * the rule, so nothing in the rule can hold it -- this does, on every profile the review gates.
+ * A revision that moves a paragraph's sentence into a heading fails here instead of going quiet.
+ */
+describe.each(
+  Object.keys(REPORT_PROSE_WORD_CEILINGS) as readonly ReportPresentationProfile[],
+)("%s headings", (profile) => {
+  test("restate no paragraph or caption statement", () => {
+    const blocks = authoredReportProseBlocks(profilePage[profile]);
+    const stated = new Set(
+      blocks.filter(({ tag }) => tag === "p" || tag === "caption")
+        .flatMap(({ text }) => reportProseStatements(text)),
+    );
+    expect(stated.size).toBeGreaterThan(0);
+    const restated = blocks.filter(({ tag }) => /^h[1-4]$/u.test(tag))
+      .flatMap(({ text }) => reportProseStatements(text))
+      .filter((statement) => stated.has(statement));
+    expect(restated).toEqual([]);
+  });
+});
+
+// Enumerated from the ceilings themselves rather than written down, so a fourth profile cannot
+// gain a page and a ceiling without also gaining the test that holds it.
+describe.each(
+  Object.keys(REPORT_PROSE_WORD_CEILINGS) as readonly ReportPresentationProfile[],
+)("%s prose length", (profile) => {
   test("does not grow past the pinned prose ceiling", () => {
     expect(reportProseWordCount(profilePage[profile])).toBeLessThanOrEqual(REPORT_PROSE_WORD_CEILINGS[profile]);
   });

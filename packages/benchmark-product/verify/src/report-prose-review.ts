@@ -75,21 +75,27 @@ const NARRATED_CONTROL_SIGNS: readonly { readonly label: string; readonly patter
 ];
 
 /**
- * Element content the page derives from a sealed record rather than authoring: every table and
- * list cell, and every disclosure control's interior. Reviewing record text would report findings
- * against bytes this product cannot rewrite.
+ * Element content the page fills from a sealed record rather than authoring: every table and list
+ * cell, and every disclosure control's interior. Reviewing record text would report findings
+ * against bytes this product cannot rewrite. The strip is drawn by element, so it also takes the
+ * fixed labels those elements carry -- `comparisonCellDetailsHtml`'s `<h4>` headings, and the
+ * `No solve output.` / `No verdict evidence.` empty-list fallbacks -- which are authored. That is
+ * the cost of a boundary a regex can draw at all, and the next paragraph is how it is paid.
  *
  * `details` carries its always-visible `summary` with it, which needs its own reason -- a label a
  * reader sees before opening anything is not hidden by being inside a closed control. The reason
  * is what that label is: the product renders exactly one `<summary>`, in `assets.ts`'s
- * `comparisonCellDetailsHtml`, and fills it entirely from record values -- arm id, task digest
- * prefix, replicate, primary score. It is the disclosure row's label, the same content class as
- * the `<td>` it stands in for, and `report-prose-review.test.ts` rebuilds every one of them from
- * the verified comparison to hold it to that.
+ * `comparisonCellDetailsHtml`, from record values -- arm id, task digest prefix, replicate,
+ * primary score, or `cellScore`'s `No primary score` where a cell has none. It is the disclosure
+ * row's label, the same content class as the `<td>` it stands in for, and
+ * `report-prose-review.test.ts` rebuilds every one of them from the verified comparison to hold
+ * it to that.
  *
  * What the strip removes is not silent either way: `unreviewedReportProse` enumerates it and each
- * profile pins the result, so an authored sentence that lands inside a data-bearing element is
- * reported rather than dropped without trace.
+ * profile pins the result, so an authored-shaped *block* that lands inside a data-bearing element
+ * is reported rather than dropped without trace. Bare text -- a sentence written straight into an
+ * `<li>` with no block element around it -- is indistinguishable from record text by element
+ * alone, and is neither reviewed nor reported.
  */
 const DATA_BEARING = /<(li|dd|dt|td|th|details)\b[^>]*>[\s\S]*?<\/\1>/giu;
 const VERBATIM = /<(style|script|pre|code)\b[^>]*>[\s\S]*?<\/\1>/giu;
@@ -112,10 +118,22 @@ function blockText(inner: string): string {
   return decodeEntities(inner.replace(/<[^>]*>/gu, " ")).replace(/\s+/gu, " ").trim();
 }
 
-/** The authored blocks with the tag that carried them, so a rule can pick its own corpus. */
-function proseBlocks(html: string): readonly { readonly tag: string; readonly text: string }[] {
+/** One authored block, with the tag that carried it, so a rule can pick its own corpus. */
+export interface AuthoredProseBlock {
+  /** Lowercased tag name: `p`, `h1`-`h4`, or `caption`. */
+  readonly tag: string;
+  readonly text: string;
+}
+
+/**
+ * The authored blocks with the tag that carried them. Exported for the same reason
+ * `authoredReportProse` is: the repetition rule reads paragraphs and captions only, and a test
+ * that wants to hold that restriction to its stated cost needs the corpus the rule reads rather
+ * than a second approximation of it.
+ */
+export function authoredReportProseBlocks(html: string): readonly AuthoredProseBlock[] {
   const stripped = html.replace(VERBATIM, " ").replace(DATA_BEARING, " ");
-  const blocks: { readonly tag: string; readonly text: string }[] = [];
+  const blocks: AuthoredProseBlock[] = [];
   for (const match of stripped.matchAll(AUTHORED)) {
     const text = blockText(match[2]!);
     if (text !== "") blocks.push({ tag: match[1]!.toLowerCase(), text });
@@ -129,7 +147,7 @@ function proseBlocks(html: string): readonly { readonly tag: string; readonly te
  * the rules read, not a second approximation of it.
  */
 export function authoredReportProse(html: string): readonly string[] {
-  return proseBlocks(html).map((block) => block.text);
+  return authoredReportProseBlocks(html).map((block) => block.text);
 }
 
 /** Why a block the rules never see was passed over. */
@@ -180,8 +198,11 @@ export function reportProseWordCount(html: string): number {
  * One statement: a sentence, or a clause a semicolon joined to one. The page states "No
  * comparative winner is stated" once as a clause and once as a sentence, so a splitter that only
  * saw full stops would miss the repetition the external reader actually hit.
+ *
+ * Exported for the same reason the corpus is: a caller holding the repetition rule to its stated
+ * cost has to normalize a block exactly as the rule does, not nearly as it does.
  */
-function statements(block: string): readonly string[] {
+export function reportProseStatements(block: string): readonly string[] {
   return block
     .split(/(?<=[.!?;])\s+|;\s*/u)
     .map((part) => part.replace(/[.!?;:,]+$/u, "").replace(/\s+/gu, " ").trim().toLowerCase())
@@ -193,7 +214,7 @@ function statements(block: string): readonly string[] {
  * order, so a caller comparing against a frozen list compares a stable sequence.
  */
 export function reviewReportProse(html: string): readonly ReportProseFinding[] {
-  const blocks = proseBlocks(html);
+  const blocks = authoredReportProseBlocks(html);
   const findings: ReportProseFinding[] = [];
 
   const occurrences = new Map<string, number>();
@@ -209,7 +230,7 @@ export function reviewReportProse(html: string): readonly ReportProseFinding[] {
   for (const block of blocks.filter(({ tag }) => tag === "p" || tag === "caption")) {
     // Counted per occurrence rather than per block: a paragraph that makes the same statement
     // twice is the defect, not an exemption from it.
-    for (const statement of statements(block.text)) {
+    for (const statement of reportProseStatements(block.text)) {
       const seen = occurrences.get(statement);
       if (seen === undefined) order.push(statement);
       occurrences.set(statement, (seen ?? 0) + 1);
@@ -233,6 +254,8 @@ export function reviewReportProse(html: string): readonly ReportProseFinding[] {
     // somewhere else on the page" already covers it, and a fourth rule would only reorder
     // findings. Emitted from this loop rather than a later one so the sequence stays one stable
     // first-appearance order.
+    // Reached only when `count === 1`: a statement that is both duplicated and the tail of a
+    // longer one reports the duplication alone, so one statement yields at most one finding.
     const host = order.find((other) => other !== statement && other.endsWith(` ${statement}`));
     if (host !== undefined) {
       findings.push({
