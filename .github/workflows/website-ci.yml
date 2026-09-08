@@ -17,6 +17,10 @@ on:
       - "docs/design/jinn-design-system/project/colors_and_type.css"
       - "docs/design/jinn-design-system/project/foundations.css"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 

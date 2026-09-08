@@ -131,6 +131,10 @@ on:
       # suite even when no package source moves.
       - "docs/superpowers/plans/demo-report-1/**"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
