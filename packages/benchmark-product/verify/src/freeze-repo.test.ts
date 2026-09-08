@@ -706,8 +706,10 @@ describe("the SPDX licence expression grammar", () => {
     const deep = `${"(".repeat(10000)}MIT${")".repeat(10000)}`;
     expect(isSpdxLicenseExpression(deep)).toBe(false);
     expect(spdxLicenseProblem(deep)).toMatch(/nests parentheses/);
-    // Inclusive at the cap, so the boundary is pinned and not merely "somewhere near 64".
+    // Both sides of the boundary, so the cap is pinned at 64 and not merely "somewhere below
+    // 10000": accepting at the cap and refusing one past it fails under any other value.
     expect(isSpdxLicenseExpression(`${"(".repeat(64)}MIT${")".repeat(64)}`)).toBe(true);
+    expect(isSpdxLicenseExpression(`${"(".repeat(65)}MIT${")".repeat(65)}`)).toBe(false);
     // The rule is depth, not group count: a flat expression of any length is untouched. Real SPDX
     // expressions nest one or two deep, so the cap refuses nothing anyone writes.
     expect(spdxLicenseProblem("(MIT) AND (Apache-2.0) AND (CC0-1.0)")).toBeUndefined();

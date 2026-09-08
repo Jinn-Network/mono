@@ -215,8 +215,8 @@ const SPDX_IDSTRING = /^[A-Za-z0-9][A-Za-z0-9.-]*$/u;
  * value nesting deeply enough exhausts the stack and leaves as a RangeError instead of a boolean
  * or a typed refusal (issue #3898). Measured on this Node build the cliff is between 4000 and
  * 6000, and it moves with the caller's own stack depth, so the cap sits far below it rather than
- * near it: a real SPDX expression nests one or two deep, which leaves ~60x headroom above
- * anything anyone writes and ~60x clearance below anything that breaks.
+ * near it: a real SPDX expression nests one or two deep, so 64 leaves 30x headroom above anything
+ * anyone writes and ~60x clearance below anything that breaks.
  */
 const SPDX_MAX_NESTING_DEPTH = 64;
 
@@ -315,11 +315,12 @@ export function isSpdxLicenseExpression(value: string): boolean {
  * outside them can reach a rendered file to be recognized by anyone else.
  *
  * Case-insensitive for the same reason the class reaches past U+007F: the readers that matter are.
- * SPDX 2.3 §D.1 writes the tag one way, but ScanCode, REUSE, and the licence scanners built on
- * them match it without regard to case, so `spdx-license-identifier: GPL-3.0-only` is a second
- * licence tag to every one of them even though this guard saw a string SPDX does not spell. A
- * legitimate field beginning `spdx-anything:` is refused with it, which is the guard's stated job
- * (issue #4053).
+ * SPDX 2.3 Annex E writes the source-file tag one way, but the licence scanners that read it match
+ * it case-insensitively, so `spdx-license-identifier: GPL-3.0-only` is a second licence tag to
+ * them even though this guard saw a string SPDX does not spell. Under `iu` the fold reaches a
+ * little past ASCII case — U+017F matches `S`, U+212A matches `K` — which refuses more, not
+ * less, and so runs the same way the rest of this guard does. A legitimate field beginning
+ * `spdx-anything:` is refused with it, which is the guard's stated job (issue #4053).
  */
 const SPDX_TAG_LINE = /^[ \t]*SPDX-[A-Za-z][A-Za-z0-9-]*[ \t]*:/iu;
 
