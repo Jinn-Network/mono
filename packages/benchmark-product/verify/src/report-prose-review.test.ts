@@ -27,7 +27,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
 import { buildPublicAssets, type PublicAssetInput } from "./assets.js";
 import type { PublicComparisonCell } from "./comparison.js";
 import { verifyPublicBundleSnapshot } from "./verify.js";
@@ -54,6 +54,13 @@ const publishedPage = readFileSync(join(GOLDEN_DIR, "index.html"), "utf8");
  * assets to prove a refusal), so one snapshot verification serves the whole file.
  */
 const { comparison } = await verifyPublicBundleSnapshot(GOLDEN_DIR);
+
+/**
+ * The cells every expectation below derives from. Named and asserted once: an empty list would
+ * make the derived expectations pass against a page rendering no comparison section at all, which
+ * is the one way those tests could go quiet without failing.
+ */
+const comparisonCells = comparison?.cells ?? [];
 
 /**
  * The golden bundle's asset input, rebuilt from the bundle's own stored records exactly as
@@ -156,7 +163,7 @@ const profilePage: Record<ReportPresentationProfile, string> = {
   wilson: new TextDecoder().decode(buildPublicAssets(goldenAssetInput())["index.html"]!),
   // Keeps `comparison`: a pairwise bundle is non-binary, so the producer derives one for it.
   pairwise: new TextDecoder().decode(buildPublicAssets(methodInput(
-    "jinn.benchmarking.method/pairwise-disagreement",
+    BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
     {
       pairs: [{
         armA: BINARY_ARM_IDS[0], armB: BINARY_ARM_IDS[1], n: 6, disagreements: 1,
@@ -169,7 +176,7 @@ const profilePage: Record<ReportPresentationProfile, string> = {
   // Omits `comparison` and carries `binaryQualification` instead -- the qualification-projecting
   // profile's own shape, matching what the verifier assembles for it.
   binary: new TextDecoder().decode(buildPublicAssets(methodInput(
-    "jinn.benchmarking.method/binary-instrument",
+    BENCHMARKING_METHOD_IDS.binaryInstrument,
     binaryQualificationResults(),
     {
       comparison: undefined,
@@ -435,6 +442,10 @@ function summaryLabel(cell: PublicComparisonCell): string {
 }
 
 describe("unreviewedReportProse", () => {
+  test("the golden bundle verifies to a non-empty comparison", () => {
+    expect(comparisonCells.length).toBeGreaterThan(0);
+  });
+
   // The comparison section is the only place the product nests authored-shaped blocks inside a
   // data-bearing element, and it renders one disclosure control per verified cell -- so the whole
   // expected list is derived from the cells rather than written down.
@@ -442,7 +453,7 @@ describe("unreviewedReportProse", () => {
     "reports exactly the authored blocks the %s page's data-bearing strip removes",
     (profile) => {
       expect(unreviewedReportProse(profilePage[profile])).toEqual(
-        (comparison?.cells ?? []).flatMap((cell) => [
+        comparisonCells.flatMap((cell) => [
           { reason: "disclosure-summary", text: summaryLabel(cell) },
           { reason: "nested-in-data-bearing", text: cell.outputSummary },
           { reason: "nested-in-data-bearing", text: "Authenticated outputs" },
@@ -462,7 +473,7 @@ describe("unreviewedReportProse", () => {
     expect(unreviewedReportProse(profilePage.wilson)
       .filter((entry) => entry.reason === "disclosure-summary")
       .map((entry) => entry.text))
-      .toEqual((comparison?.cells ?? []).map(summaryLabel));
+      .toEqual(comparisonCells.map(summaryLabel));
   });
 
   test("reports an authored block nested in a list item, and reviews none of it", () => {

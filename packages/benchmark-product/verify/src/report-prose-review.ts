@@ -147,14 +147,17 @@ export type UnreviewedProseReason = "nested-in-data-bearing" | "disclosure-summa
  *
  * Derived from inside the same strip `authoredReportProse` runs, over the same `blockText`, so
  * the two corpora are complementary by construction rather than because two regexes happen to
- * agree. (`DATA_BEARING` is not nesting-aware; no rendered asset nests one data-bearing element
- * inside another today, and this function inherits that limitation rather than introducing it.)
+ * agree. (`DATA_BEARING` matches lazily to the first close tag of the kind it opened on, so it
+ * spans a nest of two *different* kinds correctly -- `comparisonCellDetailsHtml` puts `<li>`s
+ * inside its `<details>`, which is one -- and would truncate only on a same-kind nest such as an
+ * `<li>` inside an `<li>`. No rendered asset nests a data-bearing element inside another of its
+ * own kind, and this function inherits that limitation rather than introducing it.)
  */
 export function unreviewedReportProse(
   html: string,
 ): readonly { readonly reason: UnreviewedProseReason; readonly text: string }[] {
   const dropped: { readonly reason: UnreviewedProseReason; readonly text: string }[] = [];
-  html.replace(VERBATIM, " ").replace(DATA_BEARING, (span) => {
+  for (const [span] of html.replace(VERBATIM, " ").matchAll(DATA_BEARING)) {
     for (const match of span.matchAll(AUTHORED_OR_SUMMARY)) {
       const text = blockText(match[2]!);
       if (text === "") continue;
@@ -163,8 +166,7 @@ export function unreviewedReportProse(
         text,
       });
     }
-    return " ";
-  });
+  }
   return dropped;
 }
 
@@ -199,8 +201,11 @@ export function reviewReportProse(html: string): readonly ReportProseFinding[] {
   // Statements are counted over paragraphs and table captions only. A heading labels the block
   // beneath it rather than stating a fact, and `binaryFactsHtml` emits one heading per arm per
   // source section -- so counting headings would report the page's structure ("arm-a",
-  // "Registered configuration", "Every candidate-class bucket") as repeated facts. The other two
-  // rules still read every block, so an imperative heading is still narration.
+  // "Registered configuration", "Every candidate-class bucket") as repeated facts. The cost is
+  // real and one-sided: a fact a heading genuinely does restate goes unreported here. It buys the
+  // rule back its signal, and no heading on any reviewed profile currently carries the text of a
+  // paragraph or caption. The other two rules still read every block, so an imperative heading is
+  // still narration.
   for (const block of blocks.filter(({ tag }) => tag === "p" || tag === "caption")) {
     // Counted per occurrence rather than per block: a paragraph that makes the same statement
     // twice is the defect, not an exemption from it.
@@ -311,7 +316,14 @@ export const FROZEN_REPORT_PROSE_FINDINGS: readonly FrozenReportProseFinding[] =
   },
 ] as const;
 
-/** The method branches `buildIndex` renders a whole page from, one per reviewable profile. */
+/**
+ * The method branches this review reads a whole rendered page from -- the profiles it gates, not
+ * every profile that exists. `assets.ts`'s `methodProjection` dispatches five method ids, and
+ * `paired-delta` and `paired-majority-delta` render authored prose no rule here has ever read.
+ * Gating them means writing a ruling per finding, which is a presentation decision rather than a
+ * review one; naming the gap is what this comment is for, on the same reasoning
+ * `unreviewedReportProse` gives -- a boundary nothing declares is one nobody can argue with.
+ */
 export type ReportPresentationProfile = "wilson" | "pairwise" | "binary";
 
 /**
@@ -330,7 +342,7 @@ export type ReportPresentationProfile = "wilson" | "pairwise" | "binary";
  * deliberate fixture change (a third arm, a third stratum) is re-measured against the fixture,
  * never relaxed to fit.
  */
-export const REPORT_PROSE_WORD_CEILINGS: Record<ReportPresentationProfile, number> = {
+export const REPORT_PROSE_WORD_CEILINGS: Readonly<Record<ReportPresentationProfile, number>> = {
   wilson: 363,
   pairwise: 373,
   binary: 425,
