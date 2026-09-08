@@ -311,8 +311,9 @@ export function isSpdxLicenseExpression(value: string): boolean {
  * `U+2029`, and Java's `String.lines()` breaks on the same set, so a tag after any of them is a
  * second licence tag to the reader that matters even though this file saw one line.
  *
- * The splitter below therefore recognizes exactly the terminators the classes admit, and nothing
- * outside them can reach a rendered file to be recognized by anyone else.
+ * Refusing those classes is what makes the tag check below whole: nothing outside them reaches a
+ * rendered file at all, so a terminator this file did not see cannot introduce a line some other
+ * reader would.
  *
  * Case-insensitive for the same reason the class reaches past U+007F: the readers that matter are.
  * SPDX 2.3 Annex E writes the source-file tag one way, but the licence scanners that read it match
@@ -321,21 +322,30 @@ export function isSpdxLicenseExpression(value: string): boolean {
  * little past ASCII case — U+017F matches `S`, U+212A matches `K` — which refuses more, not
  * less, and so runs the same way the rest of this guard does. A legitimate field beginning
  * `spdx-anything:` is refused with it, which is the guard's stated job (issue #4053).
+ *
+ * Unanchored for the same reason. The short-form identifier is specified to live inside a source
+ * comment — `// SPDX-License-Identifier: MIT`, `# SPDX-License-Identifier: MIT` — so a reader
+ * that implements the tag accepts an arbitrary prefix on the line, and a guard that required the
+ * tag to come first (modulo space and tab) refused none of the forms the tag is actually written
+ * in: not a commented one, not one after a leading NBSP, and not one sitting mid-line in a
+ * single-line field, where no line terminator is needed to reach a rendered file. With no `^`,
+ * `$` or `.` in the pattern the whole value tests the same as its lines would, so there is no
+ * line split here: a tag is refused wherever it sits.
  */
-const SPDX_TAG_LINE = /^[ \t]*SPDX-[A-Za-z][A-Za-z0-9-]*[ \t]*:/iu;
+const SPDX_TAG_LINE = /SPDX-[A-Za-z][A-Za-z0-9-]*[ \t]*:/iu;
 
 function renderableFreeTextProblem(value: string, multiline: boolean): string | undefined {
   // Tab is carried in both cases; CR and LF only where the field is documented as multi-line. CR
   // is admitted there because a citation pasted with CRLF endings is ordinary and the record is
   // already sealed, so refusing it would make such a bundle permanently unexportable — and the
-  // splitter below treats it as the line break it is.
+  // tag check below reads the value whole, so a tag after a CR is refused all the same.
   const forbidden = multiline
     ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u2028\u2029]/u
     : /[\u0000-\u0008\u000A-\u001F\u007F-\u009F\u2028\u2029]/u;
   if (forbidden.test(value)) {
     return "carries a control character or line separator; a freeze repository renders it into generated text and will not emit one";
   }
-  if (value.split(/\r\n|[\n\r]/u).some((line) => SPDX_TAG_LINE.test(line))) {
+  if (SPDX_TAG_LINE.test(value)) {
     return "carries a line that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it";
   }
   return undefined;
@@ -514,13 +524,15 @@ function emptyNode(): TreeNode {
  * `freezeRepoCommitId`, and each of them otherwise yields an oid for a tree no git repository can
  * hold — a worse failure than a refusal, because the number still looks like a commit id.
  *
- * The refusals split across two codes, and the split is the caller's contract (issue #4055). A
- * malformed path — an empty or dot segment, an unpaired surrogate, a NUL — collides with nothing;
- * it is structurally invalid input, which is what `validation` names. Only the two genuine
- * collisions below, where one name is claimed twice, are `conflict`: that code says the write
- * meets existing state, and a caller that retries a `conflict` under another name would retry a
- * malformed path forever. `refuse` carries the offending path on `issues[].path` either way,
- * which is where a caller branches.
+ * The refusals THIS function raises split across two codes, and the split is the caller's
+ * contract (issue #4055). A malformed path — an empty or dot segment, an unpaired surrogate, a
+ * NUL — collides with nothing; it is structurally invalid input, which is what `validation`
+ * names. Only the two genuine collisions below, where one name is claimed twice, are `conflict`
+ * here: for a path, that code would say the write met existing state, and a caller that retries a
+ * `conflict` under another name would retry a malformed path forever. Other refusals elsewhere in
+ * this file carry `conflict` for their own reasons and are not governed by this paragraph.
+ * `refuse` carries the offending path on `issues[].path` either way, which is where a caller
+ * branches.
  */
 function insert(root: TreeNode, path: string, bytes: Uint8Array): void {
   const segments = path.split("/");

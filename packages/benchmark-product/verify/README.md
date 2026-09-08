@@ -81,15 +81,18 @@ for the snapshot-rendering path the CLI actually runs, so a seam typed against t
 document a call the CLI no longer makes.
 
 Two of those three are breaking for an embedder — the `deps.verify` and `deps.freezeRepo` seam
-changes, which stop a supplied stub type-checking; the added export is not. Since then two more
-public seams have moved: `freezeRepoCommitId` raises `validation` where it raised `conflict` for a
-malformed path (an empty or dot segment, an unpaired surrogate, a NUL — none of which collides
-with anything), so a caller branching on `code` sees a code it does not handle; and
-`renderFreezeRepo` refuses a source-manifest descriptor carrying a line terminator, which it
-previously rendered, so a sealed bundle that exported before can stop exporting. Together with
-those and with the `colophon-freeze-repo/1` -> `/2` format bump above, which makes a tree
-published under `/1` report drift, the next published cut is therefore at least 0.3.0, not a patch
-on 0.2.1.
+changes, which stop a supplied stub type-checking; the added export is not. Since then four more
+public behaviours have moved. `freezeRepoCommitId` raises `validation` where it raised `conflict`
+for a malformed path (an empty or dot segment, an unpaired surrogate, a NUL — none of which
+collides with anything), so a caller branching on `code` sees a code it does not handle. The other
+three each refuse a record that exported before, so a sealed bundle can stop exporting:
+`renderFreezeRepo` refuses a source-manifest descriptor carrying a line terminator; it refuses an
+SPDX tag line written in any case and sitting anywhere on the line, where the guard previously
+matched only the canonical casing at a line's start; and `isSpdxLicenseExpression`,
+`spdxLicenseProblem` and the export behind them refuse a licence nesting parentheses more than 64
+deep, which parsed before. Together with those and with the `colophon-freeze-repo/1` -> `/2`
+format bump above, which makes a tree published under `/1` report drift, the next published cut is
+therefore at least 0.3.0, not a patch on 0.2.1.
 
 Bundles are also verifiable without this package: `../EXTERNAL-VERIFICATION.md` specifies
 the external path (openssl plus a dependency-free script, shipped here as

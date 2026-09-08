@@ -128,13 +128,20 @@ function readManifest(tree: ReturnType<typeof renderFreezeRepo>): Record<string,
 /** The typed refusal a call raised, so a test can assert its `code` and `issues` and not only its
  * prose: callers branch on the code, so the code is the part a change must not move silently. */
 function expectRefusal(run: () => unknown): BenchmarkProductError {
+  let raised: unknown;
+  let threw = false;
   try {
     run();
-    throw new Error("expected a refusal");
   } catch (cause) {
-    expect(cause).toBeInstanceOf(BenchmarkProductError);
-    return cause as BenchmarkProductError;
+    threw = true;
+    raised = cause;
   }
+  // Asserted outside the try, because a `throw` placed inside it lands in its own catch and the
+  // test then fails on the type assertion instead: a reader chasing a regression is told
+  // "expected BenchmarkProductError, received Error" when the truth is that nothing was thrown.
+  expect(threw, "expected a refusal").toBe(true);
+  expect(raised).toBeInstanceOf(BenchmarkProductError);
+  return raised as BenchmarkProductError;
 }
 
 describe("freeze repository rendering", () => {
@@ -760,6 +767,43 @@ describe("generated licence text is not writable from a free-text field", () => 
     }
   });
 
+  test("refuses a tag anywhere on the line, because a tag's home is inside a comment", () => {
+    // The short-form identifier is SPECIFIED to live in a source comment -- `// SPDX-License-Identifier: MIT`,
+    // `# SPDX-License-Identifier: MIT` -- so every reader that implements the tag accepts an
+    // arbitrary prefix on the line. A guard anchored at the line start therefore refuses none of
+    // the forms the tag is actually written in, which is the same argument the case-insensitive
+    // match was made for (issue #4053), taken to the prefix axis.
+    for (const citation of [
+      "Acme Bench, 2026.\n# SPDX-License-Identifier: GPL-3.0-only",
+      "Acme Bench, 2026.\n// SPDX-License-Identifier: GPL-3.0-only",
+      // A leading NBSP, which no `[ \t]*` prefix covers.
+      "Acme Bench, 2026.\n\u00a0SPDX-License-Identifier: GPL-3.0-only",
+    ]) {
+      expect(() => renderFreezeRepo(snapshotOf({ benchmark: withBenchmark({ citation }) })), citation)
+        .toThrow(/reads as an SPDX tag/);
+    }
+    // A single-line field needs no line break at all, so the line-terminator refusal that guards
+    // `name` never reaches this one: the tag simply sits after the text the heading renders.
+    expect(() => renderFreezeRepo(snapshotOf({
+      benchmark: withBenchmark({ name: "Bench SPDX-License-Identifier: GPL-3.0-only" }),
+    }))).toThrow(/reads as an SPDX tag/);
+  });
+
+  test("admits a near miss, because the guard reads a tag and not the letters SPDX", () => {
+    // The widened guard still has to be a guard against the TAG. A citation naming an spdx.org
+    // licence page is ordinary provenance, and `SPD X-License:` is not a tag name -- both are
+    // refused by a guard that merely looks for "SPDX", or for a colon, or that ignores the
+    // whitespace inside the name, and neither may be refused here.
+    const tree = renderFreezeRepo(snapshotOf({
+      benchmark: withBenchmark({
+        citation: "Acme Bench, 2026. Licence text: https://spdx.org/licenses/MIT\nSPD X-License: x",
+      }),
+    }));
+    const license = decoder.decode(tree.files.get("LICENSE")!);
+    expect(license).toContain("https://spdx.org/licenses/MIT");
+    expect(license).toContain("SPD X-License: x");
+  });
+
   test("refuses every line separator a licence scanner breaks on, not only the ones JS does", () => {
     // A tag-line check that stops at U+007F is bypassed by every reader that does not. Python's
     // str.splitlines() and Java's String.lines() both break on CR, U+0085, U+2028 and U+2029, so
@@ -794,7 +838,8 @@ describe("generated licence text is not writable from a free-text field", () => 
 
   test("a citation with CRLF line endings is still allowed", () => {
     // The record is sealed, so refusing CRLF would make such a bundle permanently unexportable --
-    // and it buys nothing, because the tag-line check splits on CRLF as well as LF.
+    // and it buys nothing, because the tag-line check reads the whole value and so sees a tag
+    // after a CR exactly as it sees one after an LF.
     const tree = renderFreezeRepo(snapshotOf({
       benchmark: withBenchmark({ citation: "Someone, 2026.\r\nSecond line." }),
     }));
@@ -828,6 +873,10 @@ describe("generated licence text is not writable from a free-text field", () => 
     // a single line and is a tag on its own, so the tag-line guard is the one under test: the two
     // guards stay independent even now that a descriptor refuses line separators outright.
     expect(() => renderFreezeRepo(withSourceUri("SPDX-License-Identifier: GPL-3.0-only")))
+      .toThrow(/reads as an SPDX tag/);
+    // And mid-line, where the descriptor's line-terminator refusal cannot stand in for the tag
+    // guard: `renderNotice` emits the uri on a row of its own, so the whole row is one line.
+    expect(() => renderFreezeRepo(withSourceUri("https://ex.invalid/x SPDX-License-Identifier: GPL-3.0-only")))
       .toThrow(/reads as an SPDX tag/);
   });
 
