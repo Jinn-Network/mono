@@ -10,8 +10,57 @@ import { PRODUCT_BRANDING } from "./profile/branding.js";
 import { COLOPHON_MARK_SVG } from "./profile/branding-assets.js";
 import type { ClaimPackage } from "./profile/claim.js";
 import type { PublicComparisonCell, PublicComparisonView } from "./comparison.js";
+import type { SupportedBundleFormat } from "./manifest.js";
+import { BUNDLE_V10_FORMAT } from "./manifest.js";
+
+/**
+ * One presentation feature a bundle format's report page renders (issue #4191).
+ *
+ * The registry below is what replaces minting a format number per feature. `/9`'s predecessor
+ * shape was one boolean per feature over a total record of formats; that works, but it costs a
+ * format number and a constant every time the page changes. An entry costs neither: the next
+ * presentation feature adds a member here, an entry to `/10`'s array, and a branch in the
+ * renderer — no reader row, no claim pin, no docs row, no viewer branch (operator ruling
+ * 2026-09-05, amended 2026-09-07).
+ *
+ * `report-prose-singularity` is the four rulings of issue #3016: each of the page's statements is
+ * made once, in the highest-priority slot that carries it, and the narrated control is cut.
+ */
+export type PresentationCapability = "report-prose-singularity";
+
+/**
+ * Which presentation capabilities each format's page renders.
+ *
+ * TOTAL over `SupportedBundleFormat` on purpose: a new format is a compile error here until
+ * someone states which page it renders. That is the fence around the one hazard this whole
+ * allocation exists to avoid — new prose leaking into a format someone has already published,
+ * which would break that bundle under the `npx` command printed on its own page.
+ *
+ * Every format but `/10` is empty and must stay empty. A format's array is part of its frozen
+ * closure the moment a bundle in that format is published.
+ */
+export const FORMAT_PRESENTATION_CAPABILITIES: {
+  readonly [F in SupportedBundleFormat]: readonly PresentationCapability[];
+} = {
+  "benchmark-product-public-bundle/2": [],
+  "benchmark-product-public-bundle/4": [],
+  "benchmark-product-public-bundle/5": [],
+  "benchmark-product-public-bundle/6": [],
+  "benchmark-product-public-bundle/7": [],
+  "benchmark-product-public-bundle/8": [],
+  [BUNDLE_V10_FORMAT]: ["report-prose-singularity"],
+};
 
 export interface PublicAssetInput {
+  /**
+   * The bundle format whose page to render. REQUIRED, and never defaulted: a caller that omitted
+   * it would silently get some other format's page, and because the page is byte-pinned the
+   * mistake would surface only as a verification failure against a bundle someone had already
+   * published. The format is what `bundle.json` seals, so it is the only honest key — accepting a
+   * resolved capability set instead would let a caller ask for a page no format defines, which is
+   * reproducible by nobody.
+   */
+  readonly format: SupportedBundleFormat;
   readonly claim: ClaimPackage;
   readonly matrix: MatrixRecord;
   readonly report: ReportRecord;
@@ -601,7 +650,7 @@ function stratumCaption(configuration: Record<string, unknown>): string {
   return `Buckets by stratum (${strata.join(", ")})`;
 }
 
-function binaryFactsHtml(facts: BinaryFacts): string {
+function binaryFactsHtml(facts: BinaryFacts, capabilities: ReadonlySet<PresentationCapability>): string {
   const caption = stratumCaption(facts.qualification.configuration);
   const arms = Object.entries(facts.qualification.arms).map(([armId, arm]) => {
     const rates = ["agreement", "falseAccept", "falseReject", "instability", "parserInvalid"]
@@ -609,17 +658,50 @@ function binaryFactsHtml(facts: BinaryFacts): string {
       .join("");
     return `<section class="binary-arm"><h3>${escapeMarkup(armId)}</h3><p>Instrument <span class="digest">${escapeMarkup(String(arm["instrumentSha256"]))}</span></p><h4>Item, call, and confusion denominators</h4><pre>${escapeMarkup(canonicalText({ item: arm["item"], call: arm["call"], confusion: arm["confusion"] }))}</pre><div class="table-scroll" tabindex="0" role="region" aria-label="${escapeMarkup(armId)} qualification rates"><table><caption>Five registered rates with exact denominators and Wilson intervals</caption><thead><tr><th scope="col">Rate</th><th scope="col">Registered result</th></tr></thead><tbody>${rates}</tbody></table></div><h4>Every candidate-class bucket</h4><pre>${escapeMarkup(canonicalText(arm["byCandidateClass"]))}</pre><h4>${escapeMarkup(caption)}</h4><pre>${escapeMarkup(canonicalText(arm["byStratum"]))}</pre></section>`;
   }).join("");
-  return `<p class="neutral">Qualification facts are presented per instrument without comparative conclusions.</p><h3>Registered configuration</h3><pre>${escapeMarkup(canonicalText(facts.qualification.configuration))}</pre>${arms}<h3>Per-item decisions and instability</h3><pre>${escapeMarkup(canonicalText(facts.qualification.itemDecisions))}</pre><h3>Parser-invalid, infrastructure, and other exclusions</h3><pre>${escapeMarkup(canonicalText(facts.qualification.excluded))}</pre>`;
+  // Ruling 1's second half: this opening sentence is the tail of the claim line `neutralClaimHtml`
+  // already rendered above it, so the composed page drops it. UNREACHABLE in production today --
+  // `/10` mirrors `/6`, which is non-qualifying, so no `/10` bundle renders a binary page -- but
+  // the ruling binds it ("drops it in the same revision"), and the capability entry is what the
+  // next qualification-projecting allocation will register, at which point the drop becomes live
+  // with no further code change. Driven directly by a unit test rather than through a bundle.
+  const opening = capabilities.has("report-prose-singularity")
+    ? ""
+    : '<p class="neutral">Qualification facts are presented per instrument without comparative conclusions.</p>';
+  return `${opening}<h3>Registered configuration</h3><pre>${escapeMarkup(canonicalText(facts.qualification.configuration))}</pre>${arms}<h3>Per-item decisions and instability</h3><pre>${escapeMarkup(canonicalText(facts.qualification.itemDecisions))}</pre><h3>Parser-invalid, infrastructure, and other exclusions</h3><pre>${escapeMarkup(canonicalText(facts.qualification.excluded))}</pre>`;
+}
+
+/**
+ * Does this method's header claim line already carry the page's statement that no comparative
+ * winner is stated?
+ *
+ * The `report-prose-singularity` capability drops that clause from the sample note and the
+ * descriptive comparison line, on ruling 1's premise that "the header claim line becomes the
+ * page's single statement of it". That premise is only true for the two branches of
+ * `neutralClaimHtml` that actually say it. `paired-delta@1` and `paired-majority-delta@1` render
+ * an estimate line instead, which carries no winner disclaimer at all -- so an UNCONDITIONAL drop
+ * would delete the only statement of it from every paired-method page. The golden conformance
+ * fixture is `wilson@1` and would never catch that.
+ *
+ * The rule the composed page implements: the page states it exactly once, in the highest-priority
+ * slot that carries it -- the header when the method's claim line has it, otherwise the
+ * descriptive comparison line. Every other site drops it.
+ */
+function neutralClaimStatesNoWinner(facts: MethodFacts): boolean {
+  return facts.kind === "wilson" || facts.kind === "pairwise-disagreement";
 }
 
 /** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6). The wilson branch is
  * byte-identical to before this dispatch existed -- `armResultTable` itself is untouched. */
-function armResultsHtml(facts: MethodFacts, wilsonCaption: string): string {
+function armResultsHtml(
+  facts: MethodFacts,
+  wilsonCaption: string,
+  capabilities: ReadonlySet<PresentationCapability>,
+): string {
   if (facts.kind === "wilson") return armResultTable(facts, wilsonCaption);
   if (facts.kind === "comparison") return comparisonFactsHtml(facts);
   if (facts.kind === "pairwise-disagreement") return pairwiseDisagreementFactsHtml(facts);
   if (facts.kind === "paired-majority-delta") return pairedMajorityDeltaFactsHtml(facts);
-  return binaryFactsHtml(facts);
+  return binaryFactsHtml(facts, capabilities);
 }
 
 function attritionRows(input: PublicAssetInput): string {
@@ -634,10 +716,22 @@ function cellScore(cell: PublicComparisonCell): string {
     : `${cell.primaryScore.value} ${cell.primaryScore.name} (${cell.primaryScore.direction})`;
 }
 
-function descriptiveComparisonHtml(comparison: PublicComparisonView): string {
+function descriptiveComparisonHtml(
+  comparison: PublicComparisonView,
+  reportFacts: MethodFacts,
+  capabilities: ReadonlySet<PresentationCapability>,
+): string {
   const fact = comparison.descriptiveComparison;
-  if (fact === undefined) return '<p class="neutral">No paired descriptive measurement is available. No comparative winner is stated.</p>';
-  return `<p class="neutral">Across ${fact.pairedCells} paired cells, ${escapeMarkup(fact.firstArm)} had lower ${fact.measurement} in ${fact.lowerByFirst}; ${escapeMarkup(fact.secondArm)} had lower ${fact.measurement} in ${fact.lowerBySecond}; ${fact.ties} tied. Lower is better. This is descriptive evidence, not a registered comparative winner.</p>`;
+  // Dropped only when the header already carries it. `Lower is better.` is the directional caveat,
+  // not a winner statement, and stays in both cases.
+  const winnerClause = capabilities.has("report-prose-singularity")
+    && neutralClaimStatesNoWinner(reportFacts)
+    ? ""
+    : fact === undefined
+      ? " No comparative winner is stated."
+      : " This is descriptive evidence, not a registered comparative winner.";
+  if (fact === undefined) return `<p class="neutral">No paired descriptive measurement is available.${winnerClause}</p>`;
+  return `<p class="neutral">Across ${fact.pairedCells} paired cells, ${escapeMarkup(fact.firstArm)} had lower ${fact.measurement} in ${fact.lowerByFirst}; ${escapeMarkup(fact.secondArm)} had lower ${fact.measurement} in ${fact.lowerBySecond}; ${fact.ties} tied. Lower is better.${winnerClause}</p>`;
 }
 
 function comparisonMatrixHtml(comparison: PublicComparisonView): string {
@@ -661,12 +755,28 @@ function comparisonCellDetailsHtml(comparison: PublicComparisonView): string {
   }).join("");
 }
 
-function comparisonSectionHtml(comparison: PublicComparisonView | undefined): string {
+function comparisonSectionHtml(
+  comparison: PublicComparisonView | undefined,
+  reportFacts: MethodFacts,
+  capabilities: ReadonlySet<PresentationCapability>,
+): string {
   if (comparison === undefined) return "";
+  // The synthetic-sample disclosure itself is untouched; only the winner clause the header already
+  // carries is dropped, and only when it does carry it.
+  const sampleWinnerClause = capabilities.has("report-prose-singularity")
+    && neutralClaimStatesNoWinner(reportFacts)
+    ? ""
+    : " No comparative winner is stated.";
   const sampleDisclosure = comparison.sampleKind === "bundled-prediction"
-    ? '<p class="sample-note">This bundled sample demonstrates the evidence path, not agent quality. Its outcomes are synthetic and derived from the sample consensus inputs. No comparative winner is stated.</p>'
+    ? `<p class="sample-note">This bundled sample demonstrates the evidence path, not agent quality. Its outcomes are synthetic and derived from the sample consensus inputs.${sampleWinnerClause}</p>`
     : "";
-  return `<section id="comparison" aria-labelledby="comparison-heading"><p class="eyebrow">Answer first</p><h2 id="comparison-heading">What happened, task by task</h2>${descriptiveComparisonHtml(comparison)}${sampleDisclosure}${comparisonMatrixHtml(comparison)}<h3>Open a cell to inspect its evidence</h3>${comparisonCellDetailsHtml(comparison)}</section>`;
+  // Ruling 4: cut outright, nothing survives, because nothing was disclosed -- it is an
+  // instruction, the `<details>` controls beneath it are self-evident, and `CLAUDE.md` §Frontends
+  // bans instructions for self-evident controls.
+  const cellDetailsHeading = capabilities.has("report-prose-singularity")
+    ? ""
+    : "<h3>Open a cell to inspect its evidence</h3>";
+  return `<section id="comparison" aria-labelledby="comparison-heading"><p class="eyebrow">Answer first</p><h2 id="comparison-heading">What happened, task by task</h2>${descriptiveComparisonHtml(comparison, reportFacts, capabilities)}${sampleDisclosure}${comparisonMatrixHtml(comparison)}${cellDetailsHeading}${comparisonCellDetailsHtml(comparison)}</section>`;
 }
 
 function comparisonSectionMarkdown(comparison: PublicComparisonView | undefined): string {
@@ -828,7 +938,12 @@ function neutralClaimHtml(facts: MethodFacts): string {
 // (`spec/2026-09-02-report-page-information-architecture.md` section 8). The operator's results
 // page renders the pair today; it is not part of the sealed bundle.
 
-function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
+function buildIndex(
+  input: PublicAssetInput,
+  reportFacts: MethodFacts,
+  claimFacts: MethodFacts,
+  capabilities: ReadonlySet<PresentationCapability>,
+): string {
   const outcome = input.matrix.completeness.runOutcome;
   const status = reportFacts.kind === "binary" ? qualificationOutcomeLabel(outcome) : outcomeLabel(outcome);
   const adverse = adverseFacts(input, reportFacts);
@@ -854,6 +969,18 @@ function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFact
   const rehearsalHtml = rehearsal === undefined
     ? "<p>No product rehearsal is recorded in the stored Claim.</p>"
     : `<p>Preview count: ${rehearsal.previewCount}</p>${list(rehearsal.timestamps, "No timestamps recorded.")}`;
+  // Ruling 2: the non-reconciliation disclosure is a property of the page, not of a section, so it
+  // is stated once -- on `Sealed Matrix accounting`, the FIRST sealed-source section, which keeps
+  // it below -- and the later two source labels end at their authenticated record link. That
+  // shortened shape already exists on this page: the dissent section renders exactly it.
+  const laterSourceSuffix = capabilities.has("report-prose-singularity")
+    ? "."
+    : "; values below are copied without reconciliation.";
+  // Ruling 3: attribution renders once, in the footer imprint. The verification section drops its
+  // copy and ends at the trust root.
+  const verificationAttribution = capabilities.has("report-prose-singularity")
+    ? ""
+    : `<p class="about">${escapeMarkup(PRODUCT_BRANDING.attribution)}</p>`;
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -879,15 +1006,15 @@ ${embeddedFontCss()}
 ${neutralClaimHtml(reportFacts)}
 </header>
 <main>
-<section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>${input.comparison === undefined ? "" : `\n${comparisonSectionHtml(input.comparison)}`}
+<section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>${input.comparison === undefined ? "" : `\n${comparisonSectionHtml(input.comparison, reportFacts, capabilities)}`}
 <section aria-labelledby="scope-heading"><h2 id="scope-heading">Benchmark and configuration scope</h2><dl class="facts"><div><dt>Benchmark digest</dt><dd class="digest">${input.claim.scope.benchmarkSha256}</dd></div><div><dt>Tasks</dt><dd>${input.claim.scope.taskCount}</dd></div><div><dt>Replicates</dt><dd>${input.claim.scope.replicates}</dd></div><div><dt>Venue</dt><dd>${escapeMarkup(input.claim.scope.venue)}</dd></div></dl><h3>Arms and pinned configuration</h3><ul>${arms}</ul></section>${reportFacts.kind === "binary" ? binaryAdmissionHtml(input) : ""}${disclosureSpecificationHtml(input)}
 <section aria-labelledby="matrix-heading"><h2 id="matrix-heading">Sealed Matrix accounting</h2><p class="source-label">Source: authenticated <a href="matrix.json">matrix.json</a>; values below are copied without reconciliation.</p><pre>${escapeMarkup(canonicalText({ completeness: input.matrix.completeness, attrition: input.matrix.attrition }))}</pre><h3>Completeness and attrition</h3><dl class="facts"><div><dt>Matrix run outcome</dt><dd>${escapeMarkup(outcome)}</dd></div><div><dt>Matrix expected</dt><dd>${input.matrix.completeness.expected}</dd></div><div><dt>Matrix judged</dt><dd>${input.matrix.completeness.judged}</dd></div><div><dt>Matrix floor</dt><dd>${escapeMarkup(input.matrix.completeness.floor)}</dd></div></dl><div class="table-scroll" tabindex="0" role="region" aria-label="Per-arm Matrix attrition"><table><caption>Exact per-arm attrition stored in the Matrix</caption><thead><tr><th scope="col">Arm</th><th scope="col">Expected</th><th scope="col">Judged</th><th scope="col">Unjudged</th><th scope="col">Unscorable</th><th scope="col">Expired</th><th scope="col">Invalidated</th><th scope="col">Excluded</th><th scope="col">Replacements</th></tr></thead><tbody>${attritionRows(input)}</tbody></table></div><h3>Matrix asymmetry flags</h3>${list(input.matrix.attrition.asymmetryFlags, "None recorded in the Matrix.")}</section>
-<section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>; values below are copied without reconciliation.</p><h3>${factsHeading(reportFacts, "report")}</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report")}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
-<section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>; values below are copied without reconciliation.</p><h3>${factsHeading(claimFacts, "claim")}</h3>${armResultsHtml(claimFacts, "Exact arm values stored in the Claim package")}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
+<section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>${laterSourceSuffix}</p><h3>${factsHeading(reportFacts, "report")}</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report", capabilities)}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
+<section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>${laterSourceSuffix}</p><h3>${factsHeading(claimFacts, "claim")}</h3>${armResultsHtml(claimFacts, "Exact arm values stored in the Claim package", capabilities)}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
 <section aria-labelledby="dissent-heading"><h2 id="dissent-heading">Verification assembly dissent</h2><p class="source-label">Source: authenticated <a href="verification/assembly.jsonl">verification assembly</a>.</p><dl class="facts"><div><dt>Dissenting cells</dt><dd>${input.dissentCellKeys.length}</dd></div></dl>${list(input.dissentCellKeys, "None recorded in the verification assembly.")}</section>
 <section id="limitations" aria-labelledby="limitations-heading"><h2 id="limitations-heading">Limitations by stored source</h2><h3>Sealed Report limitations</h3>${list(input.report.limitations ?? [], "None recorded in the sealed Report.")}<h3>Stored Claim limitations</h3>${list(input.claim.limitations, "None recorded in the stored Claim.")}<h3>Local self-run trust boundary stored in the Claim</h3><pre>${escapeMarkup(canonicalText(input.claim.venueHonesty))}</pre></section>
 <section aria-labelledby="records-heading"><h2 id="records-heading">Records and exact identities</h2><dl class="facts"><div><dt>Report SHA-256</dt><dd class="digest">${input.reportSha256}</dd></div><div><dt>Matrix SHA-256</dt><dd class="digest">${input.matrixSha256}</dd></div><div><dt>Run SHA-256</dt><dd class="digest">${input.claim.records.runSha256}</dd></div><div><dt>Report envelope SHA-256</dt><dd class="digest">${input.claim.records.reportEnvelopeSha256}</dd></div></dl><h3>Top-level records and catalogs</h3><ul class="compact-list">${topLevelFiles.map(([path, label]) => `<li><a href="${path}">${escapeMarkup(label)} <span class="digest">(${path})</span></a></li>`).join("")}</ul><h3>Every manifest-listed content-addressed record</h3><ul class="compact-list">${casFiles.map((path) => `<li><a href="${path}">CAS record <span class="digest">(${path})</span></a></li>`).join("")}</ul></section>
-<section id="verification" aria-labelledby="verification-heading"><h2 id="verification-heading">Portable verification</h2><p>Copy this entire directory. Reproduce publication with the exact verifier:</p><pre><code>${escapeMarkup(input.claim.verification.command)}</code></pre><p>Use the compatible major line to receive fixes that preserve this bundle-format contract:</p><pre><code>${escapeMarkup(input.claim.verification.compatibleCommand)}</code></pre><h3>Named checks</h3>${list(input.claim.verification.checks, "No checks recorded.")}<h3>Trust root</h3><p>${escapeMarkup(input.claim.verification.trustRoot)}</p><p class="about">${escapeMarkup(PRODUCT_BRANDING.attribution)}</p></section>
+<section id="verification" aria-labelledby="verification-heading"><h2 id="verification-heading">Portable verification</h2><p>Copy this entire directory. Reproduce publication with the exact verifier:</p><pre><code>${escapeMarkup(input.claim.verification.command)}</code></pre><p>Use the compatible major line to receive fixes that preserve this bundle-format contract:</p><pre><code>${escapeMarkup(input.claim.verification.compatibleCommand)}</code></pre><h3>Named checks</h3>${list(input.claim.verification.checks, "No checks recorded.")}<h3>Trust root</h3><p>${escapeMarkup(input.claim.verification.trustRoot)}</p>${verificationAttribution}</section>
 </main>
 <footer><nav aria-label="Report references"><a href="index.html#limitations">Read limitations</a> · <a href="index.html#verification">Verify this report</a></nav><p>Report <span class="digest">${input.reportSha256}</span></p><p class="about">${escapeMarkup(PRODUCT_BRANDING.attribution)}</p></footer>
 </body>
@@ -1217,6 +1344,19 @@ function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): stri
 /** Fixed, deterministic public-bundle/2 presentation bytes. The builder only projects already
  * verified stored facts; it never computes a statistic, selects a winner, or reconciles records. */
 export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<string, Uint8Array>> {
+  // `Object.hasOwn`, and a refusal rather than a default, for the reason `legacyClosure` states:
+  // an unknown format must never be answered from another format's cell, because rendering one
+  // generation's page over another's bytes is exactly the mismatch the byte-pin exists to catch.
+  // TypeScript makes this unreachable for a typed caller, but the callers that build this input in
+  // tests cast it, so no compiler stands between a wrong format string and a wrong page.
+  if (!Object.hasOwn(FORMAT_PRESENTATION_CAPABILITIES, input.format)) {
+    refuse(
+      "record-integrity",
+      "bundle.presentation",
+      `unknown public bundle format "${String(input.format)}" has no presentation capabilities`,
+    );
+  }
+  const capabilities = new Set(FORMAT_PRESENTATION_CAPABILITIES[input.format]);
   const reportFacts = methodProjection(input.report.results, input.report.method, { path: "report.json", label: "sealed Report" });
   const claimFacts = methodProjection(input.claim.results, input.claim.method, { path: "claim-package.json", label: "stored claim package" });
   if ((reportFacts.kind === "binary") !== (input.binaryQualification !== undefined)) {
@@ -1233,7 +1373,7 @@ export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<stri
     );
   }
   return {
-    "index.html": encoder.encode(buildIndex(input, reportFacts, claimFacts)),
+    "index.html": encoder.encode(buildIndex(input, reportFacts, claimFacts, capabilities)),
     "badge.svg": encoder.encode(buildBadge(input, reportFacts)),
     "social-card.svg": encoder.encode(buildSocialCard(input, reportFacts)),
     "README.md": encoder.encode(buildReadme(input, reportFacts, claimFacts)),

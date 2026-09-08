@@ -2001,6 +2001,9 @@ export async function verifyPublicBundleSnapshot(
     })
     : undefined;
   const assetFacts = {
+    // The bundle's own declared format, never a re-derivation: it is what `bundle.json` seals, and
+    // it selects which presentation generation's page the byte-compare below expects.
+    format: checked.manifest.format,
     claim,
     matrix,
     report: verifiedReport.record,
