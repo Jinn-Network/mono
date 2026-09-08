@@ -80,7 +80,8 @@ const NARRATED_CONTROL_SIGNS: readonly { readonly label: string; readonly patter
  * against bytes this product cannot rewrite. The strip is drawn by element, so it also takes the
  * fixed labels those elements carry -- `comparisonCellDetailsHtml`'s `<h4>` headings, and the
  * `No solve output.` / `No verdict evidence.` empty-list fallbacks -- which are authored. That is
- * the cost of a boundary a regex can draw at all, and the next paragraph is how it is paid.
+ * the cost of a boundary drawn by element rather than by judgment; the last paragraph says how
+ * much of it comes back.
  *
  * `details` carries its always-visible `summary` with it, which needs its own reason -- a label a
  * reader sees before opening anything is not hidden by being inside a closed control. The reason
