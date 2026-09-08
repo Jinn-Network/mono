@@ -59,6 +59,7 @@ jobs:
             packages/trust/core/yarn.lock
             packages/benchmarking/records/yarn.lock
             packages/indexer/yarn.lock
+            packages/contract-abis/yarn.lock
       - run: corepack enable
 
       - name: Indexer boundary guard

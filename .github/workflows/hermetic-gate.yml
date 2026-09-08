@@ -268,6 +268,7 @@ jobs:
             contracts/yarn.lock
             packages/lifecycle-notifications/yarn.lock
             apps/operator-console/yarn.lock
+            packages/contract-abis/yarn.lock
       - run: corepack enable
 
       # Foundry provides `anvil` — the snapshot is loaded via `anvil --load-state`

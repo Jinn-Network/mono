@@ -68,6 +68,7 @@ jobs:
             packages/marketplace/projector/yarn.lock
             packages/marketplace/venue-base/yarn.lock
             packages/marketplace/testing/yarn.lock
+            packages/contract-abis/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       # Foundry provides `forge`, required by test/storage-layout.test.ts, which

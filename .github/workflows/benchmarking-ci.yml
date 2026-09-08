@@ -159,6 +159,7 @@ jobs:
             packages/benchmarking/marketplace/yarn.lock
             packages/benchmarking/local/yarn.lock
             packages/benchmarking/publication/yarn.lock
+            packages/contract-abis/yarn.lock
       # A freshly rolled runner image can regress the packed-consumer smoke:
       # node 22.23.2's bundled npm dies with "Cannot read properties of null
       # (reading 'edgesOut')" on yarn-packed tarballs (first seen on the
