@@ -346,7 +346,7 @@ function renderableFreeTextProblem(value: string, multiline: boolean): string | 
     return "carries a control character or line separator; a freeze repository renders it into generated text and will not emit one";
   }
   if (SPDX_TAG_LINE.test(value)) {
-    return "carries a line that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it";
+    return "carries text that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it";
   }
   return undefined;
 }
