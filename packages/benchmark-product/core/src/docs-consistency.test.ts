@@ -24,6 +24,7 @@ import {
   PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V7_CHECKS,
+  PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_CHECKS,
   SUPPORTED_BUNDLE_FORMATS,
   BEACON_SOURCES,
@@ -436,6 +437,41 @@ describe("product documentation consistency", () => {
     expect(refusal.verifierVersion).toBe(
       readerLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND).slice(1),
     );
+  });
+
+  it("cites the constant a `/5` producer actually writes in the metadata-first publication gate", () => {
+    // Issue #4125: the gate paragraph's conclusion is right but its citation was not.
+    // `PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND` is the exact producer-side pin, and its own
+    // doc-comment says no `/5` bundle carries it; the line claim-package/3 actually states is the
+    // compatible constant. A contributor following the wrong citation lands on the one constant the
+    // source tells them not to read for this question.
+    const guide = read(bundleReadmePath);
+    const paragraph = guide
+      .split(/\n\s*\n/u)
+      .find((block) => block.includes("That is also the publication gate."));
+    expect(paragraph, "metadata-first publication gate paragraph").toBeTypeOf("string");
+    expect(paragraph).toContain("PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND");
+    expect(paragraph).not.toContain("`PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND`");
+  });
+
+  it("never tells a reader the published verifier is unpublished", () => {
+    // Issue #4126: the product README held `@colophon-claims/verify` behind the same publication
+    // hold as `cli` and `core` long after it shipped. The registry is not reachable from a unit
+    // test, but the repository's own sealed reader lines are: every claim this tree builds pins a
+    // `verify` release, and the publish workflow refuses a version npm has never served. So a
+    // sentence naming `verify` as unpublished contradicts the constants imported here.
+    const readme = read(productReadmePath);
+    const unpublishedClaims = readme
+      .split(/\n\s*\n/u)
+      .filter((block) => /unpublished|\bnot\b(?:\s+\w+){0,2}\s+published/iu.test(block));
+    expect(unpublishedClaims.length, "README states its publication holds").toBeGreaterThan(0);
+    for (const block of unpublishedClaims) {
+      expect(block, block).not.toContain("@colophon-claims/verify");
+    }
+    // The reader surface the README sends people to is a registry command, so the README has to
+    // say so rather than leaving it under the hold.
+    expect(readme).toMatch(/`@colophon-claims\/verify` is published/u);
+    expect(readme).toContain(readerLine(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND).slice(1));
   });
 
   it("documents the exact private web configuration and package commands", () => {

@@ -41,4 +41,6 @@ The following principles spring from that.
 ## Legible
 
 - every claim we make about ourselves must be independently and robustly verifiable — on-chain where possible
+- where a claim cannot be anchored on-chain, it is Legible only if a third party can check it with their own tools from the artifact's own bytes, without running ours
+- an artifact that carries a claim must also state what it does not prove; an unstated limit is an unverifiable claim (see [`packages/benchmark-product/EXTERNAL-VERIFICATION.md`](packages/benchmark-product/EXTERNAL-VERIFICATION.md), which tabulates what its bundles prove, what only the reference verifier proves, and what no tool proves)
 - verification of claims takes the above principles from the realm of private belief into common knowledge; without common knowledge of Jinn's state, we cannot become the most legitimate network

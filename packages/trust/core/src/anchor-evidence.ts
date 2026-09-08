@@ -96,9 +96,11 @@ function decodeProofContent(content: string): ProofContentDecode {
 // Schema (§5). Strict at every level.
 // ---------------------------------------------------------------------------
 
-/** Same absolute-IRI test `AgentIriSchema` applies (spellings.ts), stated
+/** Same absolute-IRI test `AgentIriSchema` applies (spellings.ts), plus a
+ * control-character ban because these values can appear in diagnostics. Stated
  * locally so the anchor record's URI fields carry no agent-identity meaning. */
 function isAbsoluteUri(value: string): boolean {
+  if (/[\u0000-\u001f\u007f-\u009f]/u.test(value)) return false;
   try {
     return new URL(value).protocol.length > 1;
   } catch {

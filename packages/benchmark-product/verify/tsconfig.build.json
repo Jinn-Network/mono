@@ -1,4 +1,7 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["src/**/*.test.ts", "src/**/testing/**"]
+  // `report-prose-review.ts` is a build-time review of the page this package renders, not part of
+  // the verifier a consumer runs. Excluded for the same reason the tests are: nothing unreachable
+  // should reach the published tarball. `tsconfig.json` still typechecks it.
+  "exclude": ["src/**/*.test.ts", "src/**/testing/**", "src/report-prose-review.ts"]
 }
