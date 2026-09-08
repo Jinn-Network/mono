@@ -17,8 +17,9 @@ step 7 unfinished.
 ## Before this deploy PR merges
 
 - [ ] Rollback pin recorded above, verified installable (`npm view` the exact specifier)
-- [ ] Deterministic blocking CI is green on the exact train SHA:
-      `cd operator && yarn test:hermetic`
+- [ ] Deterministic blocking CI is green on the exact train SHA — **both**
+      required contexts: `operator-ci-gate` (`cd operator && yarn test`, the full
+      client suite) and `hermetic-gate` (`cd operator && yarn test:hermetic`)
 - [ ] Operator-run, non-CI live-fork evidence is green on the exact train SHA in
       **both** modes:
   - legacy: `cd operator && JINN_E2E_MODE=legacy yarn e2e:daemon-harness`
@@ -28,7 +29,7 @@ step 7 unfinished.
       body. The scheduled/manual
       [`native-e2e-rig`](../../.github/workflows/native-e2e-rig.yml) is
       supplemental advisory evidence; it does not replace either operator-run
-      result or blocking hermetic CI.
+      result or the deterministic blocking CI contexts above.
 - [ ] Config auto-migration round-trip verified on a copy of a real fleet
       `config.json` (additive, atomic, idempotent; pinned generation still boots from
       the migrated file — contract 4)
