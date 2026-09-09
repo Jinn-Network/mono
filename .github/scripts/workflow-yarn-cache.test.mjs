@@ -227,17 +227,27 @@ function matrixValues(lines, variable) {
   return values;
 }
 
-function expandWorkingDirectories(value, jobLines) {
+// Every expansion here can nest, and a workflow is untrusted input on the pull_request
+// lane. An expansion that runs away returns nothing, which the callers already read as
+// "could not derive" — the fail-closed direction — rather than exhausting the stack or
+// the heap and taking the whole guard down with it.
+const maxExpansionDepth = 32;
+const maxDirectoryCandidates = 64;
+
+function expandWorkingDirectories(value, jobLines, depth = 0) {
+  if (depth > maxExpansionDepth) return [];
   const workspaceExpanded = value.replace(/\$\{\{\s*github\.workspace\s*\}\}/gu, '.');
   const expressionPattern = /\$\{\{\s*matrix\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}/u;
   const match = workspaceExpanded.match(expressionPattern);
   if (!match) return workspaceExpanded.includes('${{') ? [] : [workspaceExpanded];
 
   const values = matrixValues(jobLines, match[1]);
-  return values.flatMap((entry) => expandWorkingDirectories(
+  const expanded = values.flatMap((entry) => expandWorkingDirectories(
     workspaceExpanded.replace(expressionPattern, entry),
     jobLines,
+    depth + 1,
   ));
+  return expanded.length > maxDirectoryCandidates ? [] : expanded;
 }
 
 function repositoryPath(repositoryRoot, ...parts) {
@@ -256,6 +266,7 @@ function repositoryPath(repositoryRoot, ...parts) {
 function shellTokens(run) {
   const tokens = [];
   const breaks = /[\s;&|()<>]/u;
+  const heredocs = [];
   let index = 0;
   while (index < run.length) {
     const character = run[index];
@@ -266,6 +277,11 @@ function shellTokens(run) {
     } else if (character === '\n' || character === ';') {
       tokens.push({ type: 'separator' });
       index += 1;
+      while (character === '\n' && heredocs.length > 0) {
+        const delimiter = heredocs.shift();
+        const body = run.indexOf(`\n${delimiter}\n`, index - 1);
+        index = body === -1 ? run.length : body + delimiter.length + 2;
+      }
     } else if (/\s/u.test(character)) {
       index += 1;
     } else if (character === '(' || character === ')') {
@@ -274,6 +290,23 @@ function shellTokens(run) {
     } else if (character === '&' || character === '|') {
       tokens.push({ type: 'separator' });
       index += run[index + 1] === character ? 2 : 1;
+    } else if (character === '<' && run[index + 1] === '<') {
+      index += 2;
+      if (run[index] === '-') index += 1;
+      while (index < run.length && /[^\S\n]/u.test(run[index])) index += 1;
+      let delimiter = '';
+      while (index < run.length && !breaks.test(run[index])) {
+        const inner = run[index];
+        if (inner === '"' || inner === "'") {
+          const close = run.indexOf(inner, index + 1);
+          delimiter += close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
+          index = close === -1 ? run.length : close + 1;
+        } else {
+          delimiter += inner;
+          index += 1;
+        }
+      }
+      heredocs.push(delimiter);
     } else if (character === '<' || character === '>') {
       // A redirection and its target say nothing about the command's arguments, and
       // the file-descriptor number in `2>&1` is not one either.
@@ -308,6 +341,17 @@ function shellTokens(run) {
 // except when its flags say it only reports something.
 const informationalYarnFlags = new Set(['--version', '-v', '--help', '-h']);
 
+// Tokens that sit in front of the real command without being it. `do` and `{` matter
+// because the repository's own package-loop form writes the whole loop on one line.
+const commandPrefixes = new Set(['do', '{', '!', 'time', 'env', 'sudo', 'command', 'exec', 'nice', 'npx']);
+// Constructs whose branch this walk does not model. A `cd` under one of them may or may
+// not have run, so the directory becomes underivable rather than a guess.
+const unmodelledKeywords = new Set([
+  'if', 'elif', 'else', 'then', 'while', 'until', 'case',
+  // `done` closes a loop whose last iteration decides where the shell ends up.
+  'done',
+]);
+
 // Walk the tokens the way the shell walks them, tracking the working directory across
 // `cd`/`pushd`/`popd` and scoping it to `( … )`. Each Yarn install contributes the
 // directory candidates in force where it appears, or `null` when the walk lost track —
@@ -331,22 +375,37 @@ function shellInstallDirectories(run, loopValues) {
       directories = null;
       return;
     }
-    previous = directories;
-    directories = [...new Set(directories.flatMap(
+    const next = [...new Set(directories.flatMap(
       (base) => expanded.map((entry) => join(base, entry)),
     ))];
+    previous = directories;
+    // Each `cd` through a loop variable multiplies the candidate set. Left unbounded a
+    // twenty-line `run:` block exhausts the heap, and this guard runs on every pull
+    // request — including from a fork — in a job that carries no timeout.
+    directories = next.length > maxDirectoryCandidates ? null : next;
   };
 
   const finish = () => {
-    const [name, ...rest] = command;
+    const words = command;
     command = [];
+    let at = 0;
+    while (at < words.length
+      && (commandPrefixes.has(words[at]) || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[at]))) {
+      at += 1;
+    }
+    const [name, ...rest] = words.slice(at);
     if (name === undefined) return;
+    if (unmodelledKeywords.has(name)) {
+      directories = null;
+      return;
+    }
     if (name === 'cd' || name === 'pushd') {
       if (name === 'pushd') pushdStack.push(directories);
       const separated = rest[0] === '--';
       const target = separated ? rest[1] : rest[0];
       if (target === undefined) directories = null;
       else if (target === '-' && !separated) [directories, previous] = [previous, directories];
+      else if (target.startsWith('~')) directories = null;
       else move(target);
       return;
     }
@@ -354,7 +413,7 @@ function shellInstallDirectories(run, loopValues) {
       directories = pushdStack.length > 0 ? pushdStack.pop() : null;
       return;
     }
-    if (name !== 'yarn') return;
+    if (name.split('/').pop() !== 'yarn') return;
 
     const flags = [];
     const args = [];
@@ -367,7 +426,7 @@ function shellInstallDirectories(run, loopValues) {
       } else if (token === '--') {
         endOfFlags = true;
       } else if (token === '--cwd') {
-        cwd = rest[index + 1] ?? null;
+        cwd = rest[index + 1] ?? '';
         index += 1;
       } else if (token.startsWith('--cwd=')) {
         cwd = token.slice('--cwd='.length);
@@ -384,9 +443,10 @@ function shellInstallDirectories(run, loopValues) {
       installs.push(null);
       return;
     }
-    installs.push([...new Set(directories.flatMap(
+    const resolved = [...new Set(directories.flatMap(
       (base) => targets.map((entry) => join(base, entry)),
-    ))]);
+    ))];
+    installs.push(resolved.length > maxDirectoryCandidates ? null : resolved);
   };
 
   for (const token of shellTokens(run)) {
@@ -427,7 +487,8 @@ function shellLoopValues(run) {
   return values;
 }
 
-function expandShellWorkingDirectories(value, loopValues) {
+function expandShellWorkingDirectories(value, loopValues, depth = 0) {
+  if (depth > maxExpansionDepth) return [];
   const workspaceExpanded = value
     .replace(/^\$\{?GITHUB_WORKSPACE\}?$/u, '.')
     .replace(/^\$\{\{\s*github\.workspace\s*\}\}$/u, '.');
@@ -436,10 +497,12 @@ function expandShellWorkingDirectories(value, loopValues) {
   if (!match) return [workspaceExpanded];
 
   const values = loopValues.get(match[1] ?? match[2]) ?? [];
-  return values.flatMap((entry) => expandShellWorkingDirectories(
+  const expanded = values.flatMap((entry) => expandShellWorkingDirectories(
     workspaceExpanded.replace(variablePattern, entry),
     loopValues,
+    depth + 1,
   ));
+  return expanded.length > maxDirectoryCandidates ? [] : expanded;
 }
 
 function yarnInstallLockfiles(step, jobLines, inheritedWorkingDirectory, repositoryRoot) {
@@ -1462,5 +1525,258 @@ jobs:
         working-directory: app
 `);
     assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), []);
+  });
+});
+
+// Every entry below once resolved to the repository root while the shell was elsewhere,
+// or hid the install entirely. Both are the silent directions this guard must not take.
+for (const [label, run] of [
+  ['a one-line for loop', 'for d in app; do cd $d; yarn install --immutable; done'],
+  ['a brace group', '{ cd app; yarn install --immutable; }'],
+  ['an environment assignment prefix', 'cd app\n          NODE_ENV=production yarn install --immutable'],
+  ['a command prefix', 'cd app\n          env yarn install --immutable'],
+  ['a yarn invoked by path', 'cd app\n          ./node_modules/.bin/yarn install --immutable'],
+]) {
+  test(`guard resolves an install behind ${label}`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          ${run}
+`);
+      assert.match(
+        yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+        /must cache app\/yarn\.lock/u,
+      );
+    });
+  });
+}
+
+for (const [label, run] of [
+  ['a conditional directory change', 'cd app\n          if [ -d other ]; then cd ../other; fi\n          yarn install --immutable'],
+  ['a while loop', 'ls | while read d; do cd $d; yarn install --immutable; done'],
+]) {
+  test(`guard fails closed on ${label}`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          ${run}
+`);
+      assert.match(
+        yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+        /could not derive every Yarn install project lockfile/u,
+      );
+    });
+  });
+}
+
+test('guard does not honour a directory change that only appears in a heredoc', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          cat <<'EOF' > setup.sh
+          cd app
+          EOF
+          yarn install --immutable
+`);
+    // The `cd` is written to a file, not executed; the install runs at the root.
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), []);
+  });
+});
+
+test('the directory walk stays bounded when every command multiplies the candidates', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    // Each `cd $d` multiplied the candidate set by the loop width. Sixteen of them
+    // exhausted the heap, in a lane that runs on fork pull requests with no timeout.
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    const explosive = Array.from({ length: 24 }, () => 'cd $d').join('\n          ');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          for d in a b c; do
+          ${explosive}
+          yarn install --immutable
+          done
+`);
+    const startedAt = process.hrtime.bigint();
+    const violations = yarnCacheViolations(fixtureWorkflows, fixtureRoot);
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    assert.ok(elapsedMs < 5000, `walk took ${elapsedMs.toFixed(0)}ms`);
+    assert.deepEqual(violations, [
+      'fixture.yml job verify: could not derive every Yarn install project lockfile',
+    ]);
+  });
+});
+
+test('a runaway shell expansion reports rather than exhausting the stack', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          for d in a; do
+          cd ${'$d'.repeat(20000)}
+          yarn install --immutable
+          done
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: could not derive every Yarn install project lockfile',
+    ]);
+  });
+});
+
+test('guard fails closed on a directory the walk cannot expand itself', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          cd ~/app
+          yarn install --immutable
+`);
+    // Tilde expansion belongs to the shell; naming `~/yarn.lock` would be nonsense.
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: could not derive every Yarn install project lockfile',
+    ]);
+  });
+});
+
+test('guard does not carry a loop body directory past the loop', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          for d in a b; do cd $d; done
+          yarn install --immutable
+`);
+    // The shell ends in whichever directory the last iteration reached; claiming both
+    // would be a confident wrong answer.
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: could not derive every Yarn install project lockfile',
+    ]);
+  });
+});
+
+test('guard fails closed when one install names more projects than it will enumerate', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    // Two sets that are each individually within the bound, crossed into one that is not.
+    const outer = Array.from({ length: 10 }, (unused, index) => `o${index}`).join(' ');
+    const inner = Array.from({ length: 10 }, (unused, index) => `i${index}`).join(' ');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          for d in ${outer}; do
+          for e in ${inner}; do
+          cd $d
+          yarn --cwd $e install --immutable
+          done
+          done
+`);
+    // Naming 128 required lockfiles is not a verdict anyone can act on, and the set is
+    // attacker-controlled; the bound turns it into one actionable line.
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: could not derive every Yarn install project lockfile',
+    ]);
+  });
+});
+
+test('guard fails closed on a --cwd with no value', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          yarn install --immutable --cwd
+`);
+    // The target is missing, not absent: resolving it to the root would be a guess.
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: could not derive every Yarn install project lockfile',
+    ]);
   });
 });
