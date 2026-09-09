@@ -124,8 +124,11 @@ operator's own provisioning work, which the gate can only check after it is done
 - [ ] Publish the corresponding public key at a stable URL and record that URL in the deployment
       record.
 - [ ] Create the static host repository and record its `owner/name` as the repository
-      **variable** `JINN_PROFILE_HOST_REPOSITORY`. Its default branch must be `main`. Until this
-      variable is set, `canary-host-refresh` skips and the host is refreshed only by hand.
+      **variable** `JINN_PROFILE_HOST_REPOSITORY`. Its default branch must be `main`, and it
+      must already have a commit on it — the refresh checks the host out at `ref: main` and a
+      repository created with no initial commit has no branch to check out, so leaving it
+      empty turns every push to `next` red rather than skipping. Until this variable is set,
+      `canary-host-refresh` skips and the host is refreshed only by hand.
 - [ ] Add a fine-grained token with `contents: write` on **that repository only** as the secret
       `JINN_PROFILE_HOST_PUSH_TOKEN`. This credential grants write to the host content and
       nothing else: it must not carry write on `Jinn-Network/mono`, and it is not the manifest

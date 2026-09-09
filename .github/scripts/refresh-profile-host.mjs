@@ -55,6 +55,9 @@ import { HOST_CONFIG_FILE_NAME, MANIFEST_FILE_NAME } from './build-profile-host-
 import { SIGNATURE_FILE_NAME } from './sign-profile-manifest.mjs';
 
 const PROVENANCE_FILE = '.jinn-profile-host-source';
+// One rule for the run's SHA and for every commit a manifest claims, so the two sides of
+// the same-run binding cannot be compared under different notions of "a commit id".
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/i;
 // The marker is kept, not re-created, for the same reason the plugin split keeps its
 // own: a marker deleted and rewritten every run would carry a different source SHA every
 // run, so every push would read as a content change and idempotency would be gone.
@@ -69,7 +72,7 @@ const DEFAULT_KEEP = ['.git', PROVENANCE_FILE];
  * @returns {string}
  */
 export function validateSourceSha(sourceSha) {
-  if (!/^[0-9a-f]{40}$/i.test(sourceSha)) {
+  if (!COMMIT_SHA_PATTERN.test(sourceSha)) {
     throw new Error(`SOURCE_SHA is not a 40-hex commit SHA: ${sourceSha}`);
   }
   return sourceSha;
@@ -128,11 +131,23 @@ export function validateBundleDir(bundleDir, { sourceSha }) {
     if (manifest.releaseGroup !== group) {
       throw new Error(`deploy bundle directory ${group} holds a manifest claiming release group ${manifest.releaseGroup}`);
     }
+    // Presence before agreement. `undefined` is the "no group seen yet" sentinel below, so
+    // a manifest that simply omits the field would be adopted from a later group instead of
+    // refused: the bundle would validate clean while publishing a group whose bytes carry no
+    // lane and no commit binding, and the same-run check below would be reading a different
+    // group's commit. Requiring both here also makes `groups[0]` in the messages below the
+    // group the retained value actually came from.
+    if (manifest.lane !== 'canary' && manifest.lane !== 'stable') {
+      throw new Error(`deploy bundle ${group}/${MANIFEST_FILE_NAME} declares no lane: ${manifest.lane ?? '<missing>'}`);
+    }
+    const commit = manifest.generatedFrom?.commit;
+    if (typeof commit !== 'string' || !COMMIT_SHA_PATTERN.test(commit)) {
+      throw new Error(`deploy bundle ${group}/${MANIFEST_FILE_NAME} names no source commit: ${commit ?? '<missing>'}`);
+    }
     if (lane === undefined) lane = manifest.lane;
     else if (manifest.lane !== lane) {
       throw new Error(`deploy bundle mixes lanes: ${groups[0]} is ${lane} and ${group} is ${manifest.lane}`);
     }
-    const commit = manifest.generatedFrom?.commit;
     if (sourceCommit === undefined) sourceCommit = commit;
     else if (commit !== sourceCommit) {
       throw new Error(`deploy bundle mixes source commits: ${groups[0]} is ${sourceCommit} and ${group} is ${commit}`);
@@ -225,11 +240,12 @@ export function writeProvenance(hostDir, { sourceSha, lane, groups, workflowPath
 }
 
 /**
- * Inspect the existing marker without trusting malformed content. A source SHA is
- * preserved only when the marker matches the complete canonical contract exactly;
- * missing, duplicated, reordered, or otherwise malformed markers fall back in run() to
- * the current source SHA, whose mirrored tree was just proven equivalent. This file has
- * no published history, so there is no legacy contract to honor.
+ * Inspect the existing marker without trusting malformed content. `canonical` is what
+ * run() branches on: a missing, duplicated, reordered, or otherwise malformed marker is
+ * a repair, not a preserved value. This file has no published history, so there is no
+ * legacy contract to honor. `sourceSha` is the parse result, returned so a caller (today
+ * only the suite) can assert the marker round-trips; it is null exactly when the marker
+ * is not canonical.
  * @param {string} hostDir
  * @param {string} workflowPath
  * @returns {{ canonical: boolean, sourceSha: string | null }}
@@ -289,8 +305,11 @@ export function buildCommitMessage({ sourceSha, lane, groups }) {
  * Local orchestrator: validate → mirror → stage → detect content change → update
  * provenance + commit when the content changed OR the marker needs one repair (all in
  * hostDir). A later same-content refresh with a canonical marker retains the last
- * content-changing source SHA and creates no commit, even though its own run SHA
- * differs -- that ternary is the idempotency rule stated exactly. `git commit` on a
+ * content-changing source SHA because it writes nothing at all -- not writing is the
+ * idempotency rule, and it is why the marker never carries a SHA whose bytes are not
+ * the ones on disk. When the marker IS rewritten the current source SHA is always the
+ * right value: either the content changed, or the marker was not canonical and had no
+ * SHA worth preserving. `git commit` on a
  * local checkout needs no token, so it folds in here; only `git push` (in the YAML) is
  * privileged. Pure of GitHub-specific side effects -- no `::error::`, no `process.exit`,
  * no `$GITHUB_OUTPUT`.
@@ -309,12 +328,7 @@ export function run({ bundleDir, hostDir, sourceSha, workflowPath }) {
   const changed = contentChanged || !provenance.canonical;
   const message = buildCommitMessage({ sourceSha, lane, groups });
   if (changed) {
-    writeProvenance(hostDir, {
-      sourceSha: contentChanged ? sourceSha : (provenance.sourceSha ?? sourceSha),
-      lane,
-      groups,
-      workflowPath,
-    });
+    writeProvenance(hostDir, { sourceSha, lane, groups, workflowPath });
     execFileSync('git', ['add', '-A'], { cwd: hostDir });
     execFileSync('git', ['commit', '-F', '-'], { cwd: hostDir, input: message });
   }

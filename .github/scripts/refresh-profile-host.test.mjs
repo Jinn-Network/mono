@@ -307,6 +307,32 @@ test('validateBundleDir refuses groups that disagree on lane or on the source co
   cleanup(laneSplit, commitSplit);
 });
 
+test('validateBundleDir refuses a group that declares no lane and one that names no commit', () => {
+  // `undefined` is the "no group seen yet" sentinel in the agreement loop, so a manifest
+  // that OMITS the field must be refused on sight. Otherwise the value is adopted from a
+  // later group: the bundle validates clean, `implementations-v1` is published carrying no
+  // commit binding at all, and the same-run check congratulates itself on
+  // `sealed-platform-v1`'s commit. `implementations-v1` sorts first, so this is the exact
+  // live ordering.
+  for (const missing of [{ lane: undefined }, { generatedFrom: undefined }]) {
+    const bundle = makeBundle({ manifestOverrides: { 'implementations-v1': missing } });
+    assert.throws(
+      () => validateBundleDir(bundle, { sourceSha: SHA }),
+      /implementations-v1\/manifest\.json (?:declares no lane|names no source commit)/u,
+    );
+    cleanup(bundle);
+  }
+
+  // A present-but-wrong value is refused by the same gate: `lane` is written into the
+  // provenance marker, whose canonical form admits only canary or stable, and a commit
+  // that is not a full SHA cannot carry the same-run binding.
+  const badLane = makeBundle({ lane: 'production' });
+  assert.throws(() => validateBundleDir(badLane, { sourceSha: SHA }), /declares no lane: production/u);
+  const shortCommit = makeBundle({ commit: 'abc1234' });
+  assert.throws(() => validateBundleDir(shortCommit, { sourceSha: SHA }), /names no source commit: abc1234/u);
+  cleanup(badLane, shortCommit);
+});
+
 test('validateBundleDir refuses a bundle built from a different commit than this run publishes', () => {
   // The same-run binding. Without it "we deployed the attested bytes" is trust in
   // the download step rather than a property read out of the copied bytes.

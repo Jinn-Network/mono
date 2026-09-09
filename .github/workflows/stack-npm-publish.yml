@@ -227,9 +227,6 @@ jobs:
         run: |
           set -euo pipefail
           node mono/.github/scripts/refresh-profile-host.mjs
-      - name: Report unchanged host content
-        if: steps.mirror.outputs.changed != 'true'
-        run: echo "::notice::nothing to push — this push to next has the same host content as the last published refresh."
       # A plain fast-forward: neither a forced update nor a `+` refspec, so a hand-push
       # into the host repository between checkout and push is a loud red rather than a
       # silent overwrite. The shape assertions refuse the flag anywhere in this job, so
