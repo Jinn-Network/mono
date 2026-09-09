@@ -275,14 +275,10 @@ The last lines state what happened and what did not:
 ```text
 Published locally; nothing was uploaded.
 Bundle: <absolute-path>/bundle
+Receipt: <absolute-path>/quickstart-receipt.json
 Identity: sha256:<bundle-id>
 Recomputed: 6 of 6 checks passed
-
-Check it again:
-  npx @colophon-claims/verify@0.1 <absolute-path>/bundle
-
-Use your own work:
-  colophon open
+Complete comparison; no comparative winner stated.
 ```
 
 Progress goes to stderr and is concise: preflight, sample preparation, two arms, report, local publication, copied-bundle verification. There is no spinner-only state; long steps show the current arm/cell and elapsed time without inventing an ETA.
