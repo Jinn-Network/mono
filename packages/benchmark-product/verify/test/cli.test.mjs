@@ -1096,9 +1096,9 @@ test("a checked mode dimension adds no note at all", async () => {
   });
   assert.equal(result.exitCode, 0);
   assert.doesNotMatch(result.stdout, /file modes were not checked/);
-  // renderFreezeRepoCheck is appended to the same stdout outside both verdict-word guards; this is
-  // the one verdict-word assertion that reaches it (issue #4269); other tests render the same
-  // block and assert other things about it.
+  // renderFreezeRepoCheck is appended to the same stdout, and no other verdict-word guard in this
+  // file renders it: this is the one verdict-word assertion that reaches it (issue #4269); other
+  // tests render the same block and assert other things about it.
   assert.doesNotMatch(result.stdout, /verified|certified|validated|audited/i);
 });
 
@@ -1240,12 +1240,22 @@ const V8_SHAPE = {
   identity: "a".repeat(64),
   checks: V8_CHECKS,
   ...V6_IDENTITIES,
+  // The anchor block is a shape `evaluateIntegrityAnchors` can actually emit, so the render this
+  // guard walks is the render the product produces. `.mjs` type-checks nothing, so nothing else
+  // enforces that: the subject must be one of `ClaimAnchorSubject`'s two members (`lock`/`matrix`),
+  // and the subject rows are the fixed pair that closure maps over, never a one-row reduction --
+  // so a subject-keyed line in `renderSubject` or `renderAnchor` reaches this guard instead of
+  // being skipped by a subject no closure emits. A `present` RFC 3161 entry has parsed, so it
+  // carries the `provider` and `facts` its own type documents for that status; `genTime` is what
+  // `anchoredValue` reads for the head line's value segment.
   anchors: {
     anchors: [{
-      recordSha256: "9".repeat(64), status: "present", subject: "report",
+      recordSha256: "9".repeat(64), status: "present", subject: "lock",
+      provider: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
       timeBasis: "authority-time", trustMaterial: "none",
+      facts: { genTime: "2026-01-02T03:04:05Z" },
     }],
-    subjects: [{ subject: "report", outcome: "anchored" }],
+    subjects: [{ subject: "lock", outcome: "anchored" }, { subject: "matrix", outcome: "absent" }],
     invalid: [],
   },
 };
@@ -1347,8 +1357,8 @@ test("no paragraph of the default human render carries a retired verdict word (i
   // of the same coverage. `renderAnchor` prints `entry.status` verbatim and `verified` is a
   // legitimate status there, so a `verified`-status entry added to this shared fixture would fail
   // this test on a correct render. A `present` entry does not, which is why one is carried above
-  // (issue #4269): it renders `renderAnchor`, `evaluationNote`, and `renderSubject`, none of which
-  // match the word list.
+  // (issue #4269): it renders `renderAnchor`, `evaluationNote`, and `renderSubject` over both an
+  // anchored and an absent subject, none of which match the word list.
   for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
     assert.doesNotMatch(renderVerifiedBundle(shape), /verified|certified|validated|audited/i, shape.format);
   }
