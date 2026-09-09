@@ -514,7 +514,7 @@ describe("Task 4 golden guard: wilson bundle asset byte-equality", () => {
 });
 
 describe("binary qualification public assets", () => {
-  test("renders complete method/admission facts and the qualification graph without comparative copy", () => {
+  test("renders complete method/admission facts and the qualification graph without comparative copy or a verdict word", () => {
     const assets = buildPublicAssets(binaryAssetFixture());
     for (const name of ["index.html", "README.md"] as const) {
       const full = text(assets[name]);
@@ -525,6 +525,10 @@ describe("binary qualification public assets", () => {
       expect(full).toContain("promptTemplateSha256");
       expect(full).toContain(`sha256:${"8".repeat(64)}`);
       expect(full).toContain("review-disagreement");
+      // The same #4270 retirement over the full surfaces, whose binary prose the compact test does
+      // not reach. Word-anchored, unlike the compact guard: the Matrix attrition field
+      // `invalidated` is carried verbatim in both files and contains the bare word `validated`.
+      expect(full).not.toMatch(/\b(?:verified|certified|validated|audited)\b/iu);
       expect(full.toLowerCase()).not.toMatch(/\b(?:winner|loser|ranking|preferred|selected)\b/u);
     }
   });
