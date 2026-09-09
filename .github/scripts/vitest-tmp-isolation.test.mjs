@@ -35,6 +35,7 @@ import {
   regexLiteralEnd,
   regexStartsAt,
   stripComments,
+  UnterminatedTemplateError,
 } from './js-source-scanner.mjs';
 
 /** Re-exported so this guard's own scanner cases keep naming it where they always did. */
@@ -388,7 +389,17 @@ for (const seam of SEAMS) {
 
     const unwired = [];
     for (const config of configs) {
-      const wired = wiredPaths(readFileSync(resolve(root, config), 'utf8'), config);
+      // The scanner knows the source but never the path, so the file name is attached here (#3088).
+      let wired;
+      try {
+        wired = wiredPaths(readFileSync(resolve(root, config), 'utf8'), config);
+      } catch (error) {
+        if (!(error instanceof UnterminatedTemplateError)) throw error;
+        assert.fail(
+          `${config}:${error.line}: the source scanner desynced on a template literal that never ` +
+            'closes, so every wiring read from this config is worthless. Close the literal.',
+        );
+      }
       const missing = [];
       if (!wired.some((entry) => entry.key === 'setupFiles' && entry.resolved === seam.setup)) {
         missing.push(`setupFiles must include a path resolving to ${seam.setup}`);
@@ -942,6 +953,27 @@ test('stripComments leaves comment markers inside strings alone', () => {
   // The same, where the quote is not in a regex literal at all: `regexStartsAt` reads a `/` after
   // an operand as division, so only the newline bound stops the span here.
   assert.ok(!stripComments("a: b '\n// setupFiles: ['isolate-tmp.ts']").includes('isolate-tmp'));
+});
+
+// A template literal that never closes is the one mis-read this scanner cannot bound. A `'`/`"`
+// span stops at the newline, so its worst case is the rest of one line; only a backtick crosses
+// lines, so only a backtick's failure runs to the end of the file — and everything past it comes
+// back with strings and code swapped. `stripComments` is where that damage shows up, as comment
+// prose returned to a reader as live source (#3027), so it is where the walk refuses instead
+// (#3088). Refusing is worth more than a bounded guess here: the readers cannot tell a desynced
+// read from a clean one, and a guard that reads the wrong half of a file is green for the wrong
+// reason.
+test('stripComments refuses a file whose template literal never closes', () => {
+  assert.throws(
+    () => stripComments('a: b `\n// setupFiles: isolate-tmp.ts'),
+    { name: 'UnterminatedTemplateError' },
+  );
+
+  // Valid nesting is not a failure. Both fixtures are the shipped shapes from #3088, and pinning
+  // them here is what keeps the refusal narrow — a detector that also refused these would take
+  // every file in the tree that interpolates.
+  assert.doesNotThrow(() => stripComments("return `'${s.replace(/'/g, `'\\\\''`)}'`;"));
+  assert.doesNotThrow(() => stripComments('href={`/workspace/${draftId}/results`}'));
 });
 
 // A `projects` config gives each entry its own Vite root, so an `fs.allow` under one entry says

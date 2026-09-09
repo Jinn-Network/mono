@@ -234,6 +234,22 @@ export function quotedSpanEnd(source, start) {
 }
 
 /**
+ * Thrown by `stripComments` when a backtick span reaches the end of the source without closing.
+ *
+ * Carries the `offset` the span opened at and the 1-based `line` holding it, because that is all
+ * this module can say: it is handed source text and never a path. The two guards that call
+ * `stripComments` add the file name when they catch this (#3088).
+ */
+export class UnterminatedTemplateError extends Error {
+  constructor(offset, line) {
+    super(`unterminated template literal opened at line ${line}`);
+    this.name = 'UnterminatedTemplateError';
+    this.offset = offset;
+    this.line = line;
+  }
+}
+
+/**
  * `source` with line and block comments replaced by whitespace, preserving offsets and line
  * structure so the readers below can keep matching over a plain string.
  *
@@ -252,6 +268,33 @@ export function quotedSpanEnd(source, start) {
  * way, and every reader below skips them itself, so leaving them intact keeps this pass to the one
  * job its name states. A comment marker wins over a regex — `//` never opens a regex literal, and
  * `/*` cannot start a valid one — so the comment checks run first.
+ *
+ * This function is partial: a backtick span that never closes raises `UnterminatedTemplateError`
+ * rather than returning a desynced read. Every other mis-read this module can make is bounded to a
+ * line, because a `'`/`"` span and a regex literal both stop at a newline — so their worst case is
+ * the rest of one line and the readers stay worth running. Only a backtick crosses lines, so only a
+ * backtick's failure is unbounded: everything past it comes back with the file's strings and its
+ * code swapped, and a reader matching over that output is not reading the file it was handed. The
+ * `'`/`"` cases keep their tolerated end-of-source behaviour for exactly that reason, and
+ * `stripComments("a: 'unterminated // x")` returning itself stays pinned.
+ *
+ * Three places could hold this check, and the other two are worse:
+ *
+ * `quotedSpanEnd`'s contract is documented as total, and four readers — `balancedEnd`,
+ * `projectEntryRanges`, `arrayElements` and `stringLiterals` — are deliberately fail-closed-empty
+ * on an unterminated literal. Throwing there makes every one of those documented paths
+ * unreachable.
+ *
+ * The guard level would mean two guards each re-walking the file to ask the question, which is the
+ * duplication this module's header exists to end.
+ *
+ * `stripComments` is the seam: the single production entry point both guards take, already owning
+ * the full-awareness walk, and the place the damage manifests — #3027 is a property of this
+ * function's output.
+ *
+ * The blast radius is its two readers, not the tree. `benchmark-product-source-boundaries.test.mjs`
+ * walks `benchmark-product/{cli,core,verify,web}/src` and `vitest-tmp-isolation.test.mjs` walks the
+ * Vitest configs; a file outside both is no more covered after this than before.
  */
 export function stripComments(source) {
   let out = '';
@@ -259,7 +302,11 @@ export function stripComments(source) {
   while (index < source.length) {
     const char = source[index];
     if (char === "'" || char === '"' || char === '`') {
-      const stop = Math.min(quotedSpanEnd(source, index) + 1, source.length);
+      const end = quotedSpanEnd(source, index);
+      if (char === '`' && end >= source.length) {
+        throw new UnterminatedTemplateError(index, source.slice(0, index).split('\n').length);
+      }
+      const stop = Math.min(end + 1, source.length);
       out += source.slice(index, stop);
       index = stop;
       continue;
