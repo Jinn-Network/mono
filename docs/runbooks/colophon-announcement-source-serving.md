@@ -188,8 +188,7 @@ anchored entry could refuse a later chain that does not contain it — truncatio
 below an anchored point becomes detectable to a reader who recorded it, and
 nothing more. It would still not prove publication-by-time, would still not make
 the stream provably complete, and would still do nothing for a reader who never
-looked. **It is designed, not implemented** (tracked as
-[#4127](https://github.com/Jinn-Network/mono/issues/4127)), so nothing this
+looked. **It is designed, not implemented** (tracked as #4127), so nothing this
 runbook serves is anchored today. Until it ships, the ceiling to state is the
 one above. §3 and §6 of that design are the authority for both.
 
@@ -197,8 +196,8 @@ one above. §3 and §6 of that design are the authority for both.
 
 > **Designed, not implemented** (tracked as #4127). Nothing this runbook serves
 > carries an anchor announcement today, so the walk below currently reports every
-> substantive sequence as unanchored. It is recorded here because the mechanism is
-> ruled and its shape is fixed
+> substantive sequence as unanchored, with the newest reported as pending. It is
+> recorded here because the mechanism is ruled and its shape is fixed
 > ([`docs/superpowers/specs/2026-09-01-publication-head-anchoring-design.md`](../superpowers/specs/2026-09-01-publication-head-anchoring-design.md)),
 > and because the walk itself does not change when the mechanism lands. Landing
 > #4127 must clear this marker.
@@ -208,7 +207,10 @@ third-party provider, and the resulting `AnchorEvidence` record is announced by 
 later entry on this same chain. That makes coverage a property of the archive
 rather than an operator claim about it: anybody holding the archive — the operator,
 or a stranger who cold-synced it — enumerates exactly which sequences are anchored
-and which are not, from the archive alone.
+and which are not, from the archive alone. That last phrase is the whole value of
+the walk, and it is only earned if each step reads the records themselves rather
+than the publisher's description of them, which is why step 3 is written the way it
+is.
 
 ### The walk
 
@@ -217,31 +219,56 @@ already yields every entry oldest-first. Then:
 
 1. **Fix the denominator.** Sequences are fixed-width, gap-free, and increment by
    one, so the walked entries are the complete list — a missing sequence is a broken
-   chain, not a coverage question. Compute each entry's digest the way the head
-   cites it: `recordDigest(sealJson(entry).bytes)`.
-2. **Classify each entry.** An entry is *anchor-announcing* when every one of its
-   `announcements[]` names `record.kind`
-   `https://spec.jinn.network/records/anchor-evidence/v1`. Every other entry is
-   *substantive*. Anchor-announcing entries are not themselves anchored and are not
-   part of the denominator: anchoring them would not terminate, and truncating one
-   drops nothing a reader loses.
-3. **Collect the anchored set.** Each anchor announcement carries
-   `facts` of the shape `{subject: {kind, digest}, provider, upgrades?}`, and
-   `subject.digest` names the entry that anchor covers. Deduplicate by
-   `subject.digest`: an OpenTimestamps upgrade is announced as a second record
-   naming the pending one through `upgrades`, and both cover the same subject, so
-   count subjects rather than announcements.
+   chain, not a coverage question. Compute each entry's digest the way the head cites
+   it: `sealJson(entry).digest` (`@jinn-network/record-discovery-protocol`), where
+   `entry` is the inner entry payload rather than the `{entry, signature}` element the
+   page carries around it.
+2. **Classify each entry.** An entry is *provisionally anchor-announcing* when every
+   one of its `available` announcements names `record.kind`
+   `https://spec.jinn.network/records/anchor-evidence/v1`; every other entry is
+   *substantive*. Scope the predicate to `available`: a `withdrawn` announcement
+   carries no `record` at all, and a withdrawal is substantive content either way. The
+   classification is provisional because it has so far read a record *reference*
+   rather than a record — step 3 confirms it. Anchor-announcing entries are not
+   themselves anchored and are not part of the denominator: anchoring them would not
+   terminate, and truncating one drops nothing a reader loses.
+3. **Collect the anchored set — from the records, not from `facts`.** Each anchor
+   announcement carries `facts` of the shape
+   `{subject: {kind, digest}, provider, upgrades?}`. Do not read the set out of that
+   field: `facts` is advisory metadata about an announced record while the record's own
+   bytes stay authoritative (design §5.2), it is schema-optional on the announcement,
+   and nothing in the walk this section builds on ever compares it to the record it
+   describes. Treat it as an index into which records to fetch. For each such
+   announcement, fetch the `AnchorEvidence` record from `<base>/records/<sha256>` —
+   the announcement's `record.digest` with the `sha256:` prefix stripped — and read
+   `subject` from the fetched bytes. An announcement with no facts card is a record to
+   fetch, not an absent anchor. Keep only subjects whose `subject.kind` is
+   `https://spec.jinn.network/records/announcement-entry/v1`: §4.2 minted that URI to
+   make `subject.kind` normative, and a record covering anything else anchors no
+   sequence on this chain — an entry announcing only such records is substantive after
+   all and rejoins the denominator. Deduplicate by `subject.digest`, because several
+   announcements can cover one subject two ways: an OpenTimestamps upgrade is announced
+   as a second *announcement* naming the pending record through `upgrades` in its
+   facts, and the anchor ledger is keyed `(entryDigest, provider)` (§4.4), so two
+   different providers may each anchor the same entry with no upgrade relationship
+   between them. Count subjects rather than announcements.
 4. **Read off coverage.** A substantive entry is anchored when its digest is in that
-   set. Normalize the two spellings before comparing: `recordDigest` returns
-   `sha256:<hex>`, while an `AnchorEvidence` record's own subject carries the bare
-   hex in a digest set (`{"sha256": "<hex>"}`).
+   set. Normalize the two spellings before comparing: `sealJson` returns
+   `sha256:<hex>`, while the record's `subject.digest` is a digest set carrying the
+   bare hex (`{"sha256": "<hex>"}`, `Sha256DigestSetSchema`). §4.1 rules the subject
+   digest to be the entry digest with the `sha256:` prefix stripped, so the two are the
+   same value in two spellings — comparing them unnormalized yields zero matches, which
+   reads exactly like total coverage failure.
 5. **Separate the gap from the tail.** The unanchored substantive sequences are the
-   gap — with one caveat at the tip. An entry's anchor is announced by a *later*
-   entry, so a substantive append whose anchor-announcing append has not landed yet
-   reads as unanchored until it does. If the newest entry on the chain is substantive
-   rather than anchor-announcing, treat its sequence as pending rather than as a gap;
-   once the chain is at rest every substantive entry including the last one is either
-   anchored or a real gap.
+   gap — with one caveat at the tip. An entry's anchor is announced by a *later* entry,
+   so a substantive append whose anchor-announcing append has not landed yet reads as
+   unanchored until it does. If the newest entry on the chain is substantive rather
+   than anchor-announcing, treat its sequence as pending rather than as a gap. Pending
+   is a reading, not a verdict: at the tip an anchor that has not landed yet and one
+   that never will are byte-identical, the same way a mid-chain outage and a declined
+   anchor are. Nor is *unanchored* settled anywhere on the chain — §4.4 anchors any
+   past entry on demand and rules an anchor obtained late a weaker anchor rather than
+   an invalid one, so a sequence that is a gap today can be anchored tomorrow.
 6. **Name what is left exactly.** Because the denominator is exact, report the
    remaining unanchored sequences by sequence rather than as a count or a proportion.
 
@@ -251,17 +278,18 @@ already yields every entry oldest-first. Then:
   a provider outage at append time leaves a visible hole rather than a stalled
   chain. Nothing in the archive distinguishes an outage from a declined anchor, and
   this enumeration does not claim to.
-- **Presence is not validity.** The walk reports which entries have an anchor
-  announced, not whether its proof checks. Verifying one is a separate step: fetch
-  the `AnchorEvidence` record by digest from `<base>/records/<sha256>` and verify the
-  proof against the entry digest with your own trust material.
+- **Presence is not validity.** Step 3 binds each anchor to the subject its own record
+  bytes name, so the set is not a publisher assertion. It is still only presence: the
+  walk reports which entries have an anchor, not whether that anchor's proof checks.
+  Verifying one means checking the record's `proof` against the entry digest with your
+  own trust material, which needs the provider's evidence and not just this archive.
 - **Coverage is not completeness.** An anchored sequence means truncation below that
   point is detectable to a reader who recorded it, and nothing more. It does not
   date publication, says nothing about entries the publisher never appended, and
   does not make this source witnessed. The prohibited words above apply unchanged.
 - **The tripwire is the reader's, not the publisher's.** Coverage read today tells
   you which sequences you *could* record. It protects you only from the moment you
-  record `(origin, sequence, entryDigest)` and check a later chain against it.
+  record `(origin, sequence, entry)` and check a later chain against it.
 
 ## Disclosure: why this producer has no disclosure gate
 
