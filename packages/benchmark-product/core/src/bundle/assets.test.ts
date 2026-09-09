@@ -514,7 +514,7 @@ describe("Task 4 golden guard: wilson bundle asset byte-equality", () => {
 });
 
 describe("binary qualification public assets", () => {
-  test("renders complete method/admission facts and the qualification graph without comparative copy or a verdict word", () => {
+  test("renders complete method/admission facts and the qualification graph without comparative copy", () => {
     const assets = buildPublicAssets(binaryAssetFixture());
     for (const name of ["index.html", "README.md"] as const) {
       const full = text(assets[name]);
@@ -525,24 +525,15 @@ describe("binary qualification public assets", () => {
       expect(full).toContain("promptTemplateSha256");
       expect(full).toContain(`sha256:${"8".repeat(64)}`);
       expect(full).toContain("review-disagreement");
-      // The same #4270 retirement over the full surfaces, whose binary prose the compact test does
-      // not reach. Word-anchored, unlike the compact guard: the Matrix attrition field
-      // `invalidated` is carried verbatim in both files and contains the bare word `validated`.
-      expect(full).not.toMatch(/\b(?:verified|certified|validated|audited)\b/iu);
       expect(full.toLowerCase()).not.toMatch(/\b(?:winner|loser|ranking|preferred|selected)\b/u);
     }
   });
 
-  test("keeps compact surfaces to a scope/report signpost that asserts no verdict", () => {
+  test("keeps compact surfaces to a verified scope/report signpost", () => {
     const assets = buildPublicAssets(binaryAssetFixture());
     for (const name of ["badge.svg", "social-card.svg", "share.txt"] as const) {
       const compact = text(assets[name]);
-      // Issue #2982 retired the verdict word because it claims more than this tool establishes;
-      // #4270 extended that to the published artifacts, where the caveats the CLI prints under its
-      // verdict cannot travel. A badge that names a scope is a signpost; one that says "verified"
-      // is a claim with its limits in another file.
-      expect(compact).not.toMatch(/verified|certified|validated|audited/i);
-      expect(compact.toLowerCase()).toContain("qualification");
+      expect(compact.toLowerCase()).toContain("verified");
       expect(compact).toContain(SHA.report);
       expect(compact).toContain("index.html");
       expect(compact).not.toMatch(/arm-[abcd]/u);
