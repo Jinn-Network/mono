@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
@@ -279,16 +280,36 @@ export function collectLiveTreeFixtures(scriptsRoot = scriptsDir) {
   return found;
 }
 
+/**
+ * `line` with any trailing YAML comment removed.
+ *
+ * Both reads below match over prose otherwise: the invocation test sees a comment that merely
+ * mentions `node --test`, and the harvest takes every `*.test.mjs` the prose names. Together they
+ * mint an invocation that does not exist, and a phantom naming a LIVE_TREE_MUTATING_TESTS member
+ * reds the co-scheduling guard on nothing (#3149). Measured over the current workflows this drops
+ * exactly one line — a comment in `platform-architecture-control.yml` — and changes no surviving
+ * invocation's file list.
+ *
+ * Line-local and quoting-unaware: a `#` inside a quoted scalar on a `node --test` line would
+ * truncate it. No CI author writes that, and a YAML-quoting reader here would be a second parser to
+ * keep honest. The continuation check below deliberately still reads the raw line, so a `\` that
+ * only looks like a continuation once a comment is removed does not become one.
+ */
+function withoutYamlComment(line) {
+  return line.replace(/(^|\s)#.*$/u, '$1');
+}
+
 export function collectTestInvocations(workflowsRoot = workflowsDir) {
   const invocations = [];
   for (const fileName of readdirSync(workflowsRoot).filter((name) => name.endsWith('.yml'))) {
     const lines = readFileSync(join(workflowsRoot, fileName), 'utf8').split('\n');
     for (let index = 0; index < lines.length; index += 1) {
-      if (!/\bnode\s+--test\b/u.test(lines[index])) continue;
+      if (!/\bnode\s+--test\b/u.test(withoutYamlComment(lines[index]))) continue;
       const files = [];
       let last = index;
       for (;;) {
-        for (const match of lines[last].matchAll(/([A-Za-z0-9_.-]+\.test\.mjs)/gu)) files.push(match[1]);
+        const code = withoutYamlComment(lines[last]);
+        for (const match of code.matchAll(/([A-Za-z0-9_.-]+\.test\.mjs)/gu)) files.push(match[1]);
         if (!lines[last].trimEnd().endsWith('\\') || last + 1 >= lines.length) break;
         last += 1;
       }
@@ -297,6 +318,43 @@ export function collectTestInvocations(workflowsRoot = workflowsDir) {
     }
   }
   return invocations;
+}
+
+/**
+ * Every `node --test` invocation hiding inside a folded (`>`) `run:` scalar, as
+ * `{ workflow, line }`.
+ *
+ * `collectTestInvocations` follows a multi-line invocation by its trailing `\`. A folded scalar
+ * has none — YAML joins the lines itself — so the walk stops after the first body line and the
+ * file list comes back missing everything else. That is a real co-scheduling violation the guard
+ * above cannot see: the invocation reads as a one-file batch no matter how many suites it actually
+ * runs.
+ *
+ * This refuses the shape rather than parsing it. Nothing in the tree writes it — 8 folded scalars
+ * today, none carrying `node --test` — and a folded-scalar reader inside this guard would be a
+ * second YAML parser to keep honest for a shape that has never appeared (#3149).
+ *
+ * The body is every following line indented past the `run:` key itself, which is where both
+ * `run: >-` and `- run: >-` put it.
+ */
+export function foldedTestInvocations(workflowsRoot = workflowsDir) {
+  const found = [];
+  for (const fileName of readdirSync(workflowsRoot).filter((name) => name.endsWith('.yml'))) {
+    const lines = readFileSync(join(workflowsRoot, fileName), 'utf8').split('\n');
+    for (let index = 0; index < lines.length; index += 1) {
+      if (!/^\s*(?:-\s+)?run:\s*>[-+]?\s*$/u.test(lines[index])) continue;
+      const keyColumn = lines[index].indexOf('run:');
+      for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+        if (lines[cursor].trim() === '') continue;
+        if (lines[cursor].match(/^\s*/u)[0].length <= keyColumn) break;
+        if (/\bnode\s+--test\b/u.test(withoutYamlComment(lines[cursor]))) {
+          found.push({ workflow: fileName, line: cursor + 1 });
+          break;
+        }
+      }
+    }
+  }
+  return found;
 }
 
 export function findOrphanedScriptTests(scriptsRoot = scriptsDir, workflowsRoot = workflowsDir) {
@@ -346,6 +404,66 @@ test('collectTestInvocations reads the platform-release-surface lists', () => {
     lists.some((files) => files.length === 1 && LIVE_TREE_MUTATING_TESTS.has(files[0])),
     'expected the live-tree-mutating suite to own an invocation',
   );
+});
+
+// A `#` opens a YAML comment, and the harvest matches `*.test.mjs` anywhere on a line — prose
+// included. A comment that merely mentions `node --test` and names some suites therefore minted an
+// invocation that does not exist. That is not cosmetic: if one of the named files is in
+// LIVE_TREE_MUTATING_TESTS, the co-scheduling guard above reds on a phantom (#3149).
+test('collectTestInvocations ignores a node --test named in a YAML comment', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-comment-'));
+  try {
+    writeFileSync(join(fixture, 'commented.yml'), [
+      'jobs:',
+      '  verify:',
+      '    steps:',
+      '      # A suite co-scheduled by `node --test` reads a.test.mjs and b.test.mjs',
+      '      - run: node --test c.test.mjs',
+      '',
+    ].join('\n'));
+    assert.deepEqual(collectTestInvocations(fixture), [
+      { workflow: 'commented.yml', files: ['c.test.mjs'] },
+    ]);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('no node --test invocation hides in a folded run scalar', () => {
+  const folded = foldedTestInvocations();
+  if (folded.length === 0) return;
+  assert.fail(
+    `Found ${folded.length} node --test invocation(s) inside a folded run scalar:\n`
+    + folded.map(({ workflow, line }) => `- ${workflow}:${line}`).join('\n')
+    + '\nA folded scalar carries no trailing `\\`, so collectTestInvocations stops after the first '
+    + 'body line and the invocation reads as a one-file batch however many suites it runs — which '
+    + 'hides a co-scheduling violation from the guard above. Use `run: |`, or put the invocation '
+    + 'on one line.',
+  );
+});
+
+test('a folded run scalar hiding node --test is detected, and shows why it must be', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-'));
+  try {
+    writeFileSync(join(fixture, 'folded.yml'), [
+      'jobs:',
+      '  verify:',
+      '    steps:',
+      '      - run: >-',
+      '          node --test x.test.mjs',
+      '          y.test.mjs',
+      '',
+    ].join('\n'));
+    assert.deepEqual(foldedTestInvocations(fixture), [{ workflow: 'folded.yml', line: 5 }]);
+    // The damage the refusal exists for, on the same fixture: the invocation is found, but the
+    // second suite is invisible, so the co-scheduling guard reads a two-suite batch as a one-suite
+    // one and passes it.
+    assert.deepEqual(collectTestInvocations(fixture), [
+      { workflow: 'folded.yml', files: ['x.test.mjs'] },
+    ]);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
 });
 
 test('every in-checkout fixture is declared, dot-prefixed, and gitignored', () => {
