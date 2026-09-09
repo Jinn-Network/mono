@@ -21,7 +21,10 @@ const workflowsDir = resolve(root, '.github/workflows');
 
 const indentOf = (line) => line.match(/^\s*/u)[0].length;
 const unquote = (value) => value.trim().replace(/^(['"])(.*)\1$/u, '$2');
-const scalar = (value) => unquote(value.replace(/\s+#.*$/u, ''));
+// `\s+#` restarts its whitespace scan at every offset, so a line carrying a long run
+// of spaces costs quadratic time in a lane that runs on fork pull requests. Consuming
+// one whitespace character before the `#` is the same cut and stays linear.
+const scalar = (value) => unquote(value.replace(/(?:^|\s)#.*$/u, ''));
 const jobKeyPattern = /^(?:"([A-Za-z_][A-Za-z0-9_-]*)"|'([A-Za-z_][A-Za-z0-9_-]*)'|([A-Za-z_][A-Za-z0-9_-]*))$/u;
 
 function mappingKey(line) {
@@ -257,6 +260,22 @@ function repositoryPath(repositoryRoot, ...parts) {
   return insideRoot || '.';
 }
 
+// A `run:` scalar keeps the block's own indentation on every line, so a heredoc
+// terminator never sits at column 0 and a scan anchored there found none — the
+// tokenizer then discarded the whole remainder and every install in it. Compare the
+// trimmed line instead, the way the shell does for `<<-`. A terminator that genuinely
+// never appears runs the body to the end of the block, which is what the shell does too.
+function heredocBodyEnd(run, from, delimiter) {
+  let lineStart = from;
+  while (lineStart < run.length) {
+    let lineEnd = run.indexOf('\n', lineStart);
+    if (lineEnd === -1) lineEnd = run.length;
+    if (run.slice(lineStart, lineEnd).trim() === delimiter) return Math.min(lineEnd + 1, run.length);
+    lineStart = lineEnd + 1;
+  }
+  return run.length;
+}
+
 // Shell text is not a regular language, and every regex this guard read it with had
 // the same failure mode: an unanticipated form resolved to the WRONG lockfile instead
 // of failing closed (#4255). Tokenize once instead. Quotes, escapes, comments, line
@@ -267,7 +286,30 @@ function shellTokens(run) {
   const tokens = [];
   const breaks = /[\s;&|()<>]/u;
   const heredocs = [];
+  // A cursor, not `shift()`: draining the queue by shifting is a memmove per opener,
+  // so a `run:` block of nothing but `<<X` openers cost quadratic time on the same
+  // no-timeout, fork-reachable lane the candidate bound below guards.
+  let pendingHeredoc = 0;
   let index = 0;
+  // Consume one word, honoring the quoting and escaping rules the word branch uses, and
+  // report where it ends. Redirection targets and here-string operands are data, so
+  // nothing is emitted for them — but a quoted one has to be stepped over whole, or its
+  // tail is re-read as a command.
+  const wordEnd = (from) => {
+    let at = from;
+    while (at < run.length && !breaks.test(run[at])) {
+      const inner = run[at];
+      if (inner === '"' || inner === "'") {
+        const close = run.indexOf(inner, at + 1);
+        at = close === -1 ? run.length : close + 1;
+      } else if (inner === '\\' && at + 1 < run.length) {
+        at += 2;
+      } else {
+        at += 1;
+      }
+    }
+    return at;
+  };
   while (index < run.length) {
     const character = run[index];
     if (character === '\\' && run[index + 1] === '\n') {
@@ -277,10 +319,10 @@ function shellTokens(run) {
     } else if (character === '\n' || character === ';') {
       tokens.push({ type: 'separator' });
       index += 1;
-      while (character === '\n' && heredocs.length > 0) {
-        const delimiter = heredocs.shift();
-        const body = run.indexOf(`\n${delimiter}\n`, index - 1);
-        index = body === -1 ? run.length : body + delimiter.length + 2;
+      while (character === '\n' && pendingHeredoc < heredocs.length) {
+        const delimiter = heredocs[pendingHeredoc];
+        pendingHeredoc += 1;
+        index = heredocBodyEnd(run, index, delimiter);
       }
     } else if (/\s/u.test(character)) {
       index += 1;
@@ -290,6 +332,14 @@ function shellTokens(run) {
     } else if (character === '&' || character === '|') {
       tokens.push({ type: 'separator' });
       index += run[index + 1] === character ? 2 : 1;
+    } else if (character === '<' && run[index + 1] === '<' && run[index + 2] === '<') {
+      // A here-string is a redirection whose operand is data the command reads, not a
+      // body the shell runs. Read as a heredoc it yielded an empty delimiter, which
+      // then swallowed the rest of the block — `<<<` is already used in three of this
+      // repository's workflows.
+      index += 3;
+      while (index < run.length && /[^\S\n]/u.test(run[index])) index += 1;
+      index = wordEnd(index);
     } else if (character === '<' && run[index + 1] === '<') {
       index += 2;
       if (run[index] === '-') index += 1;
@@ -314,7 +364,7 @@ function shellTokens(run) {
       index += run[index + 1] === '>' ? 2 : 1;
       while (index < run.length && /[^\S\n]/u.test(run[index])) index += 1;
       if (run[index] === '&' && run[index + 1] !== '&') index += 1;
-      while (index < run.length && !breaks.test(run[index])) index += 1;
+      index = wordEnd(index);
     } else {
       let word = '';
       while (index < run.length && !breaks.test(run[index])) {
@@ -346,7 +396,20 @@ const informationalYarnFlags = new Set(['--version', '-v', '--help', '-h']);
 const commandPrefixes = new Set(['do', '{', '!', 'time', 'env', 'sudo', 'command', 'exec', 'nice', 'npx']);
 // Constructs whose branch this walk does not model. A `cd` under one of them may or may
 // not have run, so the directory becomes underivable rather than a guess.
-const unmodelledKeywords = new Set([
+//
+// Accepted limits, and unlike the `enablesCorepack` ones below these are NOT in the safe
+// direction — each can name a wrong lockfile — so they are recorded rather than excused.
+// All three need real control-flow scoping, which a single-pass walk cannot give them:
+//   - `cd` in a loop body that is not subshelled resolves to siblings rather than to the
+//     nesting a real shell accumulates across iterations (`for d in a b; do cd $d` gives
+//     `a` and `b`, never `a/b`). The form this repository actually uses wraps the body in
+//     `( … )`, which the walk scopes correctly.
+//   - `[ -d app ] && cd app` and `test -d x || cd other` apply unconditionally, because
+//     `&&` and `||` reach here as plain separators. They cannot simply be nulled: the
+//     canonical good form the guard must resolve is `cd app && yarn install`.
+//   - `for` is absent from this set on purpose, so that a `for` whose `do` sits on the
+//     next line leaves its body's `cd` unconditional as well.
+const unmodeledKeywords = new Set([
   'if', 'elif', 'else', 'then', 'while', 'until', 'case',
   // `done` closes a loop whose last iteration decides where the shell ends up.
   'done',
@@ -395,7 +458,7 @@ function shellInstallDirectories(run, loopValues) {
     }
     const [name, ...rest] = words.slice(at);
     if (name === undefined) return;
-    if (unmodelledKeywords.has(name)) {
+    if (unmodeledKeywords.has(name)) {
       directories = null;
       return;
     }
@@ -494,7 +557,12 @@ function expandShellWorkingDirectories(value, loopValues, depth = 0) {
     .replace(/^\$\{\{\s*github\.workspace\s*\}\}$/u, '.');
   const variablePattern = /\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/u;
   const match = workspaceExpanded.match(variablePattern);
-  if (!match) return [workspaceExpanded];
+  // A command substitution, a glob or a brace expansion names a directory only the
+  // runner can resolve. Returning the literal text answered confidently and wrongly —
+  // `cd $(echo app)` required `$/yarn.lock`, a path no checkout can contain, while
+  // dropping the requirement on the directory the install really runs in. Reading it as
+  // underivable is the same cut `shellLoopValues` already makes for a loop's values.
+  if (!match) return /[$`*?[\]{}]/u.test(workspaceExpanded) ? [] : [workspaceExpanded];
 
   const values = loopValues.get(match[1] ?? match[2]) ?? [];
   const expanded = values.flatMap((entry) => expandShellWorkingDirectories(
@@ -1277,7 +1345,7 @@ for (const [label, run] of [
   ['a bare yarn', 'yarn'],
   ['flags before the install verb', 'yarn --immutable install'],
 ]) {
-  test(`guard recognises ${label} as an install`, () => {
+  test(`guard recognizes ${label} as an install`, () => {
     withFixture(({ fixtureRoot, fixtureWorkflows }) => {
       writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
 jobs:
@@ -1564,6 +1632,15 @@ jobs:
 for (const [label, run] of [
   ['a conditional directory change', 'cd app\n          if [ -d other ]; then cd ../other; fi\n          yarn install --immutable'],
   ['a while loop', 'ls | while read d; do cd $d; yarn install --immutable; done'],
+  // Each of these once named a literal path no checkout can contain — `$/yarn.lock`,
+  // `app*/yarn.lock` — while silently dropping the requirement on the directory the
+  // install really runs in. A confident wrong answer is the one direction #4255 rules
+  // out, so a target only the runner can resolve has to read as underivable.
+  ['a command substitution', 'cd $(echo app)\n          yarn install --immutable'],
+  ['a backtick substitution', 'cd `echo app`\n          yarn install --immutable'],
+  ['a quoted command substitution', 'cd "$(dirname app/pkg)"\n          yarn install --immutable'],
+  ['a globbed directory', 'cd app*\n          yarn install --immutable'],
+  ['a brace expansion', 'cd {app}\n          yarn install --immutable'],
 ]) {
   test(`guard fails closed on ${label}`, () => {
     withFixture(({ fixtureRoot, fixtureWorkflows }) => {
@@ -1589,7 +1666,12 @@ jobs:
   });
 }
 
-test('guard does not honour a directory change that only appears in a heredoc', () => {
+// A heredoc terminator sits at the `run:` block's own indentation, never at column 0,
+// so a scan anchored to column 0 never found one and the tokenizer dropped everything
+// after the first `<<` — hiding every later install instead of skipping a body. The
+// fixtures below declare the WRONG lockfile on purpose: a guard that reads the block
+// correctly names the right one, while a guard blind past the heredoc returns nothing.
+test('guard does not honor a directory change that only appears in a heredoc', () => {
   withFixture(({ fixtureRoot, fixtureWorkflows }) => {
     writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
     writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
@@ -1602,15 +1684,124 @@ jobs:
         with:
           node-version: 22
           cache: yarn
-          cache-dependency-path: yarn.lock
+          cache-dependency-path: app/yarn.lock
       - run: |
           cat <<'EOF' > setup.sh
           cd app
           EOF
           yarn install --immutable
 `);
-    // The `cd` is written to a file, not executed; the install runs at the root.
-    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), []);
+    // The `cd` is written to a file, not executed, so the install runs at the root —
+    // and the guard has to see that install to say so.
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: setup-node must cache yarn.lock',
+    ]);
+  });
+});
+
+test('guard reads the commands after a heredoc body', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          cat > run.sh <<'SH'
+          echo hello
+          SH
+          cd app
+          yarn install --immutable
+`);
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /must cache app\/yarn\.lock/u,
+    );
+  });
+});
+
+test('guard reads a here-string as a redirection rather than a heredoc', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          read first <<< "one two"
+          cd app
+          yarn install --immutable
+`);
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /must cache app\/yarn\.lock/u,
+    );
+  });
+});
+
+test('a run block of heredoc openers stays linear', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    // Openers accumulate until the line ends, and draining that queue with `shift()`
+    // is a memmove apiece: measured 2314ms here against 22ms for a cursor. Same
+    // no-timeout fork-reachable lane as the candidate-set bound above.
+    const openers = `          ${Array.from({ length: 100000 }, () => 'x <<X').join(' ')}`;
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+${openers}
+          yarn install --immutable
+`);
+    const startedAt = process.hrtime.bigint();
+    yarnCacheViolations(fixtureWorkflows, fixtureRoot);
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    assert.ok(elapsedMs < 1000, `walk took ${elapsedMs.toFixed(0)}ms`);
+  });
+});
+
+test('a trailing whitespace run does not make scalar reading quadratic', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    // `/\s+#.*$/` restarted its whitespace scan at every offset, so one line of
+    // trailing spaces cost quadratic time — 300k spaces measured at 38s.
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: yarn install --immutable${' '.repeat(300000)}
+`);
+    const startedAt = process.hrtime.bigint();
+    yarnCacheViolations(fixtureWorkflows, fixtureRoot);
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    assert.ok(elapsedMs < 5000, `scalar reading took ${elapsedMs.toFixed(0)}ms`);
   });
 });
 
