@@ -10,7 +10,9 @@ export const FIRST_CUT_PLATFORM_PIN_PATH = 'packages/benchmark-product/first-cut
 export const PRODUCT_RELEASE_PLATFORM_PINS_PATH = 'packages/benchmark-product/product-release-platform-pins.json';
 
 /**
- * Every source file that seals a `@colophon-claims/verify` version into a claim or a bundle asset.
+ * Every source file that seals a published reader version into a claim or a bundle asset. Two
+ * names are published: `@colophon-claims/check`, the checker itself, and `@colophon-claims/verify`,
+ * the name it shipped under first and keeps alive as a passthrough alias (issue #4188).
  * A pin here is sealed immutably into every bundle built from this tree and cannot be corrected
  * after the bundle ships, so the publish workflow refuses whenever the set of pins and the version
  * it is about to publish disagree (issue #3244).
@@ -23,20 +25,22 @@ export const PRODUCT_RELEASE_PLATFORM_PINS_PATH = 'packages/benchmark-product/pr
 export const CLAIM_PIN_SOURCES = [
   'packages/benchmark-product/core/scripts/demo1-export-public-bundle.mjs',
   'packages/benchmark-product/core/src/legacy-closures.ts',
-  'packages/benchmark-product/verify/src/legacy-closures.ts',
+  'packages/benchmark-product/check/src/legacy-closures.ts',
   'packages/benchmark-product/cli/src/main.ts',
 ];
 
 /**
- * Every markdown file in the product tree that tells a reader which `@colophon-claims/verify`
- * version to run. These are corrigible after publication, so they never gate a publish -- but a
- * version npm has never served is still an instruction to fail, and CI refuses one (issue #3647).
+ * Every markdown file in the product tree that tells a reader which published reader version to
+ * run, under either published name. These are corrigible after publication, so they never gate a
+ * publish -- but a version npm has never served is still an instruction to fail, and CI refuses one
+ * (issue #3647).
  * Dated plans and decision records elsewhere in the repository are historical and out of scope.
  */
 export const READER_INSTRUCTION_DOCS = [
   'packages/benchmark-product/EXTERNAL-VERIFICATION.md',
   'packages/benchmark-product/PUBLIC-BUNDLE.md',
   'packages/benchmark-product/README.md',
+  'packages/benchmark-product/check/README.md',
   'packages/benchmark-product/cli/README.md',
   'packages/benchmark-product/core/README.md',
   'packages/benchmark-product/verify/README.md',
@@ -44,21 +48,27 @@ export const READER_INSTRUCTION_DOCS = [
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
 const EXACT_CANARY_PIN = /^0\.1\.0-canary\.sha\.[0-9a-f]{40}$/u;
-const VERIFY_RELEASES = {
-  '0.2.0': {
+/**
+ * Every product release this repository holds an immutable platform receipt for, keyed by the exact
+ * `<packageName>@<version>` it attests. The key carries the package name because `receiptSha256` is
+ * taken over the whole pin object, `product.packageName` included: re-pointing an entry at another
+ * name would forge a receipt for a publish that happened under the old one (issue #4188).
+ */
+const PRODUCT_RELEASES = {
+  '@colophon-claims/verify@0.2.0': {
     decision: 'DR-2026-08-22-a',
     platformSourceSha: 'e00b2fc47fc5635b007eb349fb1e41aa81bb3c50',
     stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/32544891098/attempts/2',
     receiptSha256: '8c6749c2e6c303b17ceccbc12712e1210e275dcdbcb37fd495a14a15cbb4474e',
   },
-  '0.2.1': {
+  '@colophon-claims/verify@0.2.1': {
     decision: 'operator-authorization-2026-08-26',
     platformSourceSha: '0533a224cf99f06d7facf0c23455f2781a5b9e62',
     stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/33517790412/attempts/2',
     receiptSha256: '2f2aa7e82f75c2775bd8de8673d3286caf8c6b9a92133a5a93f1766f942b1797',
   },
 };
-const VERIFY_RELEASE_VERSIONS = Object.keys(VERIFY_RELEASES);
+const PRODUCT_RELEASE_KEYS = Object.keys(PRODUCT_RELEASES);
 const PRODUCT_RELEASE_PINS_KEYS = ['schemaVersion', 'receipts'];
 const VERIFY_020_RECEIPT_KEYS = [
   'decision',
@@ -116,6 +126,31 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
+/** Records one `packageName -> versions` pin in a collector's accumulator. */
+function addPin(pins, packageName, version) {
+  if (!pins.has(packageName)) pins.set(packageName, new Set());
+  pins.get(packageName).add(version);
+}
+
+/** A collector's accumulator as a plain `{ packageName: sortedVersions }` object, names sorted. */
+function groupPins(pins) {
+  return Object.fromEntries(
+    [...pins.keys()].sort().map((packageName) => [packageName, [...pins.get(packageName)].sort()]),
+  );
+}
+
+/**
+ * The pins in `versions` that `published` cannot satisfy: an exact `X.Y.Z` npm does not serve, or a
+ * shorter `X`/`X.Y` line with no published version under it.
+ */
+function unresolvableAgainst(versions, published) {
+  return versions.filter((pin) =>
+    pin.split('.').length === 3
+      ? !published.includes(pin)
+      : !published.some((version) => version.startsWith(`${pin}.`)),
+  );
+}
+
 function sha256CanonicalJson(value) {
   return createHash('sha256').update(canonicalJson(value)).digest('hex');
 }
@@ -168,11 +203,10 @@ export function validateProductReleasePlatformPin(pin, manifest) {
   if (!hasExactKeys(pin, VERIFY_020_RECEIPT_KEYS) || !hasExactKeys(pin.product, VERIFY_020_PRODUCT_KEYS)) {
     throw new Error('product-release pin must retain the immutable verifier 0.2 receipt shape');
   }
-  const release = VERIFY_RELEASES[pin.product.version];
+  const release = PRODUCT_RELEASES[`${pin?.product?.packageName}@${pin?.product?.version}`];
   if (
     release === undefined
     || pin?.decision !== release.decision
-    || pin?.product?.packageName !== '@colophon-claims/verify'
     || pin.platformSourceSha !== release.platformSourceSha
     || pin.platformVersion !== `0.1.0-canary.sha.${release.platformSourceSha}`
     || manifest.name !== pin.product.packageName
@@ -232,18 +266,24 @@ export function validateProductReleasePlatformPins(pins, manifest) {
     !hasExactKeys(pins, PRODUCT_RELEASE_PINS_KEYS)
     || pins.schemaVersion !== 1
     || !Array.isArray(pins.receipts)
-    || JSON.stringify(pins.receipts.map((pin) => pin?.product?.version)) !== JSON.stringify(VERIFY_RELEASE_VERSIONS)
+    || JSON.stringify(pins.receipts.map((pin) => `${pin?.product?.packageName}@${pin?.product?.version}`))
+      !== JSON.stringify(PRODUCT_RELEASE_KEYS)
   ) {
     throw new Error('product-release platform pins must contain the exact ordered immutable verifier 0.2 receipts');
   }
   for (const pin of pins.receipts) {
     validateProductReleasePlatformPin(pin, {
       ...manifest,
-      name: '@colophon-claims/verify',
+      name: pin.product.packageName,
       version: pin.product.version,
     });
   }
-  const selected = pins.receipts.find((pin) => pin.product.version === manifest.version);
+  // Keyed on the pair, never the version alone: `@colophon-claims/check@0.2.1` and
+  // `@colophon-claims/verify@0.2.1` are different releases, and a version-only lookup hands the
+  // checker the alias's receipt and then refuses it with the wrong reason (issue #4188).
+  const selected = pins.receipts.find(
+    (pin) => pin.product.packageName === manifest.name && pin.product.version === manifest.version,
+  );
   if (selected === undefined) {
     throw new Error(`no immutable platform receipt is registered for ${manifest.name}@${manifest.version}`);
   }
@@ -295,25 +335,42 @@ export function applyColophonPublishManifest(manifestPath, pin, options = {}) {
 }
 
 /**
- * Every published `@colophon-claims/verify` release this repository holds a receipt for. This is the
- * offline floor, not the authority: a receipt is added in the same change that bumps the version, so
- * the ledger names a release before the registry does. `fetchPublishedVerifyVersions` is what the
+ * Every release this repository has registered for each published reader name. This is the offline
+ * floor, not the authority: an entry is added in the same change that bumps the version, so the
+ * ledger names a release before the registry does. `fetchPublishedReaderVersions` is what the
  * workflow actually asks.
+ *
+ * It is deliberately not derived from `PRODUCT_RELEASES`. A platform receipt attests one publish
+ * run; a registered release is any version this tree may resolve against. `verify@0.1.0` predates
+ * the receipt file and `verify@0.2.2` is the alias, which carries no Jinn closure to attest.
  */
-export function registeredVerifyReleases() {
-  return ['0.1.0', ...VERIFY_RELEASE_VERSIONS];
+const READER_RELEASES = {
+  '@colophon-claims/check': ['0.2.1'],
+  '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1', '0.2.2'],
+};
+
+export function registeredReaderReleases(packageName) {
+  const releases = READER_RELEASES[packageName];
+  if (releases === undefined) {
+    throw new Error(`no registered release ledger for ${packageName}; only a published reader name has one`);
+  }
+  return [...releases];
 }
 
 /**
  * The versions npm actually serves. Fails closed: a registry that cannot be read leaves the guard
  * unable to tell a pin that resolves from one that 404s, and guessing in that state is the exact
  * failure the guard exists to prevent.
+ *
+ * A clean 404 is the one answer that is not a failure to read. It is what npm returns for a name it
+ * has never served, which is exactly the state a first publish is in -- so refusing there would make
+ * the guard block the release it exists to gate, permanently. That case falls back to the offline
+ * ledger, which already names the version about to be published; every other status still refuses
+ * (issue #4188).
  */
-export async function fetchPublishedVerifyVersions(
-  packageName = '@colophon-claims/verify',
-  fetchImpl = fetch,
-) {
+export async function fetchPublishedReaderVersions(packageName, fetchImpl = fetch) {
   const response = await fetchImpl(`https://registry.npmjs.org/${packageName.replace('/', '%2f')}`);
+  if (response.status === 404) return registeredReaderReleases(packageName);
   if (!response.ok) {
     throw new Error(`cannot read published ${packageName} versions from npm: HTTP ${response.status}`);
   }
@@ -323,11 +380,15 @@ export async function fetchPublishedVerifyVersions(
 }
 
 /**
- * Every specifier shape npx resolves: the exact `X.Y.Z`, and the compatible `X.Y` and `X` lines.
- * The bare major is in the pattern because that is the shape that 404s against a 0.x package, and
- * a scan that cannot see it cannot refuse it (issue #3647).
+ * Every specifier shape npx resolves, under either published reader name: the exact `X.Y.Z`, and
+ * the compatible `X.Y` and `X` lines. The bare major is in the pattern because that is the shape
+ * that 404s against a 0.x package, and a scan that cannot see it cannot refuse it (issue #3647).
+ *
+ * Both names are in one pattern because a scan that sees only the retired one drops a file the
+ * moment its instruction moves to the new name -- silently, out of the sealed set the exhaustiveness
+ * walk enumerates (issue #4188).
  */
-const VERIFY_PIN_PATTERN = /@colophon-claims\/verify@([0-9]+(?:\.[0-9]+){0,2})/gu;
+const READER_PIN_PATTERN = /@colophon-claims\/(verify|check)@([0-9]+(?:\.[0-9]+){0,2})/gu;
 
 const REGEX_PRECEDING_KEYWORDS = new Set([
   'await', 'case', 'delete', 'do', 'else', 'in', 'instanceof', 'new', 'of', 'return', 'throw',
@@ -480,7 +541,8 @@ function* literalAndCommentSpans(text) {
 }
 
 /**
- * The `@colophon-claims/verify` specifiers one source file seals, in every shape npx resolves.
+ * The published reader specifiers one source file seals, grouped by package name, in every shape
+ * npx resolves.
  *
  * The scanner above is deliberately small -- it tracks nested template interpolations and regex
  * literals, and nothing else -- so it refuses rather than guesses: any specifier it cannot place in
@@ -490,67 +552,72 @@ function* literalAndCommentSpans(text) {
  */
 export function collectPinsFromSource(text, label = 'source') {
   const spans = [...literalAndCommentSpans(text)];
-  const pins = new Set();
+  const pins = new Map();
   const unclassified = [];
-  for (const match of text.matchAll(VERIFY_PIN_PATTERN)) {
+  for (const match of text.matchAll(READER_PIN_PATTERN)) {
+    const specifier = `@colophon-claims/${match[1]}`;
     const span = spans.find(({ start, end }) => match.index >= start && match.index < end);
-    if (span?.kind === 'string') pins.add(match[1]);
-    else if (span?.kind !== 'comment') unclassified.push(match[1]);
+    if (span?.kind === 'string') addPin(pins, specifier, match[2]);
+    else if (span?.kind !== 'comment') unclassified.push(`${specifier}@${match[2]}`);
   }
   if (unclassified.length > 0) {
     throw new Error(
-      `cannot tell whether @colophon-claims/verify@${unclassified.join(', @')} in ${label} is sealed or explained; put the specifier in a plain string constant`,
+      `cannot tell whether ${unclassified.join(', ')} in ${label} is sealed or explained; put the specifier in a plain string constant`,
     );
   }
-  return [...pins].sort();
+  return groupPins(pins);
 }
 
 /**
- * Every `@colophon-claims/verify` specifier pinned by `CLAIM_PIN_SOURCES`, deduplicated and
+ * Every reader specifier pinned by `CLAIM_PIN_SOURCES`, grouped by package name, deduplicated and
  * sorted.
  */
-export function collectClaimVerifyPins(repoRoot, sources = CLAIM_PIN_SOURCES) {
-  const pins = new Set();
+export function collectClaimReaderPins(repoRoot, sources = CLAIM_PIN_SOURCES) {
+  const pins = new Map();
   for (const source of sources) {
     const text = readFileSync(resolve(repoRoot, ...source.split('/')), 'utf8');
-    for (const pin of collectPinsFromSource(text, source)) pins.add(pin);
+    for (const [specifier, versions] of Object.entries(collectPinsFromSource(text, source))) {
+      for (const version of versions) addPin(pins, specifier, version);
+    }
   }
-  return [...pins].sort();
+  return groupPins(pins);
 }
 
 /**
- * Every `@colophon-claims/verify` specifier a reader-instruction document tells a reader to run.
- * Markdown has no string literals to scan and no comments to exclude, so the whole text counts.
+ * Every reader specifier a reader-instruction document tells a reader to run, grouped by package
+ * name. Markdown has no string literals to scan and no comments to exclude, so the whole text
+ * counts.
  */
 export function collectReaderInstructionPins(repoRoot, docs = READER_INSTRUCTION_DOCS) {
-  const pins = new Set();
+  const pins = new Map();
   for (const doc of docs) {
     const text = readFileSync(resolve(repoRoot, ...doc.split('/')), 'utf8');
-    for (const match of text.matchAll(VERIFY_PIN_PATTERN)) pins.add(match[1]);
+    for (const match of text.matchAll(READER_PIN_PATTERN)) {
+      addPin(pins, `@colophon-claims/${match[1]}`, match[2]);
+    }
   }
-  return [...pins].sort();
+  return groupPins(pins);
 }
 
 /**
- * Refuses a reader instruction naming a verifier version npm does not serve. An exact `X.Y.Z` must
- * be published; a shorter `X` or `X.Y` line must have a published version under it.
+ * Refuses a reader instruction naming a reader version npm does not serve, resolving every pin
+ * against its own package's ledger. An exact `X.Y.Z` must be published; a shorter `X` or `X.Y` line
+ * must have a published version under it.
  *
- * The default authority is the offline receipt ledger, so this runs in CI without a network call.
+ * The default authority is the offline release ledger, so this runs in CI without a network call.
  * The ledger names a release before the registry does, which leaves one window it cannot see: a
  * doc bumped in the same change as the receipt reads as resolvable until the manual publish
  * dispatch runs. That is the narrow, self-healing half; the shape it does catch -- a line npm has
  * never served at all -- is the one that strands a reader indefinitely.
  */
-export function assertReaderInstructionPinsResolve(pins, published = registeredVerifyReleases()) {
-  const unresolvable = pins.filter((pin) =>
-    pin.split('.').length === 3
-      ? !published.includes(pin)
-      : !published.some((version) => version.startsWith(`${pin}.`)),
-  );
-  if (unresolvable.length > 0) {
-    throw new Error(
-      `reader instructions name unpublished verifier @${unresolvable.join(', @')}; a reader following them gets a 404`,
-    );
+export function assertReaderInstructionPinsResolve(pins, published = registeredReaderReleases) {
+  for (const [specifier, versions] of Object.entries(pins)) {
+    const unresolvable = unresolvableAgainst(versions, published(specifier));
+    if (unresolvable.length > 0) {
+      throw new Error(
+        `reader instructions name unpublished ${specifier}@${unresolvable.join(', @')}; a reader following them gets a 404`,
+      );
+    }
   }
   return pins;
 }
@@ -569,7 +636,7 @@ export function assertReaderInstructionPinsResolve(pins, published = registeredV
  * carrying it are frozen and cannot be repointed, so requiring an exact pin would leave a
  * verifier-only patch release unpublishable by the very design meant to deliver it (issue #3687).
  */
-export function assertClaimPinsMatchPublish(pins, publishVersion, published = registeredVerifyReleases()) {
+export function assertClaimPinsMatchPublish(pins, publishVersion, published) {
   const resolvable = new Set([...published, publishVersion]);
   const exact = pins.filter((pin) => pin.split('.').length === 3);
   const unresolvable = exact.filter((pin) => !resolvable.has(pin));
@@ -595,11 +662,40 @@ export function assertClaimPinsMatchPublish(pins, publishVersion, published = re
   return pins;
 }
 
+/**
+ * Applies the publish contract across both published reader names.
+ *
+ * The name being published carries the whole contract above -- its pins must resolve, and something
+ * in the tree must ask for the exact version going out. Every other name is only checked for
+ * resolvability: publishing the checker does not publish the alias, so the alias's pins may not
+ * borrow the version about to be released to satisfy themselves (issue #4188).
+ */
+export function assertClaimReaderPinsMatchPublish(
+  pins,
+  packageName,
+  publishVersion,
+  published = registeredReaderReleases,
+) {
+  assertClaimPinsMatchPublish(pins[packageName] ?? [], publishVersion, published(packageName));
+  for (const [specifier, versions] of Object.entries(pins)) {
+    if (specifier === packageName) continue;
+    const unresolvable = unresolvableAgainst(versions, published(specifier));
+    if (unresolvable.length > 0) {
+      throw new Error(
+        `claim pins name unpublished ${specifier}@${unresolvable.join(', @')}; publishing ${packageName}@${publishVersion} does not publish them`,
+      );
+    }
+  }
+  return pins;
+}
+
 export async function checkClaimPins(repoRoot, manifest, published) {
-  return assertClaimPinsMatchPublish(
-    collectClaimVerifyPins(repoRoot),
+  const registry = published ?? await fetchPublishedReaderVersions(manifest.name);
+  return assertClaimReaderPinsMatchPublish(
+    collectClaimReaderPins(repoRoot),
+    manifest.name,
     manifest.version,
-    published ?? await fetchPublishedVerifyVersions(manifest.name),
+    (packageName) => (packageName === manifest.name ? registry : registeredReaderReleases(packageName)),
   );
 }
 
