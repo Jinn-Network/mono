@@ -50,8 +50,11 @@ function decodeRecord() {
 
 describe('TaskCoordinator.getTask decode (#4286)', () => {
   it('decodes the whole record at the right offsets', () => {
-    // Point the `abi` above at the deleted `GET_TASK_VIEW_ABI` and this reddens on four fields at
-    // once; `creatorCredited` is the sharpest, decoding `true` against a fixture that says false.
+    // Decode this same (correctly encoded) payload through the deleted `GET_TASK_VIEW_ABI` and
+    // four fields redden at once; `creatorCredited` is the sharpest, decoding `true` against a
+    // fixture that says false. Swapping the `abi` here would not show that -- the fixture is
+    // encoded from the same declaration, so the old literal fails at ENCODE instead. The proof
+    // pins the old literal on the decode side only (recorded as P6 in the sweep's evidence).
     expect(decodeRecord()).toEqual(RECORD);
   });
 
