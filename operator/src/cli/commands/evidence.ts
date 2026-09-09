@@ -1,16 +1,25 @@
 /**
  * `jinn evidence` verb — the read side of the quickstart loop.
  *
- * Two READ-ONLY subverbs turn an identifier into a result:
+ * Three READ-ONLY subverbs turn an identifier into a result:
  *   jinn evidence show --envelope-cid <cid> [--verify]
  *   jinn evidence find --task-id <id> [--role solution|verdict]
+ *   jinn evidence fetch --envelope-cid <cid> [--sha256 <hex>]
  *
- * Both are config-only: no keystore, no signer, no daemon, no bootstrap. They
- * read IPFS (show) and the HTTP discovery indexer (find) and nothing else.
+ * All three are config-only: no keystore, no signer, no daemon, no bootstrap.
+ * They read IPFS (show, fetch), the HTTP discovery indexer (find), and the
+ * artifact's own origin (fetch) — and nothing else. `fetch` is legal in this
+ * family only because the retrieval primitive it calls is keyless and
+ * store-free (#4179); the fetch path that predated it demanded a Safe and a
+ * SQLite store, which is why the deliverable was unreachable from here.
  */
 
 import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
+import {
+  fetchVerifiedArtifact as defaultFetchVerifiedArtifact,
+  type ArtifactFetchFailureReason,
+} from '@jinn-network/core/corpus-read';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
@@ -24,6 +33,20 @@ import type { AutopilotDeliveryRole } from '../../discovery-client/types.js';
 
 const SHOW_EXAMPLE = 'jinn evidence show --envelope-cid bafybeiabc123...';
 const FIND_EXAMPLE = 'jinn evidence find --task-id 42 --role solution';
+const FETCH_EXAMPLE = 'jinn evidence fetch --envelope-cid bafybeiabc123...';
+
+/**
+ * The retrieval primitive is injected so tests exercise the verb's selection,
+ * output, and error mapping without a network. Production wiring is the
+ * default; see docs/runbooks/testing.md and `doctor.ts` for the pattern.
+ */
+export interface EvidenceDeps {
+  fetchVerifiedArtifact: typeof defaultFetchVerifiedArtifact;
+}
+
+const PRODUCTION_DEPS: EvidenceDeps = {
+  fetchVerifiedArtifact: defaultFetchVerifiedArtifact,
+};
 
 /**
  * Chain id per configured network. `evidence find` needs only the chain id to
@@ -474,37 +497,250 @@ async function runFind(ctx: CommandContext): Promise<void> {
   });
 }
 
-// ── dispatch ──────────────────────────────────────────────────────────────────
+// ── evidence fetch ────────────────────────────────────────────────────────────
 
-async function run(ctx: CommandContext): Promise<void> {
-  const [subverb, ...rest] = ctx.argv;
-  if (!subverb || subverb === '--help' || subverb === '-h') {
-    ctx.writer.write(command.helpText + '\n');
+/**
+ * Failure reasons the primitive can return, mapped onto the closed CLI error
+ * code set. The asymmetry with `show --verify` is deliberate: a tier mismatch
+ * there is a legitimate read and never reddens the exit, whereas a digest
+ * mismatch here is the integrity failure the whole retrieval path exists to
+ * catch, so it must exit non-zero.
+ *
+ * `no_locator` is defensive — `ArtifactSchema` requires `access.endpoint`, so a
+ * schema-valid envelope always names at least one locator.
+ */
+const FETCH_ERROR_CODES: Record<ArtifactFetchFailureReason, 'transient_error' | 'fatal' | 'invalid_invocation'> = {
+  timeout: 'transient_error',
+  unavailable: 'transient_error',
+  not_found: 'fatal',
+  blocked: 'fatal',
+  too_large: 'fatal',
+  digest_mismatch: 'fatal',
+  no_locator: 'invalid_invocation',
+};
+
+function renderFetchHuman(value: unknown): string {
+  const v = value as {
+    sha256: string;
+    artifactType: string;
+    sizeBytes: number;
+    verified: boolean;
+    provenance: { source: string; sourceUri: string };
+  };
+  // Deliberately five lines and no payload: a terminal is not a place to put a
+  // binary blob. Use --json when you want the bytes.
+  return [
+    `Artifact ${v.sha256}`,
+    `  Type   : ${v.artifactType}`,
+    `  Size   : ${v.sizeBytes} bytes`,
+    `  Source : ${v.provenance.source} ${v.provenance.sourceUri}`,
+    `  Status : ${v.verified ? 'verified against the recorded sha256' : 'unverified'}`,
+  ].join('\n');
+}
+
+async function runFetch(ctx: CommandContext, deps: EvidenceDeps): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: ctx.argv,
+      options: {
+        ...COMMON_FLAGS,
+        'envelope-cid': { type: 'string' as const },
+        sha256: { type: 'string' as const },
+      },
+      allowPositionals: false,
+    });
+  } catch (err) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: errorMessage(err),
+        exampleCli: FETCH_EXAMPLE,
+        details: { field: 'flags' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
     return;
   }
-  if (subverb === 'show') return runShow({ ...ctx, argv: rest });
-  if (subverb === 'find') return runFind({ ...ctx, argv: rest });
-  emitEnvelope(
+
+  const envelopeCid = parsed.values['envelope-cid'] as string | undefined;
+  if (!envelopeCid) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: '--envelope-cid is required',
+        exampleCli: FETCH_EXAMPLE,
+        details: { field: '--envelope-cid', expected: 'non-empty string IPFS CID' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const config = loadConfig(getConfigPathFromArgs(ctx.argv));
+
+  // Same envelope path `show` uses, so the two subverbs cannot disagree about
+  // what an envelope says.
+  let bytes: Uint8Array;
+  try {
+    bytes = await fetchSignedEnvelopeBytesRaw(config.ipfsGatewayUrl, envelopeCid);
+  } catch (err) {
+    emitEnvelope(
+      {
+        code: 'transient_error',
+        message: `Could not fetch envelope ${envelopeCid}: ${errorMessage(err)}`,
+        hint: 'Retry when the IPFS gateway is reachable, or set ipfsGatewayUrl to a gateway that pins this CID.',
+        exampleCli: FETCH_EXAMPLE,
+        details: { envelopeCid, gateway: config.ipfsGatewayUrl },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  let envelope: SignedEnvelope;
+  try {
+    envelope = SignedEnvelopeSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
+  } catch (err) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: `Bytes at ${envelopeCid} are not a jinn.execution.v1 signed envelope: ${errorMessage(err)}`,
+        hint: 'Run `jinn conformance --envelope-cid <cid>` for the per-check breakdown.',
+        exampleCli: FETCH_EXAMPLE,
+        details: { field: '--envelope-cid', envelopeCid },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const catalog = envelope.artifacts.map((a) => ({ artifactType: a.artifactType, sha256: a.sha256 }));
+  const requestedSha = parsed.values.sha256 as string | undefined;
+  const artifact = requestedSha
+    ? envelope.artifacts.find((a) => a.sha256 === requestedSha)
+    : envelope.artifacts.length === 1
+      ? envelope.artifacts[0]
+      : undefined;
+
+  if (!artifact) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: requestedSha
+          ? `Envelope ${envelopeCid} names no artifact with sha256 ${requestedSha}`
+          : `Envelope ${envelopeCid} carries ${catalog.length} artifacts; name one with --sha256`,
+        hint: 'Pick a sha256 from the artifacts listed in details, or run `jinn evidence show` first.',
+        exampleCli: `jinn evidence fetch --envelope-cid ${envelopeCid} --sha256 <hex>`,
+        details: { field: '--sha256', envelopeCid, artifacts: catalog },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const retrieved = await deps.fetchVerifiedArtifact(
+    { sha256: artifact.sha256, artifactType: artifact.artifactType },
     {
-      code: 'invalid_invocation',
-      message: `Unknown evidence subverb: ${subverb}`,
-      exampleCli: SHOW_EXAMPLE,
-      details: { field: 'subverb', expected: 'show|find' },
+      sources: artifact.sources,
+      ipfsGatewayUrl: config.ipfsGatewayUrl,
+      endpoint: artifact.access.endpoint,
+      envelopeCid,
+      ownerSafe: envelope.participant.safeAddress,
     },
-    { writer: ctx.writer, exit: ctx.exit },
+  );
+
+  if (!retrieved.ok) {
+    emitEnvelope(
+      {
+        code: FETCH_ERROR_CODES[retrieved.reason],
+        message: retrieved.message,
+        hint: retrieved.reason === 'digest_mismatch'
+          ? 'The source returned bytes that are not the artifact this envelope names. Nothing was written; report the operator in sourceOperator.'
+          : retrieved.retryable
+            ? 'Nothing was learned about whether the artifact exists — retry.'
+            : 'The source answered, and the answer was final for this address.',
+        exampleCli: FETCH_EXAMPLE,
+        details: {
+          envelopeCid,
+          sha256: artifact.sha256,
+          reason: retrieved.reason,
+          retryable: retrieved.retryable,
+          attempts: retrieved.attempts,
+          ...(retrieved.mismatch ?? {}),
+        },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  emitResult(
+    {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      verb: 'evidence fetch',
+      envelopeCid,
+      sha256: retrieved.artifact.sha256,
+      artifactType: retrieved.artifact.artifactType,
+      sizeBytes: retrieved.artifact.bytes.length,
+      verified: true,
+      // Unconditional in JSON mode: a verb that returns everything except the
+      // deliverable is the complaint this subverb exists to answer. Where the
+      // bytes land is the caller's decision — `fetch` writes no files.
+      contentBase64: retrieved.artifact.bytes.toString('base64'),
+      provenance: retrieved.artifact.provenance,
+    },
+    renderFetchHuman,
+    {
+      json: Boolean(parsed.values.json),
+      human: Boolean(parsed.values.human),
+      writer: ctx.writer,
+      stdoutIsTty: ctx.stdoutIsTty,
+      noColor: Boolean(ctx.env['NO_COLOR']),
+    },
   );
 }
 
-const command: CommandModule = {
-  name: 'evidence',
-  summary: 'Read delivered evidence — resolve a task id to an envelope, and an envelope to its result',
-  helpText: `Usage:
+// ── dispatch ──────────────────────────────────────────────────────────────────
+
+export function createEvidenceCommand(deps: EvidenceDeps = PRODUCTION_DEPS): CommandModule {
+  async function run(ctx: CommandContext): Promise<void> {
+    const [subverb, ...rest] = ctx.argv;
+    if (!subverb || subverb === '--help' || subverb === '-h') {
+      ctx.writer.write(HELP_TEXT + '\n');
+      return;
+    }
+    if (subverb === 'show') return runShow({ ...ctx, argv: rest });
+    if (subverb === 'find') return runFind({ ...ctx, argv: rest });
+    if (subverb === 'fetch') return runFetch({ ...ctx, argv: rest }, deps);
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: `Unknown evidence subverb: ${subverb}`,
+        exampleCli: SHOW_EXAMPLE,
+        details: { field: 'subverb', expected: 'show|find|fetch' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+  }
+
+  return {
+    name: 'evidence',
+    summary: 'Read delivered evidence — resolve a task id to an envelope, and an envelope to its result',
+    helpText: HELP_TEXT,
+    run,
+  };
+}
+
+const HELP_TEXT = `Usage:
   jinn evidence show --envelope-cid <cid> [--verify] [--json|--human]
   jinn evidence find --task-id <id> [--role solution|verdict] [--json|--human]
+  jinn evidence fetch --envelope-cid <cid> [--sha256 <hex>] [--json|--human]
 
-Both subverbs are read-only: config-only, no keystore, no signer, no daemon,
-no bootstrap. Together with \`jinn tasks submit\` and \`jinn tasks watch\` they
-close the post -> deliver -> retrieve loop.
+All three subverbs are read-only: config-only, no keystore, no signer, no
+daemon, no bootstrap. Together with \`jinn tasks submit\` and \`jinn tasks watch\`
+they close the post -> deliver -> retrieve loop.
 
 show
   Fetches the signed envelope bytes from IPFS and prints its identifying
@@ -529,6 +765,20 @@ find
   'contradiction' (the indexer holds inconsistent rows). All three exit 0 —
   the status field carries the outcome.
 
+fetch
+  Retrieves the artifact an envelope names and returns its bytes, having
+  verified them against the sha256 the envelope records. A digest mismatch
+  fails closed: no bytes are returned and the exit code is non-zero.
+
+  --envelope-cid <cid>  IPFS CID of the SignedEnvelope (required)
+  --sha256 <hex>        Which artifact to fetch. Required only when the
+                        envelope names more than one; the error lists them.
+
+  JSON output carries the bytes as contentBase64 plus the provenance of the
+  source they came from. --human prints a summary and never the bytes. The
+  verb writes no files and takes no output path — where the bytes land is
+  the caller's decision.
+
 Requires an HTTP discovery indexer (find only):
   config: discovery.mode = "http", discovery.url = "<indexer url>"
   env:    JINN_DISCOVERY_MODE=http, JINN_DISCOVERY_URL=<indexer url>
@@ -540,8 +790,9 @@ Examples:
   jinn evidence find --task-id 42 --json
   jinn evidence show --envelope-cid bafybeiabc123... --human
   jinn evidence show --envelope-cid bafybeiabc123... --verify --json
-`,
-  run,
-};
+  jinn evidence fetch --envelope-cid bafybeiabc123... --json
+`;
+
+const command: CommandModule = createEvidenceCommand();
 
 export default command;
