@@ -104,22 +104,40 @@ npx @jinn-network/operator@canary --help
    The publish step creates `client-vX.Y.Z`, pushes it, creates the GitHub
    release, waits for npm/GHCR workflows, and verifies the published artifacts.
 
-For Captain-driven GitHub Release publishes, add this exact evidence marker to
-the Release body before clicking Publish. `release-commit` must be the commit
-the `vX.Y.Z` tag points at:
+For Captain-driven GitHub Release publishes, the gate is **two SHA-bound
+check-runs on the release commit** — nothing you type in the Release body:
 
-```text
-<!-- jinn-release-evidence:v1
-release-tag=vX.Y.Z
-release-commit=<git sha>
-release-client-prepare=passed
-olas-rails-smoke=passed
-app-first-testnet-acceptance=passed
--->
+- `hermetic-gate` — the native job of `.github/workflows/hermetic-gate.yml`.
+- `environment-suite` — posted by
+  `operator/scripts/release/post-check-run-verdict.mjs` from
+  `.github/workflows/environment-suite.yml`.
+
+`npm-publish.yml`'s stable-publish step resolves the release SHA, queries both
+check-runs on that exact SHA, and refuses the publish unless both are
+`success`-for-this-SHA. It re-runs nothing, and it parses no Release body. A
+check-run bound to a different `head_sha` is stale and does not count, so a
+rebase invalidates a stale verdict automatically. See the two-gate redesign
+([`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md`](../docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md)
+§7) and the guard itself at `.github/workflows/npm-publish.yml`.
+
+Both gates carry a transitional repo-variable waiver —
+`JINN_HERMETIC_GATE_WAIVED` and `JINN_ENVIRONMENT_SUITE_WAIVED`. When one is
+`'true'` the guard logs the waiver loudly and skips that verdict. Unset is the
+steady state; treat a set waiver as a cut you are publishing without that gate.
+
+Before publishing, confirm both verdicts are green on the tagged commit:
+
+```bash
+gh api repos/Jinn-Network/mono/commits/<release-sha>/check-runs \
+  --jq '.check_runs[] | select(.name=="hermetic-gate" or .name=="environment-suite")
+        | "\(.name) \(.conclusion) \(.head_sha)"'
 ```
 
-`npm-publish.yml` refuses stable publishes when this marker is absent or points
-at a different commit.
+A `jinn-release-evidence:v1` block may still appear in a Release body or in a
+generated handoff under `docs/release/`. It is **diagnostic-only** — the same
+annotation `writeHandoffDoc()` and
+[`handoff-doc-template.md`](../.claude/skills/release-readiness/references/handoff-doc-template.md)
+carry. Nothing parses it, and its absence or staleness blocks no publish.
 
 For command-flow validation without the live testnet gate:
 
