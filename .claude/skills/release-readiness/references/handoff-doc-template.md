@@ -60,7 +60,22 @@ SHA-bound check-runs (`hermetic-gate`, `environment-suite`) are. `npm-publish.ym
 no longer parses this block; it is retained as a human-readable diagnostic.
 
 <!-- jinn-release-evidence:v1
-release-tag=...
-...
+release-tag=<version>
+release-commit=<sha>
+hermetic-gate-t1-1=passed
+hermetic-gate-t1-4=passed
+environment-suite=passed
+release-readiness-recommendation=SHIP
+release-readiness-handoff=docs/release/<version>/handoff.md
+release-readiness-run=<run-id>
 -->
 ```
+
+Marker keys speak the two-gate vocabulary. One `hermetic-gate-<scenario-id>` key per
+scenario verdict (id lowercased, dots to dashes), one `environment-suite` key whose
+value is `passed`, `failed:<failClass>`, or `skipped:no-verdict-supplied` when no
+environment-suite verdict reached the run. The heading sequence above is pinned by
+`operator/scripts/release/release-readiness.test.ts`.
+
+Handoffs already written under `docs/release/` keep the retired `tier-1-*` /
+`tier-3-t3-1` keys; they are dated artifacts and are not retro-edited.

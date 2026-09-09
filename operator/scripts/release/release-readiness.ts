@@ -30,9 +30,9 @@ export interface HandoffDocInput {
     surfacesTouched: string[];
   };
   gaps: Gap[];
-  releasePrepVerdicts: ScenarioVerdict[];
-  tier3Verdict: ScenarioVerdict | null;
-  tier3Evidence: {
+  hermeticGateVerdicts: ScenarioVerdict[];
+  environmentSuiteVerdict: ScenarioVerdict | null;
+  environmentSuiteEvidence: {
     scenario: string;
     hermesModel: string;
     verdictCode: number;
@@ -89,18 +89,18 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
   });
   gapSection('Already met', 'ALREADY-MET', (g) => `- **${g.id}** [${g.source}]: ${g.notes}`);
   push(`## Hermetic-gate scenarios`);
-  for (const v of input.releasePrepVerdicts) {
+  for (const v of input.hermeticGateVerdicts) {
     push(`- ${v.scenarioId}: ${v.verdict}${v.failClass ? ` (${v.failClass})` : ''} (${v.wallClockMs}ms)`);
   }
   push();
-  if (input.tier3Verdict && input.tier3Evidence) {
+  if (input.environmentSuiteVerdict && input.environmentSuiteEvidence) {
     push(`## Environment-suite evidence`);
-    push(`- Scenario: ${input.tier3Evidence.scenario}`);
-    push(`- Hermes model: ${input.tier3Evidence.hermesModel}`);
-    push(`- Verdict: ${input.tier3Verdict.verdict} (verdictCode=${input.tier3Evidence.verdictCode})`);
-    push(`- Tx: deliver ${input.tier3Evidence.deliveryTxHash}, verdict ${input.tier3Evidence.verdictTxHash}`);
-    push(`- Cost: $${input.tier3Evidence.costUsd.toFixed(2)}`);
-    push(`- Wall-clock: ${input.tier3Verdict.wallClockMs}ms`);
+    push(`- Scenario: ${input.environmentSuiteEvidence.scenario}`);
+    push(`- Hermes model: ${input.environmentSuiteEvidence.hermesModel}`);
+    push(`- Verdict: ${input.environmentSuiteVerdict.verdict} (verdictCode=${input.environmentSuiteEvidence.verdictCode})`);
+    push(`- Tx: deliver ${input.environmentSuiteEvidence.deliveryTxHash}, verdict ${input.environmentSuiteEvidence.verdictTxHash}`);
+    push(`- Cost: $${input.environmentSuiteEvidence.costUsd.toFixed(2)}`);
+    push(`- Wall-clock: ${input.environmentSuiteVerdict.wallClockMs}ms`);
     push();
   } else {
     push(`## Environment-suite evidence`);
@@ -133,14 +133,15 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
   push(`<!-- jinn-release-evidence:v1`);
   push(`release-tag=${input.candidateVersion}`);
   push(`release-commit=${input.branchSha}`);
-  for (const v of input.releasePrepVerdicts) {
-    const key = v.scenarioId.toLowerCase().replace(/\./g, '-').replace(/^t/, 'tier-');
-    push(`${key}=${verdictMarker(v)}`);
+  for (const v of input.hermeticGateVerdicts) {
+    push(`hermetic-gate-${v.scenarioId.toLowerCase().replace(/\./g, '-')}=${verdictMarker(v)}`);
   }
-  if (input.tier3Verdict) {
-    push(`tier-3-t3-1=${verdictMarker(input.tier3Verdict)}`);
+  if (input.environmentSuiteVerdict) {
+    push(`environment-suite=${verdictMarker(input.environmentSuiteVerdict)}`);
   } else {
-    push(`tier-3-t3-1=skipped:${input.mode === 'autonomous' ? 'autonomous-mode' : 'human-skipped'}`);
+    // Mode-independent: the SKIPPED prose above deliberately asserts no mode gate,
+    // only that no environment-suite verdict reached this run.
+    push(`environment-suite=skipped:no-verdict-supplied`);
   }
   push(`release-readiness-recommendation=${input.recommendation}`);
   push(`release-readiness-handoff=docs/release/${input.candidateVersion}/handoff.md`);
