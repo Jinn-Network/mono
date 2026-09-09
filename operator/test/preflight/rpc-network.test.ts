@@ -78,6 +78,40 @@ describe('rpc network preflight', () => {
     });
   });
 
+  it('masks credentials embedded in the RPC URL out of the failure message (#3103)', async () => {
+    // 401 rather than 5xx: viem's http() transport does not retry a 401, so the
+    // test does not pay three retry backoffs. The failure message is a viem
+    // HttpRequestError whose metaMessages embed the full request URL — path and
+    // query included (userinfo is already stripped upstream by getUrl, so it is
+    // asserted only as defense in depth; relying on a library's redaction for
+    // our own leak boundary is not a control we own).
+    const server = createServer((_req, res) => {
+      res.statusCode = 401;
+      res.end('unauthorized');
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', () => resolve());
+    });
+    servers.push(server);
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('missing address');
+
+    const result = await checkRpcNetwork({
+      network: 'testnet',
+      rpcUrl:
+        `http://user:PLANTEDuserinfo01@127.0.0.1:${addr.port}` +
+        '/v2/PLANTEDpathKey01?apikey=PLANTEDqueryKey01',
+    });
+
+    expect(result.ok).toBe(false);
+    // The host survives: the endpoint stays diagnosable, which is the stated
+    // contract of the shared host-only dialect.
+    expect(result.message).toContain('127.0.0.1');
+    expect(result.message).not.toContain('PLANTEDpathKey01');
+    expect(result.message).not.toContain('PLANTEDqueryKey01');
+    expect(result.message).not.toContain('PLANTEDuserinfo01');
+  });
+
   it('accepts Anvil / Hardhat local chain id (31337) for testnet config (loopback only)', async () => {
     const rpc = await startRpc('0x7a69'); // 31337
     const result = await checkRpcNetwork({ network: 'testnet', rpcUrl: rpc.url });
