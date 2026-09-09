@@ -90,15 +90,14 @@ const RETIRED_PACKAGES = new Set(['client']);
 
 /**
  * Every file that states an `ARG BASE_TAG` default — the two overlay
- * Dockerfiles and the READMEs that quote them. They must all agree, and must
- * name a tag that is republished continuously.
+ * Dockerfiles, the READMEs that quote them, and the deploy README whose
+ * copy-pasteable "~4-line overlay" recipe an operator is most likely to paste.
+ * They must all agree, and must name a tag that is republished continuously.
  *
- * `deploy/README.md` states the default too, in the copy-pasteable "~4-line
- * overlay" recipe an operator is most likely to paste. It is in
- * `REFERENCING_FILES`, but its `FROM ghcr.io/<owner>/operator:${BASE_TAG}` is an
- * `isPlaceholder` skip, so the reference scan structurally cannot see the tag —
- * the same reasoning that gives `railway.toml` its own `BASE_TAG_EXAMPLE_FILES`
- * list below.
+ * `deploy/README.md` is in `REFERENCING_FILES` too, but its
+ * `FROM ghcr.io/<owner>/operator:${BASE_TAG}` is an `isPlaceholder` skip, so the
+ * reference scan structurally cannot see the tag — the same reasoning that gives
+ * `railway.toml` its own `BASE_TAG_EXAMPLE_FILES` list above.
  */
 const BASE_TAG_FILES = [
   'deploy/README.md',
@@ -238,7 +237,7 @@ function stripSentencePunctuation(tag: string): string {
 type Reference = { file: string; line: number; pkg: string; tag?: string };
 
 /** Every `ghcr.io/<owner>/<pkg>[:<tag>]` in one blob of text, one per match. */
-export function parseImageReferences(
+function parseImageReferences(
   text: string,
   file = '<text>',
 ): Reference[] {

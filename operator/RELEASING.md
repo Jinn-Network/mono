@@ -181,8 +181,9 @@ docker pull ghcr.io/jinn-network/operator:latest   # no registry auth
 
 Then repoint the run-it-now examples from `:next` back to `:latest`:
 
-- `DEPLOY.md` — the `image:` line in the compose snippet, and the surrounding
-  "which tag to run" prose
+- `DEPLOY.md` — the `image:` line in the compose snippet, and the prose above it
+  that says the compose file pulls `:next` (the lane table's `:next` row stays
+  true and must not be touched)
 - `deploy/README.md` — the unauthenticated `docker pull` example under
   *Pulling the base*
 - `operator/docker-compose.yml` — the `image:` line
@@ -206,6 +207,10 @@ Finally, relax the guard that encodes the same assumption:
   "Relax this once the stable lane has a green run under this name." note above
   the `ROLLING_BASE_TAGS`-only rule in *offers only pinnable BASE_TAG examples*.
   A version-shaped `BASE_TAG` example becomes pinnable once a stable cut exists.
+  Relax that rule alone — do **not** widen `ROLLING_BASE_TAGS`. That set is
+  shared with *states one overlay base-tag default*, so adding `latest` to it
+  would silently permit the overlay default the next paragraph says must stay
+  `next`.
 
 The five `ARG BASE_TAG=next` defaults (`deploy/README.md`, both overlay
 `Dockerfile`s, both overlay `README.md`s) are **not** part of this temporary
