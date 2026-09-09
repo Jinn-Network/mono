@@ -2,13 +2,14 @@
 
 | | |
 |---|---|
-| **Version** | 0.1 |
-| **Date** | 2026-09-06 |
+| **Version** | 0.2 |
+| **Date** | 2026-09-06 (v0.1); 2026-09-09 (v0.2 applies the operator ruling) |
 | **Shape** | `design` |
-| **Status** | proposed; approval-ready |
+| **Status** | adopted — operator ruling 2026-09-07; adopted with one amendment to the format numbering, recorded in §10 ([PR #4105 comment 5570963854](https://github.com/Jinn-Network/mono/pull/4105#issuecomment-5570963854)) |
 | **Issue** | [#2763](https://github.com/Jinn-Network/mono/issues/2763) |
-| **Depends on** | [benchmarking application](./2026-07-28-benchmarking-application-design.md) §7.2; [publication interoperability profile](./2026-08-13-benchmark-publication-interoperability-profile.md) §9.3; [benchmark product](./2026-08-05-benchmark-product-design.md) §7; [proof-carrying anchors](./2026-08-17-pluggable-integrity-providers-design.md) §9, §16.6, §19; [reader-facing vocabulary](./2026-09-02-reader-facing-vocabulary.md) |
+| **Depends on** | [benchmarking application](./2026-07-28-benchmarking-application-design.md) §7.2; [publication interoperability profile](./2026-08-13-benchmark-publication-interoperability-profile.md) §9.3; [benchmark product](./2026-08-05-benchmark-product-design.md) §7; [proof-carrying anchors](./2026-08-17-pluggable-integrity-providers-design.md) §9, §16.6, §19; [reader-facing vocabulary](./2026-09-02-reader-facing-vocabulary.md); [bundle capability composition](./2026-08-29-bundle-capability-composition-design.md) (v0.2: the generation this design's carriage registers into) |
 | **Outcome** | one composed reader statement backed by two independent evidence channels; no blended score or claim |
+| **v0.2 changes** | Ruling erratum; carriage only. §3 stops allocating `benchmark-product-public-bundle/9` and `benchmark-product.claim-package/7` and instead registers one `marketplace-ordering` capability entry in the composed generation `/10`, with §3.1, §3.2, §6, §7's test 9, §8, and §9's allocation bullet following. §8's slice order inverts, because the composed generation is now a precondition rather than an optional fold-in. Two evidence corrections in the document's own voice: §3's census now spans all three bundle lineages, and §4.1 names the check's predecessor exactly. **The adopted substance is unchanged** — §0, §1, §2, §4's steps and states, §5's reader copy, §6's other rules, and §7's other tests carry over unedited, and no analysis is rewritten. |
 
 ## 0. Decision in plain language
 
@@ -123,43 +124,87 @@ must not query the projector or material port again after Matrix assembly.
 This binds the public ordering record to the authority snapshot that governed
 the published result rather than constructing a plausible transcript later.
 
-## 3. Additive bundle and claim formats
+## 3. Additive bundle and claim carriage
 
-Allocate:
+This design allocates no bundle format number and no claim-package identifier.
+Its bundle-level additions register as **one capability entry**,
+`marketplace-ordering`, inside the composed generation
+`benchmark-product-public-bundle/10` (operator ruling, §10 R2).
 
-- `benchmark-product-public-bundle/9`; and
-- `benchmark-product.claim-package/7`.
+That generation is designed by [bundle capability
+composition](./2026-08-29-bundle-capability-composition-design.md) (issue
+#2889), which is itself still `proposed — needs operator decision on D1–D4`,
+and whose text still names `/8` for the generation and
+`benchmark-product.claim-package/6` for its claim id — both numbers were taken
+after that design was written, which is the same numbering drift the ruling
+corrects. `/10` therefore does not exist in the tree today. §8 states this
+design's dependency on it rather than assuming it has landed.
 
-At the claimed head `/8` and claim-package `/6` already have fixed disclosed,
-anchored qualification meanings. `/9` and `/7` are additions; `/2` through `/8`
-and claim-package `/1` through `/6` keep their exact schemas, member sets,
-check order, accepted commands, and golden bytes.
+The census at the claimed head spans three unrelated lineages, and this design
+extends only the first. Paths below are relative to
+`packages/benchmark-product/` for `core` and `verify`, and to
+`packages/benchmarking/` for `protocol`:
 
-### 3.1 Bundle closure
+| Lineage | Bundle formats | Claim-package ids |
+|---|---|---|
+| classic | `/2`, `/4`, `/6`, `/7`, `/8` (`core/src/legacy-closures.ts:44-58`; `core/src/bundle/manifest.ts:36`) | `/1`, `/2`, `/4`, `/5`, `/6` (`core/src/legacy-closures.ts:89-106`; `core/src/report/claim.ts:104`) |
+| accounting-only | `/3` (`core/src/bundle/manifest.ts:28`) — producer-side only; absent from the reader's `SUPPORTED_BUNDLE_FORMATS` (`verify/src/manifest.ts:47-54`) | — |
+| evidence-native | `/5`, carrying two profiles — full-evidence and metadata-first (`verify/src/manifest.ts:26`; `protocol/src/identifiers.ts:54-55`, `:63-64`) | `/3` (`protocol/src/portable.ts:33-34`) |
 
-Bundle `/9` is the current fully disclosed anchored closure plus the declared
-marketplace-ordering capability. It requires:
+No `/9` exists in the tree; it is allocated by PR #4090 (issue #3698) and is
+therefore unavailable. Every allocated format and claim id above keeps its exact
+schema, member set, check order, accepted command, and golden bytes, and nothing
+here touches `/3` or `/5`. The freeze binds hardest on `/8` and claim-package
+`/6`, which already carry fixed disclosed, anchored qualification meanings at
+the claimed head (`core/src/bundle/manifest.ts:29-35`;
+`core/src/report/claim.ts:89-104`) — the fact that made v0.1 reach for the next
+free number.
 
-- `ordering/marketplace.json`;
-- every event member referenced by that record;
-- every Submission member referenced by that record; and
-- a `marketplace-ordering` verification check, while retaining
-  `integrity-anchors` whenever anchors are declared.
+### 3.1 The `marketplace-ordering` capability entry
 
-The closure is biconditional: `/9` requires those members, and older formats
-refuse them. A `/9` bundle with a missing member is invalid rather than treated
-as an older or self-run bundle. The check occupies a fixed position in the `/9`
-check list immediately before `integrity-anchors`, so claim construction and
-verification share one ordered constant.
+The entry states, in the field vocabulary of the composition design's §4:
 
-If the planned capability registry lands first, marketplace ordering becomes
-one additive registry entry. That changes implementation structure, not `/9`'s
-wire meaning.
+| Field | Value |
+|---|---|
+| `token` | `marketplace-ordering` — the same string as §4.1's check name and §5's reader row, so wire token, check name, and reader row are one identifier |
+| `order` | strictly below `anchoring`'s, which is what places this check immediately before `integrity-anchors` in every derived check list |
+| `requires` / `conflicts` | both empty. Ordering stands alone: §1's separation is exactly the claim that neither channel needs the other |
+| `mandatoryFiles` | `ordering/marketplace.json` |
+| `memberPatterns` | `ordering/events/<zero-padded-ordinal>-<sha256>.json` and `ordering/submissions/<sha256>.bin`, both `mayBeEmpty: false` — deliberately unlike `anchoring`, because a declared ordering capability carrying no events establishes nothing and must fail as a missing member rather than report a quiet `present` |
+| `refines` | the claim's venue discriminant and its `venueHonesty` grammar (§3.2) |
+| `claimSection` | `marketplaceOrdering` |
+| `checks` | `marketplace-ordering` |
+| `minimumReaderRelease` | the first `@colophon-claims/verify` release that implements the token, resolved through the composition design's `minimumRelease(vector)` derivation rather than pinned as a string here |
+| `activation` | the sealed Run's venue is `open-competition` and the receipt came from `runOnMarketplace`'s already-frozen projection (§2.2) |
+
+The member patterns are the allowlist. Exact bidirectional closure against the
+record's own `events` and `submissions` arrays stays the `marketplace-ordering`
+check's job (§2.1).
+
+Declaration is authoritative and presence is derived, which is what v0.1's
+closure sentence was reaching for. Declaring the token requires its members; a
+bundle that did not declare it refuses an `ordering/**` member as
+non-allowlisted; and a declared-but-stripped member is invalid rather than
+treated as an older or self-run bundle. `integrity-anchors` is present exactly
+when `anchoring` is in the vector, so "retain `integrity-anchors` whenever
+anchors are declared" stops being a condition written into a fixed check array
+and becomes what the derivation already does.
+
+**One coordination item this design needs from the composition design.** Its
+§5.2 registry invariant — at most one capability may refine a given target — is
+stated over *bundle members* whose grammar a capability replaces, and its only
+registered refiner, `binary-qualification`, refines member grammars. This
+capability refines a **claim-package grammar slot** instead (§3.2). The
+registry's target space therefore has to distinguish the two kinds, so that the
+one-refiner-per-target invariant still runs as a build-time test rather than
+comparing names drawn from different spaces. That is a dependency on a design
+that is itself still proposed, and it is named here rather than assumed.
 
 ### 3.2 Claim projection
 
-Claim-package `/7` adds `marketplaceOrdering` beside existing `anchors` and
-uses a discriminated `venueHonesty` union:
+Declaring the token adds one claim section, `marketplaceOrdering`, beside the
+existing `anchors` section, and refines the claim's venue discriminant into a
+`venueHonesty` union:
 
 ```json
 {
@@ -183,10 +228,26 @@ uses a discriminated `venueHonesty` union:
 }
 ```
 
-For `/7`, `scope.venue = "open-competition"`, `marketplaceOrdering`, and the
-open-competition `venueHonesty` variant are required together. The existing
+The section is biconditional with the token: declared ⟺ present. Declaring
+`marketplace-ordering` requires `scope.venue = "open-competition"`, the
+`marketplaceOrdering` section, and the open-competition `venueHonesty` variant
+together; not declaring it leaves all three unreachable. Both venue slots are
+single literals today — `venue: z.literal("self-run")`
+(`core/src/report/claim.ts:276`) and `VenueHonesty.venue: "self-run"` with its
+two-literal `preRegistration` union
+(`core/src/operations/run-results.ts:102-108`) — so widening them is a
+refinement of the claim grammar rather than a new section, and it is stated in
+§3.1's entry rather than hidden inside `marketplaceOrdering`. The existing
 `self-run` variants and their `preRegistration` literals remain unchanged.
 `anchors` keeps its current schema and derivation.
+
+This design allocates no claim-package identifier. The composed generation
+carries one claim-package id whose sections are the base plus one optional
+section per declared capability; a capability contributes a section key, not an
+id. Issue #4109 names `benchmark-product.claim-package/7` for its own
+additions; under §10's ruling neither design takes that number, and the two
+coordinate as sibling registry entries whose section keys and `order` values
+are unique by construction.
 
 One pure derivation module builds `marketplaceOrdering` and the marketplace
 honesty variant from authenticated bundle bytes. Producer and verifier import
@@ -198,7 +259,12 @@ Bitcoin headers are never inputs to sealed claim text.
 
 ### 4.1 The `marketplace-ordering` check
 
-The check runs after manifest/evidence closure and before `integrity-anchors`:
+The check's `order` places it after all six base checks — `manifest`,
+`evidence-closure`, `trust`, `matrix-rederivation`, `report-verification`, and
+`claim-consistency` (`verify/src/legacy-closures.ts:81-88`) — and before
+`integrity-anchors`. `claim-consistency` is its immediate predecessor, which is
+what lets §3.2's shared derivation rebuild both sibling sections before this
+check runs:
 
 1. strict-parse `ordering/marketplace.json` from the authenticated snapshot;
 2. recompute the canonical Run digest and require `runDigest` equality;
@@ -269,6 +335,9 @@ earliest-governs ordering. Pending, absent, and declared-but-absent proof
 contexts render, respectively, “A timestamp proof is still pending.”, “No
 timestamp proof was carried.”, and “A timestamp proof was promised but is
 missing.” Invalid ordering or invalid proof evidence produces no success page.
+The timestamp-proof lines render exactly when `anchoring` is declared, which is
+what this copy already assumes; a marketplace bundle that declares no anchoring
+renders the marketplace-ordering paragraph and the independence sentence alone.
 
 Human-readable verifier output displays two rows, never one badge:
 
@@ -285,7 +354,10 @@ do not change without another format revision.
 ## 6. Fail-closed and compatibility rules
 
 - Marketplace claim bytes without ordering evidence cannot masquerade as
-  `self-run`, and `/9` cannot silently fall back to `/8`.
+  `self-run`, and a marketplace bundle cannot silently drop the
+  `marketplace-ordering` token: the capability vector is authenticated inside
+  `bundle.json`, so stripping the declaration produces a different bundle
+  identity rather than a quieter bundle.
 - `runDigestAnchorAt > earliestCellPostAt` is invalid even when a timestamp
   proof predates both.
 - A valid ordering channel remains valid when timestamp evidence is absent or
@@ -294,8 +366,9 @@ do not change without another format revision.
   it never supplies marketplace leg (b).
 - Live disagreement is invalid, not “newer data,” because the claim names an
   exact close anchor.
-- Old bundle and claim formats remain on their frozen verifier paths. Their
-  `VenueHonesty`, anchor copy, commands, checks, and bytes do not change.
+- Old bundle and claim formats remain on their frozen verifier paths, on every
+  lineage — classic, accounting-only, and evidence-native. Their `VenueHonesty`,
+  anchor copy, commands, checks, and bytes do not change.
 
 ## 7. Conformance and adversarial tests
 
@@ -320,9 +393,15 @@ tests. At minimum they cover:
    `declared-but-absent`, or `verified`: ordering output is unchanged;
 8. multiple anchors over the same Run: no increment or strengthening of the
    ordering result;
-9. `/2`–`/8` and claim `/1`–`/6` goldens stay byte-identical; `/9` rejects
-   stripped members, undeclared members, unsupported capabilities, wrong check
-   order, and a verification command that cannot read `/9`; and
+9. `/2`–`/8` and claim `/1`–`/6` goldens stay byte-identical; and this
+   capability is covered by the composed generation's generated conformance
+   lattice, which asserts, for every satisfiable subset containing the token,
+   the derived member list, the derived check list and its order, the claim
+   section set, and the derived minimum reader release — and, for every subset
+   without it, that a planted `ordering/**` member is refused as
+   non-allowlisted while declaring the token with its members stripped is
+   refused as a missing member. An unimplemented token is refused whole under
+   the must-understand rule; and
 10. CLI/page snapshots show two rows, the exact limitation prose, and no
     combined verified badge.
 
@@ -336,16 +415,28 @@ Each slice is independently reviewable and preserves old closures:
 2. **Marketplace carrier.** Extend `runOnMarketplace` to return a publication
    receipt built from its already-collected events, coherent close anchor, and
    exact material; do not perform a second read.
-3. **Bundle `/9` and claim `/7`.** Extend manifest closure, fixed check roster,
-   discriminated `VenueHonesty`, shared claim derivation, legacy goldens, and
-   reader-command compatibility in `benchmark-product/core` and `verify`.
+3. **Capability registration.** Register `marketplace-ordering` in the `/10`
+   capability registry with §3.1's entry: mandatory file, member allowlist,
+   derived check position, claim section, claim-grammar refinement, and
+   activation predicate. Legacy goldens and reader-command compatibility come
+   from the composed generation's own equivalence proof rather than from a
+   per-format roster written here.
 4. **Verifier channel.** Add byte-only `present`, injected live resolution to
    `checked`, hard failure on disagreement, JSON disclosure, and two-row human
    output.
 5. **Product integration.** Permit `open-competition` run results, persist the
    ordering receipt, and render the combined statement from verified facts.
-6. **Capability-registry fold-in.** Register marketplace ordering additively if
-   the capability-vector migration has landed; never reinterpret `/9`.
+
+Slices 1 and 2 touch no bundle format and are unblocked. Slice 3 blocks on
+packets C1–C4 of the composition design's §13 — a capability cannot register in
+a generation that does not exist — and slices 4 and 5 follow it. v0.1's slice 6
+("capability-registry fold-in", conditional and last) is absorbed into slice 3:
+the fold-in is no longer optional, and there is no `/9` left to fold in from.
+
+This design does not decide the composition design's own open decisions D1 and
+D3. If `/10` is not landing on the timeline this work needs, the escalation is
+an operator call on sequencing. It is **not** a fallback format allocation —
+minting a number here would re-create exactly what §10's ruling removed.
 
 No slice may ship a producer before the released reader accepts its exact
 closure. The producer and verifier must share derivation functions rather than
@@ -367,9 +458,75 @@ maintain matching prose or claim assembly by convention.
   not prove completeness or canonical-chain status.
 - Kept sealed claim prose independent of reader trust roots, Bitcoin headers,
   and marketplace availability.
-- Allocated bundle `/9` and claim `/7` because `/8` and `/6` already have fixed
-  meanings at this head.
+- v0.1 allocated bundle `/9` and claim-package `/7` on next-free-number grounds,
+  because `/8` and claim `/6` already have fixed meanings at this head. The
+  operator amended that (§10, R2): `/9` is taken, and features register as
+  capability entries in the composed generation `/10` rather than minting
+  numbers. The superseded allocation is history, not a live option.
 - Preserved current anchor status machinery and neutral lines, adding only the
   marketplace lead-in and explicit non-counting sentence.
 - Resolved these gates headlessly from existing repository invariants. No new
   product authority or unresolved implementation choice remains in the design.
+
+## 10. Operator rulings
+
+v0.1 was parked for approval. It is **ruled**: adopted, with one amendment.
+Source: the operator comment on
+[#4105](https://github.com/Jinn-Network/mono/pull/4105#issuecomment-5570963854)
+(comment 5570963854), from the 2026-09-07 session, recorded here for the
+implementation slices. Implementation proceeds from these rulings.
+
+Each block restates the v0.1 position so the mapping is unambiguous, then
+records the ruling. The ruling is the operator's meaning. The v0.1 position is
+historical context only and is not restated as if it were still a pick.
+
+**R1 — Is the two-channel composition adopted?**
+v0.1 proposed that a marketplace run carry chain-observed ordering and
+proof-carrying time anchors as sibling channels, presented together under **Who
+ran this** and never combined in meaning: marketplace ordering as the only
+evidence counted for registration before dispatch, timestamp proofs dating only
+the digest bytes they cover, and no combined confidence value or badge (§0). It
+rejected a widened `preRegistration` scalar because that erases which
+proposition was established (§1). It specified an ordered marketplace evidence
+record carrying the exact projector events, the coherent close anchor, and the
+exact canonical cell Submission bytes, built once from `runOnMarketplace`'s
+already-frozen projection rather than re-queried later (§2). It carried both
+channels into the bundle and claim as sibling sections derived by one pure
+module from authenticated bytes (§3). It defined a `marketplace-ordering` check
+that reports `present` for byte-only replay and `checked` only when an
+independently resolved finalized view agrees, leaving `integrity-anchors`
+untouched and forbidding either channel from feeding the other (§4). It fixed
+the exact reader copy, two verifier rows, and no combined badge (§5), the
+fail-closed and compatibility rules under which one valid channel never rescues
+an invalid one (§6), and ten conformance and adversarial tests (§7).
+**Ruling, in the operator's words:** "The design is adopted: two independent
+evidence channels inside one reader-facing statement, the ordered marketplace
+evidence carrier, byte-only versus live-resolver verification, the exact reader
+copy, fail-closed behaviour, the compatibility guarantees and the adversarial
+tests." §0, §1, §2, §4, and §5 are unchanged by v0.2.
+
+**R2 — Format numbering.**
+§3 allocated `benchmark-product-public-bundle/9` and
+`benchmark-product.claim-package/7` on next-free-number grounds, because `/8`
+and claim-package `/6` already carry fixed disclosed, anchored qualification
+meanings at the claimed head. §3.1 treated the capability registry as an
+optional later restructuring that would change implementation structure but not
+`/9`'s wire meaning, and §8 made the fold-in its last and conditional slice.
+**Ruling, in the operator's words:** "Where the spec places its additions in a
+new `benchmark-product-public-bundle/9`: `/9` is already allocated (PR #4090,
+issue #3698, `/6`'s closure plus the denominator pair). Per the standing
+allocation ruling and its amendment (see #3698, #2974, #3016, #3405), the
+composed/capability generation is **`/10`**, and features register as capability
+entries inside it rather than minting numbers. This design's bundle-level
+additions therefore land as entries in `/10`. The same holds for
+`claim-package/7`: #4109 names it too, so the two implementations coordinate
+that allocation rather than each assuming it. Implementation slices should be
+filed against `/10`."
+
+The standing allocation ruling this amends is on issue #3698 (comments
+5554839794 and 5570722681): "The composed/capability generation takes `/10`.
+Everything else registers as a capability entry inside it and does not mint its
+own format number."
+
+v0.2 carries R2 into §3, §3.1, §3.2, §6, §7's test 9, §8, and §9. The
+implementation slices against `/10` are not filed by this document.
