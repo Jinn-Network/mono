@@ -972,9 +972,13 @@ test('stripComments leaves comment markers inside strings alone', () => {
 // read from a clean one, and a guard that reads the wrong half of a file is green for the wrong
 // reason.
 test('stripComments refuses a file whose template literal never closes', () => {
+  // Asserted as the class, not as `{ name: ... }`. Both guards branch on
+  // `instanceof UnterminatedTemplateError` to attach the file path, so a plain Error carrying that
+  // `name` would satisfy a name-shaped assertion while both of them silently fall back to a bare
+  // rethrow — the path attachment this refusal exists to carry, lost with the suite still green.
   assert.throws(
     () => stripComments('a: b `\n// setupFiles: isolate-tmp.ts'),
-    { name: 'UnterminatedTemplateError' },
+    UnterminatedTemplateError,
   );
 
   // Valid nesting is not a failure. Both fixtures are the shipped shapes from #3088, and pinning
@@ -1123,6 +1127,10 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
     `x: /a\\/'b/u, `,
     // A brace or bracket inside the literal must not be read as structure.
     `x: /[{}\\]]/u, `,
+    // An arrow body opens where a value may begin, so the `/` after `=>` is a regex. The `>` of the
+    // arrow is the reason `valueMayBeginAfter` still reads a `>` as a position a value may follow;
+    // without it this reads as a division and consumes the entry's braces (#3170).
+    `x: (s) => /['"]/u.test(s), `,
   ];
   for (const property of properties) {
     // Through `stripComments`, the way every production caller reaches this reader.
@@ -1149,13 +1157,6 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
   // as a regex is the same fail-open as the `--` case, on a shape that is ordinary in a `.ts`
   // config; a prefix `!` before a real regex must still read as one.
   for (const property of ['x: opts.value! / 2, ', 'x: f(a)! / 2, ', `x: (s) => !/['"]/u.test(s), `]) {
-    assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
-  }
-
-  // An arrow body opens where a value may begin, so the `/` after `=>` is a regex. The `>` of the
-  // arrow is the reason `valueMayBeginAfter` still reads a `>` as a position a value may follow;
-  // without it this reads as a division and consumes the entry's braces (#3170).
-  for (const property of [`x: (s) => /['"]/u.test(s), `]) {
     assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
   }
 
