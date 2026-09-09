@@ -598,7 +598,7 @@ export async function getTaskCidDigest(
     functionName: 'taskCoordinator',
   }) as Address;
   const taskIdBigInt = typeof taskId === 'bigint' ? taskId : BigInt(taskId);
-  // Tokenless-OLAS pivot: TaskCoordinator.TaskRecord is trimmed -- policy is `maxClaims` +
+  // Tokenless-OLAS pivot: TaskCoordinator.TaskRecord is trimmed — policy is `maxClaims` +
   // `allowSolverSelfEvaluation`; the window/lease/quorum/EvaluationPolicy fields are gone and the
   // final flag is `creatorCredited` (was `taskCreationCredited`). `creator` then `taskCidDigest`
   // MUST stay components 0/1, because the positional branch below decodes `task[1]`. The shared
