@@ -44,7 +44,7 @@ Four scenarios, all single-operator. Coverage differs per scenario: T1.1's contr
 
 **What it does:** Playwright. Runs two named console journeys — claim policy and posting status — against a mocked daemon API, asserting each renders past the spinner and completes its flow without a JS error or a visible error boundary.
 
-**Implementation:** `apps/operator-console/e2e/claim-policy-flow.e2e.ts` and `apps/operator-console/e2e/posting-status.e2e.ts`, run by `yarn --cwd apps/operator-console e2e:app-flow` (`apps/operator-console/package.json:13`). `operator/package.json:144` defines `release:tier-1:T1.4` as byte-identical to that command, and `hermetic-gate.yml:398` runs `yarn e2e:app-flow` — which is why T1.4's contract is executed by the gate. `operator/scripts/release/run-tier-1.ts:22` still names its wrapper `runT14ConsoleRouteSmoke` after the retired all-routes shape.
+**Implementation:** `apps/operator-console/e2e/claim-policy-flow.e2e.ts` and `apps/operator-console/e2e/posting-status.e2e.ts` — the two files `apps/operator-console/package.json:13` hands to Playwright as `e2e:app-flow`. Both `operator/package.json:144` (`release:tier-1:T1.4`) and `operator/package.json:185` (`e2e:app-flow`) delegate to that one console script, and `hermetic-gate.yml:397-398` runs `yarn e2e:app-flow` with `working-directory: operator` — which is why T1.4's contract is executed by the gate. `operator/scripts/release/run-tier-1.ts:22` still names its wrapper `runT14ConsoleRouteSmoke` after the retired all-routes shape.
 
 **Wall-clock budget:** bounded by `apps/operator-console/playwright.config.ts` — 60s per test, `workers: 1`.
 
