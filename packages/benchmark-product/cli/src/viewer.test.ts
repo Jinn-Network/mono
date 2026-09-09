@@ -293,7 +293,10 @@ describe("verified bundle viewer", () => {
     viewers.push(viewer);
     const session = await claim(viewer);
     const html = await (await fetch(session.base, { headers: { cookie: session.cookie } })).text();
-    expect(html).toContain("Verified binary qualification");
+    expect(html).toContain("Binary qualification");
+    // #4262 extended the #2982 ruling to this surface; the whole response is the guard because the
+    // word reached the page through a heading, an eyebrow, and the document title.
+    expect(html).not.toMatch(/verified|certified|validated|audited/i);
     expect(html).toContain("two-human-unanimous");
     expect(html).toContain("factuality");
     expect(html).toContain("@colophon-claims/verify@0.1");
