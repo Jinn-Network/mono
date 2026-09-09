@@ -55,7 +55,7 @@ exists to protect. §6.
 **One consumer must be pinned before the producer is armed.** Two of the three in-tree
 consumers of a re-signed idle head are pinned and correct. The third,
 `operator/src/native-consumer/sync.ts`, has no equivalent predicate, reaches the shape by a
-third route, and is covered by no test. Arming the timer while its behaviour is unverified
+third route, and is covered by no test. Arming the timer while its behavior is unverified
 would convert a dormant hazard into a live one in the same change. §7.
 
 **Two of the issue's own acceptance criteria are imprecise against the code**, and this
@@ -66,7 +66,7 @@ self-source degrade "keeps refusing" a stale self-served head; a self-served sta
 
 ## 1. What #2549 left, and what round-10 actually showed
 
-#2549's filed criteria are satisfied on `next`. The consumer side admits an honest idle
+The criteria #2549 filed are satisfied on `next`. The consumer side admits an honest idle
 re-sign onto revalidation rather than tripping the sequence guard:
 
 - `reSignedIdleHead` (`operator/src/daemon/native-discovery.ts:433`) classifies a head at
@@ -229,8 +229,8 @@ same ceiling), so a peer with a slow clock is not the constraint. Level-triggeri
 smaller fraction, is what buys retry headroom.
 
 **No jitter.** Each source's trigger is derived from its own `issuedAt`, which is
-append-time-derived and therefore already desynchronised across a fleet. There is no shared
-wall-clock boundary for a fleet to synchronise on.
+append-time-derived and therefore already desynchronized across a fleet. There is no shared
+wall-clock boundary for a fleet to synchronize on.
 
 **A non-finite `minted` or `remaining` is not due.** Fail closed: the head is left alone and
 the existing degrades cover the source.
@@ -275,7 +275,7 @@ A refresh must refuse while an append intent is staged. A staged intent carries
 `expectedHeadDigest`; writing a head underneath it makes the intent's own guard throw
 ("source head changed after the append intent was claimed") on every subsequent `recover()`
 — a permanent wedge of the source. Checking for a staged intent before writing, plus
-per-source serialisation at each operator leg (§5.4), is the whole safety argument against
+per-source serialization at each operator leg (§5.4), is the whole safety argument against
 a refresh racing a real append.
 
 ### 5.3 The fast-clock guard
@@ -293,7 +293,7 @@ is masked and nothing is made worse.
 ### 5.4 The three legs, and why the requester is the one that matters
 
 **Solver and evaluator** are the easy legs. `NativeSignedSourcePublisher` already holds the
-durable writer, the signer, the store and a serialised append promise chain — free mutual
+durable writer, the signer, the store and a serialized append promise chain — free mutual
 exclusion against a concurrent append. The refresh pushes onto that same chain, so no second
 lock is invented. `FleetServedSource` is **not** widened: it is the read plane, and the
 two-operator boot test asserts its shape.
@@ -314,7 +314,7 @@ explicitly because getting it wrong bricks the source:
 - `DurableSourceState` carries no head timestamps, but the requester's `SourceState.last.head`
   is a full `SourceHead`.
 
-So a refresh that moves the blob without moving the requester's recorded head desynchronises
+So a refresh that moves the blob without moving the requester's recorded head desynchronizes
 the two floors. The resolution is already available and is why the refresh belongs inside
 the writer: the refresh re-commits state through `states.compareAndSwap` with the **generic**
 state unchanged, and the requester's state store reconstructs `lastHead` from the signed head
@@ -448,7 +448,7 @@ producer before its consumers are pinned.
 | 0 | Prose corrections only: AC1's "issuedAt only" (§2) and AC3's "keeps refusing" (§6.1) | AC1 |
 | 1 | Pin `operator/src/native-consumer/sync.ts` for the re-signed-head shape; align its predicate with `native-discovery.ts` | precondition for AC2 |
 | 2 | The fourth `DurableSourceWriter` method, with the staged-intent interlock (§5.2) and the fast-clock guard (§5.3) | AC1 |
-| 3 | The three operator legs: solver and evaluator on the existing serialised append chain; the requester's new lease-taking entry point | producer half of AC2 |
+| 3 | The three operator legs: solver and evaluator on the existing serialized append chain; the requester's new lease-taking entry point | producer half of AC2 |
 | 4 | The `head-refresh` loop row, its config knob, and the watchdog gate | AC3, and arms AC2 |
 | 5 | The AC2 regression test in `native-fleet-two-operator-boot.test.ts`, with its negative controls | AC2 |
 
@@ -457,7 +457,7 @@ producer before its consumers are pinned.
 and asserts the checkpoint advances. A second case removes the boundary entry from local state
 and records whatever happens, because that is the route's real fragility. A third refuses a
 non-advancing `issuedAt` as a negative control. If the consumer accepts (expected), the
-predicate alignment that follows is tidying and the pin holds behaviour across it. If it
+predicate alignment that follows is tidying and the pin holds behavior across it. If it
 rejects, the alignment is mandatory and Stage 2 does not start until it is green.
 
 **Stage 2 — the primitive.** Order of operations: `recover()`; refuse on a staged intent;
@@ -532,7 +532,7 @@ Correcting them is part of the change that makes them false, not a follow-up.
 | `plugin/runtime/src/corpus/sync-loop.ts:550-555` | "Per #2549 every in-tree publisher re-signs a head only after an append, so a correct but quiet feed accumulates head age indefinitely." Correct the rationale; note that promoting that row from reported to gating is now possible and is **not** done here. |
 | `packages/discovery/protocol/src/verify/source-chain.test.ts:146-147` | "Both consumers now classify it before reaching this procedure" — there are three (§7). |
 | `operator/test/daemon/native-discovery.test.ts:530-531` | "No in-tree publisher re-signs while idle, so the shape arrives from an external source." The fixture rationale that follows it stays true. |
-| `docs/superpowers/specs/2026-09-01-publication-head-anchoring-design.md` §1 | Its "dormant" characterisation of the idle re-stamp hazard. Amend with a pointer to this record rather than retro-editing dated prose. |
+| `docs/superpowers/specs/2026-09-01-publication-head-anchoring-design.md` §1 | Its "dormant" characterization of the idle re-stamp hazard. Amend with a pointer to this record rather than retro-editing dated prose. |
 
 ## 9. What this design does not do
 
@@ -579,7 +579,7 @@ verification and intent journal, and can write a head the writer itself later re
 **D4 — `operator/src/native-consumer/sync.ts` is pinned before the producer is armed (§7).**
 *Recommended: yes.* It is unpinned, unverified, and reaches the shape by a third route. The
 cost is one test and possibly one predicate alignment; the cost of skipping it is arming a
-timer against a consumer whose behaviour nobody has checked.
+timer against a consumer whose behavior nobody has checked.
 
 ## 11. Follow-ups this design defers
 
