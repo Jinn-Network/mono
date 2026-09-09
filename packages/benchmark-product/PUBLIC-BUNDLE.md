@@ -885,12 +885,13 @@ The layout:
   so every reader that implements it accepts an arbitrary prefix; and separated
   from its colon by any Unicode whitespace rather than only a space or a tab. A
   tag mid-line in a single-line `name` is refused with no line terminator involved
-  at all. The sealed source-manifest descriptors spliced into `NOTICE` —
-  `source.uri`, `source.name`, `license.uri`, `attribution.uri` — are held to that
-  same rule, and refuse an embedded line terminator outright as well, unlike
-  `citation`, which is legitimately multi-line: `NOTICE` renders each descriptor
-  as one fixed-column row, so a line break inside one would emit a second
-  row-shaped line that no source-manifest row stands behind. In
+  at all. The sealed source-manifest descriptors spliced into these generated
+  files — `source.uri`, `license.uri` and `attribution.uri` into `NOTICE`,
+  `source.name` into `metadata/spdx.json` — are held to that same rule, and
+  refuse an embedded line terminator outright as well, unlike `citation`, which
+  is legitimately multi-line: `NOTICE` renders each descriptor it carries as one
+  fixed-column row, so a line break inside one would emit a second row-shaped
+  line that no source-manifest row stands behind. In
   `metadata/spdx.json` a source `downloadLocation` that is not a remote URL, and
   an `author` that is a scheme-qualified machine identifier rather than a
   supplier name, both report `NOASSERTION` rather than stating something the
