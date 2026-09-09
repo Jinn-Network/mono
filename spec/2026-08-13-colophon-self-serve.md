@@ -176,7 +176,7 @@ Do not add `--yes` to the human quickstart. npm's first-download confirmation is
 Success output starts with the answer:
 
 ```text
-Verified: 6 of 6 checks passed
+Recomputed: 6 of 6 checks passed
 Bundle: sha256:<bundle-id>
 Format: benchmark-product-public-bundle/2
 
@@ -266,7 +266,7 @@ The last lines state what happened and what did not:
 Published locally; nothing was uploaded.
 Bundle: <absolute-path>/bundle
 Identity: sha256:<bundle-id>
-Verified: 6 of 6 checks passed
+Recomputed: 6 of 6 checks passed
 
 Check it again:
   npx @colophon-claims/verify@0.1 <absolute-path>/bundle

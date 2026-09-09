@@ -544,12 +544,20 @@ test("a result without signers keeps the previous human surface", async () => {
   assert.doesNotMatch(output, /Signed by/);
 });
 
-test("the golden bundle's default output carries no identifier while --json carries every one", async () => {
+test("the golden bundle's default output carries no identifier and no verdict word while --json carries every identifier", async () => {
   const golden = fileURLToPath(new URL("../fixtures/public-bundle-conformance-v1/golden", import.meta.url));
   const human = await invoke([golden]);
   assert.equal(human.code, undefined);
   assert.doesNotMatch(human.stdout, /urn:/);
   assert.doesNotMatch(human.stdout, /did:key/);
+  // The retired verdict word over the whole real render (issue #3510). This is the only assertion
+  // that runs the real binary, and the only one reaching the signer block; the cross-shape test
+  // below owns the artifact-content and anchor paragraphs, which render empty over golden's
+  // format /2. Regenerating golden to an anchor-carrying format would bring those paragraphs in
+  // here, and this would still pass: `invoke` supplies no anchor trust material and this package
+  // ships none, so a well-formed proof renders `present`, never `verified` (`src/verify.ts`,
+  // `anchorTrust`).
+  assert.doesNotMatch(human.stdout, /verified|certified|validated|audited/i);
   // The publisher line now carries the bare key fingerprint (issue #2983): with no binding supplied
   // that digest is the only name this key has, and printing nothing would read as nothing to say.
   assert.match(
@@ -1309,5 +1317,21 @@ test("no check name is renamed by the gloss (issue #3861)", async () => {
     for (const check of shape.checks) {
       assert.match(output, new RegExp(`^${check} `, "m"), `${check} must print verbatim at the start of its row`);
     }
+  }
+});
+
+// ── The retired verdict word, across every rendered paragraph (issue #3510) ─────────────────────
+
+test("no paragraph of the default human render carries a retired verdict word (issue #3510)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  // These two shapes are what reaches the paragraphs the golden bundle cannot: `/5` renders the
+  // artifact-content report and its limitation, `/8` the anchor block and the anchor-limits
+  // paragraph. All four render empty over golden's format /2, so the real-binary assertion in the
+  // golden test guards the signer block and this one guards the rest — they are not two spellings
+  // of the same coverage. `/8`'s anchor list is empty on purpose: `renderAnchor` prints
+  // `entry.status` verbatim and `verified` is a legitimate status there, so an entry added to this
+  // shared fixture would fail this test on a correct render.
+  for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
+    assert.doesNotMatch(renderVerifiedBundle(shape), /verified|certified|validated|audited/i, shape.format);
   }
 });
