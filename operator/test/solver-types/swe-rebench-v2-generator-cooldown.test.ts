@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, unlinkSync, utimesSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, unlinkSync, utimesSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +14,7 @@ import {
   createVettedPoolArtifactRef,
   hashVettedPoolArtifact,
   writeVettedPoolArtifactPublication,
+  type SolverNetArtifactRef,
   type SweRebenchV2VettedPoolArtifact,
 } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import { GeneratorStateStore } from '../../src/solver-types/_swe-rebench-v2-state.js';
@@ -496,37 +497,34 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
     return scorable!.updatedAt;
   }
 
+  /**
+   * Force validated-pool.json's mtime strictly past whatever the generator
+   * recorded on its previous tick.
+   *
+   * The gate in swe-rebench-v2.ts compares REAL filesystem mtimes against the
+   * in-process `lastValidatedPoolMtimeMs` — `stat()` is not faked, so a fixed
+   * fake-clock date would move the mtime backwards and the gate would never
+   * fire. Advancing past the file's own current mtime is both correct and
+   * immune to the sub-ms write granularity that motivated this helper.
+   */
   function bumpValidatedPoolMtime(): void {
-    // Force the file's mtime past the publication's updatedAt so the per-tick
-    // staleness gate fires deterministically — Node may otherwise report sub-ms
-    // mtime granularity under fakeTimers.
-    const future = new Date('2026-05-22T01:00:00.000Z');
-    utimesSync(join(stateDir, 'validated-pool.json'), future, future);
+    const path = join(stateDir, 'validated-pool.json');
+    const future = new Date(statSync(path).mtimeMs + 60_000);
+    utimesSync(path, future, future);
   }
 
-  it('re-publishes when validated-pool.json mtime advances past the stale publication', async () => {
-    await seedStalePublication();
-    await seedValidatedPoolWithTwoEntries();
-    bumpValidatedPoolMtime();
-
-    const gen = makeTestGenerator({
-      stateDir,
-      admissionMode: 'required',
-      post_batch_size: 1,
-    });
-
-    await gen();
-    await gen();
-
-    expect(ipfsUploadCount).toBe(1);
-    expect(gen.getState()).toMatchObject({
-      poolPublicationPriorSize: 1,
-      poolPublicationCurrentSize: 2,
-    });
-    expect(gen.getState().poolPublicationUpdatedAt).toBeTypeOf('string');
-  });
-
-  it('does not re-publish when the validated pool is no newer than the existing publication', async () => {
+  /**
+   * Seeds a publication that is exactly current with the validated pool, and
+   * returns its ref.
+   *
+   * The publication's `updatedAt` is pinned to the pool store's own value.
+   * `resolvePublishedVettedPool` re-publishes when the store's `updatedAt` is
+   * strictly newer than the publication's, and this block runs with
+   * `shouldAdvanceTime: true` — so letting both default to `new Date()` makes
+   * the outcome depend on how much real time bled into the fake clock between
+   * the two writes, which is host-speed dependent (#3048).
+   */
+  async function seedCurrentPublication(): Promise<SolverNetArtifactRef> {
     const artifact: SweRebenchV2VettedPoolArtifact = {
       schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
       evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
@@ -553,12 +551,6 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
       evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
       publishedAt: '2026-05-22T00:00:00.000Z',
     });
-    // Pin the publication's `updatedAt` to the pool store's own value.
-    // `resolvePublishedVettedPool` re-publishes when the store's `updatedAt`
-    // is strictly newer than the publication's, and this block runs with
-    // `shouldAdvanceTime: true` — so letting both default to `new Date()`
-    // makes the outcome depend on how much real time bled into the fake clock
-    // between the two writes, which is host-speed dependent (#3048).
     const poolUpdatedAt = await seedValidatedPoolWithTwoEntries();
     await writeVettedPoolArtifactPublication({
       stateDir,
@@ -566,6 +558,32 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
       artifact,
       updatedAt: poolUpdatedAt,
     });
+    return ref;
+  }
+
+  it('re-publishes when the validated pool is newer than the existing stale publication', async () => {
+    await seedStalePublication();
+    await seedValidatedPoolWithTwoEntries();
+
+    const gen = makeTestGenerator({
+      stateDir,
+      admissionMode: 'required',
+      post_batch_size: 1,
+    });
+
+    await gen();
+    await gen();
+
+    expect(ipfsUploadCount).toBe(1);
+    expect(gen.getState()).toMatchObject({
+      poolPublicationPriorSize: 1,
+      poolPublicationCurrentSize: 2,
+    });
+    expect(gen.getState().poolPublicationUpdatedAt).toBeTypeOf('string');
+  });
+
+  it('does not re-publish when the validated pool is no newer than the existing publication', async () => {
+    await seedCurrentPublication();
 
     const gen = makeTestGenerator({
       stateDir,
@@ -585,6 +603,69 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
     expect(ipfsUploadCount).toBe(0);
     expect(gen.getState().poolPublicationCurrentSize).toBeUndefined();
     expect(gen.getState().poolPublicationPriorSize).toBeUndefined();
+  });
+
+  it('drops the published-pool cache when validated-pool.json is rewritten mid-process', async () => {
+    await seedStalePublication();
+    await seedValidatedPoolWithTwoEntries();
+
+    const gen = makeTestGenerator({
+      stateDir,
+      admissionMode: 'required',
+      post_batch_size: 1,
+    });
+
+    // Tick 1: republishes past the stale publication, populates
+    // publishedPoolCache, and records lastValidatedPoolMtimeMs.
+    await gen();
+    expect(ipfsUploadCount).toBe(1);
+
+    // A concurrent `jinn solver-nets validate-pool` writes a third scorable
+    // entry. Advance the fake clock first so the store's `updatedAt` is
+    // unambiguously newer than the publication tick 1 just wrote, then force
+    // the file's mtime forward so the gate fires deterministically.
+    vi.setSystemTime(new Date('2026-05-22T01:00:00.000Z'));
+    const store = new ValidatedPoolStore({ stateDir });
+    await store.record(
+      'org__repo-3',
+      { scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-22T01:00:00.000Z' },
+      EVAL_SEMANTICS_VERSION,
+    );
+    bumpValidatedPoolMtime();
+
+    await gen();
+
+    // Only the mtime gate can produce this: without it tick 2 reuses the cache
+    // and never re-resolves.
+    expect(ipfsUploadCount).toBe(2);
+    expect(gen.getState()).toMatchObject({
+      poolPublicationPriorSize: 2,
+      poolPublicationCurrentSize: 3,
+    });
+  });
+
+  it('retains the published-pool cache when validated-pool.json is untouched', async () => {
+    const ref = await seedCurrentPublication();
+
+    const gen = makeTestGenerator({
+      stateDir,
+      admissionMode: 'required',
+      post_batch_size: 1,
+    });
+
+    // Tick 1 populates the cache from the existing publication and records the
+    // file's mtime. Removing the publication file then makes cache retention
+    // observable: a re-resolution would find nothing on disk and publish from
+    // local, which the upload counter would show. (Same construction as the
+    // sibling `caches the write-once vetted-pool publication` test.)
+    const first = expectTaskArray(await gen())[0];
+    unlinkSync(join(stateDir, 'vetted-pool-artifact-publication.json'));
+    const second = expectTaskArray(await gen())[0];
+
+    expect(first.spec).toMatchObject({ instance_id: 'org__repo-1' });
+    expect(second.spec).toMatchObject({ instance_id: 'org__repo-2' });
+    expect(second.eligibility?.['vettedPoolRef']).toEqual(ref);
+    expect(ipfsUploadCount).toBe(0);
   });
 
   it('re-publishes a CLEAN artifact when the existing publication is contaminated with a held-out instance (#986 substrate exclusion + wiring)', async () => {
