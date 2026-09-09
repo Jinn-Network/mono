@@ -573,9 +573,15 @@ describe('swe-rebench-v2 generator — vetted-pool re-publication on validated-p
       post_batch_size: 1,
     });
 
-    await gen();
+    const first = await gen();
     await gen();
 
+    // Three absence assertions alone pass vacuously if the generator returns
+    // early — the empty-pool bail, an admission-mode regression, or a
+    // throw-and-swallow in the resolvePublishedVettedPool catch would satisfy
+    // all of them. Prove the generator actually reached the admission gate and
+    // admitted from the published artifact (#3101).
+    expect(expectTaskArray(first)[0].spec).toMatchObject({ instance_id: 'org__repo-1' });
     expect(ipfsUploadCount).toBe(0);
     expect(gen.getState().poolPublicationCurrentSize).toBeUndefined();
     expect(gen.getState().poolPublicationPriorSize).toBeUndefined();
