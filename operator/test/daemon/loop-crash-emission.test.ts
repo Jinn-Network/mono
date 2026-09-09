@@ -12,16 +12,13 @@
  * the same host-only dialect), so the handler must go through it.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Daemon, emitLoopCrash, type DaemonConfig } from '../../src/daemon/daemon.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { SimpleRunner } from '../../src/runner/simple.js';
-import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 import { Store } from '../../src/store/store.js';
 import { getEventBuffer } from '../../src/events/emitter.js';
 
@@ -63,13 +60,11 @@ describe('#3037 — loop-crash emission preserves the cause chain', () => {
 });
 
 describe('#3110 — Daemon.start() wires every loop crash through emitLoopCrash', () => {
-  let tmp: string;
   let store: Store;
   let daemon: Daemon | undefined;
 
   beforeEach(() => {
     getEventBuffer().clear();
-    tmp = mkdtempSync(join(tmpdir(), 'jinn-3110-loop-crash-'));
     store = new Store(':memory:');
   });
 
@@ -78,7 +73,6 @@ describe('#3110 — Daemon.start() wires every loop crash through emitLoopCrash'
     daemon = undefined;
     vi.restoreAllMocks();
     store.close();
-    rmSync(tmp, { recursive: true, force: true });
   });
 
   it('carries the cause chain from a real started loop, not just the helper', async () => {
@@ -94,14 +88,6 @@ describe('#3110 — Daemon.start() wires every loop crash through emitLoopCrash'
       dbPath: ':memory:',
       apiPort: 0,
       pollIntervalMs: 60_000,
-      taskSources: [],
-      restorationEngine: {
-        implRegistry: new HarnessRegistry({ default: 'legacy-claude' }),
-        paths: {
-          workingDirRoot: join(tmp, 'work'),
-          implStateDirRoot: join(tmp, 'impl-state'),
-        },
-      },
       shutdownTimeoutMs: 100,
       checkpoint: {
         intervalMs: 300_000,

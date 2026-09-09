@@ -103,7 +103,9 @@ describe('rpc network preflight', () => {
         '/v2/PLANTEDpathKey01?apikey=PLANTEDqueryKey01',
     });
 
-    expect(result.ok).toBe(false);
+    // Narrow off the ok member so `message` is in scope: it exists only on
+    // RpcNetworkPreflightFail, and `expect` does not narrow for TypeScript.
+    if (result.ok) throw new Error('expected the RPC preflight to fail');
     // The host survives: the endpoint stays diagnosable, which is the stated
     // contract of the shared host-only dialect.
     expect(result.message).toContain('127.0.0.1');
