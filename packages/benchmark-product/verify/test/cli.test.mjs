@@ -551,8 +551,9 @@ test("the golden bundle's default output carries no identifier and no verdict wo
   assert.doesNotMatch(human.stdout, /urn:/);
   assert.doesNotMatch(human.stdout, /did:key/);
   // The retired verdict word over the whole real render (issue #3510). This is the only
-  // verdict-word assertion that runs the real binary, and the only one reaching the signer block;
-  // the cross-shape test below owns the artifact-content and anchor paragraphs, which render empty
+  // verdict-word assertion that runs the real binary; it reaches the signer block, but so do the
+  // two in-process ones below, which pass `publisherResult` and therefore render a publisher too.
+  // The cross-shape test below owns the artifact-content and anchor paragraphs, which render empty
   // over golden's format /2. Regenerating golden to an anchor-carrying format would bring those
   // paragraphs in here, and this would still pass: `invoke` supplies no anchor trust material and
   // this package ships none, so a well-formed proof renders `present`, never `verified`
@@ -875,7 +876,8 @@ test("a verified binding renders the domain and names the proof mechanism plainl
   assert.match(result.stdout, /DNS resolution/);
   assert.match(result.stdout, /registrar/);
   // The retired verdict word reaches this paragraph only through --identity-binding, and this is
-  // the one assertion that renders it (issue #4269).
+  // the one verdict-word assertion that renders it (issue #4269); other tests pass the flag and
+  // assert other things about the same paragraph.
   assert.doesNotMatch(result.stdout, /verified|certified|validated|audited/i);
   // This is the one actionable raw identifier on the human surface: the exact TXT value to compare.
   assert.equal(result.stdout.match(/did:key:/g).length, 1);
@@ -1095,7 +1097,8 @@ test("a checked mode dimension adds no note at all", async () => {
   assert.equal(result.exitCode, 0);
   assert.doesNotMatch(result.stdout, /file modes were not checked/);
   // renderFreezeRepoCheck is appended to the same stdout outside both verdict-word guards; this is
-  // the assertion that reaches it (issue #4269).
+  // the one verdict-word assertion that reaches it (issue #4269); other tests render the same
+  // block and assert other things about it.
   assert.doesNotMatch(result.stdout, /verified|certified|validated|audited/i);
 });
 
