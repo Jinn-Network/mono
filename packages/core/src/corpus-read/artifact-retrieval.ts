@@ -25,13 +25,8 @@ import {
   buildArtifactUrl,
   fetchArtifactContent,
   type AcquireResult,
-  type FetchArtifactOptions,
 } from './fetch-artifact.js';
-import {
-  classifyIpfsFetchFailure,
-  fetchFromIpfs as defaultFetchFromIpfs,
-  type FetchFromIpfsOptions,
-} from './ipfs.js';
+import { classifyIpfsFetchFailure, fetchFromIpfs as defaultFetchFromIpfs } from './ipfs.js';
 import type { ArtifactSource } from './types.js';
 
 const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1';
@@ -71,22 +66,15 @@ export interface ArtifactLocators {
 }
 
 export interface FetchVerifiedArtifactOptions {
-  /** Bounds/seams for the origin leg. Env defaults apply when omitted. */
-  origin?: FetchArtifactOptions;
-  /** Bounds for the IPFS leg. Omitted means the seam is called with two arguments. */
-  ipfs?: FetchFromIpfsOptions;
-  /** Injection seams, mirroring the `acquire.ts` precedent so tests need no module mock. */
+  /**
+   * Injection seams, mirroring the `acquire.ts` precedent so tests need no
+   * module mock. A caller that needs to bound or redirect a leg replaces the
+   * leg — there is no separate options passthrough, because no call site wants
+   * the default transport with different bounds.
+   */
   deps?: {
-    fetchArtifact?: (
-      endpoint: string,
-      sha256: string,
-      options?: FetchArtifactOptions,
-    ) => Promise<AcquireResult>;
-    fetchFromIpfs?: (
-      gatewayUrl: string,
-      cid: string,
-      opts?: FetchFromIpfsOptions,
-    ) => Promise<unknown>;
+    fetchArtifact?: (endpoint: string, sha256: string) => Promise<AcquireResult>;
+    fetchFromIpfs?: (gatewayUrl: string, cid: string) => Promise<unknown>;
     /** Clock seam for `fetchedAt`. */
     now?: () => string;
   };
@@ -253,11 +241,8 @@ export async function fetchVerifiedArtifact(
   const { sha256, artifactType } = address;
   const { sources = [], ipfsGatewayUrl, endpoint, envelopeCid, ownerSafe } = locators;
   const fetchIpfs = options?.deps?.fetchFromIpfs ?? defaultFetchFromIpfs;
-  const fetchOrigin = options?.deps?.fetchArtifact
-    ?? ((target: string, digest: string, opts?: FetchArtifactOptions) =>
-      fetchArtifactContent(target, digest, opts));
+  const fetchOrigin = options?.deps?.fetchArtifact ?? fetchArtifactContent;
   const now = options?.deps?.now ?? (() => new Date().toISOString());
-  const ipfsOpts = options?.ipfs;
 
   const attempts: ArtifactFetchAttempt[] = [];
 
@@ -315,11 +300,7 @@ export async function fetchVerifiedArtifact(
   if (ipfsSource && ipfsGatewayUrl) {
     const sourceUri = `ipfs://${ipfsSource.cid}`;
     try {
-      // Two arguments unless bounds were supplied: existing fakes assert on the
-      // recorded argument array, where a trailing `undefined` is a third entry.
-      const raw = ipfsOpts === undefined
-        ? await fetchIpfs(ipfsGatewayUrl, ipfsSource.cid)
-        : await fetchIpfs(ipfsGatewayUrl, ipfsSource.cid, ipfsOpts);
+      const raw = await fetchIpfs(ipfsGatewayUrl, ipfsSource.cid);
       const bytes = decodeDonationArtifact(raw, sha256);
       const verified = verifyArtifactDigest(sha256, bytes);
       if (!verified.ok) return refuse('ipfs', sourceUri, verified.actualSha256);
@@ -346,7 +327,7 @@ export async function fetchVerifiedArtifact(
     const sourceUri = buildArtifactUrl(endpoint, sha256);
     let outcome: AcquireResult;
     try {
-      outcome = await fetchOrigin(endpoint, sha256, options?.origin);
+      outcome = await fetchOrigin(endpoint, sha256);
     } catch (err) {
       outcome = { ok: false, reason: 'network_error', message: errorMessage(err) };
     }

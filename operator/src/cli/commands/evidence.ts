@@ -524,7 +524,7 @@ function renderFetchHuman(value: unknown): string {
     sha256: string;
     artifactType: string;
     sizeBytes: number;
-    verified: boolean;
+    digestVerified: boolean;
     provenance: { source: string; sourceUri: string };
   };
   // Deliberately five lines and no payload: a terminal is not a place to put a
@@ -534,7 +534,7 @@ function renderFetchHuman(value: unknown): string {
     `  Type   : ${v.artifactType}`,
     `  Size   : ${v.sizeBytes} bytes`,
     `  Source : ${v.provenance.source} ${v.provenance.sourceUri}`,
-    `  Status : ${v.verified ? 'verified against the recorded sha256' : 'unverified'}`,
+    `  Status : ${v.digestVerified ? 'bytes hash to the sha256 this envelope records' : 'unverified'}`,
   ].join('\n');
 }
 
@@ -629,7 +629,9 @@ async function runFetch(ctx: CommandContext, deps: EvidenceDeps): Promise<void> 
         code: 'invalid_invocation',
         message: requestedSha
           ? `Envelope ${envelopeCid} names no artifact with sha256 ${requestedSha}`
-          : `Envelope ${envelopeCid} carries ${catalog.length} artifacts; name one with --sha256`,
+          : catalog.length === 0
+            ? `Envelope ${envelopeCid} names no artifacts, so there is nothing to fetch`
+            : `Envelope ${envelopeCid} carries ${catalog.length} artifacts; name one with --sha256`,
         hint: 'Pick a sha256 from the artifacts listed in details, or run `jinn evidence show` first.',
         exampleCli: `jinn evidence fetch --envelope-cid ${envelopeCid} --sha256 <hex>`,
         details: { field: '--sha256', envelopeCid, artifacts: catalog },
@@ -684,7 +686,10 @@ async function runFetch(ctx: CommandContext, deps: EvidenceDeps): Promise<void> 
       sha256: retrieved.artifact.sha256,
       artifactType: retrieved.artifact.artifactType,
       sizeBytes: retrieved.artifact.bytes.length,
-      verified: true,
+      // Names exactly what was checked. The bytes hash to the sha256 the
+      // envelope records; whether that envelope is authentic is a separate
+      // question, and `show --verify` is where it is asked.
+      digestVerified: true,
       // Unconditional in JSON mode: a verb that returns everything except the
       // deliverable is the complaint this subverb exists to answer. Where the
       // bytes land is the caller's decision — `fetch` writes no files.
@@ -778,6 +783,10 @@ fetch
   source they came from. --human prints a summary and never the bytes. The
   verb writes no files and takes no output path — where the bytes land is
   the caller's decision.
+
+  digestVerified names exactly what was checked: the bytes hash to the sha256
+  this envelope records. It says nothing about whether the envelope itself is
+  authentic — \`show --verify\` is where the envelope's signature is checked.
 
 Requires an HTTP discovery indexer (find only):
   config: discovery.mode = "http", discovery.url = "<indexer url>"

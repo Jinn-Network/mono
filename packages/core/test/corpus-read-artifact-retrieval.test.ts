@@ -121,20 +121,10 @@ describe('fetchVerifiedArtifact', () => {
     expect(result.artifact.provenance.source).toBe('ipfs');
     expect(result.artifact.provenance.sourceUri).toBe('ipfs://bafy-donated');
     expect(result.artifact.bytes.equals(BYTES)).toBe(true);
-    // Absent an `options.ipfs`, the seam is called with exactly two arguments —
-    // existing fakes assert on the recorded argument array.
+    // The seam takes exactly two arguments: existing fakes assert on the
+    // recorded argument array, where a trailing `undefined` is a third entry.
     expect(fetchFromIpfs).toHaveBeenCalledWith(GATEWAY, 'bafy-donated');
     expect(fetchArtifact).not.toHaveBeenCalled();
-  });
-
-  it('passes IPFS options through as a third argument only when supplied', async () => {
-    const fetchFromIpfs = vi.fn(async () => donation(BYTES));
-    await fetchVerifiedArtifact(
-      { sha256: SHA },
-      { sources: ipfsSources(), ipfsGatewayUrl: GATEWAY },
-      { ipfs: { maxResponseBytes: 4096 }, deps: { fetchFromIpfs } },
-    );
-    expect(fetchFromIpfs).toHaveBeenCalledWith(GATEWAY, 'bafy-donated', { maxResponseBytes: 4096 });
   });
 
   it('fails closed on a digest mismatch and returns no bytes at all', async () => {
@@ -333,21 +323,21 @@ describe('fetchVerifiedArtifact', () => {
 
   it('never lets the declared artifactType influence admission', async () => {
     const fetchArtifact = async (): Promise<AcquireResult> => ({ ok: true, content: BYTES });
-    const labelled = await fetchVerifiedArtifact(
+    const labeled = await fetchVerifiedArtifact(
       { sha256: SHA, artifactType: 'a-label-that-is-wrong' },
       { endpoint: ENDPOINT },
       { deps: { fetchArtifact } },
     );
-    const unlabelled = await fetchVerifiedArtifact(
+    const unlabeled = await fetchVerifiedArtifact(
       { sha256: SHA },
       { endpoint: ENDPOINT },
       { deps: { fetchArtifact } },
     );
-    expect(labelled.ok).toBe(true);
-    expect(unlabelled.ok).toBe(true);
-    if (!labelled.ok || !unlabelled.ok) return;
-    expect(labelled.artifact.artifactType).toBe('a-label-that-is-wrong');
-    expect(unlabelled.artifact.artifactType).toBe('unknown');
-    expect(labelled.artifact.bytes.equals(unlabelled.artifact.bytes)).toBe(true);
+    expect(labeled.ok).toBe(true);
+    expect(unlabeled.ok).toBe(true);
+    if (!labeled.ok || !unlabeled.ok) return;
+    expect(labeled.artifact.artifactType).toBe('a-label-that-is-wrong');
+    expect(unlabeled.artifact.artifactType).toBe('unknown');
+    expect(labeled.artifact.bytes.equals(unlabeled.artifact.bytes)).toBe(true);
   });
 });

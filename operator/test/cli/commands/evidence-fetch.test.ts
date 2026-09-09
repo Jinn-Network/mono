@@ -179,7 +179,7 @@ describe('evidence fetch', () => {
       sha256: ARTIFACT_SHA,
       artifactType: 'output.portfolio.v0',
       sizeBytes: BYTES.length,
-      verified: true,
+      digestVerified: true,
     });
     expect(Buffer.from(out.contentBase64, 'base64').equals(BYTES)).toBe(true);
     expect(out.provenance).toMatchObject({
@@ -210,7 +210,7 @@ describe('evidence fetch', () => {
     const rendered = writes.join('');
     expect(rendered).toContain(ARTIFACT_SHA);
     expect(rendered).toContain('output.portfolio.v0');
-    expect(rendered).toContain('verified');
+    expect(rendered).toContain('bytes hash to the sha256 this envelope records');
     expect(rendered).not.toContain(BYTES.toString('base64'));
     expect(rendered).not.toContain('contentBase64');
   });
@@ -237,6 +237,23 @@ describe('evidence fetch', () => {
       { artifactType: 'output.portfolio.v0', sha256: ARTIFACT_SHA },
       { artifactType: 'design_document', sha256: SECOND_SHA },
     ]);
+    expect(fetchVerifiedArtifact).not.toHaveBeenCalled();
+  });
+
+  it('says there is nothing to fetch when the envelope names no artifacts', async () => {
+    fetchSignedEnvelopeBytesRawMock.mockResolvedValue(encode(buildEnvelope([])));
+    const { command, fetchVerifiedArtifact } = commandWith({ ok: true, artifact: verified() });
+    const { ctx, writes, exits } = makeCtx(
+      withConfig(['fetch', '--envelope-cid', ENVELOPE_CID, '--json']),
+    );
+    await command.run(ctx);
+
+    expect(exits).toEqual([11]);
+    const out = JSON.parse(writes[0]!);
+    expect(out.code).toBe('invalid_invocation');
+    expect(out.message).toContain('names no artifacts');
+    // The instruction must not be one no value can satisfy.
+    expect(out.message).not.toContain('--sha256');
     expect(fetchVerifiedArtifact).not.toHaveBeenCalled();
   });
 
