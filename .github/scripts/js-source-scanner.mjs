@@ -156,13 +156,15 @@ export function regexStartsAt(source, index) {
  * quote character. Without the regex check that quote opens a phantom string, and the desync it
  * causes is the same one this function exists to remove, just relocated. The comment checks are
  * there for the same reason one level up: a `//` or `/*` inside a multi-line interpolation would
- * otherwise have its prose read as structure.
+ * otherwise have its prose read as structure. They bound that reading and nothing more — an
+ * interpolation's comment text is still emitted verbatim by `stripComments`, exactly as it was
+ * before this walk existed, because the enclosing backtick span is copied through unblanked.
  *
  * `quotedSpanEnd` and this function are mutually recursive, bounded by template nesting depth. Real
  * source nests one or two deep and the deepest in this tree is 2, so no explicit depth guard is
  * warranted; a hand-written stack would be more machinery than the bound needs.
  *
- * Not exported. It has one caller, and the behaviour is pinned through `quotedSpanEnd`.
+ * Not exported. It has one caller, and the behavior is pinned through `quotedSpanEnd`.
  */
 function interpolationEnd(source, start) {
   let depth = 0;
@@ -234,15 +236,25 @@ export function quotedSpanEnd(source, start) {
 }
 
 /**
- * Thrown by `stripComments` when a backtick span reaches the end of the source without closing.
+ * Thrown by `stripComments` when backtick pairing reaches the end of the source.
  *
- * Carries the `offset` the span opened at and the 1-based `line` holding it, because that is all
+ * Carries the `offset` pairing ran out from and the 1-based `line` holding it, because that is all
  * this module can say: it is handed source text and never a path. The two guards that call
  * `stripComments` add the file name when they catch this (#3088).
+ *
+ * The message names that position and stops short of naming a cause, because the span it points at
+ * need not be the broken one. An earlier mis-read that swallows a backtick — the `>` generic-close
+ * residual documented above is one — leaves the count odd, and the walk then opens a span on a
+ * closing backtick and runs off the end: `const n = a<b> / 2; // note the \`` followed by a
+ * well-formed `` const s = `hello`; `` reports the second line, whose literal is closed correctly.
+ * Telling the reader to close that literal would be wrong advice on a correct line.
  */
 export class UnterminatedTemplateError extends Error {
   constructor(offset, line) {
-    super(`unterminated template literal opened at line ${line}`);
+    super(
+      `backtick pairing ran to the end of the file from line ${line}: either that literal is `
+      + 'unterminated, or an earlier mis-read swallowed a backtick',
+    );
     this.name = 'UnterminatedTemplateError';
     this.offset = offset;
     this.line = line;
@@ -269,13 +281,16 @@ export class UnterminatedTemplateError extends Error {
  * job its name states. A comment marker wins over a regex — `//` never opens a regex literal, and
  * `/*` cannot start a valid one — so the comment checks run first.
  *
- * This function is partial: a backtick span that never closes raises `UnterminatedTemplateError`
- * rather than returning a desynced read. Every other mis-read this module can make is bounded to a
+ * This function is partial: backtick pairing that runs to the end of the source raises
+ * `UnterminatedTemplateError` rather than returning a desynced read. What it reports is that
+ * position, not a cause — the span it names may be unterminated, or an earlier mis-read may have
+ * swallowed a backtick and left the count odd, and a character-at-a-time walk cannot tell those
+ * apart. Every other mis-read this module can make is bounded to a
  * line, because a `'`/`"` span and a regex literal both stop at a newline — so their worst case is
  * the rest of one line and the readers stay worth running. Only a backtick crosses lines, so only a
  * backtick's failure is unbounded: everything past it comes back with the file's strings and its
  * code swapped, and a reader matching over that output is not reading the file it was handed. The
- * `'`/`"` cases keep their tolerated end-of-source behaviour for exactly that reason, and
+ * `'`/`"` cases keep their tolerated end-of-source behavior for exactly that reason, and
  * `stripComments("a: 'unterminated // x")` returning itself stays pinned.
  *
  * Three places could hold this check, and the other two are worse:

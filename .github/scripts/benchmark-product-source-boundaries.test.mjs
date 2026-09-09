@@ -249,8 +249,9 @@ function hardcodedMethodIds(sourceFiles) {
     } catch (error) {
       if (!(error instanceof UnterminatedTemplateError)) throw error;
       assert.fail(
-        `${relative(root, file)}:${error.line}: the source scanner desynced on a template literal ` +
-          'that never closes, so the method-identifier read of this file is worthless. Close it.',
+        `${relative(root, file)}:${error.line}: backtick pairing ran to the end of the file from ` +
+          'here — either that literal is unterminated, or an earlier mis-read swallowed a ' +
+          'backtick. Either way the method-identifier read of this file is worthless.',
       );
     }
     return [...new Set(code.match(pattern) ?? [])].map((id) => `${relative(root, file)} -> ${id}`);

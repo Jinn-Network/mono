@@ -399,8 +399,9 @@ for (const seam of SEAMS) {
       } catch (error) {
         if (!(error instanceof UnterminatedTemplateError)) throw error;
         assert.fail(
-          `${config}:${error.line}: the source scanner desynced on a template literal that never ` +
-            'closes, so every wiring read from this config is worthless. Close the literal.',
+          `${config}:${error.line}: backtick pairing ran to the end of the file from here — ` +
+            'either that literal is unterminated, or an earlier mis-read swallowed a backtick. ' +
+            'Either way every wiring read from this config is worthless.',
         );
       }
       const missing = [];
