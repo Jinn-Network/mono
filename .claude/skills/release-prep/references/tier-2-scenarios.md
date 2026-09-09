@@ -1,6 +1,12 @@
 # Tier 2 scenarios
 
-The automated gate runs **T2.2 + T2.4** (producer/evaluator loops against an Anvil-fork-of-Base-Sepolia RPC). T2.1 and T2.3 are retired/removed; their sections below are kept for provenance. Tier 2 is invoked by `release-prep` during release-readiness Phase 5; not on every push.
+> **Superseded run-role, retained contract prose.** The release-prep skill's
+> mechanical run-role is retired (see `.claude/skills/release-prep/SKILL.md`);
+> the publish gate is the two SHA-bound check-runs `hermetic-gate` and
+> `environment-suite`. This file is retained because it is the only prose
+> documenting the Tier 2 scenario contracts and how the surviving two are wired.
+
+The automated gate runs **T2.2 + T2.4** (producer/evaluator loops against an Anvil-fork-of-Base-Sepolia RPC). T2.1 and T2.3 are retired/removed; their sections below are kept for provenance. Both surviving scenarios are executed by `.github/workflows/environment-suite.yml` via `operator/scripts/release/run-tier-2.ts`; the release-prep Phase 5 invocation this file used to describe is retired with the skill's run-role.
 
 The "what does this scenario actually exercise" contracts live in `testing-jinn-app` (one doc per scenario, Plan B). The "how is it wired and what's the runtime shape" details are below.
 
@@ -48,7 +54,7 @@ The automated live-fork T2.3 gate was **removed** by DR-2026-06-03 / [#1014](htt
 
 **Root cause it exposed:** the cross-operator IPFS-visibility bug (op-b fetching op-a's manifest by CID). Resolved by the shared-mock-IPFS helper — the `sharedMockIpfs` opt-in in `operator/test/release/tier-2/tier-2-helpers.ts` (commit `727d133c6`), which points both daemons at one in-process `startMockIpfsServer()`. It is available for any Tier-2 scenario that wants a real cross-daemon manifest round-trip; no current gate scenario invokes it.
 
-**Deterministic replacement:** the operator-journey coverage now lives in `operator/test/dashboard/solvernet-flow.e2e.test.ts` + `operator/test/dashboard/join.e2e.test.ts` (`yarn e2e:app-flow`, hermetic gate).
+**Deterministic replacement:** the operator-journey coverage now lives in `apps/operator-console/e2e/claim-policy-flow.e2e.ts` + `apps/operator-console/e2e/posting-status.e2e.ts` (`yarn e2e:app-flow`, hermetic gate — the same two flows T1.4 runs). `operator/test/dashboard/` no longer exists.
 
 **Real cross-operator experience:** the MANUAL paired-flow gate — [`testing-jinn-app/references/scenario-multi-op-spa-flow.md`](../../testing-jinn-app/references/scenario-multi-op-spa-flow.md) — run by the Captain per DR-2026-06-08 (a human-run spot check, not automated).
 
