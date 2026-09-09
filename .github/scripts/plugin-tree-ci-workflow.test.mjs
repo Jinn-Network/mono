@@ -13,7 +13,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { restoredArtifactNames, uploadedArtifactNames } from './workflow-artifact-steps.mjs';
+import {
+  restoredArtifactNames,
+  restoredArtifacts,
+  uploadedArtifactNames,
+} from './workflow-artifact-steps.mjs';
 import { citedPrecedents } from './workflow-precedent-citations.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -45,9 +49,17 @@ test('every uploaded distribution is restored by name, never by pattern', () => 
 });
 
 test('the runtime distribution is restored straight into its package', () => {
-  assert.match(
-    workflow,
-    /name: plugin-runtime-dist\n\s+path: plugin\/runtime\/dist\n/,
+  // Read the path from inside the download step. The whole-file regex this replaces matched the
+  // `name:`/`path:` pair of the UPLOAD step just as happily, so repointing only the restore was a
+  // change it could not see: verified green with the download step's `path:` set to `bogus/place`
+  // (#3086). `restoredArtifacts` already returns `{ name, path }` read from within each
+  // `download-artifact` step, and its own comment states why a bare whole-file search cannot mean
+  // anything here.
+  const runtimeRestore = restoredArtifacts(workflow).find((step) => step.name === 'plugin-runtime-dist');
+  assert.ok(runtimeRestore, 'plugin-runtime-dist must be restored in the verify job');
+  assert.equal(
+    runtimeRestore.path,
+    'plugin/runtime/dist',
     'plugin-runtime-dist must land directly in plugin/runtime/dist',
   );
   assert.equal(
