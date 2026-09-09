@@ -34,8 +34,12 @@ import { walkStructured } from '../util/structured-walk.js';
  * v3 (#3038): a non-plain object (`Map` / `Set` / class instance) is now an
  * `<redacted:unserializable>` marker instead of an empty object, and a `Date`
  * is kept as its ISO string instead of being flattened to `{}`.
+ *
+ * v4 (#3108): `URL_RE` covers `ws://` and `wss://`, so a WebSocket RPC URL
+ * embedded in a free-text string value now has its userinfo, path, query and
+ * fragment stripped. Under v3 it matched nothing and survived intact.
  */
-export const REDACTION_VERSION = '3';
+export const REDACTION_VERSION = '4';
 
 /** The marker substituted for a redacted value. */
 function marker(label: string): string {
