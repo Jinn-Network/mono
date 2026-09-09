@@ -10,6 +10,7 @@ import {
   type Transport,
 } from "@jinn-network/record-discovery-client";
 import {
+  parseHeadTimestamp,
   sealJson,
   splitOrigin,
   type AnnouncementEntry,
@@ -141,7 +142,13 @@ function classifyIdleHead(
   // An unparseable instant on either side yields NaN, and every comparison
   // with NaN is false -- so a malformed head takes the chain path with the
   // rollback and the backdated re-sign, without a separate guard.
-  return new Date(head.issuedAt).getTime() > new Date(mark.issuedAt).getTime()
+  //
+  // `parseHeadTimestamp` is the protocol package's single strict reading of a
+  // head timestamp (#3482, #4096). It differs from a bare `new Date` on exactly
+  // one input class the schema now admits, a leap second, which `new Date`
+  // reports as `NaN` -- fail-closed, but a second answer to a question the
+  // protocol package already owns.
+  return parseHeadTimestamp(head.issuedAt) > parseHeadTimestamp(mark.issuedAt)
     ? "re-signed"
     : undefined;
 }

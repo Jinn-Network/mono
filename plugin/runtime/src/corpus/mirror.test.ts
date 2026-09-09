@@ -335,6 +335,28 @@ describe("mirror sync", () => {
       expect(await marks.get({ agent: AGENT, name: NAME })).toEqual(before);
     });
 
+    test("a leap-second mark still recognises the re-sign that advances it (#4096)", async () => {
+      // `parseHeadTimestamp` reads `23:59:60` as `23:59:59.999` (#3482); a bare
+      // `new Date` returns NaN on BOTH sides of this comparison, and every
+      // comparison with NaN is false -- so a mark whose recorded instant is a
+      // leap second could never be advanced by an honest idle re-sign, and the
+      // re-sign fell through to the chain path instead. The schema admits the
+      // leap second, so this is the one input class where the two readings
+      // disagree.
+      const marks = createFileHighWaterMarkStore({ filePath: statePath, fs: corpusFs });
+      const seed = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "2026-06-30T23:59:60Z" });
+      await mirror({ highWaterMarks: marks, transport: seed.transport }).syncOnce();
+      expect((await marks.get({ agent: AGENT, name: NAME }))?.issuedAt).toBe("2026-06-30T23:59:60Z");
+
+      const posture = spyPosture();
+      const { transport } = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "2026-07-31T00:00:00Z" });
+      await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+
+      expect(posture.revalidateHead).toHaveBeenCalledTimes(1);
+      expect(posture.verify).not.toHaveBeenCalled();
+      expect((await marks.get({ agent: AGENT, name: NAME }))?.issuedAt).toBe("2026-07-31T00:00:00Z");
+    });
+
     test("a head naming a different chain position keeps the chain path", async () => {
       const marks = await seeded();
       const posture = spyPosture();
