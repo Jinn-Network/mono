@@ -265,15 +265,34 @@ function repositoryPath(repositoryRoot, ...parts) {
 // tokenizer then discarded the whole remainder and every install in it. Compare the
 // trimmed line instead, the way the shell does for `<<-`. A terminator that genuinely
 // never appears runs the body to the end of the block, which is what the shell does too.
-function heredocBodyEnd(run, from, delimiter) {
+function heredocBodyEnd(run, from, { delimiter, stripped }) {
   let lineStart = from;
   while (lineStart < run.length) {
     let lineEnd = run.indexOf('\n', lineStart);
     if (lineEnd === -1) lineEnd = run.length;
-    if (run.slice(lineStart, lineEnd).trim() === delimiter) return Math.min(lineEnd + 1, run.length);
+    const line = run.slice(lineStart, lineEnd);
+    // Only `<<-` lets the terminator be indented, and only by tabs. Trimming every
+    // terminator instead ended the body at the first indented line that happened to
+    // equal the delimiter, and ran the rest of that body as commands.
+    if ((stripped ? line.replace(/^\t+/u, '') : line) === delimiter) {
+      return Math.min(lineEnd + 1, run.length);
+    }
     lineStart = lineEnd + 1;
   }
   return run.length;
+}
+
+// A `run:` block scalar carries its YAML indentation on every line, but the shell is
+// handed the text with that indentation removed — and a heredoc terminator only counts
+// at column 0. Strip the common indent so the shell's own rules can be applied verbatim
+// instead of approximated.
+function dedent(run) {
+  const lines = run.split('\n');
+  let common = Infinity;
+  for (const line of lines) {
+    if (line.trim()) common = Math.min(common, line.match(/^[ \t]*/u)[0].length);
+  }
+  return common > 0 && common !== Infinity ? lines.map((line) => line.slice(common)).join('\n') : run;
 }
 
 // Shell text is not a regular language, and every regex this guard read it with had
@@ -282,7 +301,8 @@ function heredocBodyEnd(run, from, delimiter) {
 // continuations and redirections are consumed here so that no later step has to
 // re-guess them, and the scan is linear — the flag-alternation regex it replaces
 // backtracked exponentially on a crafted `run:` line.
-function shellTokens(run) {
+function shellTokens(indentedRun) {
+  const run = dedent(indentedRun);
   const tokens = [];
   const breaks = /[\s;&|()<>]/u;
   const heredocs = [];
@@ -295,19 +315,32 @@ function shellTokens(run) {
   // report where it ends. Redirection targets and here-string operands are data, so
   // nothing is emitted for them — but a quoted one has to be stepped over whole, or its
   // tail is re-read as a command.
+  // One monotone cursor for the whole scan, advanced only when a quote actually needs a
+  // line bound. Recomputing `indexOf('\n')` per call made every redirection on a one-line
+  // `run:` scalar a fresh scan of the remainder — quadratic, on the same lane the bounds
+  // below exist for. `wordEnd` is only ever called at a non-decreasing offset, so the
+  // cursor never has to look backwards.
+  let newlineAt = run.indexOf('\n');
+  const lineEndFrom = (at) => {
+    while (newlineAt !== -1 && newlineAt < at) newlineAt = run.indexOf('\n', newlineAt + 1);
+    return newlineAt === -1 ? run.length : newlineAt;
+  };
   const wordEnd = (from) => {
-    const newline = run.indexOf('\n', from);
-    const lineEnd = newline === -1 ? run.length : newline;
     let at = from;
     while (at < run.length && !breaks.test(run[at])) {
       const inner = run[at];
       if (inner === '"' || inner === "'") {
-        const close = run.indexOf(inner, at + 1);
         // A quote the line never closes must not swallow the rest of the block: a stray
         // `> "` would hide every install after it, which is the silent direction. A real
         // shell reads such a quote to the end of input and then fails, so stopping at the
-        // line costs nothing a working workflow relies on.
-        at = close === -1 || close > lineEnd ? lineEnd : close + 1;
+        // line costs nothing a working workflow relies on. Scan for the close within the
+        // line rather than across the block, so a run of unclosed quotes stays linear.
+        const lineEnd = lineEndFrom(at);
+        let close = -1;
+        for (let scan = at + 1; scan < lineEnd; scan += 1) {
+          if (run[scan] === inner) { close = scan; break; }
+        }
+        at = close === -1 ? lineEnd : close + 1;
       } else if (inner === '\\' && at + 1 < run.length) {
         at += 2;
       } else {
@@ -326,9 +359,9 @@ function shellTokens(run) {
       tokens.push({ type: 'separator' });
       index += 1;
       while (character === '\n' && pendingHeredoc < heredocs.length) {
-        const delimiter = heredocs[pendingHeredoc];
+        const pending = heredocs[pendingHeredoc];
         pendingHeredoc += 1;
-        index = heredocBodyEnd(run, index, delimiter);
+        index = heredocBodyEnd(run, index, pending);
       }
     } else if (/\s/u.test(character)) {
       index += 1;
@@ -338,17 +371,10 @@ function shellTokens(run) {
     } else if (character === '&' || character === '|') {
       tokens.push({ type: 'separator' });
       index += run[index + 1] === character ? 2 : 1;
-    } else if (character === '<' && run[index + 1] === '<' && run[index + 2] === '<') {
-      // A here-string is a redirection whose operand is data the command reads, not a
-      // body the shell runs. Read as a heredoc it yielded an empty delimiter, which
-      // then swallowed the rest of the block — `<<<` is already used in three of this
-      // repository's workflows.
-      index += 3;
-      while (index < run.length && /[^\S\n]/u.test(run[index])) index += 1;
-      index = wordEnd(index);
     } else if (character === '<' && run[index + 1] === '<') {
       index += 2;
-      if (run[index] === '-') index += 1;
+      const stripped = run[index] === '-';
+      if (stripped) index += 1;
       while (index < run.length && /[^\S\n]/u.test(run[index])) index += 1;
       let delimiter = '';
       while (index < run.length && !breaks.test(run[index])) {
@@ -362,10 +388,13 @@ function shellTokens(run) {
           index += 1;
         }
       }
-      // `<<` with no delimiter is a shell syntax error. Queueing an empty one made
-      // the body run to the first blank line or to the end of the block, hiding every
-      // install behind it; leaving it unqueued keeps the rest of the block readable.
-      if (delimiter !== '') heredocs.push(delimiter);
+      // Two shapes reach here with no delimiter, and neither opens a body. `<<` alone is
+      // a shell syntax error; `<<<` is a here-string, whose operand is data the command
+      // reads — the third `<` stops the delimiter scan, then the redirection branch below
+      // consumes the operand. Queueing an empty delimiter ran the "body" to the first
+      // blank line or to the end of the block, hiding every install behind it, and three
+      // of this repository's workflows already use a here-string.
+      if (delimiter !== '') heredocs.push({ delimiter, stripped });
     } else if (character === '<' || character === '>') {
       // A redirection and its target say nothing about the command's arguments, and
       // the file-descriptor number in `2>&1` is not one either.
@@ -418,6 +447,7 @@ const commandPrefixes = new Set(['do', '{', '!', 'time', 'env', 'sudo', 'command
 //     canonical good form the guard must resolve is `cd app && yarn install`.
 //   - `for` is absent from this set on purpose, so that a `for` whose `do` sits on the
 //     next line leaves its body's `cd` unconditional as well.
+// Tracked in #4414, together with the unbounded lane this guard runs in.
 const unmodeledKeywords = new Set([
   'if', 'elif', 'else', 'then', 'while', 'until', 'case',
   // `done` closes a loop whose last iteration decides where the shell ends up.
@@ -1735,6 +1765,9 @@ jobs:
   });
 });
 
+// What protects this is the empty-delimiter guard, not a branch of its own: the third
+// `<` stops the delimiter scan, so nothing is queued and the redirection branch consumes
+// the operand. Pinned because the behavior is what matters, and it regressed once.
 test('guard reads a here-string as a redirection rather than a heredoc', () => {
   withFixture(({ fixtureRoot, fixtureWorkflows }) => {
     writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
@@ -1836,6 +1869,116 @@ jobs:
       yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
       /must cache app\/yarn\.lock/u,
     );
+  });
+});
+
+test('guard ends a heredoc only at an unindented terminator', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          cat <<E > f
+            E
+          cd nowhere
+          E
+          cd app
+          yarn install --immutable
+`);
+    // Trimming every candidate terminator ended the body at the indented `E`, ran the
+    // `cd nowhere` inside it as a command, and required `nowhere/app/yarn.lock`.
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /must cache app\/yarn\.lock/u,
+    );
+  });
+});
+
+test('guard honors the tab-stripping form of a heredoc terminator', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          cat <<-E > f
+          body
+          \tE
+          cd app
+          yarn install --immutable
+`);
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /must cache app\/yarn\.lock/u,
+    );
+  });
+});
+
+test('a one-line run scalar of redirections stays linear', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    // Recomputing the line bound per `wordEnd` call rescanned the remainder of the block
+    // at every redirection: 339ms here against 16ms for a monotone cursor.
+    const redirections = Array.from({ length: 100000 }, () => '> a').join(' ');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: yarn install --immutable ; ${redirections}
+`);
+    const startedAt = process.hrtime.bigint();
+    yarnCacheViolations(fixtureWorkflows, fixtureRoot);
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    assert.ok(elapsedMs < 150, `walk took ${elapsedMs.toFixed(0)}ms`);
+  });
+});
+
+test('a one-line run scalar of quoted redirection targets stays linear', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    // The sibling test above bounds the eager line lookup; this one bounds the cursor
+    // behind it. Resolving the line afresh at each quote is quadratic on one long line —
+    // 579ms here against 20ms — because every lookup rescans the rest of the scalar.
+    const redirections = Array.from({ length: 100000 }, () => '> "a"').join(' ');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: yarn install --immutable ; ${redirections}
+`);
+    const startedAt = process.hrtime.bigint();
+    yarnCacheViolations(fixtureWorkflows, fixtureRoot);
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    assert.ok(elapsedMs < 150, `walk took ${elapsedMs.toFixed(0)}ms`);
   });
 });
 
