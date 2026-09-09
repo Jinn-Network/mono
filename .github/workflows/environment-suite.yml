@@ -12,8 +12,9 @@
 # a laptop (Option B, §9), which is what makes the verdict trustworthy and kills
 # the laptop-state failure class (JINN_PASSWORD-poisoning, exit 50).
 # Scope boundary (#2472): deterministic blocking CI is `yarn test:hermetic`
-# (hermetic-gate.yml) plus `yarn test` (ci.yml / `operator-ci-gate`) — the two
-# suites are disjoint, so neither subsumes the other.
+# (hermetic-gate.yml) plus `yarn test` (ci.yml / `operator-ci-gate`) — neither
+# suite subsumes the other (they overlap only on the two pure-unit hermetic
+# files, abi-selector-conformance and rpc-fallback).
 # `yarn e2e:daemon-harness` and its native mode are
 # operator-run, non-CI live-fork cutover evidence. The scheduled/manual
 # native-e2e-rig.yml run is supplemental advisory evidence only.

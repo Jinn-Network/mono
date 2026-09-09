@@ -18,8 +18,13 @@ step 7 unfinished.
 
 - [ ] Rollback pin recorded above, verified installable (`npm view` the exact specifier)
 - [ ] Deterministic blocking CI is green on the exact train SHA — **both**
-      required contexts: `operator-ci-gate` (`cd operator && yarn test`, the full
-      client suite) and `hermetic-gate` (`cd operator && yarn test:hermetic`)
+      required deterministic-suite contexts: `operator-ci-gate` (`cd operator &&
+      yarn test`, the full client suite) and `hermetic-gate` (`cd operator &&
+      yarn test:hermetic`) — green **with the operator lane selected**. Both
+      producing jobs are path-filtered and both gates report success when their
+      suite job is `skipped`, so a green `operator-ci-gate` / `hermetic-gate`
+      over a `skipped` suite job does not satisfy this item: open each gate's run
+      and confirm the suite job itself is non-skipped on that SHA.
 - [ ] Operator-run, non-CI live-fork evidence is green on the exact train SHA in
       **both** modes:
   - legacy: `cd operator && JINN_E2E_MODE=legacy yarn e2e:daemon-harness`
