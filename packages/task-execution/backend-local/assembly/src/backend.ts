@@ -2124,12 +2124,18 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   // backend that dies between those two points leaves a running harness with no fingerprint and the
   // next boot reads the Attempt as gone. That Attempt is already unreapable and already terminals
   // `absent` while its harness runs, so the slot it used to hold was masking that, not bounding it.
-  // Two reasons the throw is caught rather than left to propagate: an unreadable probe is not proof
-  // of death, so the safe answer is to keep the slot (the behavior this Attempt already had); and
-  // the probe reads unguarded — `readShimFingerprint` parses `shim.json`, and on Linux
-  // `listProcessGroupPids` enumerates `/proc` — which is tolerable inside `recover` but here also
-  // runs from the constructor, where it would turn one torn file, or one `/proc` this process may
-  // not read, into a backend that cannot be built at all.
+  //
+  // The `catch` buys exactly one thing: an unreadable probe is not proof of death, so the safe
+  // answer is to keep the slot — the behavior this Attempt had before #3192. It is NOT
+  // constructor-safety; the caller's own `try`/`catch` already contains the throw, so without this
+  // the backend would still build and would simply take the opposite, releasing branch. What that
+  // costs is worth naming, since neither direction is loud: on Linux the probe enumerates `/proc`
+  // unguarded, so a `/proc` this process may not read throws for EVERY Attempt and holds every slot,
+  // restoring the #3192 wedge wholesale. The opposite direction is not caught here at all — on
+  // darwin `listProcessGroupPids` swallows its own failed `ps` and returns `[]`, indistinguishable
+  // from an empty group, so under fork pressure a restart can release slots for harness groups that
+  // are still running. Both predate this call site at `reconcileResolvedRef`; this is only where the
+  // invariant is now written down.
   private attemptProcessAlive(paths: WorkspacePaths): boolean {
     try {
       return probeShimAlive(paths.meta).alive || this.harnessGroupPids(paths).length > 0;
