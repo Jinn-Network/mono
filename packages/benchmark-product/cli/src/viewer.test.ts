@@ -158,7 +158,7 @@ describe("verified bundle viewer", () => {
     expect(page).toContain("colophon bundle verify --bundle");
   });
 
-  test("offers the profile-aware command for a metadata-first bundle that deferred nothing", async () => {
+  test("offers the profile-aware command for a metadata-first bundle that deferred nothing, and names its scope without a verdict word", async () => {
     const root = mkdtempSync(join(tmpdir(), "colophon-viewer-metadata-first-complete-"));
     roots.push(root);
     writeFileSync(join(root, "report.json"), "{}");
@@ -172,6 +172,12 @@ describe("verified bundle viewer", () => {
     const page = await (await fetch(session.base, { headers: { cookie: session.cookie } })).text();
 
     expect(page).toContain("7 of 7 bundle checks passed.");
+    // The v5 heading branch, guarded the same way as the v4 one below (#4262). This is the
+    // fixture where the word is actually in the input: `artifactContent.status` reads `verified`
+    // exactly when no body was deferred, so a page that ever printed that value verbatim would
+    // fail here rather than ship.
+    expect(page).toContain("Evidence-native benchmark");
+    expect(page).not.toMatch(/verified|certified|validated|audited/i);
     expect(page).not.toContain("npx @colophon-claims/verify@");
     expect(page).toContain("colophon bundle verify --bundle");
   });
