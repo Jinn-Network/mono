@@ -573,4 +573,34 @@ describe("durable Record Discovery source writer", () => {
     await expect(writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).recover())
       .resolves.toMatchObject({ status: "recovered" });
   });
+
+  // The two guards above replay an announcement already committed in STATE, which the
+  // append path answers from its idempotency lookup before reaching the window check.
+  // This replays a durable INTENT instead -- signed, not yet in state -- which is what
+  // the carve-out at the top of the CAS loop is actually justified by: `recover()` runs
+  // unconditionally there, ahead of the window refusal, precisely so an out-of-window
+  // writer still finishes work that is already durable. Nothing covered that, so
+  // gating the recovery on `windowFailure === undefined` left the whole suite green
+  // while wedging the source: the intent can only be cleared by the recovery the gate
+  // now skips, so every subsequent append refuses identically until wall clock catches
+  // up -- a permanent stall, not a delay.
+  //
+  // The clock must be BEHIND the intent's timestamp, as in the case above (#3570):
+  // `checkRefreshWindow` rule 3 only refuses a head issued ahead of `now`, so a clock
+  // set forward never produces the `windowFailure` the gate reads and the case would
+  // not discriminate at all.
+  it("finishes a durable intent on append from a writer whose clock is now out of window", async () => {
+    const harness = makeHarness();
+    await expect(writer(harness, "after-intent-before-page").append(command())).rejects.toThrow();
+    expect(await harness.intentCas.read()).toBeDefined();
+    const signCount = harness.signCount();
+
+    const replay = await writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).append(command());
+
+    expect(replay).toMatchObject({ announcementId: "ann-1", sequence: "0000000000000001" });
+    // Together these say the receipt came from finishing the frozen intent, not from
+    // minting a second head: nothing re-signed, and the intent is durably cleared.
+    expect(harness.signCount()).toBe(signCount);
+    expect(await harness.intentCas.read()).toBeUndefined();
+  });
 });
