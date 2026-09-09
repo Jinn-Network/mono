@@ -21,7 +21,6 @@ import type {
   RouteResolver,
 } from './types.js';
 import { AcquireError, HashMismatchError } from './types.js';
-import { fetchFromIpfs as defaultFetchFromIpfs } from './ipfs.js';
 
 /**
  * Origin acquire function. Historically returned `Buffer | null`; the
@@ -85,7 +84,7 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
     ipfsGatewayUrl,
     ownerSafe,
     acquireFn = (endpoint, sha256) => fetchArtifactContent(endpoint, sha256),
-    fetchFromIpfs = defaultFetchFromIpfs,
+    fetchFromIpfs,
   } = args;
 
   const now = () => new Date().toISOString();

@@ -20,8 +20,16 @@ import { SPECIFIER } from './import-scan.js';
 const pkgRoot = fileURLToPath(new URL('../../', import.meta.url));
 const PRIMITIVE = join(pkgRoot, 'src', 'corpus-read', 'artifact-retrieval.ts');
 
-const FORBIDDEN_EXACT = ['node:fs', 'node:fs/promises', 'node:path', 'fs', 'path', 'better-sqlite3'];
-const FORBIDDEN_PATTERN = /store|keystore|signer|wallet|privateKey/i;
+const FORBIDDEN_EXACT = [
+  'node:fs', 'node:fs/promises', 'node:path', 'fs', 'path', 'better-sqlite3',
+  // Each of these is a route back to the filesystem or to key material even
+  // though none of them is named `fs`: `node:module` can `createRequire` its
+  // way to any of them, and both `node:child_process` and `node:worker_threads`
+  // run code that is under no obligation to honor this guard.
+  'node:module', 'module', 'node:child_process', 'child_process',
+  'node:worker_threads', 'worker_threads',
+];
+const FORBIDDEN_PATTERN = /store|keystore|signer|wallet|privateKey|vault|secret|credential/i;
 
 function specifiers(source: string): string[] {
   return [...source.matchAll(SPECIFIER)].map((match) => match[1]!);
@@ -91,6 +99,12 @@ describe('artifact retrieval primitive stays keyless and filesystem-neutral (#41
     expect(specifiers(`import { x } from 'node:fs';`).some(forbidden)).toBe(true);
     expect(specifiers(`import { s } from './store.js';`).some(forbidden)).toBe(true);
     expect(specifiers(`import { k } from './keystore/index.js';`).some(forbidden)).toBe(true);
+    expect(specifiers(`import { createRequire } from 'node:module';`).some(forbidden)).toBe(true);
+    expect(specifiers(`import { spawn } from 'node:child_process';`).some(forbidden)).toBe(true);
+    expect(specifiers(`import { Worker } from 'node:worker_threads';`).some(forbidden)).toBe(true);
+    expect(specifiers(`import { v } from './vault.js';`).some(forbidden)).toBe(true);
+    expect(specifiers(`import { s } from './secrets.js';`).some(forbidden)).toBe(true);
+    expect(specifiers(`import { c } from './credentials.js';`).some(forbidden)).toBe(true);
     expect(specifiers(`import { c } from 'node:crypto';`).some(forbidden)).toBe(false);
   });
 });

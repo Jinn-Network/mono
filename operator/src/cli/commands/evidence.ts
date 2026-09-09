@@ -524,17 +524,24 @@ function renderFetchHuman(value: unknown): string {
     sha256: string;
     artifactType: string;
     sizeBytes: number;
-    digestVerified: boolean;
-    provenance: { source: string; sourceUri: string };
+    provenance: { source: string; sourceUri: string; claimedSourceOperator?: string };
   };
-  // Deliberately five lines and no payload: a terminal is not a place to put a
-  // binary blob. Use --json when you want the bytes.
+  // Deliberately a summary and no payload: a terminal is not a place to put a
+  // binary blob. JSON is the default mode and it carries the bytes.
+  //
+  // Both status lines are literal because this path reaches the renderer only
+  // after the digest verified, and `fetch` never checks the envelope signature
+  // — a conditional here would be a branch no input can take.
   return [
     `Artifact ${v.sha256}`,
-    `  Type   : ${v.artifactType}`,
-    `  Size   : ${v.sizeBytes} bytes`,
-    `  Source : ${v.provenance.source} ${v.provenance.sourceUri}`,
-    `  Status : ${v.digestVerified ? 'bytes hash to the sha256 this envelope records' : 'unverified'}`,
+    `  Type     : ${v.artifactType}`,
+    `  Size     : ${v.sizeBytes} bytes`,
+    `  Source   : ${v.provenance.source} ${v.provenance.sourceUri}`,
+    ...(v.provenance.claimedSourceOperator
+      ? [`  Claimed  : ${v.provenance.claimedSourceOperator} (asserted by the envelope, not verified)`]
+      : []),
+    '  Digest   : bytes hash to the sha256 this envelope records',
+    '  Envelope : signature not checked — `jinn evidence show --verify` checks it',
   ].join('\n');
 }
 
@@ -658,7 +665,7 @@ async function runFetch(ctx: CommandContext, deps: EvidenceDeps): Promise<void> 
         code: FETCH_ERROR_CODES[retrieved.reason],
         message: retrieved.message,
         hint: retrieved.reason === 'digest_mismatch'
-          ? 'The source returned bytes that are not the artifact this envelope names. Nothing was written; report the operator in sourceOperator.'
+          ? 'The source returned bytes that are not the artifact this envelope names. Nothing was written; sourceUri is where the bytes actually came from and is what to investigate. claimedSourceOperator is only what this unverified envelope asserts.'
           : retrieved.retryable
             ? 'Nothing was learned about whether the artifact exists — retry.'
             : 'The source answered, and the answer was final for this address.',
@@ -669,13 +676,31 @@ async function runFetch(ctx: CommandContext, deps: EvidenceDeps): Promise<void> 
           reason: retrieved.reason,
           retryable: retrieved.retryable,
           attempts: retrieved.attempts,
-          ...(retrieved.mismatch ?? {}),
+          ...(retrieved.mismatch
+            ? {
+                expectedSha256: retrieved.mismatch.expectedSha256,
+                actualSha256: retrieved.mismatch.actualSha256,
+                sourceUri: retrieved.mismatch.sourceUri,
+                ...(retrieved.mismatch.sourceOperator
+                  ? { claimedSourceOperator: retrieved.mismatch.sourceOperator }
+                  : {}),
+              }
+            : {}),
         },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
     return;
   }
+
+  // The provenance the primitive returns carries the operator Safe the envelope
+  // *names*. `fetch` schema-parses the envelope and never checks its signature,
+  // so that Safe is an unverified assertion by whoever pinned these bytes — a
+  // field called `sourceOperator` would read as a finding and make this verb a
+  // way to attribute hostile bytes to an innocent operator. Rename it on the
+  // way out; `ArtifactProvenance.sourceOperator` in core has other consumers
+  // and keeps its name.
+  const { sourceOperator, ...provenance } = retrieved.artifact.provenance;
 
   emitResult(
     {
@@ -690,11 +715,17 @@ async function runFetch(ctx: CommandContext, deps: EvidenceDeps): Promise<void> 
       // envelope records; whether that envelope is authentic is a separate
       // question, and `show --verify` is where it is asked.
       digestVerified: true,
+      // The other half of that sentence, in the output rather than only in
+      // --help: this verb never verified who wrote the envelope.
+      envelopeSignatureVerified: false,
       // Unconditional in JSON mode: a verb that returns everything except the
       // deliverable is the complaint this subverb exists to answer. Where the
       // bytes land is the caller's decision — `fetch` writes no files.
       contentBase64: retrieved.artifact.bytes.toString('base64'),
-      provenance: retrieved.artifact.provenance,
+      provenance: {
+        ...provenance,
+        ...(sourceOperator ? { claimedSourceOperator: sourceOperator } : {}),
+      },
     },
     renderFetchHuman,
     {
@@ -787,6 +818,9 @@ fetch
   digestVerified names exactly what was checked: the bytes hash to the sha256
   this envelope records. It says nothing about whether the envelope itself is
   authentic — \`show --verify\` is where the envelope's signature is checked.
+  The output says so too: envelopeSignatureVerified is false, and the operator
+  Safe the envelope names is reported as claimedSourceOperator, because an
+  unverified envelope can name any Safe it likes.
 
 Requires an HTTP discovery indexer (find only):
   config: discovery.mode = "http", discovery.url = "<indexer url>"

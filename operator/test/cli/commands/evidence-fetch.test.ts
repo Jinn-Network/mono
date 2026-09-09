@@ -180,13 +180,17 @@ describe('evidence fetch', () => {
       artifactType: 'output.portfolio.v0',
       sizeBytes: BYTES.length,
       digestVerified: true,
+      // `fetch` only schema-parses the envelope; it never checks the signature.
+      envelopeSignatureVerified: false,
     });
     expect(Buffer.from(out.contentBase64, 'base64').equals(BYTES)).toBe(true);
     expect(out.provenance).toMatchObject({
       source: 'origin',
       digestAlgorithm: 'sha256',
-      sourceOperator: SAFE,
+      // The Safe is what the unverified envelope claims, so the field says so.
+      claimedSourceOperator: SAFE,
     });
+    expect(out.provenance).not.toHaveProperty('sourceOperator');
     expect(out.provenance.attempts).toHaveLength(2);
 
     // The verb hands the primitive every locator the envelope carries.
@@ -211,6 +215,9 @@ describe('evidence fetch', () => {
     expect(rendered).toContain(ARTIFACT_SHA);
     expect(rendered).toContain('output.portfolio.v0');
     expect(rendered).toContain('bytes hash to the sha256 this envelope records');
+    // The unverified-envelope caveat lives in the output, not only in --help.
+    expect(rendered).toContain('signature not checked');
+    expect(rendered).toContain(`Claimed  : ${SAFE} (asserted by the envelope, not verified)`);
     expect(rendered).not.toContain(BYTES.toString('base64'));
     expect(rendered).not.toContain('contentBase64');
   });
@@ -299,8 +306,13 @@ describe('evidence fetch', () => {
       expectedSha256: ARTIFACT_SHA,
       actualSha256: 'f'.repeat(64),
       sourceUri: 'https://op.example.com/v1/artifacts/x/content',
-      sourceOperator: SAFE,
+      claimedSourceOperator: SAFE,
     });
+    expect(out.details).not.toHaveProperty('sourceOperator');
+    // The hint points at where the bytes came from. It must not tell anyone to
+    // report a Safe that an unverified envelope merely asserts.
+    expect(out.hint).toContain('sourceUri');
+    expect(out.hint).not.toContain('report the operator');
     expect(writes.join('')).not.toContain(BYTES.toString('base64'));
     expect(JSON.stringify(out)).not.toContain('contentBase64');
   });

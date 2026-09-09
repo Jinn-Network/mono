@@ -288,6 +288,46 @@ describe('fetchVerifiedArtifact', () => {
     expect(result.retryable).toBe(true);
   });
 
+  it('reports the last inconclusive leg when more than one fails inconclusively', async () => {
+    // Pins the tie-break rule: legs run cheapest-first, so the last one to
+    // answer is the artifact's actual home and its reason is the actionable
+    // one. Here IPFS refuses on size and the origin then times out — the
+    // reported reason is the origin's, not the mirror's.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await fetchVerifiedArtifact(
+      { sha256: SHA },
+      { sources: ipfsSources(), ipfsGatewayUrl: GATEWAY, endpoint: ENDPOINT },
+      {
+        deps: {
+          fetchFromIpfs: async () => {
+            throw new IpfsFetchFailedError('gateway refused', [
+              new IpfsResponseTooLargeError(8 * 1024 * 1024),
+            ]);
+          },
+          fetchArtifact: async (): Promise<AcquireResult> => ({ ok: false, reason: 'timeout' }),
+        },
+      },
+    );
+    warn.mockRestore();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.attempts.map((attempt) => attempt.reason)).toEqual(['too_large', 'timeout']);
+    expect(result.reason).toBe('timeout');
+    expect(result.retryable).toBe(true);
+  });
+
+  it('names the missing gateway when donated sources have nowhere to be read from', async () => {
+    const result = await fetchVerifiedArtifact({ sha256: SHA }, { sources: ipfsSources() });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('no_locator');
+    // The old message claimed there was no donated source at all, which is
+    // false here — there is one, with no gateway to read it through.
+    expect(result.message).not.toContain('no donated IPFS source');
+    expect(result.message).toContain('no gateway URL');
+  });
+
   it('reports no_locator when nothing was supplied to try', async () => {
     const result = await fetchVerifiedArtifact({ sha256: SHA }, {});
     expect(result.ok).toBe(false);
@@ -339,5 +379,43 @@ describe('fetchVerifiedArtifact', () => {
     expect(labeled.artifact.artifactType).toBe('a-label-that-is-wrong');
     expect(unlabeled.artifact.artifactType).toBe('unknown');
     expect(labeled.artifact.bytes.equals(unlabeled.artifact.bytes)).toBe(true);
+  });
+});
+
+describe('fetchVerifiedArtifact production default transport', () => {
+  it('binds the destination-guarded origin fetch when no deps are supplied', async () => {
+    // Every other test here replaces the origin leg through `deps`, so nothing
+    // exercised the default binding: swapping it for a bare `fetch` would leave
+    // the suite green and ship a live SSRF. This call passes no `deps` at all.
+    //
+    // Hermetic by construction rather than by hope: 169.254.169.254 is an IPv4
+    // literal, so `resolvePublicHttpDestination` classifies it as link-local
+    // from parsing alone and throws before any DNS lookup or socket. Host
+    // resolver behavior cannot change the outcome. The private-origin hatch is
+    // stubbed off so an operator env cannot open the guard under test.
+    vi.stubEnv('JINN_CORPUS_ALLOW_PRIVATE_ORIGINS', '');
+    try {
+      const result = await fetchVerifiedArtifact(
+        { sha256: SHA },
+        { endpoint: 'http://169.254.169.254' },
+      );
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toBe('blocked');
+      expect(result.retryable).toBe(false);
+      expect(result.attempts).toEqual([
+        { leg: 'ipfs', sourceUri: '', outcome: 'skipped' },
+        {
+          leg: 'origin',
+          sourceUri: `http://169.254.169.254/v1/artifacts/${SHA}/content`,
+          outcome: 'failed',
+          reason: 'blocked',
+          message: expect.stringContaining('link-local'),
+        },
+      ]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

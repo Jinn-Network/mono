@@ -6,11 +6,15 @@
  * with the provenance of the leg that produced them. A digest mismatch fails
  * closed: the failure arm of the result union has no bytes on it at all.
  *
- * Keyless and filesystem-neutral by construction. There is no store, no signer,
- * no private key, no path, and no write of any kind — not because a caller is
- * trusted to omit them, but because no parameter through which they could
- * arrive exists. `test/architecture/keyless-primitive.test.ts` holds the module
- * graph to the same promise.
+ * Keyless and filesystem-neutral by construction. The primitive itself neither
+ * accepts nor touches key material or the filesystem: it takes no store, no
+ * signer, no private key, and no path, and it performs no write of any kind.
+ * The one channel through which such material can reach a call is the caller's
+ * own `deps` seam closure — `acquire.ts` legitimately supplies one that holds a
+ * private key — and that closure is opaque here: it is invoked, never read,
+ * never logged, and never surfaced in provenance.
+ * `test/architecture/keyless-primitive.test.ts` holds the module graph to the
+ * same promise.
  *
  * Where the returned bytes land is the caller's decision. The daemon chain
  * (`acquire.ts`) composes this with its byte cache; the CLI hands them to the
@@ -351,15 +355,28 @@ export async function fetchVerifiedArtifact(
   // one inconclusive leg means we learned nothing about existence (#3441).
   const failures = attempts.filter((attempt) => attempt.outcome === 'failed');
   if (failures.length === 0) {
+    // Name why each leg was skipped rather than assuming both locators were
+    // absent: donated sources with no gateway to read them through is its own
+    // case, and reporting it as "no donated IPFS source" is simply wrong.
+    const missing = [
+      ipfsSource
+        ? 'a donated IPFS source but no gateway URL to read it through'
+        : 'no donated IPFS source',
+      'no origin endpoint',
+    ];
     return {
       ok: false,
       sha256,
       reason: 'no_locator',
       retryable: false,
-      message: `artifact ${sha256} has no donated IPFS source and no origin endpoint to try`,
+      message: `artifact ${sha256} has no locator to try: ${missing.join(', and ')}`,
       attempts,
     };
   }
+  // When more than one leg fails inconclusively, the last one wins. Legs run
+  // cheapest-first — the opportunistic donated mirror, then the operator's own
+  // origin — so the last leg to answer is the artifact's actual home, and its
+  // reason is the one the operator can act on.
   const inconclusive = failures.filter((attempt) => attempt.reason !== 'not_found');
   const reason = inconclusive.length > 0
     ? inconclusive[inconclusive.length - 1]!.reason!
