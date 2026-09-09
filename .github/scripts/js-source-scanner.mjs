@@ -141,6 +141,63 @@ export function regexStartsAt(source, index) {
 }
 
 /**
+ * The index just past the `}` that closes the `${` interpolation whose `{` is at `start`, or
+ * `source.length` where it never closes.
+ *
+ * An interpolation body is ordinary code, not span text, and it is reached only from a backtick
+ * span. That makes this the one place the walk re-enters code from inside a string, so it repeats
+ * the same four checks the top-level walk makes rather than counting braces.
+ *
+ * Repeating them is not thoroughness for its own sake — a brace-and-string-only version is measured
+ * WORSE than not entering the body at all. Over the 5,792 first-party source files, it leaves 4
+ * files desynced against a baseline of 2, and only one of the 2 is among them: it fixes one and
+ * breaks three that were previously fine. The shape that breaks them is ordinary —
+ * `` `"${term.replace(/"/gu, '""')}"` `` — where the body holds a regex literal whose own body is a
+ * quote character. Without the regex check that quote opens a phantom string, and the desync it
+ * causes is the same one this function exists to remove, just relocated. The comment checks are
+ * there for the same reason one level up: a `//` or `/*` inside a multi-line interpolation would
+ * otherwise have its prose read as structure.
+ *
+ * `quotedSpanEnd` and this function are mutually recursive, bounded by template nesting depth. Real
+ * source nests one or two deep and the deepest in this tree is 2, so no explicit depth guard is
+ * warranted; a hand-written stack would be more machinery than the bound needs.
+ *
+ * Not exported. It has one caller, and the behaviour is pinned through `quotedSpanEnd`.
+ */
+function interpolationEnd(source, start) {
+  let depth = 0;
+  let index = start + 1;
+  while (index < source.length) {
+    const character = source[index];
+    if (character === "'" || character === '"' || character === '`') {
+      index = Math.min(quotedSpanEnd(source, index) + 1, source.length);
+      continue;
+    }
+    if (character === '/' && source[index + 1] === '/') {
+      const newline = source.indexOf('\n', index);
+      index = newline === -1 ? source.length : newline;
+      continue;
+    }
+    if (character === '/' && source[index + 1] === '*') {
+      const end = source.indexOf('*/', index + 2);
+      index = end === -1 ? source.length : end + 2;
+      continue;
+    }
+    if (character === '/' && regexStartsAt(source, index)) {
+      index = Math.min(regexLiteralEnd(source, index) + 1, source.length);
+      continue;
+    }
+    if (character === '{') depth += 1;
+    else if (character === '}') {
+      if (depth === 0) return index + 1;
+      depth -= 1;
+    }
+    index += 1;
+  }
+  return source.length;
+}
+
+/**
  * The index of the character that closes the quoted span opened at `start` — the matching quote, or
  * the newline that bounds it, or `source.length`.
  *
@@ -154,12 +211,23 @@ export function regexStartsAt(source, index) {
  * the next one anywhere in the source: in `stripComments` that handed later comments back as live
  * source, and in the balanced scanners it ran past a `projects` entry's closing brace and dropped
  * every range, putting each allowance and seam path back in one scope (issues #3027, #3154).
+ *
+ * A `${` inside a backtick span leaves span text and re-enters code, so it is handed to
+ * `interpolationEnd` rather than walked as more of the string. Reading the body as span text let a
+ * nested template's opening backtick close the outer span, and from there every backtick in the
+ * file paired off by one — the scanner walking that file's strings and its code exactly inverted
+ * (#3088). An escaped `\${` never reaches the check, because the escape advance consumes the `$`
+ * with its backslash first.
  */
 export function quotedSpanEnd(source, start) {
   const quote = source[start];
   let index = start + 1;
   while (index < source.length && source[index] !== quote) {
     if (quote !== '`' && source[index] === '\n') return index;
+    if (quote === '`' && source[index] === '$' && source[index + 1] === '{') {
+      index = interpolationEnd(source, index + 1);
+      continue;
+    }
     index += source[index] === '\\' ? 2 : 1;
   }
   return index;

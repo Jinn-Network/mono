@@ -1200,6 +1200,24 @@ test('a template literal spanning lines does not lose its projects entries', () 
   }
 });
 
+// An interpolation body is ordinary code, and a template literal is the one construct that can hold
+// another one inside itself. Reading the body as span text made the inner template's opening
+// backtick close the outer span, after which every backtick in the file paired off by one and the
+// scanner was walking the file's strings and code inverted (#3088). Both shapes below are real:
+// the shell-quoting helper in the swe-rebench evaluator and a `next/link` href in the Colophon web
+// app, and each one desynced the scanner over the whole rest of its file.
+test('a nested template literal does not close the span that encloses it', () => {
+  const nested = 'const q = `a${f(`y`)}c`;';
+  assert.equal(quotedSpanEnd(nested, 10), 22);
+
+  // The two shipped shapes, pinned as themselves rather than as a reduction of themselves. Each
+  // span must end at the literal's own closing backtick, which is the last one in the fixture.
+  const shellQuote = "return `'${s.replace(/'/g, `'\\\\''`)}'`;";
+  assert.equal(quotedSpanEnd(shellQuote, shellQuote.indexOf('`')), shellQuote.lastIndexOf('`'));
+  const href = 'href={`/workspace/${draftId}/results`}';
+  assert.equal(quotedSpanEnd(href, href.indexOf('`')), href.lastIndexOf('`'));
+});
+
 // `stripComments` passes regex literals through verbatim, and that branch is not redundant with the
 // comment checks that precede it. What reaches those checks is an *unescaped* `/` inside the
 // literal followed by `/` or `*` — which is why a character class is the shape that gets there, and
