@@ -937,7 +937,12 @@ test('an environment named in a comment does not shadow the declared one', () =>
 });
 
 test('stripComments leaves comment markers inside strings alone', () => {
-  const source = "url: 'https://example.test/a', pattern: '/* not a comment */', real: 1 /* gone */";
+  // The block comment carries an astral character on purpose. Blanking is by UTF-16 code unit,
+  // which is the unit every offset in this module is expressed in, so a surrogate pair must become
+  // two spaces and not one — otherwise the length assertion below is short by one and every offset
+  // past the comment is shifted, contradicting this function's stated offset-preserving contract
+  // (#3089).
+  const source = "url: 'https://example.test/a', pattern: '/* not a comment */', real: 1 /* gone 😀 */";
   const stripped = stripComments(source);
   assert.ok(stripped.includes("'https://example.test/a'"));
   assert.ok(stripped.includes("'/* not a comment */'"));

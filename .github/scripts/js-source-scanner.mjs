@@ -321,7 +321,12 @@ export function stripComments(source) {
     if (char === '/' && source[index + 1] === '*') {
       const end = source.indexOf('*/', index + 2);
       const stop = end === -1 ? source.length : end + 2;
-      out += source.slice(index, stop).replace(/[^\n]/gu, ' ');
+      // Deliberately without `u`, alone among the `u`-carrying regexes in this module. Blanking is
+      // by UTF-16 code unit, which is the unit every offset here is expressed in; under `u` an
+      // astral character matches once and becomes one space, shortening the output and shifting
+      // every offset past the comment — which contradicts this function's stated offset-preserving
+      // contract (#3089). `\n` is a BMP character, so line structure is preserved either way.
+      out += source.slice(index, stop).replace(/[^\n]/g, ' ');
       index = stop;
       continue;
     }
