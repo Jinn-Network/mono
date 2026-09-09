@@ -58,6 +58,9 @@ const OPERATOR_CI_SELECTED_PATHS = [
   'DEPLOY.md',
   'deploy/**',
   '.github/scripts/npm-publish-workflow.test.mjs',
+  // docker.yml's three #2811 controls are pinned by this file alone, so an
+  // edit confined to it must still run the lane that executes it.
+  '.github/scripts/docker-workflow.test.mjs',
   '.github/scripts/operator-*.test.mjs',
 ];
 

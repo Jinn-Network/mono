@@ -149,18 +149,69 @@ lever: it moves `:latest` back to that release's commit. Tags cut before this
 trigger landed cannot be dispatched at all — the workflow file runs as it exists
 on the selected ref.
 
-Re-running `yarn release:client --publish` afterwards completes the release: its
-`docker.yml` wait accepts a successful `workflow_dispatch` run for the release
-commit, not only a `release`-triggered one, so a dispatched republish clears the
+Resume the release from the report the failed publish already wrote — the same
+form as step 4 above:
+
+```bash
+yarn release:client --publish --resume release-runs/<version>-<timestamp>
+```
+
+`--resume` is required here, not optional. Without it `makeReleaseContext` builds
+a *fresh* report, so `publishAlreadyStarted` is false while the release tag
+already exists locally and on the remote, and `runPreflights` aborts with
+`Release tag client-vX.Y.Z already exists. Use --resume only for an in-progress
+release report.` before the docker wait is ever reached. Resumed, that wait
+accepts a successful `workflow_dispatch` run for the release commit, not only a
+`release`-triggered one, so a dispatched republish clears the
 `publish-wait-docker-workflow` step it would otherwise stay stuck on.
 
 **Release checklist, after the first cut that publishes under
-`ghcr.io/jinn-network/operator`:** verify `:latest` resolves anonymously
-(`docker pull ghcr.io/jinn-network/operator:latest` with no registry auth), then
-repoint the run-it-now examples in `DEPLOY.md`, `deploy/README.md` and
-`operator/docker-compose.yml` from `:next` back to `:latest`, and drop the
-"not published under this name yet" notes in the first two. They name `:next`
-only because the stable tags do not exist under this name yet.
+`ghcr.io/jinn-network/operator`.** Until that cut lands, several operator-facing
+files assert that `:latest` and `:<version>` are 404s under this name and route
+operators to `:next` instead (#2811). Every one of those claims becomes false on
+the first green stable run, and none of them is checkable from the repository —
+`:next` stays a published shape, so `operator/test/scripts/ghcr-image-references.test.ts`
+cannot detect the stale prose. Work the list by hand.
+
+First, verify `:latest` resolves anonymously:
+
+```bash
+docker pull ghcr.io/jinn-network/operator:latest   # no registry auth
+```
+
+Then repoint the run-it-now examples from `:next` back to `:latest`:
+
+- `DEPLOY.md` — the `image:` line in the compose snippet, and the surrounding
+  "which tag to run" prose
+- `deploy/README.md` — the unauthenticated `docker pull` example under
+  *Pulling the base*
+- `operator/docker-compose.yml` — the `image:` line
+- `operator/README.md` — the `docker run … version --json` quick test
+
+Then drop the "not published under this name yet" claims:
+
+- `DEPLOY.md` — the paragraph ending "Until then `:latest` and `:<version>` are
+  404s here."
+- `deploy/README.md` — the bolded **The stable tags have not been published under
+  this name yet.** paragraph
+- `operator/docker-compose.yml` — the comment above the `image:` line, not only
+  the line itself
+- `deploy/railway-launcher-operator/railway.toml` — the comment block asserting
+  "`latest` and `X.Y.Z` are 404s here and are not pinnable options today"
+- `deploy/railway-operator-codex/railway.toml` — the same comment block
+
+Finally, relax the guard that encodes the same assumption:
+
+- `operator/test/scripts/ghcr-image-references.test.ts` — the
+  "Relax this once the stable lane has a green run under this name." note above
+  the `ROLLING_BASE_TAGS`-only rule in *offers only pinnable BASE_TAG examples*.
+  A version-shaped `BASE_TAG` example becomes pinnable once a stable cut exists.
+
+The five `ARG BASE_TAG=next` defaults (`deploy/README.md`, both overlay
+`Dockerfile`s, both overlay `README.md`s) are **not** part of this temporary
+state and must stay `next`. That default is what a plain `docker build` of an
+overlay resolves with, and `latest` moves only on a release — so pointing it at
+`latest` is exactly how #2811 stayed invisible to CI.
 
 Post-release verification is performed by `yarn release:client --publish`.
 The underlying checks are:
