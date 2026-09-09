@@ -179,7 +179,14 @@ export function parseWithdrawArgv(argv: string[]): WithdrawParsedArgs {
       }
       args.splice(configIdx, 2);
     } else {
-      // Single-token `--config=<path>` form: one element, not two.
+      // Single-token `--config=<path>` form: one element, not two. An empty
+      // value (`--config=`) is rejected here so both forms fail identically —
+      // otherwise the token is consumed, escapes the unexpected-argument
+      // check, and this funds-moving command silently falls back to the
+      // default config.
+      if (args[configIdx]!.slice('--config='.length) === '') {
+        throw new Error('Missing value for --config');
+      }
       args.splice(configIdx, 1);
     }
   }

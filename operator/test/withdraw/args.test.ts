@@ -153,6 +153,12 @@ describe('parseWithdrawArgv', () => {
     ).toThrow('Missing value for --config');
   });
 
+  it('still rejects an empty --config= value', () => {
+    expect(() =>
+      parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--config=']),
+    ).toThrow('Missing value for --config');
+  });
+
   it('rejects unknown tokens', () => {
     expect(() => parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--what'])).toThrow();
   });
