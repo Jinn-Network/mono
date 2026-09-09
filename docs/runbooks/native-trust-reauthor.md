@@ -69,22 +69,17 @@ the reused locator (`:1029`) and handed to `authorBindings` as both `validFrom` 
 transaction is sent only when the run receipt is moved aside as well. Read the next section
 before running anything.
 
-### Reuse or mint: the proposed rule is mint fresh
+### Reuse or mint: state the choice, record the reason
 
 A re-author touches no key, store, or Agent IRI, so all five terms of the `ceremony-anchor/v1`
-preimage are unchanged and the digest is **identical** to the original ceremony's. Ceremony spec
-§3.2b requires this runbook to state which anchor the re-author takes and the operator to record
-why. This section states the choice — both anchors are reachable, and a single act decides which
-one you get — and records the rule proposed to replace it: mint fresh, always. The
-procedure-level defects are flagged above and remain unowned.
-
-The rule is **proposed**, not adopted, in
-[`spec/2026-09-09-recoverable-binding-anchor.md`](../../spec/2026-09-09-recoverable-binding-anchor.md)
-§6, which argues it from non-retroactivity of authority and shows that under the successor
-preimage it stops being a judgment and becomes a mechanism. Until that document is adopted, the
-currently ratified `ceremony-anchor/v1` still carries ceremony spec §3.2b's MUST that the
-operator record a reason, so record one; the rest of this section is what to record and how to
-take the fresh anchor.
+preimage are unchanged and the digest is **identical** to the original ceremony's. The ratified
+position is ceremony spec §3.2b's: the anchor MAY therefore be reused, and the reuse-vs-fresh
+choice is a per-widening judgment "the runbook MUST state and the operator MUST record with its
+reason"
+([`spec/2026-08-07-native-identity-ceremony.md §3.2b:653`](../../spec/2026-08-07-native-identity-ceremony.md)).
+Both anchors are reachable, and a single act decides which one you get. This section states the
+choice and both options' costs; a proposed rule that would remove the judgment is marked as such
+below. The procedure-level defects are flagged above and remain unowned.
 
 **Neither verb runs the re-author today.** `jinn ceremony init` refuses the moment the catalog
 exists — "a trust catalog already exists …; genesis never overwrites"
@@ -94,19 +89,18 @@ run receipt (`:1221-1226` → `:840-870`), and all three of its conditions must 
 whose receipt is absent gets no refusal from `join`, it appends, which is the binding conflict
 "Why wholesale, not `appendOperator`" warns about. There is no `--force` on either verb.
 
-**The hazard: past the guard, the original anchor is reused by default rather than by
-decision.** The only way through is to move the existing catalog aside. Doing that leaves the
-run receipt in place — it lives at `<dir>/ceremony/receipt.json` (`:266-270`), not in the
-catalog — so the re-run recomputes the identical digest, `reusableAnchor` matches it
-(`:333-349`), and the ceremony resumes onto the **already-mined** anchor. The run does say so,
-on both surfaces — `ceremony_anchor_reused` and
-`anchor reused <hash> at <time> (from a previous run's receipt)` (`:1002`, `:1010`) — so this is
-not silent. Nothing refuses it either. Reuse is what happens to an operator who moves the
-catalog and forgets the receipt. Its benefit is that it preserves the original `validFrom` and
-effective window, so there is no coverage gap at all; its cost is retroactivity, the *widened*
-scope claimed back over evidence signed before the widening, including evidence a verifier
-refused at the time for want of that very scope. That cost is why the proposed rule is mint
-fresh.
+**Reuse, and the hazard that it arrives by default rather than by decision.** The only way
+through the guard is to move the existing catalog aside. Doing that leaves the run receipt in
+place — it lives at `<dir>/ceremony/receipt.json` (`:266-270`), not in the catalog — so the
+re-run recomputes the identical digest, `reusableAnchor` matches it (`:333-349`), and the
+ceremony resumes onto the **already-mined** anchor. The run does say so, on both surfaces —
+`ceremony_anchor_reused` and `anchor reused <hash> at <time> (from a previous run's receipt)`
+(`:1002`, `:1010`) — so this is not silent. Nothing refuses it either. Reuse is therefore also
+what happens to an operator who moves the catalog and forgets the receipt, which is why it must
+be taken as a decision and recorded as one. Its benefit is that it preserves the original
+`validFrom` and effective window, so there is no coverage gap at all; its cost is retroactivity,
+the *widened* scope claimed back over evidence signed before the widening, including evidence a
+verifier refused at the time for want of that very scope.
 
 **Taking the fresh anchor.** Move `<dir>/ceremony/receipt.json` aside as well as the catalog, so
 that `reusableAnchor` finds nothing. The re-authored bindings then carry the new anchor's block
@@ -117,9 +111,17 @@ anchor's block time, evidence signed inside that window de-attributes for **ever
 only the widened one. It resolves against neither the old bindings (replaced) nor the new ones
 (not yet effective).
 
-Under the proposed rule, moving the receipt aside stops being optional, which puts the following
-footgun on the on-path procedure rather than beside it. Read it before moving anything, whichever
-anchor you take.
+**A proposed rule would remove the judgment: mint fresh whenever the act's bindings change.** It
+is **proposed**, not adopted, in
+[`spec/2026-09-09-recoverable-binding-anchor.md`](../../spec/2026-09-09-recoverable-binding-anchor.md)
+§6, which argues it from non-retroactivity of authority and shows that under the successor
+preimage it stops being a judgment and becomes a mechanism. Until that document is adopted, the
+currently ratified `ceremony-anchor/v1` still carries ceremony spec §3.2b's MUSTs above — state
+the choice, record the reason — so record one whichever anchor you take.
+
+Under the proposed rule, moving the receipt aside stops being optional, which would put the
+following footgun on the on-path procedure rather than beside it. Read it before moving
+anything, whichever anchor you take.
 
   > **Before moving the receipt aside, confirm the native config carries `agentIri` — and
   > `admissionAgent`, if this operator provisions admission.** The receipt is the *fallback*
@@ -132,11 +134,13 @@ anchor you take.
   > write-back never completed. There the receipt is the *only* record of the Agent IRI, and
   > moving it aside destroys it. Copy it somewhere, do not delete it.
 
-Because making that step mandatory promotes this failure onto the on-path procedure, the ruling
-carries one implementation requirement, named as a follow-up with no owner and as a blocker on
-the ruling's *execution* rather than on its adoption: the re-author path MUST refuse when
-neither the native config nor an accessible receipt carries `agentIri` (and `admissionAgent`,
-where admission is provisioned), instead of minting.
+Because making that step mandatory promotes this failure onto the on-path procedure, the proposed
+ruling carries one implementation requirement with it — a refusal on the re-author path when the
+Agent IRI is recoverable from neither the native config nor an accessible receipt, rather than a
+silent re-mint. It is specified at
+[`spec/2026-09-09-recoverable-binding-anchor.md`](../../spec/2026-09-09-recoverable-binding-anchor.md)
+§6.5, which names it as a follow-up with no owner and as a blocker on the ruling's *execution*
+rather than on its adoption.
 
 **What to write into the re-author's record.** Five things — four from
 [`spec/2026-09-09-recoverable-binding-anchor.md`](../../spec/2026-09-09-recoverable-binding-anchor.md)

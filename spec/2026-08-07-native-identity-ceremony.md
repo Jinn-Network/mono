@@ -2,8 +2,7 @@
 
 **Version:** 0.5 (corrects §3.2b's and §10 (e)'s statement of the fresh-anchor coverage gap —
 it is wholesale across every role, not confined to the widened scope — and points §3.2b and
-§10 (e)/(f)
-at the proposed successor preimage, trigger, and ruling in
+§10 (e)/(f) at the proposed successor preimage, trigger, and ruling in
 [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md); no rule
 here is retired and nothing there is adopted. v0.4 was the §3.2b amendment — the anchor target
 policy and anchor digest content, per DR-2026-09-06; v0.3 added §3.2a — the authored role → scope
@@ -1240,8 +1239,8 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   ratification, and it is not settled here. Owned by
   [#4172](https://github.com/Jinn-Network/mono/issues/4172), whose output
   [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §6
-  **proposes** mint-fresh, always, and is pending the operator's ruling on the PR that carries
-  it.
+  **proposes** mint-fresh whenever the act's bindings change, and is pending the operator's
+  ruling on the PR that carries it.
 - **(f) Should a successor binding-anchor preimage be *directly* third-party recomputable, and
   when is the re-anchor worth paying?** §3.2b records, as a named defect, that
   `ceremony-anchor/v1` commits to `role` labels no third party can read off a catalog. For a

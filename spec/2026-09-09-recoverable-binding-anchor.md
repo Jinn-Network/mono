@@ -20,9 +20,10 @@ The successor to `ceremony-anchor/v1` is a new preimage under a new name,
 straight off a catalog, with no `role` label and no Safe. The re-anchor it implies becomes
 owed at the earliest of three inspectable events, the primary one being the first release in
 which the catalog opener refuses an anchor on preimage recomputation for any anchor class:
-work Jinn has already authorized, not an event it waits on. The re-author mints a fresh
-anchor, always; under the successor that stops being a judgment and becomes a mechanism,
-because a scope widening changes the digest and the reuse path correctly falls through.
+work Jinn has already authorized, not an event it waits on. The re-author mints a fresh anchor
+whenever the act's bindings change — which, on the runbook's scope, is every re-author it covers;
+under the successor that stops being a judgment and becomes a mechanism, because a scope widening
+changes the digest and the reuse path correctly falls through.
 
 This document is a **source** for the anchor-locator profile document's normative text under
 [DR-2026-09-03](../log/decisions/2026-09-03-protocol-spec-repository.md). It is not that text,
@@ -42,10 +43,16 @@ none of its documents"
 decision 0). The anchor-locator profile document — `base-sepolia-calldata-v1`, which the
 catalog schema already pins as a `z.literal`
 (`operator/src/daemon/native-trust-catalog.ts:63`) — is a `spec.jinn.network` identifier and
-is therefore protocol. It exists in no repository yet. The byte-identical import
-(`Jinn-Network/spec` issue 1) has not landed: `architecture/platform-packages.v1.json` carries
-no pin block and no `pinned` marker, which DR-2026-09-03 §Consequences makes the observable
-signal that the import work is still ahead.
+is therefore protocol. **It exists in no repository yet**, and that is stated outright rather
+than inferred: DR-2026-09-06's Decision preamble says of exactly this document that "it does not
+yet exist in any repository"
+([`log/decisions/2026-09-06-native-anchor-target-and-digest.md:22`](../log/decisions/2026-09-06-native-anchor-target-and-digest.md)).
+The tree corroborates it: `architecture/platform-packages.v1.json` carries no pin block and no
+`pinned` marker, which DR-2026-09-03 §Consequences attaches to #3911, the pin-and-vendor
+follow-up that runs after `Jinn-Network/spec` issue 1's byte-identical import
+([`log/decisions/2026-09-03-protocol-spec-repository.md:52`](../log/decisions/2026-09-03-protocol-spec-repository.md),
+`:54`). That absence is consistent with the import still being ahead rather than direct evidence
+of it, which is why it is corroboration and not the argument.
 
 So issue #4172's first acceptance criterion — that the anchor-locator profile under
 DR-2026-09-03 specifies a third-party-recomputable successor preimage and the re-anchor
@@ -70,10 +77,6 @@ exactly this shape.
 
 ### 1.3 Why no decision record
 
-`/log/decisions/` is a CODEOWNERS path (`.github/CODEOWNERS:35` assigns it to the three human
-owners), so a decision record would gate the PR carrying this document on a human code owner.
-A reviewer may reasonably ask for one anyway.
-
 The call taken is that no such record is needed, because DR-2026-09-06 already ratified this
 entire frame: decision 3 names the corrective and its cost, decision 9 carries it to the
 profile document as a question, and §Deliberately left open assigns both questions to #4172 by
@@ -82,7 +85,22 @@ successor record, it named an issue as their owner. Answering them in the docume
 produces is the shape the delegation asks for. A second record would restate DR-2026-09-06's
 Context and half its Alternatives in order to say two new things, and this repository's rule is
 that canonical content is linked, never redefined locally
-([`CLAUDE.md`](../CLAUDE.md) §Canonical Docs).
+([`CLAUDE.md`](../CLAUDE.md) §Canonical Docs). That argument stands on its own; a reviewer may
+reasonably ask for a record anyway.
+
+**One consideration weighed and rejected as a reason, recorded so a reader can see it did not
+decide the call.** `/log/decisions/` is a CODEOWNERS path (`.github/CODEOWNERS:35` assigns it to
+the three human owners), so a decision record would gate the PR carrying this document on a human
+code owner, while `spec/` is not in the gated set. That fact is **not** why `spec/` was chosen,
+and it buys nothing on this document's own terms: the status model already parks everything for
+the operator's ruling on the PR that carries it, which is exactly how DR-2026-09-06 was itself
+ratified — drafted headless on 2026-09-06 and ruled by the operator on
+[PR #4108](https://github.com/Jinn-Network/mono/pull/4108) on 2026-09-07, with the code-owner gate
+recorded there as an *additional* merge condition rather than as the ratification
+([`log/decisions/2026-09-06-native-anchor-target-and-digest.md:89`](../log/decisions/2026-09-06-native-anchor-target-and-digest.md)).
+If the operator's PR ruling is the ratification either way, the gate changes nothing else. Choosing
+the artifact type to avoid a required human approval would be the wrong kind of reason for a
+document that rules three open governance questions, which is why it is not the reason given.
 
 ## 2. What is actually recoverable from a catalog
 
@@ -131,11 +149,15 @@ fragility as the defect being corrected. §9 rejects relying on it.
 
 The successor commits to binding *content*, not to a ceremony session tuple. Calling it
 `ceremony-anchor/v2` would name it for the act that produces it rather than the thing it
-anchors — the same misnomer class as `contractAddress`, which DR-2026-09-06 decision 9 declines
-to carry into the profile document on the grounds that the document is "the cheapest place to
-spell it right the first time". The chosen name is also symmetric with the sibling ratified in
-the same record: `revocation-anchor/v1` anchors revocations, `binding-anchor/v1` anchors
-bindings.
+anchors — the same misnomer class as `contractAddress`, which DR-2026-09-06 decision 9 carries
+to the profile document as a correction rather than applying to the wire key, "recorded here so
+its first published version is right rather than compatible with a mistake"
+([`log/decisions/2026-09-06-native-anchor-target-and-digest.md:50`](../log/decisions/2026-09-06-native-anchor-target-and-digest.md)).
+The ceremony spec §3.2b puts the same point the other way round: that document is where the
+corrected name is carried forward, and it is "the cheapest place to spell it right the first
+time" ([`2026-08-07-native-identity-ceremony.md §3.2b:511-513`](2026-08-07-native-identity-ceremony.md)).
+The chosen name is also symmetric with the sibling ratified in the same record:
+`revocation-anchor/v1` anchors revocations, `binding-anchor/v1` anchors bindings.
 
 The practical consequence is that `ceremony-anchor/v1`'s identifier is untouched (§11), and
 domain separation between the two is automatic: the literal is the first byte range of the
@@ -161,6 +183,28 @@ Each element of `bindings`:
 | 1 | `agent` | the binding's Agent IRI, verbatim | `KeyBinding.agent` (`packages/trust/core/src/key-binding.ts:57`) |
 | 2 | `keyId` | the binding's `did:key:`, verbatim | `KeyBinding.key.didKey` (`key-binding.ts:62`) |
 | 3 | `scope` | the binding's scope values, deduplicated, **sorted ascending** by UTF-16 code-unit order; at least one | `KeyBinding.scope` (`key-binding.ts:66`) |
+
+**The inclusion rule, so the omissions are a rule and not a list.** The preimage commits to
+exactly the per-act-varying terms of a binding that are knowable before the anchor mines. Every
+other field `KeyBinding` carries is out, and each is out for a named reason rather than to
+taste — the first two bullets by the rule, the third by a separate choice stated as such:
+
+- `relationship` and `strength` are **constants of the authoring path** — `authorRoleBinding`
+  writes `"controls"` and `"strong"` literally
+  (`packages/trust/authoring/src/binding.ts:107`, `:111`) — so they vary with no act and add no
+  distinguishing power. `voucher` fails the same test in a weaker form: it is derived from the
+  one ceremony account the act runs under (`binding.ts:102-106`), so it is constant across every
+  element of one act's array.
+- `validFrom` and `ceremony.digest` are **not knowable before the anchor mines**: §6 law 2 makes
+  `validFrom` the anchor's block time verbatim, and the ceremony evidence is signed over that
+  same `issuedAt` (`binding.ts:86-91`, `:110`). §9 works this through.
+- `expiresAt` and `supersedes` are per-act-varying and knowable, and they are still omitted, for
+  a third reason stated as such: committing to them would foreclose §13.2's supersede shape,
+  which §12 names the most valuable of the five follow-ups. That omission is a design choice
+  rather than a consequence of the rule, and it is the only one.
+
+`scope` passes both tests, and §9's argument 2 says why it earns its place beyond passing them:
+it commits to authority rather than to existence alone.
 
 **The literal template.** Written out, with `<…>` marking the values above and no whitespace
 anywhere, the bytes are:
@@ -445,15 +489,26 @@ ship the check, and shipping it is the event.
 
 ### 6.1 The ruling
 
-**Mint fresh. Always. The choice is removed rather than ruled per case.**
+**Mint fresh whenever the act's bindings change. Under `binding-anchor/v1` that is not a rule to
+follow but a consequence, so the choice is removed rather than ruled per case.**
 
-Under `binding-anchor/v1` this is not a rule anyone has to follow: a widening changes the
-`scope` term, which changes the digest, so `reusableAnchor` returns `undefined` and `init`
-reaches `reusedAnchor ?? await session.submit(anchorDigest)`
+The rule is stated as the mechanism implements it rather than as a flat "always", because the two
+differ and the narrower statement is the correct one. A widening changes the `scope` term, which
+changes the digest, so `reusableAnchor` returns `undefined` and `init` reaches
+`reusedAnchor ?? await session.submit(anchorDigest)`
 (`operator/src/cli/commands/ceremony.ts:985`) and sends a fresh transaction. The function
 already treats a digest mismatch as the correct fall-through (`:327-328`). The ruling converts
 an authoring convention into a mechanism, which is the strongest form available on a surface
 whose enforcement table has too many rows reading "authoring convention".
+
+A re-author that leaves all three preimage terms unchanged correctly *reuses*, and that is not an
+exception carved out of the ruling — it is `reusableAnchor`'s crash-resume contract, which §9
+verifies against the existing call sites. The distinction costs nothing in practice on the
+runbook's own scope, which is widenings only
+([`docs/runbooks/native-trust-reauthor.md:1-4`](../docs/runbooks/native-trust-reauthor.md)), so
+every re-author it covers changes a preimage term. It matters to the profile document's author,
+who is being handed the enforceable rule rather than a slogan: reuse on a re-author that expands
+no authority expands none, and produces no coverage gap.
 
 Until the successor lands, the same ruling holds as convention on `ceremony-anchor/v1`, where
 it costs a deliberate act — the operator must move the run receipt aside alongside the catalog,
@@ -558,9 +613,10 @@ the preimage question and this one are one answer, taken twice.
 
 ### 6.4 What the operator must record
 
-The ceremony spec §3.2b's current MUST ("record the reason") would be replaced if this ruling
-is adopted, because the reason becomes fixed by rule. In its place, the re-author's record MUST
-carry:
+The ceremony spec §3.2b's current MUST — the choice is one the runbook "MUST state and the
+operator MUST record with its reason" (`2026-08-07-native-identity-ceremony.md §3.2b:653`) —
+would be replaced if this ruling is adopted, because the reason becomes fixed by rule. In its
+place, the re-author's record MUST carry:
 
 - the fresh anchor's transaction hash and block time;
 - the outgoing anchor's transaction hash and block time;
@@ -702,6 +758,23 @@ operator/admission distinction — dissolves ground 1 and is a real candidate. I
 grounds 2 and 3 alone, which is a narrower case and worth saying: A′ and the adopted preimage
 differ by exactly one field, and the argument for that field is §6's.
 
+**The symmetric shape a reader reaches for first — commit to the binding digests, as
+`revocation-anchor/v1` commits to `targets[]`.** §3.1 invokes the symmetry with the sibling
+ratified in the same record, so this is the obvious candidate, and its adjacent variant —
+commit to `KeyBinding.ceremony.digest`, which is on the record
+(`packages/trust/authoring/src/binding.ts:110`) and therefore passes §2's recoverability test —
+looks just as plausible. Both are **structurally impossible**, not merely unattractive, and
+DR-2026-09-06's Context already says why: "the anchor digest can never be the sealed record's own
+digest", because `KeyBinding.anchors` is a required field of the record
+(`packages/trust/core/src/key-binding.ts:73`), so a record that must contain its anchor's digest
+cannot be that digest's preimage. `ceremony.digest` fails a second time over, and for the same
+reason `validFrom` does: the ceremony evidence is signed over an `issuedAt` that §6 law 2 forces
+to equal the anchor's block time, unknowable before the anchor mines
+(`packages/trust/authoring/src/binding.ts:86-91`). The asymmetry with `revocation-anchor/v1` is
+therefore not a design preference: a revocation's `targets[]` are the digests of *other*,
+already-sealed records, while a binding's own digest is downstream of its anchor. This is why the
+preimage commits to binding *terms* rather than to binding digests.
+
 **What the adopted shape does not cost, contrary to a natural reading: the crash-resume path is
 unaffected.** `reusableAnchor` (`operator/src/cli/commands/ceremony.ts:333-349`) needs the digest
 to be recomputable before the anchor mines and stable across a re-run of the same session. Scopes
@@ -739,7 +812,7 @@ creates exactly one canonicalization divergence inside one `anchors[]` array; an
 fully specified concatenation of §3.2 already removes the JavaScript dependency that was JCS's
 only real draw here.
 
-**A scheduled re-anchor window** — §5.5. **"The first verifier that checks the commitment
+**A scheduled re-anchor window** — §5.5. **"the first verifier that checks the commitment
 cross-operator"** — §5.6.
 
 ## 10. What this does not change
@@ -752,6 +825,15 @@ one criterion this document can meet outright.
   and its ceremony spec §3.2b enforcement-table row are unchanged. The successor takes a **new**
   identifier (§3.1), so the two are domain-separated and no existing digest changes value or
   meaning.
+- **Dropping `settlementSafe` from the preimage gives up no evidence.** §2 rejects the term
+  because it is unconstructible for the settlement-free shape; the separate question — what the
+  ratified preimage's Safe commitment was worth, and what its loss costs — has the answer
+  "nothing", and it is checkable. The Safe stays committed inside the EIP-191 ceremony evidence
+  as the third declared resource (`packages/trust/authoring/src/ceremony.ts:73-76`), and
+  `openNativeTrustCatalog` checks that resource against the binding's declared settlement address
+  (`operator/src/daemon/native-trust-catalog.ts:552-566`) and then against the on-chain Safe
+  owner (`:570-584`). A signature over the address plus a chain read is strictly stronger than an
+  unchecked digest term, and both checks run today whether or not the preimage names the Safe.
 - **No existing artifact is invalidated, because nothing here adds a check that runs by
   default.** The deliverable is documents. The recomputation check is authorized future work
   gated behind a deployment-wide posture flag that defaults off (§8), and it applies only to
@@ -835,7 +917,14 @@ two items are DR-2026-09-06 decision 9's, restated here in its own terms rather 
     name asserts coverage the deployment does not have over the class the ceremony spec §3.2b
     calls the sharper one. Mixed mode is the same procedure with step 5 reporting rather than
     refusing (item 5), not a second rule.
-12. **The rejected alternatives with their reasons**, not only their verdicts: §9.
+12. **The rejected alternatives with their reasons**, not only their verdicts: §9 — including
+    the shape symmetric with `revocation-anchor/v1`'s `targets[]`, which commits to the binding
+    digests, and its `ceremony.digest` variant. Both are structurally impossible on
+    DR-2026-09-06's circularity ground rather than merely unattractive, and a profile document
+    that omits them leaves its reader to rediscover that. **And the preimage's inclusion rule**
+    (§3.2): commit to exactly the per-act-varying terms knowable before the anchor mines, with
+    `expiresAt` and `supersedes` omitted for the separate, stated reason that committing to them
+    would foreclose the supersede shape of §13.2.
 
 **Two criteria this repository cannot close.** Issue #4172's first acceptance criterion asks that
 the anchor-locator profile document specify the successor preimage and the trigger, and its
@@ -872,7 +961,7 @@ no owner.
 
 Stated plainly, because the corrections are load-bearing rather than pedantic.
 
-**"The commitment can only ever be opened by its author" is too strong.** The issue says the
+**"[T]he commitment can only ever be opened by its author" is too strong.** The issue says the
 anchor "can only ever be opened by its author" and is therefore "evidentially inert".
 DR-2026-09-06 decision 3 and the ceremony spec §3.2b correct this: for a catalog carrying a
 settlement-scoped binding the commitment **is** openable today, by enumerating the twelve role
@@ -890,7 +979,7 @@ clauses), Alternatives considered and rejected, Consequences, Ratification. §10
 sections of the ceremony spec. The DR records the defect at decision 3 and delegates the two
 questions at §Deliberately left open.
 
-**Both repairs offered in scope item 1 are the wrong shape.** "Either carry `role` on
+**Both repairs offered in scope item 1 are the wrong shape.** "[E]ither carry `role` on
 `KeyBinding`, or replace the role→scope map with an invertible one" — both are rejected in §9,
 and for the same underlying reason: they preserve the `role` term and change something larger to
 make it recoverable. The correct move is the one DR-2026-09-06 decision 3 already names: stop
