@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_TESTNET_DISCOVERY_URL,
   DEFAULT_TESTNET_RPC_URLS,
@@ -1266,7 +1266,17 @@ describe('hermes config keys', () => {
     'JINN_HERMES_DOCTOR_TIMEOUT_MS',
   ] as const;
   const saved: Record<string, string | undefined> = {};
-  for (const k of HERMES_ENV_KEYS) saved[k] = process.env[k];
+
+  // Capture *and clear* inside the hook, not at collection time. A
+  // collection-time capture with no paired beforeEach let the first test in
+  // this block read whatever the contributor had exported, because loadConfig
+  // gives env precedence over the config file (#3112).
+  beforeEach(() => {
+    for (const k of HERMES_ENV_KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
 
   afterEach(async () => {
     for (const k of HERMES_ENV_KEYS) {
