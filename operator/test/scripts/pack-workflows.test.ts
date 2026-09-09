@@ -292,6 +292,10 @@ describe('packed client workflow coverage', () => {
     // ambiguity it detects and skip every remaining check.
     expect(smoke).toContain('process.exit(publicNpx.status || 1);');
     expect(smoke).not.toContain('process.exit(publicNpx.status ?? 1);');
+    // A bare status is the third wrong answer: the non-zero guard admits
+    // `status === null` (signal-killed child, no `spawnSync` error), and
+    // `process.exit(null)` exits 0.
+    expect(smoke).not.toContain('process.exit(publicNpx.status);');
   });
 
   it('asserts the packed jinn-stop-hook bin link without executing the daemon client', () => {

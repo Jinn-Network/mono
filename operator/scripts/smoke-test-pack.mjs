@@ -346,7 +346,12 @@ try {
     if (publicNpx.status !== 0) {
       console.error('smoke-test-pack: public npx version failed');
       console.error(publicNpx.stderr || publicNpx.stdout);
-      process.exit(publicNpx.status);
+      // `|| 1`, not a bare status: this guard now admits `status === null`
+      // (a signal-killed child that `spawnSync` reports with no `error`),
+      // and `process.exit(null)` exits 0 — turning a dead check 6 into a
+      // green post-merge pack-smoke that also skipped check 7. Same idiom as
+      // the guard above and as `runOrExit`.
+      process.exit(publicNpx.status || 1);
     }
     assertVersionPayload(parseJsonOrExit(publicNpx.stdout, 'public npx version'), 'public npx version');
 
