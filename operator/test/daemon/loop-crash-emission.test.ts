@@ -138,12 +138,24 @@ describe('#3110 — Daemon.start() wires every loop crash through emitLoopCrash'
       'utf8',
     );
     const sites = [...source.matchAll(/\.run\(\)\.catch\(\s*(?:err|error)\s*=>\s*(\w+)\(/g)];
+    // 11 is a maintenance constant, not an invariant: it is how many loops
+    // `Daemon.start()` arms today. Retiring a loop is legitimate (CLAUDE.md
+    // records Wave-4 D1-D6 retiring five), and lowers this floor — if that is
+    // why this line went red, update the number. A red here means "the count
+    // moved", not by itself "the wiring broke"; the per-site assertion below
+    // is what proves the wiring.
     expect(sites.length).toBeGreaterThanOrEqual(11);
     for (const site of sites) {
       expect(site[1]).toBe('emitLoopCrash');
     }
     // A handler written in any other shape would not match the regex at all,
     // so also pin the raw call count.
+    //
+    // Known boundary: a site written as `.run().then(...).catch(err => ...)`
+    // contains neither token and is invisible to both counts. All eleven
+    // sites use the direct `.run().catch(` shape, and the behavioral test
+    // above is the actual #3110 criterion; this pin covers the class, not
+    // every possible spelling of it.
     expect(source.split('.run().catch(').length - 1).toBe(sites.length);
   });
 });
