@@ -307,6 +307,9 @@ describe('evidence fetch', () => {
       actualSha256: 'f'.repeat(64),
       sourceUri: 'https://op.example.com/v1/artifacts/x/content',
       claimedSourceOperator: SAFE,
+      // Present on the failure outcome too, so a consumer can read one field
+      // rather than inferring the answer from which branch it landed in.
+      envelopeSignatureVerified: false,
     });
     expect(out.details).not.toHaveProperty('sourceOperator');
     // The hint points at where the bytes came from. It must not tell anyone to

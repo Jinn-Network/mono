@@ -676,6 +676,10 @@ async function runFetch(ctx: CommandContext, deps: EvidenceDeps): Promise<void> 
           reason: retrieved.reason,
           retryable: retrieved.retryable,
           attempts: retrieved.attempts,
+          // Emitted on every outcome, not only on success, so a machine
+          // consumer can discriminate on it without first checking which
+          // branch it is reading.
+          envelopeSignatureVerified: false,
           ...(retrieved.mismatch
             ? {
                 expectedSha256: retrieved.mismatch.expectedSha256,

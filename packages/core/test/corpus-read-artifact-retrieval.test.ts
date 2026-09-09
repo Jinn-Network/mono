@@ -3,7 +3,9 @@
  * (issue #4179).
  *
  * Both network legs are injected through the primitive's `deps` seam, so no
- * module is mocked here.
+ * module is mocked here — except in the default-transport case, which supplies
+ * no `deps` on purpose: it exists to prove the uninjected origin binding is the
+ * destination-guarded one, and injecting anything would defeat it.
  */
 
 import { createHash } from 'node:crypto';
