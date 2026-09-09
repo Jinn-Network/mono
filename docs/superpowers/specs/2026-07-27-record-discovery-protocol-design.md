@@ -1201,8 +1201,9 @@ The kit precedes all real implementations (the CSI discipline, again):
   broken linkage; sequence gaps and duplicates (must reject); duplicate `announcementId`
   (must reject); stale heads; rolled-back heads; `issuedAt` regressions; a head issued
   further ahead of the verifier's clock than one profile window (must reject
-  `head-issued-ahead`, §5.2 rule 3, and persist no high-water mark) and a head whose window
-  is inverted (must reject `refresh-by-ceiling`, §5.2 rule 1); a competing head signed by a
+  `head-issued-ahead`, §5.2 rule 3, and persist no high-water mark), a head whose window
+  is inverted (must reject `refresh-by-ceiling`, §5.2 rule 1) and a head whose window
+  exceeds the profile ceiling (must also reject `refresh-by-ceiling`, §5.2 rule 2); a competing head signed by a
   rotated-out key (must reject); entries with bad facts cards; facts requiring
   unavailable referenced bytes (must yield `indeterminate` and fail closed at decision
   grade); genesis edge cases (pinned first sequence, `previous: null` uniqueness);
@@ -1229,7 +1230,10 @@ The kit precedes all real implementations (the CSI discipline, again):
   withdrawal (must trigger recompute).
 - **Named checks in isolation:** `source-chain-verification` outcomes (`stale`, `forked`,
   `broken-chain` (including `at: refresh-by-ceiling` and `at: head-issued-ahead`),
-  `unauthorized-signer`), `facts-consistency` (all three outcomes),
+  `unauthorized-signer`), each exercised both from first adoption and against a seeded
+  high-water mark, so the kit proves the *preserve* half of §10.3 step 7 — a refused head
+  leaves a stored mark neither advanced nor cleared — across all four typed failures;
+  `facts-consistency` (all three outcomes),
   `derivation-consistency` (present, fabricated, reorged-away).
 
 ## 19. Declared impact
