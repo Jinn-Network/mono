@@ -2,16 +2,17 @@
 
 | | |
 |---|---|
-| **Version** | 0.2 |
-| **Date** | v0.1 2026-09-09; v0.2 2026-09-09 |
+| **Version** | 0.3 |
+| **Date** | v0.1 2026-09-09; v0.2 2026-09-09; v0.3 2026-09-09 |
 | **Shape** | `design` |
 | **Author** | Autopilot design session (Claude Opus 5); every citation re-read against the attempt head of `autopilot/4187` |
 | **Status** | proposed — awaiting an operator ruling on §10.1's five decisions. §10.2 records three calls this record makes rather than putting them up for adjudication. |
 | **Issue** | [#4187](https://github.com/Jinn-Network/mono/issues/4187) |
 | **Succeeds** | [#2549](https://github.com/Jinn-Network/mono/issues/2549), whose filed acceptance criteria are already satisfied on `next` |
-| **Depends on** | [record discovery](../plans/2026-07-28-record-discovery.md) §5.2, §5.5, §7 item 3; [record-discovery protocol design](./2026-07-27-record-discovery-protocol-design.md) §5.2, §13.4, §14.1 |
-| **Touches** | the `self-source-stale` / `self-source-future-head` degrades (#2547, #2548, #3467); the re-signed-head classification (#3468); the freshness-window rules (#3467, #3482). v0.1 also listed #2550; it has no in-tree corroboration — no source file, test or doc mentions it — where each of the other five is corroborated by a code comment matching this record's characterization, so it is dropped rather than carried unverified. |
+| **Depends on** | [record discovery](../plans/2026-07-28-record-discovery.md) §5.2, §5.5, §7 item 3; [record-discovery protocol design](./2026-07-27-record-discovery-protocol-design.md) §5.2, §13.3, §13.4, §14.1 |
+| **Touches** | the `self-source-stale` / `self-source-future-head` degrades (#2547, #2548, #3467); the re-signed-head classification (#3468); the freshness-window rules (#3467, #3482). #2550 was considered and left off: it has no in-tree corroboration — no source file, test or doc mentions it — where each of the other five is corroborated by a code comment matching this record's characterization, so it is dropped rather than carried unverified. |
 | **Outcome** | one primitive specified, one trigger rule, one liveness gate, one sequencing constraint, one persistence-invariant change on the requester leg, and two corrections to the issue's own phrasing |
+| **v0.3 changes** | Two corrections, five clarifications, no change to any recommendation. §5.1's key-rotation mechanism was wrong — a rotation throws out of `assertStateOwnership` before any head is read, wedging `append` and `readState` alike, and it never clears at the next append; §6.3's observability rationale and §8 Stage 2's `faulted` case follow, and §11 gains a follow-up. §2 consequence 2 no longer says the §14.1 rollback exposure is identical before and after: the *bound* is, the *realized* exposure is not, and that third weakening is now carried into §6.2, §9 and §10.1 decision 1. Also: §10.1 decision 3 states the whole loss (NB1), §10.2 marks its two tunable defaults (NB2), §5.4 stops overstating a guard (NB3), §2 corrects an elision note (NB5). This row is also where the record's revision history now lives: v0.2's corrections of v0.1 are no longer narrated in the body except where the correction itself is the content (§7, §8 Stage 4). |
 
 ## 0. Decision in plain language
 
@@ -106,9 +107,10 @@ head it read had already lapsed; reading it sooner would not have helped.
 AC1 as filed asks this record to state "what changes in the signed head (**issuedAt
 only**)". That is not what the code does, and the correction is not cosmetic.
 
-`refreshHead` (`packages/discovery/serve/src/head.ts:84-100`). The excerpt elides only the
-`parseHeadTimestamp` guard on `prev.issuedAt` (`:85-88`); the `requestedAheadMs` fallback is
-included, because the no-widening argument below rests on it:
+`refreshHead` (`packages/discovery/serve/src/head.ts:84-100`). The excerpt elides the
+`parseHeadTimestamp` guard on `prev.issuedAt` (`:85-88`) and the clock read that follows it
+(`const nowMs = clock.now().getTime()`, `:89`, which is outside that guard); the
+`requestedAheadMs` fallback is included, because the no-widening argument below rests on it:
 
 ```ts
 // …
@@ -141,13 +143,19 @@ original schedule and round-10 would recur unchanged. The heartbeat works *becau
 2. **The heartbeat re-bases the exposure window; it can never widen it.**
    `MAX_REFRESH_BY_AHEAD_MS` is 86 400 000 ms and is clamped on both sides — when writing
    (`head.ts:94`) and when reading (`packages/discovery/protocol/src/verify/refresh-bound.ts`,
-   whose `Math.min(maxAheadMs, MAX_REFRESH_BY_AHEAD_MS)` a profile may only tighten). The
-   §14.1 cold-start rollback exposure is therefore identical before and after this change,
-   which is the operative claim. Its size is `checkRefreshWindow`'s own, and it is not one
-   window: the procedure's three rules together bound a valid head's `refreshBy` to at most
-   `2 × maxAheadMs` past the consumer's clock, as `refresh-bound.ts:34-36` states in its own
-   header. A heartbeat re-bases within that bound; it does not move the bound. This is the
-   structural half of AC3.
+   whose `Math.min(maxAheadMs, MAX_REFRESH_BY_AHEAD_MS)` a profile may only tighten). So the
+   **bound** on §14.1's cold-start rollback exposure is identical before and after this
+   change. Its size is `checkRefreshWindow`'s own, and it is not one window: the procedure's
+   three rules together bound a valid head's `refreshBy` to at most `2 × maxAheadMs` past the
+   consumer's clock, as `refresh-bound.ts:34-36` states in its own header. A heartbeat
+   re-bases within that bound; it does not move the bound. This is the structural half of AC3.
+
+   **The bound is not the whole claim, and this record does not close the question here.**
+   What the heartbeat changes is how often a source sits near that bound. §6.2's
+   superseded-head row states the case: a source that idles and then appends leaves behind a
+   head that a heartbeat has kept inside `refreshBy`, where today the same head has lapsed.
+   That is a third way a heartbeat weakens `refreshBy`, it is a consequence for §10.1's first
+   decision to be ruled on, and §9 records that this design declines to cover it. §6.2, §10.1.
 3. `Math.max(nowMs, prevIssuedAtMs + 1)` guarantees strict monotonicity at any cadence —
    but it also **carries a future-dated `issuedAt` forward**. On a fast-clocked host that
    makes `head-issued-ahead` sticky, and a heartbeat makes it *periodically* sticky rather
@@ -290,15 +298,29 @@ refused          checkRefreshWindow rejected the candidate; nothing was written
 faulted          the path threw; the head is unchanged and the error is reported
 ```
 
-The last outcome is load-bearing, and v0.1 of this record omitted it. The refresh path calls
-machinery that throws for reasons the five above do not model, and two of those reasons are
-certain rather than hypothetical. `assertHeadMatchesState` verifies the *existing* head's envelope
-against the **current** signer (`source-writer.ts:325`), so after an operator key rotation
-every tick throws until the next real append re-mints the head; and a blob-store IO failure
-throws from either the read or the write. The method catches, returns `faulted` with the
-error attached, and the loop reports it under §6.3's observability rule. A bare `catch` that
-swallowed these would be exactly the silent-refusal failure §6.3 exists to prevent, which is
-why they are enumerated rather than left to one.
+The last outcome is load-bearing. The refresh path calls machinery that throws for reasons
+the five above do not model, and one of them is certain rather than hypothetical: a
+blob-store IO failure throws from either the read or the write, and no gate in §5.2 or §5.3
+sees it coming. The method catches, returns `faulted` with the error attached, and the loop
+reports it under §6.3's observability rule. A bare `catch` that swallowed it would be exactly
+the silent-refusal failure §6.3 exists to prevent.
+
+**A signer-key rotation is not a heartbeat condition, and reading it as one misdirects the
+implementer.** A rotated key does surface here — the method catches every throw, so a rotation
+returns `faulted` on each tick like anything else. What it is not is a fault the heartbeat
+introduces, and it never reaches the head at all. `loadState` calls `assertStateOwnership`
+(`source-writer.ts:547`), which throws `"durable source state belongs to a different signer
+key"` on a `signerKeyId` mismatch (`:340-342`) **before any head is read**, and `readState`
+applies the same guard directly (`:951`). `append` loads state through that same `loadState`
+(`:785`). So a rotation wedges every entry point on the writer for that source at once —
+`append` and `readState` alike — and nothing in the writer re-mints under the new key.
+`source-writer.test.ts:422` pins it.
+
+This is a pre-existing hard wedge of the durable writer, independent of this design. The
+heartbeat neither causes it nor recovers from it, and the operator's actionable signal is the
+wedged writer — every append refusing — rather than anything the heartbeat reports. In
+particular it does **not** clear at the next real append, because the append is wedged by the
+same guard. §11 files it as a follow-up.
 
 That `evidence-journal`'s `publish` re-signs in place at all is the existing proof that the
 *semantics* of a head-only refresh are settled. Only the durable-writer implementation is
@@ -332,8 +354,8 @@ future-dated `issuedAt` forward. The refresh path applies `checkRefreshWindow` t
 candidate against the host clock — exactly as the append path already does before minting —
 and on any failure returns `refused` **without writing**.
 
-**Be precise about what that catches, because it is narrower than v0.1 of this record
-claimed.** It does not catch a uniformly fast host. There, `refreshHead` sets
+**Be precise about what that catches, because it is narrower than it reads.** It does not
+catch a uniformly fast host. There, `refreshHead` sets
 `issuedAt = max(fastNow, prev + 1) = fastNow`, and the guard compares that value against the
 same fast clock: the difference is zero, the candidate passes, and the head is written. The
 tree already states this about the identical bound on the append path — "a uniformly fast
@@ -359,8 +381,13 @@ and its own boot is covered by the `self-source-future-head` degrade. §6.5.
 **Solver and evaluator** are the easy legs. `NativeSignedSourcePublisher` already holds the
 durable writer, the signer, the store and a serialized append promise chain — free mutual
 exclusion against a concurrent append. The refresh pushes onto that same chain, so no second
-lock is invented. `FleetServedSource` is **not** widened: it is the read plane, and the
-two-operator boot test asserts its shape.
+lock is invented. `FleetServedSource` is **not** widened: it is the read plane
+(`operator/src/daemon/native-fleet-serving-plane.ts:101-104`). Be honest about the guard on
+that commitment, because it is weaker than it sounds. The two-operator boot test destructures
+`{ source, handler }` from `a.served`
+(`operator/test/daemon/native-fleet-two-operator-boot.test.ts:355`), which *consumes* the
+shape rather than asserting it — an added field would not turn it red. The commitment stands
+on this record, not on that test.
 
 **The requester is the awkward leg, and it is the one #2549 actually observed failing.**
 `FleetRequesterWrite.discovery` exposes only `{ source, handler }`, and its writer is
@@ -398,9 +425,8 @@ in the same millisecond as an unrecorded refresh computes `timestamp === blobHea
 and trips the writer's strict-advance check (`source-writer.ts:827-832`) with no clock fault
 involved at all.
 
-**What the re-commit does not do is make a refresh crash-safe on this leg**, and v0.1 of this
-record was wrong to imply — through §5.5 — that nothing further was needed. §5.5 states the
-window and the resolutions.
+**What the re-commit does not do is make a refresh crash-safe on this leg.** §5.5 states the
+window it leaves open and the three resolutions that close it.
 
 ### 5.5 The crash window, and why the no-journal argument only half holds
 
@@ -470,12 +496,39 @@ look live, and the peer refusal path must stay intact.**
 | Signing key revoked or rotated out | **No.** `verifySourceHead` resolves keys valid at `now`; `unauthorized-signer` is a hard refusal for self and peer alike. |
 | A refresh stretching `refreshBy` past the ceiling | **No.** Clamped when writing and when reading; `refresh-by-ceiling` refuses even for a self-served source. §2. |
 | Host clock fast | **No** — but not because this design stops it. A fast-clocked head is hard-refused by every peer as `head-issued-ahead` before and after this change, and §5.3's guard does not close the uniformly-fast case either. The heartbeat neither masks the fault nor fixes it. §5.3, §6.5. |
+| **A superseded head retained by a rollback mirror**, after a source idled and then appended | **Yes, and this design does not cover it.** §14.1's cold-start rollback residual is left continuously available rather than intermittently. §9. |
 | Process alive and ticking, **but its writes or its serving are broken** — a full or read-only blob store, an unreachable archive listener, a persistently throwing append | **Yes, and this design does not cover it.** §9. |
 
-**The last row is the one v0.1 of this table omitted**, and it is why this table is now
-framed as a survey rather than as a proof of exhaustiveness. A source in that condition is
-alive, its loops tick, and it can write a head blob a few hundred bytes long — so the
-heartbeat re-signs on schedule while the archive behind that head is unreachable, frozen or
+**The last two rows are why this table is framed as a survey rather than as a proof of
+exhaustiveness**, and each is carried into §9 rather than left to be inferred from a table.
+
+The **superseded-head row** is the one §2 consequence 2 points forward to, and it is a
+consequence of the heartbeat rather than a condition it merely fails to catch. Take a source
+that mints its head at T0 with a 24 h window and idles. Today that head lapses at T0+24h, so
+when the source finally appends at T0+30h a rollback mirror replaying the retained
+sequence-N head is **refused** by a cold consumer: `verifySourceChain` reaches
+`fresh.isFresh(head.refreshBy, now)` and returns `stale`
+(`packages/discovery/protocol/src/verify/source-chain.ts:118-120`). With the heartbeat the
+same head is re-signed at T0+12h and again at T0+24h, so it carries `refreshBy` T0+48h — and
+after the T0+30h append moves the source to sequence N+1 the retained sequence-N head is
+still **valid**: the signature is good, the key is current, `refreshBy` has not lapsed, and
+a cold consumer has no floor to fail. On first adoption there is no high-water mark, so no
+`issuedAt` monotonicity check applies (`:129-142`) and the walk simply runs to genesis
+(`:174-176`), which a chain prefix satisfies. That consumer is held at the superseded
+position for up to a further 18 hours.
+
+The bound is not violated — §2 — but the frequency with which a source sits near it goes from
+near-zero to near-always for anything that idles before appending. **Two mitigations survive
+and should be read alongside it.** §13.3's cold-start procedure fetches from *every* reachable
+mirror in the policy's mirror set and takes the highest valid `(sequence, issuedAt)`, so the
+real head at sequence N+1 is preferred wherever the real source is reachable; and a returning
+consumer is unaffected, because its high-water mark supplies both an `issuedAt` floor and a
+walk boundary the superseded head cannot satisfy. This is a caveat to name in §10.1's first
+decision, not a reason to change its recommendation.
+
+**The broken-writes row** is the other. A source in that condition is alive, its loops tick,
+and it can write a head blob a few hundred bytes long — so the heartbeat re-signs on schedule
+while the archive behind that head is unreachable, frozen or
 unextendable. Nothing catches it. No `LOOP_REGISTRY` row supervises the serving plane or the
 append path's health; the ten rows are `posting`, `reward-claim`, `balance-topup`,
 `eviction-check`, `checkpoint`, `harvest`, `projector`, `evidence-driver`, `work` and
@@ -510,14 +563,16 @@ A withheld refresh logs loudly and emits a structured event once per episode. It
 silently no-op — otherwise the operator learns about it from a peer.
 
 **The same rule binds every other outcome, not only the gate.** A refresh returning `refused`
-on a fast-clocked host (§5.3), `faulted` after a key rotation (§5.1), or `append-in-flight`
-against a wedged lease will return it on every tick for as long as the condition lasts, and a
-per-episode event covering only the watchdog case would leave all three invisible for months.
-The loop therefore emits one structured event on every **change** of outcome for a source,
-including the change back to `refreshed`, and logs the current outcome at a level an operator
-sees. Per-tick events are not the requirement; per-transition ones are. Given §5.3 and §5.1,
-a silently-refusing heartbeat is the state an operator is most likely to be in without
-knowing it.
+on a fast-clocked host (§5.3), `append-in-flight` against a wedged lease, or `faulted` against
+a full or read-only blob store (§5.1) will return it on every tick for as long as the
+condition lasts, and a per-episode event covering only the watchdog case would leave all three
+invisible for months. The loop therefore emits one structured event on every **change** of
+outcome for a source, including the change back to `refreshed`, and logs the current outcome
+at a level an operator sees. Per-tick events are not the requirement; per-transition ones are.
+Those three are precisely the conditions in which a heartbeat refuses silently and
+indefinitely while the daemon otherwise looks healthy — none of them wedges anything an
+operator would notice locally, and each of them ends with a peer refusing this operator's
+head. That is the state the per-transition rule exists to make visible.
 
 Stated plainly, because it is the point: **a wedged operator's head still lapses at 24 hours
 and peers still refuse it.** That is the correct outcome and is the property `refreshBy`
@@ -590,8 +645,8 @@ asserts mode `unchanged`, acceptance, and a checkpoint whose instant advances to
 A second, independent static trace through `walkLinkage` and `verifySourceChain` reaches the
 same conclusion; the executed fixture is the stronger evidence and this record rests on it.
 
-What is unpinned is narrower than v0.1 claimed, and it is the part that bears on the
-producer:
+What is unpinned is narrower than the route's fragility suggests, and it is the part that
+bears on the producer:
 
 - **The re-based window is untested.** The fixture's `publicSource` helper hard-codes
   `refreshBy: '2026-08-03T12:00:00.000Z'` for every head it builds (`sync.test.ts:86`), so
@@ -648,23 +703,29 @@ exists to prevent. Two more that must not be skipped: two successive forced refr
 `refreshBy − issuedAt` at the clamp (§2's no-widening property), and omitting the injected
 clock is byte-identical to wall-clock.
 
+**Inject the `faulted` case with a blob-store IO failure**, which is the outcome's one certain
+cause (§5.1). Do not build it on a signer-key rotation. A rotation does return `faulted`, but
+it throws out of `assertStateOwnership` in `loadState` before any head is read
+(`source-writer.ts:547`, `:340-342`), and `append` loads state through the same `loadState`
+(`:785`) — so a `faulted`-then-append-recovers assertion written against a rotated key cannot
+pass, and a rotation exercises the writer's ownership guard rather than this method's error
+path.
+
 **Stage 3 — the legs.** The requester's regression test must be written before its
 implementation: publish an association, advance the clock past the half-window, refresh, then
 post a second association and assert the append succeeds. Without §5.4's state re-commit it
 fails — but the stage must **observe which failure fires rather than assert a predicted one
-blind**, because two are in play and they are reached in the opposite order to the one v0.1
-assumed. The read-path throw is expected first: `append` loads state at
-`source-writer.ts:785`, which on this leg runs `reconstructRequesterHistory`'s byte-wise head
-comparison and raises `'requester source public head does not equal requester-source state'`
+blind**, because two are in play. The read-path throw is expected first: `append` loads state
+at `source-writer.ts:785`, which on this leg runs `reconstructRequesterHistory`'s byte-wise
+head comparison and raises `'requester source public head does not equal requester-source state'`
 (`requester.ts:1353`). Only where that comparison has been relaxed — resolution (a) of §5.5 —
 does execution reach `SourceWriterIntegrityError("announcement timestamp must strictly advance
 the signed source head")` (`source-writer.ts:831`). Capture the actual failure, then pin it.
 
-**That test is necessary and not sufficient**, and v0.1 was wrong on both halves when it
-called it "the only thing standing between this design and a bricked requester source". It
-exercises a refresh that *completed*, which the state re-commit does fix. It does not touch
-§5.5's crash window — the interval between the head blob write and the state commit, in which
-the requester source is bricked outright. Closing that is §10.1's third decision and is a
+**That test is necessary and not sufficient.** It exercises a refresh that *completed*, which
+the state re-commit does fix. It does not touch §5.5's crash window — the interval between the
+head blob write and the state commit, in which the requester source is bricked outright.
+Closing that is §10.1's third decision and is a
 change to `reconstructRequesterHistory`, not a test. A crash-boundary case belongs in this
 stage beside the regression: kill between the two writes, then assert the source is still
 appendable.
@@ -753,6 +814,15 @@ Correcting them is part of the change that makes them false, not a follow-up.
   becomes possible once idle heads are re-signed, and is left as a follow-up.
 - **Does not cover a source whose host process dies.** An in-process timer dies with it, the
   head lapses, and peers refuse it. That is the correct outcome.
+- **Does not narrow §14.1's cold-start rollback residual, and leaves it continuously
+  available rather than intermittently.** A source that idles and then appends leaves a
+  superseded head that the heartbeat has kept inside `refreshBy`; a rollback mirror replaying
+  it is accepted by a cold consumer for the remainder of that window, where today the same
+  head has lapsed and is refused. The `2 × maxAheadMs` bound is unchanged (§2) and the two
+  mitigations in §6.2 survive — the mirror-set comparison prefers the real head, and a
+  returning consumer with a high-water mark is unaffected — but nothing here shrinks the
+  residual. Closing it is the witness/gossip anchor §14.1 already names, and it is not this
+  issue's. §6.2, §10.1 decision 1.
 - **Does not cover a source whose process is alive but whose writes or serving are broken** —
   a full or read-only blob store, an unreachable archive listener, a persistently throwing
   append. Such a source can still mint a head, so the heartbeat re-signs on schedule while the
@@ -776,8 +846,23 @@ Correcting them is part of the change that makes them false, not a follow-up.
 signal, and do we accept that?** *Recommended: accept.* This is the root question, and every
 decision below is downstream of it. `refreshBy` is the one thing in the protocol that says
 "this source is not withholding". A source that re-signs on a timer asserts that continuously,
-and therefore asserts it in some conditions where it is not strictly earned — §6.2's last two
-rows are both such conditions.
+and therefore asserts it in some conditions where it is not strictly earned. **There are three
+such conditions and the ruling should be made against all three**, because each was found by a
+separate pass over the code and no argument here bounds the set:
+
+1. **A wedged loop** — the process is alive and re-signing while a supervised loop is stuck.
+   This is the one the §6.3 gate closes, at five-minute resolution rather than twenty-four-hour.
+2. **Broken writes or serving** — a full or read-only blob store, an unreachable archive
+   listener, a persistently throwing append. The source can still mint a head, the gate does
+   not see it, and the lapsing `refreshBy` that used to surface it within 24 hours is removed
+   with nothing in its place. Decision 2 is framed so this is ruled on knowingly. §6.2, §9.
+3. **A superseded head retained by a rollback mirror** — a source that idles and then appends
+   leaves behind a head the heartbeat has kept fresh, so §14.1's cold-start rollback residual
+   becomes continuously available for that source rather than intermittently. The
+   `2 × maxAheadMs` bound is unchanged; the frequency of sitting near it is not. §13.3's
+   mirror-set comparison still prefers the real head wherever the real source is reachable,
+   and a returning consumer with a high-water mark is unaffected — so this is a caveat to rule
+   on, not a defect that changes the recommendation. §2, §6.2, §9.
 
 Three alternatives were considered and none is recommended. **No heartbeat, plus a tighter
 `refreshWithinMs` profile** shortens every consumer's tolerance rather than lengthening any
@@ -819,15 +904,31 @@ actually means at that position, and because it is the same comparison the gener
 already trusts on the other two legs. **What it costs, plainly:** the requester stops
 detecting a head whose `issuedAt` has drifted from its own state — which is precisely the
 drift a refresh legitimately introduces, and therefore precisely the check that cannot survive
-a heartbeat unchanged. It keeps detecting a head at the wrong position, the wrong origin or
-the wrong entry, and the envelope and canonicalization checks around it (`requester.ts:1348`,
-`:1355-1360`) are untouched. This is a change to a persistence invariant on the operator's
-most awkward leg, which is why it is a ruling and not a build detail.
+a heartbeat unchanged. **State the loss whole, because a ruling on a persistence invariant
+should not be made against half of it.** The clause is direction-blind, so dropping it also
+stops the requester detecting a *backwards*-drifted stored head — one whose `issuedAt` or
+`refreshBy` has gone down relative to the state's own record. That is not drift a refresh
+introduces, and after (a) the producer stops failing closed on it and simply continues; what
+catches it is downstream, where peers hard-refuse a non-advancing `issuedAt` as
+`rewound-or-tampered-head` (§3). The residual risk is small either way — the writer's
+strict-advance check reads the blob (`source-writer.ts:821-832`), so the append floor is
+blob-derived rather than state-derived — but it is a real loss and it belongs in the ruling.
+
+What survives is the position triple: the comparison that remains
+(`requester.ts:1350-1352`) covers `origin`, `sequence` and `entry`, three of `SourceHead`'s
+six fields (`packages/discovery/protocol/src/head.ts:10-17`), and the envelope and
+canonicalization checks around it (`:1348`, `:1355-1360`) are untouched. Of the three fields
+it stops comparing, `protocol` is separately pinned and is **not** part of the loss:
+`SourceHeadSchema` declares it `z.literal(RECORD_DISCOVERY_VERSION)`
+(`packages/discovery/protocol/src/head.ts:29`), so `parseSourceHead` refuses a wrong-valued
+one at `requester.ts:1347`, a line above the clause under discussion. The loss is `issuedAt`
+and `refreshBy`, in both directions. This is a change to a persistence invariant on the
+operator's most awkward leg, which is why it is a ruling and not a build detail.
 
 **4 — With the watchdog disabled, the heartbeat runs ungated (§6.3).** *Recommended: yes, run
 ungated and document it.* An operator running without a watchdog gets a heartbeat with no
-liveness oracle at all — a masking hazard installable by configuration, which v0.1 documented
-on a config field and never put up for a decision. The alternative is to refuse to refresh
+liveness oracle at all — a masking hazard installable by configuration, and one that belongs
+in a decision rather than in a note on a config field. The alternative is to refuse to refresh
 when no watchdog is present; it fails closed, and it makes the gate's absence loud rather than
 silent. The recommendation goes the other way for the same reason §6.4 rejects the readiness
 gate: an operator who has declined the daemon's liveness supervision has not thereby become a
@@ -849,15 +950,18 @@ record answering it. §8 Stage 0 executes the amendment once it is accepted.
 
 ### 10.2 Calls this record makes
 
-These are recorded so the operator can override them, not put up for adjudication. Each is
-settled by a mechanical fact about the code rather than by a tradeoff, and asking for a
-signature on a settled engineering call spends a ruling that §10.1 needs.
+These are recorded so the operator can override them, not put up for adjudication. The second
+and third are settled by a mechanical fact about the code rather than by a tradeoff, and asking
+for a signature on a settled engineering call spends a ruling that §10.1 needs. The first is
+mixed: level-triggering versus a deadline is settled by argument, but **the fraction and the
+tick are tuning defaults**, not facts about the code, and an operator may set either
+differently without disturbing anything else in this design.
 
-**The half-window level trigger, checked on a 300 000 ms tick (§4).** The alternatives are a
-deadline timer — fragile against process restart, host suspend, and the very wedge conditions
-the loop must survive — and a smaller fraction such as one third, which buys nothing that
-level-triggering does not already buy. Half at a 24 h window is one re-sign per source per
-twelve hours.
+**The half-window level trigger, checked on a 300 000 ms tick (§4)** — the shape is a call,
+the two numbers are tunable defaults. The alternatives are a deadline timer — fragile against
+process restart, host suspend, and the very wedge conditions the loop must survive — and a
+smaller fraction such as one third, which buys nothing that level-triggering does not already
+buy. Half at a 24 h window is one re-sign per source per twelve hours.
 
 **The primitive is a fourth `DurableSourceWriter` method (§5.1).** `maintainHead` never reads
 the writer's committed state, so a stale `prevHead` installs a head at a position the writer
@@ -887,6 +991,12 @@ To be filed as issues when this record is adopted; none of them blocks the work 
    `operator/src/config/native-sections.ts`, and `operator.verticalMode: 'native-v1'` is clamped
    back to legacy with a warning — the live switch is `operator.compositionMode: 'native'`.
    Unrelated to this design, found while tracing it, and worth its own correction.
-3. **Consider a conformance-kit case for the idle re-sign.** `maintainsFreshness` in
+3. **A signer-key rotation hard-wedges a durable source writer, with no in-writer recovery
+   path.** `assertStateOwnership` throws on a `signerKeyId` mismatch out of both `loadState`
+   and `readState` (`packages/discovery/serve/src/source-writer.ts:547`, `:951`, throwing at
+   `:340-342`), so `append` is wedged too (`:785`) and nothing in the writer re-mints the
+   source's state or head under the new key. Pre-existing and unrelated to the heartbeat —
+   found while tracing this design, and worth its own issue.
+4. **Consider a conformance-kit case for the idle re-sign.** `maintainsFreshness` in
    `packages/discovery/serve/src/head.ts` already checks a succession of heads; nothing exercises
    it against a producer that re-signs on a schedule.
