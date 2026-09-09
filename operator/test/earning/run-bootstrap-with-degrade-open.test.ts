@@ -3,7 +3,7 @@
  * `runBootstrapWithDegradeOpen` (earning/bootstrap-run.ts) is independently
  * testable via injected spies, unlike main.ts's inline loop.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   resolveDegradedStart,
   runBootstrapWithDegradeOpen,
@@ -255,56 +255,72 @@ describe('resolveDegradedStart (#2425)', () => {
   const economicEnvelope = buildEnvelope({ code: 'funding_required', message: 'needs funds' });
   const integrityEnvelope = buildEnvelope({ code: 'invalid_invocation', message: 'bad config' });
 
-  function silentLog() {
-    return { log: vi.fn(), error: vi.fn() };
-  }
+  // `resolveDegradedStart` logs straight to `console` (no injected logger — it
+  // is main.ts's boot-path callback and operators grep those lines). Spy so the
+  // suite stays quiet AND the operator-facing wording stays asserted.
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
 
   it("returns 'started' with the recovery handle when the halt is economic and start succeeds", () => {
     const recovery: StoppableRecovery = { stop: vi.fn() };
     const start = vi.fn().mockReturnValue(recovery);
 
-    const outcome = resolveDegradedStart(economicEnvelope, {
-      isEconomic: () => true,
-      start,
-      log: silentLog(),
-    });
+    const outcome = resolveDegradedStart(economicEnvelope, { isEconomic: () => true, start });
 
     expect(outcome).toEqual({ kind: 'started', recovery });
     expect(start).toHaveBeenCalledTimes(1);
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it("returns 'fail-closed' without calling start when the halt is integrity-class", () => {
     const start = vi.fn();
-    const log = silentLog();
 
-    const outcome = resolveDegradedStart(integrityEnvelope, {
-      isEconomic: () => false,
-      start,
-      log,
-    });
+    const outcome = resolveDegradedStart(integrityEnvelope, { isEconomic: () => false, start });
 
     expect(outcome).toEqual({ kind: 'fail-closed' });
     expect(start).not.toHaveBeenCalled();
-    expect(log.log).toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalled();
   });
 
   it("returns 'start-failed' — NOT 'fail-closed' — when an economic halt's recovery start throws (#2425)", () => {
-    const boom = new Error('loop construction blew up');
-    const log = silentLog();
-
     const outcome = resolveDegradedStart(economicEnvelope, {
       isEconomic: () => true,
-      start: () => { throw boom; },
-      log,
+      start: () => { throw new Error('loop construction blew up'); },
     });
 
     expect(outcome).toEqual({ kind: 'start-failed' });
     // The failure must be surfaced, and the message must say what readiness
     // the daemon actually lands in — the pre-#2425 message said only
     // "non-fatal", never that readiness is `degraded` with no loops running.
-    expect(log.error).toHaveBeenCalledTimes(1);
-    const message = String(log.error.mock.calls[0]?.join(' '));
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const message = String(errorSpy.mock.calls[0]?.join(' '));
     expect(message).toContain('degraded');
     expect(message).toContain('loop construction blew up');
+  });
+
+  it("fails CLOSED — never throws — when the classifier itself throws", () => {
+    // The `startDegraded` contract is that it never throws: an escaping error
+    // would unwind runBootstrapWithDegradeOpen and kill the daemon instead of
+    // parking it. An unclassifiable halt must not be assumed economic.
+    const start = vi.fn();
+
+    const outcome = resolveDegradedStart(economicEnvelope, {
+      isEconomic: () => { throw new Error('classifier blew up'); },
+      start,
+    });
+
+    expect(outcome).toEqual({ kind: 'fail-closed' });
+    expect(start).not.toHaveBeenCalled();
+    expect(String(errorSpy.mock.calls[0]?.join(' '))).toContain('classifier blew up');
   });
 });

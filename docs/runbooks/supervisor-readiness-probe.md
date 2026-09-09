@@ -57,9 +57,12 @@ Never set `livenessProbe` to `/ready`.
 ## `degraded` with no recovery loops running (issue #2425)
 
 On an economic halt the daemon starts a small standalone set of recovery loops
-(eviction-check, checkpoint, balance-topup, reward-claim) for the part of the
-fleet that is already operational, so a self-healing condition does not compound
-while the halt is retried.
+for the part of the fleet that is already operational, so a self-healing
+condition does not compound while the halt is retried. Which loops run depends
+on the halt and the config: reward-claim always; balance-topup unless a
+master-EOA `funding_required` halt is pending (it would drain the exact balance
+the funding poller is waiting on); eviction-check and checkpoint only under
+`stakingMode: "standard"`.
 
 If that startup itself fails, readiness is **still** `degraded` — `/ready`
 answers 200 and the supervisor correctly leaves the parked daemon alone — but
@@ -84,8 +87,8 @@ waiting for funding.
 
 ## Related
 
-- `spec/2026-08-04-headless-operator-rederivation-design.md` §6.1, §14.5 — the
-  probe contract.
+- `docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md`
+  §6.1, §14.5 — the probe contract.
 - `operator/src/api/health-endpoint.ts` — the routes.
 - `operator/src/daemon/loop-heartbeat.ts` — the readiness holder and per-loop
   `admission` classes.

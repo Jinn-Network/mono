@@ -421,9 +421,10 @@ export interface RunBootstrapWithDegradeOpenDeps<TResult> {
    * which of the three `DegradedStartOutcome` cases applies. It must NOT
    * throw: the economic/integrity classification lives inside this callback,
    * so an orchestrator that treated an escaping throw as `'degraded'` would
-   * flip an integrity halt to 200 whenever classification itself failed.
-   * `resolveDegradedStart` below is the production implementation and is
-   * what guarantees the no-throw contract.
+   * flip an integrity halt to 200 whenever classification itself failed — the
+   * wrong failure direction. `resolveDegradedStart` below is the production
+   * implementation; it catches BOTH the classify step and the start step, so
+   * neither can escape here.
    */
   startDegraded: (envelope: ErrorEnvelope) => DegradedStartOutcome;
   setReadiness: (readiness: 'bootstrapping' | 'ready' | 'degraded') => void;
@@ -505,13 +506,26 @@ export function resolveDegradedStart(
   deps: {
     isEconomic: (envelope: ErrorEnvelope) => boolean;
     start: () => StoppableRecovery;
-    /** Injected so tests can assert the operator-facing explanation without console noise. */
-    log?: Pick<Console, 'log' | 'error'>;
   },
 ): DegradedStartOutcome {
-  const log = deps.log ?? console;
-  if (!deps.isEconomic(envelope)) {
-    log.log('[main] Halt cause is integrity-class — staying fail-closed (no degraded recovery loops).');
+  let economic: boolean;
+  try {
+    economic = deps.isEconomic(envelope);
+  } catch (classifyErr) {
+    // `isEconomicBootstrapHalt` is a `Set.has` today and cannot throw, but the
+    // caller's contract is that this function never throws: an escaping error
+    // here would unwind `runBootstrapWithDegradeOpen` and kill the daemon
+    // instead of parking it. An unclassifiable halt fails CLOSED — the safe
+    // direction, since it is exactly the case where we cannot show it is
+    // economic.
+    console.error(
+      '[main] Halt classification failed — staying fail-closed (no degraded recovery loops):',
+      classifyErr instanceof Error ? classifyErr.message : classifyErr,
+    );
+    return { kind: 'fail-closed' };
+  }
+  if (!economic) {
+    console.log('[main] Halt cause is integrity-class — staying fail-closed (no degraded recovery loops).');
     return { kind: 'fail-closed' };
   }
   try {
@@ -521,7 +535,7 @@ export function resolveDegradedStart(
     // pre-#2425 wording said only "non-fatal — still waiting for retry",
     // which left an operator no way to tell this apart from a healthy
     // degraded boot.
-    log.error(
+    console.error(
       '[main] Failed to start degraded recovery loops — readiness is `degraded` with NO recovery ' +
         'loops running (/ready answers 200 so a supervisor does not restart this parked daemon; ' +
         'the fleet will not self-heal until the halt is retried):',

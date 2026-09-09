@@ -8,7 +8,7 @@
  * `operator/src/daemon/`; this test file is NOT under `src/api/`, so it can import the real
  * shared holder from `daemon/loop-heartbeat.js` and wire it straight through).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -158,6 +158,8 @@ describe('GET /ready — a failed degraded-recovery start still reports degraded
     // correctly parked waiting for funding. This drives the real shared
     // readiness holder through the real orchestrator, then asks the real
     // route — the exact seam the bug crossed.
+    // resolveDegradedStart logs the start failure to console.error by design.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const envelope = buildEnvelope({ code: 'funding_required', message: 'master EOA under-funded' });
     let attempt = 0;
     let readyDuringHalt: Response | undefined;
@@ -172,7 +174,6 @@ describe('GET /ready — a failed degraded-recovery start still reports degraded
         resolveDegradedStart(halt, {
           isEconomic: () => true,
           start: () => { throw new Error('recovery loops failed to construct'); },
-          log: { log: () => {}, error: () => {} },
         }),
       setReadiness: setDaemonReadiness,
       // Probe `/ready` while the halt is still parked — that is the window a
@@ -184,5 +185,7 @@ describe('GET /ready — a failed degraded-recovery start still reports degraded
     const body = (await readyDuringHalt!.json()) as { reason: string; accepting_work: boolean };
     expect(body.reason).toBe('degraded');
     expect(body.accepting_work).toBe(false);
+    expect(String(errorSpy.mock.calls[0]?.join(' '))).toContain('recovery loops failed to construct');
+    errorSpy.mockRestore();
   });
 });
