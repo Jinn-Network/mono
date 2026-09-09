@@ -296,10 +296,13 @@ export function collectLiveTreeFixtures(scriptsRoot = scriptsDir) {
  * a.test.mjs b.test.mjs` comes back as no invocation at all — a live batch the co-scheduling guard
  * cannot see, which is precisely what that guard exists to catch.
  *
- * The residual this shape keeps runs the other way: a trailing `# ...` comment on a real
- * `node --test` line still contributes any `*.test.mjs` names its prose spells, over-reporting that
- * batch's file list. Over-reporting can only red a batch that is co-scheduled on paper and not in
- * fact; under-reporting greens one that is co-scheduled in fact. This gate takes the false red.
+ * The residual this shape keeps runs the other way: a trailing `# ...` comment still reads as code,
+ * so on a real `node --test` line its prose contributes any `*.test.mjs` names it spells, and on a
+ * line carrying no invocation at all it mints a whole phantom one — #3149's shape again, in the
+ * trailing-comment position rather than the whole-line one. Both over-report. Over-reporting can
+ * only red a batch that is co-scheduled on paper and not in fact; under-reporting greens one that
+ * is co-scheduled in fact. This gate takes the false red, which is why the narrower strip is the
+ * right one even though it leaves this behind.
  */
 function withoutCommentLine(line) {
   return /^\s*#/u.test(line) ? '' : line;
