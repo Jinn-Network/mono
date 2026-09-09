@@ -127,7 +127,7 @@ function enclosedLiterals(source, key, open, close) {
 }
 
 /**
- * The offset range of each object literal that is a direct element of a `projects` array.
+ * The offset range of each object literal the reader can see a `{` for inside a `projects` array.
  *
  * Vitest gives every `projects` entry its own Vite config, so `server.fs.allow` under one entry
  * says nothing about a seam path named under another. These ranges are how the reachability check
@@ -151,13 +151,16 @@ function enclosedLiterals(source, key, open, close) {
  * narrows a scope, which withholds crediting rather than granting it: a false red, never a false
  * green.
  *
- * The closure is literal-shaped, and that is the larger hole. A range exists only where the reader
- * can see a `{` as a direct element of the array, so an entry held in a variable — `projects:
- * [allowProject, seamProject]` — produces no ranges at all and every allowance and seam path falls
- * back to root scope, reading green on the very shape #3123 closes. The same holds for an `fs.allow`
- * living in a module-scope object spread into one entry. This is inherent to a text scanner over a
- * checkout with no dependencies installed, which is this file's stated posture, and it is no worse
- * than the pre-#3123 behavior; it is just wider than the unterminated-literal fallback above.
+ * The closure is brace-shaped, and that is the larger hole. A range exists wherever a `{` is
+ * textually visible inside the array literal, which is looser than "a direct element of the array":
+ * a call-wrapped entry is read straight through its wrapper, as the `defineProject` case in
+ * `projectEntryRanges finds one range per object entry` asserts. What produces no range is an entry
+ * the reader can see no brace for at all — one held in a variable, `projects: [allowProject,
+ * seamProject]` — which yields no ranges and drops every allowance and seam path back to root
+ * scope, reading green on the very shape #3123 closes. The same holds for an `fs.allow` living in a
+ * module-scope object spread into one entry. This is inherent to a text scanner over a checkout
+ * with no dependencies installed, which is this file's stated posture, and it is no worse than the
+ * pre-#3123 behavior; it is just wider than the unterminated-literal fallback above.
  *
  * The `projects:` key match is unanchored. `arrayLiterals(source, 'projects')` matches any
  * `projects:` key, not only Vitest's — an asymmetry with `fsAllowPaths`, which is deliberately
