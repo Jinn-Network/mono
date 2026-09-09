@@ -299,7 +299,9 @@ describe("verified bundle viewer", () => {
     viewers.push(viewer);
     const session = await claim(viewer);
     const html = await (await fetch(session.base, { headers: { cookie: session.cookie } })).text();
-    expect(html).toContain("Binary qualification");
+    // Pinned as the `<h1>` element, not as bare text: the qualification section's `<h2>` carries
+    // the same words, so a text-only match survives a rename of the heading branch above it.
+    expect(html).toContain("<h1>Binary qualification</h1>");
     // #4262 extended the #2982 ruling to this surface; the whole response is the guard because the
     // word reached the page through a heading, an eyebrow, and the document title.
     expect(html).not.toMatch(/verified|certified|validated|audited/i);
