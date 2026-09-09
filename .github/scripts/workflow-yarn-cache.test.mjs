@@ -4,9 +4,10 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  lstatSync,
   readdirSync,
+  symlinkSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -38,7 +39,7 @@ function mappingKey(line) {
 function childIndent(lines, parentIndent, from = 1) {
   for (let index = from; index < lines.length; index += 1) {
     const line = lines[index];
-    if (!line.trim()) continue;
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
     const indent = indentOf(line);
     return indent > parentIndent ? indent : null;
   }
@@ -135,13 +136,18 @@ function withValues(lines) {
   const withAt = lines.findIndex((line) => withPattern.test(line));
   if (withAt === -1) return new Map();
   const withIndent = indentOf(lines[withAt]);
+  // Same lesson as `childIndent` (#4219): pinning the sub-keys to `withIndent + 2`
+  // read an empty map out of every workflow written at another width, and an empty
+  // `with:` map is indistinguishable here from an absent key.
+  const keyIndent = childIndent(lines, withIndent, withAt + 1);
+  if (keyIndent === null) return new Map();
   const values = new Map();
 
   for (let index = withAt + 1; index < lines.length; index += 1) {
     const line = lines[index];
     if (line.trim() && indentOf(line) <= withIndent) break;
     const match = line.match(/^(\s+)([A-Za-z0-9_-]+):\s*(.*)$/u);
-    if (!match || match[1].length !== withIndent + 2) continue;
+    if (!match || match[1].length !== keyIndent) continue;
     const raw = match[3].trim();
     if (!['|', '|-', '>', '>-'].includes(raw)) {
       values.set(match[2], scalar(raw));
@@ -239,6 +245,9 @@ function repositoryPath(repositoryRoot, ...parts) {
   return insideRoot || '.';
 }
 
+const directoryChangePattern = /(?:^|[;&|]|\s)(?:cd|pushd)\s+("[^"]+"|'[^']+'|[^\s;&|()]+)/gu;
+const accountedDirectoryChangePattern = /(?:^|[;&|])\s*(?:cd|pushd)\s+(?:"[^"]+"|'[^']+'|[^\s;&|()]+)\s*(?:&&|;)\s*yarn(?=\s|$)/gu;
+
 function shellLoopValues(run) {
   const commands = run.split('\n')
     .filter((line) => !line.trimStart().startsWith('#'))
@@ -248,7 +257,11 @@ function shellLoopValues(run) {
   const loopPattern = /(?:^|\n)\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;\n]+);\s*do/gu;
   for (const match of commands.matchAll(loopPattern)) {
     const entries = match[2].trim().split(/\s+/u).map(unquote).filter(Boolean);
-    if (entries.some((entry) => entry.includes('$'))) continue;
+    // Leaving the variable unset makes expansion yield nothing, which the caller
+    // reports as "could not derive". A glob (`for d in packages/*`) is a directory
+    // set only the runner can enumerate, so emitting `packages/*/yarn.lock` as a
+    // required path would name something no workflow can ever satisfy.
+    if (entries.some((entry) => /[$*?[\]{}]/u.test(entry))) continue;
     values.set(match[1], entries);
   }
   return values;
@@ -280,11 +293,39 @@ function yarnInstallLockfiles(step, jobLines, inheritedWorkingDirectory, reposit
   let found = false;
   let unresolved = workingDirectories.length === 0;
   const loopValues = shellLoopValues(run);
-  const yarnPattern = /(?:^|[;&|()\s])yarn(?:\s+--cwd(?:=|\s+)("[^"]+"|'[^']+'|[^\s;&|()]+))?\s+install(?:\s|$)/gu;
-  const cdPattern = /(?:^\s*|[;&|(]\s*)cd\s+("[^"]+"|'[^']+'|[^\s;&|()]+)\s*&&\s*$/u;
+  // `yarn` with no verb is `yarn install` in Yarn 4, and flags are legal on either
+  // side of the verb (`yarn --immutable install`). Anchoring the tail to a command
+  // terminator is what keeps `yarn build` and `yarn vitest run` out of the match.
+  const yarnFlag = String.raw`--[A-Za-z0-9][A-Za-z0-9-]*(?:=[^\s;&|()]+)?`;
+  const yarnPattern = new RegExp(
+    String.raw`(?:^|[;&|(]|\s)yarn`
+    + String.raw`(?:\s+(?:--cwd(?:=|\s+)("[^"]+"|'[^']+'|[^\s;&|()]+)|${yarnFlag}))*`
+    + String.raw`(?:\s+install)?(?:\s+${yarnFlag})*\s*(?=$|[;&|)#\\])`,
+    'gu',
+  );
+  const cdPattern = /(?:^\s*|[;&|(]\s*)(?:cd|pushd)\s+("[^"]+"|'[^']+'|[^\s;&|()]+)\s*(?:&&|;)\s*$/u;
+  const commandLines = run.split('\n').filter((line) => !line.trimStart().startsWith('#'));
+  // A directory change the walk cannot account for silently moves a later install to
+  // the *wrong* lockfile, which is the one direction this guard must never take: fail
+  // closed into "could not derive" instead. Accounted for are the prefix form the
+  // resolution above consumes (`cd sub && yarn install`), a change confined to a
+  // same-line subshell, and a return (`cd -`, `popd`). `cd sub` on its own preceding
+  // line is not, and is what this catches.
+  const unaccountedDirectoryChanges = commandLines.reduce((total, line) => {
+    let topLevel = line;
+    let previous;
+    do {
+      previous = topLevel;
+      topLevel = topLevel.replace(/\([^()]*\)/gu, ' ');
+    } while (topLevel !== previous);
+    const changes = [...topLevel.matchAll(directoryChangePattern)]
+      .filter((match) => !['-', '--'].includes(unquote(match[1])))
+      .length;
+    const accounted = [...topLevel.matchAll(accountedDirectoryChangePattern)].length;
+    return total + Math.max(changes - accounted, 0);
+  }, 0);
 
-  for (const line of run.split('\n')) {
-    if (line.trimStart().startsWith('#')) continue;
+  for (const line of commandLines) {
     for (const match of line.matchAll(yarnPattern)) {
       found = true;
       const beforeYarn = line.slice(0, match.index + match[0].indexOf('yarn'));
@@ -310,6 +351,8 @@ function yarnInstallLockfiles(step, jobLines, inheritedWorkingDirectory, reposit
     }
   }
 
+  if (found && unaccountedDirectoryChanges > 0) unresolved = true;
+
   return { found, lockfiles: [...new Set(lockfiles)], unresolved };
 }
 
@@ -317,9 +360,19 @@ function yarnInstallLockfiles(step, jobLines, inheritedWorkingDirectory, reposit
 // is on PATH inside the setup-node step itself. On the runner image that is the bundled
 // global Yarn 1, which refuses any project declaring `packageManager: yarn@4.13.0`. The
 // cache therefore only works when Corepack is enabled by an earlier step in the same job.
+//
+// Accepted limits, both in the safe direction: this is a text check over the `run:`
+// scalar, so `corepack enable` inside a heredoc counts even though it only writes a
+// file; and a step whose `if:` is a runtime expression counts even though it may not
+// run. Over-counting yields a red job on the runner, never a silent cache miss. A
+// literal `if: false` is excluded below because that one is decidable here.
 function enablesCorepack(step) {
   const run = propertyValue(step, 'run');
   if (run === null) return false;
+  const condition = propertyValue(step, 'if');
+  if (condition !== null && /^(?:false|\$\{\{\s*false\s*\}\})$/u.test(condition.trim())) {
+    return false;
+  }
   return run
     .split('\n')
     .filter((line) => !line.trimStart().startsWith('#'))
@@ -407,7 +460,10 @@ export function yarnCacheViolations(directory = workflowsDir, repositoryRoot = r
             violations.push(`${location}: cache dependency path must stay inside the repository: ${dependencyPath}`);
           } else if (basename(dependencyPath) !== 'yarn.lock') {
             violations.push(`${location}: cache dependency path is not an existing lockfile: ${dependencyPath}`);
-          } else if ((!existsSync(absolute) || !statSync(absolute).isFile())
+            // `lstatSync`, not `statSync`: an in-repo `yarn.lock` symlink pointing
+            // outside the tree would otherwise satisfy the very containment check
+            // above it.
+          } else if ((!existsSync(absolute) || !lstatSync(absolute).isFile())
             && !remoteCheckoutLockfiles.includes(dependencyPath)) {
             violations.push(`${location}: cache dependency path is not an existing lockfile: ${dependencyPath}`);
           }
@@ -429,9 +485,14 @@ export function setupNodeStepCoverage(directory = workflowsDir) {
     .sort()
     .map((workflowName) => {
       const source = readWorkflow(directory, workflowName);
+      // A flow-style sequence entry (`- { uses: actions/setup-node@v7 }`) is legal
+      // YAML that Actions runs and that the block walk cannot see. Counting it here
+      // is what stops the two sides agreeing with each other about a shape neither
+      // one parses.
       const declared = source
         .split('\n')
-        .filter((line) => /^\s*(?:-\s+)?uses:\s*["']?actions\/setup-node@/u.test(line))
+        .filter((line) => /^\s*(?:-\s+)?uses:\s*["']?actions\/setup-node@/u.test(line)
+          || /^\s*-\s*\{[^}]*\buses:\s*["']?actions\/setup-node@/u.test(line))
         .length;
       const resolved = jobRanges(source)
         .flatMap((job) => stepsForJob(job.lines))
@@ -491,6 +552,7 @@ jobs:
             - uses: actions/setup-node@v7
               with:
                   node-version: 22
+                  cache: yarn
             - run: yarn install --immutable
 `;
   try {
@@ -500,11 +562,12 @@ jobs:
       { workflow: 'crlf.yml', declared: 1, resolved: 1 },
       { workflow: 'four-space.yml', declared: 1, resolved: 1 },
     ]);
+    // `cache: yarn` sits in a four-space `with:` block. Its absence from the
+    // violations proves the map was read; before #4253 the block resolved empty and
+    // this fixture passed for the narrower reason that it saw no keys at all.
     const violations = yarnCacheViolations(fixtureWorkflows, fixtureWorkflows);
     assert.deepEqual(violations, [
-      'crlf.yml job verify: setup-node must declare cache: yarn',
       'crlf.yml job verify: setup-node must declare cache-dependency-path',
-      'four-space.yml job verify: setup-node must declare cache: yarn',
       'four-space.yml job verify: setup-node must declare cache-dependency-path',
     ]);
   } finally {
@@ -870,6 +933,195 @@ test('guard rejects a workflow whose Corepack step is moved after the cached set
   ), (fixtureWorkflows) => {
     assert.deepEqual(yarnCacheViolations(fixtureWorkflows), [
       'net-liveness.yml job net-liveness: corepack enable must run before the setup-node step that caches Yarn',
+    ]);
+  });
+});
+
+test('coverage counting sees a flow-style step entry the walk cannot', () => {
+  const fixtureWorkflows = mkdtempSync(join(tmpdir(), 'jinn-workflow-yarn-cache-flow-'));
+  try {
+    // `- { uses: ... }` is legal YAML that Actions runs and that the block walk
+    // resolves as nothing. Counted only by the block regex, both sides would read
+    // zero and the coverage assertion would agree with itself about a blind spot.
+    writeFileSync(join(fixtureWorkflows, 'flow.yml'), `name: flow fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - { uses: actions/setup-node@v7, with: { cache: yarn } }
+      - run: yarn install --immutable
+`);
+    assert.deepEqual(setupNodeStepCoverage(fixtureWorkflows), [
+      { workflow: 'flow.yml', declared: 1, resolved: 0 },
+    ]);
+  } finally {
+    rmSync(fixtureWorkflows, { recursive: true, force: true });
+  }
+});
+
+test('guard rejects a cache dependency path that is a symlink rather than a lockfile', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    // `statSync` follows the link and reports the target file, which would satisfy
+    // the very containment check the path assertion above it exists to enforce.
+    const outside = mkdtempSync(join(tmpdir(), 'jinn-workflow-yarn-cache-outside-'));
+    try {
+      writeFileSync(join(outside, 'yarn.lock'), 'outside lockfile\n');
+      rmSync(join(fixtureRoot, 'app/yarn.lock'));
+      symlinkSync(join(outside, 'yarn.lock'), join(fixtureRoot, 'app/yarn.lock'));
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
+        '          node-version: 22\n          cache: yarn\n          cache-dependency-path: app/yarn.lock',
+      ));
+      assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+        'fixture.yml job verify: cache dependency path is not an existing lockfile: app/yarn.lock',
+      ]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+test('guard fails closed on a directory change it cannot attribute to an install', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: app/yarn.lock
+      - run: |
+          cd app
+          yarn install --immutable
+`);
+    // Silently resolving this to the repository root would name the wrong lockfile.
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /could not derive every Yarn install project lockfile/u,
+    );
+  });
+});
+
+for (const [label, run] of [
+  ['a semicolon-separated cd', 'cd app; yarn install --immutable'],
+  ['pushd', 'pushd app && yarn install --immutable'],
+]) {
+  test(`guard resolves an install behind ${label}`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: ${run}
+`);
+      const violations = yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n');
+      assert.match(violations, /must cache app\/yarn\.lock/u);
+      assert.doesNotMatch(violations, /could not derive/u);
+    });
+  });
+}
+
+for (const [label, run] of [
+  ['a bare yarn', 'yarn'],
+  ['flags before the install verb', 'yarn --immutable install'],
+]) {
+  test(`guard recognises ${label} as an install`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: ${run}
+        working-directory: app
+`);
+      assert.match(
+        yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+        /must cache app\/yarn\.lock/u,
+      );
+    });
+  });
+}
+
+test('guard does not mistake a non-install Yarn command for an install', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: yarn build
+        working-directory: app
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), []);
+  });
+});
+
+test('guard ignores a Corepack step whose condition is literally false', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - if: \${{ false }}
+        run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: app/yarn.lock
+      - run: yarn install --immutable
+        working-directory: app
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: corepack enable must run before the setup-node step that caches Yarn',
+    ]);
+  });
+});
+
+test('guard reports a glob install loop as underivable rather than naming a glob lockfile', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    mkdirSync(join(fixtureRoot, 'packages/one'), { recursive: true });
+    writeFileSync(join(fixtureRoot, 'packages/one/yarn.lock'), 'one lockfile\n');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: packages/one/yarn.lock
+      - run: |
+          for d in packages/*; do
+            (cd "$d" && yarn install --immutable)
+          done
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: could not derive every Yarn install project lockfile',
     ]);
   });
 });
