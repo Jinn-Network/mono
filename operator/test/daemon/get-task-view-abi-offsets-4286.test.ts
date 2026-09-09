@@ -8,7 +8,8 @@ import { GET_TASK_VIEW_ABI } from '../../src/daemon/composition-root.js';
  * #4286: the operator's `getTask` ABI must match the compiled `TaskCoordinator.getTask`
  * output shape. `TaskRecord.policy` is a static nested tuple occupying two head words; the
  * previous hand-written literal declared it `uint8`, so every field after it decoded one word
- * early — silently, because the encoded payload is merely longer than the declared head.
+ * early. The shift itself is silent — the encoded payload is merely longer than the declared
+ * head, which viem does not object to.
  *
  * The encoder here is the compile output itself, so this test is a shape conformance check
  * against the source of truth rather than against another hand-copied literal.
@@ -48,7 +49,8 @@ describe('GET_TASK_VIEW_ABI (#4286)', () => {
     }) as typeof RECORD;
 
     // The field after `policy` — the sharpest offset probe. Under the shifted literal this
-    // read `finalizedAttemptCount`'s word and was therefore `true`.
+    // read `finalizedAttemptCount`'s word: `true` where that count is 1, and a hard
+    // `InvalidBytesBooleanError` for any other non-zero count, as with the 3 used here.
     expect(task.creatorCredited).toBe(false);
     expect(task.claimCount).toBe(7);
     expect(task.submittedCount).toBe(5);

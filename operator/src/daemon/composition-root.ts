@@ -886,7 +886,9 @@ const GET_VERDICT_VIEW_ABI = [{
  * The compile-generated slice, not a hand-written literal (#1577 / #4286). The previous local
  * copy declared `policy` as `uint8` where the deployed `TaskRecord` nests
  * `(uint32 maxClaims, bool allowSolverSelfEvaluation)`; that static tuple occupies two head
- * words, so every field after it decoded one word early with no error to signal it.
+ * words, so every field after it decoded one word early. The three `uint32` counts shifted
+ * silently; only the trailing `creatorCredited` bool ever raised, and only when the word it
+ * landed on was neither 0 nor 1.
  */
 export const GET_TASK_VIEW_ABI = TASK_COORDINATOR_ABI;
 
