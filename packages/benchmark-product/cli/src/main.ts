@@ -13,7 +13,7 @@ import {
   type CredentialGrant,
 } from "@colophon-claims/core";
 import { runSampleLifecycle, SAMPLE_LIFECYCLE_MODES, type SampleLifecycleEvent } from "@colophon-claims/core/sample-lifecycle";
-import { BUNDLE_FORMAT } from "@colophon-claims/verify";
+import { BUNDLE_FORMAT } from "@colophon-claims/check";
 import { createVerifiedBundleViewer } from "./viewer.js";
 import { startLocalWorkspaceApp } from "./local-app.js";
 import {
@@ -146,7 +146,7 @@ export function writeQuickstartCompanions(
     flag: "wx",
     mode: 0o600,
   });
-  writeFileSync(join(outputRoot, "NEXT-STEPS.md"), `# Your Colophon sample\n\nThe bundle in \`./bundle\` passed all six verification checks. Nothing was uploaded.\n\nVerify it again without the full product:\n\n\`\`\`sh\nnpx @colophon-claims/verify@0.1 ./bundle\n\`\`\`\n\nUse your own work:\n\n\`\`\`sh\ncolophon open\n\`\`\`\n\nReal agent arms use credentials you explicitly grant and may make paid provider calls. Colophon shows that boundary before launch.\n`, {
+  writeFileSync(join(outputRoot, "NEXT-STEPS.md"), `# Your Colophon sample\n\nThe bundle in \`./bundle\` passed all six verification checks. Nothing was uploaded.\n\nVerify it again without the full product:\n\n\`\`\`sh\nnpx @colophon-claims/check@0.2 ./bundle\n\`\`\`\n\nUse your own work:\n\n\`\`\`sh\ncolophon open\n\`\`\`\n\nReal agent arms use credentials you explicitly grant and may make paid provider calls. Colophon shows that boundary before launch.\n`, {
     encoding: "utf8",
     flag: "wx",
     mode: 0o600,

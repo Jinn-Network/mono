@@ -47,8 +47,8 @@ import {
   PUBLIC_BUNDLE_V8_CHECKS as READER_DISCLOSED_VERIFICATION_CHECKS,
   SELF_RUN_TRUST_ROOT,
   anchoredTrustRoot,
-} from "@colophon-claims/verify";
-import type { ClaimAnchor, ClaimDisclosureSection } from "@colophon-claims/verify";
+} from "@colophon-claims/check";
+import type { ClaimAnchor, ClaimDisclosureSection } from "@colophon-claims/check";
 import {
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
@@ -684,7 +684,7 @@ interface MethodProjection {
 const REPORT_SOURCE = "report.json";
 
 /*
- * Issue #3943: the mirror of the accounting block in `@colophon-claims/verify`'s
+ * Issue #3943: the mirror of the accounting block in `@colophon-claims/check`'s
  * `profile/claim.ts` (issue #3855). That file typed its ten projection-rebuild throws; this copy
  * is on a reader path of its own — `operations/verify.ts` calls core's `assertClaimConsistency`,
  * which calls this `buildClaimPackage` — so leaving it bare classified the SAME malformed sealed
@@ -705,7 +705,7 @@ const REPORT_SOURCE = "report.json";
  * surfaced as `execution`, the code `toErrorEnvelope` carries an untyped throw as; they now
  * surface as `record-integrity` at `report.json`, which is what a reader already got for the
  * same bytes through the standalone verifier. Where that code reaches a reader through
- * `colophon-verify`'s exit mapping, this is the 2 ("the verifier broke") to 1 ("the bundle is
+ * `colophon-check`'s exit mapping, this is the 2 ("the verifier broke") to 1 ("the bundle is
  * bad") shift issue #3943 named, and it is the same shift issues #3741 and #3855 each stated for
  * their own conversions. `errors.ts` documents why the two "not supported" conditions live under
  * `record-integrity` rather than a compat code of their own (issue #3944).

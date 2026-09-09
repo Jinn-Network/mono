@@ -95,14 +95,14 @@ import {
 } from "../intake/external-run-records.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
-import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/verify";
+import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/check";
 import {
   DOMAIN_BINDING_MECHANISM_NAMES,
   exportFreezeRepo,
   spdxLicenseProblem,
   summarizeVerificationOutcome,
   verifyFreezeRepo,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { formatSampleSizeAdvisory } from "../run/sample-size-advisory.js";
@@ -1285,7 +1285,7 @@ function handleIdentityBind(args: ParsedArgs, context: CliContext, jsonMode: boo
     + `Publish this at ${value.proof.location}:\n`
     + `  ${value.proof.expectedValue}\n`
     + `Until it is published the binding names a domain that has not answered; a reader who supplies\n`
-    + `the document to colophon-verify is told exactly that.\n`);
+    + `the document to colophon-check is told exactly that.\n`);
 }
 
 /**

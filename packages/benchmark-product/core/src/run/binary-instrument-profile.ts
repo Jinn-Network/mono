@@ -78,7 +78,7 @@ import {
   BINARY_INSTRUMENT_REPORT_LIMITATIONS,
   PROMPTED_SCREENING_PROFILE,
   binaryInstrumentReportLimitations,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
 export {

@@ -69,7 +69,7 @@
     "demo1:public-bundle:test": "node --test scripts/demo1-export-public-bundle.test.mjs"
   },
   "dependencies": {
-    "@colophon-claims/verify": "0.2.1",
+    "@colophon-claims/check": "0.2.1",
     "@fontsource-variable/newsreader": "5.3.0",
     "@fontsource-variable/public-sans": "5.3.0",
     "@fontsource/ibm-plex-mono": "5.3.0",
@@ -104,7 +104,7 @@
   },
   "resolutions": {
     "@jinn-network/execution-evidence-builder": "portal:../../evidence/execution-evidence-builder",
-    "@colophon-claims/verify": "portal:../verify",
+    "@colophon-claims/check": "portal:../check",
     "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
     "@jinn-network/benchmarking-aggregate": "portal:../../benchmarking/aggregate",
     "@jinn-network/benchmarking-evaluation": "portal:../../benchmarking/evaluation",

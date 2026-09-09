@@ -16,7 +16,7 @@ import {
   requiredBeaconRound,
   verifyRunBinding,
   type BeaconReference,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { itemTaskDigest, parseBenchmark } from "@jinn-network/benchmarking-records";
 import { readAuditEntries } from "../audit/journal.js";
 import { readRunBindingCarriage } from "../binding/carriage.js";

@@ -16,7 +16,7 @@
  * enforcement, it just drives the draft into a state those checks already treat as immutable.
  */
 
-import { taskSelectionContradiction } from "@colophon-claims/verify";
+import { taskSelectionContradiction } from "@colophon-claims/check";
 import {
   RUN_RECORD_KIND,
   parseRun,

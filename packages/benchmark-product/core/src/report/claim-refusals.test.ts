@@ -2,7 +2,7 @@
 
 /**
  * Issue #3943: `report/claim.ts` is the hand-maintained mirror of
- * `@colophon-claims/verify`'s `profile/claim.ts`, and `operations/verify.ts` reaches it through
+ * `@colophon-claims/check`'s `profile/claim.ts`, and `operations/verify.ts` reaches it through
  * core's own `assertClaimConsistency` -- a reader path of its own. Issue #3855 (PR #3899) typed
  * the ten projection-rebuild refusals on the verify side only, so until this file the SAME
  * malformed sealed Report was classified two ways depending on which entry point read it:
@@ -11,7 +11,7 @@
  *
  * That is the shift these tests pin: for these ten conditions core's own path now carries the
  * same code and source path a reader already gets from the standalone verifier. Where that code
- * reaches a reader through `colophon-verify`'s exit mapping it is the 2 ("the verifier broke")
+ * reaches a reader through `colophon-check`'s exit mapping it is the 2 ("the verifier broke")
  * to 1 ("the bundle is bad") shift issue #3943 named.
  *
  * Pinned structurally on `name` / `code` / `issues[].path` rather than on the prose: messages are

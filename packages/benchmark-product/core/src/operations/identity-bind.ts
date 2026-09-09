@@ -2,7 +2,7 @@
  * `identity.bind` (issue #2983): bind this workspace's report-signing key to a domain the operator
  * controls, and say exactly what to publish to make the binding true.
  *
- * The reader's half lives in `@colophon-claims/verify` (`identity/domain-binding.ts`), and this
+ * The reader's half lives in `@colophon-claims/check` (`identity/domain-binding.ts`), and this
  * calls into it rather than restating it — the same single-sourcing rule `../binding/carriage.ts`
  * follows. Minting a binding the shipped verifier would refuse is the one failure this operation
  * must not be able to have, so the document it writes is round-tripped through `verifyDomainBinding`
@@ -31,7 +31,7 @@ import {
   verifyDomainBinding,
   type DomainBindingMechanism,
   type DomainBindingProof,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
@@ -95,7 +95,7 @@ export function identityBind(
       const documentBytes = canonicalJsonBytes({ ...statement.data, signature });
 
       // The shipped reader is the acceptance test for what this writes. A binding this product
-      // minted but `colophon-verify` would refuse is a defect that must surface here, at the one
+      // minted but `colophon-check` would refuse is a defect that must surface here, at the one
       // moment the operator is still in front of it.
       const verified = verifyDomainBinding(documentBytes, [key.keyId]);
 

@@ -58,7 +58,7 @@ const memberRoots = memberDirectories
 
 /**
  * Each member's package name, read off its own manifest, so a cross-member import
- * (`@colophon-claims/verify`) resolves to a module path the same way a relative one does. Read
+ * (`@colophon-claims/check`) resolves to a module path the same way a relative one does. Read
  * rather than listed for the reason the roots are: a renamed or added member must not silently stop
  * resolving.
  */
@@ -380,7 +380,7 @@ function moduleForSpecifier(specifier: string, fromFile: string): string | undef
 
 /**
  * The module that declares the `name` this file uses: followed from the statement that names it,
- * through re-exports (`@colophon-claims/verify` names the package entry, which re-exports the face
+ * through re-exports (`@colophon-claims/check` names the package entry, which re-exports the face
  * from `binding/report-face.ts`), until a module is reached that actually declares it.
  *
  * `undefined` means the origin could not be established, and the scan then treats the occurrence as

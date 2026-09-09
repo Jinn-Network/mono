@@ -27,7 +27,7 @@ import {
   PUBLIC_BUNDLE_V8_CHECKS,
   SUPPORTED_BUNDLE_FORMATS,
   BEACON_SOURCES,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
 import {
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_METADATA_FIRST_PROFILE,
