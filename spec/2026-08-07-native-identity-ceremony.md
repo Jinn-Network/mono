@@ -1,9 +1,13 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.4 (§3.2b amendment — the anchor target policy and anchor digest content,
-per DR-2026-09-06; v0.3 added §3.2a — the authored role → scope map and the #2527
-announce-plane ruling; v0.2 revised v0.1 per independent design review, see §10 review
-record)
+**Version:** 0.5 (corrects §10 (e)'s statement of the fresh-anchor coverage gap — it is
+wholesale across every role, not confined to the widened scope — and points §3.2b and §10 (e)/(f)
+at the proposed successor preimage, trigger, and ruling in
+[`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md); no rule
+here is retired and nothing there is adopted. v0.4 was the §3.2b amendment — the anchor target
+policy and anchor digest content, per DR-2026-09-06; v0.3 added §3.2a — the authored role → scope
+map and the #2527 announce-plane ruling; v0.2 revised v0.1 per independent design review, see §10
+review record)
 
 **Date:** 2026-08-07
 
@@ -626,7 +630,9 @@ existing deployment a re-anchor, and the enumerating check buys most of the evid
 none of that cost wherever it is constructible at all. It belongs to the anchor-locator profile
 document, and changing the preimage twice is worse than once. The defect, the enumerating check
 that partly answers it, and the settlement-free shape that check cannot reach are recorded as
-inputs to that document (§10).
+inputs to that document (§10). A successor preimage that removes the defect and reaches the
+settlement-free shape too is **proposed**, not adopted, in
+[`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §3.
 
 **Re-author (the scope-widening path) recomputes the same digest.**
 [`docs/runbooks/native-trust-reauthor.md`](../docs/runbooks/native-trust-reauthor.md)
@@ -642,7 +648,11 @@ the original `validFrom` and effective window, so the *widened* scope is claimed
 over evidence signed before the widening; a fresh anchor refuses that retroactivity at the cost
 of a coverage gap between the old anchor time and the new one. The reuse-vs-fresh choice is a
 per-widening judgment the runbook MUST state and the operator MUST record with its reason.
-Which is right in general is a retroactive-authority question left open (§10).
+Which is right in general is a retroactive-authority question left open at §10 (e). A
+mint-fresh ruling is **proposed**, not adopted, in
+[`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §6; if
+adopted it would replace the recorded-reason MUST above with the fixed record contents its §6.4
+names. Both MUSTs above stand until it is.
 
 **Rebind (the rotation path's second half): `ceremony-anchor/v1` over the replacement keys.**
 §3.2's deferred `revokeBinding` surface defines rotation as revoke + `authorRoleBinding` for the
@@ -726,11 +736,11 @@ its rules are checked is how §3.2a's class of drift happens, so the split is st
 | Canonical block re-read | Enforced (`:1473-1477`) |
 | Exact digest bytes at the declared `inputByteOffset` | Enforced (`:1468-1471`) |
 | Every referenced anchor is declared in `anchors[]`; at least one per record | Enforced (`native-trust-catalog.ts:326-343`) |
-| The `ceremony-anchor/v1` preimage and every canonicalization rule above | Authoring convention. Not directly recomputable. Checkable by a third party only by enumerating the ≤12 role assignments the scope map cannot distinguish, and only for a catalog carrying a settlement-scoped binding — per the defect above |
+| The `ceremony-anchor/v1` preimage and every canonicalization rule above | Authoring convention. Not directly recomputable. Checkable by a third party only by enumerating the ≤12 role assignments the scope map cannot distinguish, and only for a catalog carrying a settlement-scoped binding — per the defect above. A directly recomputable successor is proposed, not adopted, in [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §3 |
 | The ASCII-only restriction | Authoring convention |
 | The self-send anchor-target default | A default, not a rule |
 | `inputByteOffset === 0` for anything Jinn composes | Authoring convention (`packages/trust/authoring/src/anchor.ts:129`) |
-| The re-author reuse-vs-fresh choice and its recorded reason | Authoring convention |
+| The re-author reuse-vs-fresh choice and its recorded reason | Authoring convention. A mint-fresh ruling that would replace the recorded reason with fixed record contents is proposed, not adopted, in [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §6 |
 | R4 (`effectiveFrom` at or before the anchor's block time) | Authoring convention. Partially enforceable against the observed anchor time, but not ratified as a check: the clamp already makes the anchor govern, and the only harm is a delay the operator chose |
 | The `revocation-anchor/v1` preimage (R1–R3) | Authoring convention today; recomputation is possible by construction and is named as implementation work in DR-2026-09-06 §Consequences |
 | R5 (anchor first) | Authoring convention, as law 1 is for bindings. Unobservable after the fact: the anchor time is what the record carries either way |
@@ -1219,9 +1229,15 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   state its choice. Reuse preserves the original `validFrom` and effective window, which
   claims the *widened* scope retroactively over evidence signed before the widening; a fresh
   anchor refuses that retroactivity and pays a coverage gap between the old anchor time and
-  the new one. Which is right in general is a retroactive-authority policy question that
-  exceeds an anchor-format ratification, and it is not settled here. Owned by
-  [#4172](https://github.com/Jinn-Network/mono/issues/4172).
+  the new one — and that gap is **wholesale**, not confined to the widened scope, because the
+  re-author rewrites the catalog and §6 law 2 gives every re-authored binding the new anchor's
+  block time, so evidence signed inside the window de-attributes for every role. Which is right
+  in general is a retroactive-authority policy question that exceeds an anchor-format
+  ratification, and it is not settled here. Owned by
+  [#4172](https://github.com/Jinn-Network/mono/issues/4172), whose output
+  [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §6
+  **proposes** mint-fresh, always, and is pending the operator's ruling on the PR that carries
+  it.
 - **(f) Should a successor binding-anchor preimage be *directly* third-party recomputable, and
   when is the re-anchor worth paying?** §3.2b records, as a named defect, that
   `ceremony-anchor/v1` commits to `role` labels no third party can read off a catalog. For a
@@ -1232,7 +1248,12 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   not openable at all, because `settlementSafe` appears nowhere in it; that shape has no check
   short of the successor, which sharpens the question rather than settling it. The corrective is
   a directly recomputable preimage — drop `role`, and commit to terms every catalog carries —
-  and it costs every existing deployment a re-anchor.
+  and it costs every existing deployment a re-anchor. A successor of that shape, named
+  `binding-anchor/v1` and specified byte-exactly, is **proposed** in
+  [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §3; it
+  commits to `{protocol, bindings: [{agent, keyId, scope[]}]}`, so it leans on neither the
+  `role` labels nor the Safe and is constructible for the settlement-free shape too. Proposed,
+  not adopted: the question this bullet asks stays open here.
 
   **The trigger is not an evidentiary question alone, and this is the input that was missing.**
   The same recomputation is what shuts the borrowed-anchor residual of §3.2b: a verifier that
@@ -1254,7 +1275,13 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   published version is right rather than compatible with a mistake. Owned by
   [#4172](https://github.com/Jinn-Network/mono/issues/4172), which carries both this question
   and (e) to that document and states the trigger at which the re-anchor becomes worth paying;
-  until a trigger fires, deployments keep `/v1`.
+  until a trigger fires, deployments keep `/v1`. #4172's output is
+  [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md), a
+  source for that document's normative text rather than the text itself: it proposes the
+  successor preimage (§3), a trigger that is a three-limb disjunction of inspectable events
+  (§5), and a mint-fresh ruling for (e) (§6). Its status is Proposed — nothing there is settled
+  until the operator rules on the PR that carries it, and the profile document is still where
+  the normative text lands.
 
 ### Review record (v0.2)
 

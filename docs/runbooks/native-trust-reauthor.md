@@ -69,13 +69,21 @@ the reused locator (`:1029`) and handed to `authorBindings` as both `validFrom` 
 transaction is sent only when the run receipt is moved aside as well. Read the next section
 before running anything.
 
-### Reuse or mint: state the choice, record the reason
+### Mint fresh: move the receipt aside with the catalog
 
 A re-author touches no key, store, or Agent IRI, so all five terms of the `ceremony-anchor/v1`
 preimage are unchanged and the digest is **identical** to the original ceremony's. Ceremony spec
 §3.2b requires this runbook to state which anchor the re-author takes and the operator to record
-why. This section settles **only** that question; the procedure-level defects are flagged above
-and remain unowned.
+why. This section states it as a **rule** rather than a choice: mint fresh, always. The
+procedure-level defects are flagged above and remain unowned.
+
+The rule is **proposed**, not adopted, in
+[`spec/2026-09-09-recoverable-binding-anchor.md`](../../spec/2026-09-09-recoverable-binding-anchor.md)
+§6, which argues it from non-retroactivity of authority and shows that under the successor
+preimage it stops being a judgment and becomes a mechanism. Until that document is adopted, the
+currently ratified `ceremony-anchor/v1` still carries ceremony spec §3.2b's MUST that the
+operator record a reason, so record one; the rest of this section is what to record and how to
+take the fresh anchor.
 
 **Neither verb runs the re-author today.** `jinn ceremony init` refuses the moment the catalog
 exists — "a trust catalog already exists …; genesis never overwrites"
@@ -85,28 +93,29 @@ run receipt (`:1221-1226` → `:840-870`), and all three of its conditions must 
 whose receipt is absent gets no refusal from `join`, it appends, which is the binding conflict
 "Why wholesale, not `appendOperator`" warns about. There is no `--force` on either verb.
 
-**Past the guard, the original anchor is reused by default rather than by decision.** The only
-way through is to move the existing catalog aside. Doing that leaves the run receipt in
-place — it lives at `<dir>/ceremony/receipt.json` (`:266-270`), not in the catalog — so the
-re-run recomputes the identical digest, `reusableAnchor` matches it (`:333-349`), and the
-ceremony resumes onto the **already-mined** anchor. The run does say so, on both surfaces —
-`ceremony_anchor_reused` and `anchor reused <hash> at <time> (from a previous run's receipt)`
-(`:1002`, `:1010`) — so this is not silent. It is unchosen: nothing asked the operator which
-anchor they wanted, and the answer follows from a file they moved for an unrelated reason.
+**The hazard: past the guard, the original anchor is reused by default rather than by
+decision.** The only way through is to move the existing catalog aside. Doing that leaves the
+run receipt in place — it lives at `<dir>/ceremony/receipt.json` (`:266-270`), not in the
+catalog — so the re-run recomputes the identical digest, `reusableAnchor` matches it
+(`:333-349`), and the ceremony resumes onto the **already-mined** anchor. The run does say so,
+on both surfaces — `ceremony_anchor_reused` and
+`anchor reused <hash> at <time> (from a previous run's receipt)` (`:1002`, `:1010`) — so this is
+not silent. Nothing refuses it either. Reuse is what happens to an operator who moves the
+catalog and forgets the receipt, and the cost is retroactivity: the *widened* scope is claimed
+back over evidence signed before the widening, including evidence a verifier refused at the time
+for want of that very scope.
 
-The two options, and how to actually take each:
+**Taking the fresh anchor.** Move `<dir>/ceremony/receipt.json` aside as well as the catalog, so
+that `reusableAnchor` finds nothing. The re-authored bindings then carry the new anchor's block
+time and the widened scope is claimed only from the moment it was widened. The cost is a
+coverage gap between the old anchor time and the new one, and the gap is **wholesale**: because
+the re-author rewrites the catalog and §6 law 2 gives *every* re-authored binding the new
+anchor's block time, evidence signed inside that window de-attributes for **every role**, not
+only the widened one. It resolves against neither the old bindings (replaced) nor the new ones
+(not yet effective).
 
-- **Reuse the existing anchor** — what happens by default on any path that runs at all, and
-  permitted by §6 law 1 because the digest matches. It preserves the original `validFrom` and
-  effective window, so there is no coverage gap. The cost is retroactivity: the *widened* scope
-  is claimed back over evidence signed before the widening, including evidence a verifier
-  refused at the time for want of that very scope.
-- **Mint a fresh anchor** — requires moving `<dir>/ceremony/receipt.json` aside as well as the
-  catalog, so that `reusableAnchor` finds nothing. The re-authored bindings then carry the new
-  anchor's block time and the widened scope is claimed only from the moment it was widened. The
-  cost is a coverage gap between the old anchor time and the new one: evidence signed inside
-  that window resolves against neither the old bindings (replaced) nor the new ones (not yet
-  effective).
+Moving the receipt aside is now compulsory rather than optional, which puts the following
+footgun on the on-path procedure rather than beside it. Read it before moving anything.
 
   > **Before moving the receipt aside, confirm the native config carries `agentIri` — and
   > `admissionAgent`, if this operator provisions admission.** The receipt is the *fallback*
@@ -119,11 +128,25 @@ The two options, and how to actually take each:
   > write-back never completed. There the receipt is the *only* record of the Agent IRI, and
   > moving it aside destroys it. Copy it somewhere, do not delete it.
 
-Neither is right in general — it is a retroactive-authority judgment, left open at ceremony spec
-§10 (e) and owned by [#4172](https://github.com/Jinn-Network/mono/issues/4172). Whichever is
-taken, **write the reason into the re-author's record** alongside the anchor transaction hash,
-and state explicitly whether the receipt was moved aside, since that single act is what decides
-it.
+Because making that step mandatory promotes this failure onto the on-path procedure, the ruling
+carries one implementation requirement, named as a follow-up with no owner and as a blocker on
+the ruling's *execution* rather than on its adoption: the re-author path MUST refuse when
+neither the native config nor an accessible receipt carries `agentIri` (and `admissionAgent`,
+where admission is provisioned), instead of minting.
+
+**What to write into the re-author's record.** Four things, per
+[`spec/2026-09-09-recoverable-binding-anchor.md`](../../spec/2026-09-09-recoverable-binding-anchor.md)
+§6.4:
+
+- the fresh anchor's transaction hash and block time;
+- the outgoing anchor's transaction hash and block time;
+- the scope change, and the code change that caused it;
+- the resulting window `[old anchor time, new anchor time)`, stated explicitly as a window in
+  which evidence de-attributes **for every role**, not only the widened one.
+
+The retroactive-authority question these answer is left open at ceremony spec §10 (e) and owned
+by [#4172](https://github.com/Jinn-Network/mono/issues/4172), whose output is the document
+above.
 
 ## Why wholesale, not `appendOperator`
 
