@@ -349,9 +349,17 @@ export function isSpdxLicenseExpression(value: string): boolean {
  * and no bundle member has a byte cap — cost 4.7s at 200KB and quadruples per doubling, about
  * 110 minutes at 8MB, on the reader's machine and inside one synchronous call. The bound makes
  * each start position cost at most 64 steps, so the scan is linear (281ms at 8MB) for a value
- * whose refusal is unchanged; the longest registered tag name (`SPDX-PackageDownloadLocation`)
- * spends 22 of the 64. What it gives up is `SPDX-` followed by 65+ name characters and a colon,
- * which names no tag any scanner carries.
+ * whose refusal is unchanged; `SPDX-License-Identifier`, the tag this guard exists for, spends 17
+ * of the 64, and no source-file tag SPDX defines comes near it. What it gives up is `SPDX-`
+ * followed by 66 or more name characters and a colon, which names no tag any scanner carries.
+ *
+ * The separator run stays unbounded, which is safe for a structural reason rather than a measured
+ * one: the name class and `White_Space` are disjoint, so from any start position the whitespace
+ * loop is entered at exactly one place — where the greedy name run ends — and every shorter name
+ * length the engine falls back to lands on a name character, where the loop matches nothing.
+ * There is no second quantifier for it to interleave with, so the run is walked once. Bounding it
+ * would cost a real refusal: a scanner's `\s*` matches a separator of any length, so a tag held
+ * off its colon by a long run of spaces is a tag to the reader that matters.
  */
 const SPDX_TAG = /SPDX-[A-Za-z][A-Za-z0-9-]{0,64}\p{White_Space}*:/iu;
 

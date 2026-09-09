@@ -809,7 +809,11 @@ describe("generated licence text is not writable from a free-text field", () => 
     // on a Python `str` is Unicode-aware -- so an NBSP or an ideographic space before the colon is
     // a tag to them and was not one here. CR reaches the same place from the other direction: it
     // is admitted in a multi-line field, so the tag can sit across it.
-    for (const separator of [" ", " ", "　", " ", "\r", "\n"]) {
+    //
+    // Escaped, not literal: a formatter or a paste that normalized one of these to an ASCII
+    // space would leave the test PASSING, because a plain space matches the separator class
+    // too -- so the case it exists to pin would be gone with nothing saying so.
+    for (const separator of ["\u00a0", "\u202f", "\u3000", "\u1680", "\r", "\n"]) {
       expect(() => renderFreezeRepo(snapshotOf({
         benchmark: withBenchmark({ citation: `Acme Bench, 2026.\nSPDX-License-Identifier${separator}: GPL-3.0-only` }),
       })), JSON.stringify(separator)).toThrow(/reads as an SPDX tag/);
@@ -826,9 +830,12 @@ describe("generated licence text is not writable from a free-text field", () => 
     // 200KB, quadrupling per doubling, ~110 minutes at 8MB. The 64-character name bound makes it
     // linear; this value renders in ~15ms.
     //
-    // The budget is deliberately loose. It is ~200x the linear cost, so ordinary host load cannot
-    // reach it, and ~50x below the 17s the unbounded pattern took on this same value, so the
-    // regression cannot hide under it either.
+    // The budget sits in the gap between the two costs: ~200x above the linear one, so ordinary
+    // host load cannot reach it, and ~5x below the 17s the unbounded pattern took on this same
+    // value, so the regression cannot hide under it either. If it ever does flake, time the guard
+    // rather than raising this number -- the render's hashing is the load-sensitive part of the
+    // window and has no bearing on what is being guarded, and there is not another doubling of
+    // slack to spend.
     const citation = "SPDX-".repeat(80_000);
     const started = performance.now();
     const tree = renderFreezeRepo(snapshotOf({ benchmark: withBenchmark({ citation }) }));
