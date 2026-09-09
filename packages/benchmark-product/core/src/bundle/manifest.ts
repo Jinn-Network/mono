@@ -44,8 +44,9 @@ export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
  * constant: a `/10` claim seals `PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND`, a released and immutable
  * reader that predates `/10` and refuses it at manifest parse, so the bundle would be permanently
  * unverifiable under its own instruction. `/10` enters this schema so a bundle can be LABELLED
- * with it -- which is what lets `v6-verify.test.ts` prove the round trip -- never so one can be
- * produced. The producer flips in the change that pins `/10` to the release serving it.
+ * with it -- which is what lets `v10-verify.test.ts` round-trip one through the portable reader --
+ * never so one can be produced. The producer flips in the change that pins `/10` to the release
+ * serving it.
  */
 export const BUNDLE_V10_FORMAT = "benchmark-product-public-bundle/10" as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;

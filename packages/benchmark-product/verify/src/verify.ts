@@ -98,7 +98,6 @@ import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V10_FORMAT } from "./manifes
 import {
   BUNDLE_V6_FORMAT,
   LEGACY_ANCHOR_MEMBER_PATTERN,
-  PUBLIC_BUNDLE_FILES,
   PUBLIC_BUNDLE_V4_FILES,
   legacyClosure,
   type LegacyBundleFormat,
@@ -532,18 +531,17 @@ export async function verifyPublicBundleSnapshot(
   // no mandatory MEMBER: the sealed disclosure record travels at the already-allowlisted
   // `records/<sha256>.bin` path, so its list is v7's, which is v4's.
   //
-  // `/10` is stated here for the same reason `/8` is, and moves NONE of those three axes: it is
-  // v6's closure exactly — v2's member list, no qualification, anchors, the same seven checks —
-  // differing only in which report page `buildPublicAssets` renders (issue #4191). A presentation
-  // generation that changed a member or a check would be claiming the render proves something the
-  // records did not already prove.
+  // `/10` moves NONE of those three axes: it is v6's closure exactly, differing only in which
+  // report page `buildPublicAssets` renders (issue #4191). A presentation generation that changed
+  // a member or a check would be claiming the render proves something the records did not already
+  // prove. So it is READ FROM v6's own row rather than restated as a fourth cell here: a copy
+  // would be a second place for v6's closure to be described, and the two could silently drift.
+  // Unlike `/8`, which really is a new closure, `/10` has nothing of its own to state.
   const declaredFormat = checked.manifest.format;
   const carriesDisclosure = declaredFormat === BUNDLE_V8_FORMAT;
   const { carriesQualification, carriesAnchors, mandatoryFiles } = carriesDisclosure
     ? { carriesQualification: true, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_V4_FILES }
-    : declaredFormat === BUNDLE_V10_FORMAT
-      ? { carriesQualification: false, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_FILES }
-      : legacyClosure(declaredFormat);
+    : legacyClosure(declaredFormat === BUNDLE_V10_FORMAT ? BUNDLE_V6_FORMAT : declaredFormat);
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }

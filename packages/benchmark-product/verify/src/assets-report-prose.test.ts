@@ -22,7 +22,7 @@ import {
 } from "./assets.js";
 import { BUNDLE_FORMAT } from "./legacy-closures.js";
 import { BUNDLE_V10_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
-import { reportProseWordCount, reviewReportProse } from "./report-prose-review.js";
+import { REPORT_PROSE_WORD_CEILING, reportProseWordCount, reviewReportProse } from "./report-prose-review.js";
 import { GOLDEN_PUBLISHED_PAGE, goldenInput } from "./testing/golden-asset-input.js";
 
 const decoder = new TextDecoder();
@@ -117,8 +117,14 @@ describe("the composed page's prose review", () => {
   test("measures the count REPORT_PROSE_WORD_CEILING is re-pinned to", async () => {
     // The exact number, not merely "fewer than before": the ceiling is a ratchet, and a ratchet
     // pinned to an approximation ratchets nothing.
-    expect(reportProseWordCount(await page(BUNDLE_V10_FORMAT))).toBe(327);
+    const measured = reportProseWordCount(await page(BUNDLE_V10_FORMAT));
+    expect(measured).toBe(327);
     expect(reportProseWordCount(GOLDEN_PUBLISHED_PAGE)).toBe(363);
+    // And the constant IS that measurement, not merely above it. `report-prose-review.test.ts`
+    // asserts the page stays at or under the ceiling, which a raised ceiling would also satisfy;
+    // issue #3016 acceptance criterion 3 requires the ceiling to be re-pinned to the count the
+    // revision actually measured, so raising it without shipping prose has to fail somewhere.
+    expect(REPORT_PROSE_WORD_CEILING).toBe(measured);
   });
 });
 
@@ -186,6 +192,13 @@ describe("no disclosure is lost under a method whose claim line does not carry i
     const composed = await methodPage(PAIRED_DELTA, pairedDeltaResults);
     expect(composed).not.toContain(WINNER + "; wilson@1");
     expect(composed.split(WINNER).length - 1).toBe(1);
+    // And keeps the differently-worded second statement too, which is the `/2` behaviour: with no
+    // header copy to be the single one, BOTH comparison sites are left exactly as they were.
+    // Asserted rather than left implicit because counting only the literal above would report
+    // "stated once" on a page that states the same disclosure twice in two wordings. Retiring that
+    // repetition means choosing which wording survives -- a ruling nobody has made (`assets.ts`,
+    // `neutralClaimStatesNoWinner`).
+    expect(composed).toContain("This is descriptive evidence, not a registered comparative winner.");
   });
 
   test("paired-majority-delta@1 keeps it, for the same reason", async () => {

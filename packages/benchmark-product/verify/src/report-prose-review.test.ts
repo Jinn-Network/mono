@@ -134,6 +134,11 @@ describe("the report page this revision renders", () => {
   });
 
   test("every frozen finding names a rule that still exists", () => {
+    // Vacuous while the frozen list is empty (issue #4191 retired all four): the page this
+    // revision renders carries no finding, so this asserts nothing today. It is kept armed rather
+    // than deleted because the list is the mechanism, not a one-off -- the next presentation
+    // revision that defers a finding refills it, and this is the check that stops a deferral from
+    // naming a rule the review no longer runs.
     const ruleIds = new Set(REPORT_PROSE_RULES.map((rule) => rule.id));
     for (const frozen of FROZEN_REPORT_PROSE_FINDINGS) expect(ruleIds, frozen.text).toContain(frozen.rule);
   });

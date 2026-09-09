@@ -682,9 +682,14 @@ function binaryFactsHtml(facts: BinaryFacts, capabilities: ReadonlySet<Presentat
  * would delete the only statement of it from every paired-method page. The golden conformance
  * fixture is `wilson@1` and would never catch that.
  *
- * The rule the composed page implements: the page states it exactly once, in the highest-priority
- * slot that carries it -- the header when the method's claim line has it, otherwise the
- * descriptive comparison line. Every other site drops it.
+ * The rule the composed page implements, stated exactly: the two comparison-section sites drop
+ * their winner clause ONLY when the header already carries it. When the header does not, both are
+ * left exactly as the `/2` page renders them -- so a paired-method page still states the
+ * disclosure twice, which is the `/2` behaviour and not an improvement. Ruling 1 is scoped to the
+ * repetition the external reader actually hit, on the page the golden fixture renders; retiring
+ * the paired-method repetition means choosing which of two DIFFERENTLY-WORDED sentences survives,
+ * which is a presentation ruling nobody has made. Not making it here is deliberate: the safe
+ * direction is the one that cannot lose a disclosure.
  */
 function neutralClaimStatesNoWinner(facts: MethodFacts): boolean {
   return facts.kind === "wilson" || facts.kind === "pairwise-disagreement";
@@ -1341,8 +1346,9 @@ function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): stri
   return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}. ${plainText(compactStatus(input, reportFacts))}. Report ${input.reportSha256}.${pairedClause} Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
 }
 
-/** Fixed, deterministic public-bundle/2 presentation bytes. The builder only projects already
- * verified stored facts; it never computes a statistic, selects a winner, or reconciles records. */
+/** Fixed, deterministic presentation bytes for the format `input.format` names. The builder only
+ * projects already verified stored facts; it never computes a statistic, selects a winner, or
+ * reconciles records. */
 export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<string, Uint8Array>> {
   // `Object.hasOwn`, and a refusal rather than a default, for the reason `legacyClosure` states:
   // an unknown format must never be answered from another format's cell, because rendering one

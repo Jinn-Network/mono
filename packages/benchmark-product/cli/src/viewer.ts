@@ -3,15 +3,8 @@ import { lstatSync, realpathSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { extname, resolve } from "node:path";
 import {
-  BUNDLE_V4_FORMAT,
   BUNDLE_V5_FORMAT,
-  BUNDLE_V7_FORMAT,
-  BUNDLE_V8_FORMAT,
-  PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
   bundleIdentityLabel,
   isMetadataFirstBundle,
   summarizeVerificationOutcome,
@@ -90,17 +83,13 @@ function viewerHtml(
   const artifactContentNote = outcome.artifactContent === undefined
     ? ""
     : `<p class="deferred-note">${outcome.artifactContent.notFetched} artifact ${outcome.artifactContent.notFetched === 1 ? "body was" : "bodies were"} not fetched. This bundle carries their exact digests, not their bytes, so nothing here says what they contain. Check fetched bytes against those digests yourself, or verify the full-evidence bundle.</p>`;
-  // The anchored binary-qualification closure is the one format the @0.1 line cannot read
-  // (issue #3205), so it is named before the fall-through rather than inheriting it.
-  const verificationCommand = verification.format === BUNDLE_V5_FORMAT
-    ? PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND
-    : verification.format === BUNDLE_V8_FORMAT
-      ? PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND
-      : verification.format === BUNDLE_V7_FORMAT
-        ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
-        : verification.format === BUNDLE_V4_FORMAT
-          ? PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND
-          : PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND;
+  // Read from the total map rather than a cascade with a `/2` fall-through. Formats past v6
+  // cannot read the @0.1 line (issue #3205 for `/7`, issue #4191 for `/10`), and a fall-through
+  // hands exactly those an instruction to fail -- silently, because the fall-through is where a
+  // format lands when nobody remembered it. `PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS` is TOTAL
+  // over `SupportedBundleFormat`, so an unnamed format is a compile error in that map instead.
+  const verificationCommand =
+    PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[verification.format].compatibleCommand;
   // No released npx line understands the metadata-first profile -- an older reader refuses it at
   // manifest parse -- so this page offers the local command that does work instead of an
   // instruction to fail. The key is the bundle's declared profile, not whether a body happened to
