@@ -28,6 +28,7 @@ const BENCHMARKING_PACKAGES = [
 // (record-discovery-package-inventory.test.mjs precedent, program §7.8).
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
+  ['@jinn-network/contract-abis', join(root, 'packages', 'contract-abis')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
@@ -169,6 +170,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-profiles',
     ],
     portalResolutions: [
+      '@jinn-network/contract-abis',
       '@jinn-network/record-discovery-protocol',
       '@jinn-network/record-discovery-serve',
       '@jinn-network/task-execution-backend',

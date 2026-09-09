@@ -17,6 +17,7 @@ on:
       # Transitive `portal:` closure of the workspaces above (#3573). Each is built
       # from source into this lane, so a change confined to one of them changes what
       # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/contract-abis/**"
       - "packages/discovery/protocol/**"
       - "packages/evidence/protocol/**"
       - "packages/marketplace/binding/**"
@@ -38,6 +39,7 @@ on:
       # Transitive `portal:` closure of the workspaces above (#3573). Each is built
       # from source into this lane, so a change confined to one of them changes what
       # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
+      - "packages/contract-abis/**"
       - "packages/discovery/protocol/**"
       - "packages/evidence/protocol/**"
       - "packages/marketplace/binding/**"
@@ -113,6 +115,7 @@ jobs:
             packages/task-supply/derivation/yarn.lock
             packages/task-supply/chain-scenarios/yarn.lock
             packages/task-supply/posting/yarn.lock
+            packages/contract-abis/yarn.lock
       # A freshly rolled runner image can regress the packed-consumer smoke:
       # node 22.23.2's bundled npm dies with "Cannot read properties of null
       # (reading 'edgesOut')" on yarn-packed tarballs (first seen on the
@@ -164,6 +167,11 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
+      - name: Build cross-tree portal dependency from source (contract-abis, §7.8)
+        working-directory: packages/contract-abis
+        run: |
+          yarn install --immutable
+          yarn build:dist
       - name: Build cross-tree portal dependency from source (marketplace-binding, §7.8)
         working-directory: packages/marketplace/binding
         run: |

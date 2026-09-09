@@ -49,10 +49,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@jinn-network/contract-abis@portal:../../contract-abis::locator=%40jinn-network%2Fmarketplace-binding%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/contract-abis@portal:../../contract-abis::locator=%40jinn-network%2Fmarketplace-binding%40workspace%3A."
+  languageName: node
+  linkType: soft
+
 "@jinn-network/marketplace-binding@workspace:.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/marketplace-binding@workspace:."
   dependencies:
+    "@jinn-network/contract-abis": "npm:0.1.0"
     "@jinn-network/task-execution-backend": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"

@@ -9,6 +9,7 @@ on:
   pull_request:
     paths:
       - "packages/marketplace/**"
+      - "packages/contract-abis/**"
       - "contracts/**"
       - ".github/scripts/marketplace-*.test.mjs"
       - ".github/scripts/custody-boundaries.test.mjs"
@@ -40,6 +41,7 @@ on:
     branches: [next]
     paths:
       - "packages/marketplace/**"
+      - "packages/contract-abis/**"
       - "contracts/**"
       - ".github/scripts/marketplace-*.test.mjs"
       - ".github/scripts/custody-boundaries.test.mjs"
@@ -151,6 +153,7 @@ jobs:
             packages/marketplace/pipeline/yarn.lock
             packages/marketplace/testing/yarn.lock
             packages/marketplace/venue-base/yarn.lock
+            packages/contract-abis/yarn.lock
       - name: Pin npm for packed-consumer smoke coverage
         run: npm install --global npm@11.19.0 --no-audit --no-fund
       - name: Enable Yarn 4.13.0
@@ -160,6 +163,11 @@ jobs:
       - name: Generate TaskCoordinator artifact from tracked contracts source
         run: |
           (cd contracts && yarn install --immutable && yarn compile)
+      - name: Build cross-tree portal dependency from source (contract-abis, §7.8)
+        working-directory: packages/contract-abis
+        run: |
+          yarn install --immutable
+          yarn build:dist
       - name: Build cross-tree portal dependency from source (evidence-protocol, §7.8)
         working-directory: packages/evidence/protocol
         run: |
@@ -349,6 +357,7 @@ jobs:
             packages/marketplace/projector/yarn.lock
             packages/marketplace/venue-base/yarn.lock
             packages/marketplace/testing/yarn.lock
+            packages/contract-abis/yarn.lock
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
@@ -364,6 +373,7 @@ jobs:
           yarn compile
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
+          (cd packages/contract-abis && yarn install --immutable && yarn build:dist)
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
