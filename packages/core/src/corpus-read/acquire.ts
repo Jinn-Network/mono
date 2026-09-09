@@ -3,11 +3,17 @@
  *
  * Always hash-verifies before persisting to cache.
  *
+ * The two *network* legs — the donated IPFS mirror and the operator origin —
+ * are not implemented here: they are `fetchVerifiedArtifact`, the keyless
+ * retrieval primitive (#4179). What remains in this file is the store-aware
+ * composition around it: the cache read, the self-store mirror, the route
+ * resolver, and the cache writes whose ordering the daemon owns.
+ *
  * Spec §2.3 step 4-6.
  */
 
-import { createHash } from 'node:crypto';
 import { fetchArtifactContent, type AcquireResult } from './fetch-artifact.js';
+import { fetchVerifiedArtifact, verifyArtifactDigest } from './artifact-retrieval.js';
 import type {
   ArtifactContent,
   ArtifactSource,
@@ -15,7 +21,6 @@ import type {
   RouteResolver,
 } from './types.js';
 import { AcquireError, HashMismatchError } from './types.js';
-import { classifyIpfsFetchFailure, fetchFromIpfs as defaultFetchFromIpfs } from './ipfs.js';
 
 /**
  * Origin acquire function. Historically returned `Buffer | null`; the
@@ -30,8 +35,6 @@ type AcquireFn = (
   privateKey?: string,
 ) => Promise<Buffer | null | AcquireResult>;
 type FetchFromIpfsFn = (gatewayUrl: string, cid: string) => Promise<unknown>;
-
-const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1';
 
 export interface AcquireArtifactArgs {
   sha256: string;
@@ -50,40 +53,21 @@ export interface AcquireArtifactArgs {
   fetchFromIpfs?: FetchFromIpfsFn;
 }
 
-function sha256Hex(buf: Buffer): string {
-  return createHash('sha256').update(buf).digest('hex');
-}
-
 /**
- * Log an IPFS read that the acquisition chain is about to fall through, unless
- * the gateway actually answered "not there" (#3441). A cap refusal is positive
- * evidence the content exists, so it must not read like an ordinary miss.
+ * Adapt a legacy `AcquireFn` to the primitive's clean seam. The legacy shape —
+ * a third `privateKey` parameter and a `Buffer | null` return — exists for
+ * older test fakes and stays confined to this file.
  */
-function warnIpfsFallThrough(subject: string, error: unknown): void {
-  const classification = classifyIpfsFetchFailure(error);
-  if (classification === 'not-found') return;
-  const detail = error instanceof Error ? error.message : String(error);
-  console.warn(
-    `[corpus-read] IPFS source for ${subject} could not be used (${classification}), `
-      + `falling through to the next source: ${detail}`,
-  );
-}
-
-function decodeDonationArtifact(raw: unknown, expectedSha256: string): Buffer {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('donation artifact payload is not an object');
-  }
-  const record = raw as Record<string, unknown>;
-  if (record['schemaVersion'] !== DONATION_ARTIFACT_ENCODING || record['encoding'] !== DONATION_ARTIFACT_ENCODING) {
-    throw new Error('donation artifact payload has unexpected encoding');
-  }
-  if (record['sha256'] !== expectedSha256) {
-    throw new Error('donation artifact sha256 does not match requested artifact');
-  }
-  if (typeof record['data'] !== 'string') {
-    throw new Error('donation artifact payload is missing base64 data');
-  }
-  return Buffer.from(record['data'], 'base64');
+function toAcquireResultFn(
+  acquireFn: AcquireFn,
+  privateKey: string,
+): (endpoint: string, sha256: string) => Promise<AcquireResult> {
+  return async (endpoint, sha256) => {
+    const raw = await acquireFn(endpoint, sha256, privateKey);
+    if (raw === null) return { ok: false, reason: 'not_found', message: 'origin returned null (404 / not found)' };
+    if (Buffer.isBuffer(raw)) return { ok: true, content: raw };
+    return raw;
+  };
 }
 
 export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise<ArtifactContent> {
@@ -100,7 +84,7 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
     ipfsGatewayUrl,
     ownerSafe,
     acquireFn = (endpoint, sha256) => fetchArtifactContent(endpoint, sha256),
-    fetchFromIpfs = defaultFetchFromIpfs,
+    fetchFromIpfs,
   } = args;
 
   const now = () => new Date().toISOString();
@@ -120,16 +104,18 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
     };
   }
 
-  // 2. Public IPFS donation source.
+  // 2. Public IPFS donation source. The primitive owns the fetch, the decode,
+  // the verification, and the #3441 fall-through warning; the cache write and
+  // the mismatch-is-fatal decision stay here, where the store lives.
   const ipfsSource = sources.find((source) => source.kind === 'ipfs');
   if (ipfsSource && ipfsGatewayUrl) {
-    try {
-      const raw = await fetchFromIpfs(ipfsGatewayUrl, ipfsSource.cid);
-      const bytes = decodeDonationArtifact(raw, sha256);
-      const actualSha = sha256Hex(bytes);
-      if (actualSha !== sha256) {
-        throw new HashMismatchError(sha256, actualSha, 'ipfs', ownerSafe);
-      }
+    const retrieved = await fetchVerifiedArtifact(
+      { sha256, artifactType },
+      { sources, ipfsGatewayUrl, ownerSafe, envelopeCid },
+      { deps: { fetchFromIpfs } },
+    );
+    if (retrieved.ok) {
+      const bytes = retrieved.artifact.bytes;
       const ts = now();
       store.saveNetworkArtifact({
         sha256,
@@ -151,17 +137,14 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
         fetchedAt: ts,
         sourceOperator: ownerSafe,
       };
-    } catch (err) {
-      if (err instanceof HashMismatchError) throw err;
-      // Donated IPFS is an opportunistic fast path. Gateway failures and
-      // malformed donation payloads should not block the acquisition chain;
-      // only verified byte hash mismatches remain fatal.
-      //
-      // Swallowing the failure silently, though, turns a size-policy refusal or
-      // a blocked redirect into an invisible data gap (#3441). Classify before
-      // swallowing so anything that is not proven absence reaches the operator.
-      warnIpfsFallThrough(`donation artifact ${sha256}`, err);
     }
+    if (retrieved.reason === 'digest_mismatch') {
+      throw new HashMismatchError(sha256, retrieved.mismatch!.actualSha256, 'ipfs', ownerSafe);
+    }
+    // Donated IPFS is an opportunistic fast path: gateway failures and
+    // malformed donation payloads fall through to the next source. Anything
+    // that was not proven absence has already reached the operator as a
+    // warning from inside the primitive (#3441).
   }
 
   // 3. Self-store fast path
@@ -173,9 +156,9 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
       // propagate the bad bytes into network_artifacts where peers can
       // fetch them. Throwing closes the cache-poisoning gap; the self-store
       // path is now hash-equivalent to origin / route-resolver.
-      const actualSha = sha256Hex(own.content);
-      if (actualSha !== sha256) {
-        throw new HashMismatchError(sha256, actualSha, 'self-store', selfSafeAddress);
+      const verified = verifyArtifactDigest(sha256, own.content);
+      if (!verified.ok) {
+        throw new HashMismatchError(sha256, verified.actualSha256, 'self-store', selfSafeAddress);
       }
       // Mirror into cache so peer asks for the same content can hit cache (provenance: self-store-mirror).
       const ts = now();
@@ -204,9 +187,9 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
     try {
       const out = await routeResolver.resolve({ sha256, access, requesterSafe: selfSafeAddress });
       if (out) {
-        const actualSha = sha256Hex(out.bytes);
-        if (actualSha !== sha256) {
-          throw new HashMismatchError(sha256, actualSha, 'route-resolver', out.sourceOperator);
+        const verified = verifyArtifactDigest(sha256, out.bytes);
+        if (!verified.ok) {
+          throw new HashMismatchError(sha256, verified.actualSha256, 'route-resolver', out.sourceOperator);
         }
         const ts = now();
         store.saveNetworkArtifact({
@@ -236,36 +219,25 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
   }
 
   // 5. Origin fetch
-  let bytes: Buffer | null;
-  try {
-    const raw = await acquireFn(access.endpoint, sha256, privateKey);
-    // Accept both the legacy `Buffer | null` shape and the discriminated
-    // union from fetchArtifactContent. Buffer.isBuffer guards before we
-    // duck-type into the union.
-    if (raw === null || Buffer.isBuffer(raw)) {
-      bytes = raw;
-    } else if (raw.ok === true) {
-      bytes = raw.content;
-    } else {
-      // ok: false — preserve the reason so the caller / daemon route can
-      // surface it via AcquireError.cause.
-      throw new AcquireError(
-        sha256,
-        `origin fetch failed: ${raw.reason}${raw.message ? ` (${raw.message})` : ''}`,
-        raw,
-      );
+  const retrieved = await fetchVerifiedArtifact(
+    { sha256, artifactType },
+    { endpoint: access.endpoint, ownerSafe, envelopeCid },
+    { deps: { fetchArtifact: toAcquireResultFn(acquireFn, privateKey) } },
+  );
+  if (!retrieved.ok) {
+    if (retrieved.reason === 'digest_mismatch') {
+      throw new HashMismatchError(sha256, retrieved.mismatch!.actualSha256, 'origin', ownerSafe);
     }
-  } catch (err) {
-    if (err instanceof AcquireError) throw err;
-    throw new AcquireError(sha256, 'origin fetch failed', err);
+    // Preserve the reason token in the message so callers and the daemon route
+    // can surface which failure this was.
+    const attempt = retrieved.attempts.find((entry) => entry.leg === 'origin');
+    throw new AcquireError(
+      sha256,
+      `origin fetch failed: ${retrieved.reason}${attempt?.message ? ` (${attempt.message})` : ''}`,
+      retrieved,
+    );
   }
-  if (!bytes) {
-    throw new AcquireError(sha256, 'origin returned null (404 / not found)');
-  }
-  const actualSha = sha256Hex(bytes);
-  if (actualSha !== sha256) {
-    throw new HashMismatchError(sha256, actualSha, 'origin', ownerSafe);
-  }
+  const bytes = retrieved.artifact.bytes;
   const ts = now();
   store.saveNetworkArtifact({
     sha256,
