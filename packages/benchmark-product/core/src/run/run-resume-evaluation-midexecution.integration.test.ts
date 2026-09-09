@@ -36,12 +36,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
-  expectedCellCount,
   parseBenchmark,
   parseMatrix,
   parseRun,
 } from "@jinn-network/benchmarking-records";
-import { launchAndWatch, MAX_CONCURRENT_CELLS } from "@jinn-network/benchmarking-run";
+import { launchAndWatch } from "@jinn-network/benchmarking-run";
 import { armAdd } from "../operations/arms.js";
 import type { OperationContext } from "../operations/context.js";
 import { createDraft, readDraftDocument } from "../operations/drafts.js";
@@ -288,46 +287,17 @@ describe("resume reconciles an evaluation attempt killed mid-execution", () => {
       const journalPath = rewindAttemptPastTerminal(accepted.submissionSha256);
       expect(readFileSync(journalPath, "utf8")).not.toContain("attempt-terminal");
 
-      // The ceiling below only takes capacity off the table while it actually exceeds the
-      // attempts this run can hold live at once — one solve leg and one evaluation leg per cell.
-      // Both halves of that are constants owned elsewhere (`MAX_CONCURRENT_CELLS` in
-      // `@jinn-network/benchmarking-run`, the cell count in this file's own fixture), so assert
-      // the relation rather than restate it in prose: lowering the platform maximum or widening
-      // the fixture then fails here, loudly and immediately, instead of returning this test to
-      // the machine-speed-dependent flake the ceiling was raised to cure.
-      const spec = readDraftDocument(workspaceDir, draftId).spec;
-      if (spec.taskSet.kind !== "benchmark") throw new Error("unreachable: no benchmark");
-      const runSha256 = requireRunState(workspaceDir, draftId).runSha256;
-      if (runSha256 === undefined) throw new Error("unreachable: no run record");
-      const liveAttemptCeiling = expectedCellCount(
-        parseBenchmark(getSealedBytes(workspaceDir, spec.taskSet.benchmarkSha256)),
-        parseRun(getSealedBytes(workspaceDir, runSha256)),
-      ) * 2;
-      expect(
-        MAX_CONCURRENT_CELLS,
-        `the platform ceiling no longer covers this run's ${liveAttemptCeiling} live attempts`,
-      ).toBeGreaterThanOrEqual(liveAttemptCeiling);
-
       // ── resume through the PUBLIC operation, on a fresh venue ───────────────────────────
-      // Capacity is deliberately taken OFF the table: the ceiling is the platform maximum, well
-      // above the twelve attempts this run can ever hold live at once (six cells, each a solve
-      // leg and an evaluation leg). A smaller ceiling makes the test's own crash a race.
-      // `LocalBackend`'s rehydration calls `capacity.restore(live)` over every attempt on disk
-      // that has no `attempt-terminal` event, and the abandoned drive above leaves a
-      // TIMING-DEPENDENT number of those: the interrupted evaluation attempt always (it is
-      // rewound past its terminal on purpose), plus however many solve legs happened not to have
-      // terminaled at the instant the drive was abandoned — more of them on a slower or busier
-      // machine. Each holds a slot, and the evaluation one holds its until that leg reaches
-      // `dispatchEvaluation` (its own defect, issue #3192). Whenever the held count exceeds the
-      // headroom, an unrelated cell loses its dispatch to "local backend capacity exhausted" and
-      // expires — collateral of the crash, not the verdict-recovery question under test. A fixed
-      // small headroom cannot bound a count that varies with machine speed, so this does not use
-      // one: verified by sweeping the ceiling down, which reproduces exactly the CI failure
-      // (a cell `expired` at `dispatches: 1`, no attempt, no verdict) at and below 5.
-      const resumed = await runResume(contextFor(clock), {
-        draftId,
-        maxConcurrentCells: MAX_CONCURRENT_CELLS,
-      });
+      // `maxConcurrentCells` is left at its default of 1 on purpose, and that is the assertion:
+      // this run must not starve at the narrowest concurrency the product ships. It used to need
+      // the platform maximum, because `LocalBackend`'s rehydration reserved a capacity slot for
+      // every attempt on disk without an `attempt-terminal` event — the interrupted evaluation
+      // attempt (rewound past its terminal above) plus a machine-speed-dependent number of solve
+      // legs abandoned mid-flight — and a cell that lost its dispatch to "local backend capacity
+      // exhausted" expired as collateral of the crash rather than of the question under test.
+      // #3192 made rehydration restore a slot only for an attempt whose processes actually exist,
+      // so after the abandoned drive's shutdown drains, the held count is deterministically zero.
+      const resumed = await runResume(contextFor(clock), { draftId });
       expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
 
       const final = readRunJournalEntries(workspaceDir, draftId);

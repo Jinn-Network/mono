@@ -336,13 +336,17 @@ describe("resume recovers an evaluation attempt killed during harvest", () => {
       // TIMING-DEPENDENT number of those: the interrupted evaluation attempt always (it is
       // rewound past its terminal on purpose), plus however many solve legs happened not to have
       // terminaled at the instant the drive was abandoned — more of them on a slower or busier
-      // machine. Each holds a slot, and the evaluation one holds its until that leg reaches
-      // `dispatchEvaluation` (its own defect, issue #3192). Whenever the held count exceeds the
-      // headroom, an unrelated cell loses its dispatch to "local backend capacity exhausted" and
-      // expires — collateral of the crash, not the verdict-recovery question under test. A fixed
-      // small headroom cannot bound a count that varies with machine speed, so this does not use
-      // one: verified by sweeping the ceiling down, which reproduces exactly the CI failure
-      // (a cell `expired` at `dispatches: 1`, no attempt, no verdict) at and below 5.
+      // machine. Each held a slot, and whenever the held count exceeded the headroom an unrelated
+      // cell lost its dispatch to "local backend capacity exhausted" and expired — collateral of
+      // the crash, not the verdict-recovery question under test. A fixed small headroom cannot
+      // bound a count that varies with machine speed, so this does not use one: verified by
+      // sweeping the ceiling down, which reproduced exactly the CI failure (a cell `expired` at
+      // `dispatches: 1`, no attempt, no verdict) at and below 5.
+      // That starvation is fixed: #3192 made rehydration restore a slot only for an attempt whose
+      // shim or harness group actually still exists, and the abandoned attempts above are all dead
+      // by the time this fresh venue rehydrates. The ceiling below is now belt-and-braces — this
+      // test's subject is harvest recovery, not capacity, so taking capacity off the table costs it
+      // nothing and is kept rather than re-tuned.
       const resumed = await runResume(contextFor(clock), {
         draftId,
         maxConcurrentCells: MAX_CONCURRENT_CELLS,

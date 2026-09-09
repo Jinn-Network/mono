@@ -2114,6 +2114,21 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     return listProcessGroupPids(fingerprint.harnessPid);
   }
 
+  // Does anything of this Attempt still exist on the host? The same predicate `reconcileResolvedRef`
+  // uses to separate `matching` from `absent`/`orphaned`, short-circuited so the group scan runs only
+  // once the shim is known dead. Two reasons the throw is caught rather than left to propagate:
+  // an unreadable fingerprint is not proof of death, so the safe answer is to keep the slot (the
+  // behavior this Attempt already had); and `readShimFingerprint` parses `shim.json` unguarded, so a
+  // torn file throws — tolerable inside `recover`, but this also runs from the constructor, where it
+  // would turn one corrupt file into a backend that cannot be built at all.
+  private attemptProcessAlive(paths: WorkspacePaths): boolean {
+    try {
+      return probeShimAlive(paths.meta).alive || this.harnessGroupPids(paths).length > 0;
+    } catch {
+      return true;
+    }
+  }
+
   private async killHarnessGroup(paths: WorkspacePaths): Promise<readonly number[]> {
     const fingerprint = readShimFingerprint(paths.meta);
     if (fingerprint?.harnessPid === undefined) return [];
@@ -2292,7 +2307,15 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         try {
           const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as PersistedAttempt;
           this.attempts.set(attempt, metadata);
-          if (!foldAttemptRecord(this.journal(attempt).read()).terminal) live.push(attempt);
+          // The ceiling bounds concurrent *execution*, not nonterminal journals: a rehydrated
+          // Attempt whose shim and harness group are both gone consumes nothing on this host and
+          // must not hold a slot, or a crash permanently narrows the backend it is restarted into
+          // (#3192). Releasing here is safe against the terminal a later `recover` appends —
+          // `release` is a set delete, so that append is a no-op rather than a double-release.
+          if (
+            !foldAttemptRecord(this.journal(attempt).read()).terminal
+            && this.attemptProcessAlive(this.paths(attempt))
+          ) live.push(attempt);
         } catch {
           // recover(ref) is the fail-loud reconciliation surface for corrupt attempts.
         }

@@ -175,6 +175,7 @@ interface BackendFixtureOptions {
   readonly heartbeatIntervalMs?: number;
   readonly evidenceRepository?: InMemoryEvidenceRepository;
   readonly secretForwards?: readonly { readonly grantKey: string; readonly target: string }[];
+  readonly maxConcurrentAttempts?: number;
 }
 
 function fixture(root: string, options: BackendFixtureOptions = {}): LocalTaskExecutionBackend {
@@ -248,6 +249,9 @@ function fixture(root: string, options: BackendFixtureOptions = {}): LocalTaskEx
     cancellationGraceMs: 100,
     cancellationKillPollCeilingMs: 2_000,
     ...(options.heartbeatIntervalMs === undefined ? {} : { heartbeatIntervalMs: options.heartbeatIntervalMs }),
+    ...(options.maxConcurrentAttempts === undefined
+      ? {}
+      : { maxConcurrentAttempts: options.maxConcurrentAttempts }),
     ...(repository === undefined
       ? {}
       : {
@@ -305,6 +309,12 @@ async function waitFor(
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(message);
+}
+
+function harnessGroupEmpty(metaDir: string): boolean {
+  const fingerprint = readShimFingerprint(metaDir);
+  if (fingerprint?.harnessPid === undefined) return true;
+  return listProcessGroupPids(fingerprint.harnessPid).length === 0;
 }
 
 async function expectRestartBlocked(
@@ -965,6 +975,59 @@ describe("restart reconstruction and §6.4 actions", () => {
     expect(await terminalState(backend, attempt)).toBe("delivered");
     const events = await journalEvents(root, attempt);
     expect(events.filter(({ type, details }) => type === "progress" && details["degradation"] === "heartbeat-stale")).toHaveLength(1);
+  });
+
+  // #3192. The capacity ceiling bounds concurrent *execution*, so rehydrating a nonterminal
+  // journal must not by itself reserve a slot: after a crash or a drained shutdown the attempt's
+  // processes are gone and it consumes nothing. Rewinding the terminal *after* handoffWriter
+  // (unlike the sibling crash simulations above, which rewind first) is deliberate — shutdown
+  // drains to a fixed point, so the rewind cannot race the backend's own terminal append.
+  test("a rehydrated nonterminal attempt with no live processes does not consume a capacity slot", async () => {
+    const root = await stateRoot("capacity-rehydration");
+    const first = fixture(root, { maxConcurrentAttempts: 1 });
+    const { attempt } = await submit(first);
+    await handoffWriter(first);
+    // Establish the precondition rather than assume it. Shutdown drains the backend's own workers
+    // as soon as `outcome.json` lands, which is a moment BEFORE the shim process it observed has
+    // finished exiting — so probing straight after the handoff catches a still-alive shim often
+    // enough to be flaky. That window is benign in production (a slot held for an instant longer,
+    // the fail-closed direction) but it is not the state this test is about.
+    const workspace = paths(root, attempt);
+    await waitFor(
+      () => !probeShimAlive(workspace.meta).alive && harnessGroupEmpty(workspace.meta),
+      "attempt processes did not exit",
+    );
+    await replaceJournal(root, attempt, (events) =>
+      events.filter(({ type }) => type !== "attempt-terminal"));
+
+    const restarted = fixture(root, { maxConcurrentAttempts: 1 });
+    await expect(submit(restarted)).resolves.toBeDefined();
+  });
+
+  // The other half of the same invariant, and the reason "restore nothing" is wrong: an
+  // *orphaned* attempt — dead shim, live harness group — is still consuming the host, so it must
+  // keep its slot. This passes both before and after #3192; its teeth come from the mutation
+  // check (weaken the predicate to shim-liveness alone and this is the test that fails).
+  test("a rehydrated nonterminal attempt whose harness group is still alive keeps its slot", async () => {
+    const root = await stateRoot("capacity-rehydration-orphan");
+    const pause = barrier();
+    const first = fixture(root, {
+      maxConcurrentAttempts: 1,
+      processDelayMs: 30_000,
+      completionBarrier: { phase: "before-outcome-wait", barrier: pause },
+    });
+    const { attempt } = await submit(first);
+    await pause.entered;
+    const workspace = paths(root, attempt);
+    const fingerprint = readShimFingerprint(workspace.meta);
+    if (fingerprint?.harnessPid === undefined) throw new Error("fixture shim did not publish harness PID");
+    process.kill(fingerprint.pid, "SIGKILL");
+    await waitFor(() => !probeShimAlive(workspace.meta).alive, "shim did not die");
+
+    const restarted = await restartWhilePaused(root, first, pause, attempt, { maxConcurrentAttempts: 1 });
+    // Asserted before any recover(), which would kill the very group that must hold the slot.
+    await expect(submit(restarted)).rejects.toMatchObject({ category: "backend-unavailable" });
+    pause.release();
   });
 });
 
