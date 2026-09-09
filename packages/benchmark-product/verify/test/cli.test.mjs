@@ -1240,7 +1240,7 @@ const V8_SHAPE = {
   anchors: {
     anchors: [{
       recordSha256: "9".repeat(64), status: "present", subject: "report",
-      timeBasis: "calendar-attestation", trustMaterial: "none",
+      timeBasis: "authority-time", trustMaterial: "none",
     }],
     subjects: [{ subject: "report", outcome: "anchored" }],
     invalid: [],
