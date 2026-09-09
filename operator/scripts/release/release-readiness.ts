@@ -104,7 +104,7 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
     push();
   } else {
     push(`## Environment-suite evidence`);
-    push(`SKIPPED (mode=${input.mode}; the environment suite only runs in human-invoked mode with explicit consent).`);
+    push(`SKIPPED (mode=${input.mode}; no environment-suite verdict was supplied for this run).`);
     push();
   }
   push(`## Walk-through script for human pass`);
