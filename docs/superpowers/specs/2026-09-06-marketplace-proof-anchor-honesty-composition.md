@@ -132,12 +132,15 @@ the published result rather than constructing a plausible transcript later.
 This design allocates no bundle format number and no claim-package identifier.
 Its bundle-level additions register as **one capability entry**,
 `marketplace-ordering`, inside the composed generation
-`benchmark-product-public-bundle/10` (operator ruling, §10 R2).
+`benchmark-product-public-bundle/10` (operator ruling, §10 R2). §2.1's record
+keeps its own schema id, `benchmark-product.marketplace-ordering/1`, as every
+sealed record in this product does; R2 governs bundle and claim-package
+numbering, which is what this design stops minting.
 
-That generation is designed by [bundle capability
-composition](./2026-08-29-bundle-capability-composition-design.md) (issue
-#2889), which is itself still `proposed — needs operator decision on D1–D4`,
-and whose text still names `/8` for the generation and
+That generation is designed by the [bundle capability
+composition](./2026-08-29-bundle-capability-composition-design.md) design for
+issue #2889, which is itself still `proposed — needs operator decision on
+D1–D4`, and whose text still names `/8` for the generation and
 `benchmark-product.claim-package/6` for its claim id — both numbers were taken
 after that design was written, which is the same numbering drift the ruling
 corrects. `/10` therefore does not exist in the tree today. §8 states this
@@ -551,8 +554,9 @@ an invalid one (§6), and ten conformance and adversarial tests (§7).
 evidence channels inside one reader-facing statement, the ordered marketplace
 evidence carrier, byte-only versus live-resolver verification, the exact reader
 copy, fail-closed behaviour, the compatibility guarantees and the adversarial
-tests." §0, §1, §2, §4's steps and states, and §5's reader copy are unchanged
-by v0.2.
+tests." §0, §1, §2's record and its rules, §4's steps and states, and §5's
+reader copy are unchanged by v0.2; §2.1's only edit fixes the ordinal pad width
+its own example already showed, which decides nothing the ruling decided.
 
 **R2 — Format numbering.**
 §3 allocated `benchmark-product-public-bundle/9` and
