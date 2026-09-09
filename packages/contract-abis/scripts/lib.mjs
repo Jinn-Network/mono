@@ -134,7 +134,10 @@ export function pickAbiItems(fullAbi, names, context) {
       open === -1
         ? candidates
         : candidates.filter(
-            (item) => canonicalInputs(item) === entry.slice(open + 1, entry.lastIndexOf(")")),
+            // `slice(open + 1, -1)` requires the entry to END at its closing paren, so a
+            // malformed `"foo(uint256)junk"` falls through to the not-found error rather than
+            // silently resolving.
+            (item) => canonicalInputs(item) === entry.slice(open + 1, -1),
           );
     if (matches.length === 0) {
       throw new Error(`ABI item not found: ${entry}`);

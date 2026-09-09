@@ -135,6 +135,10 @@ describe.each(impls)("pickAbiItems (%s)", (_label, pick) => {
     expect(() => pick(OVERLOADED_ABI, ["claimTask(uint256)"])).toThrow(
       "ABI item not found: claimTask(uint256)",
     );
+    // A signature with trailing text is malformed, not a match for the overload it names.
+    expect(() => pick(OVERLOADED_ABI, ["claimTask(uint256,address)junk"])).toThrow(
+      "ABI item not found: claimTask(uint256,address)junk",
+    );
   });
 
   it("names the supplied context in the ambiguity message", () => {
