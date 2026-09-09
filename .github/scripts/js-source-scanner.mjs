@@ -85,7 +85,8 @@ function keywordEndsAt(source, back) {
  * that can end an operand. Closing brackets are read as operands, so `f(x) / 2` is division; a
  * regex directly after one — `(a + b) /re/.test(c)` — is not valid code anyway.
  *
- * Two characters are ambiguous on their own and are resolved by looking behind them:
+ * Three characters are ambiguous on their own. Two are resolved by looking behind them; the third
+ * is resolved by choosing which way to be wrong.
  *
  * `--`/`++` read the wrong way round from the character alone: the trailing `-` of `x-- / 2` looks
  * like an operator. So a `+`/`-` doubled with the character before it counts as an operand end.
@@ -99,13 +100,31 @@ function keywordEndsAt(source, back) {
  * Both matter for the same reason: consuming a division as a regex takes the rest of its line —
  * including any structure and, where the line ends in a comment, the first `/` of its `//` — which
  * hands the comment's prose back as live source in miniature (#3027).
+ *
+ * `>` is the third, and it stays in the set below on purpose. It ends a TypeScript generic and it
+ * ends an arrow: `previousSignificant` before the `/` of `(x) => /re/.test(x)` is that `>`, and
+ * reading it as an operand end makes an arrow body opening with a regex scan as a division — the
+ * same fail-open as the `--` and `!` cases above, on a shape configs write freely. Keeping it costs
+ * the other reading: `x: a<b> / 2` consumes the division as a regex to the end of its line, and
+ * where that line ends in a comment its prose comes back as live source. Nothing in the tree writes
+ * that shape, and separating a generic close from a comparison needs matched `<`/`>` pairs, which a
+ * real TypeScript parser resolves by backtracking and a character-at-a-time scanner cannot.
+ *
+ * `<` used to sit in the set too, on the same reasoning, and it does not any more (#3170). It was
+ * what made the `/` of a JSX closing tag — `</Link>` — read as opening a regex literal, and that
+ * phantom literal ran to the end of its line and swallowed the opening backtick of the template
+ * beside it. From there every backtick in the file paired off by one, which desynced the scanner
+ * across two shipped `.tsx` files that `benchmark-product-source-boundaries.test.mjs` reads on
+ * every run. Dropping it loses only the mirror of the generic-close cost above — an operand may not
+ * legally follow a comparison's `<` with a regex anyway — so the asymmetry with `>` is real and
+ * deliberate rather than an oversight.
  */
 function valueMayBeginAfter(source, back) {
   if (back < 0) return true;
   const character = source[back];
   if ((character === '+' || character === '-') && source[back - 1] === character) return false;
   if (character === '!') return valueMayBeginAfter(source, previousSignificant(source, back - 1));
-  if ('(,=:[&|?{;+-*%~^<>'.includes(character)) return true;
+  if ('(,=:[&|?{;+-*%~^>'.includes(character)) return true;
   return keywordEndsAt(source, back);
 }
 

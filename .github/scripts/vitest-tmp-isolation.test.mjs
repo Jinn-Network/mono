@@ -1112,6 +1112,13 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
     assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
   }
 
+  // An arrow body opens where a value may begin, so the `/` after `=>` is a regex. The `>` of the
+  // arrow is the reason `valueMayBeginAfter` still reads a `>` as a position a value may follow;
+  // without it this reads as a division and consumes the entry's braces (#3170).
+  for (const property of [`x: (s) => /['"]/u.test(s), `]) {
+    assert.equal(projectEntryRanges(withProperty(property)).length, 2, property);
+  }
+
   // A property named after a regex-preceding keyword is not that keyword. Every one of these is a
   // legal property name, and reading one as a keyword consumed the division and the entry's braces.
   // A private class field named after one is not that keyword either: `#` is a boundary the same
@@ -1155,6 +1162,22 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
   // runs to the end of the array: zero ranges, every entry falling back to root scope, which is the
   // cross-entry crediting fail-open of #3154 returning.
   assert.equal(projectEntryRanges(stripComments(`projects: [ /'/u, { a: 1 }, { b: 2 } ]`)).length, 2);
+});
+
+// A JSX closing tag writes `</`, and reading that `/` as a regex opener is what desynced the
+// scanner across two shipped `.tsx` files: the phantom literal ran to the end of its line and
+// swallowed the opening backtick of the template beside it, after which every backtick pairing in
+// the file was off by one (#3170). `<` used to sit in `valueMayBeginAfter`'s operator set, which is
+// what made the `/` of `</Link>` look like a position a value may begin.
+test('a JSX closing tag does not open a regex literal', () => {
+  assert.equal(regexStartsAt('const a = <p>x</p>;', 15), false);
+
+  // What dropping `<` costs, pinned so it reads as a stated residual rather than a hole this gate
+  // closes: a TypeScript generic close is the same character as a comparison, so the division in
+  // `a<b> / 2` still reads as a regex and takes its line — comment prose included. Separating the
+  // two needs matched `<`/`>` pairs, which is a parser's job, and nothing in the tree writes the
+  // shape. This assertion is green before and after the `<` drop; it documents, it does not guard.
+  assert.ok(stripComments('x: a<b> / 2, // setupFiles: isolate-tmp.ts').includes('isolate-tmp'));
 });
 
 // The newline bound above is deliberately not applied to a template literal, and that exemption is
