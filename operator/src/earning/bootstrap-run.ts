@@ -382,6 +382,32 @@ export interface StoppableRecovery {
   stop: () => void | Promise<void>;
 }
 
+/**
+ * What `startDegraded` did with a halt (#2425).
+ *
+ * Before #2425 this was `StoppableRecovery | null`, and `null` conflated two
+ * outcomes that must be treated differently: an integrity-class halt (stay
+ * fail-closed) and an ECONOMIC halt whose recovery loops failed to start. The
+ * second case left readiness at `'bootstrapping'` → `/ready` 503 → a
+ * supervisor pointed at `/ready` restart-loops a daemon that is correctly
+ * parked waiting for funding — precisely the absorbing state spec §5 exists
+ * to prevent. Splitting the two is the whole fix.
+ */
+export type DegradedStartOutcome =
+  /** Economic halt; recovery loops are running. `recovery.stop()` must be awaited on retry. */
+  | { readonly kind: 'started'; readonly recovery: StoppableRecovery }
+  /**
+   * Economic halt; recovery loops did NOT start. Readiness still becomes
+   * `'degraded'`: `degraded` is strictly safer than `ready` either way
+   * (`ready-only` loops stay unadmitted, `accepting_work` is false), and the
+   * only externally visible difference is `/ready` answering 200 rather than
+   * 503 — i.e. "do not restart me", which is the correct supervisor
+   * instruction whether or not the loops came up.
+   */
+  | { readonly kind: 'start-failed' }
+  /** Integrity-class halt; stay fail-closed, readiness unchanged. */
+  | { readonly kind: 'fail-closed' };
+
 export interface RunBootstrapWithDegradeOpenDeps<TResult> {
   /**
    * Runs one bootstrap attempt. Resolves with the result on success;
@@ -391,13 +417,15 @@ export interface RunBootstrapWithDegradeOpenDeps<TResult> {
    */
   runBootstrap: () => Promise<TResult>;
   /**
-   * Classifies + starts degraded recovery for a halt's envelope. Returns
-   * `null` when the halt is integrity-class (isEconomicBootstrapHalt says
-   * no degraded loops) or when construction itself failed — either way,
-   * readiness stays at whatever it already was rather than flipping to
-   * `'degraded'` for a recovery surface that isn't actually running.
+   * Classifies + starts degraded recovery for a halt's envelope, reporting
+   * which of the three `DegradedStartOutcome` cases applies. It must NOT
+   * throw: the economic/integrity classification lives inside this callback,
+   * so an orchestrator that treated an escaping throw as `'degraded'` would
+   * flip an integrity halt to 200 whenever classification itself failed.
+   * `resolveDegradedStart` below is the production implementation and is
+   * what guarantees the no-throw contract.
    */
-  startDegraded: (envelope: ErrorEnvelope) => StoppableRecovery | null;
+  startDegraded: (envelope: ErrorEnvelope) => DegradedStartOutcome;
   setReadiness: (readiness: 'bootstrapping' | 'ready' | 'degraded') => void;
   /**
    * Waits for the retry signal (SPA click, or the funding auto-resume
@@ -415,8 +443,8 @@ export interface RunBootstrapWithDegradeOpenDeps<TResult> {
  * established in this codebase as impractical to test directly — see
  * `test/main/rpc-boot-probe-format.test.ts`'s docstring — but this function
  * has no such dependency): on a `SetupBootstrapHalted`, `startDegraded` runs
- * BEFORE `setReadiness('degraded')` (so readiness never claims a recovery
- * surface that failed to start), `setReadiness('degraded')` runs before
+ * BEFORE `setReadiness('degraded')` (so readiness reflects what the classify
+ * step actually decided), `setReadiness('degraded')` runs before
  * `awaitRetry` is awaited, the degraded handle's `stop()` is awaited to
  * completion BEFORE the loop calls `runBootstrap()` again, and
  * `setReadiness('ready')` runs only after a successful `runBootstrap()`
@@ -434,15 +462,19 @@ export async function runBootstrapWithDegradeOpen<TResult>(
       return result;
     } catch (err) {
       if (err instanceof SetupBootstrapHalted) {
-        const degradedRecovery = deps.startDegraded(err.envelope);
-        if (degradedRecovery) {
+        const outcome = deps.startDegraded(err.envelope);
+        // #2425: `'start-failed'` degrades too. Only an integrity-class halt
+        // (`'fail-closed'`) keeps readiness at `'bootstrapping'`; a failed
+        // recovery start on an economic halt must still answer `/ready` 200
+        // so a supervisor does not restart a daemon that is merely parked.
+        if (outcome.kind !== 'fail-closed') {
           deps.setReadiness('degraded');
         }
         try {
           await deps.awaitRetry(err.envelope);
         } finally {
-          if (degradedRecovery) {
-            await degradedRecovery.stop();
+          if (outcome.kind === 'started') {
+            await outcome.recovery.stop();
           }
           deps.setReadiness('bootstrapping');
         }
@@ -450,5 +482,47 @@ export async function runBootstrapWithDegradeOpen<TResult>(
       }
       throw err;
     }
+  }
+}
+
+/**
+ * The production `startDegraded` (#2425): classify the halt, start the
+ * recovery loops when it is economic, and report which
+ * `DegradedStartOutcome` applies — never throwing.
+ *
+ * Extracted out of `main.ts`'s inline callback purely so the classify →
+ * start → explain decision the #2425 regression lived in is unit-testable
+ * (`main.ts` itself stays impractical to test directly — see
+ * `runBootstrapWithDegradeOpen`'s docstring). `main.ts` supplies
+ * `isEconomicBootstrapHalt` and a closure over `startDegradedRecoveryLoops`.
+ */
+export function resolveDegradedStart(
+  envelope: ErrorEnvelope,
+  deps: {
+    isEconomic: (envelope: ErrorEnvelope) => boolean;
+    start: () => StoppableRecovery;
+    /** Injected so tests can assert the operator-facing explanation without console noise. */
+    log?: Pick<Console, 'log' | 'error'>;
+  },
+): DegradedStartOutcome {
+  const log = deps.log ?? console;
+  if (!deps.isEconomic(envelope)) {
+    log.log('[main] Halt cause is integrity-class — staying fail-closed (no degraded recovery loops).');
+    return { kind: 'fail-closed' };
+  }
+  try {
+    return { kind: 'started', recovery: deps.start() };
+  } catch (startErr) {
+    // The message states the readiness the daemon actually lands in. The
+    // pre-#2425 wording said only "non-fatal — still waiting for retry",
+    // which left an operator no way to tell this apart from a healthy
+    // degraded boot.
+    log.error(
+      '[main] Failed to start degraded recovery loops — readiness is `degraded` with NO recovery ' +
+        'loops running (/ready answers 200 so a supervisor does not restart this parked daemon; ' +
+        'the fleet will not self-heal until the halt is retried):',
+      startErr instanceof Error ? startErr.message : startErr,
+    );
+    return { kind: 'start-failed' };
   }
 }
