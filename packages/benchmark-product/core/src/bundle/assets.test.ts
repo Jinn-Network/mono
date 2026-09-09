@@ -529,11 +529,16 @@ describe("binary qualification public assets", () => {
     }
   });
 
-  test("keeps compact surfaces to a verified scope/report signpost", () => {
+  test("keeps compact surfaces to a scope/report signpost that asserts no verdict", () => {
     const assets = buildPublicAssets(binaryAssetFixture());
     for (const name of ["badge.svg", "social-card.svg", "share.txt"] as const) {
       const compact = text(assets[name]);
-      expect(compact.toLowerCase()).toContain("verified");
+      // Issue #2982 retired the verdict word because it claims more than this tool establishes;
+      // #4270 extended that to the published artifacts, where the caveats the CLI prints under its
+      // verdict cannot travel. A badge that names a scope is a signpost; one that says "verified"
+      // is a claim with its limits in another file.
+      expect(compact).not.toMatch(/verified|certified|validated|audited/i);
+      expect(compact.toLowerCase()).toContain("qualification");
       expect(compact).toContain(SHA.report);
       expect(compact).toContain("index.html");
       expect(compact).not.toMatch(/arm-[abcd]/u);

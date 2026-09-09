@@ -794,7 +794,7 @@ function factsHeading(facts: MethodFacts, source: "report" | "claim"): string {
 
 /** The one neutral sentence each method's index page leads with. Every method needs its own: the
  * fallthrough used to be binary-instrument's sentence, so a method added without a branch here
- * would have published "Verified binary-instrument qualification" over a judge readout. */
+ * would have published "Binary-instrument qualification" over a judge readout. */
 function neutralClaimHtml(facts: MethodFacts): string {
   if (facts.kind === "wilson") {
     return '<p class="neutral">No comparative winner is stated; wilson@1 reports neutral per-arm facts only.</p>';
@@ -808,7 +808,7 @@ function neutralClaimHtml(facts: MethodFacts): string {
   if (facts.kind === "pairwise-disagreement") {
     return '<p class="neutral">No comparative winner is stated; pairwise-disagreement@1 reports every unordered arm pair as a panel, with no baseline and no candidate.</p>';
   }
-  return '<p class="neutral">Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.</p>';
+  return '<p class="neutral">Binary-instrument qualification. Facts are presented per instrument without comparative conclusions.</p>';
 }
 
 // Task-selection provenance (issue #2980) is sealed into the Run and verified under
@@ -903,7 +903,7 @@ function compactStatus(input: PublicAssetInput, reportFacts: MethodFacts): strin
  * They disclose the interval state and point to the relative full-report path instead. */
 function pairedCompactFragment(facts: MethodFacts): string {
   if (facts.kind === "wilson") return "";
-  if (facts.kind === "binary") return "Verified qualification signpost · full evidence at index.html";
+  if (facts.kind === "binary") return "Qualification signpost · full evidence at index.html";
   if (facts.kind === "pairwise-disagreement") {
     return `Pairwise disagreement panel · ${facts.pairs.length} arm pairs · index.html`;
   }
@@ -915,7 +915,7 @@ function pairedCompactFragment(facts: MethodFacts): string {
 function buildBadge(input: PublicAssetInput, reportFacts: MethodFacts): string {
   const scope = scopeLine(input);
   if (reportFacts.kind === "binary") {
-    return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 920 150" width="920" height="150"><title id="title">Colophon verified qualification</title><desc id="desc">${escapeMarkup(`Verified. ${scope}. Report SHA-256 ${input.reportSha256}. Full evidence: index.html.`)}</desc><metadata>${escapeMarkup(`verified=true; scope=${scope}; Report SHA-256=${input.reportSha256}`)}</metadata><rect width="920" height="150" fill="#14120e"/><text x="20" y="45" fill="#f7f4ed" font-family="sans-serif" font-size="22">Colophon · verified qualification</text><text x="20" y="82" fill="#d8d1c5" font-family="sans-serif" font-size="14">${escapeMarkup(scope)}</text><a href="index.html"><text x="20" y="118" fill="#9eb9ef" font-family="monospace" font-size="11">Report ${input.reportSha256} · index.html</text></a></svg>\n`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 920 150" width="920" height="150"><title id="title">Colophon · binary qualification</title><desc id="desc">${escapeMarkup(`${scope}. Report SHA-256 ${input.reportSha256}. Full evidence: index.html.`)}</desc><metadata>${escapeMarkup(`scope=${scope}; Report SHA-256=${input.reportSha256}`)}</metadata><rect width="920" height="150" fill="#14120e"/><text x="20" y="45" fill="#f7f4ed" font-family="sans-serif" font-size="22">Colophon · binary qualification</text><text x="20" y="82" fill="#d8d1c5" font-family="sans-serif" font-size="14">${escapeMarkup(scope)}</text><a href="index.html"><text x="20" y="118" fill="#9eb9ef" font-family="monospace" font-size="11">Report ${input.reportSha256} · index.html</text></a></svg>\n`;
   }
   const status = compactStatus(input, reportFacts);
   const digest = input.reportSha256.slice(0, 12);
@@ -935,7 +935,7 @@ function buildBadge(input: PublicAssetInput, reportFacts: MethodFacts): string {
 function buildSocialCard(input: PublicAssetInput, reportFacts: MethodFacts): string {
   const scope = scopeLine(input);
   if (reportFacts.kind === "binary") {
-    return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1200 630" width="1200" height="630"><title id="title">Colophon verified qualification</title><desc id="desc">${escapeMarkup(`Verified. ${scope}. Report SHA-256 ${input.reportSha256}. Full evidence: index.html.`)}</desc><metadata>${escapeMarkup(`verified=true; scope=${scope}; Report SHA-256=${input.reportSha256}`)}</metadata><rect width="1200" height="630" fill="#f7f4ed"/><text x="78" y="180" fill="#c7402a" font-family="sans-serif" font-size="24">COLOPHON · VERIFIED QUALIFICATION</text><text x="78" y="300" fill="#14120e" font-family="serif" font-size="64">Evidence signpost</text><text x="78" y="390" fill="#14120e" font-family="sans-serif" font-size="24">${escapeMarkup(scope)}</text><a href="index.html"><text x="78" y="500" fill="#27406b" font-family="monospace" font-size="17">Report ${input.reportSha256}</text></a><text x="78" y="545" fill="#27406b" font-family="monospace" font-size="17">Full evidence: index.html</text></svg>\n`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1200 630" width="1200" height="630"><title id="title">Colophon · binary qualification</title><desc id="desc">${escapeMarkup(`${scope}. Report SHA-256 ${input.reportSha256}. Full evidence: index.html.`)}</desc><metadata>${escapeMarkup(`scope=${scope}; Report SHA-256=${input.reportSha256}`)}</metadata><rect width="1200" height="630" fill="#f7f4ed"/><text x="78" y="180" fill="#c7402a" font-family="sans-serif" font-size="24">COLOPHON · BINARY QUALIFICATION</text><text x="78" y="300" fill="#14120e" font-family="serif" font-size="64">Evidence signpost</text><text x="78" y="390" fill="#14120e" font-family="sans-serif" font-size="24">${escapeMarkup(scope)}</text><a href="index.html"><text x="78" y="500" fill="#27406b" font-family="monospace" font-size="17">Report ${input.reportSha256}</text></a><text x="78" y="545" fill="#27406b" font-family="monospace" font-size="17">Full evidence: index.html</text></svg>\n`;
   }
   const status = compactStatus(input, reportFacts);
   const armIds = input.claim.scope.arms.map((arm) => arm.armId).join(" · ");
@@ -1074,7 +1074,7 @@ function buildReadme(input: PublicAssetInput, reportFacts: MethodFacts, claimFac
   const topLevelLinks = topLevelFiles.map(([path, label]) => `- [${label} (\`${path}\`)](${path})`).join("\n");
   const casLinks = recordPaths(input).map((path) => `- [CAS record \`${path}\`](${path})`).join("\n");
   const documentStatus = reportFacts.kind === "binary"
-    ? `${qualificationOutcomeLabel(input.matrix.completeness.runOutcome)}. Verified binary-instrument qualification.`
+    ? `${qualificationOutcomeLabel(input.matrix.completeness.runOutcome)}. Binary-instrument qualification.`
     : `${outcomeLabel(input.matrix.completeness.runOutcome)}. No comparative winner is stated.`;
   return `# Colophon report
 
@@ -1205,7 +1205,7 @@ ${FONT_LICENSES.map(([name, path]) => `## ${name} font license\n\n\`\`\`text\n${
 
 function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): string {
   if (reportFacts.kind === "binary") {
-    return `Colophon · verified qualification. ${plainText(scopeLine(input))}. Report ${input.reportSha256}. Full evidence: index.html; verify: index.html#verification with ${plainText(input.claim.verification.command)}.\n`;
+    return `Colophon · binary qualification. ${plainText(scopeLine(input))}. Report ${input.reportSha256}. Full evidence: index.html; verify: index.html#verification with ${plainText(input.claim.verification.command)}.\n`;
   }
   // Paired branch only (P4b Task 6): empty string for wilson keeps this sentence byte-identical
   // to before this dispatch existed.
