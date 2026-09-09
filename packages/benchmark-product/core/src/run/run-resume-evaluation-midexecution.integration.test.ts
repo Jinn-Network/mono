@@ -295,8 +295,17 @@ describe("resume reconciles an evaluation attempt killed mid-execution", () => {
       // attempt (rewound past its terminal above) plus a machine-speed-dependent number of solve
       // legs abandoned mid-flight — and a cell that lost its dispatch to "local backend capacity
       // exhausted" expired as collateral of the crash rather than of the question under test.
-      // #3192 made rehydration restore a slot only for an attempt whose processes actually exist,
-      // so after the abandoned drive's shutdown drains, the held count is deterministically zero.
+      // #3192 made rehydration restore a slot only for an attempt whose processes actually exist.
+      // Note what that does and does not buy here. It is NOT that the held count is zero by
+      // construction: `venue.shutdown()` drains the backend's in-process workers, not the shims
+      // they spawned, so an abandoned attempt whose shim is still exiting legitimately keeps its
+      // slot for that window. What bounds this run is narrower and holds regardless. The
+      // interrupted evaluation attempt — the one this test rewinds, and the one that used to hold
+      // its slot for the whole solve phase — has a long-dead shim, because its worker ran to
+      // completion before the rewind. And every solve leg abandoned mid-flight is captured in
+      // `outstanding` and recovered by `runResume` before `resumeRun`, which terminals and
+      // releases it. What is left over is only an attempt in neither set, still inside its own
+      // exit window: rare, self-clearing, and no longer the systematic wedge the ceiling cured.
       const resumed = await runResume(contextFor(clock), { draftId });
       expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
 

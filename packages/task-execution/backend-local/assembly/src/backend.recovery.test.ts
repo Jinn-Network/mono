@@ -990,8 +990,13 @@ describe("restart reconstruction and §6.4 actions", () => {
     // Establish the precondition rather than assume it. Shutdown drains the backend's own workers
     // as soon as `outcome.json` lands, which is a moment BEFORE the shim process it observed has
     // finished exiting — so probing straight after the handoff catches a still-alive shim often
-    // enough to be flaky. That window is benign in production (a slot held for an instant longer,
-    // the fail-closed direction) but it is not the state this test is about.
+    // enough to be flaky. Be precise about what that window costs, because nothing re-probes
+    // liveness after `rebuildIndexes`: a slot kept for a shim that dies a moment later is held
+    // until something appends a terminal for that attempt, and for an attempt nobody recovers,
+    // that is never. So it is the same wedge #3192 removes, narrowed from a certainty to "only if
+    // a fresh backend boots inside the shim's exit window" — the fail-closed direction, and
+    // strictly better than the baseline, but not "an instant". It is also not the state this test
+    // is about, hence the wait.
     const workspace = paths(root, attempt);
     await waitFor(
       () => !probeShimAlive(workspace.meta).alive && harnessGroupEmpty(workspace.meta),
@@ -1026,8 +1031,43 @@ describe("restart reconstruction and §6.4 actions", () => {
 
     const restarted = await restartWhilePaused(root, first, pause, attempt, { maxConcurrentAttempts: 1 });
     // Asserted before any recover(), which would kill the very group that must hold the slot.
-    await expect(submit(restarted)).rejects.toMatchObject({ category: "backend-unavailable" });
+    // `backend-unavailable` alone would not pin this: `expectRestartBlocked` above uses the same
+    // category for a state-root-lock refusal, so the annotations are what distinguish "the ceiling
+    // is full because the orphan kept its slot" from "someone else owns the root".
+    await expect(submit(restarted)).rejects.toMatchObject({
+      category: "backend-unavailable",
+      annotations: { capacity: 1, liveAttempts: 1 },
+    });
     pause.release();
+  });
+
+  // The fail-closed third case, and the one the whole-suite-green refactor would otherwise erase.
+  // `attemptProcessAlive` answers "alive" when it cannot tell — an unreadable fingerprint is not
+  // proof of death, and keeping the slot is exactly the behavior this Attempt had before #3192.
+  // Without this test a change that made the predicate throw for EVERY attempt (a stricter parse,
+  // a `/proc` the process may not read) would silently restore the pre-fix wedge with nothing red.
+  test("a rehydrated nonterminal attempt whose liveness cannot be determined keeps its slot", async () => {
+    const root = await stateRoot("capacity-rehydration-unreadable");
+    const first = fixture(root, { maxConcurrentAttempts: 1 });
+    const { attempt } = await submit(first);
+    await handoffWriter(first);
+    const workspace = paths(root, attempt);
+    await waitFor(
+      () => !probeShimAlive(workspace.meta).alive && harnessGroupEmpty(workspace.meta),
+      "attempt processes did not exit",
+    );
+    await replaceJournal(root, attempt, (events) =>
+      events.filter(({ type }) => type !== "attempt-terminal"));
+    // Same setup as the first test — which admits — differing only in that the fingerprint no
+    // longer parses. So this also pins that the release is driven by the probe and not by, say,
+    // the journal shape alone.
+    await writeFile(join(workspace.meta, "shim.json"), "{ not json", "utf8");
+
+    const restarted = fixture(root, { maxConcurrentAttempts: 1 });
+    await expect(submit(restarted)).rejects.toMatchObject({
+      category: "backend-unavailable",
+      annotations: { capacity: 1, liveAttempts: 1 },
+    });
   });
 });
 

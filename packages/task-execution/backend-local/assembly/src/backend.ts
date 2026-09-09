@@ -2749,6 +2749,11 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     const rawOutcome = readOutcome(paths.meta);
     const outcome = rawOutcome !== null && rawOutcome.nonce === record.nonce ? rawOutcome : null;
     const groupPids = this.harnessGroupPids(paths);
+    // `processAlive` below is the same predicate `attemptProcessAlive` applies at rehydration, kept
+    // inline here because the surrounding fields need `shim` and `groupPids` separately. Change one
+    // and change the other: if this gains a third liveness signal, rehydration would release a slot
+    // for an attempt that reconcile then classifies `matching` and resumes — a path that re-arms a
+    // worker without re-acquiring capacity.
     let reconciliation = reconcileAttempt(record, {
       processAlive: shim.alive || groupPids.length > 0,
       shimAlive: shim.alive,
