@@ -69,12 +69,13 @@ the reused locator (`:1029`) and handed to `authorBindings` as both `validFrom` 
 transaction is sent only when the run receipt is moved aside as well. Read the next section
 before running anything.
 
-### Mint fresh: move the receipt aside with the catalog
+### Reuse or mint: the proposed rule is mint fresh
 
 A re-author touches no key, store, or Agent IRI, so all five terms of the `ceremony-anchor/v1`
 preimage are unchanged and the digest is **identical** to the original ceremony's. Ceremony spec
 §3.2b requires this runbook to state which anchor the re-author takes and the operator to record
-why. This section states it as a **rule** rather than a choice: mint fresh, always. The
+why. This section states the choice — both anchors are reachable, and a single act decides which
+one you get — and records the rule proposed to replace it: mint fresh, always. The
 procedure-level defects are flagged above and remain unowned.
 
 The rule is **proposed**, not adopted, in
@@ -101,9 +102,11 @@ catalog — so the re-run recomputes the identical digest, `reusableAnchor` matc
 on both surfaces — `ceremony_anchor_reused` and
 `anchor reused <hash> at <time> (from a previous run's receipt)` (`:1002`, `:1010`) — so this is
 not silent. Nothing refuses it either. Reuse is what happens to an operator who moves the
-catalog and forgets the receipt, and the cost is retroactivity: the *widened* scope is claimed
-back over evidence signed before the widening, including evidence a verifier refused at the time
-for want of that very scope.
+catalog and forgets the receipt. Its benefit is that it preserves the original `validFrom` and
+effective window, so there is no coverage gap at all; its cost is retroactivity, the *widened*
+scope claimed back over evidence signed before the widening, including evidence a verifier
+refused at the time for want of that very scope. That cost is why the proposed rule is mint
+fresh.
 
 **Taking the fresh anchor.** Move `<dir>/ceremony/receipt.json` aside as well as the catalog, so
 that `reusableAnchor` finds nothing. The re-authored bindings then carry the new anchor's block
@@ -114,8 +117,9 @@ anchor's block time, evidence signed inside that window de-attributes for **ever
 only the widened one. It resolves against neither the old bindings (replaced) nor the new ones
 (not yet effective).
 
-Moving the receipt aside is now compulsory rather than optional, which puts the following
-footgun on the on-path procedure rather than beside it. Read it before moving anything.
+Under the proposed rule, moving the receipt aside stops being optional, which puts the following
+footgun on the on-path procedure rather than beside it. Read it before moving anything, whichever
+anchor you take.
 
   > **Before moving the receipt aside, confirm the native config carries `agentIri` — and
   > `admissionAgent`, if this operator provisions admission.** The receipt is the *fallback*
@@ -134,15 +138,18 @@ the ruling's *execution* rather than on its adoption: the re-author path MUST re
 neither the native config nor an accessible receipt carries `agentIri` (and `admissionAgent`,
 where admission is provisioned), instead of minting.
 
-**What to write into the re-author's record.** Four things, per
+**What to write into the re-author's record.** Five things — four from
 [`spec/2026-09-09-recoverable-binding-anchor.md`](../../spec/2026-09-09-recoverable-binding-anchor.md)
-§6.4:
+§6.4, plus the reason ceremony spec §3.2b still requires while `ceremony-anchor/v1` is the
+ratified preimage:
 
 - the fresh anchor's transaction hash and block time;
 - the outgoing anchor's transaction hash and block time;
 - the scope change, and the code change that caused it;
 - the resulting window `[old anchor time, new anchor time)`, stated explicitly as a window in
-  which evidence de-attributes **for every role**, not only the widened one.
+  which evidence de-attributes **for every role**, not only the widened one;
+- the **reason** for the anchor you took. §3.2b's MUST is unretired: the proposed ruling would
+  replace it with the four items above only once adopted, so until then write it.
 
 The retroactive-authority question these answer is left open at ceremony spec §10 (e) and owned
 by [#4172](https://github.com/Jinn-Network/mono/issues/4172), whose output is the document

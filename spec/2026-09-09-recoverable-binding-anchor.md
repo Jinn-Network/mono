@@ -72,10 +72,7 @@ exactly this shape.
 
 `/log/decisions/` is a CODEOWNERS path (`.github/CODEOWNERS:35` assigns it to the three human
 owners), so a decision record would gate the PR carrying this document on a human code owner.
-That gate is not obviously wrong for rulings that bind future deployments, and a reviewer may
-reasonably ask for it — the cheapest correct form would be a short record whose Decision
-section is three clauses and whose body points here for the preimage, which is a one-file
-addition to the same PR.
+A reviewer may reasonably ask for one anyway.
 
 The call taken is that no such record is needed, because DR-2026-09-06 already ratified this
 entire frame: decision 3 names the corrective and its cost, decision 9 carries it to the
@@ -122,9 +119,9 @@ role→scope map invertible. Both are rejected in §9.
 One further fact, because a candidate design depends on it: **the admission agent *is*
 recoverable today**, because `admission` is the only role whose scope is the admission-receipt
 scope (`roles.ts:93`), so the admission binding is identifiable and its `agent` is the
-admission IRI (`ceremony.ts:719-721`). That recovery is real, but it is an inversion of the
-role→scope map at exactly one point, which makes it the same class of fragility as the defect
-being corrected. §9 rejects relying on it.
+admission IRI (`operator/src/cli/commands/ceremony.ts:719-721`). That recovery is real, but it
+is an inversion of the role→scope map at exactly one point, which makes it the same class of
+fragility as the defect being corrected. §9 rejects relying on it.
 
 ## 3. The `binding-anchor/v1` preimage
 
@@ -164,6 +161,40 @@ Each element of `bindings`:
 | 1 | `agent` | the binding's Agent IRI, verbatim | `KeyBinding.agent` (`packages/trust/core/src/key-binding.ts:57`) |
 | 2 | `keyId` | the binding's `did:key:`, verbatim | `KeyBinding.key.didKey` (`key-binding.ts:62`) |
 | 3 | `scope` | the binding's scope values, deduplicated, **sorted ascending** by UTF-16 code-unit order; at least one | `KeyBinding.scope` (`key-binding.ts:66`) |
+
+**The literal template.** Written out, with `<…>` marking the values above and no whitespace
+anywhere, the bytes are:
+
+```text
+{"protocol":"https://spec.jinn.network/trust/binding-anchor/v1","bindings":[{"agent":"<agent-1>","keyId":"<keyId-1>","scope":["<scope-1a>","<scope-1b>"]},{"agent":"<agent-2>","keyId":"<keyId-2>","scope":["<scope-2a>"]}]}
+```
+
+`{`, `}`, `[`, `]`, `"`, `:` and `,` are the only punctuation, each where RFC 8259 puts it and
+nowhere else: no newline, no space after a colon or a comma, no trailing comma. A one-element
+`bindings` array drops the `},{` between elements and changes nothing else. A scope array has at
+least one member, so `[]` never appears.
+
+**A worked two-element example.** Take an operator provisioned with `--role-sets requester`
+(§2). Both of its bindings carry the same Agent IRI and distinct keys, and the records hold, in
+the requirements-table order `authorRoleBinding` writes:
+
+| Role — *not* a preimage term | `agent` | `keyId` | `scope` **on the record** |
+|---|---|---|---|
+| `requester-submission` | `urn:uuid:1f0c9d64-7a2e-4b31-8d55-0c9ae1b3f207` | `did:key:z6MktEnCUcVfWKsPWU4kGqNVRfsPvyAeoFmuLg1YjXQdN9pB` | `["authorizations"]` |
+| `requester-discovery` | `urn:uuid:1f0c9d64-7a2e-4b31-8d55-0c9ae1b3f207` | `did:key:z6MkgYb7cRVaHqzsBWXAV8sAJ3XnPRGuC9dV1u7Wq2ePmTzL` | `["observations","jinn:discovery-announcements"]` |
+
+The preimage is then, on one line:
+
+```text
+{"protocol":"https://spec.jinn.network/trust/binding-anchor/v1","bindings":[{"agent":"urn:uuid:1f0c9d64-7a2e-4b31-8d55-0c9ae1b3f207","keyId":"did:key:z6MkgYb7cRVaHqzsBWXAV8sAJ3XnPRGuC9dV1u7Wq2ePmTzL","scope":["jinn:discovery-announcements","observations"]},{"agent":"urn:uuid:1f0c9d64-7a2e-4b31-8d55-0c9ae1b3f207","keyId":"did:key:z6MktEnCUcVfWKsPWU4kGqNVRfsPvyAeoFmuLg1YjXQdN9pB","scope":["authorizations"]}]}
+```
+
+Two things are visible in those bytes that the prose alone does not make obvious. The discovery
+element's `scope` array is **reordered** relative to the record — `jinn:discovery-announcements`
+before `observations`, per §3.2.1 — and the elements are ordered by `keyId`, which puts discovery
+first here (`…z6Mkg…` before `…z6Mkt…`), not by role and not by the order the ceremony authored
+them. No digest is given for the example: hashing is `recordDigest`'s job (§3.2.3), and a hex
+literal here would be a value to copy rather than a rule to follow.
 
 **3.2.1 The scope sort is deliberate and differs from the record.** The scope array carries no
 ordering constraint (`key-binding.ts:66`), and `authorRoleBinding` copies the requirements
@@ -211,10 +242,19 @@ break it: `AgentIriSchema` refines on `isAbsoluteIri`
 `ScopeSchema` admits any absolute URI or reverse-DNS name (`spellings.ts:230-235`). Only
 `DidKeySchema` is structurally ASCII (`spellings.ts:87-92`, base58btc).
 
+The two **delimiter** characters are admitted today as well, which is why the rule excludes them
+explicitly rather than leaning on the ASCII bound alone: `ScopeSchema`'s extension limbs screen
+values with `EXTENSION_FORBIDDEN_CHARACTER_PATTERN` (`spellings.ts:194`), which forbids only
+U+0000–U+0020 and U+007F, so `"` and `\` pass. Excluding them is what makes §3.2's concatenation
+escape-free, and therefore what makes the byte production reproducible without a JSON serializer.
+
 **Rule.** Every `agent` and `scope` value in a `binding-anchor/v1` preimage MUST consist solely
 of characters in U+0020–U+007E, excluding `"` (U+0022) and `\` (U+005C). A record violating
-this is out of profile: refused at authoring, and refused at catalog-open by any verifier
-performing recomputation. Refusing is chosen over specifying the escaping because the
+this is out of profile: refused at authoring, and — under the **successor-required** posture of
+§8 — refused at catalog-open by any verifier performing recomputation. Under mixed mode the same
+verifier classifies and reports it instead, exactly as §4 step 5 does for a digest mismatch: the
+rule takes the posture as a parameter rather than stating a second, flatter rule. Refusing is
+chosen over specifying the escaping because the
 alternative is publishing a lone-surrogate rule that will be implemented three times and agreed
 on twice.
 
@@ -227,6 +267,11 @@ The rule is well-defined on a conforming catalog because anchor digests are alre
 within one: the opener runs `uniqueBy(catalog.anchors, ({ digest }) => digest, 'anchor digest')`
 (`operator/src/daemon/native-trust-catalog.ts:309`), so "the declaration for digest `d`" names
 at most one entry and the referencing set is a function of the digest alone.
+
+**The procedure below is the successor-required procedure** (§8). It is written for the posture
+in which every anchor must recompute; under mixed mode step 5 substitutes classify-and-report for
+the refusal and nothing else changes. That is one rule with a posture parameter, not two rules,
+and the profile document must publish it as one (§11 item 5).
 
 The verifier's procedure, sited in `openNativeTrustCatalog` alongside the referential-integrity
 loop it already runs (`native-trust-catalog.ts:325-343`) and before the anchor-observation loop
@@ -243,8 +288,13 @@ loop it already runs (`native-trust-catalog.ts:325-343`) and before the anchor-o
    `revocation-anchor/v1` per DR-2026-09-06 decision 4. Out of this document's scope.
 4. If `R(a)` is non-empty, build the `binding-anchor/v1` preimage from `R(a)`, hash it, and
    compare with `a.digest`.
-5. A mismatch **refuses the catalog**, naming the anchor digest. Not a warning, not a degraded
-   mode. The existing anchor-observation failure at `:361` is the register to match.
+5. Under successor-required, a mismatch **refuses the catalog**, naming both the anchor digest
+   and the digests of the records in `R(a)`. Not a warning, not a degraded mode; the existing
+   anchor-observation failure at `:361` is the register to match. Naming the records is not
+   cosmetic: F5 is a poisoning attack whose entire cost is borne in diagnosis, and a message
+   carrying only the anchor digest leaves an operator bisecting the catalog to find the record
+   that was added. Under mixed mode the same comparison runs and a mismatch is classified and
+   reported rather than refused (§8), carrying the same identifiers.
 
 An anchor declared in `anchors[]` but referenced by no record is already excluded from
 consideration, because the required set is built from references rather than declarations
@@ -261,19 +311,41 @@ separate admission-agent term.
 ### 5.1 What the trigger is about
 
 The ceremony spec §10 (f) is explicit that this is not only a legibility question: recomputation
-is what shuts the borrowed-anchor residual, and the §7.4a genesis exemption is reachable *only*
-through a borrowed anchor time. That chain is verified rather than accepted: the consent chain
+is what *converts* the borrowed-anchor residual, and the §7.4a genesis exemption is reachable
+only through an anchor time earlier than the victim's — which recomputation makes expensive
+rather than free. §10 (f) writes that reachability condition as "a borrowed anchor time"; the
+wider phrasing here is deliberate and is this document's, not §10 (f)'s, for the reason the
+second paragraph below gives. That chain is verified rather than accepted: the consent chain
 exits at `if (resolved.isGenesis) return { ok: true }`
 (`packages/trust/core/src/verify.ts:201`), genesis is decided by earliest effective start among
 the agent's bindings (`isGenesisAmong`,
 `packages/trust/resolve/src/binding-resolver.ts:217-223`, applied at `:298`), and the effective
-start is `max(validFrom, earliest anchor time)` (`:127-135`). An earlier borrowed anchor time
-therefore buys genesis, and genesis is the exemption.
+start is `max(validFrom, earliest anchor time)` (`:127-135`). An earlier anchor time therefore
+buys genesis, and genesis is the exemption.
 
-The ceremony spec §3.2b names catalog write authority as the residual's real and only bound.
-That bound is procedural: whoever holds the catalog file serializes joins. It is a real bound
-and it is not cryptographic, and it holds only while the deployment's shape keeps it holding.
-So the trigger should fire when the deployment's shape stops keeping it.
+**Converts, not eliminates — the first of §10 (f)'s two bounds, carried here rather than
+dropped.** The ceremony spec §10 (f) states the bound in these words: recomputation "**converts**
+the residual rather than eliminating it — the preimage carries no timestamp, so an adversary who
+genuinely submitted an anchor over a tuple at time T can still present that early time later, at
+the cost of real gas and foresight of both the victim IRI and their own keys". That is as true of
+`binding-anchor/v1` as of the enumerating check: §3.2's preimage commits to
+`{protocol, bindings}` and to no time at all. Concretely, and against the same seams as above: an
+adversary who knows a victim's Agent IRI in advance mints their own keypair, computes the
+successor digest over `{victim agent, attacker keyId, scopes}`, and submits a **genuine** anchor
+transaction, which recomputes correctly under successor-required. Presented later, its earlier
+effective start makes it genesis, exits the consent chain at `verify.ts:201`, and leaves the
+victim's own binding non-genesis with neither an incumbent voucher nor a consent
+countersignature, so the victim's binding fails outright (`verify.ts:245-249`). No borrowing
+occurs anywhere in that chain. What recomputation removes is the *free* version — reaching for an
+anchor somebody else already mined. What it leaves, priced at gas plus foresight, is the
+version above, and a profile document must publish the bound rather than the stronger claim.
+
+**The second bound is the procedural one**, and §10 (f) states it too: recomputation does
+nothing for a catalog whose records an attacker cannot get in front of a verifier. That is what
+the ceremony spec §3.2b names as the residual's real bound — catalog write authority. Whoever
+holds the catalog file serializes joins. It is a real bound and it is not cryptographic, and it
+holds only while the deployment's shape keeps it holding. So the trigger should fire when the
+deployment's shape stops keeping it.
 
 **The standing exposure, stated as such.** Until a trigger fires, every deployment stays on
 `ceremony-anchor/v1` and carries the borrowed-anchor residual with one procedural bound. That
@@ -296,7 +368,10 @@ revocation act-binding check in `openNativeTrustCatalog` that recomputes `revoca
 from the referencing revocations and refuses a mismatch. The moment that lands, the catalog
 opener *contains* a preimage recomputation engine, and the binding half becomes the one anchor
 class it structurally cannot check. At that point the marginal cost of the successor is the
-re-anchor alone — the verifier code is written — and the asymmetry is a documented blind spot
+re-anchor plus one preimage builder — the siting and the refusal are written, and the binding
+preimage is the only new code, because what the revocation check recomputes is a *different*
+preimage, `revocation-anchor/v1` over `{protocol, targets[], revokedBy}` per DR-2026-09-06
+decision 4 — and the asymmetry is a documented blind spot
 inside a single function, which is precisely what the ceremony spec §3.2b enforcement table
 exists to stop tolerating. The trigger is therefore under Jinn's own control, not the world's.
 
@@ -423,6 +498,33 @@ authority is never retroactively expanded — is written nowhere, which is why t
 write it. Reuse moves an authority record under a verifier's feet: the same evidence a verifier
 refused yesterday verifies today, with nothing on the record marking the change.
 
+**The asymmetry in that argument, named rather than glossed.** This ruling forbids retroactive
+*expansion* of authority and mandates retroactive *contraction* of it: §6.2's window is authority
+removed after the fact, achieved by rewriting rather than by revoking. The §7.4b rule cited above
+is about the second direction, not the first — as the implementation plan records it, a
+revocation is "**never retroactive** (effect starts at its own anchor time)", so evidence that
+attributed at time T keeps attributing
+([`docs/superpowers/plans/2026-07-28-trust-layer.md:338`](../docs/superpowers/plans/2026-07-28-trust-layer.md),
+and test case (d) at `:402`). So the ruling reaches for a principle it enforces in one direction
+while its own mechanism runs the other way in the other, and before this ruling reuse was
+available and produced no gap at all. Argument 3 below assigns the gap's *cause* to the
+wholesale-rewrite procedure, correctly; that does not make the gap smaller, and it is the
+fresh-anchor choice that makes the procedural defect fire on every re-author, by rule.
+
+**The call taken, so a reviewer can overturn it knowingly.** Adoption of this ruling is **not**
+made conditional on §13.2's `expiresAt` / supersede shape, which would remove the gap outright.
+Three reasons. That shape is unbuilt implementation work — `authorRoleBinding` accepting
+`expiresAt`, an append-with-supersede path, `authorCatalog` no longer rewriting — and none of it
+is owned, so gating a documentary ruling on it would leave the ceremony spec §10 (e)'s question
+unanswered for as long as that work stays unowned, which is where it is today. The ruling's
+mechanical enforcement under the successor (§6.1) does not depend on the supersede shape either:
+the digest changes and `reusableAnchor` falls through regardless of how the outgoing bindings are
+retired. And the alternative on offer is not "no gap" but "reuse", which is the retroactive
+expansion argument 3 shows costs most where its benefit is a fiction. The tension is therefore
+**recorded** — here and in §11 item 9 — rather than used as a gate. A reviewer who judges the gap
+too high a price before the supersede shape exists should overturn this paragraph; the preimage
+question (§3) is independent of it.
+
 **2. "It was corrective" is a judgment no artifact carries.** Both observed widenings were
 corrective, and this is verified in the tree rather than assumed: for the discovery scope, "the
 keys simply now DECLARE the announcement authority they were already being used to exercise"
@@ -442,9 +544,12 @@ on the widened scope, fresh costs nothing and reuse is the whole harm.
 
 The honest residual is the *other* scopes. Because the re-author is wholesale, evidence that
 verified fine under `solver-delivery` — a role whose scope never changed (`roles.ts:95`) — also
-de-attributes across the window. That cost is real, it is the one genuine price of this ruling,
-and it is a defect of the **wholesale-rewrite procedure**, not of the fresh-anchor choice. The
-procedure defect is already on the runbook's own defect list and is unowned there.
+de-attributes across the window. That cost is real and it is the one genuine price of this
+ruling. Its *cause* is the **wholesale-rewrite procedure** rather than the fresh-anchor choice —
+but the fresh-anchor choice is what makes that procedural defect fire, on every re-author, by
+rule, so "not my defect" is an account of the cause and not a discharge of the cost. The
+procedure defect is already on the runbook's own defect list and is unowned there; §13.2 names
+the shape that would remove it, and §6.3's opening records why adoption is not gated on it.
 
 **4. The preimage choice makes the ruling free to enforce.** Under `binding-anchor/v1` the
 ruling is mechanical (§6.1). Ruling reuse instead would require the successor to *avoid*
@@ -512,6 +617,21 @@ of an existing one.
   makes §6's ruling structural — but a deployment sees two refusals rather than one, and the
   second one's error message must say so plainly or an operator will chase it as a separate
   defect.
+- **F5 — one hostile record can deny the whole catalog.** The schema lets any binding reference
+  any *declared* anchor digest, and the opener checks only that the referenced digest is declared
+  (`operator/src/daemon/native-trust-catalog.ts:329-331`). So under successor-required, any party
+  holding catalog append or write authority — a joining operator on a shared catalog, through the
+  `appendOperator` path — can add a single record whose `anchors[]` names an incumbent's anchor
+  digest. That record joins `R(a)`, the recomputation over `R(a)` no longer equals `a.digest`, and
+  step 5 refuses the **entire catalog** for every daemon that loads it; `openNativeTrustCatalog`
+  failing is a boot refusal, so the blast radius is the deployment rather than the record. This is
+  the same primitive that today buys a borrowed anchor time, so the successor converts an
+  integrity attack into an availability one. That trade is the right direction — fail-closed — and
+  the actor needs exactly the catalog write authority §3.2b already names as the residual's real
+  bound. It is listed because it is a capability the successor creates and F1 does not cover: F1
+  is an honest author publishing a subset, this is a hostile writer poisoning `R(a)`. It is also
+  why §4 step 5 names the records in `R(a)` and not the anchor digest alone — without that, the
+  operator bisects the catalog to find the record that was added.
 
 ## 8. Coexistence and the deployment-wide posture
 
@@ -535,15 +655,29 @@ question, and the profile document must state it in those terms.
   benefit arrives, and it is all-or-nothing by construction: a deployment that lets one anchor
   off the check has defeated the check for every anchor an attacker controls.
 
+"Every anchor" means both classes, so **arming the flag has two preconditions, not one**: the
+re-author procedure must execute (§5.3), *and* the recomputation check must exist for **both**
+anchor classes — `binding-anchor/v1` per §4 step 4, and `revocation-anchor/v1` per §4 step 3 and
+DR-2026-09-06 decision 4. T1 fires on either class landing, and that is deliberate (§5.2: the
+first class landing is what makes the second one cheap), but the trigger and the posture are
+different objects and this is where they come apart. A deployment that armed successor-required
+with only the binding class checked would assert coverage it does not have over the class the
+ceremony spec §3.2b calls the sharper one — "The residual runs in the revocation direction too,
+and there it is sharper", where a back-dated revocation anchor takes effect before the evidence
+it revokes and lets an operator de-attribute their own past evidence. A posture flag whose name
+asserts full coverage while either class goes unchecked is a downgrade surface dressed as a
+guarantee.
+
 So partial migration is a transient a deployment passes through with the flag off, and the flag
 flips once, after the last operator has re-anchored. Publishing this as a per-anchor decision
 would publish a downgrade attack as a feature.
 
 ## 9. Rejected alternatives
 
-**Family A — widening-stable, `{protocol, agent, admissionAgent?, keys: [keyId…]}`.** The family
-issue #4172 gestures at first, and the one DR-2026-09-06 decision 3 describes ("drop `role`, and
-commit only to terms every catalog carries"). Its virtue is that a scope widening recomputes the
+**Family A — widening-stable, `{protocol, agent, admissionAgent?, keys: [keyId…]}`.** The shape
+DR-2026-09-06 decision 3's defect analysis implies, and the one the ceremony spec §10 (f)
+describes ("drop `role`, and commit to terms every catalog carries"). Its virtue is that a scope
+widening recomputes the
 same digest, so the reuse property the ceremony spec §3.2b calls "load-bearing operationally"
 survives intact for the re-author too. Rejected on three grounds.
 
@@ -659,22 +793,48 @@ two items are DR-2026-09-06 decision 9's, restated here in its own terms rather 
    question, and answered here as a proposal.
 3. **The successor preimage** — name, byte production, ordering rules, uniqueness refusal,
    encoding, and digest spelling: §3, to be written fresh as normative text.
-4. **The verifier-enforced ASCII restriction** and the refusal it implies: §3.3.
-5. **The range rule and the recomputation procedure**, including the both-classes refusal and
-   the catalog-refusing mismatch: §4.
+4. **The verifier-enforced ASCII restriction** and the refusal it implies: §3.3 — under the same
+   posture parameter as item 5, so a violating record is refused under successor-required and
+   classified-and-reported under mixed mode.
+5. **The range rule and the recomputation procedure**, including the both-classes refusal at step
+   2 and the mismatch behavior at step 5: §4. The procedure is the **successor-required**
+   procedure; under mixed mode step 5 substitutes classify-and-report for the refusal and nothing
+   else changes. Publish that as **one** rule with a posture parameter — not as an unconditional
+   refusal here and a reporting mode in item 11, which would hand the reader two contradictory
+   normative rules about one behavior. Step 5's refusal names the records in `R(a)` as well as the
+   anchor digest, for the reason item 10 gives.
 6. **The re-anchor trigger** as a three-limb disjunction, with what each limb inspects and by
    whom, and T2's stated asymmetry: §5.2. Both rejected trigger shapes, with reasons: §5.5,
    §5.6.
 7. **The standing exposure, in these words:** until a trigger fires, deployments keep
    `ceremony-anchor/v1`, and that is the borrowed-anchor residual with catalog write authority as
-   its only bound and the genesis exemption reachable through it — not a neutral hold.
+   its only bound and the genesis exemption reachable through it — not a neutral hold. **And both
+   of the ceremony spec §10 (f)'s bounds on the successor's claim, not one.** First: recomputation
+   **converts** the residual rather than eliminating it — the preimage carries no timestamp, so an
+   adversary who genuinely submitted an anchor over a tuple at time T can still present that early
+   time later, at the cost of real gas and foresight of both the victim IRI and their own keys.
+   Second: it does nothing for a catalog whose records an attacker cannot get in front of a
+   verifier, which is the procedural bound. A profile document that published only the second
+   would publish, as normative text, a bound the mono-side ratified record already knows is too
+   strong (§5.1).
 8. **The hard precondition:** the re-author procedure does not execute today (§5.3), so the
    trigger must not be published as though it were executable.
 9. **The mint-fresh ruling**, its four arguments, the wholesale coverage gap named as wholesale,
-   and the record contents an operator must write: §6.
-10. **The new failure modes** F1–F4 as constraints: §7.
+   and the record contents an operator must write: §6. **With the ruling's own tension carried,
+   not dropped:** it forbids retroactive expansion of authority while mandating retroactive
+   contraction of it, and the §7.4b rule its first argument cites is about the second direction
+   only. §6.3 records why adoption is nonetheless not gated on §13.2's `expiresAt` / supersede
+   shape. Publish both halves.
+10. **The new failure modes** F1–F5 as constraints: §7 — including F5, the catalog-wide denial a
+    single hostile record buys under the range rule, and the refusal-message requirement it
+    implies: name the records in `R(a)`, not the anchor digest alone (§4 step 5).
 11. **The coexistence rule and the deployment-wide posture**, including that a non-match is not
-    evidence of a legacy anchor and that mixed mode buys no security: §8.
+    evidence of a legacy anchor and that mixed mode buys no security: §8. **Arming
+    successor-required has two preconditions:** the re-author procedure must execute (item 8),
+    *and* the recomputation check must exist for **both** anchor classes. Otherwise the posture's
+    name asserts coverage the deployment does not have over the class the ceremony spec §3.2b
+    calls the sharper one. Mixed mode is the same procedure with step 5 reporting rather than
+    refusing (item 5), not a second rule.
 12. **The rejected alternatives with their reasons**, not only their verdicts: §9.
 
 **Two criteria this repository cannot close.** Issue #4172's first acceptance criterion asks that
@@ -694,17 +854,17 @@ no owner.
 
 - **Implement `binding-anchor/v1`** in `ceremonyAnchorDigest`
   (`operator/src/cli/commands/ceremony.ts:412-428`) and the recomputation check in
-  `openNativeTrustCatalog`. This is T1's own work (§5.2).
+  `openNativeTrustCatalog`. This is the work T1's firing obliges (§5.2).
 - **Fix the re-author procedure's defects** (§5.3). Without this the trigger fires into a
   procedure that stops at a guard.
 - **The Agent-IRI refusal the ruling requires** (§6.5). A blocker on the ruling's *execution*,
   not on its adoption: a small guard, and the ruling arguably should not ship without it.
 - **The `expiresAt` / supersede shape** (§13.2). This would remove the coverage gap entirely and
   is the most valuable of the five.
-- **`KeyBinding.supersedes` is declared and read by nothing.** `git grep` finds it only in the
-  schema (`packages/trust/core/src/key-binding.ts:71`) and in the test fixture builder
-  (`packages/trust/testing/src/fixtures.ts:158`, `:208`). A declared field no consumer reads
-  should be wired up or deleted.
+- **`KeyBinding.supersedes` is declared and read by nothing.** No consumer reads it: as a field
+  it appears only in the schema (`packages/trust/core/src/key-binding.ts:71`) and in the test
+  fixture builder (`packages/trust/testing/src/fixtures.ts:158`, `:208`). A declared field no
+  consumer reads should be wired up or deleted.
 
 ## 13. Notes on the record
 

@@ -1,7 +1,8 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.5 (corrects §10 (e)'s statement of the fresh-anchor coverage gap — it is
-wholesale across every role, not confined to the widened scope — and points §3.2b and §10 (e)/(f)
+**Version:** 0.5 (corrects §3.2b's and §10 (e)'s statement of the fresh-anchor coverage gap —
+it is wholesale across every role, not confined to the widened scope — and points §3.2b and
+§10 (e)/(f)
 at the proposed successor preimage, trigger, and ruling in
 [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md); no rule
 here is retired and nothing there is adopted. v0.4 was the §3.2b amendment — the anchor target
@@ -646,7 +647,10 @@ resumes onto the already-mined anchor unless the receipt is moved aside too. The
 this and both options' costs. They differ semantically. Reuse preserves
 the original `validFrom` and effective window, so the *widened* scope is claimed retroactively
 over evidence signed before the widening; a fresh anchor refuses that retroactivity at the cost
-of a coverage gap between the old anchor time and the new one. The reuse-vs-fresh choice is a
+of a coverage gap between the old anchor time and the new one, and that gap is wholesale rather
+than confined to the widened scope: the re-author rewrites the catalog and §6 law 2 gives every
+re-authored binding the new anchor's block time, so evidence signed inside the window
+de-attributes for every role. The reuse-vs-fresh choice is a
 per-widening judgment the runbook MUST state and the operator MUST record with its reason.
 Which is right in general is a retroactive-authority question left open at §10 (e). A
 mint-fresh ruling is **proposed**, not adopted, in
