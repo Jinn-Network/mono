@@ -33,8 +33,8 @@ test('the canary job directly calls same-SHA platform verification with least pr
 
 test('the canary publisher directly needs exact verification success', () => {
   const publishAt = workflow.indexOf('canary-publish:');
-  const stableAt = workflow.indexOf('resolve-stable-source:');
-  const block = workflow.slice(publishAt, stableAt);
+  const refreshAt = workflow.indexOf('canary-host-refresh:');
+  const block = workflow.slice(publishAt, refreshAt);
   assert.match(block, /needs: canary-verification/u);
   assert.match(block, /needs\.canary-verification\.result == 'success'/u);
   assert.match(block, /github\.event_name == 'push'/u);
@@ -45,8 +45,8 @@ test('the canary publisher directly needs exact verification success', () => {
 
 test('the publisher downloads only the current run verification artifacts and receipt', () => {
   const publishAt = workflow.indexOf('canary-publish:');
-  const stableAt = workflow.indexOf('resolve-stable-source:');
-  const block = workflow.slice(publishAt, stableAt);
+  const refreshAt = workflow.indexOf('canary-host-refresh:');
+  const block = workflow.slice(publishAt, refreshAt);
   assert.equal((block.match(/uses: actions\/download-artifact@v8/gu) ?? []).length, 2);
   assert.deepEqual(
     [...block.matchAll(/^\s+name: (platform-verification-(?:artifacts|receipt))$/gmu)].map((match) => match[1]).sort(),
@@ -59,8 +59,8 @@ test('the publisher downloads only the current run verification artifacts and re
 
 test('the publisher verifies strict GitHub provenance policy before its receipt-gated npm driver', () => {
   const publishAt = workflow.indexOf('canary-publish:');
-  const stableAt = workflow.indexOf('resolve-stable-source:');
-  const block = workflow.slice(publishAt, stableAt);
+  const refreshAt = workflow.indexOf('canary-host-refresh:');
+  const block = workflow.slice(publishAt, refreshAt);
   assert.match(block, /GITHUB_REPOSITORY/u);
   assert.match(block, /GH_TOKEN: \$\{\{ github\.token \}\}/u);
   assert.match(block, /SOURCE_SHA: \$\{\{ github\.sha \}\}/u);
@@ -76,13 +76,100 @@ test('the publisher verifies strict GitHub provenance policy before its receipt-
 
 test('the final deterministic publication receipt is attested and uploaded', () => {
   const publishAt = workflow.indexOf('canary-publish:');
-  const stableAt = workflow.indexOf('resolve-stable-source:');
-  const block = workflow.slice(publishAt, stableAt);
+  const refreshAt = workflow.indexOf('canary-host-refresh:');
+  const block = workflow.slice(publishAt, refreshAt);
   assert.match(block, /uses: actions\/attest@v4/u);
   assert.ok(block.includes('subject-path: .platform-publication/${{ matrix.release_group }}/publication-receipt.json'));
   assert.match(block, /uses: actions\/upload-artifact@v4/u);
   assert.ok(block.includes('name: platform-publication-receipt-${{ matrix.release_group }}'));
   assert.match(block, /if-no-files-found: error/u);
+});
+
+test('the canary host refresh copies same-run attested bytes to the host and pushes only on change', () => {
+  const refreshAt = workflow.indexOf('canary-host-refresh:');
+  const stableAt = workflow.indexOf('resolve-stable-source:');
+  assert.ok(refreshAt > -1 && stableAt > refreshAt);
+  const block = workflow.slice(refreshAt, stableAt);
+
+  // Gated on verification, not on publication: the host refresh is independent of npm,
+  // and canary-publish carries its own unrelated enablement switch.
+  assert.match(block, /needs: canary-verification/u);
+  assert.doesNotMatch(block, /needs: canary-publish|needs\.canary-publish/u);
+  assert.match(block, /needs\.canary-verification\.result == 'success'/u);
+  assert.match(block, /github\.event_name == 'push'/u);
+  // The workflow also fires on integration/evidence-v1, which must never deploy the
+  // public host. This is the first ref discrimination in the workflow.
+  assert.match(block, /github\.ref == 'refs\/heads\/next'/u);
+  // Unconfigured must skip rather than turn `next` red.
+  assert.match(block, /vars\.JINN_PROFILE_HOST_REPOSITORY != ''/u);
+  assert.match(block, /timeout-minutes:/u);
+
+  // Push authority is the PAT, never GITHUB_TOKEN.
+  assert.match(block, /permissions:\s*\n\s+contents: read\s*\n/u);
+  assert.doesNotMatch(block, /id-token: write|attestations: write|artifact-metadata: write/u);
+
+  // Same-run restore by name; never a cross-run download.
+  assert.equal((block.match(/uses: actions\/download-artifact@v8/gu) ?? []).length, 1);
+  assert.match(block, /name: platform-verification-artifacts/u);
+  assert.doesNotMatch(block, /run-id:|github-token:/u);
+
+  // Copy only: no signing key reaches this job, and no document is regenerated here.
+  assert.doesNotMatch(block, /JINN_PROFILE_MANIFEST_SIGNING_KEY|JINN_PROFILE_MANIFEST_KEY_ID/u);
+  assert.doesNotMatch(block, /build-profile-root\.mjs|sign-profile-manifest\.mjs|npm\s+publish/u);
+
+  // The bundle is built into fresh runner temp space, never into the host checkout --
+  // the generator refuses a non-empty --out, and that refusal stays as strong as it is.
+  assert.match(block, /node \.github\/scripts\/build-profile-host-bundle\.mjs/u);
+  assert.match(block, /--out "\$\{BUNDLE_DIR\}"/u);
+  assert.match(block, /BUNDLE_DIR: \$\{\{ runner\.temp \}\}/u);
+
+  assert.match(block, /node --test mono\/\.github\/scripts\/refresh-profile-host\.test\.mjs/u);
+  assert.match(block, /node mono\/\.github\/scripts\/refresh-profile-host\.mjs/u);
+  assert.ok(
+    block.indexOf('refresh-profile-host.test.mjs') < block.indexOf('node mono/.github/scripts/refresh-profile-host.mjs'),
+    'a broken helper must never reach the host',
+  );
+
+  assert.equal((block.match(/^\s+persist-credentials: false$/gmu) ?? []).length, 2);
+
+  // Half-configured is loud, not silent: the guard precedes the host checkout, because
+  // the token is needed to read a private host repository.
+  const guardAt = block.indexOf('JINN_PROFILE_HOST_PUSH_TOKEN is not configured');
+  assert.ok(guardAt > -1, 'the token guard must name the missing secret');
+  assert.ok(guardAt < block.indexOf('repository: ${{ env.HOST_REPOSITORY }}'));
+  assert.match(block, /::error::/u);
+  assert.match(block, /exit 1/u);
+
+  // The push is a plain fast-forward, gated on a real content change.
+  assert.match(block, /steps\.mirror\.outputs\.changed == 'true'/u);
+  assert.match(block, /HEAD:refs\/heads\/main/u);
+  assert.doesNotMatch(block, /--force|push .*\+refs\//u);
+  assert.match(block, /GIT_ASKPASS/u);
+  assert.match(block, /GIT_TERMINAL_PROMPT=0/u);
+  // The credential reaches exactly three steps: the guard, the host checkout (a private
+  // host repository must be readable to be mirrored into), and the push. Naming the
+  // steps is the actual property; an occurrence count is brittle prose-sensitive noise.
+  const tokenSteps = block.split(/\n      - /u).slice(1)
+    .filter((step) => step.includes('JINN_PROFILE_HOST_PUSH_TOKEN'))
+    .map((step) => step.split('\n')[0].trim());
+  assert.deepEqual(tokenSteps, [
+    'name: Guard the host push credential',
+    'name: Checkout the profile host',
+    'name: Push to the host default branch',
+  ]);
+});
+
+test('the live-host gate explains a stale or lane-mismatched host', () => {
+  const liveHostAt = workflow.indexOf('stable-live-host-verification:');
+  const attestationAt = workflow.indexOf('stable-live-host-attestation:');
+  const block = workflow.slice(liveHostAt, attestationAt);
+
+  assert.match(block, /id: gate/u);
+  // Scoped to the gate step: a bare `if: failure()` would explain a stale host after a
+  // failed checkout, when the job never reached the network.
+  assert.match(block, /if: failure\(\) && steps\.gate\.outcome == 'failure'/u);
+  assert.match(block, /host refresh may not have run yet/u);
+  assert.match(block, /docs\/runbooks\/jinn-network-profile-hosting\.md/u);
 });
 
 test('stable resolves an exact tag SHA and shares verification without any publication path', () => {
