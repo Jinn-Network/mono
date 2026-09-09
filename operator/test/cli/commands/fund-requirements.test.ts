@@ -284,6 +284,77 @@ describe('fund-requirements command', () => {
     expect('requester' in seen[1]!).toBe(false);
   });
 
+  // Round-3 finding 2 (#4271): the dual-role window. `jinn bootstrap`'s Stage 1
+  // funding gate persists nothing, so a requester who tries to supply and is
+  // refused still reads as `requester_stage: 'safe_deployed'` + `fleet_stage:
+  // 'none'` + no services on disk — the exact state the inference calls
+  // "requester, creator Safe deployed, nothing needed". `--operator` is the way
+  // to ask the other question, and the bare answer must name which one it gave.
+  it('--operator overrides the inferred requester persona and reports the operator shortfall', async () => {
+    const seen: Record<string, unknown>[] = [];
+    const planSpy = vi.fn(async (options: Record<string, unknown>) => {
+      seen.push(options);
+      return {
+        persona: 'operator',
+        satisfied: false,
+        partial: false,
+        reasons: [],
+        master: {
+          master_address: '0xDUALROLE',
+          eth_required: '19500000000000000',
+          eth_balance: '500000000000000',
+        },
+        safes: [],
+      } as FundingPlan;
+    });
+    const fr = createFundRequirementsCommand(makeFakeDeps({ planSpy }));
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['--operator'], env: { JINN_PASSWORD: 'test' } });
+    await fr.run(ctx);
+    // Forwarded as an explicit `false`, not omitted — omitting it would leave
+    // the marker's inference in charge, which is the thing being overridden.
+    expect(seen[0]).toMatchObject({ requester: false });
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.persona).toBe('operator');
+    expect(parsed.satisfied).toBe(false);
+    expect(parsed.requirements[0]).toMatchObject({
+      role: 'master',
+      address: '0xDUALROLE',
+      needWei: '19500000000000000',
+      blocks: 'bootstrap',
+    });
+    expect(exits).toEqual([0]);
+  });
+
+  it('names the requester persona in its satisfied line and points at the operator question', async () => {
+    const deps = makeFakeDeps({
+      plan: { persona: 'requester', satisfied: true, partial: false, reasons: [], safes: [] },
+    });
+    const fr = createFundRequirementsCommand(deps);
+    const { ctx, writes } = makeCommandCtx({ argv: ['--human'], env: { JINN_PASSWORD: 'test' } });
+    await fr.run(ctx);
+    const rendered = writes.join('');
+    expect(rendered).toContain('Requester funding satisfied');
+    expect(rendered).toContain('jinn fund-requirements --operator');
+    // The bare operator answer is unchanged.
+    const operatorDeps = makeFakeDeps({
+      plan: { persona: 'operator', satisfied: true, partial: false, reasons: [], safes: [] },
+    });
+    const fr2 = createFundRequirementsCommand(operatorDeps);
+    const second = makeCommandCtx({ argv: ['--human'], env: { JINN_PASSWORD: 'test' } });
+    await fr2.run(second.ctx);
+    expect(second.writes.join('')).toContain('Funding requirements satisfied. Nothing needed right now.');
+  });
+
+  it('refuses --requester and --operator together', async () => {
+    const planSpy = vi.fn(async () => ({ persona: 'operator', satisfied: true, partial: false, reasons: [], safes: [] } as FundingPlan));
+    const fr = createFundRequirementsCommand(makeFakeDeps({ planSpy }));
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['--requester', '--operator'], env: { JINN_PASSWORD: 'test' } });
+    await fr.run(ctx);
+    expect(JSON.parse(writes[writes.length - 1]).code).toBe('invalid_invocation');
+    expect(planSpy).not.toHaveBeenCalled();
+    expect(exits).toEqual([11]);
+  });
+
   it('does not send a requester to the operator bootstrap in its partial reasons', async () => {
     const deps = makeFakeDeps({
       plan: {

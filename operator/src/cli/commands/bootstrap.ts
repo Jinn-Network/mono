@@ -187,7 +187,13 @@ export function createBootstrapCommand(deps: BootstrapDeps = PRODUCTION_DEPS): C
           code: 'funding_required',
           message: result.message,
           hint: 'Fund the listed address and re-run jinn bootstrap.',
-          exampleCli: 'jinn fund-requirements --json',
+          // `--operator` explicitly, not the bare verb: this gate persists
+          // nothing, so a dual-role user who has run `jinn requester init` and
+          // is refused here still reads as the requester persona on disk. The
+          // bare verb would answer the requester question — "creator Safe
+          // deployed, nothing needed" — to a host agent following this
+          // `exampleCli` out of an operator refusal.
+          exampleCli: 'jinn fund-requirements --operator --json',
           details: {
             role: 'master',
             address: result.funding.master_address,

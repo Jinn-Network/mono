@@ -10,11 +10,23 @@ import requesterCommand from '../../../src/cli/commands/requester.js';
 import { CLI_COMMANDS } from '../../../src/cli/index.js';
 import { createDefaultFleetState } from '../../../src/earning/types.js';
 import type { FleetBootstrapResult } from '../../../src/earning/types.js';
+import type { RpcNetworkPreflightResult } from '../../../src/preflight/rpc-network.js';
 import { makeCommandCtx } from '@test/cli.js';
+
+function okRpc(): RpcNetworkPreflightResult {
+  return {
+    ok: true,
+    network: 'testnet',
+    expectedChainId: 84532,
+    actualChainId: 84532,
+    rpcHost: '127.0.0.1',
+  };
+}
 
 function makeDeps(
   result: FleetBootstrapResult,
   spy?: ReturnType<typeof vi.fn>,
+  overrides: Partial<RequesterCommandDeps> = {},
 ): RequesterCommandDeps {
   return {
     loadConfig: () => ({
@@ -24,7 +36,17 @@ function makeDeps(
     } as never),
     getConfigPathFromArgs: () => undefined,
     resolveCliPassword: () => ({ ok: true as const, password: 'test' }),
+    checkRpcNetwork: async () => okRpc(),
+    rpcNetworkFailureHint: () => 'Point JINN_RPC_URL at the right chain.',
+    logRpcLocalDevToStderr: () => {},
+    checkDaemonGuard: () => ({
+      blocked: false as const,
+      pid: null,
+      pidfilePath: '/tmp/jinn-requester/daemon.pid',
+      reason: 'not-running' as const,
+    }),
     ensureRequesterSafe: (spy ?? vi.fn(async () => result)) as RequesterCommandDeps['ensureRequesterSafe'],
+    ...overrides,
   };
 }
 
@@ -83,6 +105,55 @@ describe('jinn requester init', () => {
     const { ctx, writes, exits } = makeCommandCtx({ argv: ['bootstrap'], env: { JINN_PASSWORD: 'test' } });
     await cmd.run(ctx);
     expect(JSON.parse(writes.at(-1)!).code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+  });
+
+  // D0a P3 (#525/#562/#897): this verb broadcasts from the same agent EOA a
+  // running daemon signs with, and it persists the Safe address it deploys.
+  // Both refusals must land *before* any chain write is attempted.
+  it('refuses to broadcast while a jinn daemon is running, without calling the bootstrapper', async () => {
+    const ensure = vi.fn(async () => readyState());
+    const cmd = createRequesterCommand(makeDeps(readyState(), ensure, {
+      checkDaemonGuard: () => ({
+        blocked: true as const,
+        pid: 4321,
+        pidfilePath: '/tmp/jinn-requester/daemon.pid',
+        reason: 'alive' as const,
+      }),
+    }));
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['init'], env: { JINN_PASSWORD: 'test' } });
+    await cmd.run(ctx);
+    const envelope = JSON.parse(writes.at(-1)!);
+    expect(envelope.code).toBe('invalid_invocation');
+    expect(envelope.details).toMatchObject({ field: 'daemon_pidfile', pid: 4321, reason: 'alive' });
+    expect(ensure).not.toHaveBeenCalled();
+    expect(exits).toEqual([11]);
+  });
+
+  it('refuses on an RPC chain-id mismatch, without calling the bootstrapper', async () => {
+    const ensure = vi.fn(async () => readyState());
+    const cmd = createRequesterCommand(makeDeps(readyState(), ensure, {
+      checkRpcNetwork: async (): Promise<RpcNetworkPreflightResult> => ({
+        ok: false,
+        message: 'RPC chain id 8453 does not match the configured testnet (84532).',
+        network: 'testnet',
+        expectedChainId: 84532,
+        actualChainId: 8453,
+        rpcHost: 'mainnet.base.org',
+        reason: 'chain_mismatch',
+      }),
+    }));
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['init'], env: { JINN_PASSWORD: 'test' } });
+    await cmd.run(ctx);
+    const envelope = JSON.parse(writes.at(-1)!);
+    expect(envelope.code).toBe('invalid_invocation');
+    expect(envelope.details).toMatchObject({
+      field: 'rpcUrl',
+      expectedChainId: 84532,
+      actualChainId: 8453,
+      reason: 'chain_mismatch',
+    });
+    expect(ensure).not.toHaveBeenCalled();
     expect(exits).toEqual([11]);
   });
 

@@ -18,7 +18,25 @@ function envelopeDebug(env: NodeJS.ProcessEnv): boolean {
 
 type AssetRole = 'native' | 'bond' | 'reward';
 
-const REQUESTER_FLAG = { requester: { type: 'boolean' as const, default: false } };
+/**
+ * The persona override, in both directions. `--requester` forces the requester
+ * gate; `--operator` forces the operator gate, overriding the persisted
+ * requester marker's inference.
+ *
+ * `--operator` exists because the inference cannot be clairvoyant: on-disk
+ * state cannot distinguish "pure requester, creator Safe deployed, done" from
+ * "requester who just ran `jinn bootstrap` and was refused at the Stage 1
+ * funding gate" -- that gate persists nothing. Both states read as
+ * `requester_stage: 'safe_deployed'` + `fleet_stage: 'none'` + no services, so
+ * the inferred answer for the second is "nothing needed" while `jinn bootstrap`
+ * is refusing for want of the operator's target. `--no-requester` cannot serve:
+ * `parseCommandArgs` calls `parseArgs` without `allowNegative`, so it is
+ * rejected as an unknown option.
+ */
+const PERSONA_FLAGS = {
+  requester: { type: 'boolean' as const, default: false },
+  operator: { type: 'boolean' as const, default: false },
+};
 
 interface FundRequirementRow {
   role: string;
@@ -75,7 +93,14 @@ function humanFundRequirements(payload: {
 }): string {
   const lines: string[] = [];
   if (payload.satisfied) {
-    lines.push('Funding requirements satisfied. Nothing needed right now.');
+    // Name the persona the answer is *for*. `persona` already reaches the JSON
+    // payload; hiding it here is what let a dual-role user read "nothing needed
+    // right now" as an answer to the operator question they were actually
+    // asking, while `jinn bootstrap` refuses at its own gate.
+    lines.push(payload.persona === 'requester'
+      ? 'Requester funding satisfied — your creator Safe is deployed. '
+        + 'Operating as well has its own gate: `jinn fund-requirements --operator`.'
+      : 'Funding requirements satisfied. Nothing needed right now.');
   } else if (payload.requirements.length === 0 && payload.partial) {
     lines.push('Funding requirements unknown — answer is partial.');
   } else {
@@ -121,12 +146,17 @@ export function createFundRequirementsCommand(deps: FundRequirementsDeps = PRODU
     let json = false;
     let human = false;
     let requester = false;
+    let operator = false;
     let configPath: string | undefined;
     try {
-      const parsed = parseCommandArgs(ctx.argv, { ...COMMON_FLAGS, ...REQUESTER_FLAG });
+      const parsed = parseCommandArgs(ctx.argv, { ...COMMON_FLAGS, ...PERSONA_FLAGS });
       json = Boolean(parsed.values.json);
       human = Boolean(parsed.values.human);
       requester = Boolean(parsed.values.requester);
+      operator = Boolean(parsed.values.operator);
+      if (requester && operator) {
+        throw new Error('--requester and --operator are mutually exclusive.');
+      }
       configPath =
         typeof parsed.values.config === 'string' && parsed.values.config.length > 0
           ? parsed.values.config
@@ -170,10 +200,12 @@ export function createFundRequirementsCommand(deps: FundRequirementsDeps = PRODU
         minEoaGasWei: config.minEoaGasWei,
         minSafeEthWei: config.minSafeEthWei,
         password: passwordValue,
-        // Only forward an explicit `--requester`. Leaving it undefined lets the
-        // plan infer the persona from the persisted requester marker, which is
-        // what a requester who has already run `jinn requester init` gets.
+        // Only forward an explicit flag. Leaving it undefined lets the plan
+        // infer the persona from the persisted requester marker, which is what
+        // a requester who has already run `jinn requester init` gets;
+        // `--operator` forces `false` so that inference is overridden.
         ...(requester ? { requester: true } : {}),
+        ...(operator ? { requester: false } : {}),
       });
     } catch (err) {
       const cause = err instanceof Error ? err.message : String(err);
@@ -263,7 +295,7 @@ export function createFundRequirementsCommand(deps: FundRequirementsDeps = PRODU
   return {
     name: 'fund-requirements',
     summary: 'List addresses that need funding before the next bootstrap step',
-    helpText: `Usage: jinn fund-requirements [--human] [--requester] [--config <path>] [--password-fd <fd>]
+    helpText: `Usage: jinn fund-requirements [--human] [--requester | --operator] [--config <path>] [--password-fd <fd>]
 
 Read-only inspection: returns a JSON object listing every wallet that
 needs additional funding before the state machine can advance. This
@@ -287,10 +319,16 @@ creator Safe that owns the tasks you post — instead of the operator's
 bootstrap target. It is inferred automatically once \`jinn requester init\`
 has run; pass it explicitly before that.
 
+\`--operator\` is its mirror: it reports the operator's bootstrap target even
+when the requester marker would otherwise infer the requester gate. Use it if
+you have run \`jinn requester init\` and now want to supply as well. The two
+flags are mutually exclusive.
+
 Examples:
   jinn fund-requirements
   jinn fund-requirements --human
   jinn fund-requirements --requester
+  jinn fund-requirements --operator
 `,
     run,
   };

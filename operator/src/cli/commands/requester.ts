@@ -24,6 +24,15 @@ import {
 import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
 import type { FleetBootstrapResult } from '../../earning/types.js';
+import {
+  checkRpcNetwork as defaultCheckRpcNetwork,
+  logRpcLocalDevToStderr as defaultLogRpcLocalDevToStderr,
+  rpcNetworkFailureHint as defaultRpcNetworkFailureHint,
+} from '../../preflight/rpc-network.js';
+import {
+  checkDaemonGuard as defaultCheckDaemonGuard,
+  daemonGuardEnvelope,
+} from '../daemon-guard.js';
 
 const EXAMPLE_CLI = 'JINN_PASSWORD=... jinn requester init';
 
@@ -31,6 +40,16 @@ export interface RequesterCommandDeps {
   loadConfig: typeof defaultLoadConfig;
   getConfigPathFromArgs: typeof defaultGetConfigPathFromArgs;
   resolveCliPassword: typeof defaultResolveCliPassword;
+  /**
+   * Preflight, in the same order and for the same reasons as `jinn bootstrap`
+   * (`cli/commands/bootstrap.ts`). This verb broadcasts — the master -> agent
+   * value transfer and the Safe deployment — and it *persists* what it
+   * deploys, so both of that command's guards apply here verbatim.
+   */
+  checkRpcNetwork: typeof defaultCheckRpcNetwork;
+  rpcNetworkFailureHint: typeof defaultRpcNetworkFailureHint;
+  logRpcLocalDevToStderr: typeof defaultLogRpcLocalDevToStderr;
+  checkDaemonGuard: typeof defaultCheckDaemonGuard;
   /**
    * Requester-only onboarding walk. Production wires this to
    * `FleetBootstrapper.ensureRequesterSafe`. Injected so the CLI surface is
@@ -48,6 +67,10 @@ const PRODUCTION_DEPS: RequesterCommandDeps = {
   loadConfig: defaultLoadConfig,
   getConfigPathFromArgs: defaultGetConfigPathFromArgs,
   resolveCliPassword: defaultResolveCliPassword,
+  checkRpcNetwork: defaultCheckRpcNetwork,
+  rpcNetworkFailureHint: defaultRpcNetworkFailureHint,
+  logRpcLocalDevToStderr: defaultLogRpcLocalDevToStderr,
+  checkDaemonGuard: defaultCheckDaemonGuard,
   async ensureRequesterSafe(input) {
     const bootstrapper = new FleetBootstrapper({
       earningDir: input.earningDir,
@@ -104,6 +127,49 @@ export function createRequesterCommand(deps: RequesterCommandDeps = PRODUCTION_D
     const configPath = deps.getConfigPathFromArgs(ctx.argv);
     const config = deps.loadConfig(configPath);
     const chain: 'base' | 'base-sepolia' = config.network === 'testnet' ? 'base-sepolia' : 'base';
+
+    // This verb persists what it deploys: `stepFleetSafePredict` /
+    // `stepFleetSafeDeploy` write `fleet_safe_address` into
+    // `earning_state.json`. A mis-set RPC would record a Safe deployed on the
+    // wrong chain as the fleet Safe -- and because the requester's Safe *is*
+    // the operator's Safe, that wrong-chain write poisons a later operator
+    // bootstrap too. Refuse before touching the chain, exactly as
+    // `jinn bootstrap` does.
+    const rpcPreflight = await deps.checkRpcNetwork(config);
+    if (!rpcPreflight.ok) {
+      return emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: rpcPreflight.message,
+          hint: deps.rpcNetworkFailureHint(rpcPreflight),
+          exampleCli: 'jinn doctor --human',
+          details: {
+            field: 'rpcUrl',
+            network: rpcPreflight.network,
+            expectedChainId: rpcPreflight.expectedChainId,
+            actualChainId: rpcPreflight.actualChainId ?? null,
+            rpcHost: rpcPreflight.rpcHost,
+            reason: rpcPreflight.reason,
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+    }
+    // Log to real stderr; `ctx.writer` is stdout and must stay a single JSON
+    // (or human) line for the `emitResult` / `emitEnvelope` contracts.
+    deps.logRpcLocalDevToStderr(rpcPreflight);
+
+    // D0a P3 (#525/#562/#897): `ensureRequesterSafe` broadcasts from the same
+    // agent EOA a running `jinn run` daemon signs with, against the same
+    // earning directory, with no cross-process nonce lock. The dual-role user
+    // this verb is built for is precisely the one who has that daemon up.
+    const daemonGuard = deps.checkDaemonGuard({ earningDir: config.earningDir, env: ctx.env });
+    if (daemonGuard.blocked) {
+      return emitEnvelope(
+        daemonGuardEnvelope(daemonGuard, EXAMPLE_CLI),
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+    }
 
     let result: FleetBootstrapResult;
     try {
