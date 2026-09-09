@@ -4,7 +4,9 @@ import {
   archivePagePath,
   headPath,
   parseAnnouncementEntry,
+  parseHeadTimestamp,
   recordDigest,
+  refreshByWithinCeiling,
   recordPath,
   sealJson,
   type AnnouncementEntry,
@@ -79,6 +81,69 @@ export function adaptRequesterSourceV1Publication(input: {
 }
 
 /**
+ * Refuses a v1 head whose timestamps the generic writer will refuse, BEFORE the
+ * intent exists to be persisted (#4094).
+ *
+ * `createDurableSourceWriter.append` reads `command.timestamp` strictly at its
+ * very top for exactly this reason (#3482): admitting a timestamp the head
+ * schema will later refuse signs a head, persists the append intent, and only
+ * THEN fails -- leaving the intent claimed, so `recover()` replays the same
+ * failure and every later append is dead behind it.
+ *
+ * This pre-C6 compatibility path does not go through `append`. The intent it
+ * returns is CAS'd durable by `createRequesterSourceIntentStore.read()` before
+ * `commitIntent` runs the strict `parseHeadTimestamp` comparisons inside
+ * `assertIntentOwnership` -- the same wedge shape on a second route. So the
+ * refusal is brought forward to here, using the same reading, and it is placed
+ * before `signAnnouncementEntry`/`signHead` so a refusal signs nothing either.
+ *
+ * This is NOT `append`'s clock-relative window bound, which deliberately exempts
+ * this reader: a head the old requester already minted must not be re-bounded
+ * against a clock that has since moved. Every predicate here is a function of
+ * the frozen bytes alone, and each one is a predicate `assertIntentOwnership`
+ * will apply to those same bytes later.
+ *
+ * Unreachable today -- every requester-source-v1 timestamp originates from
+ * `new Date(...).toISOString()`, which always produces a conforming spelling.
+ * The defect being closed is that the append guard's own reasoning was not
+ * enforced on this path, not that a live input reaches it.
+ */
+function assertV1HeadTimestamps(input: {
+  readonly publication: RequesterSourcePublicationV1;
+  readonly previousHeadIssuedAt: string | null;
+}): void {
+  const head = input.publication.head;
+  const issuedAtMs = parseHeadTimestamp(head.issuedAt);
+  if (Number.isNaN(issuedAtMs)) {
+    throw new Error(`requester source v1 head issuedAt is invalid: ${head.issuedAt}`);
+  }
+  const refreshByMs = parseHeadTimestamp(head.refreshBy);
+  if (Number.isNaN(refreshByMs)) {
+    throw new Error(`requester source v1 head refreshBy is invalid: ${head.refreshBy}`);
+  }
+  if (!(refreshByMs > issuedAtMs)) {
+    throw new Error(`requester source v1 head refreshBy does not follow issuedAt: ${head.refreshBy}`);
+  }
+  // The §5.2 CEILING, which `assertIntentOwnership` also applies to these frozen
+  // bytes, and which is clock-free: it bounds `refreshBy` against this head's own
+  // `issuedAt`, not against now. That is why bringing it forward is safe where
+  // bringing `append`'s `checkRefreshWindow` forward would not be -- the latter
+  // compares an already-minted head against a clock that has since moved.
+  if (!refreshByWithinCeiling(head)) {
+    throw new Error(`requester source v1 head refreshBy exceeds the §5.2 ceiling: ${head.refreshBy}`);
+  }
+  if (input.previousHeadIssuedAt !== null) {
+    const previousMs = parseHeadTimestamp(input.previousHeadIssuedAt);
+    if (Number.isNaN(previousMs)) {
+      throw new Error(`requester source v1 previous head issuedAt is invalid: ${input.previousHeadIssuedAt}`);
+    }
+    if (!(issuedAtMs > previousMs)) {
+      throw new Error(`requester source v1 head issuedAt does not advance the previous head: ${head.issuedAt}`);
+    }
+  }
+}
+
+/**
  * Freezes a pre-C6 requester publication as the generic writer's durable
  * intent. This is a compatibility reader only: the returned transaction is
  * committed and recovered by `createDurableSourceWriter`.
@@ -101,6 +166,7 @@ export async function freezeRequesterSourceV1Intent(input: {
   if (announcement.action !== 'available') {
     throw new Error('requester source v1 compatibility intent must be available');
   }
+  assertV1HeadTimestamps(input);
   const signedEntry = await signAnnouncementEntry(input.publication.entry, input.signer);
   const page: ArchivePage = {
     protocol: RECORD_DISCOVERY_VERSION,
