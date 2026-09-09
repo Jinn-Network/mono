@@ -229,6 +229,13 @@ const imageReference =
  * and a real tag never ends in one — the registry grammar allows `.` inside a
  * tag but the shapes these lanes publish are semver, `next`, `latest`,
  * `canary-*` and `sha-*`.
+ *
+ * Prose only. In an `EXECUTABLE_FILES` entry there is no sentence for a
+ * terminator to end: `…/operator:next.` in a Dockerfile or a `docker run` line
+ * is a literal, legal-but-unpublished OCI tag that 404s at build time, and
+ * stripping it would hand this suite a tag nobody wrote. Masking, not
+ * mangling — no current reference changes either way — but the whole point of
+ * the executable set is that its references are pulled rather than read.
  */
 function stripSentencePunctuation(tag: string): string {
   return tag.replace(/[.;:!?]+$/, '');
@@ -241,14 +248,16 @@ function parseImageReferences(
   text: string,
   file = '<text>',
 ): Reference[] {
+  const prose = !EXECUTABLE_FILES.has(file);
   const found: Reference[] = [];
   text.split('\n').forEach((line, index) => {
     for (const match of line.matchAll(imageReference)) {
+      const tag = match[2];
       found.push({
         file,
         line: index + 1,
         pkg: match[1],
-        tag: match[2] === undefined ? undefined : stripSentencePunctuation(match[2]),
+        tag: tag === undefined ? undefined : prose ? stripSentencePunctuation(tag) : tag,
       });
     }
   });
@@ -297,6 +306,16 @@ describe('GHCR image references', () => {
     expect(
       parseImageReferences('run ghcr.io/jinn-network/operator:0.2.3.')[0],
     ).toMatchObject({ pkg: 'operator', tag: '0.2.3' });
+
+    // An executable file has no sentence, so nothing is stripped there: a
+    // trailing `.` is part of the literal tag that file would actually pull,
+    // and `operator:next.` is a 404 this suite must keep reporting.
+    expect(
+      parseImageReferences(
+        'FROM ghcr.io/jinn-network/operator:next.',
+        'deploy/railway-operator-codex/Dockerfile',
+      )[0],
+    ).toMatchObject({ pkg: 'operator', tag: 'next.' });
 
     // Kill-check: a tag no lane publishes is still caught, terminator or not.
     for (const text of [

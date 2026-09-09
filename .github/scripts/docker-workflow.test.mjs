@@ -41,12 +41,19 @@ function step(name) {
  * Every shell script this workflow runs. A `run:` block is a block scalar
  * (`|`, `|-`, `>`, `>-`) or a one-liner; both forms are collected, because a
  * `${{ }}` interpolation is equally injectable in either.
+ *
+ * The optional `- ` in the opener is load-bearing: a step written without a
+ * `name:` puts `run:` on the list-item line itself (`- run: |`), which is the
+ * dominant step form in this repository — `ci.yml` alone uses it 35 times. An
+ * opener anchored to `run:` as the first non-whitespace token skips those
+ * steps' scripts silently, so the injection assertions below would advertise
+ * coverage they do not have.
  */
-function runBlocks() {
-  const lines = workflow.split('\n');
+function runBlocks(source = workflow) {
+  const lines = source.split('\n');
   const blocks = [];
   for (let index = 0; index < lines.length; index += 1) {
-    const opener = /^(\s*)run:\s*(\|-?|>-?)?\s*(.*)$/.exec(lines[index]);
+    const opener = /^(\s*)(?:-\s+)?run:\s*(\|-?|>-?)?\s*(.*)$/.exec(lines[index]);
     if (opener === null) continue;
     const [, indent, blockScalar, inline] = opener;
     if (blockScalar === undefined) {
@@ -78,8 +85,16 @@ test('a manual publish may only run from a release tag', () => {
 
   const guard = /case "\$\{GITHUB_REF\}" in\s*\n\s*refs\/tags\/v\*\|refs\/tags\/client-v\*\)\s*;;\s*\n\s*\*\)\s*\n(?:.*\n)*?\s*exit 1\s*\n\s*;;\s*\n\s*esac/;
   assert.match(meta, guard);
+  // Both bounds, because ordering alone is not containment: the whole
+  // `case`/`esac` can be moved out of the branch — or left in place and
+  // neutered under an `if false; then` — and a start-bound-only assertion stays
+  // green while the allowlist is dead. `RELEASE_TAG="${RELEASE_TAG_INPUT}"` is
+  // the `else` arm, and therefore the end of the dispatch branch.
+  const elseArmAt = meta.indexOf('RELEASE_TAG="${RELEASE_TAG_INPUT}"');
+  assert.notEqual(elseArmAt, -1, 'the non-dispatch branch must read the tag from the environment');
+  const guardAt = meta.search(guard);
   assert.ok(
-    meta.search(guard) > dispatchAt,
+    guardAt > dispatchAt && guardAt < elseArmAt,
     'the release-tag allowlist must sit inside the workflow_dispatch branch',
   );
 
@@ -131,4 +146,27 @@ test('attacker-shaped values reach the shell through env, never interpolation', 
   assert.match(meta, /RELEASE_TAG_INPUT: \$\{\{ github\.event\.release\.tag_name \}\}/);
   assert.match(meta, /RELEASE_TAG="\$\{RELEASE_TAG_INPUT\}"/);
   assert.match(meta, /"\$\{VERSION_INPUT#v\}" != "\$\{VERSION\}"/);
+});
+
+test('runBlocks collects a step written without a name', () => {
+  // Regression probe for the opener's `- ` alternative. Without it this fixture
+  // yields no blocks at all, and the interpolation assertions above pass over
+  // every nameless `- run:` step in the workflow without reading one line of
+  // its script.
+  const fixture = [
+    'jobs:',
+    '  build:',
+    '    steps:',
+    '      - run: |',
+    '          echo "publishing ${{ github.event.release.tag_name }}"',
+    '      - name: Named step',
+    '        run: echo ${{ inputs.version }}',
+    '      - run: echo "one-liner ${{ inputs.version }}"',
+  ].join('\n');
+
+  const blocks = runBlocks(fixture);
+  assert.equal(blocks.length, 3);
+  assert.match(blocks[0], /github\.event\.release\.tag_name/);
+  assert.match(blocks[1], /inputs\.version/);
+  assert.match(blocks[2], /one-liner/);
 });
