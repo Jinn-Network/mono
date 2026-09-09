@@ -92,8 +92,11 @@ const DISPLAY_UNSAFE_CHARACTER =
  * - **Amounts and digests must match their sealed grammars**, and a rail identifier must carry
  *   no character whose only job is to make it render as a different rail.
  * - **The item's `provenance` must carry the values the withdrawal key is built from**, because
- *   a card this function returns is destructured in `liveOfferCards` without a second check,
- *   so a malformed one would throw there rather than miss here.
+ *   a card this function returns reaches `liveOfferCards` without a second check. A shape that
+ *   cannot be destructured there throws instead of missing here; one that destructures but
+ *   carries the wrong types keys the withdrawal lookup at a value no withdrawal can match, so a
+ *   withdrawn offer reads as live. This is the one bullet whose skip costs something other than
+ *   ordering — a crashed listing or a stale one.
  */
 export function readOfferCard(item: AnnouncedItem): OfferCard | undefined {
   const record = item.record as AnnouncedItem["record"] | undefined;
@@ -101,14 +104,27 @@ export function readOfferCard(item: AnnouncedItem): OfferCard | undefined {
   if (record.kind !== OFFER_RECORD_KIND) return undefined;
   // `provenance` is guarded for the same reason `record` is, and it was the one required
   // field of the item that was not. A card that reaches `liveOfferCards` is destructured
-  // there unconditionally (`card.item.provenance`), so a malformed one -- absent, null, a
-  // string, or an object missing `source.agent` -- turned this function's documented
-  // miss-not-throw posture into a `TypeError` thrown from the withdrawal filter, one feed
-  // item poisoning the whole listing. Guarding it here keeps the defect a miss, where the
-  // chain-and-facts verifier adjudicates it. Only the four values the withdrawal key is
-  // built from are checked: `entry` and `derivation` are read by no path in this module,
-  // and checking a field nothing consumes would narrow what an index accepts for no
-  // ordering or safety gain.
+  // there unconditionally (`card.item.provenance`) and its `source` is then read for
+  // `agent`, so an unguarded item failed in one of two ways, and only the first of them
+  // throws:
+  //
+  // - Provenance absent, null, a string, a number, or an array, or an object whose
+  //   `source` is absent or null: the destructure or the `source.agent` read raises a
+  //   `TypeError` out of the withdrawal filter, turning this function's documented
+  //   miss-not-throw posture into one feed item poisoning the whole listing.
+  // - Provenance that destructures cleanly but carries a non-string (or empty) value the
+  //   key is built from -- `{ source: {}, announcementId: 7 }`, `{ source: "x", ... }`:
+  //   nothing throws. `withdrawalKey` JSON-encodes what it is given, so `7` and `"7"` are
+  //   different keys and a source's own withdrawal stops matching its own announcement.
+  //   That is the fail-OPEN direction: a delisted offer keeps showing as live.
+  //
+  // Guarding both here keeps the defect a miss, where the chain-and-facts verifier
+  // adjudicates it. Non-empty is the sealed grammar's own bound -- `announcementId`,
+  // `agent` and `name` are each `z.string().min(1)` in `entry.ts` -- so this narrows
+  // nothing an honest announcement could spell. Only the four values the withdrawal key
+  // is built from are checked: `entry` and `derivation` are read by no path in this
+  // module, and checking a field nothing consumes would narrow what an index accepts for
+  // no ordering or safety gain.
   const provenance = item.provenance as AnnouncedItem["provenance"] | undefined;
   if (typeof provenance !== "object" || provenance === null || Array.isArray(provenance)) {
     return undefined;

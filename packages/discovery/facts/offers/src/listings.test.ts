@@ -184,6 +184,42 @@ describe("reading an offer card off an announced item", () => {
     ]);
   });
 
+  // The other half of the same guard, and the half the throwing shapes above cannot reach.
+  // Each shape here destructures cleanly in `liveOfferCards` and never throws -- the defect is
+  // that `withdrawalKey` JSON-encodes whatever it is handed, so a non-string (or empty) value
+  // keys the announcement at something no withdrawal of it can produce. Delete any one of the
+  // `announcementId` / `source.agent` / `source.name` clauses and the shape it covers is READ,
+  // which is why they are asserted one field at a time: the other three are held valid so the
+  // miss is attributable.
+  it("misses rather than mis-keying an item whose provenance carries the wrong value types", async () => {
+    const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
+    const ok = { agent: "did:key:zSomeone", name: "offers" };
+    for (const broken of [
+      { announcementId: 7, source: ok },
+      { announcementId: "", source: ok },
+      { announcementId: "a", source: "x" },
+      { announcementId: "a", source: [] },
+      { announcementId: "a", source: { agent: 7, name: "offers" } },
+      { announcementId: "a", source: { agent: "", name: "offers" } },
+      { announcementId: "a", source: { agent: "did:key:zSomeone", name: 7 } },
+      { announcementId: "a", source: { agent: "did:key:zSomeone", name: "" } },
+    ]) {
+      const candidate = { ...item, provenance: broken } as unknown as AnnouncedItem;
+      expect(() => readOfferCard(candidate)).not.toThrow();
+      expect(readOfferCard(candidate), JSON.stringify(broken)).toBeUndefined();
+    }
+
+    // The property a caller actually sees, and the reason a mis-key is worse than a throw: the
+    // announcing source withdrew this announcement, and an item read under a key its own
+    // withdrawal cannot spell would keep showing a delisted offer as live.
+    const misKeyed = {
+      ...item,
+      provenance: { ...item.provenance, announcementId: 7 },
+    } as unknown as AnnouncedItem;
+    const withdrawal: WithdrawnAnnouncement = { source: item.provenance.source, announcementId: "7" };
+    expect(liveOfferCards(offerCards([misKeyed]), [withdrawal])).toEqual([]);
+  });
+
   it("misses rather than throws on a card an index cannot read", async () => {
     const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "1500000" }] });
     const card = item.facts as Record<string, unknown>;
