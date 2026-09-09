@@ -11,6 +11,7 @@ import {
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
   BUNDLE_V8_FORMAT,
+  BUNDLE_V10_FORMAT,
   FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
@@ -25,6 +26,7 @@ import {
   PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V7_CHECKS,
   PUBLIC_BUNDLE_V8_CHECKS,
+  PUBLIC_BUNDLE_V10_CHECKS,
   SUPPORTED_BUNDLE_FORMATS,
   BEACON_SOURCES,
 } from "@colophon-claims/verify";
@@ -330,6 +332,11 @@ describe("product documentation consistency", () => {
         compatible: [readerLine(instruction(BUNDLE_V8_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_V8_CHECKS,
       },
+      [`\`${BUNDLE_V10_FORMAT}\``]: {
+        pinned: [readerLine(instruction(BUNDLE_V10_FORMAT).command)],
+        compatible: [readerLine(instruction(BUNDLE_V10_FORMAT).compatibleCommand)],
+        checks: PUBLIC_BUNDLE_V10_CHECKS,
+      },
     };
 
     expect(rows.map((cells) => cells[0])).toEqual(Object.keys(expected));
@@ -370,6 +377,7 @@ describe("product documentation consistency", () => {
       [BUNDLE_V6_FORMAT]: "\n### Anchored bundle v6\n",
       [BUNDLE_V7_FORMAT]: "\n### Anchored binary qualification bundle v7\n",
       [BUNDLE_V8_FORMAT]: "\n### Disclosed anchored binary qualification bundle v8\n",
+      [BUNDLE_V10_FORMAT]: "\n### Composed presentation bundle v10\n",
     };
     // Prompted screening is the fourth axis the format string does not record, so the `/2` and
     // `/4` sections state a second, later line beside the unprompted one.
