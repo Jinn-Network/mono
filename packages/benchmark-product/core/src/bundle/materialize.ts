@@ -1082,7 +1082,7 @@ function recordClosure(input: MaterializeBundleInput): {
   // presentation generation's page is rendered, and the verifier byte-compares the result against
   // the same selection read from `bundle.json`. THE EMITTED FORMAT IS UNCHANGED -- this is the
   // same expression the return below used to compute inline, moved, not edited. No run emits
-  // `/10`: its claim would seal `npx @colophon-claims/verify@0.2.1`, a released reader that
+  // `/10`: its claim seals `PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND`, a released reader that
   // predates `/10` and refuses it at manifest parse, so the bundle would be permanently
   // unverifiable under its own instruction (issue #4191). The producer flips in the change that
   // pins `/10` to the release serving it.

@@ -41,7 +41,7 @@ export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
  * emit what the verifier accepts.
  *
  * **No run emits it.** `materialize.ts`'s format selection is unchanged and does not name this
- * constant: a `/10` claim would seal `npx @colophon-claims/verify@0.2.1`, a released and immutable
+ * constant: a `/10` claim seals `PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND`, a released and immutable
  * reader that predates `/10` and refuses it at manifest parse, so the bundle would be permanently
  * unverifiable under its own instruction. `/10` enters this schema so a bundle can be LABELLED
  * with it -- which is what lets `v6-verify.test.ts` prove the round trip -- never so one can be
