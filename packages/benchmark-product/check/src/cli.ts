@@ -65,7 +65,7 @@ export interface VerifierCliDeps {
 const PLATFORM_BYTES_SENTENCE = "Checks run against the exact platform bytes installed from npm." as const;
 
 function usage(): string {
-  return "Usage: colophon-verify <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
+  return "Usage: colophon-check <bundle> [--json] [--tsa-root <file>]... [--ots-headers <file>]...\n"
     + "                        [--freeze-repo <dir>] [--identity-binding <file>]\n"
     + "  --tsa-root     RFC 3161 trust anchor, DER or PEM. Repeatable.\n"
     + "  --ots-headers  Bitcoin block headers, one \"<height>:<80-byte-hex>\" per line. Repeatable.\n"
@@ -494,7 +494,7 @@ export async function runVerifierCli(
     return {
       exitCode: 2,
       stdout: "",
-      stderr: `colophon-verify: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      stderr: `colophon-check: ${cause instanceof Error ? cause.message : String(cause)}\n`,
     };
   }
 
@@ -511,7 +511,7 @@ export async function runVerifierCli(
     const stdout = parsed.json
       ? `${JSON.stringify({ ok: false, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, code, message: error.message })}\n`
       : "";
-    const stderr = parsed.json ? "" : `colophon-verify: ${withoutRawIdentifiers(error.message)}\n`;
+    const stderr = parsed.json ? "" : `colophon-check: ${withoutRawIdentifiers(error.message)}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
 
@@ -596,7 +596,7 @@ export async function runVerifierCli(
     : [
       ...(freezeRepoFailure === undefined ? [] : [`freeze repository not checked: ${freezeRepoFailure.message}`]),
       ...(identityFailure === undefined ? [] : [`domain binding not applied: ${identityFailure.message}`]),
-    ].map((note) => `colophon-verify: ${note}\n`).join("");
+    ].map((note) => `colophon-check: ${note}\n`).join("");
   // A drifted freeze repository is a verdict about the artifact and takes precedence: exit 1 is
   // what the usage text promises for it, and an operational failure on a different flag must not
   // silently re-code that verdict as 2.

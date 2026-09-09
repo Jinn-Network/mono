@@ -1,1 +1,1 @@
-export * from "@colophon-claims/verify";
+export * from "@colophon-claims/check";

@@ -2,7 +2,7 @@
 
 /**
  * Issue #3943: `report/claim.ts` is the hand-maintained mirror of
- * `@colophon-claims/verify`'s `profile/claim.ts`, and `operations/verify.ts` reaches it through
+ * `@colophon-claims/check`'s `profile/claim.ts`, and `operations/verify.ts` reaches it through
  * core's own `assertClaimConsistency` -- a reader path of its own. Issue #3855 (PR #3899) typed
  * the ten projection-rebuild refusals on the verify side only, so until this file the SAME
  * malformed sealed Report was classified two ways depending on which entry point read it:

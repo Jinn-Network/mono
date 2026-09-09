@@ -6,9 +6,9 @@
  * adapter preserves core's typed operation-error identity; it does not
  * implement or reinterpret a verification check.
  */
-import { verifyPublicBundle as verifyReaderBundle } from "@colophon-claims/verify";
+import { verifyPublicBundle as verifyReaderBundle } from "@colophon-claims/check";
 import { BenchmarkProductError, PRODUCT_ERROR_CODES, type ProductIssue } from "../errors.js";
-import type { PublicBundleVerificationResult, VerifyPublicBundleDeps } from "@colophon-claims/verify";
+import type { PublicBundleVerificationResult, VerifyPublicBundleDeps } from "@colophon-claims/check";
 
 function isIssue(value: unknown): value is ProductIssue {
   return typeof value === "object" && value !== null
@@ -46,4 +46,4 @@ export type {
   PublicBundleVerificationCheck,
   PublicBundleVerificationResult,
   VerifyPublicBundleDeps,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";

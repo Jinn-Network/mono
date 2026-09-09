@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import type { VerifiedPublicBundleSnapshot } from "@colophon-claims/verify";
+import type { VerifiedPublicBundleSnapshot } from "@colophon-claims/check";
 import { createVerifiedBundleViewer, type VerifiedBundleViewer } from "./viewer.js";
 
 const roots: string[] = [];
