@@ -495,6 +495,10 @@ export async function runBootstrapWithDegradeOpen<TResult>(
  * (`main.ts` itself stays impractical to test directly — see
  * `runBootstrapWithDegradeOpen`'s docstring). `main.ts` supplies
  * `isEconomicBootstrapHalt` and a closure over `startDegradedRecoveryLoops`.
+ *
+ * The log lines keep main.ts's `[main]` prefix even though the code moved
+ * here: this IS main.ts's boot-path callback, operators grep boot logs by that
+ * prefix, and `docs/runbooks/supervisor-readiness-probe.md` quotes it.
  */
 export function resolveDegradedStart(
   envelope: ErrorEnvelope,
