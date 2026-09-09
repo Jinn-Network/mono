@@ -914,21 +914,22 @@ function pairedCompactFragment(facts: MethodFacts): string {
   return "Paired estimate and interval in full report · index.html";
 }
 
-// The retired verdict word (issue #2982) is ruled out of the binary branch of every asset below --
-// the index prose, the badge, the social card, the README status line, and the share sentence -- and
-// then held, exactly as #2980 and #2977 above are held. The ruling: `PRINCIPLES.md` Legible requires
-// an artifact that carries a claim to state what it does not prove, and a badge or a social card
-// travels detached from `index.html`, so the caveats the CLI prints under its verdict cannot travel
-// with it; `verified=true` in the SVG `<metadata>` is an unqualified machine-readable boolean. It is
-// recorded on sweep member #4270. The hold: rendering a different string here is a bundle-format
-// allocation, because `verify.ts` byte-compares every presentation asset against the reader's own
-// rebuild, and the formats whose Report method is `binary-instrument@1` pin
-// `@colophon-claims/verify@0.2.1`, which `PUBLIC-BUNDLE.md` records as published and as the
-// registry's `latest`. A bundle rendering the retired wording would carry an instruction to run a
-// verifier that refuses it, and one rendering the current wording is refused by the reader it pins.
-// Allocating a format for these bytes -- or a reader line that is not yet pinned -- unblocks it. The
-// local viewer (`cli/src/viewer.ts`) took the same ruling immediately, because nothing byte-compares
-// a live reader page; only the mechanism differs there, not the ruling.
+// The retired verdict word (issue #2982) is ruled out of the binary branch of every asset this file
+// renders -- the index prose above, the badge, the social card, the README status line, and the
+// share sentence -- and then held, exactly as #2980 and #2977 above are held. The ruling:
+// `PRINCIPLES.md` Legible requires an artifact that carries a claim to state what it does not
+// prove, and a badge or a social card travels detached from `index.html`, so the caveats the CLI
+// prints under its verdict cannot travel with it; `verified=true` in the SVG `<metadata>` is an
+// unqualified machine-readable boolean. It is recorded on sweep member #4270. The hold: rendering a
+// different string here is a bundle-format allocation, because `verify.ts` byte-compares every
+// presentation asset against the reader's own rebuild, and every format that reaches this branch
+// pins a published reader -- `@colophon-claims/verify@0.2.1` for public-bundle/7, /8, and prompted
+// bundles, `@0.1.0` for an unprompted public-bundle/4 (`PUBLIC-BUNDLE.md`, the reader-pin table).
+// A bundle rendering the retired wording would carry an instruction to run a verifier that refuses
+// it, and one rendering the current wording is refused by the reader it pins. Allocating a format
+// for these bytes -- or a reader line that is not yet pinned -- unblocks it. The local viewer
+// (`cli/src/viewer.ts`) took the same ruling immediately, because nothing byte-compares a live
+// reader page; only the mechanism differs there, not the ruling.
 
 function buildBadge(input: PublicAssetInput, reportFacts: MethodFacts): string {
   const scope = scopeLine(input);
