@@ -264,7 +264,7 @@ docker compose up -d
 ### Quick test
 
 ```bash
-docker run --rm ghcr.io/jinn-network/operator:latest version --json
+docker run --rm ghcr.io/jinn-network/operator:next version --json
 ```
 
 ## Operator commands

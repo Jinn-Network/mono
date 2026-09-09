@@ -140,6 +140,28 @@ Release workflow contract:
   - `ghcr.io/jinn-network/operator:sha-<shortsha>`
   - `ghcr.io/jinn-network/operator:latest`
 
+If that run goes red, re-run it: `.github/workflows/docker.yml` takes a manual
+`workflow_dispatch` with a `version` input, launched **from the release tag**
+(#2811). The version must match the tag it was launched from and
+`operator/package.json` at it, so a re-run publishes the released commit and
+nothing else. Dispatching an *older* release tag is therefore also the rollback
+lever: it moves `:latest` back to that release's commit. Tags cut before this
+trigger landed cannot be dispatched at all — the workflow file runs as it exists
+on the selected ref.
+
+Re-running `yarn release:client --publish` afterwards completes the release: its
+`docker.yml` wait accepts a successful `workflow_dispatch` run for the release
+commit, not only a `release`-triggered one, so a dispatched republish clears the
+`publish-wait-docker-workflow` step it would otherwise stay stuck on.
+
+**Release checklist, after the first cut that publishes under
+`ghcr.io/jinn-network/operator`:** verify `:latest` resolves anonymously
+(`docker pull ghcr.io/jinn-network/operator:latest` with no registry auth), then
+repoint the run-it-now examples in `DEPLOY.md`, `deploy/README.md` and
+`operator/docker-compose.yml` from `:next` back to `:latest`, and drop the
+"not published under this name yet" notes in the first two. They name `:next`
+only because the stable tags do not exist under this name yet.
+
 Post-release verification is performed by `yarn release:client --publish`.
 The underlying checks are:
 

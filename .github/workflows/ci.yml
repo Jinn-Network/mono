@@ -138,6 +138,12 @@ jobs:
           # what this lane verifies — and until #3573 none of them selected it. The
           # list is derived from the `portal:` graph and enforced by
           # `.github/scripts/portal-path-filters.test.mjs`; it is not hand-curated.
+          # The image lanes and the operator-facing deploy documents are what
+          # `operator/test/scripts/ghcr-image-references.test.ts` guards. A change
+          # confined to them — the exact shape of `af8bd65de`, which caused #2811
+          # — selected no lane before those four entries. Every line inside the
+          # array is a quoted pattern: `pack-workflows.test.ts` parses it and
+          # rejects anything else.
           patterns=(
             '^operator/'
             '^apps/operator-console/'
@@ -148,6 +154,10 @@ jobs:
             '^packages/.*/package\.json$'
             '^\.github/workflows/ci\.yml$'
             '^\.github/workflows/npm-publish\.yml$'
+            '^\.github/workflows/docker\.yml$'
+            '^\.github/workflows/operator-images\.yml$'
+            '^DEPLOY\.md$'
+            '^deploy/'
             '^\.github/scripts/npm-publish-workflow\.test\.mjs$'
             '^\.github/scripts/operator-[^/]*\.test\.mjs$'
             '^packages/discovery/client/'
