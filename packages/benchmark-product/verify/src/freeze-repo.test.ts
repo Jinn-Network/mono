@@ -804,10 +804,46 @@ describe("generated licence text is not writable from a free-text field", () => 
     expect(license).toContain("SPD X-License: x");
   });
 
+  test("refuses a tag separated from its colon by whitespace an ASCII class does not carry", () => {
+    // The scanners this guard is written for spell the tag `SPDX-License-Identifier\s*:`, and `\s`
+    // on a Python `str` is Unicode-aware -- so an NBSP or an ideographic space before the colon is
+    // a tag to them and was not one here. CR reaches the same place from the other direction: it
+    // is admitted in a multi-line field, so the tag can sit across it.
+    for (const separator of [" ", " ", "　", " ", "\r", "\n"]) {
+      expect(() => renderFreezeRepo(snapshotOf({
+        benchmark: withBenchmark({ citation: `Acme Bench, 2026.\nSPDX-License-Identifier${separator}: GPL-3.0-only` }),
+      })), JSON.stringify(separator)).toThrow(/reads as an SPDX tag/);
+    }
+  });
+
+  test("scans a hostile citation in linear time, not quadratically", () => {
+    // Unanchoring the guard made the search try every position the `SPDX-` literal matches, and
+    // `-` is in the name class too, so an unbounded greedy name run backtracked the whole
+    // remaining run at each of them. Nothing caps this input: `citation` has no schema in this
+    // package and no bundle member carries a byte cap, so a sealed record can hand the READER --
+    // who is verifying precisely because the publisher is untrusted -- a value that pinned one
+    // core inside a single synchronous `.test()` call. Measured on the unbounded pattern: 4.7s at
+    // 200KB, quadrupling per doubling, ~110 minutes at 8MB. The 64-character name bound makes it
+    // linear; this value renders in ~15ms.
+    //
+    // The budget is deliberately loose. It is ~200x the linear cost, so ordinary host load cannot
+    // reach it, and ~50x below the 17s the unbounded pattern took on this same value, so the
+    // regression cannot hide under it either.
+    const citation = "SPDX-".repeat(80_000);
+    const started = performance.now();
+    const tree = renderFreezeRepo(snapshotOf({ benchmark: withBenchmark({ citation }) }));
+    const elapsed = performance.now() - started;
+    // Admitted, not refused: there is no colon, so this is not a tag -- the cost was the point.
+    expect(decoder.decode(tree.files.get("LICENSE")!)).toContain(citation);
+    expect(elapsed).toBeLessThan(3_000);
+  });
+
   test("refuses every line separator a licence scanner breaks on, not only the ones JS does", () => {
-    // A tag-line check that stops at U+007F is bypassed by every reader that does not. Python's
+    // A generated file's line structure is a claim -- NOTICE's fixed-column rows, LICENSE's tag
+    // and name lines, the README heading -- so a terminator this file does not recognize but a
+    // reader does lets one sealed field add a line no record stands behind. Python's
     // str.splitlines() and Java's String.lines() both break on CR, U+0085, U+2028 and U+2029, so
-    // a tag after any of them is a second licence tag to the reader that matters.
+    // a class that stopped at U+007F would leave exactly those readers such a line.
     for (const separator of ["\r", "\u0085", "\u2028", "\u2029"]) {
       expect(() => renderFreezeRepo(snapshotOf({
         benchmark: withBenchmark({ citation: `Someone, 2026.${separator}SPDX-License-Identifier: GPL-3.0-only` }),

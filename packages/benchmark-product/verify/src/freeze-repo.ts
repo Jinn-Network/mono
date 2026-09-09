@@ -251,6 +251,10 @@ function spdxNestingDepth(value: string): number {
  * Still grammar, not list membership, exactly as the single-identifier check is; and `spdxUrl`
  * below cites a list address only for the single-identifier case, because a compound expression
  * names no one page.
+ *
+ * Returns `false` for an expression nesting parentheses deeper than `SPDX_MAX_NESTING_DEPTH`,
+ * which the grammar alone would have accepted (issue #3898). Stated here because this is an
+ * exported predicate: an embedder reading it in an editor sees this block, not the constant.
  */
 export function isSpdxLicenseExpression(value: string): boolean {
   // Checked here and not only in `spdxLicenseProblem` because this predicate is exported: it has
@@ -297,7 +301,7 @@ export function isSpdxLicenseExpression(value: string): boolean {
 }
 
 /**
- * Control characters and line separators, plus any line that would read as an SPDX tag.
+ * Control characters and line separators, plus any text that would read as an SPDX tag.
  * `citation` and `name` are spliced verbatim into `LICENSE` and the README heading, so a citation
  * carrying a line break followed by `SPDX-License-Identifier: MIT` would put a second licence tag
  * into a machine-scanned licence file. Self-inflicted rather than an outside attack — the field is
@@ -305,15 +309,16 @@ export function isSpdxLicenseExpression(value: string): boolean {
  * free-text field, and refusing is cheaper than escaping.
  *
  * The refused set is C0 (tab excepted, and the line terminators in the one multi-line field), DEL,
- * ALL of C1, and `U+2028` / `U+2029`. C1 and the separators are not decoration: a line-break check
- * that stops at `U+007F` is bypassed by every scanner that does not. Python's `str.splitlines()`
- * — the idiom in ScanCode and most licence scanners — breaks on `\r`, `U+0085`, `U+2028` and
- * `U+2029`, and Java's `String.lines()` breaks on the same set, so a tag after any of them is a
- * second licence tag to the reader that matters even though this file saw one line.
- *
- * Refusing those classes is what makes the tag check below whole: nothing outside them reaches a
- * rendered file at all, so a terminator this file did not see cannot introduce a line some other
- * reader would.
+ * ALL of C1, and `U+2028` / `U+2029`. C1 and the separators are not decoration, and the reason is
+ * not the tag check — that reads the whole value now and needs no help. It is that a generated
+ * file's LINE STRUCTURE is itself a claim: `NOTICE` states each upstream source as a fixed-column
+ * row, `LICENSE` puts the tag and the publication's name on lines of their own, and `README.md`
+ * opens with the name as a Markdown heading. A terminator this file does not recognize but a
+ * downstream reader does lets one sealed field add a row, a heading, or a line no record stands
+ * behind — with or without a tag on it. Python's `str.splitlines()` — the idiom in ScanCode and
+ * most licence scanners — breaks on `\r`, `U+0085`, `U+2028` and `U+2029`, and Java's
+ * `String.lines()` breaks on the same set, so a class that stopped at `U+007F` would leave exactly
+ * those readers a line this file never saw.
  *
  * Case-insensitive for the same reason the class reaches past U+007F: the readers that matter are.
  * SPDX 2.3 Annex E writes the source-file tag one way, but the licence scanners that read it match
@@ -331,8 +336,24 @@ export function isSpdxLicenseExpression(value: string): boolean {
  * single-line field, where no line terminator is needed to reach a rendered file. With no `^`,
  * `$` or `.` in the pattern the whole value tests the same as its lines would, so there is no
  * line split here: a tag is refused wherever it sits.
+ *
+ * The separator before the colon is Unicode whitespace, not `[ \t]`, on the same argument once
+ * more: a scanner spelling the tag `SPDX-License-Identifier\s*:` matches an NBSP, a CR, or an
+ * ideographic space there, and `\s` on a Python `str` is Unicode-aware. An ASCII-only separator
+ * class admitted every one of those.
+ *
+ * The tag name is capped at 64 characters after its first, and that bound is load-bearing rather
+ * than cosmetic. Unanchoring made the search try every position the `SPDX-` literal matches, and
+ * `-` is itself in the name class, so an unbounded greedy run backtracked the whole remaining run
+ * at each of them: `"SPDX-".repeat(n)` — which no field forbids, since `citation` has no schema
+ * and no bundle member has a byte cap — cost 4.7s at 200KB and quadruples per doubling, about
+ * 110 minutes at 8MB, on the reader's machine and inside one synchronous call. The bound makes
+ * each start position cost at most 64 steps, so the scan is linear (281ms at 8MB) for a value
+ * whose refusal is unchanged; the longest registered tag name (`SPDX-PackageDownloadLocation`)
+ * spends 22 of the 64. What it gives up is `SPDX-` followed by 65+ name characters and a colon,
+ * which names no tag any scanner carries.
  */
-const SPDX_TAG_LINE = /SPDX-[A-Za-z][A-Za-z0-9-]*[ \t]*:/iu;
+const SPDX_TAG = /SPDX-[A-Za-z][A-Za-z0-9-]{0,64}\p{White_Space}*:/iu;
 
 function renderableFreeTextProblem(value: string, multiline: boolean): string | undefined {
   // Tab is carried in both cases; CR and LF only where the field is documented as multi-line. CR
@@ -345,7 +366,7 @@ function renderableFreeTextProblem(value: string, multiline: boolean): string | 
   if (forbidden.test(value)) {
     return "carries a control character or line separator; a freeze repository renders it into generated text and will not emit one";
   }
-  if (SPDX_TAG_LINE.test(value)) {
+  if (SPDX_TAG.test(value)) {
     return "carries text that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it";
   }
   return undefined;
