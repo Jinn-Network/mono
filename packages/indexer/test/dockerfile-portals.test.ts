@@ -21,11 +21,16 @@ interface PortalEdge {
 
 function portalEntries(manifest: Record<string, unknown>): Map<string, string> {
   const portals = new Map<string, string>();
+  // `resolutions` is applied LAST because a later `set` wins here and Yarn gives
+  // `resolutions` precedence over the dependency fields. A package can name the
+  // same portal in both (packages/indexer does, for @jinn-network/contract-abis);
+  // if the two targets ever diverge, the guard must check the one the install
+  // will actually resolve, not the one that happens to be read second.
   for (const field of [
-    'resolutions',
     'dependencies',
     'devDependencies',
     'optionalDependencies',
+    'resolutions',
   ]) {
     const group = manifest[field] as Record<string, string> | undefined;
     for (const [name, version] of Object.entries(group ?? {})) {
