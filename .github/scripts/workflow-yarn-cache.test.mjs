@@ -296,12 +296,18 @@ function shellTokens(run) {
   // nothing is emitted for them — but a quoted one has to be stepped over whole, or its
   // tail is re-read as a command.
   const wordEnd = (from) => {
+    const newline = run.indexOf('\n', from);
+    const lineEnd = newline === -1 ? run.length : newline;
     let at = from;
     while (at < run.length && !breaks.test(run[at])) {
       const inner = run[at];
       if (inner === '"' || inner === "'") {
         const close = run.indexOf(inner, at + 1);
-        at = close === -1 ? run.length : close + 1;
+        // A quote the line never closes must not swallow the rest of the block: a stray
+        // `> "` would hide every install after it, which is the silent direction. A real
+        // shell reads such a quote to the end of input and then fails, so stopping at the
+        // line costs nothing a working workflow relies on.
+        at = close === -1 || close > lineEnd ? lineEnd : close + 1;
       } else if (inner === '\\' && at + 1 < run.length) {
         at += 2;
       } else {
@@ -356,7 +362,10 @@ function shellTokens(run) {
           index += 1;
         }
       }
-      heredocs.push(delimiter);
+      // `<<` with no delimiter is a shell syntax error. Queueing an empty one made
+      // the body run to the first blank line or to the end of the block, hiding every
+      // install behind it; leaving it unqueued keeps the rest of the block readable.
+      if (delimiter !== '') heredocs.push(delimiter);
     } else if (character === '<' || character === '>') {
       // A redirection and its target say nothing about the command's arguments, and
       // the file-descriptor number in `2>&1` is not one either.
@@ -1741,6 +1750,85 @@ jobs:
           cache-dependency-path: yarn.lock
       - run: |
           read first <<< "one two"
+          cd app
+          yarn install --immutable
+`);
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /must cache app\/yarn\.lock/u,
+    );
+  });
+});
+
+// Both shapes are shell syntax errors, so the workflow they appear in fails on the
+// runner either way. They are pinned because the fix for the heredoc scan reached the
+// same code, and the wrong direction here is silence: one stray character hiding every
+// install after it imposes no cache requirement at all.
+test('guard steps over a quoted redirection target whole', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          echo hi > "my file.txt"
+          cd app
+          yarn install --immutable
+`);
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /must cache app\/yarn\.lock/u,
+    );
+  });
+});
+
+test('guard keeps reading past a redirection whose target quote is never closed', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          echo x > "unclosed
+          cd app
+          yarn install --immutable
+`);
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /must cache app\/yarn\.lock/u,
+    );
+  });
+});
+
+test('guard keeps reading past a heredoc opener with no delimiter', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          cat << > f
           cd app
           yarn install --immutable
 `);
