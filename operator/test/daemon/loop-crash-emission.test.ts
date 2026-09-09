@@ -12,9 +12,17 @@
  * the same host-only dialect), so the handler must go through it.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { emitLoopCrash } from '../../src/daemon/daemon.js';
+import { Daemon, emitLoopCrash, type DaemonConfig } from '../../src/daemon/daemon.js';
+import { LocalAdapter } from '../../src/adapters/local/adapter.js';
+import { SimpleRunner } from '../../src/runner/simple.js';
+import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
+import { Store } from '../../src/store/store.js';
 import { getEventBuffer } from '../../src/events/emitter.js';
 
 function lastEvent() {
@@ -51,5 +59,105 @@ describe('#3037 — loop-crash emission preserves the cause chain', () => {
     const event = lastEvent();
     expect(event.errorCode).toBe('work_crashed');
     expect((event.details as Record<string, unknown>).error).toBe('boom');
+  });
+});
+
+describe('#3110 — Daemon.start() wires every loop crash through emitLoopCrash', () => {
+  let tmp: string;
+  let store: Store;
+  let daemon: Daemon | undefined;
+
+  beforeEach(() => {
+    getEventBuffer().clear();
+    tmp = mkdtempSync(join(tmpdir(), 'jinn-3110-loop-crash-'));
+    store = new Store(':memory:');
+  });
+
+  afterEach(async () => {
+    await daemon?.stop().catch(() => undefined);
+    daemon = undefined;
+    vi.restoreAllMocks();
+    store.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('carries the cause chain from a real started loop, not just the helper', async () => {
+    // `checkpoint` is the representative loop: it is an always-admission loop
+    // that needs no composition and no network, and — unlike the watchdog — it
+    // is constructed in the Daemon *constructor*, so its crash can be forced
+    // with a plain spy on the real instance rather than a module mock. The
+    // fixture shape is watchdog-wiring.test.ts's.
+    daemon = new Daemon({
+      adapter: new LocalAdapter(),
+      runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
+      store,
+      dbPath: ':memory:',
+      apiPort: 0,
+      pollIntervalMs: 60_000,
+      taskSources: [],
+      restorationEngine: {
+        implRegistry: new HarnessRegistry({ default: 'legacy-claude' }),
+        paths: {
+          workingDirRoot: join(tmp, 'work'),
+          implStateDirRoot: join(tmp, 'impl-state'),
+        },
+      },
+      shutdownTimeoutMs: 100,
+      checkpoint: {
+        intervalMs: 300_000,
+        store: {
+          async load() { throw new Error('checkpoint store stub: not used here'); },
+        } as unknown as NonNullable<DaemonConfig['checkpoint']>['store'],
+        chain: 'base-sepolia',
+        writeCheckpoint: async () => {
+          throw new Error('checkpoint writer stub: not used here');
+        },
+      } as NonNullable<DaemonConfig['checkpoint']>,
+      // Explicit escape hatch (watchdog-wiring.test.ts header): no extra
+      // background timer for a test that is not about the watchdog.
+      watchdog: false,
+    });
+
+    const loop = (daemon as unknown as { checkpointLoop: { run(): Promise<void> } }).checkpointLoop;
+    vi.spyOn(loop, 'run').mockRejectedValue(
+      new Error('checkpoint tx failed', {
+        cause: new Error('HTTP request failed: https://secret-key.example/rpc'),
+      }),
+    );
+
+    await daemon.start();
+    // stop() awaits loopPromises, so the .catch handler is guaranteed to have
+    // run by the time it resolves — deterministic, no polling, no waitFor.
+    await daemon.stop();
+    daemon = undefined;
+
+    const event = getEventBuffer()
+      .snapshot({ limit: 50 })
+      .find((e) => e.errorCode === 'checkpoint_crashed');
+    expect(event).toBeDefined();
+    expect(event!.message).toBe('checkpoint loop crashed');
+    const detail = String((event!.details as Record<string, unknown>).error);
+    expect(detail).toContain('checkpoint tx failed');
+    // The cause is the part the pre-#3037 `.message`-only read dropped.
+    expect(detail).toContain('caused by:');
+    expect(detail).not.toContain('secret-key.example/rpc');
+  });
+
+  it('routes every .run().catch( site in daemon.ts through emitLoopCrash', () => {
+    // A behavioral test covers one loop. This covers the class: a twelfth loop
+    // added with an inline handler, or any one of the existing sites reverted,
+    // is the exact regression shape #3037 arrived in.
+    const source = readFileSync(
+      fileURLToPath(new URL('../../src/daemon/daemon.ts', import.meta.url)),
+      'utf8',
+    );
+    const sites = [...source.matchAll(/\.run\(\)\.catch\(\s*(?:err|error)\s*=>\s*(\w+)\(/g)];
+    expect(sites.length).toBeGreaterThanOrEqual(11);
+    for (const site of sites) {
+      expect(site[1]).toBe('emitLoopCrash');
+    }
+    // A handler written in any other shape would not match the regex at all,
+    // so also pin the raw call count.
+    expect(source.split('.run().catch(').length - 1).toBe(sites.length);
   });
 });
