@@ -5,11 +5,11 @@
 | **Version** | 0.2 |
 | **Date** | 2026-09-06 (v0.1); 2026-09-09 (v0.2 applies the operator ruling) |
 | **Shape** | `design` |
-| **Status** | adopted — operator ruling 2026-09-07; adopted with one amendment to the format numbering, recorded in §10 ([PR #4105 comment 5570963854](https://github.com/Jinn-Network/mono/pull/4105#issuecomment-5570963854)) |
+| **Status** | adopted — operator ruling 2026-09-07, with one amendment to the format numbering, recorded in §10 ([PR #4105 comment 5570963854](https://github.com/Jinn-Network/mono/pull/4105#issuecomment-5570963854)) |
 | **Issue** | [#2763](https://github.com/Jinn-Network/mono/issues/2763) |
 | **Depends on** | [benchmarking application](./2026-07-28-benchmarking-application-design.md) §7.2; [publication interoperability profile](./2026-08-13-benchmark-publication-interoperability-profile.md) §9.3; [benchmark product](./2026-08-05-benchmark-product-design.md) §7; [proof-carrying anchors](./2026-08-17-pluggable-integrity-providers-design.md) §9, §16.6, §19; [reader-facing vocabulary](./2026-09-02-reader-facing-vocabulary.md); [bundle capability composition](./2026-08-29-bundle-capability-composition-design.md) (v0.2: the generation this design's carriage registers into) |
 | **Outcome** | one composed reader statement backed by two independent evidence channels; no blended score or claim |
-| **v0.2 changes** | Ruling erratum; carriage only. §3 stops allocating `benchmark-product-public-bundle/9` and `benchmark-product.claim-package/7` and instead registers one `marketplace-ordering` capability entry in the composed generation `/10`, with §3.1, §3.2, §6, §7's test 9, §8, and §9's allocation bullet following. §8's slice order inverts, because the composed generation is now a precondition rather than an optional fold-in. Two evidence corrections in the document's own voice: §3's census now spans all three bundle lineages, and §4.1 names the check's predecessor exactly. **The adopted substance is unchanged** — §0, §1, §2, §4's steps and states, §5's reader copy, §6's other rules, and §7's other tests carry over unedited, and no analysis is rewritten. |
+| **v0.2 changes** | Ruling erratum; carriage only. §3 stops allocating `benchmark-product-public-bundle/9` and `benchmark-product.claim-package/7` and instead registers one `marketplace-ordering` capability entry in the composed generation `/10`, with §3.1, §3.2, §5, §6, §7's test 9, §8, and §9's allocation bullet following. §8's slice order inverts, because the composed generation is now a precondition rather than an optional fold-in. Two evidence corrections in the document's own voice: §3's census now spans all three bundle lineages, and §4.1 names the check's predecessor exactly. **The adopted substance is unchanged** — §0, §1, §2, §4's steps and states, §5's reader copy, §6's other rules, and §7's other tests carry over unedited, and no analysis is rewritten. |
 
 ## 0. Decision in plain language
 
@@ -151,12 +151,13 @@ extends only the first. Paths below are relative to
 | accounting-only | `/3` (`core/src/bundle/manifest.ts:28`) — producer-side only; absent from the reader's `SUPPORTED_BUNDLE_FORMATS` (`verify/src/manifest.ts:47-54`) | — |
 | evidence-native | `/5`, carrying two profiles — full-evidence and metadata-first (`verify/src/manifest.ts:26`; `protocol/src/identifiers.ts:54-55`, `:63-64`) | `/3` (`protocol/src/portable.ts:33-34`) |
 
-No `/9` exists in the tree; it is allocated by PR #4090 (issue #3698) and is
-therefore unavailable. Every allocated format and claim id above keeps its exact
-schema, member set, check order, accepted command, and golden bytes, and nothing
-here touches `/3` or `/5`. The freeze binds hardest on `/8` and claim-package
-`/6`, which already carry fixed disclosed, anchored qualification meanings at
-the claimed head (`core/src/bundle/manifest.ts:29-35`;
+No `/9` exists in the tree. Per the ruling (§10 R2) it is allocated by PR #4090
+(issue #3698) and is therefore unavailable — an allocation this document takes
+from the ruling rather than from the tree. Every allocated format and claim id
+above keeps its exact schema, member set, check order, accepted command, and
+golden bytes, and nothing here touches `/3` or `/5`. The freeze binds hardest
+on `/8` and claim-package `/6`, which already carry fixed disclosed, anchored
+qualification meanings at the claimed head (`core/src/bundle/manifest.ts:29-35`;
 `core/src/report/claim.ts:89-104`) — the fact that made v0.1 reach for the next
 free number.
 
@@ -167,7 +168,7 @@ The entry states, in the field vocabulary of the composition design's §4:
 | Field | Value |
 |---|---|
 | `token` | `marketplace-ordering` — the same string as §4.1's check name and §5's reader row, so wire token, check name, and reader row are one identifier |
-| `order` | strictly below `anchoring`'s, which is what places this check immediately before `integrity-anchors` in every derived check list |
+| `order` | strictly below `anchoring`'s, which is what places this check before `integrity-anchors` in every derived check list |
 | `requires` / `conflicts` | both empty. Ordering stands alone: §1's separation is exactly the claim that neither channel needs the other |
 | `mandatoryFiles` | `ordering/marketplace.json` |
 | `memberPatterns` | `ordering/events/<zero-padded-ordinal>-<sha256>.json` and `ordering/submissions/<sha256>.bin`, both `mayBeEmpty: false` — deliberately unlike `anchoring`, because a declared ordering capability carrying no events establishes nothing and must fail as a missing member rather than report a quiet `present` |
@@ -238,16 +239,17 @@ two-literal `preRegistration` union
 (`core/src/operations/run-results.ts:102-108`) — so widening them is a
 refinement of the claim grammar rather than a new section, and it is stated in
 §3.1's entry rather than hidden inside `marketplaceOrdering`. The existing
-`self-run` variants and their `preRegistration` literals remain unchanged.
+`self-run` variants and their `preRegistration` literals
+(`verify/src/profile/anchor-claims.ts:321`, `:323`) remain unchanged.
 `anchors` keeps its current schema and derivation.
 
 This design allocates no claim-package identifier. The composed generation
 carries one claim-package id whose sections are the base plus one optional
 section per declared capability; a capability contributes a section key, not an
-id. Issue #4109 names `benchmark-product.claim-package/7` for its own
-additions; under §10's ruling neither design takes that number, and the two
-coordinate as sibling registry entries whose section keys and `order` values
-are unique by construction.
+id. Per the ruling (§10 R2), issue #4109 names
+`benchmark-product.claim-package/7` for its own additions; under that ruling
+neither design takes that number, and the two coordinate as sibling registry
+entries whose section keys and `order` values are unique by construction.
 
 One pure derivation module builds `marketplaceOrdering` and the marketplace
 honesty variant from authenticated bundle bytes. Producer and verifier import
@@ -503,7 +505,8 @@ an invalid one (§6), and ten conformance and adversarial tests (§7).
 evidence channels inside one reader-facing statement, the ordered marketplace
 evidence carrier, byte-only versus live-resolver verification, the exact reader
 copy, fail-closed behaviour, the compatibility guarantees and the adversarial
-tests." §0, §1, §2, §4, and §5 are unchanged by v0.2.
+tests." §0, §1, §2, §4's steps and states, and §5's reader copy are unchanged
+by v0.2.
 
 **R2 — Format numbering.**
 §3 allocated `benchmark-product-public-bundle/9` and
@@ -523,10 +526,11 @@ additions therefore land as entries in `/10`. The same holds for
 that allocation rather than each assuming it. Implementation slices should be
 filed against `/10`."
 
-The standing allocation ruling this amends is on issue #3698 (comments
-5554839794 and 5570722681): "The composed/capability generation takes `/10`.
-Everything else registers as a capability entry inside it and does not mint its
-own format number."
+The standing allocation ruling R2 invokes is on issue #3698 (comments
+5554839794 and 5570722681), quoted here as R2 cites it rather than read from
+that issue: "The composed/capability generation takes `/10`. Everything else
+registers as a capability entry inside it and does not mint its own format
+number."
 
 v0.2 carries R2 into §3, §3.1, §3.2, §6, §7's test 9, §8, and §9. The
 implementation slices against `/10` are not filed by this document.
