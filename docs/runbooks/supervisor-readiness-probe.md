@@ -59,9 +59,10 @@ Never set `livenessProbe` to `/ready`.
 On an economic halt the daemon starts a small standalone set of recovery loops
 for the part of the fleet that is already operational, so a self-healing
 condition does not compound while the halt is retried. Which loops run depends
-on the halt and the config: reward-claim always; balance-topup unless a
-master-EOA `funding_required` halt is pending (it would drain the exact balance
-the funding poller is waiting on); eviction-check and checkpoint only under
+on the halt and the config. Each loop is skipped when its configured interval
+is `0`; beyond that, balance-topup is also skipped while a master-EOA
+`funding_required` halt is pending (it would drain the exact balance the
+funding poller is waiting on), and eviction-check and checkpoint run only under
 `stakingMode: "standard"`.
 
 If that startup itself fails, readiness is **still** `degraded` — `/ready`

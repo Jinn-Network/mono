@@ -151,6 +151,19 @@ describe('GET /ready — the §6.1 status/reason mapping', () => {
 });
 
 describe('GET /ready — a failed degraded-recovery start still reports degraded (#2425)', () => {
+  // resolveDegradedStart logs the start failure to console.error by design.
+  // Restored in afterEach, not inline, so a failing assertion below cannot
+  // leave console mocked for the rest of the file.
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
   it('startDegraded\'s recovery start throwing → 200 degraded, not 503 bootstrapping', async () => {
     // The whole point of the issue: an ECONOMIC halt (funding shortfall)
     // whose recovery loops fail to construct must NOT leave `/ready` at 503,
@@ -158,8 +171,6 @@ describe('GET /ready — a failed degraded-recovery start still reports degraded
     // correctly parked waiting for funding. This drives the real shared
     // readiness holder through the real orchestrator, then asks the real
     // route — the exact seam the bug crossed.
-    // resolveDegradedStart logs the start failure to console.error by design.
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const envelope = buildEnvelope({ code: 'funding_required', message: 'master EOA under-funded' });
     let attempt = 0;
     let readyDuringHalt: Response | undefined;
@@ -186,6 +197,5 @@ describe('GET /ready — a failed degraded-recovery start still reports degraded
     expect(body.reason).toBe('degraded');
     expect(body.accepting_work).toBe(false);
     expect(String(errorSpy.mock.calls[0]?.join(' '))).toContain('recovery loops failed to construct');
-    errorSpy.mockRestore();
   });
 });

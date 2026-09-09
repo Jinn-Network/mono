@@ -518,6 +518,13 @@ export function resolveDegradedStart(
     // instead of parking it. An unclassifiable halt fails CLOSED — the safe
     // direction, since it is exactly the case where we cannot show it is
     // economic.
+    //
+    // This is deliberately NOT the same call `bootstrap-halt-classification.ts`
+    // makes for an *unrecognized category* (it degrades open, on the reasoning
+    // that failing closed on a merely-unfamiliar error string would recreate
+    // spec §5's absorbing state). The two differ: there, the classifier ran and
+    // produced an answer it could partly vouch for; here it produced nothing at
+    // all, so there is no evidence the halt is economic to degrade open on.
     console.error(
       '[main] Halt classification failed — staying fail-closed (no degraded recovery loops):',
       classifyErr instanceof Error ? classifyErr.message : classifyErr,
