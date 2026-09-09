@@ -1,7 +1,7 @@
 {
-  "name": "@colophon-claims/verify",
+  "name": "@colophon-claims/check",
   "version": "0.2.1",
-  "description": "Standalone public-bundle verifier for Colophon claims.",
+  "description": "Standalone public-bundle checker for Colophon claims. Formerly published as @colophon-claims/verify, which remains a permanent passthrough alias.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
@@ -11,7 +11,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/Jinn-Network/mono.git",
-    "directory": "packages/benchmark-product/verify"
+    "directory": "packages/benchmark-product/check"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,10 +23,13 @@
     "./admission": {
       "import": "./dist/admission/index.js",
       "types": "./dist/admission/index.d.ts"
+    },
+    "./bin": {
+      "import": "./dist/bin.js"
     }
   },
   "bin": {
-    "colophon-verify": "./dist/bin.js"
+    "colophon-check": "./dist/bin.js"
   },
   "files": [
     "dist/",

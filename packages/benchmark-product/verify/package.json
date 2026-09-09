@@ -1,0 +1,45 @@
+{
+  "name": "@colophon-claims/verify",
+  "version": "0.2.2",
+  "description": "Deprecated alias for @colophon-claims/check. Install @colophon-claims/check instead; this name keeps resolving permanently so published bundle instructions never break.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/benchmark-product/verify"
+  },
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./admission": {
+      "types": "./admission.d.ts",
+      "import": "./admission.js"
+    }
+  },
+  "bin": {
+    "colophon-verify": "./bin.js"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "admission.js",
+    "admission.d.ts",
+    "bin.js",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@colophon-claims/check": "0.2.1"
+  }
+}
