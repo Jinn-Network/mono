@@ -2114,13 +2114,22 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     return listProcessGroupPids(fingerprint.harnessPid);
   }
 
-  // Does anything of this Attempt still exist on the host? The same predicate `reconcileResolvedRef`
-  // uses to separate `matching` from `absent`/`orphaned`, short-circuited so the group scan runs only
-  // once the shim is known dead. Two reasons the throw is caught rather than left to propagate:
-  // an unreadable fingerprint is not proof of death, so the safe answer is to keep the slot (the
-  // behavior this Attempt already had); and `readShimFingerprint` parses `shim.json` unguarded, so a
-  // torn file throws — tolerable inside `recover`, but this also runs from the constructor, where it
-  // would turn one corrupt file into a backend that cannot be built at all.
+  // Does anything of this Attempt still exist on the host? Exactly `reconcileResolvedRef`'s
+  // `processAlive` term — the one that separates `absent` (nothing left, so nothing to bound) from
+  // `orphaned` and `matching` (something is still running) — short-circuited so the group scan runs
+  // only once the shim is known dead. `shimAlive` is what separates those latter two; this is
+  // deliberately the weaker question, because the ceiling bounds occupancy, not supervisability.
+  // It answers from evidence the host has published, so it is blind in the window
+  // `reconcileResolvedRef` is blind in: the shim writes `shim.json` AFTER spawning the harness, so a
+  // backend that dies between those two points leaves a running harness with no fingerprint and the
+  // next boot reads the Attempt as gone. That Attempt is already unreapable and already terminals
+  // `absent` while its harness runs, so the slot it used to hold was masking that, not bounding it.
+  // Two reasons the throw is caught rather than left to propagate: an unreadable probe is not proof
+  // of death, so the safe answer is to keep the slot (the behavior this Attempt already had); and
+  // the probe reads unguarded — `readShimFingerprint` parses `shim.json`, and on Linux
+  // `listProcessGroupPids` enumerates `/proc` — which is tolerable inside `recover` but here also
+  // runs from the constructor, where it would turn one torn file, or one `/proc` this process may
+  // not read, into a backend that cannot be built at all.
   private attemptProcessAlive(paths: WorkspacePaths): boolean {
     try {
       return probeShimAlive(paths.meta).alive || this.harnessGroupPids(paths).length > 0;
@@ -2312,6 +2321,10 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           // must not hold a slot, or a crash permanently narrows the backend it is restarted into
           // (#3192). Releasing here is safe against the terminal a later `recover` appends —
           // `release` is a set delete, so that append is a no-op rather than a double-release.
+          // It does widen slightly beyond the evaluation Attempt of #3192: a `harvesting` or
+          // `recording` Attempt released here has its `recover` re-run harvest or re-write the
+          // delivery outside the ceiling. Deliberate — those actions spawn nothing, so they are not
+          // the concurrency the ceiling exists to bound.
           if (
             !foldAttemptRecord(this.journal(attempt).read()).terminal
             && this.attemptProcessAlive(this.paths(attempt))
@@ -2749,11 +2762,11 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     const rawOutcome = readOutcome(paths.meta);
     const outcome = rawOutcome !== null && rawOutcome.nonce === record.nonce ? rawOutcome : null;
     const groupPids = this.harnessGroupPids(paths);
-    // `processAlive` below is the same predicate `attemptProcessAlive` applies at rehydration, kept
+    // `processAlive` below is the same question `attemptProcessAlive` asks at rehydration, kept
     // inline here because the surrounding fields need `shim` and `groupPids` separately. Change one
-    // and change the other: if this gains a third liveness signal, rehydration would release a slot
-    // for an attempt that reconcile then classifies `matching` and resumes — a path that re-arms a
-    // worker without re-acquiring capacity.
+    // and change the other: give this a third liveness signal that rehydration does not have, and
+    // rehydration frees the slot of an Attempt this then classifies `orphaned` — one whose harness
+    // group is still on the host and still to be killed — so the ceiling stops bounding it.
     let reconciliation = reconcileAttempt(record, {
       processAlive: shim.alive || groupPids.length > 0,
       shimAlive: shim.alive,
