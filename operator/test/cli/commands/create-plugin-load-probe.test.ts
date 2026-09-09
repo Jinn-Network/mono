@@ -11,7 +11,7 @@
  * dirs, so the loader's materialization never writes to ~/.jinn-client/.
  *
  * No new operator/src substrate is introduced — the test asserts the real
- * loader path the `references/load-probe.mjs` script will drive at runtime.
+ * loader path directly.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -34,8 +34,8 @@ afterEach(() => {
 });
 
 // Both patterns drive the identical mechanism — scaffold, load via a bare
-// `file:` source (the same entry shape references/load-probe.mjs uses, so the
-// loader takes the name from the manifest), then assert the registry resolves
+// `file:` source (so the loader takes the name from the manifest), then assert
+// the registry resolves
 // the plug-in for its target key and nothing else. Only the pattern and the
 // target/non-target keys differ.
 const cases = [

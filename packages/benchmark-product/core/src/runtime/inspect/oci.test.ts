@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { buildInspectOciRunArgs, catalogInspectOciSelection, InspectOciHostBindingSchema } from "./oci.js";
+import { buildInspectOciRunArgs, catalogInspectOciSelection, InspectOciCommandTimeoutError, InspectOciHostBindingSchema, InspectOciUnavailableError } from "./oci.js";
 
 const binding = InspectOciHostBindingSchema.parse({
   kind: "oci",
@@ -66,6 +66,8 @@ const temporaryDirectories: string[] = [];
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  delete process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS;
+  delete process.env.JINN_INSPECT_OCI_WORKER_TIMEOUT_MS;
 });
 
 /**
@@ -106,3 +108,65 @@ test("an OCI command that exits 0 without parseable stdout names itself and what
     /the OCI Inspect worker catalog probe exited 0 without parseable JSON on stdout \(0 chars, empty\)/u,
   );
 });
+
+/**
+ * A stand-in for the `docker` CLI that answers the engine-reachability check and then hangs
+ * forever on the subcommand named by `hangOn` -- the shape a wedged Docker Engine leaves behind.
+ */
+function writeHangingFakeDocker(directory: string, hangOn: "version" | "run"): string {
+  const dockerPath = join(directory, "docker");
+  writeFileSync(dockerPath, [
+    `#!${process.execPath}`,
+    `if (process.argv[2] === ${JSON.stringify(hangOn)}) setInterval(() => {}, 1000);`,
+    "else if (process.argv[2] === 'version') process.stdout.write('{}');",
+  ].join("\n"), { mode: 0o755 });
+  chmodSync(dockerPath, 0o755);
+  return dockerPath;
+}
+
+/**
+ * #4025. `runBoundedProcess` bounded its child by bytes but not by time, and its `signal`
+ * parameter -- the only wall-clock escape it had -- is supplied by no caller on this path. A
+ * wedged engine therefore hung the launcher indefinitely instead of refusing, the hazard
+ * `JINN_SWE_REBENCH_COMMAND_TIMEOUT_MS` already exists to prevent for the sibling Docker stack.
+ * Expiry must be a typed refusal that names the command, distinct from a real non-zero exit.
+ */
+test("a worker probe that never returns expires as a typed timeout naming the command", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jinn-oci-hang-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "jinn-oci-project-"));
+  const datasetCacheDir = mkdtempSync(join(tmpdir(), "jinn-oci-dataset-"));
+  temporaryDirectories.push(directory, projectDir, datasetCacheDir);
+  process.env.JINN_INSPECT_OCI_WORKER_TIMEOUT_MS = "300";
+
+  const failure = await catalogInspectOciSelection({
+    dockerPath: writeHangingFakeDocker(directory, "run"),
+    imageDigest: `sha256:${"a".repeat(64)}`,
+    projectDir,
+    datasetCacheDir,
+    taskReference: "hermetic_eval.py@fixture",
+  }).catch((cause: unknown) => cause);
+
+  expect(failure).toBeInstanceOf(InspectOciCommandTimeoutError);
+  expect((failure as Error).message).toContain("timed out after 300 ms: docker run");
+}, 30_000);
+
+/**
+ * The short-lived `docker` calls carry their own, separate bound. A `docker version` that never
+ * answers is exactly the wedged engine the reachability check exists to detect, so its expiry must
+ * arrive as the actionable unavailability refusal rather than as a hang.
+ */
+test("a docker engine that never answers refuses as unavailable rather than hanging", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jinn-oci-hang-version-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "jinn-oci-project-"));
+  const datasetCacheDir = mkdtempSync(join(tmpdir(), "jinn-oci-dataset-"));
+  temporaryDirectories.push(directory, projectDir, datasetCacheDir);
+  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "300";
+
+  await expect(catalogInspectOciSelection({
+    dockerPath: writeHangingFakeDocker(directory, "version"),
+    imageDigest: `sha256:${"a".repeat(64)}`,
+    projectDir,
+    datasetCacheDir,
+    taskReference: "hermetic_eval.py@fixture",
+  })).rejects.toBeInstanceOf(InspectOciUnavailableError);
+}, 30_000);

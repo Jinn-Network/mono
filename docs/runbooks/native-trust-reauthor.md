@@ -29,6 +29,22 @@ silent-degradation window.
 
 ## The operation
 
+> **This procedure does not execute as written, and the defects run deeper than the anchor
+> choice below.** `jinn ceremony init` refuses while the catalog exists
+> (`operator/src/cli/commands/ceremony.ts:949-966`) and there is no `--force`, so the command
+> below stops at a guard. Moving the catalog aside to get past it has consequences this runbook
+> does not yet cover: `authorCatalog` seals a **version-1 genesis** rather than continuing the
+> policy chain (`packages/trust/authoring/src/catalog.ts:198-215`), which moves
+> `policyGenesisDigest` and fails every *other* operator closed against their pin
+> (`operator/src/daemon/native-trust-catalog.ts:305-307`); and it writes only the re-authoring
+> operator's bindings, so a shared catalog comes back single-operator. A **joined** operator has
+> no path at all, since `join` needs the catalog it appends to. Only the anchor question below
+> was in scope for DR-2026-09-06; **the rest of this procedure needs its own fix and does not
+> have one yet.** A further defect lands once revocations exist: `authorCatalog` writes
+> `revocations: []`, so a wholesale re-author un-revokes everything — see
+> "Why wholesale, not `appendOperator`" below. Treat the steps below as a description of intent,
+> not a runbook to execute, until that lands.
+
 Re-run the existing ceremony against the same directory:
 
 ```
@@ -43,9 +59,71 @@ It is already idempotent on custody and requires no new tooling. Specifically:
   re-run keeps the operator's identity.
 - The catalog authority key is likewise reopened, so the policy chain continues rather than forking.
 
-What the re-run does produce: one **new on-chain anchor transaction**, fresh EIP-191 ceremony
-signatures over the new anchor's block time (§6 law 2 requires `validFrom`, the ceremony's
-`issuedAt`, and the anchor block time to be the same verbatim string), and a rewritten `trust.json`.
+What the re-run does produce: fresh EIP-191 ceremony signatures and a rewritten `trust.json`.
+Whether it also produces a **new on-chain anchor transaction** depends on the choice below, and
+the default is that it does not: unless the receipt is moved aside, `reusableAnchor` matches and
+`session.submit` is never called (`operator/src/cli/commands/ceremony.ts:976`, `:985`), so the
+signatures are over the **original** anchor's block time — `validFrom` is assigned straight from
+the reused locator (`:1029`) and handed to `authorBindings` as both `validFrom` and `issuedAt`
+(`:1030-1036`, `:741`), which is what §6 law 2 requires be the same verbatim string. A new
+transaction is sent only when the run receipt is moved aside as well. Read the next section
+before running anything.
+
+### Reuse or mint: state the choice, record the reason
+
+A re-author touches no key, store, or Agent IRI, so all five terms of the `ceremony-anchor/v1`
+preimage are unchanged and the digest is **identical** to the original ceremony's. Ceremony spec
+§3.2b requires this runbook to state which anchor the re-author takes and the operator to record
+why. This section settles **only** that question; the procedure-level defects are flagged above
+and remain unowned.
+
+**Neither verb runs the re-author today.** `jinn ceremony init` refuses the moment the catalog
+exists — "a trust catalog already exists …; genesis never overwrites"
+(`operator/src/cli/commands/ceremony.ts:949-966`). `join` refuses too, though for a different
+reason: it is built to append to an existing catalog, so what stops it is this operator's own
+run receipt (`:1221-1226` → `:840-870`), and all three of its conditions must hold — an operator
+whose receipt is absent gets no refusal from `join`, it appends, which is the binding conflict
+"Why wholesale, not `appendOperator`" warns about. There is no `--force` on either verb.
+
+**Past the guard, the original anchor is reused by default rather than by decision.** The only
+way through is to move the existing catalog aside. Doing that leaves the run receipt in
+place — it lives at `<dir>/ceremony/receipt.json` (`:266-270`), not in the catalog — so the
+re-run recomputes the identical digest, `reusableAnchor` matches it (`:333-349`), and the
+ceremony resumes onto the **already-mined** anchor. The run does say so, on both surfaces —
+`ceremony_anchor_reused` and `anchor reused <hash> at <time> (from a previous run's receipt)`
+(`:1002`, `:1010`) — so this is not silent. It is unchosen: nothing asked the operator which
+anchor they wanted, and the answer follows from a file they moved for an unrelated reason.
+
+The two options, and how to actually take each:
+
+- **Reuse the existing anchor** — what happens by default on any path that runs at all, and
+  permitted by §6 law 1 because the digest matches. It preserves the original `validFrom` and
+  effective window, so there is no coverage gap. The cost is retroactivity: the *widened* scope
+  is claimed back over evidence signed before the widening, including evidence a verifier
+  refused at the time for want of that very scope.
+- **Mint a fresh anchor** — requires moving `<dir>/ceremony/receipt.json` aside as well as the
+  catalog, so that `reusableAnchor` finds nothing. The re-authored bindings then carry the new
+  anchor's block time and the widened scope is claimed only from the moment it was widened. The
+  cost is a coverage gap between the old anchor time and the new one: evidence signed inside
+  that window resolves against neither the old bindings (replaced) nor the new ones (not yet
+  effective).
+
+  > **Before moving the receipt aside, confirm the native config carries `agentIri` — and
+  > `admissionAgent`, if this operator provisions admission.** The receipt is the *fallback*
+  > source for both: identity resolution prefers the config and falls back to the receipt, and
+  > if neither has them it **mints a fresh `urn:uuid:`**
+  > (`operator/src/cli/commands/ceremony.ts:376-389`). With both the config keys and the receipt
+  > gone, the re-author silently becomes a re-mint — a new operator identity, every peer's
+  > configuration invalidated — which is precisely what this runbook exists to avoid. The
+  > dangerous state is the one `refuseConfigWriteBackPending` flags: sealed on chain, config
+  > write-back never completed. There the receipt is the *only* record of the Agent IRI, and
+  > moving it aside destroys it. Copy it somewhere, do not delete it.
+
+Neither is right in general — it is a retroactive-authority judgment, left open at ceremony spec
+§10 (e) and owned by [#4172](https://github.com/Jinn-Network/mono/issues/4172). Whichever is
+taken, **write the reason into the re-author's record** alongside the anchor transaction hash,
+and state explicitly whether the receipt was moved aside, since that single act is what decides
+it.
 
 ## Why wholesale, not `appendOperator`
 
@@ -56,9 +134,22 @@ additive, so the old narrow-scope binding would remain alongside the new wide-sc
 operator no better off. `authorCatalog`, which the ceremony command uses, rewrites the catalog and
 does not have this problem.
 
+It has a different one, and it belongs on the defect list at the top of this runbook.
+`authorCatalog` writes `revocations: []` (`packages/trust/authoring/src/catalog.ts:216`), so a
+wholesale re-author **un-revokes everything**. `appendOperator` does not have this problem — it
+rewrites around the loaded file and preserves `revocations` — so this is specific to the verb the
+ceremony command actually uses. Jinn cannot author a revocation yet (`revokeBinding`'s body is
+unimplemented, ceremony spec §3.2, §9), though a hand-written catalog entry resolves today because
+the schema carries `revocations` and the opener honors them. DR-2026-09-06 does not itself make
+revocations authorable; it unblocks the §9 rotation follow-up that will. Either way this procedure
+needs its own fix before the first revocation exists.
+
 ## Cost and sequencing
 
-Per operator: one anchor transaction plus its finality wait, and a daemon restart. Nothing else.
+Per operator: a finality wait and a daemon restart. On the reuse path there is no anchor
+transaction — the wait still runs (`operator/src/cli/commands/ceremony.ts:1014`, unconditional)
+but resolves at once against an already-finalized anchor. Minting fresh adds one anchor
+transaction and a real finality wait. Nothing else.
 
 The window between deploying the code change and completing the re-run is a **hard boot refusal**,
 not a degradation. Sequence accordingly: on a shared deployment, re-author before rolling the code,

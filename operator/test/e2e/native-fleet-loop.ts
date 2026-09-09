@@ -322,7 +322,17 @@ export async function runNativeFleetLoop(): Promise<void> {
     printLegTable();
     console.log('\n=== native-fleet rig: boot legs PROVEN on fork; loop legs are seeded/deploy-time (table above) ===');
   } finally {
-    for (const store of stores) store.close();
+    // The anvil fork holds a port and a process: teardown runs even if a `store.close()` throws
+    // (#4064). Close failures are reported rather than swallowed, but never strand the fork.
+    for (const store of stores) {
+      try {
+        store.close();
+      } catch (error) {
+        // Reported, not rethrown: a throw out of `finally` would both strand the fork and replace
+        // whatever failure brought the rig here.
+        console.error(`rig store close failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     await anvil.teardown();
   }
 }

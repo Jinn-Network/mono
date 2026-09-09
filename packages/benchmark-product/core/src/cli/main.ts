@@ -96,7 +96,13 @@ import {
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
 import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/verify";
-import { DOMAIN_BINDING_MECHANISM_NAMES, exportFreezeRepo, summarizeVerificationOutcome, verifyFreezeRepo } from "@colophon-claims/verify";
+import {
+  DOMAIN_BINDING_MECHANISM_NAMES,
+  exportFreezeRepo,
+  spdxLicenseProblem,
+  summarizeVerificationOutcome,
+  verifyFreezeRepo,
+} from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { formatSampleSizeAdvisory } from "../run/sample-size-advisory.js";
@@ -481,6 +487,41 @@ function parseItemsFlag(raw: string): number {
   return value;
 }
 
+/**
+ * Parses `--beacon-round`; refuses `"invalid-invocation"` naming `--beacon-round` unless the text
+ * is decimal digits denoting a positive round (issue #3332).
+ *
+ * The shape check is on the TEXT, before conversion, because `Number` is a coercion rather than a
+ * parse: it reads `"1e3"`, `"0x10"`, `"+1"`, `"1."` and `"  1000  "` as integers, and `""` as
+ * zero. `Number.isInteger` then passes and the schema's bound admits the result, so the operator
+ * who mistyped a round is not refused by name -- they get a successfully bound run at a round they
+ * never typed. `bind` is write-once by design (a run binds once, because re-binding is re-drawing),
+ * so a coerced round cannot be corrected by rebinding; and a coerced value that happens to land
+ * after the seal binds cleanly to the wrong round. The web action applies the same rule at its own
+ * entry point (`web/src/app/actions.ts`).
+ *
+ * Leading zeros are admitted: `007` denotes 7 unambiguously, and refusing it would only reject a
+ * spelling the operator meant.
+ */
+function parseBeaconRoundFlag(raw: string): number {
+  if (!/^[0-9]+$/u.test(raw)) {
+    refuse(
+      "invalid-invocation",
+      "--beacon-round",
+      `--beacon-round must be decimal digits denoting a round or block height, got ${JSON.stringify(raw)}`,
+    );
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    refuse(
+      "invalid-invocation",
+      "--beacon-round",
+      `--beacon-round must be a positive round or block height, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return value;
+}
+
 function parseConcurrencyFlag(raw: string): number {
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value < 1 || value > 32) {
@@ -601,15 +642,17 @@ function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: b
   const description = optional(args, "description");
   const version = optional(args, "version");
   const license = optional(args, "license");
-  if (license !== undefined && !/^[A-Za-z0-9][A-Za-z0-9.+-]*$/u.test(license)) {
-    // The same SPDX 2.3 Annex A short-identifier grammar the freeze-repository export applies when
-    // it renders `SPDX-License-Identifier:`. Refusing here makes free text a one-second failure at
-    // the flag rather than a refusal after the record is sealed and published.
-    refuse(
-      "invalid-invocation",
-      "--license",
-      "--license must be an SPDX short identifier (SPDX 2.3 Annex A grammar), not free text",
-    );
+  const licenseProblem = license !== undefined ? spdxLicenseProblem(license) : undefined;
+  if (licenseProblem !== undefined) {
+    // The whole check the freeze-repository export applies before it renders
+    // `SPDX-License-Identifier:` — imported rather than restated, so the flag and the export
+    // cannot come to disagree about what a licence is. Importing the grammar alone would not do
+    // that: the grammar tokenizes on whitespace, so it admits padding and tabs the export refuses
+    // (issue #3878). Refusing here makes such a value a one-second failure at the flag rather than
+    // a refusal after the record is sealed and published — at which point the licence can no
+    // longer be corrected. It is an expression, not a bare identifier: `Apache-2.0 OR MIT` is an
+    // ordinary dual licence, and the narrower check refused it outright.
+    refuse("invalid-invocation", "--license", `--license ${licenseProblem}`);
   }
   const citation = optional(args, "citation");
   const parserInvalidPolicy = optional(args, "parser-invalid-policy");
@@ -1135,10 +1178,7 @@ function assertAnchorSubject(value: string): AnchorSubject {
  */
 function handleBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
   assertKnownFlags(args, BIND_FLAGS);
-  const round = Number(required(args, "beacon-round"));
-  if (!Number.isInteger(round)) {
-    refuse("invalid-invocation", "bind", "--beacon-round must be an integer round or block height");
-  }
+  const round = parseBeaconRoundFlag(required(args, "beacon-round"));
   const result = runBind(buildOperationContext(args, context), {
     draftId: required(args, "draft"),
     // Source and value are validated by the operation against the beacon registry and the hex
@@ -1671,7 +1711,20 @@ async function handleVerify(args: ParsedArgs, context: CliContext, jsonMode: boo
   const draftId = required(args, "draft");
 
   const result = await runVerify(opContext, { draftId });
-  return renderResult(result, jsonMode, (value) => `verified draft ${value.draftId}: ${value.checks.join(", ")}\n`);
+  return renderResult(result, jsonMode, (value) => {
+    const lines = [`verified draft ${value.draftId}: ${value.checks.join(", ")}`];
+    for (const anchor of value.anchors?.anchors ?? []) {
+      const basis = [anchor.provider, anchor.timeBasis].filter((part) => part !== undefined).join(", ");
+      lines.push(
+        `anchor ${anchor.subject ?? "unknown"}: ${basis.length === 0 ? "unknown provider/time basis" : basis}, `
+        + `${anchor.status}, record ${anchor.recordSha256}`,
+      );
+    }
+    if (value.anchoringWindow !== undefined) {
+      lines.push("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
+    }
+    return `${lines.join("\n")}\n`;
+  });
 }
 
 async function handlePublish(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -1757,7 +1810,10 @@ async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jso
   // A drifted tree must not exit 0. `check && publish` is exactly how this verb gets used, and a
   // zero exit there publishes the drift. The typed envelope still carries every difference, so a
   // machine caller reads WHICH members drifted from `issues`, not from prose.
-  const detail = `freeze repository does not match ${result.bundleIdentity}: ${result.differences
+  // The commit id is reported on this path too, not only on the matching one: a drift report whose
+  // reader is deciding whether the tree they hold is the one an announcement pinned needs the oid
+  // the bundle renders to in order to answer that at all.
+  const detail = `freeze repository does not match ${result.bundleIdentity} (bundle renders commit ${result.commitId}): ${result.differences
     .map((difference) => `${difference.path} (${difference.kind})`)
     .join(", ")}`;
   return renderResult(

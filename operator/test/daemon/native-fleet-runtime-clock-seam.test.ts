@@ -10,12 +10,13 @@
  * What this file proves, deterministically and off-chain:
  *   1. an injected `now` genuinely DRIVES those window checks — a clock outside the binding window
  *      is refused while wall-clock is inside it, so the assertion cannot pass by accident;
- *   2. omitting `now` is exactly wall-clock (the production default, byte-identical to pre-seam).
+ *   2. omitting `now` is exactly wall-clock (the production default, byte-identical to pre-seam);
+ *   3. EVERY one of the three threading sites is reached, independently of the other two (#4062).
  *
  * The chain reads the boot makes are the anchor lookup only, so the fork is stood in for by a
  * small `publicClient` stub answering for one finalized calldata anchor.
  */
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -43,6 +44,12 @@ const ANCHOR_TIME = '2026-08-01T00:00:00.000Z';
 const WALL_CLOCK = new Date('2026-08-20T00:00:00.000Z');
 /** Outside it, on the wrong side of `validFrom`: no binding is effective yet. */
 const BEFORE_VALID_FROM = new Date('2026-07-01T00:00:00.000Z');
+/**
+ * Past the catalog's `refreshBy` (`2027-01-01`, the two-operator fixture's constant) and so on the
+ * wrong side of the ONE window only the trust-policy chain has. Role bindings carry no upper bound,
+ * so this instant separates the trust-catalog threading from the two role-identity ones (#4062).
+ */
+const AFTER_REFRESH_BY = new Date('2027-06-01T00:00:00.000Z');
 
 /**
  * The only chain reads a native boot makes: `createBaseSepoliaFinalizedAnchorClient`'s lookup of
@@ -113,13 +120,23 @@ async function twoOperatorSetup(root: string) {
 
 describe('buildFleetNativeRuntime effective-time seam', () => {
   const stores: Store[] = [];
-  afterEach(() => {
+  /**
+   * Every temp root `boot()` created (#4063). `test/_support/isolate-home.ts` redirects `$TMPDIR`
+   * into a per-file home and sweeps it in `afterAll`, so these never outlive a run; removing them
+   * per test keeps the file's peak footprint at one fixture tree instead of four, and converges on
+   * the cleaning pattern the rest of `test/daemon/` uses.
+   */
+  const roots: string[] = [];
+  afterEach(async () => {
     vi.useRealTimers();
+    // Close the SQLite handles before removing the trees that hold them.
     for (const store of stores.splice(0)) store.close();
+    for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
   });
 
   async function boot(now?: () => Date) {
     const root = await mkdtemp(join(tmpdir(), 'native-fleet-clock-'));
+    roots.push(root);
     const { setup, anchorDigest } = await twoOperatorSetup(root);
     const store = new Store(join(root, 'jinn.db'));
     stores.push(store);
@@ -150,6 +167,30 @@ describe('buildFleetNativeRuntime effective-time seam', () => {
     expect(runtime.requesterWrite?.admissionAgent).toBe('urn:jinn:admission:fleet-e2e-a');
   });
 
+  /**
+   * Pins the two role-identity threading sites independently (#4062). The first test cannot: it puts
+   * wall-clock INSIDE the window too, so a site that quietly fell back to `new Date()` would still
+   * boot. Here the fallback is the failing answer — wall-clock sits before `validFrom` — so the
+   * boot only reaches its assertions if the injected clock arrived at every ROLE-IDENTITY site:
+   * drop the merged solver+requester threading and the fleet role bindings refuse; drop the
+   * admission threading and `buildFleetRequesterWriteAuthority` refuses, which is the site nothing
+   * else in CI reached. The trust catalog is pinned separately below — its window has no lower
+   * bound, so a past clock cannot distinguish it.
+   */
+  it('threads the injected clock to both the fleet identities and admission', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // Wall-clock is OUTSIDE the window: any site reading it instead of `now` refuses.
+    vi.setSystemTime(BEFORE_VALID_FROM);
+    const runtime = await boot(() => WALL_CLOCK);
+
+    // Site 2: the merged solver + requester role identities.
+    expect(runtime.identities.get('solver-delivery').keyId).toMatch(/^did:key:/u);
+    expect(runtime.identities.get('requester-submission').keyId).toMatch(/^did:key:/u);
+    // Site 3: the admission role set, opened inside buildFleetRequesterWriteAuthority.
+    expect(runtime.requesterWrite?.roles.get('admission').keyId).toMatch(/^did:key:/u);
+    expect(runtime.requesterWrite?.admissionAgent).toBe('urn:jinn:admission:fleet-e2e-a');
+  });
+
   it('refuses when the injected clock falls outside the binding window', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     // Wall-clock is INSIDE the window, so only the injected clock can produce this refusal.
@@ -170,5 +211,20 @@ describe('buildFleetNativeRuntime effective-time seam', () => {
     // `validFrom` and the identical call refuses.
     vi.setSystemTime(BEFORE_VALID_FROM);
     await expect(boot()).rejects.toThrow(/has no effective binding at boot/u);
+  });
+
+  /**
+   * Pins the trust-catalog threading on its own (#4062). The catalog's policy chain is the only
+   * one of the three readers with an UPPER bound (`refreshBy`), so a clock past it refuses there
+   * and nowhere else — the role bindings accept any instant after their `validFrom`. Remove the
+   * `openNativeTrustCatalog` threading and the chain reads wall-clock, which is inside the window,
+   * and the boot then succeeds instead of raising this refusal.
+   */
+  it('threads the injected clock to the trust-policy chain window', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // Wall-clock is INSIDE the chain's window, so only the injected clock can produce this refusal.
+    vi.setSystemTime(WALL_CLOCK);
+    await expect(boot(() => AFTER_REFRESH_BY))
+      .rejects.toThrow(/native trust policy chain refused/u);
   });
 });

@@ -56,7 +56,7 @@ import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/sig
 import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
-import { BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT } from "../legacy-closures.js";
+import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT } from "../legacy-closures.js";
 import { BUNDLE_V8_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
@@ -246,7 +246,7 @@ function recordClosure(input: MaterializeBundleInput): {
   readonly files: Map<string, Uint8Array>;
   readonly evidenceRecords: Map<string, Set<BundleV4EvidenceRole>>;
   readonly format:
-    | "benchmark-product-public-bundle/2"
+    | typeof BUNDLE_FORMAT
     | typeof BUNDLE_V4_FORMAT
     | typeof BUNDLE_V6_FORMAT
     | typeof BUNDLE_V7_FORMAT
@@ -1106,7 +1106,7 @@ function recordClosure(input: MaterializeBundleInput): {
         : BUNDLE_V6_FORMAT
       : binaryQualification
         ? BUNDLE_V4_FORMAT
-        : "benchmark-product-public-bundle/2",
+        : BUNDLE_FORMAT,
   };
 }
 

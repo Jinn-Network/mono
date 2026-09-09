@@ -1713,6 +1713,7 @@ The exact 76-package trusted-publisher set is the union of stack-published group
 | conformance | @jinn-network/trust-observation | packages/trust/observation/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/adversarial-v1/README.md | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/capture-provenance.md | — | — | — |
+| fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/cross-validation-2026-09-06.md | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/cross-validation.md | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/kit-token-canonical.der | — | — | — |
 | fixtures | @jinn-network/trust-testing | packages/trust/testing/fixtures/anchor-kit-v1/ots-stamp-provenance.md | — | — | — |

@@ -110,6 +110,7 @@ describe("the node:crypto ports on captured production certificates", () => {
     (_name, token) => {
       const facts = anchorCertificateReader.readCertificate(signerCertificateOf(token.tokenDer));
       expect(facts.extendedKeyUsageOids).toEqual(["1.3.6.1.5.5.7.3.8"]);
+      expect(facts.extendedKeyUsageCritical).toBe(true);
       expect(facts.notBefore).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
       expect(facts.notAfter).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
       expect(facts.sid.map((form) => form.kind))

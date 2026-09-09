@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { RECORD_DISCOVERY_VERSION } from "./identifiers.js";
 import { isSourceName, splitOrigin } from "./grammar.js";
+import { isHeadTimestamp } from "./timestamps.js";
 
 // Source Head (§5.2) -- the one mutable, DSSE-signed document per source.
 // Field set frozen at design §16 item 3: {origin, sequence, entry, issuedAt,
@@ -17,14 +18,20 @@ export interface SourceHead {
 
 const Sha256DigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const SequenceSchema = z.string().regex(/^[0-9]{16}$/);
+// §5.2 timestamps carry an explicit offset so one signed head reads as the
+// same instant on every host (#3482); an offset-less string is host-LOCAL
+// time and is refused here rather than reinterpreted per consumer.
+const HeadTimestampSchema = z.string().refine(isHeadTimestamp, {
+  message: "must be a calendar-strict RFC 3339 date-time with an explicit offset ('Z' or '+/-HH:MM')",
+});
 
 const SourceHeadSchema = z.looseObject({
   protocol: z.literal(RECORD_DISCOVERY_VERSION),
   origin: z.string().min(1),
   sequence: SequenceSchema,
   entry: Sha256DigestSchema,
-  issuedAt: z.string().min(1),
-  refreshBy: z.string().min(1),
+  issuedAt: HeadTimestampSchema,
+  refreshBy: HeadTimestampSchema,
 });
 
 /**

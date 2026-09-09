@@ -155,7 +155,7 @@ Two ways to supply the CID, and they are not interchangeable:
 Save the spec to a file — the published `@jinn-network/client` package does
 not ship the repo's `fixtures/` directory, so write it yourself rather than
 pointing at a path that will not exist on your machine. (`prediction.v1`
-is not used for this worked example: its committed spec-file schema is a
+is not used for this worked example: its spec-file schema is a
 Polymarket binary-question shape, not the Chainlink-threshold shape a
 `prediction.v1` config entry might suggest — see the note at the end of
 this section. `prediction.apy.v0`'s schema is what is shown below,
@@ -249,22 +249,22 @@ invocation.
 
 **A note on `prediction.v1` and this section's `--solver-net prediction`
 naming.** The registered `prediction.v1` SolverType (`SOLVER_TYPES['prediction.v1']`
-in `client/src/solver-types/index.ts`) validates spec files against a
+in `operator/src/solver-types/index.ts`) validates spec files against a
 Polymarket binary-question schema (`question.kind: "binary"`,
 `source.venue: "polymarket"`, plus `resolution`/`consensusSnapshot`/
-`eligibilitySnapshot` blocks) — confirmed by running `jinn tasks submit
---dry-run` against both a Chainlink-shaped spec and the repo's own
-`fixtures/prediction-v1-task.example.json` (which is Chainlink-shaped) on
-this branch: both fail `parseSpec` with the same schema errors. The
-Chainlink-threshold shape shown in §3's config example belongs to a
-separate, unregistered `legacyChainlinkPredictionV1` definition
-(`client/src/solver-types/prediction-v0.ts`) kept only for spec-parsing
+`eligibilitySnapshot` blocks), and resolves no sentinels — every field in
+the spec file is literal. The repo's own
+`fixtures/prediction-v1-task.example.json` carries that shape and passes
+`jinn tasks submit --spec-file` (#2314). The Chainlink-threshold shape
+shown in §3's config example belongs to a separate, unregistered
+`legacyChainlinkPredictionV1` definition
+(`operator/src/solver-types/prediction-v0.ts`) kept only for spec-parsing
 reuse by other code, not for `jinn tasks submit`. §3's example is accurate
 for `jinn tasks list`/`show` (which echo config verbatim without SolverType
-validation) but would not pass `jinn tasks submit` as written today. This
-is a repo-level fixture/schema mismatch, not a quickstart-authoring choice
-— filed as [#2314](https://github.com/Jinn-Network/mono/issues/2314) rather
-than patched here.
+validation) but would not pass `jinn tasks submit` as written. Prediction
+SolverNet itself is frozen per DR-2026-05-11-a
+(`log/decisions/2026-05-11-freeze-prediction-solvernet.md`); the example is
+kept accurate, not extended.
 
 ## 5. Observe the delivery
 

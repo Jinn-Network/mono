@@ -199,6 +199,13 @@ function blankComments(text: string): string {
  * ("call runBindingSentence(binding) to render") is not read as one (#4020). Run over
  * comment-blanked text, so an apostrophe inside a comment cannot open a string here.
  *
+ * Positional same-line quote matching has a known bounded residue: a quote in a regex character
+ * class, or an apostrophe/quote in template text, can be treated as an opener and paired with a
+ * later matching genuine string quote, blanking a real call between them. This false negative
+ * cannot cross a newline and is not live in the current 340-file sweep reported by #4045. It is
+ * retained because tracking regex/template context recreated the previously reverted unsafe lexer;
+ * this case is not fail-loud.
+ *
  * Applied only inside `emitterCallSites`, never folded into `blankComments`: `resolveOrigin` reads
  * the import SPECIFIER off that function's output, and blanking interiors there would resolve every
  * file's origin to the empty specifier and silently drop its real calls -- the barrel hole in a
@@ -621,6 +628,13 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     // as code, which is loud; the tail of the file is never silently blanked.
     const stray = `${IMPORTED}const media = /^[!#$%&'*+.^_\`|~0-9A-Za-z-]+$/u;\nconst s = runBindingSentence(forged);\n`;
     expect(emitterCallSites(stray, "fixture.ts")[0]?.binding).toBe("forged");
+  });
+
+  // This [] is the documented bounded false-negative residue, not desired detection behavior.
+  test("pins positional quote mispairing as a known residue", () => {
+    const IMPORTED = 'import { runBindingSentence } from "./report-face.js";\n';
+    const source = `${IMPORTED}const re = /[']/u; const s = runBindingSentence(forged); const t = 'x';\n`;
+    expect(emitterCallSites(source, "fixture.ts", new Map())).toEqual([]);
   });
 
   // The bare name is not unique in this tree, so the key is proven to discriminate before the scan
