@@ -91,11 +91,35 @@ const DISPLAY_UNSAFE_CHARACTER =
  *   the offer at whichever of the two it met first.
  * - **Amounts and digests must match their sealed grammars**, and a rail identifier must carry
  *   no character whose only job is to make it render as a different rail.
+ * - **The item's `provenance` must carry the values the withdrawal key is built from**, because
+ *   a card this function returns is destructured in `liveOfferCards` without a second check,
+ *   so a malformed one would throw there rather than miss here.
  */
 export function readOfferCard(item: AnnouncedItem): OfferCard | undefined {
   const record = item.record as AnnouncedItem["record"] | undefined;
   if (record === null || record === undefined) return undefined;
   if (record.kind !== OFFER_RECORD_KIND) return undefined;
+  // `provenance` is guarded for the same reason `record` is, and it was the one required
+  // field of the item that was not. A card that reaches `liveOfferCards` is destructured
+  // there unconditionally (`card.item.provenance`), so a malformed one -- absent, null, a
+  // string, or an object missing `source.agent` -- turned this function's documented
+  // miss-not-throw posture into a `TypeError` thrown from the withdrawal filter, one feed
+  // item poisoning the whole listing. Guarding it here keeps the defect a miss, where the
+  // chain-and-facts verifier adjudicates it. Only the four values the withdrawal key is
+  // built from are checked: `entry` and `derivation` are read by no path in this module,
+  // and checking a field nothing consumes would narrow what an index accepts for no
+  // ordering or safety gain.
+  const provenance = item.provenance as AnnouncedItem["provenance"] | undefined;
+  if (typeof provenance !== "object" || provenance === null || Array.isArray(provenance)) {
+    return undefined;
+  }
+  const source = provenance.source as AnnouncedItem["provenance"]["source"] | undefined;
+  if (typeof provenance.announcementId !== "string" || provenance.announcementId.length === 0) {
+    return undefined;
+  }
+  if (typeof source !== "object" || source === null || Array.isArray(source)) return undefined;
+  if (typeof source.agent !== "string" || source.agent.length === 0) return undefined;
+  if (typeof source.name !== "string" || source.name.length === 0) return undefined;
   if (typeof item.facts !== "object" || item.facts === null || Array.isArray(item.facts)) {
     return undefined;
   }

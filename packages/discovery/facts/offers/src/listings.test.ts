@@ -153,6 +153,37 @@ describe("reading an offer card off an announced item", () => {
     expect(readOfferCard(rest as unknown as AnnouncedItem)).toBeUndefined();
   });
 
+  // The exact analogue for `provenance`, which was the one required field of the item that
+  // `readOfferCard` did not guard. A read card is destructured unconditionally in
+  // `liveOfferCards` (`card.item.provenance`), so each shape below used to be READ and then
+  // throw a `TypeError` out of the withdrawal filter -- one malformed feed item taking the
+  // whole listing down, which is precisely the posture this function documents itself as not
+  // having.
+  it("misses rather than throws on an item whose provenance an index cannot read", async () => {
+    const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
+    for (const broken of [
+      undefined,
+      null,
+      "x",
+      7,
+      {},                          // no announcementId, no source
+      { announcementId: "a" },     // announcementId alone: the source half still decides the key
+    ]) {
+      expect(() =>
+        readOfferCard({ ...item, provenance: broken } as unknown as AnnouncedItem),
+      ).not.toThrow();
+      expect(readOfferCard({ ...item, provenance: broken } as unknown as AnnouncedItem)).toBeUndefined();
+    }
+
+    // The property a caller actually sees: a bad item is dropped from the listing instead of
+    // destroying it.
+    const bad = { ...item, provenance: { announcementId: "a" } } as unknown as AnnouncedItem;
+    const good = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "20" }] });
+    expect(liveOfferCards(offerCards([bad, good]), []).map((card) => card.offerRecordDigest)).toEqual([
+      digest(good),
+    ]);
+  });
+
   it("misses rather than throws on a card an index cannot read", async () => {
     const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "1500000" }] });
     const card = item.facts as Record<string, unknown>;
