@@ -864,20 +864,37 @@ The layout:
   SPDX licence expression: the export checks it against the SPDX 2.3 Annex D
   grammar, so free text is a refusal rather than a rendered
   `SPDX-License-Identifier:` line, while an ordinary dual licence
-  (`Apache-2.0 OR MIT`) is accepted. The grammar is not the SPDX licence list, and
-  the export deliberately does not carry a list that would date — so `LICENSE`
-  cites the SPDX list address for a single identifier and says in as many words
-  that an identifier the list does not carry will not resolve there. A
+  (`Apache-2.0 OR MIT`) is accepted. The grammar is not the whole licence check:
+  an expression nesting parentheses more than 64 deep is refused as well, though
+  it satisfies that grammar, because the renderer parses the expression by
+  recursive descent and will not present a value it cannot parse — real
+  expressions nest one or two deep. The grammar is not the SPDX licence list
+  either, and the export deliberately does not carry a list that would date — so
+  `LICENSE` cites the SPDX list address for a single identifier and says in as
+  many words that an identifier the list does not carry will not resolve there. A
   `LicenseRef-` identifier, which SPDX defines as off-list, gets no address at
   all, and neither does a compound expression, which names no one list entry. The
   publication's `name`, `version`, `author`, and `citation` are spliced into these
   generated files verbatim, so each is refused if it carries a control character
   or line separator — C0, DEL, all of C1, `U+2028` and `U+2029`, since a
-  licence scanner breaks lines on more of those than JavaScript does — or a line
-  that would read as a second `SPDX-…:` tag. In `metadata/spdx.json` a
-  source `downloadLocation` that is not a remote URL, and an `author` that is a
-  scheme-qualified machine identifier rather than a supplier name, both report
-  `NOASSERTION` rather than stating something the record does not support.
+  licence scanner breaks lines on more of those than JavaScript does — or text
+  that would read as a second `SPDX-…:` tag. That tag refusal is not line-shaped:
+  a tag is refused wherever it sits in the value, in any casing, since the
+  scanners that matter match case-insensitively; at any position on the line,
+  since the short-form identifier is specified to live inside a source comment and
+  so every reader that implements it accepts an arbitrary prefix; and separated
+  from its colon by any Unicode whitespace rather than only a space or a tab. A
+  tag mid-line in a single-line `name` is refused with no line terminator involved
+  at all. The sealed source-manifest descriptors spliced into `NOTICE` —
+  `source.uri`, `source.name`, `license.uri`, `attribution.uri` — are held to that
+  same rule, and refuse an embedded line terminator outright as well, unlike
+  `citation`, which is legitimately multi-line: `NOTICE` renders each descriptor
+  as one fixed-column row, so a line break inside one would emit a second
+  row-shaped line that no source-manifest row stands behind. In
+  `metadata/spdx.json` a source `downloadLocation` that is not a remote URL, and
+  an `author` that is a scheme-qualified machine identifier rather than a
+  supplier name, both report `NOASSERTION` rather than stating something the
+  record does not support.
 - `README.md` — the doctrine, the layout, and the check.
 
 The tree's **git commit hash is the value a freeze announcement pins**. It is

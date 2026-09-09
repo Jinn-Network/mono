@@ -351,7 +351,12 @@ export function isSpdxLicenseExpression(value: string): boolean {
  * each start position cost at most 64 steps, so the scan is linear (281ms at 8MB) for a value
  * whose refusal is unchanged; `SPDX-License-Identifier`, the tag this guard exists for, spends 17
  * of the 64, and no source-file tag SPDX defines comes near it. What it gives up is `SPDX-`
- * followed by 66 or more name characters and a colon, which names no tag any scanner carries.
+ * followed by 66 or more name characters and a colon, which names no registered tag but can still
+ * carry one as a prefix: `SPDX-License-Identifier` plus 60 dashes and `: GPL-3.0-only` is admitted
+ * here, yet a reader matching the bare substring rather than the specified
+ * `SPDX-License-Identifier\s*:` still reads a licence out of it. The bound is kept because no
+ * finite bound closes that — 300 dashes beats any of them — while an unbounded run reinstates the
+ * measured quadratic above; what a scanner spelling the tag as specified reads is unchanged.
  *
  * The separator run stays unbounded, which is safe for a structural reason rather than a measured
  * one: the name class and `White_Space` are disjoint, so from any start position the whitespace
