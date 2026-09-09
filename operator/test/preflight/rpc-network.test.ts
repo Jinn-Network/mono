@@ -81,10 +81,10 @@ describe('rpc network preflight', () => {
   it('masks credentials embedded in the RPC URL out of the failure message (#3103)', async () => {
     // 401 rather than 5xx: viem's http() transport does not retry a 401, so the
     // test does not pay three retry backoffs. The failure message is a viem
-    // HttpRequestError whose metaMessages embed the full request URL — path and
-    // query included (userinfo is already stripped upstream by getUrl, so it is
-    // asserted only as defense in depth; relying on a library's redaction for
-    // our own leak boundary is not a control we own).
+    // HttpRequestError whose metaMessages embed the full request URL — path,
+    // query and fragment included (userinfo is already stripped upstream by
+    // getUrl, so it is asserted only as defense in depth; relying on a
+    // library's redaction for our own leak boundary is not a control we own).
     const server = createServer((_req, res) => {
       res.statusCode = 401;
       res.end('unauthorized');
@@ -100,7 +100,7 @@ describe('rpc network preflight', () => {
       network: 'testnet',
       rpcUrl:
         `http://user:PLANTEDuserinfo01@127.0.0.1:${addr.port}` +
-        '/v2/PLANTEDpathKey01?apikey=PLANTEDqueryKey01',
+        '/v2/PLANTEDpathKey01?apikey=PLANTEDqueryKey01#PLANTEDfragKey01',
     });
 
     // Narrow off the ok member so `message` is in scope: it exists only on
@@ -111,6 +111,10 @@ describe('rpc network preflight', () => {
     expect(result.message).toContain('127.0.0.1');
     expect(result.message).not.toContain('PLANTEDpathKey01');
     expect(result.message).not.toContain('PLANTEDqueryKey01');
+    // The fragment is the fourth vector #3103 names, and viem does carry it
+    // into the message verbatim — so unlike the userinfo line above, this one
+    // is not defense in depth.
+    expect(result.message).not.toContain('PLANTEDfragKey01');
     expect(result.message).not.toContain('PLANTEDuserinfo01');
   });
 
