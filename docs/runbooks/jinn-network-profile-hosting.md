@@ -86,9 +86,9 @@ document withdrawn from the catalog stop being served. The source of truth is th
 in `Jinn-Network/mono`.
 
 A failed refresh is a real alarm, not noise: the host is now behind `next`, which is the
-drift this job exists to remove. Every step runs under `set -euo pipefail`, the job
-carries no `continue-on-error`, and the push is a plain fast-forward that fails rather
-than overwrites.
+drift this job exists to remove. Every step fails the job on a non-zero exit — the
+multi-command ones under `set -euo pipefail` — the job carries no `continue-on-error`,
+and the push is a plain fast-forward that fails rather than overwrites.
 
 The refresh is deliberately **not** a `needs:` of `stable-live-host-verification`. Adding
 a write-credential job to that gate's dependency chain would let a skipped refresh skip

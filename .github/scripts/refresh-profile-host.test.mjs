@@ -129,6 +129,12 @@ test('first refresh commits the bundle to the host root byte-identically', () =>
       `${relativePath} must land byte-identical`,
     );
   }
+  assert.equal(
+    existsSync(path.join(host, 'stale.json')),
+    false,
+    'the keep list is exactly .git and the provenance marker; anything else the host root '
+      + 'held is mirrored away rather than served forever',
+  );
   cleanup(bundle, host);
 });
 
