@@ -185,23 +185,26 @@ Each element of `bindings`:
 | 3 | `scope` | the binding's scope values, deduplicated, **sorted ascending** by UTF-16 code-unit order; at least one | `KeyBinding.scope` (`key-binding.ts:66`) |
 
 **The inclusion rule, so the omissions are a rule and not a list.** The preimage commits to
-exactly the per-act-varying terms of a binding that are knowable before the anchor mines. Every
-other field `KeyBinding` carries is out, and each is out for a named reason rather than to
-taste — the first two bullets by the rule, the third by a separate choice stated as such:
+exactly the terms of a binding that can vary between the bindings of one act and are knowable
+before the anchor mines. All three qualify: `keyId` differs for every element, `scope` differs by
+role, and `agent` differs whenever the act provisions admission, which takes its own Agent IRI
+(`operator/src/cli/commands/ceremony.ts:720`). Every other field `KeyBinding` carries is out, and
+each is out for a named reason rather than to taste — the first two bullets by the rule, the
+third by a separate choice stated as such:
 
 - `relationship` and `strength` are **constants of the authoring path** — `authorRoleBinding`
   writes `"controls"` and `"strong"` literally
-  (`packages/trust/authoring/src/binding.ts:107`, `:111`) — so they vary with no act and add no
-  distinguishing power. `voucher` fails the same test in a weaker form: it is derived from the
-  one ceremony account the act runs under (`binding.ts:102-106`), so it is constant across every
-  element of one act's array.
+  (`packages/trust/authoring/src/binding.ts:107`, `:111`) — so they can vary between no two
+  bindings anywhere. `voucher` is out by the same clause for a narrower reason: it is derived
+  from the one ceremony account the act runs under (`binding.ts:102-106`), so it varies between
+  acts but is constant across every element of one act's array.
 - `validFrom` and `ceremony.digest` are **not knowable before the anchor mines**: §6 law 2 makes
   `validFrom` the anchor's block time verbatim, and the ceremony evidence is signed over that
   same `issuedAt` (`binding.ts:86-91`, `:110`). §9 works this through.
-- `expiresAt` and `supersedes` are per-act-varying and knowable, and they are still omitted, for
-  a third reason stated as such: committing to them would foreclose §13.2's supersede shape,
-  which §12 names the most valuable of the five follow-ups. That omission is a design choice
-  rather than a consequence of the rule, and it is the only one.
+- `expiresAt` and `supersedes` can vary between the bindings of one act and are knowable, and
+  they are still omitted, for a third reason stated as such: committing to them would foreclose
+  §13.2's supersede shape, which §12 names the most valuable of the five follow-ups. That
+  omission is a design choice rather than a consequence of the rule, and it is the only one.
 
 `scope` passes both tests, and §9's argument 2 says why it earns its place beyond passing them:
 it commits to authority rather than to existence alone.
@@ -616,7 +619,9 @@ the preimage question and this one are one answer, taken twice.
 The ceremony spec §3.2b's current MUST — the choice is one the runbook "MUST state and the
 operator MUST record with its reason" (`2026-08-07-native-identity-ceremony.md §3.2b:653`) —
 would be replaced if this ruling is adopted, because the reason becomes fixed by rule. In its
-place, the re-author's record MUST carry:
+place, the re-author's record MUST carry the four items below. They describe the fresh-anchor
+path — under the reuse §6.1 leaves correct, nothing is minted, nothing goes out, and there is no
+window, so only the scope change is writable:
 
 - the fresh anchor's transaction hash and block time;
 - the outgoing anchor's transaction hash and block time;
@@ -922,9 +927,9 @@ two items are DR-2026-09-06 decision 9's, restated here in its own terms rather 
     digests, and its `ceremony.digest` variant. Both are structurally impossible on
     DR-2026-09-06's circularity ground rather than merely unattractive, and a profile document
     that omits them leaves its reader to rediscover that. **And the preimage's inclusion rule**
-    (§3.2): commit to exactly the per-act-varying terms knowable before the anchor mines, with
-    `expiresAt` and `supersedes` omitted for the separate, stated reason that committing to them
-    would foreclose the supersede shape of §13.2.
+    (§3.2): commit to exactly the terms that can vary between the bindings of one act and are
+    knowable before the anchor mines, with `expiresAt` and `supersedes` omitted for the separate,
+    stated reason that committing to them would foreclose the supersede shape of §13.2.
 
 **Two criteria this repository cannot close.** Issue #4172's first acceptance criterion asks that
 the anchor-locator profile document specify the successor preimage and the trigger, and its

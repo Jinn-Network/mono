@@ -142,18 +142,26 @@ silent re-mint. It is specified at
 §6.5, which names it as a follow-up with no owner and as a blocker on the ruling's *execution*
 rather than on its adoption.
 
-**What to write into the re-author's record.** Five things — four from
+**What to write into the re-author's record.** Three things whichever anchor you took:
+
+- the scope change, and the code change that caused it;
+- the **reason** for the anchor you took. Ceremony spec §3.2b's MUST is unretired: the proposed
+  ruling would replace it with fixed contents only once adopted, so until then write it;
+- explicitly whether the receipt was moved aside, since that single act is what decides which
+  anchor you got.
+
+If you minted fresh, add the three items that presuppose one — the rest of what
 [`spec/2026-09-09-recoverable-binding-anchor.md`](../../spec/2026-09-09-recoverable-binding-anchor.md)
-§6.4, plus the reason ceremony spec §3.2b still requires while `ceremony-anchor/v1` is the
-ratified preimage:
+§6.4 would make the fixed record contents, its fourth being the scope change already above:
 
 - the fresh anchor's transaction hash and block time;
 - the outgoing anchor's transaction hash and block time;
-- the scope change, and the code change that caused it;
 - the resulting window `[old anchor time, new anchor time)`, stated explicitly as a window in
-  which evidence de-attributes **for every role**, not only the widened one;
-- the **reason** for the anchor you took. §3.2b's MUST is unretired: the proposed ruling would
-  replace it with the four items above only once adopted, so until then write it.
+  which evidence de-attributes **for every role**, not only the widened one.
+
+None of the three is writable under reuse: nothing is minted, nothing goes out, and there is no
+window — the original `validFrom` is preserved, which is exactly the retroactivity that is
+reuse's cost.
 
 The retroactive-authority question these answer is left open at ceremony spec §10 (e) and owned
 by [#4172](https://github.com/Jinn-Network/mono/issues/4172), whose output is the document
