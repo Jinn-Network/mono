@@ -921,7 +921,7 @@ canonicalization checks around it (`:1348`, `:1355-1360`) are untouched. Of the 
 it stops comparing, `protocol` is separately pinned and is **not** part of the loss:
 `SourceHeadSchema` declares it `z.literal(RECORD_DISCOVERY_VERSION)`
 (`packages/discovery/protocol/src/head.ts:29`), so `parseSourceHead` refuses a wrong-valued
-one at `requester.ts:1347`, a line above the clause under discussion. The loss is `issuedAt`
+one at `requester.ts:1347`, two lines above the clause under discussion. The loss is `issuedAt`
 and `refreshBy`, in both directions. This is a change to a persistence invariant on the
 operator's most awkward leg, which is why it is a ruling and not a build detail.
 
