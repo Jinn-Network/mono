@@ -48,6 +48,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
   ['@jinn-network/record-publication', join(root, 'packages', 'discovery', 'publication')],
+  ['@jinn-network/contract-abis', join(root, 'packages', 'contract-abis')],
   ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
   ['@jinn-network/marketplace-projector', join(root, 'packages', 'marketplace', 'projector')],
 ];

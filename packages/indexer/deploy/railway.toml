@@ -35,6 +35,7 @@ watchPatterns = [
   "packages/task-execution/protocol/**",
   "packages/trust/core/**",
   "packages/benchmarking/records/**",
+  "packages/contract-abis/**",
 ]
 
 [deploy]

@@ -50,6 +50,7 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
+    "@jinn-network/contract-abis": "portal:../../contract-abis",
     "@jinn-network/environment-record": "portal:../../environments/record",
     "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
     "@jinn-network/marketplace-binding": "portal:../../marketplace/binding",

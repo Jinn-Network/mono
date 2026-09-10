@@ -20,6 +20,7 @@ const MARKETPLACE_PACKAGES = [
 // Cross-tree Jinn dependencies live outside packages/marketplace; map name -> absolute dir
 // (record-discovery-package-inventory.test.mjs precedent).
 const SIBLING_TREE_DIRS = new Map([
+  ['@jinn-network/contract-abis', join(root, 'packages', 'contract-abis')],
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
   ['@jinn-network/execution-evidence-builder', join(root, 'packages', 'evidence', 'execution-evidence-builder')],
@@ -59,6 +60,7 @@ const SIBLING_TREE_DIRS = new Map([
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['binding', {
     dependencies: [
+      '@jinn-network/contract-abis',
       '@jinn-network/task-execution-backend',
       '@jinn-network/task-execution-profiles',
       '@jinn-network/task-execution-protocol',
@@ -90,6 +92,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [],
     peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/contract-abis'],
   }],
   ['pipeline', {
     dependencies: [
@@ -113,7 +116,10 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [],
     peerDependencies: [],
-    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder'],
+    transitivePortalResolutions: [
+      '@jinn-network/contract-abis',
+      '@jinn-network/execution-evidence-builder',
+    ],
   }],
   // venue-base is the tier-3 chain-adapter tree (composition design §6.1). It consumes the
   // binding's port surface and the projector's decode/finality/observe machinery; it may NEVER
@@ -137,6 +143,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [],
     peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/contract-abis'],
   }],
   ['testing', {
     dependencies: [
@@ -170,7 +177,10 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [],
     peerDependencies: [],
-    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder'],
+    transitivePortalResolutions: [
+      '@jinn-network/contract-abis',
+      '@jinn-network/execution-evidence-builder',
+    ],
   }],
 ]);
 

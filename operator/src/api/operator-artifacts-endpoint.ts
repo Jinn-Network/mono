@@ -13,6 +13,7 @@ import type {
   Store,
 } from '../store/store.js';
 import type { EnvelopeProjection } from '../corpus/types.js';
+import { markRestartRequired } from './restart-required-state.js';
 
 export interface OperatorPricingConfig {
   publicEndpoint: string;
@@ -26,7 +27,6 @@ export interface OperatorArtifactsRoutesConfig {
   configPath?: string;
   operatorConfig?: OperatorPricingConfig;
   persistConfigValue?: typeof persistTopLevelConfigValue;
-  onOperatorConfigUpdated?: (operator: OperatorPricingConfig) => void;
 }
 
 type ArtifactSource = 'served' | 'network';
@@ -452,13 +452,20 @@ export function addOperatorArtifactsRoutes(app: Hono, config: OperatorArtifactsR
 
     try {
       persistConfigValue('operator', normalized.value, configPath);
-      config.onOperatorConfigUpdated?.(normalized.value);
     } catch (err) {
       return c.json({
         error: 'config_write_failed',
         detail: err instanceof Error ? err.message : String(err),
       }, 500);
     }
+
+    // Issue #2427: this write genuinely needs a restart. Every live pricing
+    // consumer (artifact packaging, live publishing, endpoint stamping) reads a
+    // boot-time snapshot, so the previous in-memory hot-apply reassigned
+    // `config.operator` without reaching any consumer of the pricing values
+    // other than the diagnostic debug-report snapshot. Set the flag the
+    // `restart_required` notification reads, matching the response below.
+    markRestartRequired();
 
     return c.json({
       ok: true,

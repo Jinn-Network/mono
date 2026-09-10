@@ -127,6 +127,7 @@ describe("the tier-1 anchor provider contract (design §4.3)", () => {
       notBefore: "2026-01-01T00:00:00Z",
       notAfter: "2027-01-01T00:00:00Z",
       extendedKeyUsageOids: ["1.3.6.1.5.5.7.3.8"],
+      extendedKeyUsageCritical: true,
       subjectNames: [Uint8Array.from([0x30, 0x00])],
       sid: [issuerAndSerial, subjectKeyIdentifier],
     };

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Store } from '../../src/store/store.js';
 import { handleAcquireArtifact } from '../../src/mcp/acquire-artifact.js';
@@ -8,8 +9,8 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
   afterEach(() => store.close());
 
   it('returns from served_artifacts without proxying to daemon', async () => {
-    const sha256 = 'a'.repeat(64);
     const bytes = Buffer.from('own content');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
     store.saveServedArtifact({
       sha256,
       artifactType: 'design_document',
@@ -62,8 +63,8 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
   });
 
   it('proxies to daemon when no fast path hits and forwards bearer header', async () => {
-    const sha256 = 'c'.repeat(64);
     const fetchedBytes = Buffer.from('fetched');
+    const sha256 = createHash('sha256').update(fetchedBytes).digest('hex');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(
         JSON.stringify({
@@ -103,7 +104,7 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
   });
 
   it('omits Authorization header when no daemonApiToken is supplied', async () => {
-    const sha256 = 'h'.repeat(64);
+    const sha256 = createHash('sha256').update(Buffer.from('x')).digest('hex');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(
         JSON.stringify({
@@ -128,7 +129,7 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
   });
 
   it('forwards envelopeCid + artifactType hints to the daemon route', async () => {
-    const sha256 = 'e'.repeat(64);
+    const sha256 = createHash('sha256').update(Buffer.from('x')).digest('hex');
     const ownerSafe = '0x' + '2'.repeat(40);
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(
@@ -163,8 +164,8 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
   });
 
   it('forwards donated IPFS sources and mirrors an IPFS daemon result with ipfs provenance', async () => {
-    const sha256 = '1'.repeat(64);
     const fetchedBytes = Buffer.from('donated-bytes');
+    const sha256 = createHash('sha256').update(fetchedBytes).digest('hex');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(
         JSON.stringify({
@@ -261,5 +262,113 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
     expect(row).not.toBeNull();
     // last_used_at should be ISO timestamp now (post 2026-04-30)
     expect(row!.lastUsedAt >= '2026-04-30T00:00:00.000Z').toBe(true);
+  });
+  // ── verification (#4179) ────────────────────────────────────────────────────
+  //
+  // The daemon-proxy path used to trust the HTTP hop ("hash verification was
+  // already done daemon-side") and mirror the decoded bytes straight into the
+  // shared cache, where the unverified-cache-read fast path would then serve
+  // them to every later caller. These cases close that.
+
+  it('refuses daemon-proxied bytes that do not hash to the requested address', async () => {
+    const sha256 = createHash('sha256').update(Buffer.from('the real bytes')).digest('hex');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          ok: true,
+          sha256,
+          content: Buffer.from('substituted bytes').toString('base64'),
+          artifactType: 'design_document',
+          source: 'origin',
+          paidAmountUsdc: '0',
+          fetchedAt: '2026-04-30T00:00:00.000Z',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await handleAcquireArtifact('http://127.0.0.1:7331', store, {
+      sha256,
+      access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe('acquire_failed');
+      expect(result.reason).toBe('hash_mismatch');
+      expect(result.sha256).toBe(sha256);
+      expect(result.retryable).toBe(false);
+    }
+    // The unverified mirror is the actual defect: nothing may enter the cache.
+    expect(store.getNetworkArtifact(sha256)).toBeNull();
+    fetchSpy.mockRestore();
+  });
+
+  it('still mirrors and returns the full result shape on a verified proxy hit', async () => {
+    const bytes = Buffer.from('verified bytes');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const sourceOperator = '0x' + '3'.repeat(40);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          ok: true,
+          sha256,
+          content: bytes.toString('base64'),
+          artifactType: 'design_document',
+          source: 'origin',
+          paidAmountUsdc: '0.01',
+          fetchedAt: '2026-04-30T00:00:00.000Z',
+          sourceOperator,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await handleAcquireArtifact('http://127.0.0.1:7331', store, {
+      sha256,
+      access: { endpoint: 'https://op.example.com', priceUsdc: '0.01' },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.content).toMatchObject({
+        sha256,
+        artifactType: 'design_document',
+        source: 'origin',
+        paidAmountUsdc: '0.01',
+        fetchedAt: '2026-04-30T00:00:00.000Z',
+        sourceOperator,
+      });
+      expect(result.content.bytes.equals(bytes)).toBe(true);
+    }
+    expect(store.getNetworkArtifact(sha256)?.content.equals(bytes)).toBe(true);
+    fetchSpy.mockRestore();
+  });
+
+  it('refuses a corrupted served_artifacts row rather than serving it', async () => {
+    const sha256 = createHash('sha256').update(Buffer.from('what was promised')).digest('hex');
+    store.saveServedArtifact({
+      sha256,
+      artifactType: 'design_document',
+      content: Buffer.from('not what was promised'),
+      priceUsdc: '0',
+      createdAt: '2026-04-30T00:00:00.000Z',
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('fetch should not be called after a self-store refusal');
+    });
+
+    const result = await handleAcquireArtifact('http://127.0.0.1:7331', store, {
+      sha256,
+      access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('hash_mismatch');
+      expect(result.retryable).toBe(false);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });

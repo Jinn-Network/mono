@@ -34,11 +34,17 @@ The self-serve source is now split into Colophon-owned Tier 4 packages:
 - `@colophon-claims/verify` — the smaller reader-only verifier;
 - `@colophon-claims/web` — private source/build input for the local UI.
 
-They are implemented but not published. Registry publication remains held until
-the `@colophon-claims` organization and publisher custody are established and
-the exact Jinn dependency set is available from npm. There is no hosted service,
-account, telemetry, billing, or remote publication. Product `publish` means
-local immutable bundle emission only.
+`@colophon-claims/verify` is published to npm, `latest` `0.2.1`. The reader
+lines below therefore run straight from the registry; nothing has to be checked
+out to verify a received bundle.
+
+`@colophon-claims/cli` and `@colophon-claims/core` are implemented but not
+published. Registry publication of those two remains held until the exact Jinn
+dependency set is available from npm; `@colophon-claims/web` is private
+source/build input by design and is not for registry release.
+
+There is no hosted service, account, telemetry, billing, or remote publication.
+Product `publish` means local immutable bundle emission only.
 
 ## Cold public quickstart
 
@@ -50,7 +56,7 @@ npx @colophon-claims/cli@0.1
 
 It runs the bundled zero-credential comparison, retains its copied bundle and
 receipt, verifies the copy, and opens a verified loopback viewer. It is not yet
-a registry command because the packages have not been published.
+a registry command because `@colophon-claims/cli` has not been published.
 
 For a received bundle, the smaller reader surface is:
 

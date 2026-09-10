@@ -13,9 +13,14 @@ import {
   NativeDiscoveryLocalAuthorityError,
   NativeDiscoverySyncError,
   createNativeDiscoveryConsumer,
+  type NativeDiscoveryDecodeInput,
   type NativeDiscoverySource,
 } from '../../src/daemon/native-discovery.js';
 import type { AnnouncedSubmissionCard } from '../../src/daemon/native-submission-facts.js';
+import {
+  NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD,
+  isPoisonQuarantined,
+} from '../../src/daemon/native-discovery-quarantine.js';
 
 const AGENT = 'did:key:zNativeRequester';
 const SOURCE_NAME = 'requester';
@@ -147,7 +152,7 @@ function consumer(input: {
   readonly routes: Map<string, unknown>;
   readonly verify: NativeDiscoverySource['verify'];
   readonly verifyHead?: NativeDiscoverySource['verifyHead'];
-  readonly decode?: ReturnType<typeof createNativeDiscoveryConsumer>['decode'];
+  readonly decode?: (input: NativeDiscoveryDecodeInput) => Promise<AnnouncedSubmissionCard | undefined>;
   readonly now?: () => Date;
   readonly selfServed?: boolean;
 }) {
@@ -165,6 +170,11 @@ function consumer(input: {
     now: input.now ?? (() => FRESH_FIXTURE_TIME),
   });
 }
+
+const okVerify: NativeDiscoverySource['verify'] = async (input) => {
+  for await (const item of input.entries) void item;
+  return { status: 'ok' };
+};
 
 describe('native discovery consumer', () => {
   it('cold-syncs once, persists an exact signed high-water with queued cards, then returning-syncs only the exact next sequence after restart', async () => {
@@ -582,6 +592,44 @@ describe('native discovery consumer', () => {
       await expect(replayed.sync()).rejects.toMatchObject({ reason: 'rewound-or-tampered-head' });
     });
 
+    it('recognises the re-sign that advances a leap-second checkpoint (#4096)', async () => {
+      // `parseHeadTimestamp` reads `23:59:60` as `23:59:59.999` (#3482); a bare
+      // `new Date` returns NaN on BOTH sides of `reSignedIdleHead`'s comparison,
+      // and every comparison with NaN is false. So a checkpoint whose recorded
+      // instant is a leap second could never be advanced by an honest idle
+      // re-sign: the re-sign fell through to the sequence guard as
+      // `rewound-or-tampered-head`, which is the exact #2549 symptom #3468
+      // exists to remove. The §5.2 schema admits the leap second, so this is the
+      // one input class where the two readings disagree.
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const store = new Store(':memory:');
+      const seeded = consumer({
+        store,
+        routes: reSignedRoutes(first, '2026-06-30T23:59:60Z', '2026-08-03T01:00:00.000Z'),
+        verify: async () => ({ status: 'ok' }),
+        now: () => new Date('2026-08-02T01:00:00.000Z'),
+      });
+      await seeded.sync();
+      for (const item of seeded.takePending()) seeded.acknowledge(item);
+      expect(seeded.checkpoint({ agent: AGENT, name: SOURCE_NAME })?.signedHighWater).toMatchObject({
+        issuedAt: '2026-06-30T23:59:60Z',
+      });
+
+      const verify = vi.fn(async () => ({ status: 'ok' as const }));
+      const verifyHead = vi.fn(async () => ({ status: 'ok' as const }));
+      const polled = consumer({
+        store,
+        routes: reSignedRoutes(first, '2026-08-02T12:00:00.000Z', '2026-08-03T12:00:00.000Z'),
+        verify,
+        verifyHead,
+        now: () => new Date('2026-08-02T13:00:00.000Z'),
+      });
+
+      await expect(polled.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
+      expect(verifyHead).toHaveBeenCalledOnce();
+      expect(verify).not.toHaveBeenCalled();
+    });
+
     it('still refuses one whose revalidation fails', async () => {
       const { store, first } = await checkpointed();
       const refused = consumer({
@@ -688,9 +736,19 @@ describe('native discovery consumer', () => {
 
     // #3531 — the STRICT increase. `sameHead` runs first and compares `refreshBy` and the
     // envelope as well, so a head at the same position with the SAME `issuedAt` but a stretched
-    // `refreshBy` and a new envelope is not `sameHead`; relaxing `>` to `>=` would admit it and
-    // persist that stretched `refreshBy` to the checkpoint. §5.2's strict-increase rule at this
-    // consumer had no test.
+    // `refreshBy` and a new envelope is not `sameHead`; relaxing `>` to `>=` would admit it.
+    // §5.2's strict-increase rule at this consumer had no test.
+    //
+    // Be exact about the consequence, because it is scoped to this fixture (#3770). Under `>=`
+    // it is THIS TEST'S injected `verifyHead` stub — an unconditional `{ status: 'ok' }` — that
+    // admits the head and lets the stretched `refreshBy` reach the checkpoint. Production never
+    // gets there: this head's window is 167h wide against the published-source profile's 24h
+    // ceiling, so `verifySourceHead` answers `refresh-by-ceiling`, a hard refusal on this path
+    // for every source, and the consumer throws before the checkpoint write. That is the same
+    // argument `reSignedIdleHead`'s own docblock makes about what a re-sign can install at an
+    // unchanged position. The mutation proof is unaffected by the correction: under `>=` the
+    // stub admits, `sync()` resolves instead of rejecting `rewound-or-tampered-head`, and the
+    // case still reddens — it is the strict-increase guard under test here, not the window.
     it('keeps the chain path for a head at the same instant with a stretched refreshBy', async () => {
       const { store, first } = await checkpointed();
       const verifyHead = vi.fn(async () => ({ status: 'ok' as const }));
@@ -1348,6 +1406,192 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
     await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
     expect(synced.takePending()).toHaveLength(1);
     warn.mockRestore();
+  });
+
+  /**
+   * ## The undecodable degrade above used to be permanent (#2473)
+   *
+   * The test directly above pins the #2529 contract — degrade, do NOT advance — and it stays
+   * exactly right for a transient decode fault. What it could not distinguish is a decode that
+   * will never succeed: the same bytes were re-fetched and re-thrown at every poll, the
+   * checkpoint never moved, and that source's queue was wedged for the life of the process.
+   *
+   * These pin the bound. Below the threshold the #2529 behaviour is unchanged, byte for byte.
+   * At the threshold the announcement is quarantined and stepped past, `queue()` runs, and the
+   * checkpoint advances — which is what lets the source resume.
+   */
+  describe('a permanently undecodable announcement quarantines and the checkpoint advances (#2473)', () => {
+    it('degrades below the threshold, then quarantines, advances, and resumes the source', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const store = new Store(':memory:');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const routes = routesFor([first]);
+      const synced = consumer({
+        store,
+        routes,
+        verify: async (input) => {
+          for await (const item of input.entries) void item;
+          return { status: 'ok' };
+        },
+        // Never decodable: the exact shape of a reader that will not catch up on its own.
+        decode: async () => { throw new Error('chainId is not a canonical unsigned integer'); },
+      });
+      const identity = { agent: AGENT, name: SOURCE_NAME };
+
+      for (let poll = 1; poll < NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD; poll += 1) {
+        await expect(synced.sync()).resolves.toMatchObject({
+          accepted: 0,
+          verifiedSources: 0,
+          degraded: [{ source: identity, reason: 'undecodable' }],
+        });
+        // #2529's load-bearing half, unchanged: no checkpoint, so nothing is skipped past.
+        expect(synced.checkpoint(identity)).toBeUndefined();
+        expect(isPoisonQuarantined({
+          store,
+          scope: 'announcement',
+          source: identity,
+          entryDigest: sealJson(first).digest,
+          announcementId: 'announcement-0000000000000001',
+        })).toBe(false);
+      }
+
+      // The threshold poll: the source is no longer degraded, and the pass completed.
+      await expect(synced.sync()).resolves.toEqual({
+        accepted: 0,
+        verifiedSources: 1,
+        degraded: [],
+      });
+      expect(isPoisonQuarantined({
+        store,
+        scope: 'announcement',
+        source: identity,
+        entryDigest: sealJson(first).digest,
+        announcementId: 'announcement-0000000000000001',
+      })).toBe(true);
+      // Acceptance criterion: the checkpoint ADVANCED past the quarantined entry.
+      expect(synced.checkpoint(identity)?.entryDigest).toEqual(sealJson(first).digest);
+      expect(synced.takePending()).toHaveLength(0);
+      expect(warn.mock.calls.map((call) => String(call[0])).join('\n')).toContain('quarantining');
+      warn.mockRestore();
+    });
+
+    it('resumes the source after quarantine: the next appended entry syncs normally', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const second = entry('0000000000000002', sealJson(first).digest, DIGEST_B);
+      const store = new Store(':memory:');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const decode = async (input: NativeDiscoveryDecodeInput) => {
+        if (input.entry.sequence === '0000000000000001') {
+          throw new Error('chainId is not a canonical unsigned integer');
+        }
+        return cardFor(input.entry.sequence);
+      };
+
+      const poisoned = consumer({ store, routes: routesFor([first]), verify: okVerify, decode });
+      for (let poll = 1; poll <= NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD; poll += 1) {
+        await poisoned.sync();
+      }
+      const identity = { agent: AGENT, name: SOURCE_NAME };
+      expect(poisoned.checkpoint(identity)?.entryDigest).toEqual(sealJson(first).digest);
+
+      // The source appends. A consumer that had been wedged on entry 1 would still collect
+      // nothing here; a quarantined-and-advanced one returning-syncs entry 2 normally.
+      const resumed = consumer({ store, routes: routesFor([first, second]), verify: okVerify, decode });
+      await expect(resumed.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+      expect(resumed.takePending()).toHaveLength(1);
+      expect(resumed.checkpoint(identity)?.entryDigest).toEqual(sealJson(second).digest);
+      warn.mockRestore();
+    });
+
+    it('quarantines one announcement without touching its healthy sibling in the same entry', async () => {
+      const paired: AnnouncementEntry = {
+        ...entry('0000000000000001', null, DIGEST_A),
+        announcements: [
+          {
+            announcementId: 'announcement-poison',
+            action: 'available',
+            record: { kind: 'https://spec.jinn.network/records/submission/v1', digest: DIGEST_A },
+            facts: { taskDigest: DIGEST_A, taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0' },
+          },
+          {
+            announcementId: 'announcement-healthy',
+            action: 'available',
+            record: { kind: 'https://spec.jinn.network/records/submission/v1', digest: DIGEST_B },
+            facts: { taskDigest: DIGEST_B, taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0' },
+          },
+        ],
+      };
+      const store = new Store(':memory:');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const synced = consumer({
+        store,
+        routes: routesFor([paired]),
+        verify: async (input) => {
+          for await (const item of input.entries) void item;
+          return { status: 'ok' };
+        },
+        decode: async (input) => {
+          if (input.announcement.announcementId === 'announcement-poison') {
+            throw new Error('chainId is not a canonical unsigned integer');
+          }
+          return cardFor(input.entry.sequence);
+        },
+      });
+      const identity = { agent: AGENT, name: SOURCE_NAME };
+
+      for (let poll = 1; poll < NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD; poll += 1) {
+        await expect(synced.sync()).resolves.toMatchObject({ degraded: [{ reason: 'undecodable' }] });
+        expect(synced.takePending()).toHaveLength(0);
+      }
+      await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+      expect(synced.takePending()).toHaveLength(1);
+      expect(synced.checkpoint(identity)?.entryDigest).toEqual(sealJson(paired).digest);
+      expect(isPoisonQuarantined({
+        store,
+        scope: 'announcement',
+        source: identity,
+        entryDigest: sealJson(paired).digest,
+        announcementId: 'announcement-poison',
+      })).toBe(true);
+      expect(isPoisonQuarantined({
+        store,
+        scope: 'announcement',
+        source: identity,
+        entryDigest: sealJson(paired).digest,
+        announcementId: 'announcement-healthy',
+      })).toBe(false);
+      warn.mockRestore();
+    });
+
+    it('never counts a local-authority fault against the announcement — that stays fatal', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const store = new Store(':memory:');
+      const synced = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async (input) => {
+          for await (const item of input.entries) void item;
+          return { status: 'ok' };
+        },
+        decode: async () => {
+          throw new NativeDiscoveryLocalAuthorityError({
+            cause: new Error('trust catalog changed on disk after the authority was loaded'),
+          });
+        },
+      });
+
+      for (let poll = 1; poll <= NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD + 1; poll += 1) {
+        await expect(synced.sync()).rejects.toThrow('trust catalog changed on disk');
+      }
+      expect(isPoisonQuarantined({
+        store,
+        scope: 'announcement',
+        source: { agent: AGENT, name: SOURCE_NAME },
+        entryDigest: sealJson(first).digest,
+        announcementId: 'announcement-0000000000000001',
+      })).toBe(false);
+      expect(synced.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toBeUndefined();
+    });
   });
 
   it('isolates the undecodable source from its siblings', async () => {

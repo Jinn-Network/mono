@@ -8,7 +8,7 @@
  * `operator/src/daemon/`; this test file is NOT under `src/api/`, so it can import the real
  * shared holder from `daemon/loop-heartbeat.js` and wire it straight through).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +16,11 @@ import { startApiServer, type ApiServer } from '../../src/api/server.js';
 import { Store } from '../../src/store/store.js';
 import { getDaemonReadiness, setDaemonReadiness } from '../../src/daemon/loop-heartbeat.js';
 import { buildEnvelope } from '../../src/errors/envelope.js';
+import {
+  resolveDegradedStart,
+  runBootstrapWithDegradeOpen,
+  SetupBootstrapHalted,
+} from '../../src/earning/bootstrap-run.js';
 import { persistBootstrapError } from '../../src/errors/persisted-bootstrap-error.js';
 
 const TEST_TOKEN = 'test-token-456';
@@ -142,5 +147,55 @@ describe('GET /ready — the §6.1 status/reason mapping', () => {
     const body = (await res.json()) as { reason: string; cause?: string };
     expect(body.reason).toBe('degraded');
     expect(body.cause).toBe('funding_required');
+  });
+});
+
+describe('GET /ready — a failed degraded-recovery start still reports degraded (#2425)', () => {
+  // resolveDegradedStart logs the start failure to console.error by design.
+  // Restored in afterEach, not inline, so a failing assertion below cannot
+  // leave console mocked for the rest of the file.
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
+  it('startDegraded\'s recovery start throwing → 200 degraded, not 503 bootstrapping', async () => {
+    // The whole point of the issue: an ECONOMIC halt (funding shortfall)
+    // whose recovery loops fail to construct must NOT leave `/ready` at 503,
+    // or a supervisor pointed at `/ready` restart-loops a daemon that is
+    // correctly parked waiting for funding. This drives the real shared
+    // readiness holder through the real orchestrator, then asks the real
+    // route — the exact seam the bug crossed.
+    const envelope = buildEnvelope({ code: 'funding_required', message: 'master EOA under-funded' });
+    let attempt = 0;
+    let readyDuringHalt: Response | undefined;
+
+    await runBootstrapWithDegradeOpen({
+      runBootstrap: async () => {
+        attempt += 1;
+        if (attempt === 1) throw new SetupBootstrapHalted(envelope);
+        return 'ok';
+      },
+      startDegraded: (halt) =>
+        resolveDegradedStart(halt, {
+          isEconomic: () => true,
+          start: () => { throw new Error('recovery loops failed to construct'); },
+        }),
+      setReadiness: setDaemonReadiness,
+      // Probe `/ready` while the halt is still parked — that is the window a
+      // supervisor polls in.
+      awaitRetry: async () => { readyDuringHalt = await fetch(`${baseUrl}/ready`); },
+    });
+
+    expect(readyDuringHalt?.status).toBe(200);
+    const body = (await readyDuringHalt!.json()) as { reason: string; accepting_work: boolean };
+    expect(body.reason).toBe('degraded');
+    expect(body.accepting_work).toBe(false);
+    expect(String(errorSpy.mock.calls[0]?.join(' '))).toContain('recovery loops failed to construct');
   });
 });

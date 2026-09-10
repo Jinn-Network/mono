@@ -701,6 +701,20 @@ describe('solver-nets command', () => {
       expect(envelope['solverNet']['plugins']).not.toContain('npm:@example/old-reference-plugin');
     });
 
+    // #2393: `configPathFrom` scanned argv itself and only understood the
+    // two-token form, so the equals form silently fell back to the default
+    // config path and reported the SolverNet as absent.
+    it('resolves the --config equals form to the same path as the space form', async () => {
+      const configPath = tempConfig(predictionConfig());
+
+      const equals = await runSolverNets(['list', `--config=${configPath}`]);
+      const spaced = await runSolverNets(['list', '--config', configPath]);
+
+      expect(equals.envelope['configPath']).toBe(configPath);
+      expect(equals.envelope['configPath']).toBe(spaced.envelope['configPath']);
+      expect(equals.envelope['solverNets']).toEqual(spaced.envelope['solverNets']);
+    });
+
     it('returns a safe minimal shape when a SolverNet entry is malformed (not an object)', async () => {
       const malformedConfig = {
         solverNets: {

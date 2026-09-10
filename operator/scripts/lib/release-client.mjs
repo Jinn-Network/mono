@@ -592,7 +592,37 @@ export function runPublishSequence(context) {
   }
 }
 
-export async function waitForWorkflow(context, { workflow, stepId, label }) {
+/**
+ * Pick the run a wait step should judge, out of everything `gh run list` returned
+ * for the release commit.
+ *
+ * A release-only filter here is what stranded the documented `docker.yml` retry
+ * (#2811): the runbook tells a Captain to republish a red release lane via
+ * `workflow_dispatch` from the release tag, but a wait that lists only
+ * `--event release` runs can never see that run, re-reads the same red one, and
+ * throws — so `--publish` stays blocked even though the images exist. Newest
+ * success across the accepted triggers wins; otherwise the newest run, so a
+ * still-running retry keeps the poll going rather than resolving early.
+ */
+export function selectWorkflowRun(runs, commit, acceptedEvents) {
+  const accepted = runs.filter(
+    (run) => run.event === undefined || acceptedEvents.includes(run.event),
+  );
+  const onCommit = accepted.filter((run) => run.headSha === commit);
+  const pool = (onCommit.length > 0 ? onCommit : accepted)
+    .slice()
+    .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
+  return (
+    pool.find((run) => run.status === 'completed' && run.conclusion === 'success')
+    ?? pool[0]
+    ?? null
+  );
+}
+
+export async function waitForWorkflow(
+  context,
+  { workflow, stepId, label, events = ['release'] },
+) {
   if (isStepComplete(context.report, stepId)) return findStep(context.report, stepId);
 
   const startedAt = context.now().toISOString();
@@ -609,19 +639,17 @@ export async function waitForWorkflow(context, { workflow, stepId, label }) {
       REPO_FULL_NAME,
       '--workflow',
       workflow,
-      '--event',
-      'release',
       '--commit',
       context.report.commit,
       '--json',
-      'databaseId,status,conclusion,headSha,url,displayTitle,createdAt',
+      'databaseId,status,conclusion,event,headSha,url,displayTitle,createdAt',
       '--limit',
       '20',
     ], { cwd: context.repoRoot });
 
     if (lastResult.status !== 0) break;
     const runs = parseJson(lastResult.stdout, `${workflow} run list`);
-    selectedRun = runs.find((run) => run.headSha === context.report.commit) ?? runs[0] ?? null;
+    selectedRun = selectWorkflowRun(runs, context.report.commit, events);
     if (selectedRun?.status === 'completed') {
       break;
     }
@@ -642,7 +670,7 @@ export async function waitForWorkflow(context, { workflow, stepId, label }) {
     label,
     command: 'gh',
     args: ['run', 'list', '--workflow', workflow, '--commit', context.report.commit],
-    commandLine: `gh run list --workflow ${workflow} --event release --commit ${context.report.commit}`,
+    commandLine: `gh run list --workflow ${workflow} --commit ${context.report.commit}`,
     cwd: context.repoRoot,
     status: passed ? 'passed' : 'failed',
     exitCode: lastResult?.status ?? 1,
@@ -664,17 +692,27 @@ export async function waitForWorkflow(context, { workflow, stepId, label }) {
   return step;
 }
 
-export async function waitForReleaseWorkflows(context) {
-  await waitForWorkflow(context, {
+export const RELEASE_WORKFLOW_WAITS = [
+  {
     workflow: 'npm-publish.yml',
     stepId: 'publish-wait-npm-workflow',
     label: 'wait for npm publish workflow',
-  });
-  await waitForWorkflow(context, {
+  },
+  {
     workflow: 'docker.yml',
     stepId: 'publish-wait-docker-workflow',
     label: 'wait for Docker workflow',
-  });
+    // `operator/RELEASING.md` documents a `workflow_dispatch` re-run from the
+    // release tag as the recovery for a red stable lane. Accept it here, or the
+    // documented recovery cannot complete the release.
+    events: ['release', 'workflow_dispatch'],
+  },
+];
+
+export async function waitForReleaseWorkflows(context) {
+  for (const wait of RELEASE_WORKFLOW_WAITS) {
+    await waitForWorkflow(context, wait);
+  }
 }
 
 export function runPublishVerifications(context) {

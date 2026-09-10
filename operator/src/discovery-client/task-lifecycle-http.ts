@@ -1,8 +1,8 @@
 /**
  * The HTTP lifecycle-evidence read (#2044).
  *
- * A SIBLING module, deliberately not a fifth `DiscoveryClient` method: the
- * four-method narrowness of `./types.ts` is a design invariant, every consumer
+ * A SIBLING module, deliberately not part of `DiscoveryClient`: the
+ * five-method narrowness of `./types.ts` is a design invariant, every consumer
  * narrows with `Pick<DiscoveryClient, 'x'>`, and this read has no consumer today.
  *
  * STAGED, NOT EXPORTED. #2044's governing ruling
@@ -10,7 +10,7 @@
  * keeps the issue alive because the read "improves the live product now and its
  * shape informs projector #1". Nothing imports it yet, and it is deliberately
  * absent from `operator/src/index.ts`: no module under `discovery-client/`
- * appears there — the four shipped `DiscoveryClient` methods included — and
+ * appears there — the five shipped `DiscoveryClient` methods included — and
  * `@jinn-network/operator` is published to npm, so an entry-point export is a
  * public-API commitment for a surface with no consumer. Until the projector
  * arrives, `test/discovery-client/task-lifecycle-schema-conformance.test.ts` is

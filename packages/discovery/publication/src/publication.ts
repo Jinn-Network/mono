@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isHeadTimestamp } from "@jinn-network/record-discovery-protocol";
 import type {
   PublicationAction, PublicationArtifact, PublicationExecutionReceipt, PublicationJournal,
   PublicationPlan, PublicationRecord, RecordPublicationDependencies, Sha256Digest,
@@ -71,7 +72,18 @@ function validate(plan: PublicationPlan): Member[] {
         if (!originMode && (member.actions.includes("verify-origin") || (member.actions.includes("announce") && !["owner", "delegate"].includes(member.authority.mode)))) {
           throw new PublicationPlanError("INVALID_PLAN", "Only owner/delegate records may be announced.");
         }
-        if (member.actions.includes("announce") && (typeof member.announcementTimestamp !== "string" || !Number.isFinite(new Date(member.announcementTimestamp).getTime()))) {
+        // `isHeadTimestamp`, not `Number.isFinite(new Date(x))` (#4095). This value
+        // becomes the announcement entry's `timestamp`, and `assertIntentOwnership`
+        // pins that equal to the source head's `issuedAt`, which #3482 made
+        // calendar-strict RFC 3339 with a mandatory offset. A bare `new Date` admits
+        // offset-less spellings (host-LOCAL by definition), legacy host-parser
+        // spellings, and "2026-02-30" silently rolled forward to March -- so a plan
+        // validated cleanly and was then refused by the writer for the very field the
+        // plan had just approved. Refusing here instead moves the refusal to where the
+        // operator can still choose a different timestamp, and refuses nothing the
+        // writer would have accepted. The writer remains the single authority on the
+        // field; this gate only agrees with it earlier.
+        if (member.actions.includes("announce") && !isHeadTimestamp(member.announcementTimestamp)) {
           throw new PublicationPlanError("INVALID_PLAN", "An announced record needs a valid immutable announcement timestamp.");
         }
       }
