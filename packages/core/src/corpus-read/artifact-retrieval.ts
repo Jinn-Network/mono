@@ -363,9 +363,12 @@ export async function fetchVerifiedArtifact(
       if (!verified.ok) return refuse('ipfs', sourceUri, verified.actualSha256);
       return admit('ipfs', sourceUri, bytes);
     } catch (err) {
-      // A gateway failure or a malformed donation payload is opportunistic
-      // noise, not a verdict on the artifact: classify, warn unless it was
-      // proven absence, and let the next locator answer.
+      // Neither a gateway failure nor a malformed donation payload is a verdict
+      // on the artifact *globally*, so both fall through and let the next
+      // locator answer. They differ in what they proved here: a transport
+      // failure learned nothing, while a payload that will never decode into
+      // this artifact is absence at this locator — hence the split reason. Both
+      // still warn; only a gateway's own "not there" is silent (#3441).
       warnIpfsFallThrough(`donation artifact ${sha256}`, err);
       attempts.push({
         leg: 'ipfs',
