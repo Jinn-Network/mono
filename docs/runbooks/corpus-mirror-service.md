@@ -234,13 +234,14 @@ itself did not:
   reporting it threw; the injected clock, or a stderr sink that EPIPEd, are the
   candidates, and they differ. A clock that throws costs both the
   `corpus.mirror.cycle` line and the `mirror-sync-status.json` update, and
-  stalls the per-source timestamps with them. A logger that throws costs only
-  the cycle line — the sync and the status file are already written. Neither
-  costs the loop, which reschedules regardless. This line is itself emitted
-  best-effort inside a nested guard, so when the logger is the fault no line
-  appears at all: a silent gap in cycle lines carries the same reading. Either
-  way `corpus-mirror-freshness` is emitted from inside the same guarded block
-  that failed, so no health row marks it — a restart is the remedy.
+  stalls the per-source timestamps with them. A logger that throws costs the
+  reporting alone — the sync, the status file and the timestamps are already
+  written. Neither costs the loop, which reschedules regardless. This line is
+  itself emitted best-effort inside a nested guard, so when the logger is the
+  fault no line appears at all: a silent gap in cycle lines carries the same
+  reading. Either way `corpus-mirror-freshness` is emitted from inside the same
+  guarded block that failed, so no health row marks it — a restart is the
+  remedy.
 - **`corpus.mirror.status.unwritable`** — `mirror-sync-status.json` could not
   be written: permissions, or a full or read-only volume. The sync is
   unaffected and the stderr cycle line stays authoritative; the file channel is
