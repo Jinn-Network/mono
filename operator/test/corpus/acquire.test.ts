@@ -238,6 +238,30 @@ describe('acquireArtifactContent', () => {
     expect(store.getNetworkArtifact(declaredSha)).toBeNull();
   });
 
+  it('maps a legacy null-returning acquireFn to not_found', async () => {
+    // The legacy `Buffer | null` fake shape is the one part of the adapter whose
+    // message text changed when the primitive took over the origin leg, and
+    // nothing exercised it. The sibling case below covers the AcquireResult
+    // union shape; this covers the bare `null`, so the branch-specific substring
+    // rather than /not_found/ is what distinguishes the two.
+    const declaredSha = 'e'.repeat(64);
+    const acquireFn = vi.fn(async () => null);
+    await expect(
+      acquireArtifactContent({
+        sha256: declaredSha,
+        artifactType: 'design_document',
+        access,
+        store,
+        selfSafeAddress: '0x' + 'f'.repeat(40),
+        privateKey: TEST_KEY,
+        acquireFn,
+        ownerSafe: '0x' + 'a'.repeat(40),
+      }),
+    ).rejects.toThrow(/origin returned null \(404 \/ not found\)/);
+    expect(acquireFn).toHaveBeenCalledOnce();
+    expect(store.getNetworkArtifact(declaredSha)).toBeNull();
+  });
+
   it('surfaces a free-fetch AcquireResult not_found as AcquireError', async () => {
     const declaredSha = 'b'.repeat(64);
     // Fake returns the discriminated AcquireResult shape (ok:false) rather
