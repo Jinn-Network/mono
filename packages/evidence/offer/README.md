@@ -135,6 +135,14 @@ independent claim: in practice the offer's announcement, on a chain that is hold
 caller who derives the holder from the signing key has asked the signature to vouch for
 itself and learned nothing.
 
+`atTime` carries the same obligation, and the record cannot help you here either: an offer
+seals no time of its own, so the validity window and the binding's revocation check both hang
+off a value the caller supplies. Suppose a key is revoked effective some date, and an attacker
+seals an offer naming their own `to` and publishes it in a feed that also supplies the
+`atTime` to check it at. A consumer that takes both from that feed gets `ok: true` on an offer
+signed by a revoked key. So `atTime` must come from the consumer's own clock, or from a source
+independent of the feed that supplied the offer — exactly as the holder IRI must.
+
 ## Supersession
 
 "The current price" is a property of a *set* of offers, never a field on one, so
@@ -142,7 +150,10 @@ itself and learned nothing.
 supersession is honored only when it names an offer in the set with the same subject and the
 same holder — an offer prices one subject, and only the holder can retire their own offer.
 A fork (two successors to one predecessor) leaves both live; the holder's own append-only
-announcement chain, not this package, orders them.
+announcement chain, not this package, orders them. Being a fold over whatever set you were
+handed, it also cannot see an absence: a set holding only a stale, expensive offer resolves as
+live with no diagnostic at all, because a feed that withholds the successor looks exactly like
+one where none exists — a further reason the set itself has to come from somewhere you trust.
 
 ## Two consequences worth stating plainly
 
