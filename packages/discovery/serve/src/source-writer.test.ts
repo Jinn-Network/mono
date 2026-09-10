@@ -581,9 +581,11 @@ describe("durable Record Discovery source writer", () => {
   // unconditionally there, ahead of the window refusal, precisely so an out-of-window
   // writer still finishes work that is already durable. Nothing covered that, so
   // gating the recovery on `windowFailure === undefined` left the whole suite green
-  // while wedging the source: the intent can only be cleared by the recovery the gate
-  // now skips, so every subsequent append refuses identically until wall clock catches
-  // up -- a permanent stall, not a delay.
+  // while breaking exactly that: the intent can only be cleared by the recovery the
+  // gate now skips, so that command keeps refusing until the writer's clock catches up.
+  // The stall is bounded, not permanent -- an in-window append runs the recovery and
+  // clears the intent -- but it is a real refusal of durable work, which is what the
+  // carve-out exists to prevent.
   //
   // The clock must be BEHIND the intent's timestamp, as in the case above (#3570):
   // `checkRefreshWindow` rule 3 only refuses a head issued ahead of `now`, so a clock

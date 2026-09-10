@@ -95,8 +95,8 @@ const DISPLAY_UNSAFE_CHARACTER =
  *   a card this function returns reaches `liveOfferCards` without a second check. A shape that
  *   cannot be destructured there throws instead of missing here; one that destructures but
  *   carries the wrong types keys the withdrawal lookup at a value no withdrawal can match, so a
- *   withdrawn offer reads as live. This is the one bullet whose skip costs something other than
- *   ordering — a crashed listing or a stale one.
+ *   withdrawn offer reads as live. Both costs fall on the listing itself rather than on the
+ *   order of a row in it.
  */
 export function readOfferCard(item: AnnouncedItem): OfferCard | undefined {
   const record = item.record as AnnouncedItem["record"] | undefined;
