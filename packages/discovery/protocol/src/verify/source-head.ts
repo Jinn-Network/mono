@@ -40,11 +40,10 @@ import type { SourceHeadOutcome } from "./outcomes.js";
 // procedure's monotonicity rule, so the caller must exclude it here too. An
 // `issuedAt` EQUAL to the one already held is admitted, not excluded -- that
 // is the byte-identical head above, and it is why this precondition reads
-// "does not regress" rather than §5.2's "strictly increases".
-// `classifyIdleHead` (`plugin/runtime/src/corpus/mirror.ts`) is the in-tree
-// caller that reads it that way: equal `issuedAt` is its "unchanged" case and
-// greater is its "re-signed" one, both of which reach here; a regressing --
-// or unparseable -- instant is what it sends down the chain path instead.
+// "does not regress" rather than §5.2's "strictly increases". A GREATER
+// `issuedAt` at the same position -- the head re-signed before `refreshBy`
+// expired -- reaches here too; only a regressing, or unparseable, instant
+// goes down the chain path.
 //
 // This procedure deliberately neither reads nor advances the high-water mark:
 // a revalidated head adopts nothing. What the CALLER does with the instant

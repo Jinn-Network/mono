@@ -220,15 +220,17 @@ row's full detail and remedy:
 {"detail":"1 of 1 followed archive(s) have not synced …","remedy":"…","level":"warn","message":"corpus-mirror-freshness"}
 ```
 
-Four more lines are documented here. The rest reach the same stderr and are
-read through the health rows below: `corpus.mirror.sync-failed` (`error`, the
-only error-level line the mirror emits), `corpus.mirror.lock-failed` and
-`corpus.mirror.index-failed` (`warn`), `corpus.mirror.status.unreadable`
-(`warn`), and `corpus.mirror.head-revalidated` (`debug`, which reports a
-successful sync rather than a fault).
+Four more lines are documented here: `corpus.mirror.cycle.unreported` and
+`corpus.mirror.status.unwritable` at `warn`, `corpus.mirror.skipped` and
+`corpus.mirror.freshness.unavailable` at `debug`. The rest reach the same
+stderr and are read through the health rows below:
+`corpus.mirror.sync-failed` (`error`, the only error-level line the mirror
+emits), `corpus.mirror.lock-failed` and `corpus.mirror.index-failed` (`warn`),
+`corpus.mirror.status.unreadable` (`warn`), and
+`corpus.mirror.head-revalidated` (`debug`, which reports a successful sync
+rather than a fault).
 
-Two of the four are `warn`, and both mean a channel degraded while the sync
-itself did not:
+Both `warn` lines mean a channel degraded while the sync itself did not:
 
 - **`corpus.mirror.cycle.unreported`** — the cycle ran, but recording or
   reporting it threw; the injected clock, or a stderr sink that EPIPEd, are the
@@ -249,8 +251,8 @@ itself did not:
   per-source timestamps that no longer reflect reality. Fix the path or its
   permissions.
 
-Two are `debug`. `corpus.mirror.skipped` is the line behind the
-`skipped-locked` reading given below. `corpus.mirror.freshness.unavailable` is
+`corpus.mirror.skipped` is the line behind the `skipped-locked` reading given
+below. `corpus.mirror.freshness.unavailable` is
 why a `corpus.mirror.cycle` line can arrive without a `freshness` key: the
 verdict could not be computed for that cycle, which is supplementary and never
 costs the cycle line.
