@@ -130,7 +130,29 @@ test('the canary host refresh copies same-run attested bytes to the host and pus
   // the generator refuses a non-empty --out, and that refusal stays as strong as it is.
   assert.match(block, /node \.github\/scripts\/build-profile-host-bundle\.mjs/u);
   assert.match(block, /--out "\$\{BUNDLE_DIR\}"/u);
-  assert.match(block, /BUNDLE_DIR: \$\{\{ runner\.temp \}\}/u);
+  // EVERY declaration, not "at least one". `BUNDLE_DIR` is declared twice -- once on the
+  // build step and once on the mirror step -- and a single `match` is satisfied by either,
+  // so pointing the build step at the host checkout would have passed a test whose whole
+  // claim is that the bundle is never generated there. The duplication cannot be removed:
+  // `jobs.<job_id>.env` cannot read the `runner` context, so a job-level declaration is a
+  // parse error rather than a simplification.
+  const bundleDirDeclarations = block.match(/^\s+BUNDLE_DIR: .*$/gmu) ?? [];
+  assert.equal(bundleDirDeclarations.length, 2, 'the build step and the mirror step each declare BUNDLE_DIR');
+  for (const declaration of bundleDirDeclarations) {
+    assert.match(declaration, /BUNDLE_DIR: \$\{\{ runner\.temp \}\}\/profile-host-bundle$/u);
+  }
+  // No job-level `env:` in this workflow may name `runner`, for the same reason.
+  assert.doesNotMatch(workflow, /^    env:\n(?:      \S.*\n)*      \S+: [^\n]*runner\./mu);
+
+  // The mirror's expected group set is the catalog's answer, carried from the step that
+  // passed those roots to the generator -- not a second derivation that could drift, and
+  // not the bundle's own directory listing.
+  assert.match(block, /printf 'release_groups=%s\\n'/u);
+  assert.match(block, /EXPECTED_RELEASE_GROUPS: \$\{\{ steps\.bundle\.outputs\.release_groups \}\}/u);
+  assert.ok(
+    block.indexOf('id: bundle') < block.indexOf('steps.bundle.outputs.release_groups'),
+    'the emitting step must precede the consuming step',
+  );
 
   assert.match(block, /node --test mono\/\.github\/scripts\/refresh-profile-host\.test\.mjs/u);
   assert.match(block, /node mono\/\.github\/scripts\/refresh-profile-host\.mjs/u);

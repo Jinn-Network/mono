@@ -201,8 +201,16 @@ jobs:
       # attested set with nothing riding along. The mirror step below is what reconciles
       # that directory with the host tree, deletions included.
       - name: Build the deploy bundle from the attested roots
+        id: bundle
         working-directory: mono
         env:
+          # Declared per step, and repeated verbatim on the mirror step below, because a
+          # job-level `env:` cannot read the `runner` context -- GitHub evaluates
+          # `jobs.<job_id>.env` with only `github`, `needs`, `strategy`, `matrix`, `vars`,
+          # `secrets` and `inputs` in scope, so hoisting this to remove the duplication
+          # makes the workflow invalid at parse time. The duplication is load-bearing; the
+          # shape assertions pin BOTH declarations to runner temp space, which is what
+          # keeps the bundle out of the host checkout the mirror is about to reconcile.
           BUNDLE_DIR: ${{ runner.temp }}/profile-host-bundle
         run: |
           set -euo pipefail
@@ -212,14 +220,21 @@ jobs:
           NODE
           )"
           root_args=()
+          group_list=""
           while IFS= read -r group; do
             [ -z "${group}" ] && continue
             root_args+=(--root ".platform-verification/${group}/profile-root")
+            group_list="${group_list:+${group_list},}${group}"
           done <<< "${groups}"
           if [ "${#root_args[@]}" -eq 0 ]; then
             echo "::error::the catalog names no stack-published release group"
             exit 1
           fi
+          # The mirror's expected-group list is emitted from the SAME iteration that builds
+          # the `--root` arguments, so what the mirror requires the bundle to contain is
+          # exactly the set of roots this step passed the generator -- not a second
+          # derivation that could drift from it.
+          printf 'release_groups=%s\n' "${group_list}" >> "${GITHUB_OUTPUT}"
           node .github/scripts/build-profile-host-bundle.mjs "${root_args[@]}" --out "${BUNDLE_DIR}"
       - name: Set the host git identity
         run: |
@@ -229,8 +244,16 @@ jobs:
       - name: Mirror the bundle into the host checkout
         id: mirror
         env:
+          # Repeated rather than hoisted -- see the build step above for why the `runner`
+          # context forces this.
           BUNDLE_DIR: ${{ runner.temp }}/profile-host-bundle
           HOST_DIR: host
+          # The catalog's own answer to "which release groups is this deploy", carried from
+          # the step that passed those roots to the generator. The mirror requires the
+          # bundle's groups to equal it exactly: an extra top-level directory carrying a
+          # `manifest.json` is not silently adopted as a release group, and a bundle built
+          # from a short `--root` list cannot mirror a whole group off the live origin.
+          EXPECTED_RELEASE_GROUPS: ${{ steps.bundle.outputs.release_groups }}
         run: |
           set -euo pipefail
           node mono/.github/scripts/refresh-profile-host.mjs

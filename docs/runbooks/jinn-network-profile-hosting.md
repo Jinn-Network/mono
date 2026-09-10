@@ -171,6 +171,13 @@ operator's own provisioning work, which the gate can only check after it is done
       per group; a document path claimed by two groups is refused before anything is written.
       `/manifest.json` and `/manifest.dsse.json` are deliberately not served, and the gate
       probes both as must-404s.
+      Mirroring that directory to the host is `refresh-profile-host.mjs`, driven by
+      `BUNDLE_DIR`, `HOST_DIR`, `SOURCE_SHA` and `EXPECTED_RELEASE_GROUPS` — the last being
+      the comma-separated group ids this deploy covers, which the mirror requires the bundle
+      to match exactly. It has no default, because the mirror REPLACES the host content: a
+      bundle short one group would otherwise unpublish that group from the live origin, and
+      a short `--root` list above is the easiest way to build one by hand. Name every
+      stack-published group in both places, or the mirror refuses before it writes.
 - [ ] *(gate)* `stable-live-host-verification` fetches `<release-group>/manifest.json` from the
       live domain, verifies its signature against the digest-pinned published key, and
       byte-compares every hosted document, media type and digest with the same-run attested

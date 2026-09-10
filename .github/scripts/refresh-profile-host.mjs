@@ -131,14 +131,61 @@ function assertMirrorableEntries(directory, prefix = '') {
 }
 
 /**
+ * Require the bundle's release groups to be EXACTLY the set the caller expected -- neither
+ * a superset nor a subset.
+ *
+ * It closes two holes at once, because they are the same hole seen from either side.
+ *
+ * Enumeration is a SCAN: any top-level directory holding a `manifest.json` reads as a
+ * release group. The real bundle already contains seven served documents literally named
+ * `manifest.json`, and only their depth keeps them out of that scan, so nothing but luck
+ * separates a served `<dir>/manifest.json` from a release group. Compared against the
+ * catalog's own answer the scan stops being an inference: an unrecognized directory is
+ * named and refused rather than adopted, and the refusal is legible instead of surfacing
+ * later as a manifest that "claims the wrong release group".
+ *
+ * The subset side is the sharper one, because `mirrorContent` DELETES every host entry the
+ * bundle does not carry. A bundle short one group therefore unpublishes that group from the
+ * live origin, and every gate reports success. CI cannot reach that state -- the generator
+ * exits 1 on a missing root -- but the break-glass path assembles the `--root` list by hand,
+ * and one omitted `--root` is all it takes. Requiring the full set turns that footgun into a
+ * named refusal before anything is written.
+ *
+ * The list is required, never defaulted: a caller that cannot say which groups it is
+ * publishing has no business publishing.
+ * @param {string[]} groups discovered in the bundle, sorted
+ * @param {string[]} expectedGroups
+ */
+function assertExpectedGroups(groups, expectedGroups) {
+  if (
+    !Array.isArray(expectedGroups)
+    || expectedGroups.length === 0
+    || expectedGroups.some((group) => typeof group !== 'string' || group.trim() === '')
+  ) {
+    throw new Error('the expected release groups must be given as a non-empty list of group ids (EXPECTED_RELEASE_GROUPS); a deploy that cannot name its groups is refused rather than mirrored');
+  }
+
+  const expected = [...new Set(expectedGroups)].sort();
+  const unexpected = groups.filter((group) => !expected.includes(group));
+  const missing = expected.filter((group) => !groups.includes(group));
+  if (unexpected.length > 0 || missing.length > 0) {
+    const detail = [
+      unexpected.length > 0 ? `unexpected ${unexpected.join(', ')}` : null,
+      missing.length > 0 ? `missing ${missing.join(', ')}` : null,
+    ].filter((part) => part !== null).join('; ');
+    throw new Error(`deploy bundle release groups do not match the expected set ${expected.join(', ')}: ${detail}`);
+  }
+}
+
+/**
  * The fail-closed gate on bytes that are about to become public. The bundle generator
  * already enforces most of this; re-asserting it here puts the check immediately before
  * publication, where the bytes being published are the ones being read.
  * @param {string} bundleDir
- * @param {{ sourceSha: string }} expected
+ * @param {{ sourceSha: string, expectedGroups: string[] }} expected
  * @returns {{ groups: string[], lane: string, sourceCommit: string }}
  */
-export function validateBundleDir(bundleDir, { sourceSha }) {
+export function validateBundleDir(bundleDir, { sourceSha, expectedGroups }) {
   if (!existsSync(bundleDir) || !statSync(bundleDir).isDirectory()) {
     throw new Error(`deploy bundle not found: ${bundleDir} does not exist (or is not a directory)`);
   }
@@ -168,6 +215,11 @@ export function validateBundleDir(bundleDir, { sourceSha }) {
   if (groups.length === 0) {
     throw new Error(`deploy bundle ${bundleDir} declares no release group (no <group>/${MANIFEST_FILE_NAME})`);
   }
+
+  // Before any manifest is read: a directory that is not a release group has no manifest
+  // worth interpreting, and refusing it by name beats refusing it by whatever its
+  // `releaseGroup` field happens to say.
+  assertExpectedGroups(groups, expectedGroups);
 
   let lane;
   let sourceCommit;
@@ -377,12 +429,12 @@ export function buildCommitMessage({ sourceSha, lane, groups }) {
  * local checkout needs no token, so it folds in here; only `git push` (in the YAML) is
  * privileged. Pure of GitHub-specific side effects -- no `::error::`, no `process.exit`,
  * no `$GITHUB_OUTPUT`.
- * @param {{ bundleDir: string, hostDir: string, sourceSha: string, workflowPath: string }} args
+ * @param {{ bundleDir: string, hostDir: string, sourceSha: string, workflowPath: string, expectedGroups: string[] }} args
  * @returns {{ changed: boolean, message: string, groups: string[], lane: string }}
  */
-export function run({ bundleDir, hostDir, sourceSha, workflowPath }) {
+export function run({ bundleDir, hostDir, sourceSha, workflowPath, expectedGroups }) {
   validateSourceSha(sourceSha);
-  const { groups, lane } = validateBundleDir(bundleDir, { sourceSha });
+  const { groups, lane } = validateBundleDir(bundleDir, { sourceSha, expectedGroups });
   validateHostCheckout(bundleDir, hostDir);
   mirrorContent(bundleDir, hostDir);
   // `--force` is what makes the staged tree cover every mirrored path, and so what makes
@@ -426,10 +478,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const hostDir = process.env.HOST_DIR ?? 'host';
   const sourceSha = process.env.SOURCE_SHA ?? '';
   const workflowPath = process.env.WORKFLOW_PATH ?? '.github/workflows/stack-npm-publish.yml';
+  // Comma-separated because a release group id is a catalog key -- kebab-case, never
+  // carrying a comma. Unset parses to the empty list, which `assertExpectedGroups` refuses
+  // by name: there is no default, because defaulting it would restore the scan this exists
+  // to replace.
+  const expectedGroups = (process.env.EXPECTED_RELEASE_GROUPS ?? '')
+    .split(',')
+    .map((group) => group.trim())
+    .filter((group) => group !== '');
 
   let result;
   try {
-    result = run({ bundleDir, hostDir, sourceSha, workflowPath });
+    result = run({ bundleDir, hostDir, sourceSha, workflowPath, expectedGroups });
   } catch (error) {
     console.log(`::error::${error?.message ?? error}`);
     process.exit(1);

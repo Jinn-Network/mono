@@ -34,6 +34,10 @@ const HELPER = path.join(import.meta.dirname, 'refresh-profile-host.mjs');
 const WORKFLOW_PATH = '.github/workflows/stack-npm-publish.yml';
 const SHA = 'a'.repeat(40);
 const NEXT_SHA = 'b'.repeat(40);
+// The two stack-published groups, matching `makeBundle`'s default fixture. Every gate call
+// states its expected set explicitly: the helper requires one, and a fixture whose bundle
+// and expectation disagree is the thing under test rather than an accident.
+const GROUPS = ['implementations-v1', 'sealed-platform-v1'];
 
 // --- temp-fixture helpers ---------------------------------------------------
 
@@ -100,8 +104,8 @@ function commitCount(dir) {
   return Number(git(dir, ['rev-list', '--count', 'HEAD']).trim());
 }
 
-function refresh(bundleDir, hostDir, sourceSha = SHA) {
-  return run({ bundleDir, hostDir, sourceSha, workflowPath: WORKFLOW_PATH });
+function refresh(bundleDir, hostDir, sourceSha = SHA, expectedGroups = GROUPS) {
+  return run({ bundleDir, hostDir, sourceSha, workflowPath: WORKFLOW_PATH, expectedGroups });
 }
 
 // --- the mirror ------------------------------------------------------------
@@ -256,16 +260,16 @@ test('the mirror keeps .git and the provenance marker and drops a hand-added str
 test('validateBundleDir refuses a missing directory, a missing sentinel, and a groupless bundle', () => {
   const missing = path.join(tmpdir(), 'jinn-profile-host-absent-directory');
   assert.throws(
-    () => validateBundleDir(missing, { sourceSha: SHA }),
+    () => validateBundleDir(missing, { sourceSha: SHA, expectedGroups: GROUPS }),
     (error) => error.message.includes(missing),
   );
 
   const noSentinel = makeBundle();
   rmSync(path.join(noSentinel, 'vercel.json'));
-  assert.throws(() => validateBundleDir(noSentinel, { sourceSha: SHA }), /vercel\.json/u);
+  assert.throws(() => validateBundleDir(noSentinel, { sourceSha: SHA, expectedGroups: GROUPS }), /vercel\.json/u);
 
   const noGroups = makeBundle({ groups: [] });
-  assert.throws(() => validateBundleDir(noGroups, { sourceSha: SHA }), /release group/u);
+  assert.throws(() => validateBundleDir(noGroups, { sourceSha: SHA, expectedGroups: GROUPS }), /release group/u);
   cleanup(noSentinel, noGroups);
 });
 
@@ -277,7 +281,7 @@ test('validateBundleDir refuses a reserved bundle root: a manifest, or the prove
     const bundle = makeBundle();
     writeFile(bundle, reserved, '{}\n');
     assert.throws(
-      () => validateBundleDir(bundle, { sourceSha: SHA }),
+      () => validateBundleDir(bundle, { sourceSha: SHA, expectedGroups: GROUPS }),
       new RegExp(reserved.replaceAll('.', '\\.'), 'u'),
       `a root ${reserved} must be refused before it reaches the host`,
     );
@@ -305,7 +309,7 @@ test('validateBundleDir refuses a bundle carrying a Git control path at any dept
     const bundle = makeBundle();
     writeFile(bundle, controlPath, 'poisoned\n');
     assert.throws(
-      () => validateBundleDir(bundle, { sourceSha: SHA }),
+      () => validateBundleDir(bundle, { sourceSha: SHA, expectedGroups: GROUPS }),
       /Git control path/u,
       `${controlPath} must be refused before it reaches the host checkout`,
     );
@@ -328,7 +332,7 @@ test('validateBundleDir refuses a bundle entry that is not a regular file', () =
     mkdirSync(path.dirname(absolute), { recursive: true });
     symlinkSync('../.git', absolute);
     assert.throws(
-      () => validateBundleDir(bundle, { sourceSha: SHA }),
+      () => validateBundleDir(bundle, { sourceSha: SHA, expectedGroups: GROUPS }),
       /not a regular file/u,
       `${linkPath} must be refused before it reaches the host checkout`,
     );
@@ -398,6 +402,7 @@ test('staging is ignore-proof, so the published tree is the mirrored tree', () =
 
 test('validateBundleDir refuses a manifest whose releaseGroup disagrees with its directory', () => {
   const bundle = makeBundle({ groups: ['sealed-platform-v1'] });
+  const expectedGroups = ['sealed-platform-v1'];
   writeFile(
     bundle,
     'sealed-platform-v1/manifest.json',
@@ -408,7 +413,7 @@ test('validateBundleDir refuses a manifest whose releaseGroup disagrees with its
       documents: [],
     })}\n`,
   );
-  assert.throws(() => validateBundleDir(bundle, { sourceSha: SHA }), /sealed-platform-v1/u);
+  assert.throws(() => validateBundleDir(bundle, { sourceSha: SHA, expectedGroups }), /sealed-platform-v1/u);
   cleanup(bundle);
 });
 
@@ -416,14 +421,14 @@ test('validateBundleDir refuses groups that disagree on lane or on the source co
   const laneSplit = makeBundle({
     manifestOverrides: { 'sealed-platform-v1': { lane: 'stable' } },
   });
-  assert.throws(() => validateBundleDir(laneSplit, { sourceSha: SHA }), /lane/u);
+  assert.throws(() => validateBundleDir(laneSplit, { sourceSha: SHA, expectedGroups: GROUPS }), /lane/u);
 
   const commitSplit = makeBundle({
     manifestOverrides: {
       'sealed-platform-v1': { generatedFrom: { repository: 'Jinn-Network/mono', commit: NEXT_SHA } },
     },
   });
-  assert.throws(() => validateBundleDir(commitSplit, { sourceSha: SHA }), /commit/u);
+  assert.throws(() => validateBundleDir(commitSplit, { sourceSha: SHA, expectedGroups: GROUPS }), /commit/u);
   cleanup(laneSplit, commitSplit);
 });
 
@@ -437,7 +442,7 @@ test('validateBundleDir refuses a group that declares no lane and one that names
   for (const missing of [{ lane: undefined }, { generatedFrom: undefined }]) {
     const bundle = makeBundle({ manifestOverrides: { 'implementations-v1': missing } });
     assert.throws(
-      () => validateBundleDir(bundle, { sourceSha: SHA }),
+      () => validateBundleDir(bundle, { sourceSha: SHA, expectedGroups: GROUPS }),
       /implementations-v1\/manifest\.json (?:declares no lane|names no source commit)/u,
     );
     cleanup(bundle);
@@ -447,9 +452,9 @@ test('validateBundleDir refuses a group that declares no lane and one that names
   // provenance marker, whose canonical form admits only canary or stable, and a commit
   // that is not a full SHA cannot carry the same-run binding.
   const badLane = makeBundle({ lane: 'production' });
-  assert.throws(() => validateBundleDir(badLane, { sourceSha: SHA }), /declares no lane: production/u);
+  assert.throws(() => validateBundleDir(badLane, { sourceSha: SHA, expectedGroups: GROUPS }), /declares no lane: production/u);
   const shortCommit = makeBundle({ commit: 'abc1234' });
-  assert.throws(() => validateBundleDir(shortCommit, { sourceSha: SHA }), /names no source commit: abc1234/u);
+  assert.throws(() => validateBundleDir(shortCommit, { sourceSha: SHA, expectedGroups: GROUPS }), /names no source commit: abc1234/u);
   cleanup(badLane, shortCommit);
 });
 
@@ -458,15 +463,113 @@ test('validateBundleDir refuses a bundle built from a different commit than this
   // the download step rather than a property read out of the copied bytes.
   const bundle = makeBundle({ commit: NEXT_SHA });
   assert.throws(
-    () => validateBundleDir(bundle, { sourceSha: SHA }),
+    () => validateBundleDir(bundle, { sourceSha: SHA, expectedGroups: GROUPS }),
     (error) => error.message.includes(SHA) && error.message.includes(NEXT_SHA),
   );
   cleanup(bundle);
 });
 
+test('validateBundleDir refuses a bundle whose groups are not exactly the expected set', () => {
+  // Enumeration is a SCAN for `<dir>/manifest.json`, and the real bundle serves seven
+  // documents literally named `manifest.json` -- only their depth keeps them out of it. A
+  // top-level one would otherwise be adopted as a release group and turn `next` red with a
+  // message about a manifest claiming the wrong group. Compared against the catalog's answer
+  // it is named and refused instead.
+  const extra = makeBundle({ groups: [...GROUPS, 'schemas'] });
+  assert.throws(
+    () => validateBundleDir(extra, { sourceSha: SHA, expectedGroups: GROUPS }),
+    (error) => error.message.includes('unexpected schemas') && !error.message.includes('missing'),
+  );
+
+  // The sharper half, because `mirrorContent` DELETES every host entry the bundle does not
+  // carry: a bundle short one group unpublishes that group from the live origin while every
+  // gate reports success. Unreachable on the CI path -- the generator exits 1 on a missing
+  // root -- but the break-glass path assembles `--root` by hand, and one omitted `--root` is
+  // the whole failure. `groups.length >= 1` could never have caught it.
+  const short = makeBundle({ groups: ['sealed-platform-v1'] });
+  assert.throws(
+    () => validateBundleDir(short, { sourceSha: SHA, expectedGroups: GROUPS }),
+    (error) => error.message.includes('missing implementations-v1') && !error.message.includes('unexpected'),
+  );
+
+  // Both sides at once are reported together, so one run names the whole discrepancy.
+  const swapped = makeBundle({ groups: ['sealed-platform-v1', 'colophon-v1'] });
+  assert.throws(
+    () => validateBundleDir(swapped, { sourceSha: SHA, expectedGroups: GROUPS }),
+    (error) => error.message.includes('unexpected colophon-v1') && error.message.includes('missing implementations-v1'),
+  );
+  cleanup(extra, short, swapped);
+});
+
+test('validateBundleDir requires an expected group set rather than defaulting to what it found', () => {
+  // Fail-closed: a caller that cannot say which groups it is publishing is refused, never
+  // handed the scan's own answer back as its expectation. Defaulting here would restore
+  // exactly the inference the check exists to replace.
+  const bundle = makeBundle();
+  for (const expectedGroups of [undefined, [], ['sealed-platform-v1', ''], ['implementations-v1', 7]]) {
+    assert.throws(
+      () => validateBundleDir(bundle, { sourceSha: SHA, expectedGroups }),
+      /EXPECTED_RELEASE_GROUPS/u,
+      `expectedGroups ${JSON.stringify(expectedGroups)} must be refused`,
+    );
+  }
+  // A duplicated id is a restatement of the same set, not a different one.
+  assert.deepEqual(
+    validateBundleDir(bundle, { sourceSha: SHA, expectedGroups: [...GROUPS, 'implementations-v1'] }).groups,
+    GROUPS,
+  );
+  cleanup(bundle);
+});
+
+test('the group-set gate precedes every manifest read, and run() refuses before it mirrors', () => {
+  // Order matters: a directory that is not a release group has no manifest worth
+  // interpreting, so it is named as unexpected rather than surfacing as whatever its
+  // `releaseGroup` field happens to say.
+  const bundle = makeBundle({ groups: GROUPS });
+  writeFile(bundle, 'schemas/manifest.json', 'not json at all\n');
+  assert.throws(
+    () => validateBundleDir(bundle, { sourceSha: SHA, expectedGroups: GROUPS }),
+    /unexpected schemas/u,
+  );
+
+  // And the refusal reaches the orchestrator before anything destructive: `mirrorContent`
+  // has already deleted the host tree by the time a later check could fire.
+  const host = makeHostRepo();
+  const before = git(host, ['rev-parse', 'HEAD']).trim();
+  assert.throws(() => refresh(bundle, host), /unexpected schemas/u);
+  assert.equal(git(host, ['rev-parse', 'HEAD']).trim(), before);
+  assert.equal(existsSync(path.join(host, 'stale.json')), true, 'a refused bundle must not have mirrored');
+  cleanup(bundle, host);
+});
+
+test('the CLI refuses a bundle when EXPECTED_RELEASE_GROUPS is unset or short', () => {
+  const bundle = makeBundle();
+  const host = makeHostRepo();
+  const before = git(host, ['rev-parse', 'HEAD']).trim();
+
+  for (const [label, expected] of [['unset', undefined], ['short', 'sealed-platform-v1']]) {
+    const env = { ...process.env, BUNDLE_DIR: bundle, HOST_DIR: host, SOURCE_SHA: SHA, WORKFLOW_PATH };
+    delete env.EXPECTED_RELEASE_GROUPS;
+    if (expected !== undefined) env.EXPECTED_RELEASE_GROUPS = expected;
+    const result = spawnSync(process.execPath, [HELPER], { encoding: 'utf8', env });
+
+    assert.notEqual(result.status, 0, `${label} must exit non-zero`);
+    assert.match(result.stdout + result.stderr, /::error::/u);
+    assert.equal(git(host, ['rev-parse', 'HEAD']).trim(), before, `${label} must leave the host untouched`);
+  }
+
+  // The whitespace around a hand-typed list is not a different set.
+  const result = spawnSync(process.execPath, [HELPER], {
+    encoding: 'utf8',
+    env: { ...process.env, BUNDLE_DIR: bundle, HOST_DIR: host, SOURCE_SHA: SHA, WORKFLOW_PATH, EXPECTED_RELEASE_GROUPS: ' implementations-v1 , sealed-platform-v1 ' },
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  cleanup(bundle, host);
+});
+
 test('validateBundleDir returns the sorted groups, the agreed lane, and the commit', () => {
   const bundle = makeBundle({ groups: ['sealed-platform-v1', 'implementations-v1'] });
-  assert.deepEqual(validateBundleDir(bundle, { sourceSha: SHA }), {
+  assert.deepEqual(validateBundleDir(bundle, { sourceSha: SHA, expectedGroups: GROUPS }), {
     groups: ['implementations-v1', 'sealed-platform-v1'],
     lane: 'canary',
     sourceCommit: SHA,
@@ -598,7 +701,14 @@ test('the CLI fails loudly on a missing SOURCE_SHA and leaves the host untouched
 
   const result = spawnSync(process.execPath, [HELPER], {
     encoding: 'utf8',
-    env: { ...process.env, BUNDLE_DIR: bundle, HOST_DIR: host, SOURCE_SHA: '', WORKFLOW_PATH },
+    env: {
+      ...process.env,
+      BUNDLE_DIR: bundle,
+      HOST_DIR: host,
+      SOURCE_SHA: '',
+      WORKFLOW_PATH,
+      EXPECTED_RELEASE_GROUPS: GROUPS.join(','),
+    },
   });
 
   assert.notEqual(result.status, 0);
@@ -621,6 +731,7 @@ test('the CLI emits changed= to $GITHUB_OUTPUT and importing the module runs not
       HOST_DIR: host,
       SOURCE_SHA: SHA,
       WORKFLOW_PATH,
+      EXPECTED_RELEASE_GROUPS: GROUPS.join(','),
       GITHUB_OUTPUT: outputFile,
     },
   });
