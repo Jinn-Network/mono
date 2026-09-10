@@ -1915,6 +1915,11 @@ test('guard treats a leading tab as script content, never as indentation', () =>
     // Counting them toward the common indent stripped them, turning the `\tE` into a
     // terminator: the guard ran `cd nowhere` and required `nowhere/app/yarn.lock` for an
     // install bash never reaches, because to bash the heredoc never ends.
+    //
+    // The declared path is deliberately the one the root install would NOT satisfy. With
+    // `yarn.lock` declared, an empty result would also be produced by a guard that saw
+    // the install and placed it at the root — the assertion would pass for a reason
+    // narrower than its name, which is the trap this file has fallen into twice.
     writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
 jobs:
   verify:
@@ -1925,7 +1930,7 @@ jobs:
         with:
           node-version: 22
           cache: yarn
-          cache-dependency-path: yarn.lock
+          cache-dependency-path: app/yarn.lock
       - run: |
           \tcat <<E > f
           \tbody
