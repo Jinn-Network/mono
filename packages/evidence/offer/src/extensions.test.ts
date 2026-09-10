@@ -140,13 +140,13 @@ function collectStable(
   }
 }
 
-// RFC 3986 spellings WHATWG rewrites, which is exactly why they cannot come from the sweep:
+// Spellings WHATWG rewrites, which is exactly why they cannot come from the sweep:
 // `collectStable` keeps a string only when it is its own `new URL(...).href`, so the corpus it
 // builds ranges over WHATWG's image and structurally cannot hold a preimage. Seeded raw here so
-// the reachability direction has something to carry to an accepted spelling. `"` is legal
-// nowhere and `'` is legal in an RFC 3986 query, so between them they show the seeding is about
-// preimages generally rather than about one octet.
-const RFC_LEGAL_PREIMAGES = [
+// the reachability direction has something to carry to an accepted spelling. `'` is RFC-legal in
+// a query and `"` is RFC-legal nowhere, and both are seeded on purpose: the point is that the
+// seeding is about preimages generally rather than about the one octet this PR documents.
+const WHATWG_REWRITTEN_PREIMAGES = [
   "https://r.example/x?a'b",
   "ws://r.example/x?a'b",
   "https://r.example/x?a'b#f",
@@ -157,7 +157,7 @@ function stableUris(): readonly string[] {
   const stable = new Set<string>();
   collectStable(stable, USERINFOS, HOSTS, PORTS, AUTHORITY_SWEEP_PATHS, AUTHORITY_SWEEP_QUERIES, AUTHORITY_SWEEP_FRAGMENTS);
   collectStable(stable, COMPONENT_SWEEP_USERINFOS, COMPONENT_SWEEP_HOSTS, COMPONENT_SWEEP_PORTS, PATHS, QUERIES, FRAGMENTS);
-  for (const preimage of RFC_LEGAL_PREIMAGES) stable.add(preimage);
+  for (const preimage of WHATWG_REWRITTEN_PREIMAGES) stable.add(preimage);
   return [...stable];
 }
 
@@ -212,5 +212,19 @@ describe("the normalized-identifier guarantee, under the special schemes", () =>
       if (!isNormalizedAbsoluteUri(normalized)) unspellable.push(`${href} -> ${normalized}`);
     }
     expect(unspellable).toEqual([]);
+  });
+
+  // The apostrophe class the docstring and the README both enumerate, stated as four assertions
+  // because prose is not a test. The sweeps above reach the first two through the seed; the
+  // path and fragment halves — the ones that make this a query-only rule rather than a rule
+  // about `'` — are reachable from nothing else here, so a later tightening of the raw-octet
+  // rule could falsify the enumeration with a green suite.
+  test.each([
+    ["refuses a raw apostrophe in a query", "https://r.example/v1?a'b", false],
+    ["accepts its escape, which is a different identifier", "https://r.example/v1?a%27b", true],
+    ["accepts a raw apostrophe in a path", "https://r.example/v1'x", true],
+    ["accepts a raw apostrophe in a fragment", "https://r.example/v1#a'b", true],
+  ])("%s", (_label, uri, accepted) => {
+    expect(isNormalizedAbsoluteUri(uri)).toBe(accepted);
   });
 });

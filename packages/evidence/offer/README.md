@@ -159,8 +159,16 @@ independent of the feed that supplied the offer — exactly as the holder IRI mu
 supersession is honored only when it names an offer in the set with the same subject and the
 same holder — an offer prices one subject, and only the holder can retire their own offer.
 A fork (two successors to one predecessor) leaves both live; the holder's own append-only
-announcement chain, not this package, orders them. Being a fold over whatever set you were
-handed, it also cannot see an absence: a set holding only a stale, expensive offer resolves as
+announcement chain, not this package, orders them.
+
+Being a fold, it takes each entry's `digest` and `holder` entirely on trust, and both carry the
+same obligation the holder IRI does: they must be carried across from `verifyOffer`, never
+assembled by the feed. An entry claiming a victim's digest and listed first shadows the genuine
+offer out of `live` — not silently, the dropped copy is reported as a `DUPLICATE_OFFER`
+diagnostic, but shadowed all the same — and an entry claiming a victim's holder can supersede
+offers that are not its own. Neither is fixable inside this package.
+
+It also cannot see an absence: a set holding only a stale, expensive offer resolves as
 live with no diagnostic at all, because a feed that withholds the successor looks exactly like
 one where none exists — a further reason the set itself has to come from somewhere you trust.
 

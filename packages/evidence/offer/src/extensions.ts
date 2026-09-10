@@ -145,12 +145,13 @@ function hasNoEmptyQueryOrFragment(value: string): boolean {
  * the identifier is reachable — unlike the three policy classes, which are not. The scope is
  * exactly the query: `https://r.example/v1'x` and `https://r.example/v1#a'b` both pass raw. A
  * string carrying a malformed escape is refused for a different reason: it is not an RFC 3986 URI
- * to begin with. `extensions.test.ts` runs both directions over strings WHATWG itself emits —
- * two sweeps of hand-picked special-scheme spellings, every component spelling against a few
- * authorities and every authority spelling against a few components — plus an explicit seed of
- * RFC-legal spellings WHATWG rewrites, which the sweeps range over WHATWG's image and so cannot
- * reach. Both because a rule that claims more than it delivers is worse than a modest one, which
- * is the whole reason this function grew past its round-trip check.
+ * to begin with. `extensions.test.ts` runs both directions over two sweeps of hand-picked
+ * special-scheme spellings — every component spelling against a few authorities, every authority
+ * spelling against a few components — and then over an explicit seed of spellings WHATWG
+ * rewrites. The seed is there because the sweeps build their corpus out of what `new URL` emits,
+ * so they range over WHATWG's image and structurally cannot reach a preimage such as the
+ * apostrophe case above. All of it because a rule that claims more than it delivers is worse
+ * than a modest one, which is the whole reason this function grew past its round-trip check.
  *
  * Under any other scheme the raw-octet rule still applies, so a string carrying an octet outside
  * the component's RFC 3986 grammar is refused whatever the scheme; everything else about the

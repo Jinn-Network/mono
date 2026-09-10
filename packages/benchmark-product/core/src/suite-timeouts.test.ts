@@ -49,8 +49,15 @@ function packageTestFiles(): readonly string[] {
  * argument, so the shapes that carry this literal legitimately are excluded structurally rather
  * than by luck: `const CONTAINER_REAP_BUDGET_MS = 30_000;` has a declaration, `timeout: 30_000,`
  * and `solveStartDelayMsForTesting: 30_000,` have a key, and `urn:uuid:30000000-…` has
- * neighbours. All four live in the scanned tree today, which is what makes this test passing on
+ * neighbors. All four live in the scanned tree today, which is what makes this test passing on
  * a clean tree the negative proof rather than an assumption.
+ *
+ * Both shapes tolerate a trailing line comment, and that is not cosmetic. Anchoring hard at
+ * `$` would mean the single most natural way of re-adding a bound — writing the justification
+ * next to it, `}, 30_000); // flaky on CI` — slipped past both patterns, which is the one
+ * spelling this guard most needs to catch. Tolerating the comment is also what gives the pin
+ * below its teeth: without it the marker would be redundant, because any comment at all already
+ * bought an exemption.
  *
  * The gap, stated rather than left to be assumed: the options-object spelling
  * `test("n", { timeout: 30_000 }, fn)` evades both patterns. No test here uses it and every
@@ -60,9 +67,10 @@ function packageTestFiles(): readonly string[] {
  */
 function redundantBoundPatterns(value: number): readonly RegExp[] {
   const literal = `(?:${value}|${String(value).replace(/\B(?=(\d{3})+$)/gu, "_")})`;
+  const trailing = String.raw`\s*(?://.*)?$`;
   return [
-    new RegExp(`^\\s*\\}, *${literal}\\);?\\s*$`, "u"),
-    new RegExp(`^\\s*${literal},?\\s*$`, "u"),
+    new RegExp(`^\\s*\\}, *${literal}\\);?${trailing}`, "u"),
+    new RegExp(`^\\s*${literal},?${trailing}`, "u"),
   ];
 }
 
@@ -110,7 +118,7 @@ describe("suite timeouts (#2766)", () => {
   // The class this config exists to end reaccumulates: #3358 hoisted 114 overrides into
   // `testTimeout`, #3703 swept the survivors, and 35 more had arrived by 2026-09-06 — a dozen of
   // them after that sweep merged. Restating the default per test is not merely redundant, it
-  // re-pins 18 files to a number the config can no longer move for them. So the comparison value
+  // re-pins 7 files to a number the config can no longer move for them. So the comparison value
   // is read from the config source rather than hardcoded: raise the config to 45s and this
   // starts failing `45_000` overrides, while a `30_000` bound becomes a legitimate tightening
   // below the default and correctly stops being one.

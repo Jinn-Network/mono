@@ -60,14 +60,15 @@ const DISPLAY_UNSAFE_CHARACTER =
  * refuses the ways a destination is blank in practice — `""`, `" "`, an ideographic space, a
  * lone zero-width space, a lone byte-order mark — without reaching for every codepoint that
  * happens to render as nothing, which is the doorway to the unbounded confusables problem this
- * package declines to own. Only the WHOLE value is judged: a format
- * character *inside* a destination stays legal, because ZWJ and ZWNJ are load-bearing in Indic
- * and Arabic scripts and a rail may put human-readable text here.
+ * package declines to own. Only the WHOLE value is judged, so this rule alone leaves every
+ * format character legal *inside* a destination. That is deliberate for ZWJ and ZWNJ, which are
+ * load-bearing in Indic and Arabic scripts where a rail may put human-readable text — and too
+ * wide for the rest, which is what `INTERIOR_FORMAT_CHARACTER` below narrows to those two.
  */
 const VISIBLE_CHARACTER = /[^\s\p{Cf}]/u;
 
 /**
- * Every Unicode format character except the two joiners the reason above names. An allow-set,
+ * Every Unicode format character except the two joiners `VISIBLE_CHARACTER` names. An allow-set,
  * written as a negative lookahead because the `v`-flag set difference `[\p{Cf}--[\u200C\u200D]]`
  * needs an ES2024 target this package does not have.
  *
@@ -82,8 +83,9 @@ const VISIBLE_CHARACTER = /[^\s\p{Cf}]/u;
  * The 96-character tag block U+E0020–U+E007F is why this is worth the cost: it carries
  * arbitrary invisible ASCII inside a payment address, which is a channel and not a script.
  *
- * The cost, plainly: 156 format characters now have no accepted spelling inside a `to` value at
- * all, among them the Arabic and Syriac prefixed format controls (U+0600–U+0605, U+06DD,
+ * The cost, plainly: 168 format characters have no accepted spelling inside a `to` value at all,
+ * 156 of them newly so and the other twelve already refused above as bidi controls. Among the
+ * newly refused are the Arabic and Syriac prefixed format controls (U+0600–U+0605, U+06DD,
  * U+070F) and the Egyptian quadrat controls (U+13430–U+1343F). A rail vocabulary that needs one
  * owes its own rule, the same way an opaque scheme does.
  *
