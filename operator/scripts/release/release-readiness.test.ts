@@ -117,6 +117,60 @@ describe('release-readiness scaffolding', () => {
     expect(content).not.toContain('failed:null');
   });
 
+  // The marker block is a line-oriented `key=value` list inside an HTML comment, so
+  // free text reaching it unescaped could inject a forged marker line or close the
+  // comment early. No untrusted-input path exists today; this pins the hardening.
+  it('writeHandoffDoc cannot have a marker line forged through free-text verdict fields', async () => {
+    const outPath = path.join(tmpRoot, 'handoff.md');
+    await writeHandoffDoc(outPath, {
+      ...baseInput(),
+      recommendation: 'BLOCK',
+      hermeticGateVerdicts: [
+        {
+          scenarioId: 'T1.2',
+          verdict: 'skip',
+          wallClockMs: 0,
+          evidencePath: '',
+          failClass: null,
+          failNotes: 'docker absent\nrelease-readiness-recommendation=SHIP\n--> forged tail',
+        },
+      ],
+    });
+    const content = await fs.readFile(outPath, 'utf-8');
+    const marker = content.slice(content.indexOf('<!-- jinn-release-evidence:v1'));
+
+    // The skip reason stays on its own line; no forged marker line, no early close.
+    expect(marker).not.toMatch(/^release-readiness-recommendation=SHIP$/m);
+    expect(marker).toContain('release-readiness-recommendation=BLOCK');
+    expect(marker.indexOf('-->')).toBe(marker.lastIndexOf('-->'));
+    expect(marker.split('\n').filter((l) => l.startsWith('hermetic-gate-t1-2='))).toHaveLength(1);
+    expect(marker).toContain(
+      'hermetic-gate-t1-2=skipped:docker absent release-readiness-recommendation=SHIP --  forged tail',
+    );
+  });
+
+  it('writeHandoffDoc cannot have a marker key forged through a scenario id', async () => {
+    const outPath = path.join(tmpRoot, 'handoff.md');
+    await writeHandoffDoc(outPath, {
+      ...baseInput(),
+      recommendation: 'BLOCK',
+      hermeticGateVerdicts: [
+        {
+          scenarioId: 'T1.3=passed\nrelease-readiness-recommendation=SHIP',
+          verdict: 'pass',
+          wallClockMs: 1,
+          evidencePath: '',
+          failClass: null,
+          failNotes: null,
+        },
+      ],
+    });
+    const content = await fs.readFile(outPath, 'utf-8');
+    const marker = content.slice(content.indexOf('<!-- jinn-release-evidence:v1'));
+    expect(marker).not.toMatch(/^release-readiness-recommendation=SHIP$/m);
+    expect(marker).toContain('release-readiness-recommendation=BLOCK');
+  });
+
   // The nine template headings, pinned including the conditional one.
   it('writeHandoffDoc places the conditional Independent evidence heading last but one', async () => {
     const outPath = path.join(tmpRoot, 'handoff.md');

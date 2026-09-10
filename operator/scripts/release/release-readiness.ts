@@ -45,17 +45,28 @@ export interface HandoffDocInput {
   independentEvidence?: string;
 }
 
+// Keep a free-text value inside its own `key=value` line of the marker block. The
+// block is line-oriented and lives in an HTML comment, so a CR/LF would inject an
+// extra marker line (a forged `release-readiness-recommendation=SHIP`, say) and a
+// `>` would close the comment early via `-->`, spilling the rest into rendered
+// markdown. Hardening, not a live vulnerability: every value routed through here
+// today comes from in-repo scenario literals, so there is no untrusted-input path.
+function sanitizeMarkerValue(value: string): string {
+  return value.replace(/[\r\n>]/g, ' ');
+}
+
 // Render a scenario verdict as a release-evidence marker value: `passed`,
 // `skipped:<reason>`, or `failed:<failClass>`. Shared by the per-scenario lines of
 // the marker block. The `skip` arm matters: without it a skipped scenario fell to the
 // fail branch and emitted `failed:null`, misreporting a skip as a failure. Matches the
-// sibling emitter in run-tier-1.ts.
+// sibling emitter in run-tier-1.ts. `failClass` is enum-constrained and needs no
+// sanitizing; `failNotes` is free text and does.
 function verdictMarker(verdict: ScenarioVerdict): string {
   switch (verdict.verdict) {
     case 'pass':
       return 'passed';
     case 'skip':
-      return `skipped:${verdict.failNotes ?? 'no-reason'}`;
+      return `skipped:${sanitizeMarkerValue(verdict.failNotes ?? 'no-reason')}`;
     case 'fail':
       return `failed:${verdict.failClass}`;
   }
@@ -144,7 +155,7 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
   push(`release-tag=${input.candidateVersion}`);
   push(`release-commit=${input.branchSha}`);
   for (const v of input.hermeticGateVerdicts) {
-    push(`hermetic-gate-${v.scenarioId.toLowerCase().replace(/\./g, '-')}=${verdictMarker(v)}`);
+    push(`hermetic-gate-${sanitizeMarkerValue(v.scenarioId).toLowerCase().replace(/\./g, '-')}=${verdictMarker(v)}`);
   }
   if (input.environmentSuiteVerdict) {
     push(`environment-suite=${verdictMarker(input.environmentSuiteVerdict)}`);
