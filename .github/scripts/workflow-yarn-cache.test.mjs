@@ -290,7 +290,10 @@ function dedent(run) {
   const lines = run.split('\n');
   let common = Infinity;
   for (const line of lines) {
-    if (line.trim()) common = Math.min(common, line.match(/^[ \t]*/u)[0].length);
+    // Spaces only: YAML indentation can never contain a tab, so a leading tab is script
+    // content. Counting it as indentation stripped it too, and a `\tE` line the shell
+    // never sees at column 0 became a heredoc terminator.
+    if (line.trim()) common = Math.min(common, line.match(/^ */u)[0].length);
   }
   return common > 0 && common !== Infinity ? lines.map((line) => line.slice(common)).join('\n') : run;
 }
@@ -334,7 +337,10 @@ function shellTokens(indentedRun) {
         // `> "` would hide every install after it, which is the silent direction. A real
         // shell reads such a quote to the end of input and then fails, so stopping at the
         // line costs nothing a working workflow relies on. Scan for the close within the
-        // line rather than across the block, so a run of unclosed quotes stays linear.
+        // line rather than across the block. The cursor above is already enough to make
+        // this linear — `indexOf` searches would cover disjoint forward ranges — but this
+        // file has carried three separate superlinear reads, so the bound is kept local
+        // and checkable here instead of resting on that argument.
         const lineEnd = lineEndFrom(at);
         let close = -1;
         for (let scan = at + 1; scan < lineEnd; scan += 1) {
@@ -1895,6 +1901,68 @@ jobs:
 `);
     // Trimming every candidate terminator ended the body at the indented `E`, ran the
     // `cd nowhere` inside it as a command, and required `nowhere/app/yarn.lock`.
+    assert.match(
+      yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+      /must cache app\/yarn\.lock/u,
+    );
+  });
+});
+
+test('guard treats a leading tab as script content, never as indentation', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    // YAML indentation cannot contain a tab, so every tab below is part of the script.
+    // Counting them toward the common indent stripped them, turning the `\tE` into a
+    // terminator: the guard ran `cd nowhere` and required `nowhere/app/yarn.lock` for an
+    // install bash never reaches, because to bash the heredoc never ends.
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          \tcat <<E > f
+          \tbody
+          \tE
+          \tcd nowhere
+          \tE
+          \tcd app
+          \tyarn install --immutable
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), []);
+  });
+});
+
+test('guard refuses a tab-indented terminator for a plain heredoc', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    // Only `<<-` may indent its terminator. Accepting one here would end the body early
+    // and run `cd nowhere` as a command.
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          cat <<E > f
+          body
+          \tE
+          cd nowhere
+          E
+          cd app
+          yarn install --immutable
+`);
     assert.match(
       yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
       /must cache app\/yarn\.lock/u,
