@@ -82,6 +82,37 @@ export class IpfsFetchFailedError extends Error {
  * default fetch also tries the `ipfs.io` fallback, which typically stalls into a 504 or an abort
  * for an unpinned digest rather than answering 404. Such a run classifies `'unavailable'` — the
  * safe direction, since absence is never claimed without proof of it.
+ *
+ * That near-unreachability was weighed and is ACCEPTED (#3477). Three loosenings were considered
+ * and all three are rejected:
+ *
+ *   - Treat a primary-gateway 404 as authoritative absence. A gateway 404 means *that gateway did
+ *     not resolve the CID inside its own timeout*, not that the content is absent from the
+ *     network. Elevating it to a global absence claim is strictly weaker evidence than the current
+ *     rule, in the exact direction #2647's FAILURE IS NOT ABSENCE exists to forbid.
+ *   - Surface per-gateway evidence to the caller. Nothing to build: {@link
+ *     IpfsFetchFailedError.causes} is already a per-candidate array in attempt order, and the
+ *     aggregate message names each candidate. So the strictness costs no INFORMATION — only the
+ *     convenience of a single verdict, which any caller needing finer granularity can bypass.
+ *   - Separate the never-reached fallback out as its own case, distinct from a fallback that
+ *     answered something other than 404. A candidate the whole-operation deadline never reached
+ *     is not evidence of absence — the
+ *     un-attempted gateway could have served it. Counting a non-attempt as absence-supporting is
+ *     the first loosening with an extra step.
+ *
+ * The asymmetry is what settles it. Classifying genuine absence as `'unavailable'` costs one
+ * warning line and a retry on a later tick: cheap and self-correcting. Classifying a mere
+ * non-answer as `'not-found'` costs silent treatment as absent, no retry signal, and a data gap
+ * indistinguishable from real data: expensive, permanent, invisible.
+ *
+ * Correcting a claim that has been restated as fact: it is NOT true that no control flow branches
+ * on `'not-found'`. Five sites do, so the strictness has an observable cost (noisier
+ * `'unavailable'` warnings for content that is genuinely absent) rather than none —
+ * `buildFetchIpfsBytes` (returns `undefined` instead of the refusal string) and `narrowIpfsBytes`
+ * (silent instead of `logger.warn`) in `operator/src/daemon/composition-root.ts`;
+ * `warnIpfsFallThrough` (silent instead of `console.warn`) and `ipfsReason` (reason `not_found`
+ * instead of `too_large` / `unavailable`) in `./artifact-retrieval.ts`; and the trajectory read in
+ * `operator/src/conformance/harness.ts` (silent instead of `console.warn`).
  */
 export function classifyIpfsFetchFailure(
   error: unknown,
