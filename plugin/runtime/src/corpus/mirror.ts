@@ -24,7 +24,7 @@ import type { MirrorSourceConfig } from "../config.js";
 import type { RuntimeLogger } from "../logger.js";
 import type { CorpusAdmission } from "./admission.js";
 import { adaptAnnouncementEntry } from "./announcements.js";
-import type { ChainVerification } from "./chain-verification.js";
+import type { ChainVerification, WalkTruncation } from "./chain-verification.js";
 import { describeError } from "./errors.js";
 import type { CorpusFilesystem } from "./fs.js";
 import { tryAcquireSyncLock } from "./lock.js";
@@ -181,7 +181,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
     signal: AbortSignal | undefined,
   ): Promise<{
     readonly entries: SyncedEntry[];
-    readonly truncated: boolean;
+    readonly truncation: WalkTruncation;
     readonly head: Awaited<ReturnType<typeof fetchHead>>;
   }> {
     const endpoint: SourceEndpoint = {
@@ -205,17 +205,26 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
 
     const entries: SyncedEntry[] = [];
     // Set only when an entry the walk had already produced is abandoned, so a
-    // walk that simply ran out is never reported as cut (#3252).
-    let truncated = false;
+    // walk that simply ran out is never reported as cut (#3252) -- and set to
+    // WHICH abandonment it was, because a cancellation and a bound need
+    // different operator advice downstream (#3672). The abort is checked first:
+    // an operation cancelled on the same iteration the bound would also have
+    // stopped is still a cancellation, and raising the bound would not have
+    // let it finish.
+    let truncation: WalkTruncation = "none";
     for await (const synced of walk) {
-      if (signal?.aborted === true || counters.entriesWalked >= options.maxEntriesPerSync) {
-        truncated = true;
+      if (signal?.aborted === true) {
+        truncation = "aborted";
+        break;
+      }
+      if (counters.entriesWalked >= options.maxEntriesPerSync) {
+        truncation = "bound";
         break;
       }
       counters.entriesWalked += 1;
       entries.push(synced);
     }
-    return { entries, truncated, head };
+    return { entries, truncation, head };
   }
 
   async function syncSource(
@@ -235,7 +244,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
     try {
       const mark = await options.highWaterMarks.get(identity);
       const firstAdoption = mark === undefined;
-      const { entries, truncated, head } = await collect(source, counters, signal);
+      const { entries, truncation, head } = await collect(source, counters, signal);
 
       // An archive polled more often than it appends re-serves the chain
       // position this mirror already accepted -- byte-identical if the poll
@@ -255,7 +264,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
       // path where the truncation is judged, not on the revalidation one where
       // it would read as a clean no-op (#3252).
       const idle =
-        mark === undefined || entries.length !== 0 || truncated
+        mark === undefined || entries.length !== 0 || truncation !== "none"
           ? undefined
           : classifyIdleHead(head.head, identity, mark);
       if (mark !== undefined && idle !== undefined) {
@@ -296,7 +305,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
         head: head.head,
         ...(head.signature === undefined ? {} : { headSignature: head.signature }),
         entries,
-        truncated,
+        truncation,
         firstAdoption,
       });
       if (verification.status === "rejected") {

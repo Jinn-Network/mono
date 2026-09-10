@@ -79,6 +79,23 @@ async function compose(options: {
   readonly tamper?: "head" | "entry";
   readonly entryCount?: number;
   readonly maxEntriesPerSync?: number;
+  /**
+   * Wraps the composed transport so a test can cancel the operation mid-walk
+   * and still reach the MIRROR's own abort check (#3672).
+   *
+   * The wrapper drops the caller's signal from each request it forwards, which
+   * is not a convenience: `createFetchTransport` calls `signal.throwIfAborted()`
+   * between response chunks, so over the production transport an abort during a
+   * walk ALWAYS surfaces as a rejected read -- `source-sync-failed`, correctly,
+   * a transport failure. `collect`'s own `signal?.aborted` check is therefore
+   * reached only by a transport that does NOT honor cancellation, and `signal`
+   * is public API on the mirror interface, so such a caller is exactly what it
+   * guards. This models that transport.
+   *
+   * `afterFetch` fires AFTER the response rather than before, so the abort lands
+   * mid-walk rather than on the first read of the cycle.
+   */
+  readonly afterFetch?: (url: string) => void;
 } = {}) {
   const { didKey, signer } = archiveSigner();
   const archive = await buildSignedFixtureArchive({
@@ -121,13 +138,24 @@ async function compose(options: {
   // the only way to show that an unchanged head is re-checked for freshness
   // rather than remembered as accepted.
   let clock = NOW;
+  const afterFetch = options.afterFetch;
   const ports = createLocalCorpusPorts({
     config,
     fetchLike: loopbackFetch(archive.routes),
     now: () => clock,
   });
+  const transport =
+    afterFetch === undefined
+      ? ports.corpusTransport
+      : {
+          async fetch(url: string) {
+            const response = await ports.corpusTransport.fetch(url);
+            afterFetch(url);
+            return response;
+          },
+        };
   const capability = createCorpusCapability({
-    transport: ports.corpusTransport,
+    transport,
     fs: ports.corpusFs,
     dsseVerifier: ports.dsseVerifier,
     readPolicyVersions: ports.readPolicyVersions,
@@ -382,6 +410,44 @@ describe("a backlog larger than the per-pass entry bound (#3252)", () => {
     // head signature or entry linkage -- the phantom hunt this refusal exists
     // to prevent (#3252).
     expect(check.remedy).toContain("corpus.maxEntriesPerSync");
+    expect(check.remedy).not.toContain("head signature");
+    expect(check.remedy).not.toContain("entry linkage it served");
+  });
+
+  test("an abort is refused as a cancellation, and never as the bound (#3672)", async () => {
+    // Both abandonments produce a prefix and both are correctly refused under
+    // this posture. What must differ is the reason the operator is shown: the
+    // bound is a number they can raise, and a cancelled pass is not, so sending
+    // them to `corpus.maxEntriesPerSync` here is the same misdirection #3252
+    // was filed to remove -- one field over.
+    const controller = new AbortController();
+    const { capability } = await compose({
+      entryCount: 2,
+      // Deliberately generous: the bound is nowhere near reached, so nothing
+      // but the abort can stop this walk.
+      maxEntriesPerSync: 500,
+      afterFetch: (url) => {
+        if (url.includes("/entries/")) controller.abort();
+      },
+    });
+
+    const outcome = await capability.mirror.syncOnce({ signal: controller.signal });
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.sources[0]!.failure).toEqual({
+      code: "chain-verification-rejected",
+      message: "sync-aborted",
+    });
+    expect(outcome.sources[0]!.indexed).toBe(0);
+
+    const check = await chainVerificationCheck(capability);
+    expect(check.ok).toBe(false);
+    expect(check.detail).toContain(`${source.agent}/${source.name} (sync-aborted)`);
+
+    // The whole point of the member: the remedy names cancellation and does
+    // NOT send the operator to raise a bound that was never the constraint.
+    expect(check.remedy).toContain("CANCELLED");
+    expect(check.remedy).not.toContain("corpus.maxEntriesPerSync");
     expect(check.remedy).not.toContain("head signature");
     expect(check.remedy).not.toContain("entry linkage it served");
   });

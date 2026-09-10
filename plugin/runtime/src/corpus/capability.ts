@@ -17,6 +17,7 @@ import {
   type CorpusAdmission,
 } from "./admission.js";
 import {
+  SYNC_ABORTED_REASON,
   SYNC_TRUNCATED_REASON,
   UNVERIFIED_CHAIN_ACKNOWLEDGEMENT,
   createDriverChainVerification,
@@ -451,8 +452,24 @@ export function createCorpusCapability(
       // real install can have one truncated source and one genuinely broken
       // one, and each needs its own next step.
       const truncated = refused.some((entry) => entry[1] === SYNC_TRUNCATED_REASON);
-      const archiveFaulted = refused.some((entry) => entry[1] !== SYNC_TRUNCATED_REASON);
+      const aborted = refused.some((entry) => entry[1] === SYNC_ABORTED_REASON);
+      const archiveFaulted = refused.some(
+        (entry) => entry[1] !== SYNC_TRUNCATED_REASON && entry[1] !== SYNC_ABORTED_REASON,
+      );
       const remedies: string[] = [];
+      if (aborted) {
+        // Deliberately says nothing about `corpus.maxEntriesPerSync` (#3672).
+        // The bound did not cause this stop and raising it changes nothing, so
+        // naming it here would send the operator to tune a value that was never
+        // the constraint -- the same misdirection the truncated remedy below
+        // exists to remove, one field over.
+        remedies.push(
+          `A \`${SYNC_ABORTED_REASON}\` refusal is this runtime's own doing too: the sync was ` +
+            "CANCELLED before the walk finished, so the entry the head cites was never fetched " +
+            "and the chain could not be verified. Nothing about the archive or the bound is " +
+            "implicated — let a pass run to completion and it verifies.",
+        );
+      }
       if (truncated) {
         remedies.push(
           `A \`${SYNC_TRUNCATED_REASON}\` refusal is this runtime's own doing, not the ` +

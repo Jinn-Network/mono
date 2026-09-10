@@ -13,9 +13,10 @@ export interface ChainVerificationInput {
   readonly headSignature?: DsseEnvelope;
   readonly entries: readonly SyncedEntry[];
   /**
-   * Whether the mirror abandoned the walk before it ran out -- its per-pass
-   * entry bound was reached, or the operation was aborted -- so `entries` is a
-   * PREFIX of the chain above the mark rather than the whole of it (#3252).
+   * Whether the mirror abandoned the walk before it ran out, and WHY -- so
+   * `entries` is a PREFIX of the chain above the mark rather than the whole of
+   * it (#3252), and the operator can be told which of the two abandonments it
+   * was (#3672).
    *
    * The walk yields oldest-first, so a prefix is missing the newest entries,
    * including the one the head cites. Whether that is fatal is the posture's
@@ -23,8 +24,14 @@ export interface ChainVerificationInput {
    * mirror: a posture that verifies linkage cannot accept it, and one that
    * verifies nothing loses nothing by indexing the prefix and resuming from it
    * on the next pass.
+   *
+   * The cause travels WITH the fact rather than collapsing into one boolean
+   * because the two abandonments need different operator advice. `bound` is a
+   * config value the operator can raise; `aborted` is a cancellation, and
+   * telling that operator to raise the bound sends them to tune a value that
+   * was never the constraint.
    */
-  readonly truncated: boolean;
+  readonly truncation: WalkTruncation;
   readonly firstAdoption: boolean;
 }
 
@@ -40,6 +47,16 @@ export interface HeadRevalidationInput {
   readonly headSignature?: DsseEnvelope;
 }
 
+/**
+ * Why a walk stopped short, if it did (#3672).
+ *
+ * One discriminated field rather than a boolean plus an optional cause,
+ * because that pair can express `{ truncated: false, cause: "aborted" }` --
+ * a state that means nothing -- and does not force a construction site to say
+ * which abandonment it saw.
+ */
+export type WalkTruncation = "none" | "bound" | "aborted";
+
 export type ChainVerificationOutcome =
   | { readonly status: "ok" }
   | { readonly status: "rejected"; readonly reason: string };
@@ -51,6 +68,17 @@ export type ChainVerificationOutcome =
  * away from the value emitted here.
  */
 export const SYNC_TRUNCATED_REASON = "sync-truncated";
+
+/**
+ * The other refusal that is this runtime's own doing rather than the archive's
+ * (#3672): the walk was CANCELLED before it ran out.
+ *
+ * Kept distinct from `SYNC_TRUNCATED_REASON` because the remedy differs. The
+ * bound is a number an operator can raise; a cancellation is not, and rendering
+ * the bound's remedy for it sends that operator to tune a config value that did
+ * not cause the stop and that raising will not change.
+ */
+export const SYNC_ABORTED_REASON = "sync-aborted";
 
 export interface ChainVerification {
   readonly mode: "verified" | "unverified";
@@ -145,15 +173,19 @@ export function createDriverChainVerification(
   return Object.freeze({
     mode: "verified" as const,
     async verify(input: ChainVerificationInput): Promise<ChainVerificationOutcome> {
-      if (input.truncated) {
+      if (input.truncation !== "none") {
         // Refused ahead of every check on the source, because a cut chain is
         // this runtime's own doing: `verifySourceChain` walks linkage from the
         // head's cited entry, which a truncated walk does not contain, so
         // asking it here would return `broken-chain` and blame the archive for
-        // a bound the operator set. Naming the real cause is what lets that
-        // operator raise `maxEntriesPerSync` instead of hunting a phantom
-        // linkage break (#3252).
-        return { status: "rejected", reason: SYNC_TRUNCATED_REASON };
+        // a stop the operator never caused. Naming the real cause is what lets
+        // that operator act on it instead of hunting a phantom linkage break
+        // (#3252) -- and naming WHICH cause is what keeps that action right
+        // (#3672).
+        return {
+          status: "rejected",
+          reason: input.truncation === "aborted" ? SYNC_ABORTED_REASON : SYNC_TRUNCATED_REASON,
+        };
       }
       const headSignature = input.headSignature;
       if (headSignature === undefined) {

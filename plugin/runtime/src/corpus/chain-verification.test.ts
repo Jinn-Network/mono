@@ -4,6 +4,8 @@ import { describe, expect, test, vi } from "vitest";
 
 import type { RuntimeLogger } from "../logger.js";
 import {
+  SYNC_ABORTED_REASON,
+  SYNC_TRUNCATED_REASON,
   UNVERIFIED_CHAIN_ACKNOWLEDGEMENT,
   createDriverChainVerification,
   createRejectingChainVerification,
@@ -28,7 +30,7 @@ const input = {
   head,
   headSignature: envelope,
   entries: [],
-  truncated: false,
+  truncation: "none" as const,
   firstAdoption: true,
 };
 
@@ -232,7 +234,7 @@ describe("driver-backed chain verification", () => {
 });
 
 describe("a walk the mirror itself truncated (#3252)", () => {
-  const truncated = { ...input, truncated: true };
+  const truncated = { ...input, truncation: "bound" as const };
 
   test("the driver posture refuses it without asking the driver to verify it", async () => {
     const verifySource = vi.fn(async () => ({ status: "broken-chain" }) as never);
@@ -248,5 +250,35 @@ describe("a walk the mirror itself truncated (#3252)", () => {
   test("the unverified posture still admits it, so a capped mirror keeps making progress", async () => {
     const verification = createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT);
     await expect(verification.verify(truncated)).resolves.toEqual({ status: "ok" });
+  });
+});
+
+// #3672: both abandonments produce a prefix, and the `verified` posture is
+// right to refuse either. What differs is the REASON the operator is shown,
+// because only one of the two names something they can change.
+describe("a walk the mirror abandoned because it was cancelled (#3672)", () => {
+  const aborted = { ...input, truncation: "aborted" as const };
+
+  test("is refused with a reason that names cancellation, not the per-pass bound", async () => {
+    const verifySource = vi.fn(async () => ({ status: "broken-chain" }) as never);
+    const driver = { verifySource } as unknown as VerifyDriver;
+
+    await expect(createDriverChainVerification(driver, spyLogger()).verify(aborted)).resolves.toEqual({
+      status: "rejected",
+      reason: "sync-aborted",
+    });
+    // Refused ahead of the driver for the same reason a bounded walk is: the
+    // entry the head cites was never fetched, so linkage would come back
+    // `broken-chain` and blame the archive.
+    expect(verifySource).not.toHaveBeenCalled();
+  });
+
+  test("the two abandonments do not share one reason", () => {
+    expect(SYNC_ABORTED_REASON).not.toBe(SYNC_TRUNCATED_REASON);
+  });
+
+  test("the unverified posture still admits it, exactly as it admits a bounded prefix", async () => {
+    const verification = createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT);
+    await expect(verification.verify(aborted)).resolves.toEqual({ status: "ok" });
   });
 });
