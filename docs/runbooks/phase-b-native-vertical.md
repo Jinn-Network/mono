@@ -182,6 +182,44 @@ For every drill retain the seed, injected boundary, sanitized before/after state
 IDs and transaction hashes, source heads, final graph digest, and comparison with the uninterrupted
 run. The reports named by the closure manifest must cover exactly these six checkpoint names.
 
+### The committed drill harness
+
+The deterministic drill is not hand-driven. Run it:
+
+```bash
+cd operator
+yarn drill:native-restart --out ./native-restart-drill-reports
+```
+
+It boots a local Anvil pinned to chain id `84532`, asserts the native boot gate, and for each of the
+six checkpoints runs three real operating-system processes: an uninterrupted oracle, a run the
+harness **SIGKILLs** at the injected boundary, and a recovery run restarted against that run's own
+durable state directory with the identical run ID and operation IDs. The kill is not a cooperative
+in-process throw — the role host prints its boundary marker and then waits, so nothing unwinds,
+flushes, or persists.
+
+Broadcasts are real Anvil transactions and recoveries read the node's real receipts, nonce history,
+and `finalized` tag back; Anvil's `finalized` tag trails `latest` by 64 blocks, so
+"execution starts only after canonical finality" is exercised rather than asserted. Duplicate
+counters are read from canonical chain history, not from a local tally.
+
+For forked-contract fidelity before the live run, pin a fork instead — the pinned block is recorded
+in every report, so the fork run stays re-runnable:
+
+```bash
+yarn drill:native-restart --out ./native-restart-drill-reports \
+  --fork-url "$BASE_SEPOLIA_RPC_URL" --fork-block <block>
+```
+
+The harness writes one canonical, sanitized, digested report per checkpoint plus
+`recovery-reports.json`, whose entries are the closure manifest's `recoveryReports` array verbatim.
+A report is only produced for a pair that matched: a divergent pair fails the drill and emits
+nothing, because `comparison.equalToUninterrupted` is a literal `true` in the report schema.
+
+Each report also carries `liveRunDelta`, naming what the deterministic drill does **not** cover — a
+funded, mech-registered operator Safe and the escrowed marketplace legs, a live requester record
+source, and container-graded evaluation. A green drill is not a green live round trip.
+
 ## Public artifact capture
 
 Under the unique run ID, retain a sanitized public evidence bundle containing:
@@ -271,6 +309,15 @@ yarn vitest run \
   test/native-consumer/verification.test.ts \
   test/native-consumer/public-vertical.test.ts \
   test/daemon/native-recovery-matrix.test.ts
+```
+
+The restart drill is not read-only with respect to a local Anvil process, so it is not in the list
+above; it starts and tears down its own node and touches no wallet, RPC endpoint, or chain state
+outside it:
+
+```bash
+cd operator
+yarn drill:native-restart --out ./native-restart-drill-reports
 ```
 
 Run the full hosted, packed-tarball, Anvil recovery, and domain gates before scheduling the separately

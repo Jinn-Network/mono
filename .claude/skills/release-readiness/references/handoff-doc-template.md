@@ -30,12 +30,12 @@ Run-id: <run-id>
 ### Already met (N)
 - **GAP-3** [source]: covered by <evidence>
 
-## release-prep evidence
+## Hermetic-gate scenarios
 - T1.1: pass (87s)
-- T1.2: pass (22s)
+- T1.4: pass (22s)
 - ...
 
-## Tier 3 evidence (load-bearing)
+## Environment-suite evidence
 - Scenario: op-a solves ..., op-b evaluates
 - Hermes model: ...
 - Verdict: pass (verdictCode=1)
@@ -53,7 +53,12 @@ Run-id: <run-id>
 ## Independent evidence
 <any out-of-band signal>
 
-## Marker block (final)
+## Marker block (final, diagnostic-only)
+
+The `jinn-release-evidence:v1` block is **not** the publish gate — the two
+SHA-bound check-runs (`hermetic-gate`, `environment-suite`) are. `npm-publish.yml`
+no longer parses this block; it is retained as a human-readable diagnostic.
+
 <!-- jinn-release-evidence:v1
 release-tag=...
 ...

@@ -4,7 +4,7 @@
 // the query path fetches an offer, which is the property the profile exists to give an index.
 import { createHash } from "node:crypto";
 
-import { OFFER_RECORD_KIND, sealOffer } from "@jinn-network/evidence-offer";
+import { OFFER_RECORD_KIND, OfferRailSchema, sealOffer } from "@jinn-network/evidence-offer";
 import type { AnnouncedItem } from "@jinn-network/record-discovery-protocol";
 import { describe, expect, it } from "vitest";
 
@@ -151,6 +151,73 @@ describe("reading an offer card off an announced item", () => {
     const { record: _record, ...rest } = item;
     expect(() => readOfferCard(rest as unknown as AnnouncedItem)).not.toThrow();
     expect(readOfferCard(rest as unknown as AnnouncedItem)).toBeUndefined();
+  });
+
+  // The exact analogue for `provenance`, which was the one required field of the item that
+  // `readOfferCard` did not guard. A read card is destructured unconditionally in
+  // `liveOfferCards` (`card.item.provenance`), so each shape below used to be READ and then
+  // throw a `TypeError` out of the withdrawal filter -- one malformed feed item taking the
+  // whole listing down, which is precisely the posture this function documents itself as not
+  // having.
+  it("misses rather than throws on an item whose provenance an index cannot read", async () => {
+    const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
+    for (const broken of [
+      undefined,
+      null,
+      "x",
+      7,
+      {},                          // no announcementId, no source
+      { announcementId: "a" },     // announcementId alone: the source half still decides the key
+    ]) {
+      expect(() =>
+        readOfferCard({ ...item, provenance: broken } as unknown as AnnouncedItem),
+      ).not.toThrow();
+      expect(readOfferCard({ ...item, provenance: broken } as unknown as AnnouncedItem)).toBeUndefined();
+    }
+
+    // The property a caller actually sees: a bad item is dropped from the listing instead of
+    // destroying it.
+    const bad = { ...item, provenance: { announcementId: "a" } } as unknown as AnnouncedItem;
+    const good = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "20" }] });
+    expect(liveOfferCards(offerCards([bad, good]), []).map((card) => card.offerRecordDigest)).toEqual([
+      digest(good),
+    ]);
+  });
+
+  // The other half of the same guard, and the half the throwing shapes above cannot reach.
+  // Each shape here destructures cleanly in `liveOfferCards` and never throws -- the defect is
+  // that `withdrawalKey` JSON-encodes whatever it is handed, so a non-string (or empty) value
+  // keys the announcement at something no withdrawal of it can produce. Delete any one of the
+  // `announcementId` / `source.agent` / `source.name` clauses and the shape it covers is READ,
+  // which is why they are asserted one field at a time: the other three are held valid so the
+  // miss is attributable.
+  it("misses rather than mis-keying an item whose provenance carries the wrong value types", async () => {
+    const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
+    const ok = { agent: "did:key:zSomeone", name: "offers" };
+    for (const broken of [
+      { announcementId: 7, source: ok },
+      { announcementId: "", source: ok },
+      { announcementId: "a", source: "x" },
+      { announcementId: "a", source: [] },
+      { announcementId: "a", source: { agent: 7, name: "offers" } },
+      { announcementId: "a", source: { agent: "", name: "offers" } },
+      { announcementId: "a", source: { agent: "did:key:zSomeone", name: 7 } },
+      { announcementId: "a", source: { agent: "did:key:zSomeone", name: "" } },
+    ]) {
+      const candidate = { ...item, provenance: broken } as unknown as AnnouncedItem;
+      expect(() => readOfferCard(candidate)).not.toThrow();
+      expect(readOfferCard(candidate), JSON.stringify(broken)).toBeUndefined();
+    }
+
+    // The property a caller actually sees, and the reason a mis-key is worse than a throw: the
+    // announcing source withdrew this announcement, and an item read under a key its own
+    // withdrawal cannot spell would keep showing a delisted offer as live.
+    const misKeyed = {
+      ...item,
+      provenance: { ...item.provenance, announcementId: 7 },
+    } as unknown as AnnouncedItem;
+    const withdrawal: WithdrawnAnnouncement = { source: item.provenance.source, announcementId: "7" };
+    expect(liveOfferCards(offerCards([misKeyed]), [withdrawal])).toEqual([]);
   });
 
   it("misses rather than throws on a card an index cannot read", async () => {
@@ -349,6 +416,63 @@ describe("the whole listing query, from cards alone", () => {
   it("returns nothing for a subject nobody has offered", async () => {
     const only = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
     expect(listOffersForSubject([only], { subject: OTHER_SUBJECT, rail: USDC })).toEqual([]);
+  });
+});
+
+// `listings.ts` carries its own copies of two grammars the sealed offer schema owns: the amount
+// regex (schema: `RailAmount`) and the display-unsafe character class. They are byte-identical
+// today and nothing ties them together -- neither constant is exported from either side, so a
+// narrowing or widening edit to the schema's copy leaves the card reader silently accepting a
+// different language than the record it claims to summarize. The consequence is asymmetric and
+// worse than it looks: the reader accepting MORE than the record means an index ranks a card
+// whose offer the record layer will refuse; accepting LESS means an honest offer never reaches
+// the catalog at all.
+//
+// Pinned through `readOfferCard` rather than by re-declaring the constants. A re-declared copy
+// pins nothing -- it drifts with neither side -- and exporting the constants would widen a
+// sealed record package's API to serve a test, while moving the card reader onto a zod parse
+// would put one on the per-amount hot path `amountOnRail` deliberately keeps clear.
+//
+// Two traps the probes must respect. Each holds the OTHER field valid, so a refusal is
+// attributable to the field under test. And the card's rail-identifier rule is compared against
+// the schema's `to`, never its `rail`: `rail` is a `NormalizedAbsoluteUri` and would refuse
+// these probes for an unrelated reason -- the pairing the `DISPLAY_UNSAFE_CHARACTER` comment in
+// `listings.ts` already documents.
+//
+// One narrower gap, recorded rather than fixed: `readOfferCard` does not check rail identifiers
+// against `NormalizedAbsoluteUri` at all, so a card can carry two spellings of one rail and
+// still pass the card-side uniqueness rule the record forbids. That is not exploitable for
+// mispricing, because `amountOnRail` matches the caller's exact rail string, and narrowing what
+// the reader accepts would be a behavior change rather than a drift pin.
+describe("the card reader's grammars track the sealed offer schema", () => {
+  const railOf = (to: string, amount: string) =>
+    OfferRailSchema.safeParse({ rail: USDC, to, amount }).success;
+
+  it("accepts exactly the amounts the schema's RailAmount accepts", async () => {
+    const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
+    const card = item.facts as Record<string, unknown>;
+    for (const amount of ["1", "10", "0", "01", "", "-1", "1.0", " 1", "1e3", "+1"]) {
+      const readable =
+        readOfferCard({ ...item, facts: { ...card, "rails.amount": [amount] } }) !== undefined;
+      expect(readable, `amount ${JSON.stringify(amount)}`).toBe(railOf("0xabc", amount));
+    }
+  });
+
+  it("refuses exactly the display-unsafe characters the schema refuses in a destination", async () => {
+    const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
+    const card = item.facts as Record<string, unknown>;
+    // Each in-class codepoint is paired with an adjacent out-of-class one, so a narrowed class
+    // and a widened one both show up rather than only one direction.
+    for (const code of [
+      0x00, 0x0a, 0x1f, 0x20, 0x7e, 0x7f, 0x9f, 0xa0, 0x061c, 0x061d, 0x200d, 0x200e, 0x200f,
+      0x2028, 0x2029, 0x202a, 0x202e, 0x202f, 0x2065, 0x2066, 0x2069, 0x206a, 0xfeff,
+    ]) {
+      const char = String.fromCodePoint(code);
+      const readable =
+        readOfferCard({ ...item, facts: { ...card, "rails.rail": [USDC + char] } }) !== undefined;
+      expect(readable, `U+${code.toString(16).toUpperCase().padStart(4, "0")}`)
+        .toBe(railOf(`addr${char}`, "10"));
+    }
   });
 });
 

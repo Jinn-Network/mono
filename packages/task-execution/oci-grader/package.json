@@ -71,7 +71,6 @@
     "@jinn-network/task-execution-profiles": "portal:../profiles",
     "@jinn-network/task-execution-protocol": "portal:../protocol",
     "@jinn-network/task-execution-supervisor": "portal:../backend-local/supervisor",
-    "@jinn-network/task-execution-workspace": "portal:../backend-local/workspace",
-    "@noble/hashes": "2.2.0"
+    "@jinn-network/task-execution-workspace": "portal:../backend-local/workspace"
   }
 }

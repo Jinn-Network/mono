@@ -11,6 +11,13 @@
 # and the publish guard (npm-publish.yml §7) reason about. It runs in CI, NOT on
 # a laptop (Option B, §9), which is what makes the verdict trustworthy and kills
 # the laptop-state failure class (JINN_PASSWORD-poisoning, exit 50).
+# Scope boundary (#2472): deterministic blocking CI is `yarn test:hermetic`
+# (hermetic-gate.yml) plus `yarn test` (ci.yml / `operator-ci-gate`) — neither
+# suite subsumes the other (they overlap only on the two pure-unit hermetic
+# files, abi-selector-conformance and rpc-fallback).
+# `yarn e2e:daemon-harness` and its native mode are
+# operator-run, non-CI live-fork cutover evidence. The scheduled/manual
+# native-e2e-rig.yml run is supplemental advisory evidence only.
 #
 # Cadence (§8): the AUTHORITATIVE run is a workflow_dispatch on the EXACT
 # candidate SHA (triggered by release-readiness for the Monday cut). A single
@@ -162,10 +169,19 @@ jobs:
       # NOTE: every step below carries `if: steps.resolve.outputs.skip != 'true'`
       # so the Thursday skip-if-unchanged short-circuit (§8) cleanly no-ops the
       # whole run when next HEAD already has an environment-suite verdict.
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - if: steps.resolve.outputs.skip != 'true'
         uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            operator/yarn.lock
+            contracts/yarn.lock
       - if: steps.resolve.outputs.skip != 'true'
         run: corepack enable
       - if: steps.resolve.outputs.skip != 'true'
@@ -191,9 +207,9 @@ jobs:
           yarn build:plugin
           yarn build:core
 
-      # The tier-2 daemon-harness deploys the JinnRouterV3 stack onto its Anvil
-      # fork by compiling contracts at runtime (`yarn compile` in `contracts/` —
-      # see test/e2e/task-first-helpers.ts). `contracts/` is a SEPARATE Yarn
+      # The tier-2 scenario deploys the JinnRouterV3 stack onto its Anvil fork
+      # by compiling contracts at runtime (`yarn compile` in `contracts/` — see
+      # test/e2e/task-first-helpers.ts). `contracts/` is a SEPARATE Yarn
       # project (its own yarn.lock), so the client install above does NOT cover
       # it; without this the harness fails with "Couldn't find the node_modules
       # state file" and T2.2 false-reds the gate (#1018).
@@ -451,8 +467,11 @@ jobs:
       #
       # The suite is the REAL-WORLD half of the determinism split (§6 Home 2): the
       # real `claude-code` harness against real Base Sepolia + real Ponder, on the
-      # warm pre-staked operator — never an Anvil fork (that Anvil-fork loop,
-      # `yarn e2e:daemon-harness`, is the HERMETIC gate's job, §6 Home 1). It
+      # warm pre-staked operator — never an Anvil fork. Deterministic blocking CI
+      # is `yarn test:hermetic` (hermetic-gate.yml) plus `yarn test` (ci.yml /
+      # `operator-ci-gate`); the daemon-harness live-fork
+      # modes are operator-run, non-CI cutover evidence, with the scheduled/manual
+      # native-e2e-rig.yml run providing supplemental advisory evidence. This suite
       # consolidates two existing real-testnet entries into one verdict:
       #   - run-tier-2 — cross-operator donation handshake (T2.1) + producer/
       #     evaluator (T2.2) on real testnet, two warm operators.

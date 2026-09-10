@@ -245,9 +245,11 @@ export interface AnchorCertificateFacts {
   readonly notBefore: string;
   readonly notAfter: string;
   /** Every extended key usage the certificate asserts. §6.1 rule 9 requires
-   * exactly `id-kp-timeStamping`; extension criticality is a recorded gap
-   * (§16 item 4), not silently assumed. */
+   * exactly `id-kp-timeStamping`. */
   readonly extendedKeyUsageOids: readonly string[];
+  /** Whether the extended-key-usage extension is marked critical. Missing
+   * extensions and an omitted `critical` BOOLEAN both report `false`. */
+  readonly extendedKeyUsageCritical: boolean;
   /** Exact DER of each `GeneralName` the certificate presents for itself --
    * what §6.1 rule 10 compares the TSTInfo `tsa` field against, by bytes. */
   readonly subjectNames: readonly Uint8Array[];

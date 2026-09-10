@@ -225,9 +225,9 @@ test('Increment 1 moves only verify onto a demand-gated independent product line
   assert.equal(catalog.releaseGroups['transitional-or-private'].expectedPackageCount, 12);
 });
 
-test('Colophon trusted publishing is a separate workflow and never joins the stack 76', () => {
+test('Colophon trusted publishing is a separate workflow and never joins the stack 77', () => {
   const stack = buildRegistrationList(repoRoot);
-  assert.equal(stack.length, 76);
+  assert.equal(stack.length, 77);
   assert.equal(stack.some((row) => row.package.startsWith('@colophon-claims/')), false);
   assert.equal(COLOPHON_PUBLISH_WORKFLOW, 'colophon-npm-publish.yml');
   const workflow = readFileSync(join(repoRoot, '.github/workflows', COLOPHON_PUBLISH_WORKFLOW), 'utf8');
@@ -242,12 +242,13 @@ test('Colophon trusted publishing is a separate workflow and never joins the sta
   assert.match(workflow, /transformColophonManifestForPublish|colophon-publish-manifest/u);
 });
 
-test('first-cut public surfaces disclose that spec.jinn.network is not hosted', () => {
+test('first-cut public surfaces disclose origin-free protocol identifiers', () => {
   const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/README.md'), 'utf8');
   const cli = readFileSync(join(repoRoot, 'packages/benchmark-product/verify/src/cli.ts'), 'utf8');
   for (const [label, text] of [['README', readme], ['CLI', cli]]) {
-    assert.match(text, /spec\.jinn\.network/u, label);
-    assert.match(text, /not hosted/iu, label);
+    assert.match(text, /Protocol identifiers[\s\S]{0,64}are names, not addresses/u, label);
+    assert.match(text, /bytes installed from npm/u, label);
+    assert.doesNotMatch(text, /spec\.jinn\.network/u, label);
   }
   assert.match(readme, /What this does not yet prove/u);
 });

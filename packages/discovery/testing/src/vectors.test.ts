@@ -61,8 +61,15 @@ describe("loadVectors", () => {
       expect(superseding).toBeDefined();
       const original = JSON.parse(
         readFileSync(fileURLToPath(new URL(`../fixtures/vectors/${superseded}/vector.json`, import.meta.url)), "utf8"),
-      ) as { kind: string };
+      ) as { kind: string; expect: unknown };
       expect(superseding!.kind).toBe(original.kind);
+      // `kind` is the verification PLANE, not the rule: every source-chain
+      // vector shares it, so a `supersededBy` retargeted at any other
+      // source-chain vector passes the kind check while the retired rule
+      // silently leaves the corpus. `expect` is the rule — same status, same
+      // `at` — so pinning it is what makes the erratum a replacement rather
+      // than a deletion with a forwarding address.
+      expect(superseding!.expect).toEqual(original.expect);
     }
   });
 

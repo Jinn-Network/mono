@@ -481,7 +481,7 @@ test('mutation: anonymous pack:smoke inserted before npm pin in packages job fai
 
 test('mutation: remove setup-node from trace job fails', () => {
   const mutant = workflow.replace(
-    /(  packages:[\s\S]*?      - uses: actions\/checkout@v7\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
+    /(  packages:[\s\S]*?      - uses: actions\/checkout@v7\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?(?:      - name: Enable Corepack before the Yarn cache lookup\n(?:        [^\n]*\n)+)?)(      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1',
   );
   expectValidationFailure(mutant, /packages must have exactly one setup-node step \(found 0\)/);
@@ -500,7 +500,7 @@ test('mutation: duplicate setup-node in architecture job fails', () => {
 
 test('mutation: setup-node before checkout in trace job fails', () => {
   const mutant = workflow.replace(
-    /(  packages:[\s\S]*?steps:\n)(      - uses: actions\/checkout@v7\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
+    /(  packages:[\s\S]*?steps:\n)(      - uses: actions\/checkout@v7\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?(?:      - name: Enable Corepack before the Yarn cache lookup\n(?:        [^\n]*\n)+)?)(      - uses: actions\/setup-node@v7\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1      - uses: actions/setup-node@v7\n        with:\n          node-version: 22.23.1\n$2',
   );
   expectValidationFailure(mutant, /packages checkout must precede setup-node/);
