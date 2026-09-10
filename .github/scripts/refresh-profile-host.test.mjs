@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -311,6 +311,48 @@ test('validateBundleDir refuses a bundle carrying a Git control path at any dept
     );
     cleanup(bundle);
   }
+});
+
+test('validateBundleDir refuses a bundle entry that is not a regular file', () => {
+  // The Git-control check above is type-blind, so a symlink NAMED `.git` was already
+  // refused. An innocuously-named one was not inspected at all: it is neither a directory
+  // (so the walk never recursed) nor a name in the rule, so it fell past both branches.
+  // `cpSync` copies a link as a link -- `dereference` defaults to false -- so the host
+  // committed mode 120000 and published a route out of the served tree under a name this
+  // gate had cleared. The gate's claim is that the bytes about to be published are the
+  // bytes it read, and only a regular file has bytes. `walkFiles` in
+  // build-profile-host-bundle.mjs refuses the same shapes one layer up.
+  for (const linkPath of ['leak', 'schemas/leak']) {
+    const bundle = makeBundle();
+    const absolute = path.join(bundle, linkPath);
+    mkdirSync(path.dirname(absolute), { recursive: true });
+    symlinkSync('../.git', absolute);
+    assert.throws(
+      () => validateBundleDir(bundle, { sourceSha: SHA }),
+      /not a regular file/u,
+      `${linkPath} must be refused before it reaches the host checkout`,
+    );
+    cleanup(bundle);
+  }
+});
+
+test('a bundle symlink never reaches the host checkout, and nothing is mirrored first', () => {
+  const bundle = makeBundle();
+  symlinkSync('../.git', path.join(bundle, 'leak'));
+  const host = makeHostRepo();
+  const headBefore = git(host, ['rev-parse', 'HEAD']).trim();
+
+  assert.throws(() => refresh(bundle, host), /not a regular file/u);
+
+  // lstat, not existsSync: a dangling link exists as an entry while resolving to nothing.
+  assert.throws(
+    () => lstatSync(path.join(host, 'leak')),
+    { code: 'ENOENT' },
+    'no link is mirrored into the host',
+  );
+  assert.equal(git(host, ['rev-parse', 'HEAD']).trim(), headBefore);
+  assert.ok(existsSync(path.join(host, 'stale.json')), 'the gate fires before anything is mirrored');
+  cleanup(bundle, host);
 });
 
 test('a bundle .git path never reaches the host checkout, and nothing is mirrored first', () => {

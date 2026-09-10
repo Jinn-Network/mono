@@ -111,6 +111,10 @@ test('the canary host refresh copies same-run attested bytes to the host and pus
   // secret's availability, and the workflow also fires on integration/evidence-v1.
   // Precedent: canary-publish's `environment: npm-publish` on the comparable npm surface.
   assert.match(block, /environment: profile-host-publish/u);
+  // Pinned at exactly one for the same reason `environment: npm-publish` is: a second
+  // declaration would mean a second job reading this push credential, and a dropped one
+  // would silently return it to being a repository secret every workflow can read.
+  assert.equal((workflow.match(/environment: profile-host-publish/gu) ?? []).length, 1);
   assert.doesNotMatch(block, /id-token: write|attestations: write|artifact-metadata: write/u);
 
   // Same-run restore by name; never a cross-run download.

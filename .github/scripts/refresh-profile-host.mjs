@@ -89,28 +89,44 @@ function readGroupManifest(bundleDir, group) {
 }
 
 /**
- * Refuse any bundle entry Git reads as control input, at any depth. `mirrorContent` copies
- * with `cpSync`, whose `force` default is true, so a bundle path whose first segment is
- * `.git` is written INTO the host checkout's real `.git` -- and the push step, which is the
- * one step holding the host token, then reads that `.git/config`. A `.gitignore` or
- * `.gitattributes` is the quieter half of the same defect: Git honors it, so the staged
- * tree stops being the mirrored tree and attested documents are silently unpublished while
- * every gate reports success. `DEFAULT_KEEP` protects `.git` from DELETION only; this is
- * what protects it from being written through.
+ * Refuse any bundle entry the host must not receive: a name Git reads as control input, and
+ * anything that is not a plain file or a directory.
  *
- * The rule itself is `hasGitControlSegment`, shared with the generator that built these
- * bytes. The walk is recursive because the mirror is: a nested entry lands in the host tree
- * just as surely as a root one.
+ * The control-path half is the sharp one. `mirrorContent` copies with `cpSync`, whose
+ * `force` default is true, so a bundle path whose first segment is `.git` is written INTO
+ * the host checkout's real `.git` -- and the push step, which is the one step holding the
+ * host token, then reads that `.git/config`. A `.gitignore` or `.gitattributes` is the
+ * quieter half of the same defect: Git honors it, so the staged tree stops being the
+ * mirrored tree and attested documents are silently unpublished while every gate reports
+ * success. `DEFAULT_KEEP` protects `.git` from DELETION only; this is what protects it from
+ * being written through. The rule itself is `hasGitControlSegment`, shared with the
+ * generator that built these bytes.
+ *
+ * The entry-type half is what keeps that rule from being decided by a name. A symlink is
+ * neither a file nor a directory, so an innocuously-named one was never inspected and never
+ * recursed into: `cpSync` copies it as a link (`dereference` defaults to false) and the host
+ * commits mode 120000, so `leak -> ../.git` published a route out of the served tree under a
+ * name this gate had cleared. The published bytes must be the bytes that were read, which is
+ * this function's whole claim, and only a regular file has bytes. `walkFiles` in
+ * `build-profile-host-bundle.mjs` refuses the same shapes when it builds a bundle; the
+ * break-glass path assembles one by hand, with no generator above it.
+ *
+ * The walk is recursive because the mirror is: a nested entry lands in the host tree just as
+ * surely as a root one.
  * @param {string} directory
  * @param {string} prefix
  */
-function assertNoGitControlPath(directory, prefix = '') {
+function assertMirrorableEntries(directory, prefix = '') {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (hasGitControlSegment(entry.name)) {
       throw new Error(`the deploy bundle carries the Git control path ${relativePath}, which the host checkout would read as control rather than serve`);
     }
-    if (entry.isDirectory()) assertNoGitControlPath(path.join(directory, entry.name), relativePath);
+    if (entry.isDirectory()) {
+      assertMirrorableEntries(path.join(directory, entry.name), relativePath);
+    } else if (!entry.isFile()) {
+      throw new Error(`the deploy bundle carries ${relativePath}, which is not a regular file; only bytes the gate can read may be published`);
+    }
   }
 }
 
@@ -143,7 +159,7 @@ export function validateBundleDir(bundleDir, { sourceSha }) {
     }
   }
 
-  assertNoGitControlPath(bundleDir);
+  assertMirrorableEntries(bundleDir);
 
   const groups = readdirSync(bundleDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && existsSync(path.join(bundleDir, entry.name, MANIFEST_FILE_NAME)))
@@ -311,7 +327,9 @@ export function inspectProvenance(hostDir, workflowPath) {
 
 /**
  * Stage the whole host tree, ignore rules included. See the call site in `run()` for why
- * `--force` is load-bearing rather than defensive.
+ * `--force` is load-bearing rather than defensive. It overrides ignore rules and nothing
+ * else -- a content filter still rewrites the blob it stages -- so what it guarantees is
+ * that no path is skipped, not that the staged blob equals the mirrored one.
  * @param {string} hostDir
  */
 function stageEverything(hostDir) {
@@ -367,12 +385,21 @@ export function run({ bundleDir, hostDir, sourceSha, workflowPath }) {
   const { groups, lane } = validateBundleDir(bundleDir, { sourceSha });
   validateHostCheckout(bundleDir, hostDir);
   mirrorContent(bundleDir, hostDir);
-  // `--force` is what makes the staged tree provably equal the mirrored tree, and so what
-  // makes `treeChanged` a sound idempotency oracle rather than a proxy for one: a plain
+  // `--force` is what makes the staged tree cover every mirrored path, and so what makes
+  // `treeChanged` a sound idempotency oracle rather than a proxy for one: a plain
   // `git add -A` honors every ignore source Git can find -- a bundle-served `.gitignore`,
   // the host's own, `.git/info/exclude`, the user's global one -- and would stage a subset
   // of the attested bytes while reporting success. `validateBundleDir` refuses the
   // bundle-carried case above; this closes the ones no bundle validation can see.
+  //
+  // It does not make the staged BYTES equal the mirrored bytes: `--force` overrides ignore
+  // rules only, and a content transform still applies -- `core.autocrlf`, or a clean filter
+  // configured in `.git/info/attributes` or global config. A bundle-carried `.gitattributes`
+  // is refused above and `mirrorContent` deletes the host's own, and a fresh
+  // `actions/checkout` runner carries neither of the rest, so on the CI path there is
+  // nothing left to transform. On the break-glass laptop there can be, and what bounds it
+  // is downstream, not here: `verify-live-profile-host` byte-compares every served document
+  // against the attested artifact, so a rewritten blob fails loud rather than silently.
   stageEverything(hostDir);
 
   const contentChanged = treeChanged(hostDir);

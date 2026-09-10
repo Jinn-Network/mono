@@ -61,15 +61,38 @@ const GIT_CONTROL_PATH_SEGMENTS = new Set([
   '.gitmodules',
 ]);
 
+// Names are not the only spelling of a name. Win32 strips trailing dots and spaces when it
+// opens a path, so `.git.` and `.git ` reach `.git`; NTFS answers the 8.3 short name `git~1`
+// with the same directory; and HFS+ ignores a set of formatting codepoints when it compares
+// names, so `.gi<U+200C>t` is `.git` to the filesystem. Git ships `core.protectNTFS` and
+// `core.protectHFS` on by default for exactly this class, and the reason applies here for
+// the reason the case fold already does: the break-glass mirror recipe is run by hand, on a
+// laptop, whose filesystem may be any of these. Fold the aliases away before comparing, or
+// the rule below is a rule about spellings rather than about what Git will read.
+const HFS_IGNORABLE_CODEPOINTS = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/gu;
+const NTFS_DOTGIT_SHORT_NAME = /^git~[0-9]$/u;
+
+/** A path segment reduced to the name a case-insensitive Win32 or HFS+ host would open. */
+function foldSegmentAliases(segment) {
+  return segment
+    .replaceAll(HFS_IGNORABLE_CODEPOINTS, '')
+    .toLowerCase()
+    .replace(/[. ]+$/u, '');
+}
+
 /**
  * Whether any segment of a forward-slash path is a name Git reads as control input.
- * Compared case-insensitively because a case-insensitive host filesystem resolves `.GIT`
- * to the same directory, and the break-glass mirror recipe is run by hand on a laptop.
+ * Compared against the folded segment rather than the literal one, so an alias of `.git`
+ * -- a different case, a trailing dot or space, the NTFS short name, an HFS+ ignorable
+ * codepoint -- is refused with the name it aliases.
  * @param {string} value
  * @returns {boolean}
  */
 export function hasGitControlSegment(value) {
-  return String(value).split('/').some((segment) => GIT_CONTROL_PATH_SEGMENTS.has(segment.toLowerCase()));
+  return String(value).split('/').some((segment) => {
+    const folded = foldSegmentAliases(segment);
+    return GIT_CONTROL_PATH_SEGMENTS.has(folded) || NTFS_DOTGIT_SHORT_NAME.test(folded);
+  });
 }
 
 function toPosix(value) {

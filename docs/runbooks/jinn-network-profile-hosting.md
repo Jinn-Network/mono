@@ -143,6 +143,17 @@ operator's own provisioning work, which the gate can only check after it is done
       let a host push rewrite the workflows that drive it), and it is not the manifest
       signing key. Setting the variable without the secret makes the job fail loudly rather
       than skip.
+- [ ] **Delete any repository secret named `JINN_PROFILE_HOST_PUSH_TOKEN`**, and confirm none
+      exists, once the environment secret above is in place. This step is not tidying, and
+      skipping it leaves the previous step doing nothing. `environment:` does not scope a
+      credential: an environment secret *overrides* a same-named repository secret, but a job
+      declaring an environment still reads the repository secret when no environment-level one
+      exists — so an operator who provisioned under the earlier instruction (which said to add
+      a repository secret) keeps a working job, a green workflow assertion, and the unchanged
+      blast radius the environment was added to close. And a repository secret is readable by
+      any workflow in the repository, including one landed on `integration/evidence-v1`, which
+      would simply not declare the environment: while it exists the deployment-branch policy
+      protects nothing. Revoke and reissue the token if it ever existed as a repository secret.
 - [ ] Configure a static host for `spec.jinn.network` that preserves manifest paths exactly. The
       apex stays purely the product site and serves no protocol bytes.
 - [ ] Serve each document with the media type declared by `manifest.json`, including extensionless

@@ -206,6 +206,45 @@ test('Jinn identifiers map only to canonical relative hosted paths', async () =>
   }
 });
 
+test('a Git control name is refused through its filesystem aliases, not just its spelling', async () => {
+  // What the rule is about is the name the host filesystem will OPEN, and a name has more
+  // than one spelling that reaches the same file. Win32 strips trailing dots and spaces;
+  // NTFS answers the 8.3 short name `git~1` with `.git`; HFS+ ignores a set of formatting
+  // codepoints when it compares. Git ships `core.protectNTFS` and `core.protectHFS` on by
+  // default for exactly this class, and the break-glass mirror recipe is run by hand on a
+  // laptop, so the same aliases have to fold away before the comparison.
+  const { hasGitControlSegment } = await implementation;
+  for (const alias of [
+    '.git.',
+    '.git ',
+    '.git...',
+    '.GIT.',
+    'git~1',
+    'GIT~1',
+    'a/git~9/config',
+    '.gitignore.',
+    '.GITIGNORE ',
+    '.gi\u200ct/config',
+    '.git\ufeff',
+    'schemas/.git\u202e/config',
+  ]) {
+    assert.equal(hasGitControlSegment(alias), true, `${JSON.stringify(alias)} reaches a Git control name`);
+  }
+
+  // The fold must not swallow ordinary names: it is a comparison rule, not a rename.
+  for (const benign of [
+    'schemas/task.schema.json',
+    'profiles/execution-evidence/v1/profile',
+    'gitignore',
+    '.github/workflows/ci.yml',
+    'digit~1.json',
+    'a.git/b',
+    '.gitignore-sample',
+  ]) {
+    assert.equal(hasGitControlSegment(benign), false, `${JSON.stringify(benign)} is an ordinary served path`);
+  }
+});
+
 // --- DR-2026-08-04, transition window closed: spec.jinn.network only ---
 
 test('the retired apex origin is rejected by name, citing the re-seal', async () => {
