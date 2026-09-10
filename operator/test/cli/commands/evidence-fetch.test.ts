@@ -16,6 +16,7 @@ import type { CommandContext } from '../../../src/cli/command.js';
 import type {
   ArtifactAddress,
   ArtifactLocators,
+  FetchVerifiedArtifactFailure,
   FetchVerifiedArtifactResult,
   VerifiedArtifact,
 } from '@jinn-network/core/corpus-read';
@@ -202,6 +203,25 @@ describe('evidence fetch', () => {
       envelopeCid: ENVELOPE_CID,
       ownerSafe: SAFE,
     });
+  });
+
+  it('will not let a digest_mismatch failure omit its mismatch evidence', () => {
+    // Type-level regression guard for #4361. `refuse()` is the sole producer of
+    // reason: 'digest_mismatch' and always sets `mismatch`, but before this the
+    // invariant lived only in that constructor — so two call sites in
+    // corpus-read/acquire.ts had to assert it with `!`. If the union is ever
+    // loosened again, this directive stops suppressing anything and becomes
+    // TS2578, which `yarn typecheck:test` reports as a new error on this file.
+    // @ts-expect-error a digest_mismatch failure must carry `mismatch`
+    const withoutEvidence: FetchVerifiedArtifactFailure = {
+      ok: false,
+      sha256: ARTIFACT_SHA,
+      reason: 'digest_mismatch',
+      retryable: false,
+      message: 'no evidence attached',
+      attempts: [],
+    };
+    expect(withoutEvidence.reason).toBe('digest_mismatch');
   });
 
   it('--human summarizes the retrieval and never prints the bytes', async () => {

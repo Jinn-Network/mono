@@ -90,8 +90,13 @@ export interface ArtifactFetchAttempt {
   /** `ipfs://<cid>` or the exact URL `buildArtifactUrl` produced; empty when skipped. */
   readonly sourceUri: string;
   readonly outcome: 'verified' | 'skipped' | 'failed' | 'digest_mismatch';
-  /** Present on `failed`; the classified reason, never a raw string match. */
-  readonly reason?: ArtifactFetchFailureReason;
+  /**
+   * Present on `failed`; the classified reason, never a raw string match.
+   * `digest_mismatch` is excluded because `refuse()` records that outcome with
+   * no `reason` field — no attempt ever carries the token, and saying so here
+   * is what lets the failure union below narrow without a cast.
+   */
+  readonly reason?: Exclude<ArtifactFetchFailureReason, 'digest_mismatch'>;
   readonly message?: string;
 }
 
@@ -131,22 +136,40 @@ export type ArtifactFetchFailureReason =
   /** Transport failure — nothing was learned about whether the content exists. */
   | 'unavailable';
 
-export interface FetchVerifiedArtifactFailure {
+/** Evidence, not content. Present on `digest_mismatch` and only there. */
+export interface ArtifactDigestMismatch {
+  readonly expectedSha256: string;
+  readonly actualSha256: string;
+  readonly sourceUri: string;
+  readonly sourceOperator?: string;
+}
+
+interface FetchVerifiedArtifactFailureBase {
   readonly ok: false;
   readonly sha256: string;
-  readonly reason: ArtifactFetchFailureReason;
   /** Derived from `reason`, never caller-supplied. */
   readonly retryable: boolean;
   readonly message: string;
   readonly attempts: readonly ArtifactFetchAttempt[];
-  /** Present only on `digest_mismatch`. Evidence, not content. */
-  readonly mismatch?: {
-    readonly expectedSha256: string;
-    readonly actualSha256: string;
-    readonly sourceUri: string;
-    readonly sourceOperator?: string;
-  };
 }
+
+/**
+ * Discriminated on `reason` so the compiler, not a constructor comment, carries
+ * the invariant that `digest_mismatch` always ships its evidence. `refuse()` is
+ * the sole producer of that reason and has always set `mismatch`; before this
+ * split, callers reading the evidence had to assert it with `!`.
+ */
+export type FetchVerifiedArtifactFailure =
+  | (FetchVerifiedArtifactFailureBase & {
+      readonly reason: 'digest_mismatch';
+      readonly mismatch: ArtifactDigestMismatch;
+    })
+  | (FetchVerifiedArtifactFailureBase & {
+      readonly reason: Exclude<ArtifactFetchFailureReason, 'digest_mismatch'>;
+      // Declared-and-undefined rather than omitted so a caller holding a value
+      // narrowed only by `!ok` may still read `mismatch` and narrow on it.
+      readonly mismatch?: undefined;
+    });
 
 export type FetchVerifiedArtifactResult =
   | { readonly ok: true; readonly artifact: VerifiedArtifact }
@@ -212,12 +235,16 @@ function decodeDonationArtifact(raw: unknown, expectedSha256: string): Buffer {
 }
 
 /** `fetchArtifactContent`'s vocabulary → the primitive's. */
-function originReason(reason: Exclude<AcquireResult, { ok: true }>['reason']): ArtifactFetchFailureReason {
+function originReason(
+  reason: Exclude<AcquireResult, { ok: true }>['reason'],
+): Exclude<ArtifactFetchFailureReason, 'digest_mismatch'> {
   return reason === 'network_error' ? 'unavailable' : reason;
 }
 
 /** `classifyIpfsFetchFailure`'s hyphenated vocabulary → the primitive's. */
-function ipfsReason(classification: 'too-large' | 'not-found' | 'unavailable'): ArtifactFetchFailureReason {
+function ipfsReason(
+  classification: 'too-large' | 'not-found' | 'unavailable',
+): Exclude<ArtifactFetchFailureReason, 'digest_mismatch'> {
   if (classification === 'too-large') return 'too_large';
   if (classification === 'not-found') return 'not_found';
   return 'unavailable';

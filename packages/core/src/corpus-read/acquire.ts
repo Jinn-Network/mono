@@ -139,7 +139,7 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
       };
     }
     if (retrieved.reason === 'digest_mismatch') {
-      throw new HashMismatchError(sha256, retrieved.mismatch!.actualSha256, 'ipfs', ownerSafe);
+      throw new HashMismatchError(sha256, retrieved.mismatch.actualSha256, 'ipfs', ownerSafe);
     }
     // Donated IPFS is an opportunistic fast path: gateway failures and
     // malformed donation payloads fall through to the next source. Anything
@@ -226,7 +226,7 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
   );
   if (!retrieved.ok) {
     if (retrieved.reason === 'digest_mismatch') {
-      throw new HashMismatchError(sha256, retrieved.mismatch!.actualSha256, 'origin', ownerSafe);
+      throw new HashMismatchError(sha256, retrieved.mismatch.actualSha256, 'origin', ownerSafe);
     }
     // Preserve the reason token in the message so callers and the daemon route
     // can surface which failure this was.
