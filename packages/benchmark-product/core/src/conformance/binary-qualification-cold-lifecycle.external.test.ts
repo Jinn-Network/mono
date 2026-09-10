@@ -64,7 +64,7 @@ const CELL_TABLE = [
   ["RRR", "RRR", "RRR", "RRX"],
 ] as const;
 const ARM_IDS = ["alpha", "beta", "delta", "gamma"] as const;
-const VERIFY_FIRST_PARTY_CLOSURE = [
+const CHECKER_FIRST_PARTY_CLOSURE = [
   "@colophon-claims/check",
   "@jinn-network/benchmarking-aggregate",
   "@jinn-network/benchmarking-interop",
@@ -391,7 +391,7 @@ describe("T1 provider-free binary qualification cold lifecycle", () => {
     mkdirSync(coldReaderDir);
     writeFileSync(join(coldReaderDir, "package.json"), JSON.stringify({
       private: true,
-      dependencies: { "@colophon-claims/verify": "0.1" },
+      dependencies: { "@colophon-claims/check": "0.2" },
     }, null, 2), { flag: "wx" });
     writeFileSync(join(coldReaderDir, ".npmrc"), [
       `registry=${registryUrl}`,
@@ -416,10 +416,10 @@ describe("T1 provider-free binary qualification cold lifecycle", () => {
       env: minimalEnv,
     });
     expect(installed.exitCode, installed.stderr).toBe(0);
-    const installedVerifier = join(coldReaderDir, "node_modules", "@colophon-claims", "verify");
-    expect(statSync(installedVerifier).isDirectory()).toBe(true);
-    expect(statSync(installedVerifier).isSymbolicLink()).toBe(false);
-    expect(json(join(installedVerifier, "package.json")).version).toMatch(/^2\./u);
+    const installedChecker = join(coldReaderDir, "node_modules", "@colophon-claims", "check");
+    expect(statSync(installedChecker).isDirectory()).toBe(true);
+    expect(statSync(installedChecker).isSymbolicLink()).toBe(false);
+    expect(json(join(installedChecker, "package.json")).version).toMatch(/^0\.2\./u);
     const lockBytes = readFileSync(join(coldReaderDir, "package-lock.json"), "utf8");
     expect(lockBytes).not.toContain("portal:");
     expect(lockBytes).not.toContain(workspaceDir);
@@ -433,10 +433,10 @@ describe("T1 provider-free binary qualification cold lifecycle", () => {
       assertRealTree(packagePath);
       return String(json(join(packagePath, "package.json")).name);
     }).sort();
-    expect([...new Set(installedFirstPartyNames)]).toEqual(VERIFY_FIRST_PARTY_CLOSURE);
+    expect([...new Set(installedFirstPartyNames)]).toEqual(CHECKER_FIRST_PARTY_CLOSURE);
 
     expect(existsSync(workspaceDir)).toBe(false);
-    const executable = join(coldReaderDir, "node_modules", ".bin", process.platform === "win32" ? "colophon-verify.cmd" : "colophon-verify");
+    const executable = join(coldReaderDir, "node_modules", ".bin", process.platform === "win32" ? "colophon-check.cmd" : "colophon-check");
     const replay = await run(executable, [copiedBundleDir, "--json"], {
       cwd: coldReaderDir,
       env: minimalEnv,

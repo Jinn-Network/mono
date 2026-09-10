@@ -248,20 +248,26 @@ test('publish transform refuses a floating canary dist-tag in the pin or source 
   );
 });
 
-test('Increment 1 moves only verify onto a demand-gated independent product line', () => {
+test('Increment 1 moves only the reader onto a demand-gated independent product line', () => {
   const catalog = loadPlatformCatalog(repoRoot);
+  const check = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/check');
   const verify = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/verify');
   const core = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/core');
   const cli = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/cli');
   const web = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/web');
+  assert.equal(check.releaseGroup, 'colophon-claims-v1');
+  assert.equal(check.publishPolicy, 'independent');
+  // Both published names sit on the same release group and publish independently of each other:
+  // the alias is a release, not a build artifact of the checker (issue #4188).
   assert.equal(verify.releaseGroup, 'colophon-claims-v1');
   assert.equal(verify.publishPolicy, 'independent');
+  assert.match(verify.role, /alias/u);
   assert.equal(core.releaseGroup, 'transitional-or-private');
   assert.equal(core.publishPolicy, 'never');
   assert.equal(cli.publishPolicy, 'never');
   assert.equal(web.publishPolicy, 'never');
   const group = catalog.releaseGroups['colophon-claims-v1'];
-  assert.equal(group.expectedPackageCount, 1);
+  assert.equal(group.expectedPackageCount, 2);
   assert.deepEqual(group.publishPolicies, ['independent']);
   assert.equal(group.stackPublished, false);
   assert.equal(group.canary, false);
