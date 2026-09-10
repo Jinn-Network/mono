@@ -67,12 +67,43 @@ const DISPLAY_UNSAFE_CHARACTER =
 const VISIBLE_CHARACTER = /[^\s\p{Cf}]/u;
 
 /**
+ * Every Unicode format character except the two joiners the reason above names. An allow-set,
+ * written as a negative lookahead because the `v`-flag set difference `[\p{Cf}--[\u200C\u200D]]`
+ * needs an ES2024 target this package does not have.
+ *
+ * It overlaps `DISPLAY_UNSAFE_CHARACTER` on the twelve bidi controls and neither subsumes the
+ * other: that rule also covers `\p{Cc}` and the two line separators, which are not `\p{Cf}`,
+ * and this one covers 156 format characters it does not reach. The overlap is deliberate,
+ * because the two rules ask different questions — `DISPLAY_UNSAFE_CHARACTER` asks whether a
+ * value reorders or splices what a buyer reads, this one asks whether it hides content inside
+ * itself — and a bidi control is honestly both. zod runs every chained refine, so a value that
+ * is both reports both messages.
+ *
+ * The 96-character tag block U+E0020–U+E007F is why this is worth the cost: it carries
+ * arbitrary invisible ASCII inside a payment address, which is a channel and not a script.
+ * Variation selectors U+FE00–U+FE0F are `\p{Mn}`, not `\p{Cf}`, so neither this rule nor the
+ * one above ever reached them.
+ *
+ * The cost, plainly: 156 format characters now have no accepted spelling inside a `to` value at
+ * all, among them the Arabic and Syriac prefixed format controls (U+0600–U+0605, U+06DD,
+ * U+070F) and the Egyptian quadrat controls (U+13430–U+1343F). A rail vocabulary that needs one
+ * owes its own rule, the same way an opaque scheme does.
+ *
+ * And it narrows the class rather than closing it. ZWJ between two hex digits still renders
+ * invisibly, so two destinations can still collide — the alphabet for that is 2 characters
+ * rather than 158. That is the trade this package will make and no more: the unbounded
+ * confusables problem stays declined, three lines above.
+ */
+const INTERIOR_FORMAT_CHARACTER = /(?![\u200C\u200D])\p{Cf}/u;
+
+/**
  * The rail-specific payment destination. Its *syntax* stays opaque — this package binds no
  * rail and cannot know what a well-formed destination looks like on one that does not exist
  * yet, so no address shape is imposed here and none should be. What is refused is only what
  * is indefensible on every rail: a value with no character that is neither whitespace nor a
- * format character, and one carrying characters whose whole effect is to make it display as a
- * different address than it is.
+ * format character, one carrying characters whose whole effect is to make it display as a
+ * different address than it is, and one carrying a format character other than ZWJ or ZWNJ,
+ * whose whole effect is to hide content inside the address.
  */
 const RailDestination = z
   .string()
@@ -85,6 +116,11 @@ const RailDestination = z
     (value) => !DISPLAY_UNSAFE_CHARACTER.test(value),
     "to must not carry control characters, line separators, or Unicode bidi controls, which "
       + "make one payment destination display as another",
+  )
+  .refine(
+    (value) => !INTERIOR_FORMAT_CHARACTER.test(value),
+    "to must not carry a Unicode format character other than ZWJ or ZWNJ, which hides content "
+      + "inside a payment destination",
   );
 
 /**

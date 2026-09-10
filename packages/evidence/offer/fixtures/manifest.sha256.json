@@ -58,6 +58,10 @@
       "sha256": "256dc5b8c706d265d0cdac458fb53de17906e5639ee6de185e00079be46800fc"
     },
     {
+      "id": "offer/invalid-tag-carrier-rail-destination.json",
+      "sha256": "94389e32e13132ca5bb4eb6cd6e83669ce7292215b5c05e407194c7ce837d2a6"
+    },
+    {
       "id": "offer/invalid-unnormalized-rail-identifier.json",
       "sha256": "bf21caee43d693a25877171580a0e764192d40a0ac495a377f505e71e7046d73"
     },
