@@ -601,9 +601,23 @@ const isTestFile = (path: string): boolean =>
  * Every place this product emits an instruction from live code: the checker, core, the CLI and the
  * web app, plus the JSON Schemas the checker ships in its tarball. The schemas carry no version
  * pin, so the publish-manifest pin walk cannot see them and this is the only guard that can.
+ *
+ * `core/quickstart`, `cli/scripts` and the `web` package-root configs are swept for the same
+ * reason: `public-quickstart.mjs` emits a reader-facing surface, and the publish-manifest pin walk
+ * reaches these files but matches only *versioned* specifiers -- so an unversioned
+ * `@colophon-claims/verify` or a bare `colophon-verify` landing in one would escape both guards.
  */
 const sweptSourceFiles: readonly string[] = [
-  ...["check/src", "check/scripts", "core/src", "core/scripts", "cli/src", "web/src"]
+  ...[
+    "check/src",
+    "check/scripts",
+    "core/src",
+    "core/scripts",
+    "core/quickstart",
+    "cli/src",
+    "cli/scripts",
+    "web",
+  ]
     .flatMap((root) => walkFiles(resolve(productRoot, root)))
     .filter((path) => /\.(?:ts|tsx|mjs)$/u.test(path) && !isTestFile(path)),
   ...walkFiles(resolve(productRoot, "check/schemas")).filter((path) => path.endsWith(".json")),
