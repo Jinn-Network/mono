@@ -289,8 +289,13 @@ export interface NativeDiscoverySyncReport {
    * Announcements this pass stepped past by crossing the poison-quarantine threshold (#2473).
    * The CROSSING only: an announcement quarantined by an earlier pass is skipped at the top of
    * the loop and counts nothing, so this stays 0 once the wedge has cleared rather than reading
-   * non-zero forever. Withdrawal-scope quarantine is not a sync-pass event and is not counted
-   * here -- `drainNativeDiscoveryWithdrawals` owns that lane.
+   * non-zero forever. A crossing is dropped with the rest of its source's result if a LATER
+   * announcement in the same pass degrades that source, and the crossed one is skipped from then
+   * on -- so a crossing can go uncounted here entirely. The durable `native_discovery_quarantine`
+   * row and the `native_discovery_poison_quarantined` event are the authority for what is
+   * quarantined; this is a per-pass summary, not a running total. Withdrawal-scope quarantine is
+   * not a sync-pass event and is not counted here -- `drainNativeDiscoveryWithdrawals` owns that
+   * lane.
    */
   readonly quarantined: number;
 }
