@@ -92,12 +92,15 @@ const VISIBLE_CHARACTER = /[^\s\p{Cf}]/u;
  * What this closes is one channel, not the class, and the residue is larger than the two joiners
  * it deliberately keeps. The 256 variation selectors — U+FE00–U+FE0F and U+E0100–U+E01EF — are
  * `\p{Mn}`, so no rule here has ever reached them, and they smuggle a payload after an ASCII
- * character exactly as the tag block did. So do U+3164 HANGUL FILLER, U+115F, U+1160, the
- * Mongolian free variation selectors, and every unassigned code point, none of which is `\p{Cf}`
- * either. Naming them is the point: this rule shrinks the invisible-payload alphabet, it does not
- * empty it, and a reader who takes the sentence above for a closed class would be wrong. Closing
- * the rest means an allow-set over the whole of Unicode rather than over `\p{Cf}`, which is the
- * unbounded confusables problem this package declines three lines above.
+ * character exactly as the tag block did. U+3164 HANGUL FILLER, U+115F and U+1160 are `\p{Lo}`
+ * and render blank, and the Mongolian free variation selectors are `\p{Mn}` — note U+180E is
+ * not among them, being `\p{Cf}` and so refused. An unassigned code point is `\p{Cn}`, which
+ * is disjoint from `\p{Cf}`, and passes too; most renderers give it tofu rather than nothing, so
+ * it is a confusable rather than a hiding place. Naming them is the point: this rule shrinks the
+ * invisible-payload alphabet, it does not empty it, and a reader who takes the sentence above
+ * for a closed class would be wrong. Closing the rest means an allow-set over the whole of
+ * Unicode rather than over `\p{Cf}`, which is the unbounded confusables problem
+ * `VISIBLE_CHARACTER` declines above.
  *
  * One more thing the shape of this rule decides rather than the rule itself: `\p{Cf}` resolves
  * against the engine's Unicode tables, so which characters are refused moves with the runtime.
