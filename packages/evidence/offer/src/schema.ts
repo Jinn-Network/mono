@@ -81,18 +81,27 @@ const VISIBLE_CHARACTER = /[^\s\p{Cf}]/u;
  *
  * The 96-character tag block U+E0020–U+E007F is why this is worth the cost: it carries
  * arbitrary invisible ASCII inside a payment address, which is a channel and not a script.
- * Variation selectors U+FE00–U+FE0F are `\p{Mn}`, not `\p{Cf}`, so neither this rule nor the
- * one above ever reached them.
  *
  * The cost, plainly: 156 format characters now have no accepted spelling inside a `to` value at
  * all, among them the Arabic and Syriac prefixed format controls (U+0600–U+0605, U+06DD,
  * U+070F) and the Egyptian quadrat controls (U+13430–U+1343F). A rail vocabulary that needs one
  * owes its own rule, the same way an opaque scheme does.
  *
- * And it narrows the class rather than closing it. ZWJ between two hex digits still renders
- * invisibly, so two destinations can still collide — the alphabet for that is 2 characters
- * rather than 158. That is the trade this package will make and no more: the unbounded
- * confusables problem stays declined, three lines above.
+ * What this closes is one channel, not the class, and the residue is larger than the two joiners
+ * it deliberately keeps. The 256 variation selectors — U+FE00–U+FE0F and U+E0100–U+E01EF — are
+ * `\p{Mn}`, so no rule here has ever reached them, and they smuggle a payload after an ASCII
+ * character exactly as the tag block did. So do U+3164 HANGUL FILLER, U+115F, U+1160, the
+ * Mongolian free variation selectors, and every unassigned code point, none of which is `\p{Cf}`
+ * either. Naming them is the point: this rule shrinks the invisible-payload alphabet, it does not
+ * empty it, and a reader who takes the sentence above for a closed class would be wrong. Closing
+ * the rest means an allow-set over the whole of Unicode rather than over `\p{Cf}`, which is the
+ * unbounded confusables problem this package declines three lines above.
+ *
+ * One more thing the shape of this rule decides rather than the rule itself: `\p{Cf}` resolves
+ * against the engine's Unicode tables, so which characters are refused moves with the runtime.
+ * `VISIBLE_CHARACTER` already had that dependency; this widens it to 156 more code points. Two
+ * verifiers on different ICU versions can therefore disagree about one sealed offer, and the
+ * `engines` floor is what bounds the spread today rather than a frozen list.
  */
 const INTERIOR_FORMAT_CHARACTER = /(?![\u200C\u200D])\p{Cf}/u;
 

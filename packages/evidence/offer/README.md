@@ -45,8 +45,14 @@ The protocol takes no fee and no cut, ever. There is no fee field to take one wi
   ships with this package; concrete rails arrive as their own adapters. `to` keeps that
   openness — its syntax is opaque, because no address shape can be imposed on a rail that
   does not exist yet — but it must carry at least one character that is neither whitespace nor
-  a format character, and it may not carry control characters, line separators, or Unicode
-  bidi controls, whose whole effect here is to make one destination display as another.
+  a format character; it may not carry control characters, line separators, or Unicode
+  bidi controls, whose whole effect here is to make one destination display as another; and
+  inside the value it may carry no format character but ZWJ and ZWNJ, which are load-bearing
+  in Indic and Arabic scripts where the 96-character tag block is a way to hide arbitrary
+  ASCII inside a payment address. That last rule shrinks the invisible-payload alphabet
+  rather than emptying it — variation selectors and other invisible non-`Cf` characters are
+  outside its reach, as `src/schema.ts` records — because emptying it is the unbounded
+  confusables problem this package declines.
 - **No reference currency and no conversion, anywhere.** Equivalence across a multi-rail
   offer is the holder's assertion, sealed with the offer.
 - **Repricing is supersession, never mutation.** A new price is a new record with a new

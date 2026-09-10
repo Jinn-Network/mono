@@ -118,6 +118,20 @@ describe("the offer record schema", () => {
     ])("refuse a destination that is %s", (_label, to) => {
       expect(parse(offer({ rails: [{ rail: USDC, to, amount: "1" }] })).success).toBe(false);
     });
+
+    // The residue the docstring names, pinned so the prose cannot outrun the code again. None of
+    // these is `\p{Cf}`, so no rule here reaches them, and each still hides a payload after an
+    // ASCII character. Asserting they pass is not endorsing them: it fixes the boundary, so that
+    // widening the rule to cover one has to come back here and correct the docstring with it.
+    test.each([
+      ["a variation selector", "0xdead\uFE0Fbeef"],
+      ["a supplementary variation selector", "0xdead\u{E0100}beef"],
+      ["a mongolian free variation selector", "0xdead\u180Bbeef"],
+      ["a hangul filler", "0xdead\u3164beef"],
+      ["an unassigned code point", "0xdead\u{E0002}beef"],
+    ])("accept a destination carrying %s, which this package does not claim to reach", (_label, to) => {
+      expect(parse(offer({ rails: [{ rail: USDC, to, amount: "1" }] })).success).toBe(true);
+    });
   });
 
   describe("rail identifiers", () => {
