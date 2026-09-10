@@ -45,28 +45,42 @@ export interface HandoffDocInput {
   independentEvidence?: string;
 }
 
-// Keep a free-text value inside its own `key=value` line of the marker block. The
-// block is line-oriented and lives in an HTML comment, so a CR/LF would inject an
-// extra marker line (a forged `release-readiness-recommendation=SHIP`, say) and a
-// `>` would close the comment early via `-->`, spilling the rest into rendered
-// markdown. Hardening, not a live vulnerability: every value routed through here
-// today comes from in-repo scenario literals, so there is no untrusted-input path.
+// Keep a marker key or value inside its own `key=value` line of the marker block. The
+// block is line-oriented and lives in an HTML comment, so a CR/LF injects an extra
+// marker line (a forged `release-readiness-recommendation=SHIP`, say) and a `>` closes
+// the comment early via `-->`, spilling the rest into rendered markdown.
+//
+// Hardening, not a live vulnerability -- but not because the inputs are in-repo
+// literals. Skip and fail reasons carry caught `Error.message` text (run-tier-1.ts,
+// run-tier-2.ts, scenario-types.ts, test/release/tier-2/scenario-evidence.ts,
+// test/release/tier-3/T3.1-producer-evaluator-real.ts) and runtime precondition strings
+// (test/release/tier-2/T2.4-producer-evaluator-swe-rebench.ts), and `writeHandoffDoc`
+// has no in-repo production caller -- the input is whatever the agent running the
+// release-readiness skill assembles from a run. None of that is adversary-controlled,
+// and all of it can be multi-line by accident. Accident-proofing is the point.
 function sanitizeMarkerValue(value: string): string {
   return value.replace(/[\r\n>]/g, ' ');
+}
+
+// The one seam every marker line goes through, so a field added later is sanitized by
+// construction rather than by remembering to wrap its call site. Both halves are
+// sanitized: the per-scenario keys interpolate a free-text `scenarioId`.
+function markerLine(key: string, value: string): string {
+  return `${sanitizeMarkerValue(key)}=${sanitizeMarkerValue(value)}`;
 }
 
 // Render a scenario verdict as a release-evidence marker value: `passed`,
 // `skipped:<reason>`, or `failed:<failClass>`. Shared by the per-scenario lines of
 // the marker block. The `skip` arm matters: without it a skipped scenario fell to the
 // fail branch and emitted `failed:null`, misreporting a skip as a failure. Matches the
-// sibling emitter in run-tier-1.ts. `failClass` is enum-constrained and needs no
-// sanitizing; `failNotes` is free text and does.
+// sibling emitter in run-tier-1.ts. Sanitizing is markerLine's job, not this one's --
+// the free-text `failNotes` is covered there along with every other marker value.
 function verdictMarker(verdict: ScenarioVerdict): string {
   switch (verdict.verdict) {
     case 'pass':
       return 'passed';
     case 'skip':
-      return `skipped:${sanitizeMarkerValue(verdict.failNotes ?? 'no-reason')}`;
+      return `skipped:${verdict.failNotes ?? 'no-reason'}`;
     case 'fail':
       return `failed:${verdict.failClass}`;
   }
@@ -152,21 +166,21 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
   );
   push();
   push(`<!-- jinn-release-evidence:v1`);
-  push(`release-tag=${input.candidateVersion}`);
-  push(`release-commit=${input.branchSha}`);
+  push(markerLine('release-tag', input.candidateVersion));
+  push(markerLine('release-commit', input.branchSha));
   for (const v of input.hermeticGateVerdicts) {
-    push(`hermetic-gate-${sanitizeMarkerValue(v.scenarioId).toLowerCase().replace(/\./g, '-')}=${verdictMarker(v)}`);
+    push(markerLine(`hermetic-gate-${v.scenarioId.toLowerCase().replace(/\./g, '-')}`, verdictMarker(v)));
   }
   if (input.environmentSuiteVerdict) {
-    push(`environment-suite=${verdictMarker(input.environmentSuiteVerdict)}`);
+    push(markerLine('environment-suite', verdictMarker(input.environmentSuiteVerdict)));
   } else {
     // Mode-independent: the SKIPPED prose above deliberately asserts no mode gate,
     // only that no environment-suite verdict reached this run.
-    push(`environment-suite=skipped:no-verdict-supplied`);
+    push(markerLine('environment-suite', 'skipped:no-verdict-supplied'));
   }
-  push(`release-readiness-recommendation=${input.recommendation}`);
-  push(`release-readiness-handoff=docs/release/${input.candidateVersion}/handoff.md`);
-  push(`release-readiness-run=${input.runId}`);
+  push(markerLine('release-readiness-recommendation', input.recommendation));
+  push(markerLine('release-readiness-handoff', `docs/release/${input.candidateVersion}/handoff.md`));
+  push(markerLine('release-readiness-run', input.runId));
   push(`-->`);
 
   await fs.writeFile(outPath, lines.join('\n') + '\n');

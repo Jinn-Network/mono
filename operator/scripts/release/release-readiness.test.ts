@@ -50,6 +50,11 @@ describe('release-readiness scaffolding', () => {
     openQuestions: ['Q1: spec drift in unused section — acceptable?'],
   });
 
+  // The marker block only, as lines. An injection is caught by counting the lines that
+  // claim a key -- asserting on one forged line's exact text misses a variant of it.
+  const markerLines = (content: string): string[] =>
+    content.slice(content.indexOf('<!-- jinn-release-evidence:v1')).split('\n');
+
   it('writeHandoffDoc produces a structured markdown file', async () => {
     const outPath = path.join(tmpRoot, 'docs', 'release', 'v0.1.7', 'handoff.md');
     await writeHandoffDoc(outPath, baseInput());
@@ -137,18 +142,23 @@ describe('release-readiness scaffolding', () => {
       ],
     });
     const content = await fs.readFile(outPath, 'utf-8');
-    const marker = content.slice(content.indexOf('<!-- jinn-release-evidence:v1'));
+    const lines = markerLines(content);
+    const marker = lines.join('\n');
 
     // The skip reason stays on its own line; no forged marker line, no early close.
-    expect(marker).not.toMatch(/^release-readiness-recommendation=SHIP$/m);
-    expect(marker).toContain('release-readiness-recommendation=BLOCK');
+    expect(lines.filter((l) => l.startsWith('release-readiness-recommendation='))).toEqual([
+      'release-readiness-recommendation=BLOCK',
+    ]);
     expect(marker.indexOf('-->')).toBe(marker.lastIndexOf('-->'));
-    expect(marker.split('\n').filter((l) => l.startsWith('hermetic-gate-t1-2='))).toHaveLength(1);
+    expect(lines.filter((l) => l.startsWith('hermetic-gate-t1-2='))).toHaveLength(1);
     expect(marker).toContain(
       'hermetic-gate-t1-2=skipped:docker absent release-readiness-recommendation=SHIP --  forged tail',
     );
   });
 
+  // A scenario id lands in the marker *key*, and the key is lowercased -- so an injected
+  // `SHIP` arrives as `ship` and a forged line's exact text is not what to assert on.
+  // What the injection actually breaks is the block's structure: one line per key.
   it('writeHandoffDoc cannot have a marker key forged through a scenario id', async () => {
     const outPath = path.join(tmpRoot, 'handoff.md');
     await writeHandoffDoc(outPath, {
@@ -165,10 +175,35 @@ describe('release-readiness scaffolding', () => {
         },
       ],
     });
+    const lines = markerLines(await fs.readFile(outPath, 'utf-8'));
+    expect(lines.filter((l) => l.startsWith('release-readiness-recommendation='))).toEqual([
+      'release-readiness-recommendation=BLOCK',
+    ]);
+    expect(lines.filter((l) => l.startsWith('hermetic-gate-'))).toHaveLength(1);
+  });
+
+  // `runId` is one of the three plain-string fields the first hardening pass missed. It
+  // reaches the marker block on its own line, so it can forge a line and close the
+  // comment early exactly as a verdict field can.
+  it('writeHandoffDoc cannot have a marker line forged through the run id', async () => {
+    const outPath = path.join(tmpRoot, 'handoff.md');
+    await writeHandoffDoc(outPath, {
+      ...baseInput(),
+      recommendation: 'BLOCK',
+      runId: '2026-05-26-a4f3\nrelease-readiness-recommendation=SHIP\n--> spilled into markdown',
+    });
     const content = await fs.readFile(outPath, 'utf-8');
-    const marker = content.slice(content.indexOf('<!-- jinn-release-evidence:v1'));
-    expect(marker).not.toMatch(/^release-readiness-recommendation=SHIP$/m);
-    expect(marker).toContain('release-readiness-recommendation=BLOCK');
+    const lines = markerLines(content);
+    const marker = lines.join('\n');
+    expect(lines.filter((l) => l.startsWith('release-readiness-recommendation='))).toEqual([
+      'release-readiness-recommendation=BLOCK',
+    ]);
+    expect(lines.filter((l) => l.startsWith('release-readiness-run='))).toHaveLength(1);
+    // Only the block's own closing `-->` survives.
+    expect(marker.indexOf('-->')).toBe(marker.lastIndexOf('-->'));
+    expect(marker).toContain(
+      'release-readiness-run=2026-05-26-a4f3 release-readiness-recommendation=SHIP --  spilled into markdown',
+    );
   });
 
   // The nine template headings, pinned including the conditional one.
