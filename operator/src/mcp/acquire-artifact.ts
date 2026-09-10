@@ -197,9 +197,9 @@ export async function handleAcquireArtifact(
   const bytes = Buffer.from(contentB64, 'base64');
 
   // Verify BEFORE the mirror. The daemon verified these bytes too, but that is
-  // a claim about the other side of an HTTP hop, and the cache-read fast path
-  // above does not re-hash — so unverified bytes admitted here would be served
-  // to every later caller in this process (#4179).
+  // a claim about the other side of an HTTP hop, and this process is what
+  // admits them into the shared cache — so bytes that fail here must never
+  // reach the row, whatever the other side asserted (#4179).
   const verified = verifyArtifactDigest(args.sha256, bytes);
   if (!verified.ok) {
     return hashMismatch(args.sha256, verified.actualSha256, `daemon ${daemonApiUrl}`);
@@ -217,23 +217,30 @@ export async function handleAcquireArtifact(
     ? `ipfs://${ipfsSource.cid}`
     : args.access.endpoint;
 
-  // Best-effort cache mirror; errors here are non-fatal. Unconditional: the
-  // bytes are already verified above, and INSERT OR REPLACE is a no-op except in
-  // the one case that matters — replacing a row the read just rejected. A guard
-  // here would let a corrupt row block its own repair and charge every later
-  // call a daemon round trip forever.
+  // Best-effort cache mirror; errors here are non-fatal. Guarded on the row
+  // still being *unusable*, not on its mere absence. The daemon opens this same
+  // SQLite file (main.ts hands the subprocess `config.dbPath`), so by now it has
+  // written a row naming how it really acquired the bytes — `route-resolver`,
+  // `self-store-mirror` — while `source`/`sourceEndpoint` here are only
+  // reconstructed from the request; search-records and corpus-knowledge hand
+  // that endpoint back to agents. Re-reading, rather than skipping whenever any
+  // row exists, is what still lets a digest-failing row be replaced instead of
+  // blocking its own repair forever.
   try {
-    store.saveNetworkArtifact({
-      sha256: args.sha256,
-      artifactType,
-      envelopeCid: args.envelopeCid ?? null,
-      content: bytes,
-      source: 'origin',
-      sourceOperator: sourceOperator ?? null,
-      sourceEndpoint,
-      paidAmountUsdc,
-      fetchedAt,
-    });
+    const existing = store.getNetworkArtifact(args.sha256);
+    if (!existing || !verifyArtifactDigest(args.sha256, existing.content).ok) {
+      store.saveNetworkArtifact({
+        sha256: args.sha256,
+        artifactType,
+        envelopeCid: args.envelopeCid ?? null,
+        content: bytes,
+        source: 'origin',
+        sourceOperator: sourceOperator ?? null,
+        sourceEndpoint,
+        paidAmountUsdc,
+        fetchedAt,
+      });
+    }
   } catch {
     /* ignore cache mirror failure */
   }
