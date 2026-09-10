@@ -61,7 +61,8 @@ function bundleSnapshot(identity = "0".repeat(64)) {
 
 /**
  * The `readFile` seam returns bytes or refuses; a fixture map's miss is a broken test, not an
- * empty file, so it is named here rather than handed to the parser as `undefined`.
+ * empty file. The CLI wraps this dep, so the miss surfaces as an exit-2 refusal carrying the
+ * path on stderr rather than as `undefined` reaching the parser.
  *
  * @param {ReadonlyMap<string, Uint8Array>} files
  * @param {string} path
@@ -681,9 +682,10 @@ test("a refusal says what failed without printing the identifier it refused", as
 
 /**
  * The evidence-native `/5` member of `PublicBundleVerificationResult`, named locally because the
- * published surface pins its `checks` to `typeof EVIDENCE_NATIVE_BUNDLE_V5_CHECKS` and exports
- * neither that constant nor its type. A fixture built from `../dist/index.js` alone -- which is
- * the constraint these suites keep on purpose -- therefore cannot write that one field's type.
+ * published surface pins its `checks` to `typeof EVIDENCE_NATIVE_BUNDLE_V5_CHECKS`, which
+ * `../dist/index.js` re-exports neither as a value nor as a type. The tuple is reachable through
+ * `@jinn-network/benchmarking-evidence`, a direct dependency -- these fixtures cast that one field
+ * rather than reach past the published surface these suites exist to exercise.
  *
  * @typedef {Extract<import("../dist/index.js").PublicBundleVerificationResult, { profile: string }>} V5Verification
  */
@@ -695,7 +697,7 @@ test("a refusal says what failed without printing the identifier it refused", as
  *
  * Fields absent from a fixture are absent on purpose -- each of these renderings exercises one
  * path, not a whole result -- so the parameter is partial. Every field that IS written stays
- * checked, and a misspelt one is still rejected.
+ * checked, and a misspelled one is still rejected.
  *
  * @param {Partial<Omit<V5Verification, "checks">>
  *   & { format: "benchmark-product-public-bundle/5", checks: readonly string[] }} fixture
@@ -1145,11 +1147,16 @@ test("a drifted freeze repository still exits 1 when an unrelated binding also f
 // from CI, so the injectable `freezeRepo` dep is the only place that string can be exercised.
 
 /**
- * @param {Partial<import("../dist/index.js").FreezeRepoVerificationResult>} extra
+ * `executableBitChecked` is required rather than defaulted: it and `executableBitSkipped` are
+ * derived from one probe and cannot disagree, so a caller that states only the skip reason must
+ * not silently acquire a `true`.
+ *
+ * @param {Partial<Omit<import("../dist/index.js").FreezeRepoVerificationResult, "executableBitChecked">>
+ *   & Pick<import("../dist/index.js").FreezeRepoVerificationResult, "executableBitChecked">} extra
  * @returns {import("../dist/index.js").FreezeRepoVerificationResult}
  */
 function matchedTree(extra) {
-  return { ok: true, bundleIdentity: "a".repeat(64), commitId: "d".repeat(40), fileCount: 3, executableBitChecked: true, differences: [], ...extra };
+  return { ok: true, bundleIdentity: "a".repeat(64), commitId: "d".repeat(40), fileCount: 3, differences: [], ...extra };
 }
 
 test("a filesystem that does not record the bit is reported as one, not as a refused probe", async () => {

@@ -6,16 +6,14 @@
   // branch had a textual conflict, so both merged green with nothing checking the stubs
   // against the declaration they implement.
   //
-  // This project checks them. It is separate from `tsconfig.json` because these suites import
-  // `../dist/index.js` on purpose -- they test the published surface of
+  // This project checks them under the same rules as the code it guards, which is why it
+  // extends `tsconfig.json` rather than restating it. It is a separate project because these
+  // suites import `../dist/index.js` on purpose -- they test the published surface of
   // `@colophon-claims/verify`, which is what an external consumer actually gets -- so their
   // types resolve only once `dist/` exists. `yarn typecheck` runs before `yarn build`; this
   // one runs from the `test` script, after it.
+  "extends": "./tsconfig.json",
   "compilerOptions": {
-    "target": "ES2024",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "strict": true,
     // Deliberate. Strict `noImplicitAny` adds 34 reports on untyped locals in test helpers --
     // a different bug class from the seam-shape collision this project exists to catch, and
     // annotating every helper parameter is churn with no guarantee attached. Every other
@@ -23,8 +21,10 @@
     "noImplicitAny": false,
     "allowJs": true,
     "checkJs": true,
+    // The base emits declarations from `src/` into `dist/`; this project emits nothing.
+    "rootDir": ".",
+    "declaration": false,
     "noEmit": true,
-    "skipLibCheck": true,
     "types": ["node"]
   },
   "include": ["test/**/*.mjs"]
