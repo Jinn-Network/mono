@@ -128,10 +128,16 @@ steady state; treat a set waiver as a cut you are publishing without that gate.
 Before publishing, confirm both verdicts are green on the tagged commit:
 
 ```bash
-gh api repos/Jinn-Network/mono/commits/<release-sha>/check-runs \
-  --jq '.check_runs[] | select(.name=="hermetic-gate" or .name=="environment-suite")
-        | "\(.name) \(.conclusion) \(.head_sha)"'
+for name in hermetic-gate environment-suite; do
+  gh api -X GET repos/Jinn-Network/mono/commits/<release-sha>/check-runs \
+    -f check_name="$name" -f per_page=100 \
+    --jq '.check_runs[] | "\(.name) \(.status) \(.conclusion) \(.head_sha)"'
+done
 ```
+
+Filter by `check_name` and raise `per_page` — the endpoint defaults to 30 results
+and a release SHA on `next` carries far more check-runs than that, so an unfiltered
+query can page right past both verdicts and print nothing.
 
 A `jinn-release-evidence:v1` block may still appear in a Release body or in a
 generated handoff under `docs/release/`. It is **diagnostic-only** — the same
