@@ -97,19 +97,30 @@ export function classifyIpfsFetchFailure(
 export function normalizeIpfsGatewayBase(gatewayUrl: string): string {
   let normalized = gatewayUrl.trim();
   if (normalized === '') normalized = 'https://gateway.autonolas.tech';
-  // Drop any userinfo at the source. `fetch` rejects a credentialed URL
-  // outright, and its own error message quotes the URL back — so a gateway
-  // configured Infura-style would otherwise put its secret into every
-  // aggregated fetch error, which callers log.
   try {
     const parsed = new URL(normalized);
-    if (parsed.username !== '' || parsed.password !== '') {
-      parsed.username = '';
-      parsed.password = '';
-      normalized = parsed.toString();
-    }
+    // Drop any userinfo at the source. `fetch` rejects a credentialed URL
+    // outright, and its own error message quotes the URL back — so a gateway
+    // configured Infura-style would otherwise put its secret into every
+    // aggregated fetch error, which callers log.
+    parsed.username = '';
+    parsed.password = '';
+    // A fragment is never transmitted to a server, and treating it as part of
+    // the base corrupted the `/ipfs` suffix test into appending a second
+    // segment (`…/ipfs#frag` → `…/ipfs#frag/ipfs/`). Dropping it is the only
+    // reading that is both correct and lossless in transit.
+    parsed.hash = '';
+    // Normalize on the parsed path, not the raw string: a query-bearing base
+    // otherwise had `/ipfs/` spliced on after the query, putting the CID
+    // inside the query string (#3452).
+    let path = parsed.pathname.replace(/\/+$/, '');
+    if (!path.toLowerCase().endsWith('/ipfs')) path = `${path}/ipfs`;
+    parsed.pathname = `${path}/`;
+    return parsed.toString();
   } catch {
-    // Not an absolute URL; leave it to the caller's own failure path.
+    // Not an absolute URL; leave it to the caller's own failure path, which
+    // reports it as a per-candidate `candidate URL could not be parsed`
+    // instead of escaping as a bare TypeError.
   }
   normalized = normalized.replace(/\/+$/, '');
   if (!normalized.toLowerCase().endsWith('/ipfs')) normalized = `${normalized}/ipfs`;
@@ -386,6 +397,23 @@ function resolveGatewayCandidateUrl(
   if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) {
     return { reason: 'candidate URL escapes the gateway path prefix' };
   }
+  // `new URL(cidPath, base)` drops the base's query unconditionally, which
+  // strips the API key off every request to an authenticated gateway (#3452).
+  // Re-attach it *after* the guard, so a manifest-supplied CID path can never
+  // influence the check, and only when the base has one, so every query-free
+  // base issues a byte-identical request. The base wins over any query the CID
+  // path carries: two query strings cannot be merged unambiguously, and
+  // letting manifest text override an operator's gateway credentials is the
+  // wrong direction.
+  //
+  // Two known limits, both narrow and neither fixed here. A *relative*
+  // redirect `Location` is resolved with `new URL(location, current)`, which
+  // drops the query, so the key is not forwarded across such a hop — gateways
+  // that redirect path form to subdomain form send an absolute `Location`, and
+  // `assertRedirectAllowed` already pins the host family and port. And
+  // `displayUrl` stays `origin + pathname`, which is what keeps the credential
+  // out of logs now that the request actually carries it.
+  if (base.search !== '') resolved.search = base.search;
   return { url: resolved };
 }
 
