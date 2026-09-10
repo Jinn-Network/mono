@@ -90,6 +90,10 @@
       "sha256": "e13a2536ccb4a21f3aa9e881061e17043a695df9cdc7b922ef5085cc89e0ccf3"
     },
     {
+      "id": "vectors/forked-chain-seeded-mark/vector.json",
+      "sha256": "47d8fa1b4881595ef42199bb03ad7bd130d77def1fff7028f1dd1ac67af4a01b"
+    },
+    {
       "id": "vectors/forked-chain-shared-previous/vector.json",
       "sha256": "dcb1e24ceb509e4bdf0917dafbeb86533a7f9fb9dbf4aa4d15ec0bb6ceae6cc6"
     },
@@ -166,6 +170,10 @@
       "sha256": "3bb795d4dd4301e876a9ff268902f9a9f8602a701485371671dd5db465151b45"
     },
     {
+      "id": "vectors/refresh-by-ceiling-exceeds-window/vector.json",
+      "sha256": "937e9238c8ea7f6d7403bfbbc493f8a260354f102fe3f2ac33d768b61c2d393b"
+    },
+    {
       "id": "vectors/refresh-by-ceiling-inverted-window/vector.json",
       "sha256": "c6b973f99a6f1a3f8d0067c30ab11ae3a228cf357c520edfb02b6bca76281c18"
     },
@@ -200,6 +208,10 @@
     {
       "id": "vectors/source-conformance-unpublished-profile/vector.json",
       "sha256": "4140fa77b2fdc9f68dc3db9da98038908070b054e16efb24416b78d99ece582b"
+    },
+    {
+      "id": "vectors/stale-head-seeded-mark/vector.json",
+      "sha256": "bece2749b7af5a68b6bce6160281056deb24eb82f978986eddc8513ebec83832"
     },
     {
       "id": "vectors/stale-head/vector.json",
@@ -268,6 +280,10 @@
     {
       "id": "vectors/withdrawal-of-withdrawal/vector.json",
       "sha256": "c9e9a8edca78da87671aceecdcc7b07da8c6e6ae98f4cbf94a8028e3fd9e59e2"
+    },
+    {
+      "id": "vectors/wrong-signing-scope-seeded-mark/vector.json",
+      "sha256": "0c0d7c9e139c9dc3756e84a54619d8e3c9cedc3e0f22dee2650eef972779571f"
     },
     {
       "id": "vectors/wrong-signing-scope/vector.json",
