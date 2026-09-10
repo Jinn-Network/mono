@@ -361,6 +361,29 @@ describe('evidence fetch', () => {
     });
   });
 
+  it('exits fatal on a malformed donation payload', async () => {
+    // A decode failure is a terminal property of the fetched bytes, not a
+    // transport unknown, so the verb must not hand back the retry hint.
+    const { command } = commandWith({
+      ok: false,
+      sha256: ARTIFACT_SHA,
+      reason: 'malformed_payload',
+      retryable: false,
+      message: 'the donated payload is not this artifact',
+      attempts: [],
+    });
+    const { ctx, writes, exits } = makeCtx(
+      withConfig(['fetch', '--envelope-cid', ENVELOPE_CID, '--json']),
+    );
+    await command.run(ctx);
+
+    expect(exits).toEqual([50]);
+    const out = JSON.parse(writes[0]!);
+    expect(out.code).toBe('fatal');
+    expect(out.details).toMatchObject({ reason: 'malformed_payload', retryable: false });
+    expect(out.hint).toBe('The source answered, and the answer was final for this address.');
+  });
+
   it('requires --envelope-cid', async () => {
     const { command } = commandWith({ ok: true, artifact: verified() });
     const { ctx, writes, exits } = makeCtx(withConfig(['fetch', '--json']));

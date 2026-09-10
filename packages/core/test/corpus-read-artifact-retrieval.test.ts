@@ -180,23 +180,82 @@ describe('fetchVerifiedArtifact', () => {
       { schemaVersion: 'jinn.artifact.donation.v1', encoding: 'jinn.artifact.donation.v1', sha256: SHA },
     ];
 
-    for (const payload of cases) {
-      fetchArtifact.mockClear();
-      const result = await fetchVerifiedArtifact(
-        { sha256: SHA },
-        { sources: ipfsSources(), ipfsGatewayUrl: GATEWAY, endpoint: ENDPOINT },
-        { deps: { fetchArtifact, fetchFromIpfs: async () => payload } },
-      );
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.artifact.provenance.source).toBe('origin');
-      expect(result.artifact.provenance.attempts[0]).toMatchObject({
-        leg: 'ipfs',
-        outcome: 'failed',
-        reason: 'unavailable',
-      });
-      expect(fetchArtifact).toHaveBeenCalledOnce();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const payload of cases) {
+        fetchArtifact.mockClear();
+        warn.mockClear();
+        const result = await fetchVerifiedArtifact(
+          { sha256: SHA },
+          { sources: ipfsSources(), ipfsGatewayUrl: GATEWAY, endpoint: ENDPOINT },
+          { deps: { fetchArtifact, fetchFromIpfs: async () => payload } },
+        );
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.artifact.provenance.source).toBe('origin');
+        expect(result.artifact.provenance.attempts[0]).toMatchObject({
+          leg: 'ipfs',
+          outcome: 'failed',
+          reason: 'malformed_payload',
+        });
+        expect(fetchArtifact).toHaveBeenCalledOnce();
+        // The warning and the attempt record must name the same fact, or an
+        // operator reading one and an automated consumer reading the other
+        // disagree about what happened.
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0]![0]).toMatch(/malformed-payload/);
+      }
+    } finally {
+      warn.mockRestore();
     }
+  });
+
+  it('does not let a malformed donation payload mask the origin 404', async () => {
+    // The gateway answered and what it served is permanently not this artifact;
+    // the origin answered and said absent. Both legs were conclusive, so the
+    // retrieval must not report `unavailable`/retryable and send the operator
+    // back to retry a call that can never succeed.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await fetchVerifiedArtifact(
+      { sha256: SHA },
+      { sources: ipfsSources(), ipfsGatewayUrl: GATEWAY, endpoint: ENDPOINT },
+      {
+        deps: {
+          fetchFromIpfs: async () => ({ ...donation(BYTES), encoding: 'something.else' }),
+          fetchArtifact: async (): Promise<AcquireResult> => ({ ok: false, reason: 'not_found' }),
+        },
+      },
+    );
+    warn.mockRestore();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.attempts.map((attempt) => attempt.reason))
+      .toEqual(['malformed_payload', 'not_found']);
+    expect(result.reason).toBe('not_found');
+    expect(result.retryable).toBe(false);
+  });
+
+  it('still yields to an inconclusive origin after a malformed donation payload', async () => {
+    // A decode failure is conclusive absence AT THAT LOCATOR only. It must never
+    // outrank a leg that genuinely learned nothing (#3441).
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await fetchVerifiedArtifact(
+      { sha256: SHA },
+      { sources: ipfsSources(), ipfsGatewayUrl: GATEWAY, endpoint: ENDPOINT },
+      {
+        deps: {
+          fetchFromIpfs: async () => ({ ...donation(BYTES), encoding: 'something.else' }),
+          fetchArtifact: async (): Promise<AcquireResult> => ({ ok: false, reason: 'timeout' }),
+        },
+      },
+    );
+    warn.mockRestore();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('timeout');
+    expect(result.retryable).toBe(true);
   });
 
   it('records an IPFS size refusal as too_large and still falls through (#3441)', async () => {
