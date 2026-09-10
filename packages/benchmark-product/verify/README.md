@@ -4,8 +4,9 @@
 The checker moved to a name that does not repeat the word its own verdict line uses.
 
 This package is a passthrough alias: it re-exports `@colophon-claims/check` and its
-`colophon-verify` executable re-enters `colophon-check`. Behaviour, output, and exit status are
-identical.
+`colophon-verify` executable re-enters `colophon-check`. The verdict, the `--json` document, and
+the exit status are the checker's own, unchanged. Diagnostic lines name `colophon-check`, because
+they come from the checker rather than from this shim.
 
 The name stays published permanently. Bundles sealed before the rename print their reader command
 with this name, and a sealed instruction that stops resolving is a broken claim, so:

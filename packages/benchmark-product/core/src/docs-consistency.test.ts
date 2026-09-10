@@ -661,6 +661,11 @@ const SEALED_COMMAND_LITERALS: ReadonlyMap<string, readonly string[]> = new Map(
   ],
   ["core/scripts/demo1-export-public-bundle.mjs", ["@colophon-claims/verify@0.1"]],
   ["check/src/assets.ts", ["@colophon-claims/verify@0.1.0"]],
+  // Not a command and not a version pin: one rendered byte of the `colophon-freeze-repo/2` README,
+  // hashed into `freeze.json` and byte-compared by `--freeze-repo`. Moving it with the rename would
+  // have made every tree rendered before the rename report drift and exit 1 under an unchanged
+  // format label. It is pinned here so it moves only when a freeze-repo format decision moves it.
+  ["check/src/freeze-repo.ts", ["@colophon-claims/verify"]],
 ]);
 
 describe("retired reader package name", () => {

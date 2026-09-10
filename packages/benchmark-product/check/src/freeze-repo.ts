@@ -895,13 +895,22 @@ function renderReadme(
     "",
   );
   for (const entry of roleCounts) lines.push(`- \`${entry.role}\` — ${entry.files} ${entry.files === 1 ? "record" : "records"}`);
+  // The package name below is a RENDERED BYTE, not a reader instruction: it is hashed into
+  // `freeze.json` and byte-compared by `--freeze-repo`, so changing it under an unchanged
+  // `FREEZE_REPO_FORMAT` is exactly the silent drift this module's header forbids. #4188 renamed
+  // the reader to `@colophon-claims/check`; moving this string with it would have made every
+  // `colophon-freeze-repo/2` tree rendered before that rename report README drift and exit 1. A
+  // rename does not get to move a format, so the byte keeps the retired name and the permanent
+  // passthrough alias carries it -- installing the retired name resolves to the checker, whose
+  // tarball is where `schemas/` ships. It moves when a freeze-repo format decision moves it, and
+  // `docs-consistency.test.ts` pins this exact literal so an edit fails there instead.
   lines.push(
     "",
     "## Schemas",
     "",
     "The record schemas are pinned by the protocol identifiers this repository's records carry",
     `(listed in \`${FREEZE_REPO_MANIFEST_FILENAME}\`) and ship with the standalone verifier package,`,
-    "`@colophon-claims/check`. They are not copied here: a copy would make this tree a function of",
+    "`@colophon-claims/verify`. They are not copied here: a copy would make this tree a function of",
     "the tool version as well as of the bundle, and the tree's whole value is that it is not.",
     "",
   );
