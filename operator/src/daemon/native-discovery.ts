@@ -289,13 +289,13 @@ export interface NativeDiscoverySyncReport {
    * Announcements this pass stepped past by crossing the poison-quarantine threshold (#2473).
    * The CROSSING only: an announcement quarantined by an earlier pass is skipped at the top of
    * the loop and counts nothing, so this stays 0 once the wedge has cleared rather than reading
-   * non-zero forever. A crossing is dropped with the rest of its source's result if a LATER
-   * announcement in the same pass degrades that source, and the crossed one is skipped from then
-   * on -- so a crossing can go uncounted here entirely. The durable `native_discovery_quarantine`
-   * row and the `native_discovery_poison_quarantined` event are the authority for what is
-   * quarantined; this is a per-pass summary, not a running total. Withdrawal-scope quarantine is
-   * not a sync-pass event and is not counted here -- `drainNativeDiscoveryWithdrawals` owns that
-   * lane.
+   * non-zero forever. A crossing counts even when a LATER announcement degrades that same
+   * source in the same pass (#4394) -- the crossing is durable and is skipped from then on, so
+   * dropping it with the discarded source result would report it zero times, ever. The durable
+   * `native_discovery_quarantine` row and the `native_discovery_poison_quarantined` event are
+   * the authority for what is quarantined; this is a per-pass summary, not a running total.
+   * Withdrawal-scope quarantine is not a sync-pass event and is not counted here --
+   * `drainNativeDiscoveryWithdrawals` owns that lane.
    */
   readonly quarantined: number;
 }
@@ -745,10 +745,21 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
   }
 
   type SourcePollOutcome =
-    | { readonly accepted: number; readonly quarantined: number }
+    | { readonly accepted: number }
     | { readonly reason: NativeDiscoveryDegradedReason; readonly detail: string };
 
-  async function pollSource(configured: NativeDiscoverySource): Promise<SourcePollOutcome> {
+  /**
+   * The pass-scoped quarantine count (#4394). It is NOT on the success arm above and NOT
+   * closure state: `sync()` allocates one per call and every `pollSource` in that pass
+   * increments it. A crossing is durable the moment the ledger row is written, so it must
+   * survive a later announcement degrading the same source — which discards the outcome.
+   */
+  interface SyncPass { quarantined: number }
+
+  async function pollSource(
+    configured: NativeDiscoverySource,
+    pass: SyncPass,
+  ): Promise<SourcePollOutcome> {
     const source = configured.identity;
     const prior = checkpoint(source);
     // Poll-time introduction resolution (#2521). A source that cannot be resolved — 404, or
@@ -898,7 +909,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           signature: syncedHead.signature,
         }, [], []);
       }
-      return { accepted: 0, quarantined: 0 };
+      return { accepted: 0 };
     }
     if (prior !== undefined && compareCodeUnitStrings(syncedHead.head.sequence, prior.sequence) <= 0) {
       throw new NativeDiscoverySyncError(source, 'rewound-or-tampered-head');
@@ -1023,7 +1034,6 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       refreshBy: syncedHead.head.refreshBy,
       signature: syncedHead.signature,
     };
-    let quarantined = 0;
     const cards: Array<{
       sequence: string;
       entryDigest: `sha256:${string}`;
@@ -1098,7 +1108,10 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
             ...(input.now === undefined ? {} : { now: input.now }),
           });
           if (!poisoned.quarantined) throw undecodable;
-          quarantined += 1;
+          // Counted on the pass, not the outcome: the throw below, on a LATER announcement,
+          // would discard an outcome-carried count even though this crossing is durable and
+          // is skipped from the next poll on — reporting it zero times, ever (#4394).
+          pass.quarantined += 1;
           continue;
         }
         clearPoisonFailures({
@@ -1126,20 +1139,21 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       }
     }
     queue(source, highWater, cards, withdrawals);
-    return { accepted: cards.length + withdrawals.length, quarantined };
+    return { accepted: cards.length + withdrawals.length };
   }
 
   return {
     async sync() {
       let accepted = 0;
       let verifiedSources = 0;
-      let quarantined = 0;
+      // Per-pass, never a running total: allocated here, on every call.
+      const pass: SyncPass = { quarantined: 0 };
       const degraded: NativeDiscoveryDegradedSource[] = [];
       for (const configured of sources) {
         const source = configured.identity;
         let outcome: SourcePollOutcome;
         try {
-          outcome = await pollSource(configured);
+          outcome = await pollSource(configured, pass);
         } catch (cause) {
           // Fail-CLOSED: only the shapes `degradedReason` recognises as "unavailable or
           // unintelligible" are isolated to their source. Everything else — every trust, identity,
@@ -1160,10 +1174,9 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         }
         reportedDegraded.delete(sourceKey(source));
         accepted += outcome.accepted;
-        quarantined += outcome.quarantined;
         verifiedSources += 1;
       }
-      return { accepted, verifiedSources, degraded, quarantined };
+      return { accepted, verifiedSources, degraded, quarantined: pass.quarantined };
     },
 
     takePending() {

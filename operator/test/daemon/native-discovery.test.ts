@@ -1564,6 +1564,79 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
       warn.mockRestore();
     });
 
+    it('counts the crossing even when a LATER announcement degrades the same pass (#4394)', async () => {
+      // The crossing announcement is decoded first and the degrading one second, so the
+      // threshold poll reaches both: the first steps past into quarantine, the second is
+      // decoded for the very first time (the earlier polls threw before reaching it), fails
+      // once, and degrades the source. The crossing is durable — the ledger row is written
+      // and the announcement is skipped from here on — so a report that dropped it with the
+      // rest of the source's result would report that crossing zero times, ever.
+      const paired: AnnouncementEntry = {
+        ...entry('0000000000000001', null, DIGEST_A),
+        announcements: [
+          {
+            announcementId: 'announcement-crossing',
+            action: 'available',
+            record: { kind: 'https://spec.jinn.network/records/submission/v1', digest: DIGEST_A },
+            facts: { taskDigest: DIGEST_A, taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0' },
+          },
+          {
+            announcementId: 'announcement-later',
+            action: 'available',
+            record: { kind: 'https://spec.jinn.network/records/submission/v1', digest: DIGEST_B },
+            facts: { taskDigest: DIGEST_B, taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0' },
+          },
+        ],
+      };
+      const store = new Store(':memory:');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const synced = consumer({
+        store,
+        routes: routesFor([paired]),
+        verify: async (input) => {
+          for await (const item of input.entries) void item;
+          return { status: 'ok' };
+        },
+        decode: async () => { throw new Error('chainId is not a canonical unsigned integer'); },
+      });
+      const identity = { agent: AGENT, name: SOURCE_NAME };
+
+      for (let poll = 1; poll < NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD; poll += 1) {
+        await expect(synced.sync()).resolves.toMatchObject({
+          accepted: 0,
+          verifiedSources: 0,
+          degraded: [{ source: identity, reason: 'undecodable' }],
+          quarantined: 0,
+        });
+      }
+
+      // The threshold poll: the first announcement CROSSES, then the second degrades the
+      // source. The crossing is reported alongside the degraded entry, not dropped with it.
+      await expect(synced.sync()).resolves.toMatchObject({
+        accepted: 0,
+        verifiedSources: 0,
+        degraded: [{ source: identity, reason: 'undecodable' }],
+        quarantined: 1,
+      });
+      expect(isPoisonQuarantined({
+        store,
+        scope: 'announcement',
+        source: identity,
+        entryDigest: sealJson(paired).digest,
+        announcementId: 'announcement-crossing',
+      })).toBe(true);
+
+      // And the crossing is reported exactly once: the next pass skips it at the top of the
+      // loop, so it counts nothing there — which is why the degraded pass had to count it.
+      await expect(synced.sync()).resolves.toMatchObject({
+        accepted: 0,
+        verifiedSources: 0,
+        degraded: [{ source: identity, reason: 'undecodable' }],
+        quarantined: 0,
+      });
+      warn.mockRestore();
+    });
+
     it('never counts a local-authority fault against the announcement — that stays fatal', async () => {
       const first = entry('0000000000000001', null, DIGEST_A);
       const store = new Store(':memory:');
