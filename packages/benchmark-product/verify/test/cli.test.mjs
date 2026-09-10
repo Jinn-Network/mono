@@ -18,6 +18,47 @@ async function invoke(args) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The `verify` seam's return shape, written once (issues #4272, #4385, #4386)
+// ---------------------------------------------------------------------------
+//
+// `VerifierCliDeps.verify` returns the verification AND the authenticated snapshot it was
+// computed from, because `--freeze-repo` renders its tree from that same snapshot rather than
+// re-verifying without the caller's trust material. A stub that returns the bare verification
+// spreads to nothing rather than throwing, so the omission used to surface as an
+// undefined-property crash several frames inside the renderer (#4272). `tsconfig.tests.json`
+// now makes it a compile error; these helpers make carrying the field cheap enough that no
+// stub has a reason to drop it.
+
+/**
+ * One authenticated snapshot, distinguishable by `identity` so a test can assert that the
+ * exact object it supplied is the one the freeze seam received.
+ *
+ * @param {string} [identity]
+ * @returns {import("../dist/index.js").VerifiedBundleSnapshot}
+ */
+function bundleSnapshot(identity = "0".repeat(64)) {
+  const bytes = new TextEncoder().encode("{}");
+  return {
+    manifest: {
+      format: "benchmark-product-public-bundle/2",
+      files: [{ path: "bundle.json", sha256: "0".repeat(64), bytes: bytes.length }],
+    },
+    bytes,
+    identity,
+    fileBytes: new Map([["bundle.json", bytes]]),
+  };
+}
+
+/**
+ * @param {import("../dist/index.js").PublicBundleVerificationResult} verification
+ * @param {import("../dist/index.js").VerifiedBundleSnapshot} [snapshot]
+ * @returns {import("../dist/index.js").VerifiedPublicBundleSnapshot}
+ */
+function verified(verification, snapshot = bundleSnapshot()) {
+  return { verification, snapshot };
+}
+
 test("usage exits 2 and states the exit contract", async () => {
   const result = await invoke([]);
   assert.equal(result.code, 2);
@@ -1091,6 +1132,35 @@ test("a checked mode dimension adds no note at all", async () => {
   });
   assert.equal(result.exitCode, 0);
   assert.doesNotMatch(result.stdout, /file modes were not checked/);
+});
+
+// ── The freeze tree renders from the reported verdict's own snapshot (issue #4386) ─────────────
+//
+// #3781 moved the `verify` seam to `{ verification, snapshot }` for one reason, recorded at
+// `src/cli.ts:37-42`: `--freeze-repo` must render from the same authenticated snapshot the
+// printed verdict came from. The shape before it verified once for the verdict and again inside
+// the freeze check, and that second pass ran without the caller's `--tsa-root` / `--ots-headers`
+// material -- so its anchor outcomes could disagree with the reported ones with nothing saying
+// so. `src/cli.ts` implements it; until this test nothing observed it, because every freezeRepo
+// stub ignored its arguments and every verify stub omitted `snapshot` entirely.
+
+test("the freeze check renders from the exact snapshot the reported verdict came from", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const snapshot = bundleSnapshot("f".repeat(64));
+  /** @type {import("../dist/index.js").VerifiedBundleSnapshot | undefined} */
+  let seen;
+  const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
+    verify: async () => verified(publisherResult(keyId), snapshot),
+    freezeRepo: async (received) => {
+      seen = received;
+      return matchedTree({ executableBitChecked: true });
+    },
+  });
+  assert.equal(result.exitCode, 0);
+  // Identity, not shape. A stale re-verification that happened to produce an equal-looking
+  // snapshot is precisely the failure #3781 exists to prevent, and `deepEqual` would accept it.
+  assert.equal(seen, snapshot);
 });
 
 // ── The promoted caveat's enumeration (issue #3691) ─────────────────────────────────────────────
