@@ -106,6 +106,11 @@ test('the canary host refresh copies same-run attested bytes to the host and pus
 
   // Push authority is the PAT, never GITHUB_TOKEN.
   assert.match(block, /permissions:\s*\n\s+contents: read\s*\n/u);
+  // ...and that PAT is an ENVIRONMENT secret, not a repository secret every workflow in the
+  // repository can read. The job's own `github.ref` gate constrains this job, not the
+  // secret's availability, and the workflow also fires on integration/evidence-v1.
+  // Precedent: canary-publish's `environment: npm-publish` on the comparable npm surface.
+  assert.match(block, /environment: profile-host-publish/u);
   assert.doesNotMatch(block, /id-token: write|attestations: write|artifact-metadata: write/u);
 
   // Same-run restore by name; never a cross-run download.

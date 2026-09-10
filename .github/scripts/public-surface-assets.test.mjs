@@ -190,6 +190,13 @@ test('Jinn identifiers map only to canonical relative hosted paths', async () =>
     'https://spec.jinn.network/schema#fragment',
     'https://spec.jinn.network/manifest.json',
     'https://spec.jinn.network/manifest.dsse.json',
+    // Refused at the earliest layer, so a poisoned `$id` never reaches a profile root: the
+    // host serves these bytes out of a Git worktree, where `.git/...` is read as control
+    // and the `.gitignore` family decides which attested bytes get published at all.
+    'https://spec.jinn.network/.git/config',
+    'https://spec.jinn.network/.gitignore',
+    'https://spec.jinn.network/schemas/.gitattributes',
+    'https://spec.jinn.network/.GIT/hooks/pre-commit',
   ]) {
     assert.throws(
       () => jinnIdentifierServedPath(identifier, 'fixture identity'),

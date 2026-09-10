@@ -52,6 +52,7 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 import { HOST_CONFIG_FILE_NAME, MANIFEST_FILE_NAME } from './build-profile-host-bundle.mjs';
+import { hasGitControlSegment } from './public-surface-assets.mjs';
 import { SIGNATURE_FILE_NAME } from './sign-profile-manifest.mjs';
 
 const PROVENANCE_FILE = '.jinn-profile-host-source';
@@ -88,6 +89,32 @@ function readGroupManifest(bundleDir, group) {
 }
 
 /**
+ * Refuse any bundle entry Git reads as control input, at any depth. `mirrorContent` copies
+ * with `cpSync`, whose `force` default is true, so a bundle path whose first segment is
+ * `.git` is written INTO the host checkout's real `.git` -- and the push step, which is the
+ * one step holding the host token, then reads that `.git/config`. A `.gitignore` or
+ * `.gitattributes` is the quieter half of the same defect: Git honors it, so the staged
+ * tree stops being the mirrored tree and attested documents are silently unpublished while
+ * every gate reports success. `DEFAULT_KEEP` protects `.git` from DELETION only; this is
+ * what protects it from being written through.
+ *
+ * The rule itself is `hasGitControlSegment`, shared with the generator that built these
+ * bytes. The walk is recursive because the mirror is: a nested entry lands in the host tree
+ * just as surely as a root one.
+ * @param {string} directory
+ * @param {string} prefix
+ */
+function assertNoGitControlPath(directory, prefix = '') {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (hasGitControlSegment(entry.name)) {
+      throw new Error(`the deploy bundle carries the Git control path ${relativePath}, which the host checkout would read as control rather than serve`);
+    }
+    if (entry.isDirectory()) assertNoGitControlPath(path.join(directory, entry.name), relativePath);
+  }
+}
+
+/**
  * The fail-closed gate on bytes that are about to become public. The bundle generator
  * already enforces most of this; re-asserting it here puts the check immediately before
  * publication, where the bytes being published are the ones being read.
@@ -106,12 +133,17 @@ export function validateBundleDir(bundleDir, { sourceSha }) {
   }
 
   // The bundle root is reserved: each group's inventory lives under its own name, and
-  // the live-host gate probes both root paths as must-404s.
-  for (const reserved of [MANIFEST_FILE_NAME, SIGNATURE_FILE_NAME]) {
+  // the live-host gate probes both root paths as must-404s. The provenance marker joins
+  // them because `writeProvenance` clobbers that exact path -- a document served there
+  // would be unpublishable by construction, and the host would answer a manifest-digested
+  // path with provenance bytes.
+  for (const reserved of [MANIFEST_FILE_NAME, SIGNATURE_FILE_NAME, PROVENANCE_FILE]) {
     if (existsSync(path.join(bundleDir, reserved))) {
       throw new Error(`the deploy bundle root is reserved, but it carries ${reserved}`);
     }
   }
+
+  assertNoGitControlPath(bundleDir);
 
   const groups = readdirSync(bundleDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && existsSync(path.join(bundleDir, entry.name, MANIFEST_FILE_NAME)))
@@ -207,6 +239,10 @@ export function validateHostCheckout(bundleDir, hostDir) {
  * top-level host entry not in DEFAULT_KEEP, then recursively copy the bundle in. Result:
  * host tree === bundle tree + kept files. An overlay would leave a document withdrawn
  * from the catalog served forever. Does NOT run git itself -- run() owns the staging.
+ *
+ * That result holds only because `validateBundleDir` has already refused a bundle carrying
+ * a Git control path: the copy is `force: true`, so a `.git/...` entry would be written
+ * THROUGH the kept `.git` rather than beside it.
  * @param {string} bundleDir
  * @param {string} hostDir
  * @param {{ keep?: string[] }} [opts]
@@ -274,8 +310,18 @@ export function inspectProvenance(hostDir, workflowPath) {
 }
 
 /**
+ * Stage the whole host tree, ignore rules included. See the call site in `run()` for why
+ * `--force` is load-bearing rather than defensive.
+ * @param {string} hostDir
+ */
+function stageEverything(hostDir) {
+  execFileSync('git', ['add', '-A', '--force'], { cwd: hostDir });
+}
+
+/**
  * Idempotency oracle: is there any staged/unstaged change in the host repo? The caller
- * must have run `git add -A` first so deletions register.
+ * must have run `stageEverything` first so deletions register and no ignore rule can hide
+ * a mirrored file from the comparison.
  * @param {string} hostDir
  * @returns {boolean}
  */
@@ -321,7 +367,13 @@ export function run({ bundleDir, hostDir, sourceSha, workflowPath }) {
   const { groups, lane } = validateBundleDir(bundleDir, { sourceSha });
   validateHostCheckout(bundleDir, hostDir);
   mirrorContent(bundleDir, hostDir);
-  execFileSync('git', ['add', '-A'], { cwd: hostDir });
+  // `--force` is what makes the staged tree provably equal the mirrored tree, and so what
+  // makes `treeChanged` a sound idempotency oracle rather than a proxy for one: a plain
+  // `git add -A` honors every ignore source Git can find -- a bundle-served `.gitignore`,
+  // the host's own, `.git/info/exclude`, the user's global one -- and would stage a subset
+  // of the attested bytes while reporting success. `validateBundleDir` refuses the
+  // bundle-carried case above; this closes the ones no bundle validation can see.
+  stageEverything(hostDir);
 
   const contentChanged = treeChanged(hostDir);
   const provenance = inspectProvenance(hostDir, workflowPath);
@@ -329,7 +381,7 @@ export function run({ bundleDir, hostDir, sourceSha, workflowPath }) {
   const message = buildCommitMessage({ sourceSha, lane, groups });
   if (changed) {
     writeProvenance(hostDir, { sourceSha, lane, groups, workflowPath });
-    execFileSync('git', ['add', '-A'], { cwd: hostDir });
+    stageEverything(hostDir);
     execFileSync('git', ['commit', '-F', '-'], { cwd: hostDir, input: message });
   }
   return { changed, message, groups, lane };

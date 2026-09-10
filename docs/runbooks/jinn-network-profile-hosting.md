@@ -129,9 +129,18 @@ operator's own provisioning work, which the gate can only check after it is done
       repository created with no initial commit has no branch to check out, so leaving it
       empty turns every push to `next` red rather than skipping. Until this variable is set,
       `canary-host-refresh` skips and the host is refreshed only by hand.
-- [ ] Add a fine-grained token with `contents: write` on **that repository only** as the secret
-      `JINN_PROFILE_HOST_PUSH_TOKEN`. This credential grants write to the host content and
-      nothing else: it must not carry write on `Jinn-Network/mono`, and it is not the manifest
+- [ ] Create the Actions **environment** `profile-host-publish` and give it a
+      deployment-branch policy of `next` only. `canary-host-refresh` declares this
+      environment, so the push credential below is an environment secret rather than a plain
+      repository secret. A repository secret is readable by *any* workflow in the repository
+      — including one landed on `integration/evidence-v1`, which this workflow also fires on
+      — so the job's own `github.ref` gate constrains the job, not the secret's availability.
+      Precedent: `canary-publish` gates the comparable npm surface behind `npm-publish`.
+- [ ] Add a fine-grained token with `contents: write` on **that repository only** as the
+      `profile-host-publish` environment secret `JINN_PROFILE_HOST_PUSH_TOKEN`. This
+      credential grants write to the host content and nothing else: it must not carry write
+      on `Jinn-Network/mono`, it must **not** carry the `Workflows` permission (that would
+      let a host push rewrite the workflows that drive it), and it is not the manifest
       signing key. Setting the variable without the secret makes the job fail loudly rather
       than skip.
 - [ ] Configure a static host for `spec.jinn.network` that preserves manifest paths exactly. The

@@ -40,6 +40,38 @@ const CANDIDATE_IDENTIFIER_HOSTS = new Set([
 ]);
 const GENERATED_PROFILE_ROOT_PATHS = new Set(['manifest.json', 'manifest.dsse.json']);
 
+// Names Git reads as control input rather than as content, so a served document carrying
+// one stops being a document. `.git` is the sharp end: the deploy mirror copies the bundle
+// over the host checkout with `cpSync`, whose `force` default is true, so a bundle path
+// whose first segment is `.git` lands inside the host's REAL `.git` -- and the
+// token-bearing push step then reads whatever `.git/config` it finds there. The
+// `.gitignore` family is the quiet end: `git add -A` honors `.gitignore` and Git applies
+// `.gitattributes` filters, so such a document silently changes which attested bytes get
+// staged and published while every gate still reports success.
+//
+// No canonical identifier can legitimately claim one of these paths, so refusing them
+// costs nothing. The rule is stated once, here, because three layers copy these bytes --
+// the profile-root builder (via jinnIdentifierServedPath), the bundle generator (via
+// assertLiteralRoutePath), and the deploy mirror -- and a restated rule is a rule that
+// drifts.
+const GIT_CONTROL_PATH_SEGMENTS = new Set([
+  '.git',
+  '.gitattributes',
+  '.gitignore',
+  '.gitmodules',
+]);
+
+/**
+ * Whether any segment of a forward-slash path is a name Git reads as control input.
+ * Compared case-insensitively because a case-insensitive host filesystem resolves `.GIT`
+ * to the same directory, and the break-glass mirror recipe is run by hand on a laptop.
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function hasGitControlSegment(value) {
+  return String(value).split('/').some((segment) => GIT_CONTROL_PATH_SEGMENTS.has(segment.toLowerCase()));
+}
+
 function toPosix(value) {
   return value.split(sep).join('/');
 }
@@ -107,6 +139,7 @@ export function jinnIdentifierServedPath(identifier, label = 'Jinn identifier') 
     || isAbsolute(servedPath)
     || win32.isAbsolute(servedPath)
     || segments.some((segment) => segment === '' || segment === '.' || segment === '..')
+    || hasGitControlSegment(servedPath)
     || GENERATED_PROFILE_ROOT_PATHS.has(servedPath)) invalid();
   return servedPath;
 }

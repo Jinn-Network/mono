@@ -139,6 +139,13 @@ jobs:
       vars.JINN_PROFILE_HOST_REPOSITORY != ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The same precedent `canary-publish` sets for the npm surface, for the same reason: the
+    # credential below publishes a public surface, so it must be an environment secret scoped
+    # to a deployment-branch policy rather than a plain repository secret every workflow in
+    # the repository can read -- this one also fires on integration/evidence-v1, so the job's
+    # own `github.ref` gate constrains the job, not the secret's availability. Provisioning
+    # is a checklist row in docs/runbooks/jinn-network-profile-hosting.md.
+    environment: profile-host-publish
     permissions:
       contents: read
     env:

