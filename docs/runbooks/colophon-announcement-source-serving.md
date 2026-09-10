@@ -240,9 +240,9 @@ already yields every entry oldest-first. Then:
    empty. The classification is provisional because it has so far read a record
    *reference* rather than a record — step 3 confirms it. Anchor-announcing entries are
    not themselves anchored and are provisionally out of the denominator too: in the
-   ordinary case — an anchor over an entry on this chain — anchoring them would not
+   ordinary case — an anchor over an announcement entry — anchoring them would not
    terminate, and truncating one drops nothing a reader loses. Step 3 reads the records
-   and revises both halves where they do not hold.
+   and revises this classification where they do not bear it out.
 3. **Collect the anchored set — from the records, not from `facts`.** Sweep every anchor
    announcement on the chain — the announcement-level predicate step 2 names, an
    `action` of `available` plus the anchor-evidence `record.kind`, and nothing else.
@@ -260,13 +260,15 @@ already yields every entry oldest-first. Then:
    machine" step 4 requires of every announcement, and only then read `subject` from
    them. An announcement whose record cannot be fetched, fails that check, or does not
    parse contributes no subject, so nothing it might have anchored is counted as
-   anchored. Do not resolve its announcing entry either way on that evidence: the record
-   is exactly what would have said which side of the partition the entry belongs on.
-   Report those announcements as unreadable, separately from the gap, because neither
-   cause is a coverage fact — a missing record or a digest mismatch is a serving fault,
-   which "Verify it from another machine" step 4 diagnoses; bytes that hash correctly
-   and still do not parse as an `AnchorEvidence` record are a producer fault, which it
-   does not. Keep only subjects whose `subject.kind` is
+   anchored. That record is also the evidence that would have said which side of step
+   2's partition its announcing entry belongs on, so the entry cannot be resolved on it.
+   Default that entry into the denominator as substantive — over-reporting is the
+   direction this walk errs in everywhere else — and carry its sequence as *unreadable*
+   rather than as an ordinary gap, so a reader is not left to read a hosting fault as a
+   missing anchor. A missing record or a digest mismatch is a serving fault, which
+   "Verify it from another machine" step 4 diagnoses; bytes that hash correctly and
+   still do not parse as an `AnchorEvidence` record are a producer fault, which it does
+   not. Keep only subjects whose `subject.kind` is
    `https://spec.jinn.network/records/announcement-entry/v1`: §4.2 minted that URI to
    make `subject.kind` normative, and a record covering anything else anchors no
    sequence on this chain — an entry announcing only such non-entry anchors is
@@ -274,21 +276,21 @@ already yields every entry oldest-first. Then:
    states its stopping rule over announcement kind alone and so would read such an entry
    out of the denominator; neither of §4.3's own two reasons reaches it, because
    anchoring it terminates one step later exactly as the ordinary case does, and an
-   anchor over something that is not an entry on this chain is content a reader loses to
-   truncation — the test §4.3 names. The rejoin is per-entry while this sweep is
-   per-announcement, so carry each fetched subject's announcing entry along with it.
-   Sweeping announcements rather than anchor-announcing entries is deliberate: an anchor
-   riding on a mixed entry is still collected. No design section rules mixed entries out
-   — §4.3 rules which entries are anchored and §5.2 where an anchor is announced, and
-   §7's sketch has a pending anchor ride on the next substantive append — so what keeps
-   them off this chain is only this producer's one-announcement-per-entry writer. Step 3
-   therefore revises step 2's provisional partition, and steps 4 through 6 read the
-   revised one. Deduplicate by `subject.digest`, because several announcements can cover
-   one subject two ways: an OpenTimestamps upgrade is announced as a second
-   *announcement* naming the pending record through `upgrades` in its facts, and the
-   anchor ledger is keyed `(entryDigest, provider)` (§4.4), so two different providers
-   may each anchor the same entry with no upgrade relationship between them. Count
-   subjects rather than announcements.
+   anchor over a record of some other kind is content a reader loses to truncation — the
+   test §4.3 names. The rejoin is per-entry while this sweep is per-announcement, so
+   carry each fetched subject's announcing entry along with it. Sweeping announcements
+   rather than anchor-announcing entries is deliberate: an anchor riding on a mixed
+   entry is still collected. No design section rules mixed entries out — §4.3 rules
+   which entries are anchored and §5.2 where an anchor is announced, and §7's sketch has
+   a pending anchor ride on the next substantive append — so what keeps them off this
+   chain is only this producer's one-announcement-per-entry writer. Step 3 therefore
+   revises step 2's provisional partition, and steps 4 through 6 read the revised one.
+   Deduplicate by `subject.digest`, because several announcements can cover one subject
+   two ways: an OpenTimestamps upgrade is announced as a second *announcement* naming
+   the pending record through `upgrades` in its facts, and the anchor ledger is keyed
+   `(entryDigest, provider)` (§4.4), so two different providers may each anchor the same
+   entry with no upgrade relationship between them. Count subjects rather than
+   announcements.
 4. **Read off coverage.** A substantive entry is anchored when its digest is in that
    set. Normalize the two spellings before comparing: `sealJson` returns
    `sha256:<hex>`, while the record's `subject.digest` is a digest set carrying the
