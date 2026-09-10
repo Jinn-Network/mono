@@ -21,9 +21,9 @@ export const MAX_FAILURE_CHARS = 512;
  * hit `MAX_FAILURE_CHARS` is written -- and rendered into the
  * `corpus-mirror-freshness` detail -- looking complete: it just stops. An
  * operator reading it cannot tell whether the cause was in the part they can
- * see. One character is enough, and the writer slices to
- * `MAX_FAILURE_CHARS - 1` before appending it so a marked value still fits the
- * bound the read schema declares.
+ * see. One character is enough. The writer appends it OVER the tail of the cut
+ * rather than after it, so the invariant the read schema depends on holds: a
+ * marked value is still at most `MAX_FAILURE_CHARS`.
  */
 export const FAILURE_TRUNCATION_MARKER = "\u2026";
 

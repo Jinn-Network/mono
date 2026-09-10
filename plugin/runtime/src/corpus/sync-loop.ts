@@ -401,14 +401,10 @@ export function createCorpusSyncCapability(
    * next read rejects as unrecognized, quietly costing the freshness history
    * that document exists to keep.
    *
-   * A half the ceiling actually cut says so (#3822). `sanitizeUntrustedText`
-   * slices with no suffix, so a cut value written as-is looks complete — it
-   * just stops — and an operator reading a 512-character error cannot tell
-   * whether the cause was in the part they can see. The marker is appended
-   * over the LAST character rather than after the bound, so a marked value is
-   * still at most `MAX_FAILURE_CHARS` and still satisfies the read schema. The
-   * truncation flag is what decides, not the length: a value that arrives at
-   * exactly the ceiling was not cut and is not marked.
+   * A half the ceiling actually cut says so — see `FAILURE_TRUNCATION_MARKER`
+   * for why (#3822). What is local to this function: the truncation FLAG is
+   * what decides, not the length, so a value that arrives at exactly the
+   * ceiling was not cut and is not marked.
    */
   function recordable(value: string | undefined, fallback: string): string {
     const { text, truncated } =

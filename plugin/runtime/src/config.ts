@@ -287,7 +287,12 @@ function resolveCorpusConfig(file: unknown, homeDirectory: string): CorpusConfig
   const byArchive = new Set<string>();
   const byRepository = new Set<string>();
   /**
-   * `(agent, keyid)` -> the single `validFrom` this configuration declares for it.
+   * `(agent, keyid)` → the single `validFrom` this configuration declares for it.
+   *
+   * NUL-joined rather than `/`-joined like the `byArchive` key below, because
+   * `agent` is a URL and contains `/` of its own — `a/b` + `c` and `a` + `b/c`
+   * would collide. `name` has a restricted grammar, which is what lets that
+   * neighbour join on `/` safely.
    *
    * Keyed by AGENT, not by archive, because that is the question the runtime
    * asks of it: `declaredSigningKeys` in `session-host-corpus.ts` aggregates
@@ -298,7 +303,7 @@ function resolveCorpusConfig(file: unknown, homeDirectory: string): CorpusConfig
    * contradiction here rather than picking one is the fail-loud direction, and
    * it is what makes that dedup order-independent. Comparison is between
    * canonical UTC instants, since `MirrorSourceSigningKeySchema` normalizes
-   * `validFrom` on the way in -- two offset spellings of one instant are not a
+   * `validFrom` on the way in — two offset spellings of one instant are not a
    * contradiction.
    */
   const declaredKeyValidFrom = new Map<string, string>();

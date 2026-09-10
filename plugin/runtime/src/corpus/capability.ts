@@ -73,7 +73,8 @@ interface Started {
    * Chain-verification refusals observed since start, newest wins, keyed by
    * `agent/name`. The value is the posture's `reason` — whatever it refused
    * on, which is the head signature, the entry linkage (`broken-chain`), or
-   * this runtime's own per-pass bound (`sync-truncated`), not head signatures
+   * one of this runtime's own two abandonments (`sync-truncated` for the
+   * per-pass bound, `sync-aborted` for a cancelled pass), not head signatures
    * alone.
    */
   readonly chainRejections: Map<string, string>;
@@ -444,32 +445,23 @@ export function createCorpusCapability(
     const configured = state.corpus.chainVerification;
     if (configured === "verified" && state.chainVerificationShortfall === undefined) {
       const refused = [...state.chainRejections.entries()];
-      // `sync-truncated` is the one reason in this map the archive did not
-      // cause -- it is this runtime abandoning the walk at its own per-pass
-      // bound (#3252). Sending that operator to the archive's head signature
-      // and entry linkage is the phantom hunt the refusal exists to prevent,
-      // so its remedy is emitted separately. Both can be present at once: a
-      // real install can have one truncated source and one genuinely broken
-      // one, and each needs its own next step.
+      // Two reasons in this map the archive did not cause: this runtime
+      // abandoning the walk at its own per-pass bound (`sync-truncated`,
+      // #3252) and abandoning it because the pass was cancelled
+      // (`sync-aborted`, #3672). Sending either operator to the archive's head
+      // signature and entry linkage is the phantom hunt those refusals exist
+      // to prevent, and sending the CANCELLED one to the bound is a second
+      // phantom on top -- so all three remedies are emitted separately. Any
+      // combination can be present at once: a real install can have one
+      // truncated source, one cancelled source, and one genuinely broken one,
+      // and each needs its own next step, which is why each names the source
+      // state it applies to rather than the install as a whole.
       const truncated = refused.some((entry) => entry[1] === SYNC_TRUNCATED_REASON);
       const aborted = refused.some((entry) => entry[1] === SYNC_ABORTED_REASON);
       const archiveFaulted = refused.some(
         (entry) => entry[1] !== SYNC_TRUNCATED_REASON && entry[1] !== SYNC_ABORTED_REASON,
       );
       const remedies: string[] = [];
-      if (aborted) {
-        // Deliberately says nothing about `corpus.maxEntriesPerSync` (#3672).
-        // The bound did not cause this stop and raising it changes nothing, so
-        // naming it here would send the operator to tune a value that was never
-        // the constraint -- the same misdirection the truncated remedy below
-        // exists to remove, one field over.
-        remedies.push(
-          `A \`${SYNC_ABORTED_REASON}\` refusal is this runtime's own doing too: the sync was ` +
-            "CANCELLED before the walk finished, so the entry the head cites was never fetched " +
-            "and the chain could not be verified. Nothing about the archive or the bound is " +
-            "implicated — let a pass run to completion and it verifies.",
-        );
-      }
       if (truncated) {
         remedies.push(
           `A \`${SYNC_TRUNCATED_REASON}\` refusal is this runtime's own doing, not the ` +
@@ -477,6 +469,22 @@ export function createCorpusCapability(
             "entry the head cites was never fetched and the chain could not be verified. " +
             "Raise `corpus.maxEntriesPerSync` (default 500, ceiling 10,000) above that " +
             "source's backlog and the next pass verifies it.",
+        );
+      }
+      if (aborted) {
+        // Deliberately says nothing about `corpus.maxEntriesPerSync` (#3672).
+        // The bound did not cause this stop and raising it changes nothing, so
+        // naming it here would send the operator to tune a value that was never
+        // the constraint — the same misdirection the truncated remedy above
+        // exists to remove, one field over. Emitted after that remedy, and
+        // scoped to its own source, so an install carrying both reads as two
+        // per-source next steps rather than as one self-contradicting
+        // paragraph.
+        remedies.push(
+          `A \`${SYNC_ABORTED_REASON}\` refusal is this runtime's own doing as well: that ` +
+            "source's sync was CANCELLED before the walk finished, so the entry the head cites " +
+            "was never fetched and the chain could not be verified. For that source neither the " +
+            "archive nor the bound is implicated — let its pass run to completion and it verifies.",
         );
       }
       if (archiveFaulted) {

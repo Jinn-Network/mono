@@ -150,7 +150,9 @@ describe("corpus configuration", () => {
             },
           },
         }),
-      ).toThrow(new RegExp(`${KEYID}[\\s\\S]*|https://agents\\.test/alice`));
+        // Both, not either: an `|` here would pass on a message naming only
+        // one of the two, which is the case this test exists to fail.
+      ).toThrow(new RegExp(`(?=[\\s\\S]*${KEYID})(?=[\\s\\S]*https://agents\\.test/alice)`));
     });
 
     test("the rejection does not depend on which source is written first", () => {
