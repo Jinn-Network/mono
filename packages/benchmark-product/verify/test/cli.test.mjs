@@ -1241,16 +1241,18 @@ const V8_SHAPE = {
   checks: V8_CHECKS,
   ...V6_IDENTITIES,
   // The anchor block is a shape `evaluateIntegrityAnchors` can actually emit, so the render this
-  // guard walks is the render the product produces. `tsconfig.tests.json` (issue #4385) checks this
-  // literal against `PublicBundleVerificationResult`, so the field shape is enforced -- but
-  // emittability is not, because that type admits blocks the closure never produces. Those are the
-  // parts only this comment holds: the subject must be one of `ClaimAnchorSubject`'s two members
-  // (`lock`/`matrix`), and the subject rows are the fixed pair that closure maps over, never a
-  // one-row reduction -- so a subject-keyed line in `renderSubject` or `renderAnchor` reaches this
-  // guard instead of being skipped by a subject no closure emits. A `present` RFC 3161 entry has
-  // parsed, so it carries the `provider` and `facts` its own type documents for that status
-  // (`facts` is typed `unknown`, so its contents are this comment's charge too); `genTime` is what
-  // `anchoredValue` reads for the head line's value segment.
+  // guard walks is the render the product produces. The `@type` annotation above this literal
+  // binds it to `PublicBundleVerificationResult`, and `tsconfig.tests.json` (issue #4385) turns
+  // on the `checkJs` that honors it, so the field shape is enforced -- including that every
+  // `subject` here is one of `ClaimAnchorSubject`'s two members (`lock`/`matrix`). Emittability
+  // is not enforced, because that type admits blocks the closure never produces. Those are the
+  // parts only this comment holds: the subject rows are the fixed pair that closure maps over,
+  // never a one-row reduction (`subjects` is an unbounded `readonly AnchorSubjectReport[]`) -- so
+  // a subject-keyed line in `renderSubject` or `renderAnchor` reaches this guard instead of being
+  // skipped by a subject the closure never emits. A `present` RFC 3161 entry has parsed, so it
+  // carries the `provider` and `facts` its own type documents for that status (both are optional
+  // on a flat interface, and `facts` is typed `unknown`, so its contents are this comment's
+  // charge too); `genTime` is what `anchoredValue` reads for the head line's value segment.
   anchors: {
     anchors: [{
       recordSha256: "9".repeat(64), status: "present", subject: "lock",
