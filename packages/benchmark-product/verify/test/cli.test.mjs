@@ -10,11 +10,20 @@ import { fileURLToPath } from "node:url";
 const exec = promisify(execFile);
 const bin = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
+/**
+ * Success and failure return the same shape so a caller can read `code` without narrowing.
+ * `code` stays `undefined` on success, which is what the refusal assertions test against.
+ *
+ * @param {readonly string[]} args
+ * @returns {Promise<{ stdout: string, stderr: string, code: number | undefined }>}
+ */
 async function invoke(args) {
   try {
-    return await exec(process.execPath, [bin, ...args]);
+    const { stdout, stderr } = await exec(process.execPath, [bin, ...args]);
+    return { stdout, stderr, code: undefined };
   } catch (error) {
-    return { stdout: error.stdout, stderr: error.stderr, code: error.code };
+    const failure = /** @type {{ stdout: string, stderr: string, code?: number }} */ (error);
+    return { stdout: failure.stdout, stderr: failure.stderr, code: failure.code };
   }
 }
 
@@ -48,6 +57,20 @@ function bundleSnapshot(identity = "0".repeat(64)) {
     identity,
     fileBytes: new Map([["bundle.json", bytes]]),
   };
+}
+
+/**
+ * The `readFile` seam returns bytes or refuses; a fixture map's miss is a broken test, not an
+ * empty file, so it is named here rather than handed to the parser as `undefined`.
+ *
+ * @param {ReadonlyMap<string, Uint8Array>} files
+ * @param {string} path
+ * @returns {Uint8Array}
+ */
+function readFixture(files, path) {
+  const bytes = files.get(path);
+  assert.ok(bytes !== undefined, `no fixture for ${path}`);
+  return bytes;
 }
 
 /**
@@ -154,7 +177,7 @@ test("the verdict names the operation and its limits print directly under it (is
   // `Artifact content` block and its limit paragraph. The caveats are unconditional, so neither may
   // render a verdict without them immediately beneath it (issue #3690).
   const shapes = [
-    {
+    /** @type {import("../dist/index.js").PublicBundleVerificationResult} */ ({
       format: "benchmark-product-public-bundle/4",
       identity: "a".repeat(64),
       checks: [
@@ -163,8 +186,8 @@ test("the verdict names the operation and its limits print directly under it (is
       ],
       benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
       reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
-    },
-    {
+    }),
+    v5({
       format: "benchmark-product-public-bundle/5",
       identity: `sha256:${"a".repeat(64)}`,
       checks: [
@@ -184,7 +207,7 @@ test("the verdict names the operation and its limits print directly under it (is
         status: "not-fetched", verified: 2, notFetched: 3,
         notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
       },
-    },
+    }),
   ];
   for (const shape of shapes) {
     const output = renderVerifiedBundle(shape);
@@ -211,6 +234,7 @@ const V6_IDENTITIES = {
   reportSha256: "e".repeat(64),
   reportEnvelopeSha256: "f".repeat(64),
 };
+/** @type {readonly import("../dist/index.js").PublicBundleVerificationCheck[]} */
 const V6_CHECKS = [
   "manifest", "evidence-closure", "trust", "matrix-rederivation",
   "report-verification", "claim-consistency", "integrity-anchors",
@@ -340,6 +364,7 @@ test("accepted anchor reasons alias raw identifiers for humans while JSON keeps 
   const urn = "urn:jinn:anchor:calendar-a";
   const keyId = "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX";
   const reason = `calendar promise ${urn} was signed by ${keyId}`;
+  /** @type {import("../dist/index.js").PublicBundleVerificationResult} */
   const report = {
     format: "benchmark-product-public-bundle/6",
     identity: "a".repeat(64),
@@ -360,13 +385,13 @@ test("accepted anchor reasons alias raw identifiers for humans while JSON keeps 
     },
   };
 
-  const human = await runVerifierCli(["bundle"], { verify: async () => ({ verification: report }) });
+  const human = await runVerifierCli(["bundle"], { verify: async () => verified(report) });
   assert.equal(human.exitCode, 0);
   assert.match(human.stdout, /calendar promise <identifier: see --json> was signed by <identifier: see --json>/);
   assert.doesNotMatch(human.stdout, /urn:|did:key/);
   assert.doesNotMatch(human.stdout, /jinn\.network|jinn\.benchmarking/);
 
-  const machine = await runVerifierCli(["bundle", "--json"], { verify: async () => ({ verification: report }) });
+  const machine = await runVerifierCli(["bundle", "--json"], { verify: async () => verified(report) });
   assert.equal(machine.exitCode, 0);
   assert.equal(JSON.parse(machine.stdout).anchors.anchors[0].reason, reason);
 });
@@ -400,14 +425,15 @@ test("the trust-material flags reach the verifier; a malformed header file exits
     ["headers.txt", encoder.encode("# comment\n880017:" + "ab".repeat(80) + "\n")],
     ["broken.txt", encoder.encode("not-a-header\n")],
   ]);
+  /** @type {import("../dist/index.js").VerifyPublicBundleDeps | undefined} */
   let seen;
   const ok = await runVerifierCli(
     ["bundle", "--json", "--tsa-root", "root.der", "--ots-headers", "headers.txt"],
     {
-      readFile: (path) => files.get(path),
+      readFile: (path) => readFixture(files, path),
       verify: async (_dir, options) => {
         seen = options;
-        return { verification: { format: "benchmark-product-public-bundle/6", identity: "a".repeat(64), checks: V6_CHECKS, ...V6_IDENTITIES } };
+        return verified({ format: "benchmark-product-public-bundle/6", identity: "a".repeat(64), checks: V6_CHECKS, ...V6_IDENTITIES });
       },
     },
   );
@@ -416,12 +442,14 @@ test("the trust-material flags reach the verifier; a malformed header file exits
   // reported body must still be the verification. A stub returning the bare verification spreads
   // to nothing rather than throwing, which would empty this body with nothing said.
   assert.equal(JSON.parse(ok.stdout).identity, "a".repeat(64));
-  assert.equal(seen.anchorTrust.rfc3161.trustAnchorsDer.length, 1);
-  assert.deepEqual([...seen.anchorTrust.opentimestamps.blockHeaders].map((entry) => entry.height), [880017]);
-  assert.equal(seen.anchorTrust.opentimestamps.blockHeaders[0].header.length, 80);
+  const trust = seen?.anchorTrust;
+  assert.ok(trust?.rfc3161 !== undefined && trust.opentimestamps !== undefined);
+  assert.equal(trust.rfc3161.trustAnchorsDer.length, 1);
+  assert.deepEqual([...trust.opentimestamps.blockHeaders].map((entry) => entry.height), [880017]);
+  assert.equal(trust.opentimestamps.blockHeaders[0].header.length, 80);
 
   const broken = await runVerifierCli(["bundle", "--ots-headers", "broken.txt"], {
-    readFile: (path) => files.get(path),
+    readFile: (path) => readFixture(files, path),
     verify: async () => { throw new Error("must not be reached"); },
   });
   assert.equal(broken.exitCode, 2);
@@ -432,7 +460,7 @@ test("the trust-material flags reach the verifier; a malformed header file exits
     readFile: () => { throw new Error("must not be reached"); },
     verify: async (_dir, options) => {
       seen = options;
-      return { verification: { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES } };
+      return verified({ format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES });
     },
   });
   assert.equal(bare.exitCode, 0);
@@ -444,17 +472,20 @@ test("a PEM trust anchor file is decoded into one DER root per block", async () 
   const { runVerifierCli } = await import("../dist/index.js");
   const der = Buffer.from([0x30, 0x82, 0x01, 0x02, 0x03, 0x04]);
   const pem = `-----BEGIN CERTIFICATE-----\n${der.toString("base64")}\n-----END CERTIFICATE-----\n`;
+  /** @type {import("../dist/index.js").VerifyPublicBundleDeps | undefined} */
   let seen;
   const result = await runVerifierCli(["bundle", "--json", "--tsa-root", "roots.pem"], {
     readFile: () => new TextEncoder().encode(pem + pem),
     verify: async (_dir, options) => {
       seen = options;
-      return { verification: { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES } };
+      return verified({ format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES });
     },
   });
   assert.equal(result.exitCode, 0);
-  assert.equal(seen.anchorTrust.rfc3161.trustAnchorsDer.length, 2);
-  assert.deepEqual(Buffer.from(seen.anchorTrust.rfc3161.trustAnchorsDer[0]), der);
+  const anchors = seen?.anchorTrust;
+  assert.ok(anchors?.rfc3161 !== undefined);
+  assert.equal(anchors.rfc3161.trustAnchorsDer.length, 2);
+  assert.deepEqual(Buffer.from(anchors.rfc3161.trustAnchorsDer[0]), der);
 });
 
 test("a flag missing its value exits 2 with usage", async () => {
@@ -468,7 +499,7 @@ test("a flag missing its value exits 2 with usage", async () => {
 
 test("human summary names all seven evidence-native checks for bundle v5", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
-  const output = renderVerifiedBundle({
+  const output = renderVerifiedBundle(v5({
     format: "benchmark-product-public-bundle/5",
     identity: `sha256:${"a".repeat(64)}`,
     checks: [
@@ -484,7 +515,7 @@ test("human summary names all seven evidence-native checks for bundle v5", async
     artifacts: 300,
     profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
     artifactContent: { status: "verified", verified: 300, notFetched: 0, notFetchedDigests: [] },
-  });
+  }));
   assert.match(output, /^Recomputed: 7 of 7 checks passed/m);
   assert.match(output, new RegExp(`Bundle: sha256:${"a".repeat(64)}`));
   assert.doesNotMatch(output, /sha256:sha256:/);
@@ -526,6 +557,7 @@ test("the anchored qualification closure counts its seven checks, not the unanch
   assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
 });
 
+/** @type {readonly import("../dist/index.js").PublicBundleSigner[]} */
 const SIGNERS = [
   { role: "publisher", identity: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX", keyId: "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX", custody: "same-operator" },
   { role: "automated-grader", identity: "urn:jinn:benchmark-product:local-venue:evaluator-1", keyId: "benchmark-product-verdict-dc8dbb6d84571890", custody: "same-operator" },
@@ -556,7 +588,7 @@ test("the human surface names signer roles in plain words and prints no raw iden
 
 test("an undeclared-custody signer set prints the role alone", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
-  const output = renderVerifiedBundle({
+  const output = renderVerifiedBundle(v5({
     format: "benchmark-product-public-bundle/5",
     identity: `sha256:${"a".repeat(64)}`,
     checks: ["manifest"],
@@ -566,7 +598,7 @@ test("an undeclared-custody signer set prints the role alone", async () => {
       { role: "publisher", identity: "urn:report:1", keyId: "k1", custody: "undeclared" },
       { role: "automated-grader", identity: "urn:evaluator:1", keyId: "k2", custody: "undeclared" },
     ],
-  });
+  }));
   assert.match(output, /^ {2}automated grader — custody not declared · 1 key$/m);
   // The publisher is the operator the others are measured against, so it takes no custody suffix.
   assert.match(output, /^ {2}publisher · 1 key$/m);
@@ -647,11 +679,38 @@ test("a refusal says what failed without printing the identifier it refused", as
   assert.match(JSON.parse(json.stdout).message, /did:key:z[1-9A-HJ-NP-Za-km-z]+:envelope-signature-invalid/);
 });
 
+/**
+ * The evidence-native `/5` member of `PublicBundleVerificationResult`, named locally because the
+ * published surface pins its `checks` to `typeof EVIDENCE_NATIVE_BUNDLE_V5_CHECKS` and exports
+ * neither that constant nor its type. A fixture built from `../dist/index.js` alone -- which is
+ * the constraint these suites keep on purpose -- therefore cannot write that one field's type.
+ *
+ * @typedef {Extract<import("../dist/index.js").PublicBundleVerificationResult, { profile: string }>} V5Verification
+ */
+
+/**
+ * Restores the `checks` tuple that a fixture cannot name. Every other field stays checked against
+ * the real shape, which is the point: these are renderer fixtures, and the seam this project
+ * exists to guard is `VerifierCliDeps`, not the renderer's argument.
+ *
+ * Fields absent from a fixture are absent on purpose -- each of these renderings exercises one
+ * path, not a whole result -- so the parameter is partial. Every field that IS written stays
+ * checked, and a misspelt one is still rejected.
+ *
+ * @param {Partial<Omit<V5Verification, "checks">>
+ *   & { format: "benchmark-product-public-bundle/5", checks: readonly string[] }} fixture
+ * @returns {V5Verification}
+ */
+function v5(fixture) {
+  return /** @type {V5Verification} */ (/** @type {unknown} */ (fixture));
+}
+
 const V5_CHECKS = [
   "manifest", "evidence-closure", "artifact-integrity", "signature-validity",
   "matrix-rederivation", "report-verification", "claim-consistency",
 ];
 
+/** @type {Omit<V5Verification, "profile" | "artifactContent" | "checks"> & { checks: readonly string[] }} */
 const V5_RESULT = {
   format: "benchmark-product-public-bundle/5",
   identity: `sha256:${"a".repeat(64)}`,
@@ -668,11 +727,11 @@ const V5_RESULT = {
 
 test("a full-evidence v5 bundle prints all seven checks as passed", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
-  const output = renderVerifiedBundle({
+  const output = renderVerifiedBundle(v5({
     ...V5_RESULT,
     profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
     artifactContent: { status: "verified", verified: 5, notFetched: 0, notFetchedDigests: [] },
-  });
+  }));
   assert.match(output, /^Recomputed: 7 of 7 checks passed$/m);
   for (const check of V5_CHECKS) assert.match(output, new RegExp(`${check}\\s+passed`));
   assert.doesNotMatch(output, /not fetched/);
@@ -681,7 +740,7 @@ test("a full-evidence v5 bundle prints all seven checks as passed", async () => 
 
 test("a metadata-first v5 bundle discloses artifact-integrity as not fetched", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
-  const output = renderVerifiedBundle({
+  const output = renderVerifiedBundle(v5({
     ...V5_RESULT,
     profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
     artifactContent: {
@@ -690,7 +749,7 @@ test("a metadata-first v5 bundle discloses artifact-integrity as not fetched", a
       notFetched: 3,
       notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
     },
-  });
+  }));
   // The deferred check is never printed as a pass and never folded into the passed total.
   assert.match(output, /^Recomputed: 6 of 7 checks passed, 1 not fetched$/m);
   assert.match(output, /artifact-integrity\s+not fetched/);
@@ -710,7 +769,7 @@ test("a metadata-first v5 bundle discloses artifact-integrity as not fetched", a
 
 test("a metadata-first bundle with one deferred body says body, not bodies", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
-  const output = renderVerifiedBundle({
+  const output = renderVerifiedBundle(v5({
     ...V5_RESULT,
     profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
     artifactContent: {
@@ -719,7 +778,7 @@ test("a metadata-first bundle with one deferred body says body, not bodies", asy
       notFetched: 1,
       notFetchedDigests: ["1".repeat(64)],
     },
-  });
+  }));
   assert.match(output, /1 artifact body was not fetched/);
 });
 
@@ -753,8 +812,7 @@ test("verify refusals keep protocol identifiers in --json and alias them for a h
   const kind = "https://spec.jinn.network/records/benchmark-matrix/v1";
   const deps = {
     verify: () => {
-      const error = new Error(`disclosure-specification: the record's subject kind must be ${kind}`);
-      error.code = "record-integrity";
+      const error = Object.assign(new Error(`disclosure-specification: the record's subject kind must be ${kind}`), { code: "record-integrity" });
       return Promise.reject(error);
     },
   };
@@ -774,10 +832,9 @@ test("a kind-mismatch refusal remains a readable contrast after aliasing", async
   const declared = "https://spec.jinn.network/records/benchmark-matrix/v1";
   const deps = {
     verify: () => {
-      const error = new Error(
+      const error = Object.assign(new Error(
         `carried anchor is invalid: subject.kind is ${declared}, but its digest resolves to this bundle's sealed Run`,
-      );
-      error.code = "record-integrity";
+      ), { code: "record-integrity" });
       return Promise.reject(error);
     },
   };
@@ -796,10 +853,9 @@ test("freeze-repo failures keep identifiers in --json and alias them for a human
   const { runVerifierCli } = await import("../dist/index.js");
   const method = "https://registry.jinn.benchmarking/methods/freeze/v1";
   const deps = {
-    verify: async () => ({ verification: { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"] } }),
+    verify: async () => verified({ format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES }),
     freezeRepo: () => {
-      const error = new Error(`freeze-repo-render: no licence declared for ${method}`);
-      error.code = "freeze-repo-render";
+      const error = Object.assign(new Error(`freeze-repo-render: no licence declared for ${method}`), { code: "freeze-repo-render" });
       return Promise.reject(error);
     },
   };
@@ -819,8 +875,7 @@ test("non-Jinn URLs survive the human refusal surface", async () => {
   const calendar = "https://alice.btc.calendar.opentimestamps.org/";
   const human = await runVerifierCli(["bundle"], {
     verify: () => {
-      const error = new Error(`integrity-anchors: the calendar at ${calendar} did not answer`);
-      error.code = "environment";
+      const error = Object.assign(new Error(`integrity-anchors: the calendar at ${calendar} did not answer`), { code: "environment" });
       return Promise.reject(error);
     },
   });
@@ -854,12 +909,19 @@ function base58btc(bytes) {
 }
 
 /** A real key, its did:key, and a signed binding document for it. */
+/**
+ * @param {string} [domain]
+ * @param {"dns-txt" | "well-known-url"} [mechanism]
+ */
 async function mintDomainBinding(domain = "example.com", mechanism = "dns-txt") {
   const { canonicalJsonBytes } = await import("@jinn-network/trust-core");
   const { domainBindingStatementBytes } = await import("../dist/index.js");
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  const raw = Buffer.from(publicKey.export({ format: "jwk" }).x, "base64url");
+  const { x } = publicKey.export({ format: "jwk" });
+  assert.ok(x !== undefined, "an ed25519 JWK must carry its public coordinate");
+  const raw = Buffer.from(x, "base64url");
   const keyId = `did:key:z${base58btc(Uint8Array.from([0xed, 0x01, ...raw]))}`;
+  /** @type {Parameters<typeof domainBindingStatementBytes>[0]} */
   const statement = {
     format: "colophon-domain-binding/1",
     domain,
@@ -875,6 +937,10 @@ async function mintDomainBinding(domain = "example.com", mechanism = "dns-txt") 
 
 const { keyFingerprintFromDidKey } = await import("../dist/index.js");
 
+/**
+ * @param {string} keyId
+ * @returns {import("../dist/index.js").PublicBundleVerificationResult}
+ */
 function publisherResult(keyId) {
   return {
     format: "benchmark-product-public-bundle/6",
@@ -903,7 +969,7 @@ test("a verified binding renders the domain and names the proof mechanism plainl
   const { keyId, bytes } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
     readFile: () => bytes,
-    verify: async () => ({ verification: publisherResult(keyId) }),
+    verify: async () => verified(publisherResult(keyId)),
   });
   assert.equal(result.exitCode, 0);
   // Attributive, not assertive: only the key's signature was checked, so the line says so where a
@@ -916,7 +982,7 @@ test("a verified binding renders the domain and names the proof mechanism plainl
   assert.match(result.stdout, /DNS resolution/);
   assert.match(result.stdout, /registrar/);
   // This is the one actionable raw identifier on the human surface: the exact TXT value to compare.
-  assert.equal(result.stdout.match(/did:key:/g).length, 1);
+  assert.equal(result.stdout.match(/did:key:/g)?.length, 1);
   assert.match(result.stdout, new RegExp(`\n {4}expect: colophon-domain-binding=1; key=${keyId}\n`));
   assert.doesNotMatch(result.stdout, /jinn\.network|jinn\.benchmarking/);
 });
@@ -924,7 +990,7 @@ test("a verified binding renders the domain and names the proof mechanism plainl
 test("without a binding the publisher is named by its bare key fingerprint", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
-  const result = await runVerifierCli(["bundle"], { verify: async () => ({ verification: publisherResult(keyId) }) });
+  const result = await runVerifierCli(["bundle"], { verify: async () => verified(publisherResult(keyId)) });
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /key sha256:[a-f0-9]{64} — no domain bound/);
   assert.doesNotMatch(result.stdout, /claims publication/);
@@ -938,7 +1004,7 @@ test("a binding for a key that did not sign the bundle exits 2 and is not render
   const other = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
     readFile: () => bytes,
-    verify: async () => ({ verification: publisherResult(other.keyId) }),
+    verify: async () => verified(publisherResult(other.keyId)),
   });
   assert.equal(result.exitCode, 2);
   assert.match(result.stderr, /domain binding not applied/);
@@ -953,7 +1019,7 @@ test("--json carries the verified binding, and the failure in its place", async 
   const { keyId, bytes } = await mintDomainBinding("example.org", "well-known-url");
   const ok = await runVerifierCli(["bundle", "--json", "--identity-binding", "b.json"], {
     readFile: () => bytes,
-    verify: async () => ({ verification: publisherResult(keyId) }),
+    verify: async () => verified(publisherResult(keyId)),
   });
   const parsed = JSON.parse(ok.stdout);
   assert.equal(parsed.ok, true);
@@ -967,7 +1033,7 @@ test("--json carries the verified binding, and the failure in its place", async 
 
   const bad = await runVerifierCli(["bundle", "--json", "--identity-binding", "b.json"], {
     readFile: () => new TextEncoder().encode("{"),
-    verify: async () => ({ verification: publisherResult(keyId) }),
+    verify: async () => verified(publisherResult(keyId)),
   });
   const parsedBad = JSON.parse(bad.stdout);
   assert.equal(parsedBad.ok, false);
@@ -981,10 +1047,9 @@ test("identity-binding failures keep identifiers in --json and alias them for a 
   const { keyId } = await mintDomainBinding();
   const kind = "https://spec.jinn.network/records/domain-binding/v1";
   const deps = {
-    verify: async () => ({ verification: publisherResult(keyId) }),
+    verify: async () => verified(publisherResult(keyId)),
     readFile: () => {
-      const error = new Error(`binding document uses unsupported kind ${kind}`);
-      error.code = "validation";
+      const error = Object.assign(new Error(`binding document uses unsupported kind ${kind}`), { code: "validation" });
       throw error;
     },
   };
@@ -1014,17 +1079,15 @@ test("a binding for a grader key never becomes the publisher's identity", async 
   const grader = await mintDomainBinding("grader.example");
   const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
     readFile: () => grader.bytes,
-    verify: async () => ({
-      verification: {
-        format: "benchmark-product-public-bundle/6",
-        identity: "a".repeat(64),
-        checks: V6_CHECKS,
-        ...V6_IDENTITIES,
-        signers: [
-          { role: "publisher", identity: "urn:jinn:agent:alpha", keyId: publisher.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(publisher.keyId) },
-          { role: "automated-grader", identity: "urn:jinn:agent:beta", keyId: grader.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(grader.keyId) },
-        ],
-      },
+    verify: async () => verified({
+      format: "benchmark-product-public-bundle/6",
+      identity: "a".repeat(64),
+      checks: V6_CHECKS,
+      ...V6_IDENTITIES,
+      signers: [
+        { role: "publisher", identity: "urn:jinn:agent:alpha", keyId: publisher.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(publisher.keyId) },
+        { role: "automated-grader", identity: "urn:jinn:agent:beta", keyId: grader.keyId, custody: "same-operator", keyFingerprint: keyFingerprintFromDidKey(grader.keyId) },
+      ],
     }),
   });
   assert.equal(result.exitCode, 2);
@@ -1039,17 +1102,15 @@ test("with no single publisher there is no identity to qualify, so neither line 
   const second = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
     readFile: () => bytes,
-    verify: async () => ({
-      verification: {
-        format: "benchmark-product-public-bundle/6",
-        identity: "a".repeat(64),
-        checks: V6_CHECKS,
-        ...V6_IDENTITIES,
-        signers: [
-          { role: "publisher", identity: "urn:jinn:agent:alpha", keyId, custody: "same-operator" },
-          { role: "publisher", identity: "urn:jinn:agent:beta", keyId: second.keyId, custody: "same-operator" },
-        ],
-      },
+    verify: async () => verified({
+      format: "benchmark-product-public-bundle/6",
+      identity: "a".repeat(64),
+      checks: V6_CHECKS,
+      ...V6_IDENTITIES,
+      signers: [
+        { role: "publisher", identity: "urn:jinn:agent:alpha", keyId, custody: "same-operator" },
+        { role: "publisher", identity: "urn:jinn:agent:beta", keyId: second.keyId, custody: "same-operator" },
+      ],
     }),
   });
   assert.equal(result.exitCode, 2);
@@ -1066,8 +1127,8 @@ test("a drifted freeze repository still exits 1 when an unrelated binding also f
     ["bundle", "--freeze-repo", "repo", "--identity-binding", "binding.json"],
     {
       readFile: () => new TextEncoder().encode("{"),
-      verify: async () => ({ verification: publisherResult(keyId) }),
-      freezeRepo: async () => ({ ok: false, commitId: "c".repeat(40), fileCount: 3, executableBitChecked: true, differences: [{ kind: "changed", path: "README.md" }] }),
+      verify: async () => verified(publisherResult(keyId)),
+      freezeRepo: async () => ({ ok: false, bundleIdentity: "a".repeat(64), commitId: "c".repeat(40), fileCount: 3, executableBitChecked: true, differences: [{ kind: "changed", path: "README.md" }] }),
     },
   );
   assert.equal(result.exitCode, 1);
@@ -1083,15 +1144,19 @@ test("a drifted freeze repository still exits 1 when an unrelated binding also f
 // filesystem carries no executable bit. A filesystem that does not record the bit is not reachable
 // from CI, so the injectable `freezeRepo` dep is the only place that string can be exercised.
 
+/**
+ * @param {Partial<import("../dist/index.js").FreezeRepoVerificationResult>} extra
+ * @returns {import("../dist/index.js").FreezeRepoVerificationResult}
+ */
 function matchedTree(extra) {
-  return { ok: true, commitId: "d".repeat(40), fileCount: 3, differences: [], ...extra };
+  return { ok: true, bundleIdentity: "a".repeat(64), commitId: "d".repeat(40), fileCount: 3, executableBitChecked: true, differences: [], ...extra };
 }
 
 test("a filesystem that does not record the bit is reported as one, not as a refused probe", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
-    verify: async () => ({ verification: publisherResult(keyId) }),
+    verify: async () => verified(publisherResult(keyId)),
     freezeRepo: async () => matchedTree({ executableBitChecked: false, executableBitSkipped: "not-recorded" }),
   });
   assert.equal(result.exitCode, 0);
@@ -1102,7 +1167,7 @@ test("a refused probe says so rather than describing the reader's filesystem", a
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
-    verify: async () => ({ verification: publisherResult(keyId) }),
+    verify: async () => verified(publisherResult(keyId)),
     freezeRepo: async () => matchedTree({ executableBitChecked: false, executableBitSkipped: "not-probed" }),
   });
   assert.equal(result.exitCode, 0);
@@ -1115,7 +1180,7 @@ test("a result carrying no reason claims neither cause", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
-    verify: async () => ({ verification: publisherResult(keyId) }),
+    verify: async () => verified(publisherResult(keyId)),
     freezeRepo: async () => matchedTree({ executableBitChecked: false }),
   });
   assert.equal(result.exitCode, 0);
@@ -1127,7 +1192,7 @@ test("a checked mode dimension adds no note at all", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
   const result = await runVerifierCli(["bundle", "--freeze-repo", "repo"], {
-    verify: async () => ({ verification: publisherResult(keyId) }),
+    verify: async () => verified(publisherResult(keyId)),
     freezeRepo: async () => matchedTree({ executableBitChecked: true }),
   });
   assert.equal(result.exitCode, 0);
@@ -1169,6 +1234,7 @@ test("the freeze check renders from the exact snapshot the reported verdict came
 // closure — and not even all of it: `trust` was missing — so an anchored or disclosed bundle
 // printed `of 7` or `of 8` above a sentence that accounted for five checks.
 
+/** @type {readonly import("../dist/index.js").PublicBundleVerificationCheck[]} */
 const V8_CHECKS = [...V6_CHECKS, "disclosure-specification"];
 
 function caveatOf(output) {
@@ -1213,14 +1279,14 @@ test("the caveat enumerates the disclosed closure's eighth check (issue #3691)",
 
 test("the caveat never claims a deferred check was recomputed (issue #3691)", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
-  const output = renderVerifiedBundle({
+  const output = renderVerifiedBundle(v5({
     ...V5_RESULT,
     profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5/metadata-first",
     artifactContent: {
       status: "not-fetched", verified: 2, notFetched: 3,
       notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
     },
-  });
+  }));
   const caveat = caveatOf(output);
   assert.doesNotMatch(caveat, /artifact integrity/);
   assert.match(caveat, /signature validity/);
@@ -1238,7 +1304,7 @@ test("every closure's checks have a caveat phrase (issue #3691)", async () => {
   ];
   for (const checks of closures) {
     const sentence = describeRecomputedChecks({
-      outcomes: checks.map((check) => ({ check, state: "passed" })),
+      outcomes: checks.map((check) => (/** @type {import("../dist/index.js").VerificationCheckOutcome} */ ({ check, state: "passed" }))),
       passed: checks.length,
       notFetched: 0,
       total: checks.length,
@@ -1274,7 +1340,7 @@ test("the usage block and the verdict agree on what this tool does to the npm by
 // asserted by the external verification path — so the spec rules them *keep + gloss*: the plain
 // words go beside the name, never in place of it. These tests hold both halves of that ruling.
 
-const V5_METADATA_FIRST = {
+const V5_METADATA_FIRST = v5({
   format: "benchmark-product-public-bundle/5",
   identity: `sha256:${"a".repeat(64)}`,
   checks: [
@@ -1294,8 +1360,9 @@ const V5_METADATA_FIRST = {
     status: "not-fetched", verified: 2, notFetched: 3,
     notFetchedDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
   },
-};
+});
 
+/** @type {import("../dist/index.js").PublicBundleVerificationResult} */
 const V8_SHAPE = {
   format: "benchmark-product-public-bundle/8",
   identity: "a".repeat(64),

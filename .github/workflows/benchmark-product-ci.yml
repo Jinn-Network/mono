@@ -1,5 +1,29 @@
 name: Benchmark Product CI
 
+# This lane does NOT run in merge groups, and that is a decision, not an omission (issue #4384).
+#
+# If you arrived here from a red `Benchmark Product CI` on `next` for something that was green on
+# every contributing pull request, you have found the accepted gap rather than a new bug. Two
+# branches can each be correct alone and wrong together -- #4272 is the worked example: PR #3664
+# and PR #3781 both rewrote the verifier CLI and its suite, merged with no textual conflict, and
+# the semantic collision first appeared as a red `push` run here, after the merge.
+#
+# What was weighed. The `product` job took 1h4m on the #4272 fix. Adding `merge_group` and making
+# a job required would put roughly that on the critical path of every queued merge touching the
+# filtered paths above -- a repo-wide stall, not a lane-local cost. The "fast subset" alternative
+# is not actually fast: anything that runs the verifier suite must first build the ~35-package
+# `portal:` closure from source, which is most of the job. No measured number exists for a split
+# lane, and turning an unmeasured guess into a required check is how a merge queue wedges.
+#
+# What was done instead. `packages/benchmark-product/verify/tsconfig.tests.json` typechecks the
+# `.mjs` suites against the published surface they exercise, so a stub written against a
+# superseded seam shape now fails to compile at its own line rather than crashing several frames
+# inside the renderer, as #4272 did. Detection stays post-merge; diagnosis stops being an
+# investigation.
+#
+# This is reversible. A second semantic collision landing on `next` is the signal that the
+# measured cost of a split merge-group lane is worth paying.
+
 on:
   pull_request:
     paths:
