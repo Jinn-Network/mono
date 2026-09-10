@@ -335,8 +335,8 @@ export function deriveConformanceClaims(markdown = readFileSync(specPath, 'utf8'
  * append-only — a wrong one is retained unedited and replaced by a new fixture plus a dated
  * erratum — so the loaded corpus skips the superseded copy while its bytes stay on disk.
  * `packages/discovery/testing/src/vectors.ts` (`supersededDirectories`) is the definition of
- * record; this re-derives it because a `.github/scripts` guard cannot import the package —
- * there is no build here, and `record-discovery-source-boundaries.test.mjs` would object.
+ * record; this re-derives it because a `.github/scripts` guard cannot import the package: the
+ * architecture job runs no install, and `vectors.ts` is TypeScript.
  */
 function supersededVectors() {
   const manifest = JSON.parse(readFileSync(join(fixturesRoot, 'manifest.sha256.json'), 'utf8'));

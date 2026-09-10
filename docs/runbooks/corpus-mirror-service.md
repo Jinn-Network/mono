@@ -220,24 +220,27 @@ row's full detail and remedy:
 {"detail":"1 of 1 followed archive(s) have not synced …","remedy":"…","level":"warn","message":"corpus-mirror-freshness"}
 ```
 
-Four more lines are documented here, all of them about a channel rather than
-the sync. The sync's own failures — `corpus.mirror.sync-failed` (`error`, the
+Four more lines are documented here. The rest reach the same stderr and are
+read through the health rows below: `corpus.mirror.sync-failed` (`error`, the
 only error-level line the mirror emits), `corpus.mirror.lock-failed` and
-`corpus.mirror.index-failed` (`warn`), plus `corpus.mirror.status.unreadable`
-(`warn`) and `corpus.mirror.head-revalidated` (`debug`) — reach the same
-stderr and are read through the health rows below rather than here.
+`corpus.mirror.index-failed` (`warn`), `corpus.mirror.status.unreadable`
+(`warn`), and `corpus.mirror.head-revalidated` (`debug`, which reports a
+successful sync rather than a fault).
 
 Two of the four are `warn`, and both mean a channel degraded while the sync
 itself did not:
 
 - **`corpus.mirror.cycle.unreported`** — the cycle ran, but recording or
   reporting it threw; the injected clock, or a stderr sink that EPIPEd, are the
-  candidates. That cycle's `corpus.mirror.cycle` line and its
-  `mirror-sync-status.json` update are the casualties, not the loop, which
-  reschedules regardless. It is emitted best-effort inside a nested guard, so
-  when the logger is itself the fault no line appears at all — a silent gap in
-  cycle lines carries the same reading. Repeats age per-source timestamps and
-  eventually trip `corpus-mirror-freshness`, which is the row to act on.
+  candidates, and they differ. A clock that throws costs both the
+  `corpus.mirror.cycle` line and the `mirror-sync-status.json` update, and
+  stalls the per-source timestamps with them. A logger that throws costs only
+  the cycle line — the sync and the status file are already written. Neither
+  costs the loop, which reschedules regardless. This line is itself emitted
+  best-effort inside a nested guard, so when the logger is the fault no line
+  appears at all: a silent gap in cycle lines carries the same reading. Either
+  way `corpus-mirror-freshness` is emitted from inside the same guarded block
+  that failed, so no health row marks it — a restart is the remedy.
 - **`corpus.mirror.status.unwritable`** — `mirror-sync-status.json` could not
   be written: permissions, or a full or read-only volume. The sync is
   unaffected and the stderr cycle line stays authoritative; the file channel is

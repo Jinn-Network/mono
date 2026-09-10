@@ -338,8 +338,8 @@ verifier handed a wider value MUST clamp it back to the published-source ceiling
 honor it. The clamp is normative, not advisory: it is what stops a caller re-opening the
 window by passing a bigger number.
 
-The two refusals are named once, here, and reused verbatim by both named verification
-procedures (§10.3):
+The two refusals are named once, here, and reused verbatim by both procedures that verify a
+head (§10.3, §10.5):
 
 - **`refresh-by-ceiling`** — rules 1–2 together. It covers the *empty or inverted* window
   as well as the too-wide one; an operator reading this slug for a collapsed window should not
@@ -884,11 +884,12 @@ writes the high-water mark, and §10.3 step 7 remains the only writer of the mar
 monotonicity floor — an identical head leaves it where it is, an accepted re-sign raises it to
 the instant just accepted, so the head it replaced becomes a regression rather than an
 indefinitely replayable one. Raising the floor at an unmoved position is the caller's write,
-not this procedure's, and it is the one high-water-mark write that does not come from §10.3. And it **binds the head's `origin` to the source
-being followed**: keys are resolved from the head, so accepting a head that claims another
-agent would let any agent's valid signature satisfy this source's poll. §10.3 leaves that
-binding to its callers because its linkage walk catches the mismatch downstream; this
-procedure has no chain to catch it, so the binding is explicit and its failure is typed.
+not this procedure's, and it is the one high-water-mark write that does not come from §10.3.
+And it **binds the head's `origin` to the source being followed**: keys are resolved from the
+head, so accepting a head that claims another agent would let any agent's valid signature
+satisfy this source's poll. §10.3 leaves that binding to its callers because its linkage
+walk catches the mismatch downstream; this procedure has no chain to catch it, so the
+binding is explicit and its failure is typed.
 
 **What it is not** is a cached acceptance. Signature, current-key validity and freshness are
 re-checked on every call, so a rotated-out or revoked signer, a tampered envelope, a window
