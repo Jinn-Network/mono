@@ -220,6 +220,30 @@ row's full detail and remedy:
 {"detail":"1 of 1 followed archive(s) have not synced …","remedy":"…","level":"warn","message":"corpus-mirror-freshness"}
 ```
 
+Four more lines can appear. Two are `warn`, and both mean a channel degraded
+while the sync itself did not:
+
+- **`corpus.mirror.cycle.unreported`** — the cycle ran, but recording or
+  reporting it threw; the injected clock, or a stderr sink that EPIPEd, are the
+  candidates. That cycle's `corpus.mirror.cycle` line and its
+  `mirror-sync-status.json` update are the casualties, not the loop, which
+  reschedules regardless. It is emitted best-effort inside a nested guard, so
+  when the logger is itself the fault no line appears at all — a silent gap in
+  cycle lines carries the same reading. Repeats age per-source timestamps and
+  eventually trip `corpus-mirror-freshness`, which is the row to act on.
+- **`corpus.mirror.status.unwritable`** — `mirror-sync-status.json` could not
+  be written: permissions, or a full or read-only volume. The sync is
+  unaffected and the stderr cycle line stays authoritative; the file channel is
+  what degraded. An operator reading the file rather than stderr sees
+  per-source timestamps that no longer reflect reality. Fix the path or its
+  permissions.
+
+Two are `debug`. `corpus.mirror.skipped` is the line behind the
+`skipped-locked` reading given below. `corpus.mirror.freshness.unavailable` is
+why a `corpus.mirror.cycle` line can arrive without a `freshness` key: the
+verdict could not be computed for that cycle, which is supplementary and never
+costs the cycle line.
+
 The health rows are contributed by the capabilities that are actually
 composed, so where you read one depends on which process holds it. The
 `mirror` process contributes the four rows below and exposes no surface to

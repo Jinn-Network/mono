@@ -817,7 +817,7 @@ window) and `head-issued-ahead` (issued too far past the verifier's clock) — s
 `broken-chain` with `at` set to that slug, so they read alongside the entry ceilings the
 linkage walk enforces. A head-only revalidation procedure, which has no chain to fold them
 into, MUST surface the same two slugs as top-level statuses under the same spelling: one
-vocabulary, whichever procedure reports the defect.
+vocabulary, whichever procedure reports the defect. That procedure is §10.5.
 
 ### 10.4 Named verification: item verification
 
@@ -841,6 +841,62 @@ A consumer holding one item from query or subscribe:
    evidence checks, profile checks — not discovery's business).
 
 Discovery verifies *distribution*; the record protocols verify *content*.
+
+### 10.5 Named verification: `source-head-revalidation`
+
+The procedure §10.3's closing rule obliges without naming. It is steps 1-3 of
+`source-chain-verification` with the chain removed, for a source serving the chain position
+the consumer already holds:
+
+1. resolve the source's working keys via the trust layer, under the discovery signing scope
+   (§5.5);
+2. verify the head's DSSE signature **against a key that is currently valid at verification
+   time** — the same rule, and the same reason, as §10.3 step 2: an old key may not vouch a
+   head;
+3. verify the head's freshness window against §5.2's three rules **before** asking whether
+   the head is fresh — a head that over-sets `refreshBy` or issues itself into the future is
+   always fresh and the clock can never catch it — then verify `refreshBy` freshness.
+
+**Caller precondition.** The presented head MUST name exactly the chain position the
+consumer already holds. Position is `sequence` **and** `entry`; a head naming any other
+position is a chain claim and belongs to §10.3. The caller must also exclude an `issuedAt`
+that does not strictly increase: that is a rollback or a backdated re-sign, and it belongs to
+the chain procedure's monotonicity rule (§10.3 step 3), not here.
+
+**Typed outcomes.** `ok`; `stale` (`refreshBy` expired); `refresh-by-ceiling` (empty,
+inverted, or too-wide window); `head-issued-ahead` (`issuedAt` further ahead of the
+verifier's clock than one freshness window); `unauthorized-signer` (no signature by a key
+valid at verification time); `head-origin-mismatch` (the head names a source other than the
+one followed); `head-payload-mismatch` (the envelope does not carry these head bytes);
+`invalid-head-envelope` (not a parseable wire DSSE envelope). The first five discharge
+§10.3's obligation directly: `refresh-by-ceiling` and `head-issued-ahead` are the same two
+slugs under the same spelling, top-level here because there is no `broken-chain` to fold them
+into. The last three are the envelope-shaped refusals §10.3 folds into `unauthorized-signer`
+and this procedure keeps separate, so a caller can tell a malformed envelope from a wrong
+signer.
+
+**Two fail-closed properties.** It **advances no mark**: a revalidated head adopts nothing,
+and §10.3 step 7 remains the only writer of the high-water mark. Both cases below keep
+`issuedAt` a monotonicity floor — an identical head leaves it where it is, an accepted
+re-sign raises it to the instant just accepted, so the head it replaced becomes a regression
+rather than an indefinitely replayable one. And it **binds the head's `origin` to the source
+being followed**: keys are resolved from the head, so accepting a head that claims another
+agent would let any agent's valid signature satisfy this source's poll. §10.3 leaves that
+binding to its callers because its linkage walk catches the mismatch downstream; this
+procedure has no chain to catch it, so the binding is explicit and its failure is typed.
+
+**What it is not** is a cached acceptance. Signature, current-key validity and freshness are
+re-checked on every call, so a rotated-out or revoked signer, a tampered envelope, a window
+that breaks §5.2, or a crossed `refreshBy` still refuses bytes this consumer once accepted.
+
+**Why it exists.** Two cases the seven-step procedure cannot express, both a source serving
+the position already held. First, a head **byte-identical** to the one already accepted:
+§5.2 requires `issuedAt` to strictly increase on every re-signing, so `source-chain-verification`
+refuses it for monotonicity — correct for a chain walk, wrong for a poll that simply outran
+the archive's re-signing. Second, the **same position re-signed later**, which §5.2 obliges a
+live source to do before `refreshBy` expires: monotonicity passes, and then the linkage walk
+fails, because a returning consumer is fed only entries *above* its mark, so the head's own
+cited entry — the boundary itself — is absent from the fed set (#3468).
 
 ## 11. Evidence-layer crosswalk
 
@@ -978,6 +1034,11 @@ is what the later profile did. Every earlier revision stays frozen and registere
 pinned to one keeps working. Like the `profiles.test.ts` pins, this table is an audit written
 from the same reading of the defining schemas as the profiles themselves — it records what was
 audited and does not independently prove any row complete.
+`.github/scripts/record-discovery-audit-table.test.mjs` reads the table back against the profile
+documents, so a profile that widens or narrows its declared set, and a record kind that arrives
+without a row, fail there rather than leaving the table stale. That guard is a change-detector of
+the same kind as the pins: it proves the table and the profiles agree, and neither proves a
+profile complete against the schema it describes.
 
 | Record kind | Leaf | Set | v1 declared | Revision (facts profile) |
 | --- | --- | --- | --- | --- |
@@ -1099,6 +1160,7 @@ unions of verified items are always safe.
 | Rollback (mirror serves an old head) | High-water mark for returning consumers; mirror-set comparison + `issuedAt` preference for cold consumers; residual window = `refreshBy`, bounded by the published-source profile (§14.1) |
 | Equivocation (forked chain, duplicate heads) | Provable from signed artifacts whenever branches meet; gap-free sequences leave no benign fork reading; head exchange (§10.2) creates meeting points; guaranteed detection is the tlog follow-up (§14.1) |
 | Old-key attack (compromised rotated-out key signs a head) | §10.3 step 2: head signer must be currently valid; old keys cannot vouch heads, and entries never need re-vouching |
+| Head-only revalidation used to launder another agent's head, or to advance a mark | §10.5 binds the head's `origin` to the source being followed, and advances no mark; §10.3 step 7 remains the only writer of the high-water mark |
 | Evidence suppression via withdrawal | §5.1: withdrawal never invalidates; retrospective kinds immune to pruning except `reorged`; reason codes make correction distinguishable from delisting |
 | Source withholding | Visible staleness (`refreshBy`); projector completeness spot-checkable against the substrate; N projectors |
 | Relay withholding | Normative head-vs-delivered comparison + entry-granular spot-checks (§9.5); direct chain walk always open |
@@ -1171,9 +1233,10 @@ Frozen at this design's granularity (signatures refined at implementation):
    no origination, no ranking.
 10. The subscribe cursor contract, relay-local cursor declaration, the announcement dedupe
     key, and the two relay cross-check obligations (§9.3, §9.5).
-11. The named verification procedures and their typed outcomes (§10.3, §10.4) — including
-    the head-signer current-validity rule and mandatory entry-provenance verification for
-    decision-grade use.
+11. The named verification procedures and their typed outcomes (§10.3, §10.4, §10.5) —
+    including the head-signer current-validity rule, mandatory entry-provenance verification
+    for decision-grade use, and `source-head-revalidation`'s two fail-closed properties: it
+    advances no mark, and it binds the head's `origin` to the source being followed.
 12. The evidence-layer crosswalk commitments (§11): frozen contracts unchanged; unpublished
     journal conformant.
 
@@ -1223,14 +1286,18 @@ The kit precedes all real implementations (the CSI discipline, again):
   the per-item-drop censoring relay (must be caught by the entry-granular spot-check).
 - **Consumer conformance:** ping-flood debounce (pull rate stays at the consumer's
   configured ceiling); hostile-locator guards (oversize, wrong content type,
-  private-address); head-vs-delivered relay divergence (must downgrade the relay);
+  private-address); well-known archive-root containment (§7 item 3: a contained root
+  accepted; a cross-origin root and a path-escaping root both refused);
+  head-vs-delivered relay divergence (must downgrade the relay);
   cold-start mirror disagreement (must take the highest valid `(sequence, issuedAt)`);
   withdrawal of a retrospective-kind item (must not prune the decision store); `reorged`
   withdrawal (must trigger recompute).
 - **Named checks in isolation:** `source-chain-verification` outcomes (`stale`, `forked`,
   `broken-chain` (including `at: refresh-by-ceiling` and `at: head-issued-ahead`),
   `unauthorized-signer`), `facts-consistency` (all three outcomes),
-  `derivation-consistency` (present, fabricated, reorged-away).
+  `derivation-consistency` (present, fabricated, reorged-away); item verification outcomes
+  (`content-corruption`; `unauthorized-provenance`, both the never-synced entry and the
+  entry that does not announce this item; and `verified`).
 
 ## 19. Declared impact
 
