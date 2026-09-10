@@ -736,9 +736,19 @@ describe('native discovery consumer', () => {
 
     // #3531 — the STRICT increase. `sameHead` runs first and compares `refreshBy` and the
     // envelope as well, so a head at the same position with the SAME `issuedAt` but a stretched
-    // `refreshBy` and a new envelope is not `sameHead`; relaxing `>` to `>=` would admit it and
-    // persist that stretched `refreshBy` to the checkpoint. §5.2's strict-increase rule at this
-    // consumer had no test.
+    // `refreshBy` and a new envelope is not `sameHead`; relaxing `>` to `>=` would admit it.
+    // §5.2's strict-increase rule at this consumer had no test.
+    //
+    // Be exact about the consequence, because it is scoped to this fixture (#3770). Under `>=`
+    // it is THIS TEST'S injected `verifyHead` stub — an unconditional `{ status: 'ok' }` — that
+    // admits the head and lets the stretched `refreshBy` reach the checkpoint. Production never
+    // gets there: this head's window is 167h wide against the published-source profile's 24h
+    // ceiling, so `verifySourceHead` answers `refresh-by-ceiling`, a hard refusal on this path
+    // for every source, and the consumer throws before the checkpoint write. That is the same
+    // argument `reSignedIdleHead`'s own docblock makes about what a re-sign can install at an
+    // unchanged position. The mutation proof is unaffected by the correction: under `>=` the
+    // stub admits, `sync()` resolves instead of rejecting `rewound-or-tampered-head`, and the
+    // case still reddens — it is the strict-increase guard under test here, not the window.
     it('keeps the chain path for a head at the same instant with a stretched refreshBy', async () => {
       const { store, first } = await checkpointed();
       const verifyHead = vi.fn(async () => ({ status: 'ok' as const }));

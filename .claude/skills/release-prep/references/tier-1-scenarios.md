@@ -1,6 +1,14 @@
 # Tier 1 scenarios
 
-Three scenarios, all single-operator, all run on every push to `next` (canary cadence) plus inside `release-prep` for any candidate version. None of them use the substrate from Plan A — Tier 1 is bootstrap-from-scratch territory.
+> **Superseded run-role, retained contract prose.** The release-prep skill's
+> mechanical run-role is retired (see `.claude/skills/release-prep/SKILL.md`);
+> the publish gate is the two SHA-bound check-runs `hermetic-gate` and
+> `environment-suite`. This file is retained because it is the only prose
+> documenting the Tier 1 scenario contracts, including which of them those
+> workflows still execute and which are covered only by the non-blocking weekly
+> `release-tier-1.yml` run.
+
+Three scenarios, all single-operator. Coverage differs per scenario: T1.1's contract is executed by `hermetic-gate.yml` via `yarn test:hermetic` (`operator/test/hermetic/bootstrap-from-scratch.test.ts`) and T1.4's via that workflow's `e2e:app-flow` step. **T1.2's contract has no home in either gate workflow** — neither `hermetic-gate.yml` nor `environment-suite.yml` runs it. It is covered instead by `.github/workflows/release-tier-1.yml`, which invokes the `release:tier-1:T1.2` vitest wrapper on a weekly schedule (Mondays 06:00 UTC) plus manual dispatch — non-blocking by construction, so a regression there is "investigate before the next cut", not a blocked PR. None of the three use the substrate from Plan A — Tier 1 is bootstrap-from-scratch territory.
 
 ## T1.1 — bootstrap-fresh-anvil
 
@@ -18,7 +26,7 @@ Three scenarios, all single-operator, all run on every push to `next` (canary ca
 
 **What it does:** Spawns a fresh-HOME daemon (setup mode is enough — no bootstrap needed). Queries `/v1/harnesses/readiness` (index) and `/v1/harnesses/:name/readiness` (per harness). Asserts every known harness (`claude-code-learner`, `codex-code-learner`, `hermes-agent`) returns a valid contract response: 200 with correct shape, 404 `{error: 'harness_not_found'}`, or 503 `{error: 'subsystem_not_ready'}`.
 
-**Implementation:** `operator/test/release/tier-1/T1.2-harness-readiness-contract.ts`
+**Implementation:** `operator/test/release/tier-1/T1.2-harness-readiness-contract.ts` — run only by its `release:tier-1:T1.2` vitest wrapper, which `.github/workflows/release-tier-1.yml` runs weekly; no gate workflow invokes it.
 
 **Wall-clock budget:** 30s
 
