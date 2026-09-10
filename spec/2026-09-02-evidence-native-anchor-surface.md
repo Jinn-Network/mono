@@ -29,28 +29,32 @@ Both halves of the issue's own suggested remedy are unavailable today:
   inert: no check would read it, and the claim could not name it. That is a
   decorative anchor, which is worse than none.
 - **"or the report republished on format /6"** — `/6` is the anchored member of
-  the *classic* lineage (`/2` → `/4` → `/6` → `/7` → `/8`; `/3` exists but is an
-  out-of-line allocation — a publication-profile projection its own constant in
-  `packages/benchmark-product/core/src/bundle/manifest.ts` calls "a separate
-  lineage from the frozen classic closures", absent from
-  `SUPPORTED_BUNDLE_FORMATS`, and named in `PUBLIC-BUNDLE.md` only as "the
-  unrelated accounting-only v3"), whose closure is the
-  v2 Run/Matrix/Report graph. Demo-1 is evidence-native: its records are
+  the *classic* lineage (`/2` → `/4` → `/6` → `/7` → `/8`; `/3` exists but is
+  an out-of-line allocation — a publication-profile projection its own constant
+  in `packages/benchmark-product/core/src/bundle/manifest.ts` calls "a separate
+  lineage from the frozen classic closures", present in that file's own schema
+  union but absent from the reader's `SUPPORTED_BUNDLE_FORMATS` in
+  `packages/benchmark-product/verify/src/manifest.ts`, and named in
+  `PUBLIC-BUNDLE.md` only as "the unrelated accounting-only v3"), whose closure
+  is the v2 Run/Matrix/Report graph. Demo-1 is evidence-native: its records are
   Benchmark v2, Analysis Manifest, Cohort, Matrix v2 and Report v3, and it has
   no `run.json`. The refusal is mechanical rather than a matter of lineage
   taste: `/6`'s mandatory member list is `PUBLIC_BUNDLE_FILES`, which includes
   `run.json` (`packages/benchmark-product/verify/src/legacy-closures.ts`), so
-  such a bundle would refuse at `mandatory public bundle file "run.json" is
-  missing` (`verify/src/verify.ts`). `/7` and `/8` are dead for the same reason:
-  both take `PUBLIC_BUNDLE_V4_FILES`, which is that same list plus
-  `qualification.json`. There is no re-emission of this report onto `/6`.
+  such a bundle would refuse at `mandatory public bundle file "…" is missing`
+  (`verify/src/verify.ts`) — on the *first* absent member, which is
+  `static-bundle.json`; `run.json` is named here because it is the member no
+  evidence-native report can fill, there being no Run record. `/7` and `/8` are
+  dead for the same reason: both take `PUBLIC_BUNDLE_V4_FILES`, which is that
+  same list plus `qualification.json`. There is no re-emission of this report
+  onto `/6`.
 
 This is not an oversight. The approved design records it twice as deferred
 work: §7.4 ("the evidence-native claim-package/3 and public-bundle/5 adopt the
 same anchor surface in their own later allocation") and §19.7 ("The
-evidence-native closures adopt the anchor surface in their own later
-allocation"; "anchoring evidence for already-published historical bundles is
-future work").
+evidence-native closures (`claim-package/3`, `public-bundle/5`) adopt the
+anchor surface in their own later allocation"; "anchoring evidence for
+already-published historical bundles is future work").
 
 So #2974 is that later allocation. It is `design`-shaped, and the four rulings
 it needed are now made (§4). The issue is currently typed `fix` with Effort
@@ -61,7 +65,7 @@ it needed are now made (§4). The issue is currently typed `fix` with Effort
 Verified in this session, offline, against the committed bytes:
 
 ```
-$ openssl ts -reply -in lock-manifest.tsr -text          # (output elided)
+$ openssl ts -reply -in lock-manifest.tsr -text          # (condensed)
 Policy OID: tsa_policy1
 Hash Algorithm: sha256
 Message data: 822b2f7469dc2e58a3e72eee32688614d296ba20fc381d9a074e3935a68622b3
@@ -96,14 +100,14 @@ removes all four. Under the capability rule the surface mints **no public
 identifier of its own**: it registers as a capability entry inside the composed
 generation `benchmark-product-public-bundle/10`, exactly as `external-import`
 is to register inside `/8` (#3417). That precedent is a ratified allocation
-decision rather than shipped code: `packages/benchmark-product/EXTERNAL-RUN-IMPORT.md`
-still reads "**Until it lands:** `colophon publish` refuses", and
+decision rather than shipped code:
+`packages/benchmark-product/EXTERNAL-RUN-IMPORT.md` still reads "Until it
+lands:" and, in the bullet beneath it, "`colophon publish` refuses", and
 `core/src/operations/publish.ts` still refuses. The rule it establishes is what
-this ruling leans on, not its implementation. `/10`'s own
-allocation — its format IRI, its claim package, its profile IRIs, and the
-mechanism by which a capability entry becomes bundle-visible — belongs to
-the #3403 → #3406 chain and is a prerequisite of this work, not a product of
-it.
+this ruling leans on, not its implementation. `/10`'s own allocation — its
+format IRI, its claim package, its profile IRIs, and the mechanism by which a
+capability entry becomes bundle-visible — belongs to the #3403 → #3406 chain
+and is a prerequisite of this work, not a product of it.
 
 What remains is code, across three packages, plus documentation:
 
@@ -166,12 +170,17 @@ verification. The remedy the issue asks for would, implemented naively, break
 the bundle it is meant to strengthen.
 
 The conflict is semantic, not arithmetic — but the semantic difference is a
-property of *this artifact*, not of the lineage. `closeAt` has the same shape in
-both: a required top-level close instant sitting immediately beside
-`preregistration`, which is the structure `packages/benchmarking/records/README.md`
-describes on the classic Run as "the mandatory `closeAt` stopping rule". It is
-not the source cutoff — the Analysis Manifest carries a distinct *optional
-per-source* `cutoff` field (`SourceBoundarySchema` in
+property of *this artifact*, not of the lineage. `closeAt` has the same shape
+in both: a required top-level close instant — in the manifest, sitting
+immediately beside `preregistration`. The classic Run carries no
+`preregistration` field at all
+(`packages/benchmarking/records/src/run/schema.ts`), because the Run *is* the
+pre-registration — `packages/benchmarking/records/README.md` describes it as "a
+sealed declaration of one execution campaign (arms, replicates, policy, the
+mandatory `closeAt` stopping rule) sealed before any cell executes". The
+load-bearing half holds either way: same required top-level close instant, and
+it is not the source cutoff — the Analysis Manifest carries a distinct
+*optional per-source* `cutoff` field (`SourceBoundarySchema` in
 `packages/benchmarking/protocol/src/manifest.ts`), and the two values coincide
 in Demo-1 only because the seal script writes the same constant into each
 (`core/src/method/skillsbench-demo1-seal.ts`: `cutoff:

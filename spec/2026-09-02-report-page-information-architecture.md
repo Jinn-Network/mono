@@ -193,8 +193,11 @@ of the counting rule. The replicate *count* still appears above the fold, inside
 visual, as the per-arm `n`. Only its *name* moves down, onto the closed-state label of
 Band 5's accounting fold, where the reader who cares about it is already standing.
 
-Neither ceiling is a target to hit; both are ceilings. A method whose honest claim needs
-four concepts should spend four.
+Neither ceiling is a target to hit; both are ceilings. A method whose honest claim needs four
+concepts should spend four. That is also what absorbs the one dependency this derivation
+carries: §9 assigns the wording of Band 5's fold labels to #3016, so a rewording of fold 2 that
+drops the word `replicate` would spend eleven rather than twelve. Eleven is inside the ceiling
+and nothing breaks; only the worked example above stops being worked.
 
 ### 3.4 What the budget does not constrain
 
@@ -305,7 +308,7 @@ how machinery folds without weakening disclosure.
 page renders today. A fold that rewrote its content would be a disclosure change wearing an
 information-architecture costume.
 
-**A fold is labeled with its conclusion, not its contents.** "Every attempt is accounted
+**A fold is labeled with its conclusion, not its contents.** "Every replicate is accounted
 for", not "Sealed Matrix accounting". A reader must be able to learn what the block
 establishes without opening it, because the reader who never opens it still has to leave
 with the right belief.
@@ -313,7 +316,7 @@ with the right belief.
 **A fold's label must be false-negative safe.** Where the underlying facts do not support
 the conclusion, the label states the exception instead and the fold opens by default. A run
 with unjudged cells is labeled "Three attempts were never judged", open, in Band 4 — not
-"Every attempt is accounted for", closed, in Band 5. The label is derived from the facts,
+"Every replicate is accounted for", closed, in Band 5. The label is derived from the facts,
 in the manner `neutralClaimHtml` and `report-face.ts` already derive their sentences: the
 words key on facts, never on configuration, so the text is identical for every reader.
 
