@@ -10,6 +10,7 @@ import {
   buildConfigProvenance,
   getConfigPathFromArgs,
 } from '../src/config.js';
+import { requireConfigPathFromArgs } from '../src/config/path-args.js';
 import { phaseDTransitionUsageSnapshot } from '../src/compatibility/phase-d-transition-usage.js';
 
 /**
@@ -1487,5 +1488,50 @@ describe('getConfigPathFromArgs (#2393)', () => {
 
   it('returns undefined when no --config is present', () => {
     expect(getConfigPathFromArgs(['run', '--native-config', '/tmp/native.json'])).toBeUndefined();
+  });
+});
+
+/**
+ * Issue #4376 — callers that need a config path could not tell "no --config"
+ * from "--config given with an empty value", because the shared scan returns
+ * undefined for both. The chain-touching native production deployment path
+ * therefore fell silently back to the default state-dir config.
+ */
+describe('requireConfigPathFromArgs (#4376)', () => {
+  it('reads the space-separated form', () => {
+    expect(requireConfigPathFromArgs(['--config', '/tmp/space.json'])).toBe('/tmp/space.json');
+  });
+
+  it('reads the equals form', () => {
+    expect(requireConfigPathFromArgs(['--config=/tmp/equals.json'])).toBe('/tmp/equals.json');
+  });
+
+  it('returns undefined when no --config is present, leaving the default to the caller', () => {
+    expect(requireConfigPathFromArgs(['run'])).toBeUndefined();
+  });
+
+  it('throws on an empty equals value', () => {
+    expect(() => requireConfigPathFromArgs(['--config='])).toThrow(
+      '--config was given with an empty value',
+    );
+  });
+
+  it('throws on a trailing bare --config with no value', () => {
+    expect(() => requireConfigPathFromArgs(['run', '--config'])).toThrow(
+      '--config was given with an empty value',
+    );
+  });
+
+  it('throws on a bare --config with an empty value', () => {
+    expect(() => requireConfigPathFromArgs(['--config', ''])).toThrow(
+      '--config was given with an empty value',
+    );
+  });
+
+  // The documented fall-through is preserved: only an argv where no
+  // occurrence at all was usable is an error.
+  it('falls through an empty value to a later usable occurrence without throwing', () => {
+    expect(requireConfigPathFromArgs(['--config=', '--config', '/tmp/later.json']))
+      .toBe('/tmp/later.json');
   });
 });

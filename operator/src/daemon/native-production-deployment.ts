@@ -29,7 +29,7 @@ import {
   type NativeRoleIdentityRole,
   type RoleIdentitySet,
 } from './role-identities.js';
-import { getConfigPathFromArgs } from '../config/path-args.js';
+import { requireConfigPathFromArgs } from '../config/path-args.js';
 import { resolveDefaultStateDir } from '../state-dir.js';
 
 const ZERO_CODE_HASH = /^0x0{64}$/u;
@@ -201,7 +201,17 @@ export function assertNativeTargetInspection(
 }
 
 function configPath(): string {
-  return getConfigPathFromArgs(process.argv) ?? join(resolveDefaultStateDir(), 'config.json');
+  // An empty `--config` value must not fall back to the default: this path
+  // validates on-chain funding, escrow, and transaction caps, so loading a
+  // different file than the operator named is the highest-consequence form of
+  // the silent fallback (#4376).
+  let named: string | undefined;
+  try {
+    named = requireConfigPathFromArgs(process.argv);
+  } catch (cause) {
+    throw new NativeProductionDeploymentError(cause instanceof Error ? cause.message : String(cause));
+  }
+  return named ?? join(resolveDefaultStateDir(), 'config.json');
 }
 
 function loadProductionConfig(): NativeProductConfig {
