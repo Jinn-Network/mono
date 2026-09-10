@@ -24,6 +24,7 @@
  *   exceeds the cap, so an oversized response is never fully buffered.
  */
 
+import { envInteger } from './env.js';
 import {
   resolvePublicHttpDestination,
   ProhibitedDestinationError,
@@ -78,20 +79,6 @@ export interface FetchArtifactOptions {
 
 class TimeoutError extends Error {}
 class TooLargeError extends Error {}
-
-/**
- * `minimum` is 0 where the bound reads `0` as "disabled" (the timeout, and a
- * redirect cap of zero meaning "follow none"), and 1 for the byte cap, where
- * zero would not disable anything — it would reject every artifact as
- * `too_large`. A foot-gun that silently stops all acquisition is worse than
- * ignoring the value, so an out-of-range setting falls back to the default.
- */
-function envInteger(name: string, fallback: number, minimum = 0): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === '') return fallback;
-  const parsed = Number(raw);
-  return Number.isInteger(parsed) && parsed >= minimum ? parsed : fallback;
-}
 
 function envFlag(name: string): boolean {
   const raw = process.env[name];

@@ -1,3 +1,5 @@
+import { envInteger } from './env.js';
+
 const IPFS_FETCH_TIMEOUT_MS = 15_000;
 /**
  * Bound on one whole `fetchFromIpfs` / `fetchBytesFromIpfs` call. The
@@ -317,17 +319,28 @@ export type FetchFromIpfsOptions = {
    * {@link DEFAULT_MAX_IPFS_RESPONSE_BYTES}. Raise it only for a call site that
    * legitimately reads larger payloads (#3441) — the default is sized for JSON
    * envelopes and source files, and a caller that raises it accepts buffering
-   * that many bytes. Values below 1 fall back to the default.
+   * that many bytes. Values below 1 fall back to the env, then the default.
+   *
+   * An operator may move the *default* with `JINN_IPFS_MAX_RESPONSE_BYTES`
+   * (#3453). An explicit bound here wins over it, so the env cannot clamp a
+   * call site that already states its own — concretely, it does not reach
+   * `fetchTrajectoryFromIpfs`'s 64 MiB (`MAX_TRAJECTORY_IPFS_RESPONSE_BYTES`,
+   * `operator/src/adapters/mech/ipfs.ts`). Making it a ceiling instead would
+   * make the raise-the-cap intent this option exists for inexpressible.
    */
   maxResponseBytes?: number;
 };
 
 function resolveMaxResponseBytes(opts?: FetchFromIpfsOptions): number {
   const requested = opts?.maxResponseBytes;
-  if (typeof requested !== 'number' || !Number.isFinite(requested) || requested < 1) {
-    return DEFAULT_MAX_IPFS_RESPONSE_BYTES;
+  if (typeof requested === 'number' && Number.isFinite(requested) && requested >= 1) {
+    return Math.floor(requested);
   }
-  return Math.floor(requested);
+  // The env replaces the default as the fallback; it is not a second
+  // validation layer, so an out-of-range *option* still falls through to it.
+  // `minimum = 1` is what keeps the cap from being disabled into an unbounded
+  // read: `0` and every other out-of-range value land on the default.
+  return envInteger('JINN_IPFS_MAX_RESPONSE_BYTES', DEFAULT_MAX_IPFS_RESPONSE_BYTES, 1);
 }
 
 function resolveFallbackGatewayBases(
