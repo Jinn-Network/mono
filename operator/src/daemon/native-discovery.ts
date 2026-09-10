@@ -751,7 +751,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
   /**
    * The pass-scoped quarantine count (#4394). It is NOT on the success arm above and NOT
    * closure state: `sync()` allocates one per call and every `pollSource` in that pass
-   * increments it. A crossing is durable the moment the ledger row is written, so it must
+   * shares it. A crossing is durable the moment the ledger row is written, so it must
    * survive a later announcement degrading the same source — which discards the outcome.
    */
   interface SyncPass { quarantined: number }
@@ -1108,8 +1108,8 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
             ...(input.now === undefined ? {} : { now: input.now }),
           });
           if (!poisoned.quarantined) throw undecodable;
-          // Counted on the pass, not the outcome: the throw below, on a LATER announcement,
-          // would discard an outcome-carried count even though this crossing is durable and
+          // Counted on the pass, not the outcome: the throw above, reached again on a LATER
+          // announcement, would discard an outcome-carried count even though this is durable and
           // is skipped from the next poll on — reporting it zero times, ever (#4394).
           pass.quarantined += 1;
           continue;
