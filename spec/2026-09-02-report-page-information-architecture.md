@@ -195,9 +195,9 @@ Band 5's accounting fold, where the reader who cares about it is already standin
 
 Neither ceiling is a target to hit; both are ceilings. A method whose honest claim needs four
 concepts should spend four. That is also what absorbs the one dependency this derivation
-carries: §9 assigns the wording of Band 5's fold labels to #3016, so a rewording of fold 2 that
-drops the word `replicate` would spend eleven rather than twelve. Eleven is inside the ceiling
-and nothing breaks; only the worked example above stops being worked.
+carries: §9 assigns the wording of Band 5's fold labels to #3016, so a rewording of fold 2
+that drops the word `replicate` would spend eleven rather than twelve. Eleven is inside the
+ceiling and nothing breaks; only the worked example above stops being worked.
 
 ### 3.4 What the budget does not constrain
 

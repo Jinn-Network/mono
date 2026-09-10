@@ -42,19 +42,19 @@ Both halves of the issue's own suggested remedy are unavailable today:
   taste: `/6`'s mandatory member list is `PUBLIC_BUNDLE_FILES`, which includes
   `run.json` (`packages/benchmark-product/verify/src/legacy-closures.ts`), so
   such a bundle would refuse at `mandatory public bundle file "…" is missing`
-  (`verify/src/verify.ts`) — on the *first* absent member, which is
-  `static-bundle.json`; `run.json` is named here because it is the member no
-  evidence-native report can fill, there being no Run record. `/7` and `/8` are
-  dead for the same reason: both take `PUBLIC_BUNDLE_V4_FILES`, which is that
-  same list plus `qualification.json`. There is no re-emission of this report
-  onto `/6`.
+  (`verify/src/verify.ts`) — on the *first* absent member of that list, whose
+  index 0 is `static-bundle.json`; `run.json` is named here because it is the
+  member no evidence-native report can fill, there being no Run record. `/7`
+  and `/8` are dead for the same reason: both take `PUBLIC_BUNDLE_V4_FILES`,
+  which is that same list plus `qualification.json`. There is no re-emission of
+  this report onto `/6`.
 
 This is not an oversight. The approved design records it twice as deferred
 work: §7.4 ("the evidence-native claim-package/3 and public-bundle/5 adopt the
 same anchor surface in their own later allocation") and §19.7 ("The
 evidence-native closures (`claim-package/3`, `public-bundle/5`) adopt the
-anchor surface in their own later allocation"; "anchoring evidence for
-already-published historical bundles is future work").
+anchor surface in their own later allocation, per §7.4"; "anchoring evidence
+for already-published historical bundles is future work").
 
 So #2974 is that later allocation. It is `design`-shaped, and the four rulings
 it needed are now made (§4). The issue is currently typed `fix` with Effort
