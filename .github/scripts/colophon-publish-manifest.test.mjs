@@ -626,8 +626,10 @@ test('reader instructions name only reader versions npm serves, under whichever 
   assert.ok(pins['@colophon-claims/check'].length > 0, 'the docs must reach the name being published');
   assert.match(
     readFileSync(join(repoRoot, 'packages/benchmark-product/EXTERNAL-VERIFICATION.md'), 'utf8'),
-    /npx @colophon-claims\/verify@0\.1 <bundle-dir>/u,
-    'the external path documents the /2 bundle, whose sealed compatible command is the @0.1 line',
+    /npx @colophon-claims\/check@0\.2 <bundle-dir>/u,
+    'the external path is a fresh instruction, not a sealed quotation: @0.2 reads /2 identically '
+      + 'and also reads the /6, /7 and /8 bundles this same document tabulates, so it is the only '
+      + 'line a cold external verifier can be sent to (#4188)',
   );
   const ledger = () => ['0.1.0', '0.2.0', '0.2.1'];
   assert.throws(

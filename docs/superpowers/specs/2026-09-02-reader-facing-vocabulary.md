@@ -1,7 +1,7 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.2
-- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04)
+- **Version:** 1.3
+- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-10)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -18,6 +18,11 @@
 - **v1.2** (#3837): files §7's five presentation-rename units as issues (#3861–#3865) and
   records each number in §7. §7's closing note now says no *external* condition gates them,
   which is what "unblocked" meant before the tracker could see their order. No ruling changes.
+- **v1.3** (#4188): records the sanctioned exception to §2's contract classification of the
+  package name and the command name. The checker is published as `@colophon-claims/check` with
+  the binary `colophon-check`; `@colophon-claims/verify` and `colophon-verify` stay published
+  permanently as a passthrough alias, so no sealed instruction stops resolving and no published
+  bundle changes what it is. No disposition below is reversed.
 
 ## 1. Scope
 
@@ -84,7 +89,9 @@ belongs to a bundle-format revision and to nothing smaller:
   `method.id` alongside `method.version` — and enum values (`two-human-unanimous`,
   `operator-only`, `screened-operator-sampled`, `complete`/`partial`/`cancelled`);
 - `--json` output keys, the package name `@colophon-claims/verify`, and the command name
-  `colophon-verify`.
+  `colophon-verify` — renamed to `@colophon-claims/check` and `colophon-check` by #4188, under
+  the one condition that keeps this classification intact: both retired names stay published
+  permanently as a passthrough alias, so every sealed instruction still resolves.
 
 The `wilson@1`-style spellings are **not** on this side. They are a presentation composition of
 `method.id` and `method.version`, and they appear in **zero** sealed records —

@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { GATED_OPERATIONS } from "./authority/policy.js";
@@ -526,7 +526,7 @@ describe("product documentation consistency", () => {
    *
    * `MAX_BEACON_ROUND` and the per-source representable ceilings stay unpublished, deliberately:
    * they are a defensive bound rather than part of the derivation, and `beaconRoundInstant` -- not
-   * the schema -- owns representability (`verify/src/binding/beacon-binding.ts`). Publishing them
+   * the schema -- owns representability (`check/src/binding/beacon-binding.ts`). Publishing them
    * would invite a reader to treat a refusal ceiling as a beacon fact.
    */
   it("publishes exactly the scheduled beacon sources' own chain parameters", () => {
@@ -559,5 +559,167 @@ describe("product documentation consistency", () => {
       expect(rows.some((row) => row.source === source), source).toBe(false);
       expect(document).toContain(`\`${source}\` indexes by block height`);
     }
+  });
+});
+
+const checkManifestPath = resolve(productRoot, "check/package.json");
+const aliasManifestPath = resolve(productRoot, "verify/package.json");
+const checkReadmePath = resolve(productRoot, "check/README.md");
+const aliasReadmePath = resolve(productRoot, "verify/README.md");
+
+/**
+ * The reader package was renamed to `@colophon-claims/check` (#4188) and the old name stays
+ * published forever as a passthrough alias, so a bundle sealed before the rename keeps resolving.
+ * The two spellings a freshly emitted surface could still print are the package
+ * `@colophon-claims/verify` -- pinned or bare -- and the binary `colophon-verify`. The negative
+ * lookaheads keep `@colophon-claims/verify-anything` and `colophon-verify-anything` out, so the
+ * guards below refuse the retired name itself rather than any word starting with it.
+ */
+const RETIRED_READER_TOKEN =
+  /@colophon-claims\/verify(?:@[0-9][0-9.]*)?(?![-\w])|colophon-verify(?![-\w])/gu;
+
+/** An instruction to RUN the retired reader, pinned or unpinned. */
+const RETIRED_READER_INSTRUCTION = /npx\s+@colophon-claims\/verify(?![-\w])/u;
+
+/** Generated trees and sealed bundle bytes are not surfaces this repository emits. */
+const UNSWEPT_DIRECTORIES = new Set(["node_modules", "dist", ".next", "fixtures", "__fixtures__"]);
+
+function walkFiles(directory: string): readonly string[] {
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) {
+      return UNSWEPT_DIRECTORIES.has(entry.name) ? [] : walkFiles(resolve(directory, entry.name));
+    }
+    return entry.isFile() ? [resolve(directory, entry.name)] : [];
+  });
+}
+
+const isTestFile = (path: string): boolean =>
+  /\.test\.(?:ts|tsx|mjs)$/u.test(path) || path.includes(`${sep}test${sep}`);
+
+/**
+ * Every place this product emits an instruction from live code: the checker, core, the CLI and the
+ * web app, plus the JSON Schemas the checker ships in its tarball. The schemas carry no version
+ * pin, so the publish-manifest pin walk cannot see them and this is the only guard that can.
+ */
+const sweptSourceFiles: readonly string[] = [
+  ...["check/src", "check/scripts", "core/src", "core/scripts", "cli/src", "web/src"]
+    .flatMap((root) => walkFiles(resolve(productRoot, root)))
+    .filter((path) => /\.(?:ts|tsx|mjs)$/u.test(path) && !isTestFile(path)),
+  ...walkFiles(resolve(productRoot, "check/schemas")).filter((path) => path.endsWith(".json")),
+];
+
+const sweptMarkdownFiles: readonly string[] = walkFiles(productRoot).filter((path) =>
+  path.endsWith(".md"),
+);
+
+/**
+ * The two documents that may still print `npx @colophon-claims/verify…`, and why each may.
+ * `PUBLIC-BUNDLE.md` quotes the per-format lines the published bundles themselves seal -- quoting a
+ * sealed byte is not issuing an instruction -- and the alias package's own README exists to tell
+ * its readers that exact command still resolves. `EXTERNAL-VERIFICATION.md` is deliberately absent:
+ * it issues a fresh instruction to a cold external verifier, so it prints the current name.
+ */
+const LEGACY_COMMAND_MARKDOWN = ["PUBLIC-BUNDLE.md", "verify/README.md"] as const;
+
+/**
+ * The exact multiset of retired-name literals each frozen file carries, keyed by product-relative
+ * path. Per-literal rather than per-file on purpose: sealing a NEW format with the retired name is
+ * how the regression arrives, and a new per-format constant lands in precisely these files -- it
+ * fails here as an unexpected literal. Removing or rewording an existing one fails as a missing
+ * literal, so the guard cannot go vacuous either.
+ *
+ * `legacy-closures.ts` (both copies) holds the frozen per-format commands `profile/claim.ts`
+ * compares an incoming bundle against; `demo1-export-public-bundle.mjs` seals its line into a
+ * `benchmark-product-public-bundle/5` claim; `assets.ts` quotes, in prose, which line the classic
+ * and anchored allocations pin.
+ */
+const SEALED_COMMAND_LITERALS: ReadonlyMap<string, readonly string[]> = new Map([
+  [
+    "check/src/legacy-closures.ts",
+    [
+      "@colophon-claims/verify@0.1.0",
+      "@colophon-claims/verify@0.1.0",
+      "@colophon-claims/verify@0.1",
+      "@colophon-claims/verify@0.1",
+      "@colophon-claims/verify@0.2.0",
+      "@colophon-claims/verify@0.2.1",
+      "@colophon-claims/verify@0.2.1",
+      "@colophon-claims/verify@0.2",
+      "@colophon-claims/verify@0.2",
+    ],
+  ],
+  [
+    "core/src/legacy-closures.ts",
+    [
+      "@colophon-claims/verify@0.1.0",
+      "@colophon-claims/verify@0.1",
+      "@colophon-claims/verify@0.2.0",
+      "@colophon-claims/verify@0.2.1",
+      "@colophon-claims/verify@0.2",
+    ],
+  ],
+  ["core/scripts/demo1-export-public-bundle.mjs", ["@colophon-claims/verify@0.1"]],
+  ["check/src/assets.ts", ["@colophon-claims/verify@0.1.0"]],
+]);
+
+describe("retired reader package name", () => {
+  it("prints only the current reader name in every freshly emitted instruction", () => {
+    expect(sweptMarkdownFiles.length).toBeGreaterThan(5);
+
+    for (const path of sweptMarkdownFiles) {
+      const document = relative(productRoot, path);
+      if ((LEGACY_COMMAND_MARKDOWN as readonly string[]).includes(document)) continue;
+      expect(
+        RETIRED_READER_INSTRUCTION.test(read(path)),
+        `${document} instructs a reader to run the retired @colophon-claims/verify name`,
+      ).toBe(false);
+    }
+
+    // The allowlist is a claim about which documents exist, not a licence for absent ones.
+    for (const document of LEGACY_COMMAND_MARKDOWN) {
+      expect(existsSync(resolve(productRoot, document)), document).toBe(true);
+    }
+  });
+
+  it("confines the retired reader name to the frozen per-format command constants", () => {
+    expect(sweptSourceFiles.length).toBeGreaterThan(50);
+
+    const found = new Map<string, readonly string[]>();
+    for (const path of sweptSourceFiles) {
+      const literals = [...read(path).matchAll(RETIRED_READER_TOKEN)].map((match) => match[0]);
+      if (literals.length > 0) found.set(relative(productRoot, path), literals.sort());
+    }
+
+    const expected = new Map(
+      [...SEALED_COMMAND_LITERALS].map(([path, literals]) => [path, [...literals].sort()]),
+    );
+    expect(Object.fromEntries(found)).toEqual(Object.fromEntries(expected));
+  });
+
+  it("keeps the retired reader name resolving through a published passthrough alias", () => {
+    const check = JSON.parse(read(checkManifestPath)) as Record<string, unknown>;
+    const alias = JSON.parse(read(aliasManifestPath)) as Record<string, unknown>;
+
+    expect(check["name"]).toBe("@colophon-claims/check");
+    expect(check["bin"]).toEqual({ "colophon-check": "./dist/bin.js" });
+    // The alias's `bin.js` reaches the checker's binary through this subpath, so its absence would
+    // leave `colophon-verify` with nothing to re-enter.
+    expect((check["exports"] as Record<string, unknown>)["./bin"]).toBeDefined();
+
+    expect(alias["name"]).toBe("@colophon-claims/verify");
+    expect(alias["bin"]).toEqual({ "colophon-verify": "./bin.js" });
+    expect((alias["publishConfig"] as Record<string, unknown>)["access"]).toBe("public");
+    // A `0.3.x` alias would leave `npx @colophon-claims/verify@0.2` resolving to the pre-rename
+    // real package rather than the passthrough, so the alias line stays under `0.2`.
+    expect(String(alias["version"]).startsWith("0.2.")).toBe(true);
+    expect((alias["dependencies"] as Record<string, string>)["@colophon-claims/check"]).toBe(
+      check["version"],
+    );
+
+    // Each README names the package it is the README of, so neither install page sends a reader to
+    // the wrong name.
+    expect(read(checkReadmePath)).toContain("# @colophon-claims/check");
+    expect(read(aliasReadmePath)).toContain("@colophon-claims/check");
   });
 });

@@ -31,7 +31,7 @@ The self-serve source is now split into Colophon-owned Tier 4 packages:
 
 - `@colophon-claims/cli` — the installable `colophon` command;
 - `@colophon-claims/core` — product operations and local composition;
-- `@colophon-claims/verify` — the smaller reader-only verifier;
+- `@colophon-claims/check` — the smaller reader-only checker;
 - `@colophon-claims/web` — private source/build input for the local UI.
 
 They are implemented but not published. Registry publication remains held until
@@ -55,17 +55,21 @@ a registry command because the packages have not been published.
 For a received bundle, the smaller reader surface is:
 
 ```bash
-npx @colophon-claims/verify@0.1 ./bundle
+npx @colophon-claims/check@0.2 ./bundle
 ```
 
-That line reads the bundle formats through public-bundle/6, and only the claims
-that pin it. Reader lines are not forward compatible, and a reader that is too
-old refuses with the same code an invalid bundle earns, so before concluding
+That line reads every published bundle format, and only the claims that pin
+it. Reader lines are not forward compatible, and a reader that is too old
+refuses with the same code an invalid bundle earns, so before concluding
 anything from a refusal, read the line the bundle's own claim package pins in
 `verification.command` — the producer named it for that exact bundle. The
 per-format table in [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) covers the case where
 you have only `bundle.json`; the format string alone is not sufficient, because
 prompted-screening bundles pin a later line without changing their format.
+
+Reports sealed before the rename pin `@colophon-claims/verify`. That name stays
+published permanently as a passthrough alias onto `@colophon-claims/check`, so
+every sealed instruction keeps resolving.
 
 To verify a bundle with tools that are not ours, see
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).

@@ -1,10 +1,14 @@
-# @colophon-claims/verify
+# @colophon-claims/check
 
-Verify a public Colophon claim bundle without the Colophon app or any execution runtime:
+Check a public Colophon claim bundle without the Colophon app or any execution runtime:
 
 ```sh
-npx @colophon-claims/verify@0.2 ./bundle
+npx @colophon-claims/check@0.2 ./bundle
 ```
+
+This package was published as `@colophon-claims/verify` through `0.2.1`. That name stays
+published permanently as a passthrough alias onto this one, so a bundle that sealed it keeps
+resolving.
 
 Use `--json` for machine-readable output. The reader runs the checks the bundle's declared
 format closes over, and its verdict names each one — different formats close over different
@@ -51,7 +55,7 @@ the sealed records stay the source of truth, and the tree is a pure function of 
 so anyone can regenerate it and diff it. To check a published one against its bundle:
 
 ```sh
-npx @colophon-claims/verify@0.2 ./bundle --freeze-repo ./published-repo
+npx @colophon-claims/check@0.2 ./bundle --freeze-repo ./published-repo
 ```
 
 Exit status is `1` when the tree does not match, and every missing, unexpected, or changed
