@@ -378,6 +378,36 @@ describe('fetchVerifiedArtifact', () => {
     expect(result.retryable).toBe(true);
   });
 
+  it('prefers an inconclusive earlier leg over a conclusive later one', async () => {
+    // Pins the half of the tie-break the cheapest-first rule above does not:
+    // the inconclusive preference outranks leg order. Here the mirror's
+    // transport fails — nothing was learned — and the origin then answers a
+    // plain 404. Under a bare last-wins tie-break this reports
+    // `not_found`/not retryable, telling the operator the artifact is gone on
+    // the word of a leg that never saw the other's evidence; #3441 says absence
+    // is claimable only when every attempted leg answered absent.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await fetchVerifiedArtifact(
+      { sha256: SHA },
+      { sources: ipfsSources(), ipfsGatewayUrl: GATEWAY, endpoint: ENDPOINT },
+      {
+        deps: {
+          fetchFromIpfs: async () => {
+            throw new IpfsFetchFailedError('gateway unreachable', [new Error('socket hang up')]);
+          },
+          fetchArtifact: async (): Promise<AcquireResult> => ({ ok: false, reason: 'not_found' }),
+        },
+      },
+    );
+    warn.mockRestore();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.attempts.map((attempt) => attempt.reason)).toEqual(['unavailable', 'not_found']);
+    expect(result.reason).toBe('unavailable');
+    expect(result.retryable).toBe(true);
+  });
+
   it('names the missing gateway when donated sources have nowhere to be read from', async () => {
     const result = await fetchVerifiedArtifact({ sha256: SHA }, { sources: ipfsSources() });
     expect(result.ok).toBe(false);
