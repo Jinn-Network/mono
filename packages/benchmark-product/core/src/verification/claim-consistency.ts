@@ -118,7 +118,7 @@ export function assertClaimConsistency(input: {
   // (coordinator ruling, packet #2837) -- mirrors `operations/report.ts`'s own method-conditional
   // exactly, so the cold rebuild here agrees with what `report` actually sealed. Computed from
   // `reportRecord.method.id` directly (like the portable verifier's own `binaryLimitations`,
-  // `verify/src/profile/claim-consistency.ts`) rather than threaded through
+  // `check/src/profile/claim-consistency.ts`) rather than threaded through
   // `input.additionalLimitations`, since it depends on WHICH method produced this Report, not on
   // venue/suite facts shared across every Report a run carries.
   const pairedEstimateLimitation =

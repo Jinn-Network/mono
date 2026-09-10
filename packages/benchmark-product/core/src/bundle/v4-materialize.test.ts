@@ -367,7 +367,7 @@ describe("binary public-bundle/4 producer closure", () => {
           ],
     );
     // §6.9 drops the roster: a screened admission registers ZERO reviewers, same as operator-only
-    // (item 4's fourth axis -- this is exactly why `verify/src/schema.ts:123`'s
+    // (item 4's fourth axis -- this is exactly why `check/src/schema.ts:123`'s
     // `reviewers.length === 1` refusal needed no change: both non-two-human modes already produced
     // the "empty" half of its "empty or a registry of at least two" allowance).
     expect(trust.admission.reviewers).toHaveLength(truthAdmission === "two-human-unanimous" ? 2 : 0);

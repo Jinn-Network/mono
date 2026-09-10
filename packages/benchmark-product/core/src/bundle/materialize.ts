@@ -552,7 +552,7 @@ function recordClosure(input: MaterializeBundleInput): {
       format: BUNDLE_QUALIFICATION_FORMAT,
       // Stays claim-package/2 on every closure, including the anchored one (issue #3205): this
       // names the projection SHAPE the qualification graph was built for, which claim-package/5
-      // reuses byte-identically. See `verify/src/schema.ts`'s own note on the same literal.
+      // reuses byte-identically. See `check/src/schema.ts`'s own note on the same literal.
       claimSchema: BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
       sourceManifestSha256: extension.sourceManifestSha256,
       admissionManifestSha256: extension.admissionManifestSha256,
@@ -570,7 +570,7 @@ function recordClosure(input: MaterializeBundleInput): {
       // previously producible bundle moves: an unsorted projection never got past this parse, so
       // the only lists this sort can reorder are ones that could not be published at all.
       //
-      // MIRRORED by `verify/src/verify.ts`'s `projectAdmissionExclusions`, which re-derives these
+      // MIRRORED by `check/src/verify.ts`'s `projectAdmissionExclusions`, which re-derives these
       // exact three fields with this exact sort from its own admission replay and refuses a bundle
       // whose carried list differs (issue #3246). The two sides are duplicated rather than shared
       // because the verifier is a standalone published package that re-states `core` instead of

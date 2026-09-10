@@ -6,7 +6,7 @@
  *
  * Sealing proves a method document predates its publication. It cannot prove the *run* happened
  * after the seal: a party could run privately, write a method describing what already happened,
- * seal it, and re-run. `verify/src/profile/anchor-claims.ts` says as much in the sealed claim's own
+ * seal it, and re-run. `check/src/profile/anchor-claims.ts` says as much in the sealed claim's own
  * words -- a time anchor proves "the design's existence by that time and nothing else about the run
  * -- in particular, not that results were produced after it".
  *
