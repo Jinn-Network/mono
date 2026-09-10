@@ -191,7 +191,7 @@ describe('native discovery consumer', () => {
     const store = new Store(':memory:');
 
     const cold = consumer({ store, routes, verify });
-    await expect(cold.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1, degraded: [] });
+    await expect(cold.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1, degraded: [], quarantined: 0 });
     expect(cold.takePending().map((item) => item.card.chain.taskId)).toEqual([1n, 2n]);
     for (const item of cold.takePending()) cold.acknowledge(item);
     expect(cold.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toMatchObject({
@@ -203,7 +203,7 @@ describe('native discovery consumer', () => {
     const third = entry('0000000000000003', sealJson(second).digest, DIGEST_C);
     const resumedRoutes = routesFor([first, second, third]);
     const restarted = consumer({ store, routes: resumedRoutes, verify });
-    await expect(restarted.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+    await expect(restarted.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [], quarantined: 0 });
     expect(restarted.takePending().map((item) => item.card.chain.taskId)).toEqual([3n]);
     expect(verified).toEqual([
       { firstAdoption: true, sequences: ['0000000000000001', '0000000000000002'] },
@@ -224,7 +224,7 @@ describe('native discovery consumer', () => {
     };
     const synced = consumer({ store: new Store(':memory:'), routes, verify: verifier });
 
-    await expect(synced.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1, degraded: [] });
+    await expect(synced.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1, degraded: [], quarantined: 0 });
     expect(sequences).toEqual(['0000000000000001', '0000000000000002']);
     expect(synced.takePending()).toHaveLength(2);
   });
@@ -250,7 +250,7 @@ describe('native discovery consumer', () => {
 
     await synced.sync();
     for (const item of synced.takePending()) synced.acknowledge(item);
-    await expect(synced.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
+    await expect(synced.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [], quarantined: 0 });
     expect(decode).toHaveBeenCalledOnce();
     expect(verify).toHaveBeenCalledOnce();
     expect(synced.takePending()).toEqual([]);
@@ -486,7 +486,7 @@ describe('native discovery consumer', () => {
         now: () => FRESH_FIXTURE_TIME,
         selfServed: true,
       });
-      await expect(restarted.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
+      await expect(restarted.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [], quarantined: 0 });
     });
 
     // FINDING (#2547), SUPERSEDED BY #3468: the alternative "refresh the served head at boot" used
@@ -524,7 +524,7 @@ describe('native discovery consumer', () => {
         now: () => new Date('2026-08-04T01:00:00.000Z'),
         selfServed: true,
       });
-      await expect(afterRefresh.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
+      await expect(afterRefresh.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [], quarantined: 0 });
       expect(verify).not.toHaveBeenCalled();
       expect(afterRefresh.checkpoint({ agent: AGENT, name: SOURCE_NAME })?.signedHighWater).toMatchObject({
         sequence: '0000000000000001',
@@ -572,7 +572,7 @@ describe('native discovery consumer', () => {
         now: () => new Date('2026-08-02T13:00:00.000Z'),
       });
 
-      await expect(polled.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
+      await expect(polled.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [], quarantined: 0 });
       expect(verifyHead).toHaveBeenCalledOnce();
       expect(verify).not.toHaveBeenCalled();
       expect(polled.takePending()).toEqual([]);
@@ -625,7 +625,7 @@ describe('native discovery consumer', () => {
         now: () => new Date('2026-08-02T13:00:00.000Z'),
       });
 
-      await expect(polled.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
+      await expect(polled.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [], quarantined: 0 });
       expect(verifyHead).toHaveBeenCalledOnce();
       expect(verify).not.toHaveBeenCalled();
     });
@@ -947,7 +947,7 @@ describe('native discovery consumer', () => {
       verify: async () => ({ status: 'ok' as const }),
     });
 
-    await expect(synced.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1, degraded: [] });
+    await expect(synced.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1, degraded: [], quarantined: 0 });
     expect(synced.takePending()).toHaveLength(1);
     expect(synced.takePendingWithdrawals()).toEqual([expect.objectContaining({
       sequence: '0000000000000002',
@@ -1133,7 +1133,7 @@ describe('native discovery consumer — the never-published source (#2523)', () 
     expect(adoptions).toEqual([]);
 
     for (const [url, value] of routesFor([first])) routes.set(url, value);
-    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [], quarantined: 0 });
     // Polling early skipped no entry: the source is adopted from genesis, not from "now".
     expect(adoptions).toEqual([true]);
   });
@@ -1150,7 +1150,7 @@ describe('native discovery consumer — the never-published source (#2523)', () 
       decode: async (input) => cardFor(input.entry.sequence),
       now: () => FRESH_FIXTURE_TIME,
     });
-    await expect(initial.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+    await expect(initial.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [], quarantined: 0 });
 
     // Same source, same store — the head object disappears.
     routes.delete(`${ROOT}${headPath(SOURCE_NAME)}`);
@@ -1355,7 +1355,7 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
     await expect(synced.sync()).resolves.toMatchObject({ degraded: [{ reason: 'unreachable' }] });
     expect(adoptions).toEqual([]);
     for (const [url, value] of routes) live.set(url, value);
-    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [], quarantined: 0 });
     expect(adoptions).toEqual([true]);
     expect(synced.takePending()).toHaveLength(1);
     warn.mockRestore();
@@ -1393,7 +1393,7 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
     expect(synced.takePending()).toHaveLength(0);
 
     undecodable = false;
-    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [], quarantined: 0 });
     expect(synced.takePending()).toHaveLength(1);
     warn.mockRestore();
   });
@@ -1433,6 +1433,8 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
           accepted: 0,
           verifiedSources: 0,
           degraded: [{ source: identity, reason: 'undecodable' }],
+          // Below the threshold nothing is quarantined, so the count stays zero (#4295).
+          quarantined: 0,
         });
         // #2529's load-bearing half, unchanged: no checkpoint, so nothing is skipped past.
         expect(synced.checkpoint(identity)).toBeUndefined();
@@ -1450,6 +1452,8 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
         accepted: 0,
         verifiedSources: 1,
         degraded: [],
+        // The pass that CROSSED the threshold reports the announcement it stepped past (#4295).
+        quarantined: 1,
       });
       expect(isPoisonQuarantined({
         store,
@@ -1487,7 +1491,7 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
       // The source appends. A consumer that had been wedged on entry 1 would still collect
       // nothing here; a quarantined-and-advanced one returning-syncs entry 2 normally.
       const resumed = consumer({ store, routes: routesFor([first, second]), verify: okVerify, decode });
-      await expect(resumed.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+      await expect(resumed.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [], quarantined: 0 });
       expect(resumed.takePending()).toHaveLength(1);
       expect(resumed.checkpoint(identity)?.entryDigest).toEqual(sealJson(second).digest);
       warn.mockRestore();
@@ -1533,7 +1537,14 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
         await expect(synced.sync()).resolves.toMatchObject({ degraded: [{ reason: 'undecodable' }] });
         expect(synced.takePending()).toHaveLength(0);
       }
-      await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+      // The poison sibling CROSSES the threshold on this pass while the healthy one is accepted,
+      // so the pass reports both halves: one card in, one announcement stepped past (#4295).
+      await expect(synced.sync()).resolves.toEqual({
+        accepted: 1,
+        verifiedSources: 1,
+        degraded: [],
+        quarantined: 1,
+      });
       expect(synced.takePending()).toHaveLength(1);
       expect(synced.checkpoint(identity)?.entryDigest).toEqual(sealJson(paired).digest);
       expect(isPoisonQuarantined({
@@ -1730,7 +1741,7 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
         degraded: [{ reason: 'refused-destination' }],
       });
       contained = true;
-      await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+      await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [], quarantined: 0 });
       warn.mockRestore();
     });
   });
@@ -1967,7 +1978,7 @@ describe('a peer rolling its archive page (#2531 F2)', () => {
     const consumerUnderTest = rollingConsumer({ store, routes: () => routes, source });
 
     // Tick 1: cold sync against page 1. The endpoint is now memoized to page 1.
-    await expect(consumerUnderTest.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+    await expect(consumerUnderTest.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [], quarantined: 0 });
     expect(state.introductionReads).toBe(1);
     for (const item of consumerUnderTest.takePending()) consumerUnderTest.acknowledge(item);
 
@@ -1977,7 +1988,7 @@ describe('a peer rolling its archive page (#2531 F2)', () => {
 
     // Tick 2: SAME process, SAME source object. The memoized page-1 root yields nothing above the
     // high-water mark; the fix re-resolves, sees a different root, and follows it.
-    await expect(consumerUnderTest.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+    await expect(consumerUnderTest.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [], quarantined: 0 });
     expect(consumerUnderTest.takePending().map((item) => item.card.chain.taskId)).toEqual([2n]);
     expect(consumerUnderTest.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toMatchObject({
       sequence: '0000000000000002',

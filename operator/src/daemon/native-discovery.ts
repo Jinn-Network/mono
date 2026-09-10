@@ -285,6 +285,14 @@ export interface NativeDiscoverySyncReport {
    * neither `accepted` nor `verifiedSources`, and are retried on the next poll.
    */
   readonly degraded: readonly NativeDiscoveryDegradedSource[];
+  /**
+   * Announcements this pass stepped past by crossing the poison-quarantine threshold (#2473).
+   * The CROSSING only: an announcement quarantined by an earlier pass is skipped at the top of
+   * the loop and counts nothing, so this stays 0 once the wedge has cleared rather than reading
+   * non-zero forever. Withdrawal-scope quarantine is not a sync-pass event and is not counted
+   * here -- `drainNativeDiscoveryWithdrawals` owns that lane.
+   */
+  readonly quarantined: number;
 }
 
 export interface NativeDiscoveryConsumer<Card = AnnouncedSubmissionCard> {
@@ -732,7 +740,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
   }
 
   type SourcePollOutcome =
-    | { readonly accepted: number }
+    | { readonly accepted: number; readonly quarantined: number }
     | { readonly reason: NativeDiscoveryDegradedReason; readonly detail: string };
 
   async function pollSource(configured: NativeDiscoverySource): Promise<SourcePollOutcome> {
@@ -885,7 +893,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           signature: syncedHead.signature,
         }, [], []);
       }
-      return { accepted: 0 };
+      return { accepted: 0, quarantined: 0 };
     }
     if (prior !== undefined && compareCodeUnitStrings(syncedHead.head.sequence, prior.sequence) <= 0) {
       throw new NativeDiscoverySyncError(source, 'rewound-or-tampered-head');
@@ -1010,6 +1018,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       refreshBy: syncedHead.head.refreshBy,
       signature: syncedHead.signature,
     };
+    let quarantined = 0;
     const cards: Array<{
       sequence: string;
       entryDigest: `sha256:${string}`;
@@ -1084,6 +1093,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
             ...(input.now === undefined ? {} : { now: input.now }),
           });
           if (!poisoned.quarantined) throw undecodable;
+          quarantined += 1;
           continue;
         }
         clearPoisonFailures({
@@ -1111,13 +1121,14 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       }
     }
     queue(source, highWater, cards, withdrawals);
-    return { accepted: cards.length + withdrawals.length };
+    return { accepted: cards.length + withdrawals.length, quarantined };
   }
 
   return {
     async sync() {
       let accepted = 0;
       let verifiedSources = 0;
+      let quarantined = 0;
       const degraded: NativeDiscoveryDegradedSource[] = [];
       for (const configured of sources) {
         const source = configured.identity;
@@ -1144,9 +1155,10 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         }
         reportedDegraded.delete(sourceKey(source));
         accepted += outcome.accepted;
+        quarantined += outcome.quarantined;
         verifiedSources += 1;
       }
-      return { accepted, verifiedSources, degraded };
+      return { accepted, verifiedSources, degraded, quarantined };
     },
 
     takePending() {
