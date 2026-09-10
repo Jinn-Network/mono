@@ -612,6 +612,35 @@ describe("the corpus-sync capability", () => {
     await built.capability.stop!();
   });
 
+  test("a marked failure half never ends in half an astral character", async () => {
+    // The marker is written over the LAST code unit, one further in than
+    // `sanitizeUntrustedText` cut -- so it can land inside a surrogate pair
+    // that the sanitizer's own cut left whole, and leave a lone high surrogate
+    // as the second-to-last code unit. `truncateLineBoundary` in
+    // `projection/truncate.ts` guards the same hazard; this is the same guard.
+    const astral = "\u{1F600}"; // one astral char, two code units
+    const built = harness({
+      outcomes: [{ status: "synced", sources: [report(ALICE, { indexed: 1 })] }],
+      sources: [source(ALICE.agent)],
+      listRecordsThrows: true,
+      // Padded so the pair occupies the LAST TWO code units the sanitizer
+      // keeps: its own cut at MAX_FAILURE_CHARS leaves the pair whole, and the
+      // marker's cut one further in is the thing that splits it.
+      listRecordsError: new Error(`${"p".repeat(MAX_FAILURE_CHARS - 2)}${astral}${"q".repeat(50)}`),
+    });
+    await built.start();
+    await settle();
+
+    const recorded = (await statusOf(built))?.lastCycle?.indexError;
+    expect(recorded).toBeDefined();
+    expect(recorded!.length).toBeLessThanOrEqual(MAX_FAILURE_CHARS);
+    expect(recorded!.endsWith(FAILURE_TRUNCATION_MARKER)).toBe(true);
+    // No lone surrogate survives anywhere in the recorded value. Spelled out
+    // rather than via `toWellFormed`, which needs a newer `lib` than this
+    // package targets.
+    expect(recorded!).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  });
+
   test("the next cycle is still scheduled when the cycle's own reporting throws", async () => {
     const built = harness();
     // Whatever writes the cycle line can fail — a stderr EPIPE is the

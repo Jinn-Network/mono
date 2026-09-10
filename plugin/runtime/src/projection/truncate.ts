@@ -2,7 +2,13 @@
 
 export const TRUNCATION_TAIL = "\n[truncated]" as const;
 
-function endsWithHighSurrogate(text: string): boolean {
+/**
+ * Exported for the other place in this package that cuts at a code-unit
+ * boundary and must not leave half an astral character behind:
+ * `recordable` in `corpus/sync-loop.ts` (#3822). One definition of the
+ * surrogate range, not two.
+ */
+export function endsWithHighSurrogate(text: string): boolean {
   const last = text.charCodeAt(text.length - 1);
   return last >= 0xd800 && last <= 0xdbff;
 }

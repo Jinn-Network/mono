@@ -10,6 +10,7 @@ import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "../errors.js";
 import type { HealthCheck } from "../health.js";
 import type { RuntimeLogger } from "../logger.js";
 import { sanitizeUntrustedText } from "../mcp/untrusted.js";
+import { endsWithHighSurrogate } from "../projection/truncate.js";
 import { indexPublicPlane } from "../relevance/indexing.js";
 import type { RelevanceIndex } from "../relevance/index-store.js";
 import type { TraceSpanSource } from "../relevance/trace-decode-adapter.js";
@@ -415,9 +416,14 @@ export function createCorpusSyncCapability(
         ? { text: "", truncated: false }
         : sanitizeUntrustedText(value, MAX_FAILURE_CHARS);
     if (text === "") return fallback;
-    return truncated
-      ? `${text.slice(0, MAX_FAILURE_CHARS - FAILURE_TRUNCATION_MARKER.length)}${FAILURE_TRUNCATION_MARKER}`
-      : text;
+    if (!truncated) return text;
+    // One code unit further in than the sanitizer cut, so a surrogate pair it
+    // left whole can be split here. Dropping the orphaned high surrogate costs
+    // one more character and keeps the recorded value well-formed --
+    // `truncateLineBoundary` guards the identical hazard the same way.
+    let cut = text.slice(0, MAX_FAILURE_CHARS - FAILURE_TRUNCATION_MARKER.length);
+    if (endsWithHighSurrogate(cut)) cut = cut.slice(0, -1);
+    return `${cut}${FAILURE_TRUNCATION_MARKER}`;
   }
 
   function followedOnly(
