@@ -81,7 +81,10 @@ trailing dot as meaningful. Refusing these keeps one destination from arriving u
 identifiers, and the cost is stated rather than hidden: `https://r.example./v1`,
 `https://r.example/v1?`, and `https://r.example/v1#` have **no** accepted spelling here at all. A
 vocabulary that means something by any of them needs its own rule, the same way an opaque scheme
-does.
+does. A fourth string is refused without being anyone's policy — a raw `'` in the query
+(`https://r.example/v1?a'b`), which WHATWG's special-query encode set rewrites and the round-trip
+check therefore cannot accept; unlike the three above it is still reachable, spelled `%27`, and
+only in the query (`…/v1'x` and `…/v1#a'b` both pass raw).
 
 Stated positively, and this is the whole of it: under a special scheme, two strings this check
 calls equivalent never both pass, and every equivalence class it admits has an accepted spelling.
