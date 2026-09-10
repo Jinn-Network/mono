@@ -479,7 +479,9 @@ describe("product documentation consistency", () => {
       (block) => /`@colophon-claims\/verify` is published/u.test(block),
     );
     expect(publication, "README publication sentence").toBeTypeOf("string");
-    expect(publication).toContain(
+    // Matched against the unwrapped sentence: the hard wrap is cosmetic, so a re-flow that lands
+    // the newline between the two tokens must not be reported as a version disagreement.
+    expect(publication?.replace(/\s+/gu, " ")).toContain(
       `\`latest\` \`${readerLine(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND).slice(1)}\``,
     );
   });
