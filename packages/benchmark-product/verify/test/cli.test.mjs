@@ -319,13 +319,13 @@ test("accepted anchor reasons alias raw identifiers for humans while JSON keeps 
     },
   };
 
-  const human = await runVerifierCli(["bundle"], { verify: async () => report });
+  const human = await runVerifierCli(["bundle"], { verify: async () => ({ verification: report }) });
   assert.equal(human.exitCode, 0);
   assert.match(human.stdout, /calendar promise <identifier: see --json> was signed by <identifier: see --json>/);
   assert.doesNotMatch(human.stdout, /urn:|did:key/);
   assert.doesNotMatch(human.stdout, /jinn\.network|jinn\.benchmarking/);
 
-  const machine = await runVerifierCli(["bundle", "--json"], { verify: async () => report });
+  const machine = await runVerifierCli(["bundle", "--json"], { verify: async () => ({ verification: report }) });
   assert.equal(machine.exitCode, 0);
   assert.equal(JSON.parse(machine.stdout).anchors.anchors[0].reason, reason);
 });
@@ -755,7 +755,7 @@ test("freeze-repo failures keep identifiers in --json and alias them for a human
   const { runVerifierCli } = await import("../dist/index.js");
   const method = "https://registry.jinn.benchmarking/methods/freeze/v1";
   const deps = {
-    verify: async () => ({ format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"] }),
+    verify: async () => ({ verification: { format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"] } }),
     freezeRepo: () => {
       const error = new Error(`freeze-repo-render: no licence declared for ${method}`);
       error.code = "freeze-repo-render";
@@ -940,7 +940,7 @@ test("identity-binding failures keep identifiers in --json and alias them for a 
   const { keyId } = await mintDomainBinding();
   const kind = "https://spec.jinn.network/records/domain-binding/v1";
   const deps = {
-    verify: async () => publisherResult(keyId),
+    verify: async () => ({ verification: publisherResult(keyId) }),
     readFile: () => {
       const error = new Error(`binding document uses unsupported kind ${kind}`);
       error.code = "validation";

@@ -14,6 +14,7 @@
  * Spec: spec/2026-04-30-phase-a-umbrella.md §4.2.
  */
 
+import { verifyArtifactDigest } from '@jinn-network/core/corpus-read';
 import type { ArtifactContent } from '../corpus/index.js';
 import type { Store } from '../store/store.js';
 import type { ArtifactSource } from '../types/envelope.js';
@@ -39,6 +40,28 @@ export type AcquireArtifactResult =
       sourceOperator?: string;
     };
 
+/**
+ * Bytes reached this process and did not hash to the address that was asked
+ * for. `hash_mismatch` is the name the daemon route already uses for this
+ * condition (api/server.ts, HTTP 422), and MCP callers are documented to
+ * discriminate on it — so a locally-detected mismatch must not invent a second
+ * wire name for the same thing.
+ */
+function hashMismatch(
+  sha256: string,
+  actualSha256: string,
+  source: string,
+): AcquireArtifactResult {
+  return {
+    ok: false,
+    error: 'acquire_failed',
+    reason: 'hash_mismatch',
+    sha256,
+    retryable: false,
+    message: `expected ${sha256}, got ${actualSha256} from ${source}`,
+  };
+}
+
 export async function handleAcquireArtifact(
   daemonApiUrl: string | undefined,
   store: Store,
@@ -47,6 +70,10 @@ export async function handleAcquireArtifact(
 ): Promise<AcquireArtifactResult> {
   const own = store.getServedArtifact(args.sha256);
   if (own) {
+    const verified = verifyArtifactDigest(args.sha256, own.content);
+    if (!verified.ok) {
+      return hashMismatch(args.sha256, verified.actualSha256, 'served_artifacts');
+    }
     return {
       ok: true,
       content: {
@@ -152,9 +179,19 @@ export async function handleAcquireArtifact(
 
   // Decode base64 → Buffer and mirror into network_artifacts so subsequent
   // calls in the same process hit the cache path without re-round-tripping
-  // the daemon. Hash verification was already done daemon-side.
+  // the daemon.
   const contentB64 = String(body['content'] ?? '');
   const bytes = Buffer.from(contentB64, 'base64');
+
+  // Verify BEFORE the mirror. The daemon verified these bytes too, but that is
+  // a claim about the other side of an HTTP hop, and the cache-read fast path
+  // above does not re-hash — so unverified bytes admitted here would be served
+  // to every later caller in this process (#4179).
+  const verified = verifyArtifactDigest(args.sha256, bytes);
+  if (!verified.ok) {
+    return hashMismatch(args.sha256, verified.actualSha256, `daemon ${daemonApiUrl}`);
+  }
+
   const artifactType = String(body['artifactType'] ?? args.artifactType ?? 'unknown');
   const source = (body['source'] ?? 'origin') as ArtifactContent['source'];
   const paidAmountUsdc = String(body['paidAmountUsdc'] ?? args.access.priceUsdc);
