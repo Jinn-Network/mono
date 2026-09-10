@@ -23,7 +23,8 @@ async function verify(bundleDir) {
     const result = await exec(process.execPath, [bin, bundleDir, "--json"]);
     return { code: 0, output: JSON.parse(result.stdout) };
   } catch (error) {
-    return { code: error.code, output: JSON.parse(error.stdout) };
+    const failure = /** @type {{ code: number, stdout: string }} */ (error);
+    return { code: failure.code, output: JSON.parse(failure.stdout) };
   }
 }
 
