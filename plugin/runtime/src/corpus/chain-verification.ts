@@ -4,6 +4,7 @@ import type { SyncedEntry, VerifyDriver } from "@jinn-network/record-discovery-c
 import type { SourceHead, SourceIdentity } from "@jinn-network/record-discovery-protocol";
 import type { DsseEnvelope } from "@jinn-network/trust-core";
 
+import type { RuntimeLogger } from "../logger.js";
 import { describeError } from "./errors.js";
 
 export interface ChainVerificationInput {
@@ -112,8 +113,35 @@ export function createUnverifiedChainVerification(
   });
 }
 
-/** The real posture: `record-discovery-client`'s verification driver. */
-export function createDriverChainVerification(driver: VerifyDriver): ChainVerification {
+/**
+ * The real posture: `record-discovery-client`'s verification driver.
+ *
+ * The logger is REQUIRED, and is the only place a driver's thrown cause can go
+ * (#3253). `verification-failed` is a closed-union literal, and the
+ * `corpus-chain-verification` health check interpolates only such literals and
+ * locally configured source names into its `detail` and `remedy` — so putting
+ * remote-influenced free text into `reason` to carry the cause would widen a
+ * surface that is deliberately narrow. Logging it here leaves `reason` the
+ * literal and still gives the operator debugging a `verification-failed`
+ * archive something more than the symptom.
+ */
+export function createDriverChainVerification(
+  driver: VerifyDriver,
+  log: RuntimeLogger,
+): ChainVerification {
+  function reportDriverFailure(
+    source: SourceIdentity,
+    operation: "verify" | "revalidate-head",
+    error: unknown,
+  ): void {
+    log.warn("corpus.chain-verification.driver-failed", {
+      agent: source.agent,
+      name: source.name,
+      operation,
+      message: describeError(error),
+    });
+  }
+
   return Object.freeze({
     mode: "verified" as const,
     async verify(input: ChainVerificationInput): Promise<ChainVerificationOutcome> {
@@ -158,7 +186,7 @@ export function createDriverChainVerification(driver: VerifyDriver): ChainVerifi
           ? { status: "ok" }
           : { status: "rejected", reason: outcome.status };
       } catch (error) {
-        void describeError(error);
+        reportDriverFailure(input.source, "verify", error);
         return { status: "rejected", reason: "verification-failed" };
       }
     },
@@ -180,7 +208,7 @@ export function createDriverChainVerification(driver: VerifyDriver): ChainVerifi
           ? { status: "ok" }
           : { status: "rejected", reason: outcome.status };
       } catch (error) {
-        void describeError(error);
+        reportDriverFailure(input.source, "revalidate-head", error);
         return { status: "rejected", reason: "verification-failed" };
       }
     },

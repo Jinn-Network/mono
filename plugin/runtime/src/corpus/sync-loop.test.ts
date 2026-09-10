@@ -10,6 +10,7 @@ import type { CorpusReader, MirrorSourceStatus } from "./read.js";
 import type { CorpusRetrieval } from "./retrieve.js";
 import { createCorpusSyncCapability } from "./sync-loop.js";
 import {
+  FAILURE_TRUNCATION_MARKER,
   MAX_FAILURE_CHARS,
   MIRROR_SYNC_STATUS_FILENAME,
   MIRROR_SYNC_STATUS_FORMAT,
@@ -584,6 +585,30 @@ describe("the corpus-sync capability", () => {
     expect(status?.lastCycle?.status).toBe("synced");
     expect(status?.lastCycle?.indexError).toHaveLength(MAX_FAILURE_CHARS);
     expect(status?.lastCycle?.indexError).not.toContain("\u001b");
+    // #3822: bounded is not enough. An operator reading a value that stops at
+    // the ceiling cannot tell whether the cause was in the part they can see,
+    // so a cut value says it was cut -- and still fits the bound.
+    expect(status?.lastCycle?.indexError?.endsWith(FAILURE_TRUNCATION_MARKER)).toBe(true);
+    await built.capability.stop!();
+  });
+
+  test("a failure half that stops exactly at the ceiling uncut is not marked as cut", async () => {
+    const built = harness({
+      outcomes: [{ status: "synced", sources: [report(ALICE, { indexed: 1 })] }],
+      sources: [source(ALICE.agent)],
+      listRecordsThrows: true,
+      // `describeError` prefixes nothing for a plain `Error`, so this arrives
+      // at `recordable` at exactly the ceiling: the one length at which a naive
+      // "slice one short and append a marker" would lie about a complete value.
+      listRecordsError: new Error("z".repeat(MAX_FAILURE_CHARS)),
+    });
+    await built.start();
+    await settle();
+
+    const status = await statusOf(built);
+    expect(status?.lastCycle?.indexError).toHaveLength(MAX_FAILURE_CHARS);
+    expect(status?.lastCycle?.indexError).toBe("z".repeat(MAX_FAILURE_CHARS));
+    expect(status?.lastCycle?.indexError?.endsWith(FAILURE_TRUNCATION_MARKER)).toBe(false);
     await built.capability.stop!();
   });
 
@@ -982,7 +1007,13 @@ test("peer-supplied failure text is bounded and stripped before it is durable", 
   // no longer move an operator's cursor; the inert characters stay, because
   // stripping them would rewrite the peer's reported fault.
   expect(failure?.code).toBe("redirect[2Jed");
-  expect(failure?.message).toBe("a".repeat(512));
+  // Bounded AND marked (#3822): the marker is written over the last character
+  // rather than after the bound, so the value is still at most
+  // `MAX_FAILURE_CHARS` and still satisfies the read schema.
+  expect(failure?.message).toBe(
+    `${"a".repeat(MAX_FAILURE_CHARS - FAILURE_TRUNCATION_MARKER.length)}${FAILURE_TRUNCATION_MARKER}`,
+  );
+  expect(failure?.message).toHaveLength(MAX_FAILURE_CHARS);
   await built.capability.stop!();
 });
 

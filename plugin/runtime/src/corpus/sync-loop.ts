@@ -19,6 +19,7 @@ import type { CorpusMirror, MirrorSyncOutcome, MirrorSyncStatus } from "./mirror
 import type { CorpusReader } from "./read.js";
 import type { CorpusRetrieval } from "./retrieve.js";
 import {
+  FAILURE_TRUNCATION_MARKER,
   MAX_FAILURE_CHARS,
   MIRROR_SYNC_STATUS_FILENAME,
   MIRROR_SYNC_STATUS_FORMAT,
@@ -398,11 +399,25 @@ export function createCorpusSyncCapability(
    * `min(1)` on the read schema, so an empty one would write a document the
    * next read rejects as unrecognized, quietly costing the freshness history
    * that document exists to keep.
+   *
+   * A half the ceiling actually cut says so (#3822). `sanitizeUntrustedText`
+   * slices with no suffix, so a cut value written as-is looks complete — it
+   * just stops — and an operator reading a 512-character error cannot tell
+   * whether the cause was in the part they can see. The marker is appended
+   * over the LAST character rather than after the bound, so a marked value is
+   * still at most `MAX_FAILURE_CHARS` and still satisfies the read schema. The
+   * truncation flag is what decides, not the length: a value that arrives at
+   * exactly the ceiling was not cut and is not marked.
    */
   function recordable(value: string | undefined, fallback: string): string {
-    const sanitized =
-      value === undefined ? "" : sanitizeUntrustedText(value, MAX_FAILURE_CHARS).text;
-    return sanitized === "" ? fallback : sanitized;
+    const { text, truncated } =
+      value === undefined
+        ? { text: "", truncated: false }
+        : sanitizeUntrustedText(value, MAX_FAILURE_CHARS);
+    if (text === "") return fallback;
+    return truncated
+      ? `${text.slice(0, MAX_FAILURE_CHARS - FAILURE_TRUNCATION_MARKER.length)}${FAILURE_TRUNCATION_MARKER}`
+      : text;
   }
 
   function followedOnly(

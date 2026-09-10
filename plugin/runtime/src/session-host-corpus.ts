@@ -95,6 +95,17 @@ async function readPolicyVersions(directory: string): Promise<readonly Uint8Arra
  * `KeyResolver.resolve(agent, at)` asks — an agent that publishes two archives
  * signs both with the same working keys.
  */
+/**
+ * Every key this configuration declares for an agent, aggregated across that
+ * agent's sources -- because `KeyResolver.resolve(agent, at)` asks about the
+ * agent, not about one archive.
+ *
+ * De-duplicating on `keyid` alone is safe rather than order-dependent (#3444):
+ * `resolveCorpusConfig` rejects two declarations of one `(agent, keyid)` that
+ * disagree on `validFrom`, so by the time a `RuntimeConfig` exists every
+ * surviving duplicate carries the same instant and which one is kept cannot
+ * change when the key is admitted.
+ */
 function declaredSigningKeys(
   config: RuntimeConfig,
 ): ReadonlyMap<string, readonly MirrorSourceSigningKey[]> {

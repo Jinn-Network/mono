@@ -128,7 +128,11 @@ export function createCorpusCapability(
             });
 
       const chainRejections = new Map<string, string>();
-      const posture = selectChainVerification(corpus.chainVerification, options.verifyDriver);
+      const posture = selectChainVerification(
+        corpus.chainVerification,
+        options.verifyDriver,
+        context.log,
+      );
 
       started = {
         config: context.config,
@@ -319,6 +323,7 @@ export function createCorpusCapability(
   function selectChainVerification(
     mode: CorpusConfig["chainVerification"],
     driver: VerifyDriver | undefined,
+    log: RuntimeLogger,
   ): { readonly verification: ChainVerification; readonly shortfall?: "driver-unavailable" } {
     if (mode === "unverified") {
       return { verification: createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT) };
@@ -329,7 +334,7 @@ export function createCorpusCapability(
     if (driver === undefined) {
       return { verification: createRejectingChainVerification(), shortfall: "driver-unavailable" };
     }
-    return { verification: createDriverChainVerification(driver) };
+    return { verification: createDriverChainVerification(driver, log) };
   }
 
   /**

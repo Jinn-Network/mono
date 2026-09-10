@@ -286,7 +286,36 @@ function resolveCorpusConfig(file: unknown, homeDirectory: string): CorpusConfig
 
   const byArchive = new Set<string>();
   const byRepository = new Set<string>();
+  /**
+   * `(agent, keyid)` -> the single `validFrom` this configuration declares for it.
+   *
+   * Keyed by AGENT, not by archive, because that is the question the runtime
+   * asks of it: `declaredSigningKeys` in `session-host-corpus.ts` aggregates
+   * every source's keys per agent for `KeyResolver.resolve(agent, at)`, and
+   * de-duplicates on `keyid` alone. Two declarations of one key that disagree
+   * on `validFrom` would therefore let source order decide which instant the
+   * binding resolver gates on and the key catalog probes at. Rejecting the
+   * contradiction here rather than picking one is the fail-loud direction, and
+   * it is what makes that dedup order-independent. Comparison is between
+   * canonical UTC instants, since `MirrorSourceSigningKeySchema` normalizes
+   * `validFrom` on the way in -- two offset spellings of one instant are not a
+   * contradiction.
+   */
+  const declaredKeyValidFrom = new Map<string, string>();
   for (const source of parsed.data.sources) {
+    for (const key of source.signingKeys) {
+      const declaration = `${source.agent}\u0000${key.keyid}`;
+      const existing = declaredKeyValidFrom.get(declaration);
+      if (existing !== undefined && existing !== key.validFrom) {
+        throw new PluginRuntimeError(
+          RUNTIME_ERROR_CODES.configInvalid,
+          `corpus signing key ${key.keyid} for agent ${source.agent} is declared with two ` +
+            `different validFrom instants (${existing} and ${key.validFrom}); declare one.`,
+        );
+      }
+      declaredKeyValidFrom.set(declaration, key.validFrom);
+    }
+
     const archive = `${source.agent}/${source.name}`;
     if (byArchive.has(archive)) {
       throw new PluginRuntimeError(
