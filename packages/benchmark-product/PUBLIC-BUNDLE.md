@@ -508,6 +508,56 @@ version-mismatch refusal it gives a v7 one. `colophon bundle verify --bundle
 still unpublished, so that route needs a mono checkout the `npx` line does
 not.
 
+### Composed presentation bundle v10
+
+A bundle whose report page renders the composed presentation generation emits
+`benchmark-product-public-bundle/10`. It is v6's closure exactly --- v2's member
+list, no qualification graph, an anchored trust root, the same **seven checks**,
+and `benchmark-product.claim-package/4` --- differing only in which report page
+the verifier rebuilds and byte-compares. Nothing about what the bundle proves
+moves. A presentation generation that grew a check would be claiming the render
+proves something the records did not already prove.
+
+The page is byte-pinned: `verifyPublicBundleSnapshot` rebuilds every
+presentation asset and refuses the bundle on any mismatch, and every published
+claim seals the exact reader line that performs that rebuild. Changing a
+rendered string in place would therefore break every already-published bundle
+under the command printed on its own page, which is why a prose revision takes a
+format number rather than an edit. What v10 renders is the four report-prose
+rulings of issue #3016: each of the page's statements is made once, in the
+highest-priority slot that carries it, and the narrated control above the
+per-cell disclosures is cut. No disclosure the v6 page carries is absent from
+the v10 page.
+
+Later presentation features register as capability entries inside this
+generation rather than taking a further format number.
+
+v10 cannot pin v6's first public `@0.1` line: no released `0.1` reader
+understands the format, so a claim naming one would be an instruction to fail.
+It pins the same `0.2.1` line v7 and v8 pin, with `@0.2` as the compatible line:
+
+```bash
+npx @colophon-claims/verify@0.2.1 <bundle-dir>
+```
+
+v10 is anchored, so it takes the trust-material form too:
+
+```bash
+npx @colophon-claims/verify@0.2.1 <bundle-dir> \
+  --tsa-root ./authority-root.pem \
+  --ots-headers ./bitcoin-headers.txt
+```
+
+`--tsa-root` and `--ots-headers` carry the meaning and the defaults stated for
+v6.
+
+**No run emits v10 yet.** The producer's format selection is unchanged, because
+`0.2.1` is published and immutable and predates this format, so it refuses v10
+at manifest parse --- a v10 bundle would be permanently unverifiable under its
+own instruction. The format enters the schema so a bundle can be labelled with
+it and the round trip proven; the producer flips in the change that pins v10 to
+the release serving it.
+
 ## Portable verification
 
 Verification with your own tools — no Jinn code at all — is specified in
@@ -535,6 +585,7 @@ out where it applies.
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/8` | `@0.2.1` | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
+| `benchmark-product-public-bundle/10` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a
