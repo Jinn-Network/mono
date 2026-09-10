@@ -1,8 +1,8 @@
-import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { pruneMigrationBackups } from '../../src/config.js';
+import { describe, expect, it, vi } from 'vitest';
+import { loadConfig, pruneMigrationBackups } from '../../src/config.js';
 
 describe('pruneMigrationBackups', () => {
   it('removes stage-1 atomic-write backups and leaves everything else alone', () => {
@@ -31,5 +31,32 @@ describe('pruneMigrationBackups', () => {
     writeFileSync(join(dir, 'config.json'), '{"configShapeVersion":2}\n');
     expect(pruneMigrationBackups(dir).removed).toEqual([]);
     expect(readdirSync(dir)).toEqual(['config.json']);
+  });
+});
+
+describe('loadConfig prune notice', () => {
+  it('writes the prune notice to stderr, never to stdout', () => {
+    // stdout carries the --json payload (src/errors/envelope.ts: "stderr is
+    // reserved for logs"). Every --json verb loads config before it emits, so
+    // one console.log here breaks `jinn <verb> --json | jq` on the single run
+    // that performs the prune.
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-config-prune-notice-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, JSON.stringify({ network: 'testnet', configShapeVersion: 2 }));
+    writeFileSync(join(dir, 'config.json.backup-20260730T142233Z'), '{}\n');
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      loadConfig(configPath);
+      expect(log).not.toHaveBeenCalled();
+      expect(error.mock.calls.map((call) => String(call[0]))).toContain(
+        '[config] Pruned 1 pre-v2 migration backup.',
+      );
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
