@@ -208,7 +208,49 @@ async function discardBody(response: Response): Promise<void> {
   }
 }
 
-/** Read a response body as bytes, refusing anything past `maxBytes`. */
+/**
+ * The exact decoded length this response promises, or `undefined` when it
+ * promises nothing usable (#3759).
+ *
+ * `content-encoding` is the trap: with one set, `content-length` describes
+ * *wire* bytes, and the reader hands back the decoded ones — a gzipped 200 KB
+ * JSON body declares ~230. Pre-sizing from that is not a pessimization, it is
+ * a buffer guaranteed to overflow, so the fast path is gated on the encoding
+ * being absent or `identity`. The raw header is read rather than
+ * `Number(header)` because `Number(null)` is `0`, which cannot be told from a
+ * genuinely declared zero.
+ */
+function exactDecodedLength(response: Response, maxBytes: number): number | undefined {
+  const encoding = response.headers.get('content-encoding');
+  if (encoding !== null && encoding.trim().toLowerCase() !== 'identity') return undefined;
+  const raw = response.headers.get('content-length');
+  if (raw === null || raw.trim() === '') return undefined;
+  const declared = Number(raw);
+  if (!Number.isInteger(declared) || declared < 0 || declared > maxBytes) return undefined;
+  return declared;
+}
+
+/**
+ * Read a response body as bytes, refusing anything past `maxBytes`.
+ *
+ * Peak resident bytes, not memcpy count, is what the pre-sizing below buys.
+ * The stream has already allocated each chunk either way, and the join is the
+ * single copy in both designs — but the chunk-list path holds every chunk live
+ * *while* it allocates and fills the joined buffer, so it peaks at roughly
+ * twice the payload: ~128 MiB at `fetchTrajectoryFromIpfs`'s 64 MiB bound
+ * (measured), against ~1x live for the pre-sized path.
+ *
+ * The honest caveat: the fast path is gated on the absence of a content
+ * encoding, and gateways generally compress JSON — so it will rarely engage on
+ * the very trajectory read that motivated the bound. The win is real for the
+ * raw-bytes path (source files, sealed documents, envelopes) and
+ * correct-but-inert for compressed JSON.
+ *
+ * Out of scope, and larger than what this removes: `fetchJson` decodes these
+ * bytes into a UTF-16 string (up to 2x the byte length) and then `JSON.parse`s
+ * that into an object graph, all while the bytes are still live. Bringing that
+ * down means streaming JSON parsing, which is a rewrite rather than a fix.
+ */
 async function readBoundedBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
@@ -218,6 +260,9 @@ async function readBoundedBytes(response: Response, maxBytes: number): Promise<U
   const body = response.body;
   if (!body) return new Uint8Array(0);
   const reader = body.getReader();
+  const exact = exactDecodedLength(response, maxBytes);
+  let buffer = exact === undefined ? undefined : new Uint8Array(exact);
+  let written = 0;
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
@@ -226,8 +271,26 @@ async function readBoundedBytes(response: Response, maxBytes: number): Promise<U
       if (done) break;
       if (!value) continue;
       total += value.byteLength;
+      // The cumulative counter stays the authority on the cap. The pre-sized
+      // buffer's own length is never it — a lying `content-length` must not be
+      // able to widen or narrow the bound.
       if (total > maxBytes) {
         throw new IpfsResponseTooLargeError(maxBytes);
+      }
+      if (buffer !== undefined) {
+        if (written + value.byteLength <= buffer.length) {
+          buffer.set(value, written);
+          written += value.byteLength;
+          continue;
+        }
+        // The body outran what it declared, on an identity response. Fall back
+        // in place: what was written becomes the first chunk-list entry and
+        // the read continues exactly as it did before. Peak on this anomalous
+        // path is 2x — today's behaviour, so no regression and no new failure
+        // mode. (`subarray` is right here: the pre-sized buffer is dropped
+        // straight after, so retaining its backing store costs nothing.)
+        chunks.push(buffer.subarray(0, written));
+        buffer = undefined;
       }
       chunks.push(value);
     }
@@ -237,6 +300,15 @@ async function readBoundedBytes(response: Response, maxBytes: number): Promise<U
     } catch {
       // Already terminal; the read result (or throw) above is what matters.
     }
+  }
+  if (buffer !== undefined) {
+    // A short body is not reachable through `fetch` — undici rejects a body
+    // that ends early with `TypeError: terminated` — but returning trailing
+    // zeros would be wrong if it ever were, and the guard costs one branch.
+    // `slice`, never `subarray`: a view would retain the whole pre-sized
+    // backing store and silently defeat this change on the one path where it
+    // matters.
+    return written === buffer.length ? buffer : buffer.slice(0, written);
   }
   const joined = new Uint8Array(total);
   let offset = 0;
