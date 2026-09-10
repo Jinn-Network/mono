@@ -262,13 +262,13 @@ already yields every entry oldest-first. Then:
    parse contributes no subject, so nothing it might have anchored is counted as
    anchored. That record is also the evidence that would have said which side of step
    2's partition its announcing entry belongs on, so the entry cannot be resolved on it.
-   Default that entry into the denominator as substantive — over-reporting is the
-   direction this walk errs in everywhere else — and carry its sequence as *unreadable*
-   rather than as an ordinary gap, so a reader is not left to read a hosting fault as a
-   missing anchor. A missing record or a digest mismatch is a serving fault, which
-   "Verify it from another machine" step 4 diagnoses; bytes that hash correctly and
-   still do not parse as an `AnchorEvidence` record are a producer fault, which it does
-   not. Keep only subjects whose `subject.kind` is
+   Default that entry into the denominator as substantive, because a sequence dropped
+   from the denominator is one a reader cannot see at all, and carry its sequence as
+   *unreadable* rather than as an ordinary gap, so a reader is not left to read a
+   hosting fault as a missing anchor. A missing record or a digest mismatch is a serving
+   fault, which "Verify it from another machine" step 4 diagnoses; bytes that hash
+   correctly and still do not parse as an `AnchorEvidence` record are a producer fault,
+   which it does not. Keep only subjects whose `subject.kind` is
    `https://spec.jinn.network/records/announcement-entry/v1`: §4.2 minted that URI to
    make `subject.kind` normative, and a record covering anything else anchors no
    sequence on this chain — an entry announcing only such non-entry anchors is
@@ -314,6 +314,9 @@ already yields every entry oldest-first. Then:
    flight too and still reads as a gap.
 6. **Name what is left exactly.** Because the denominator is exact, report the
    remaining unanchored sequences by sequence rather than as a count or a proportion.
+   List the tip's pending sequence, and any sequence step 3 marked unreadable,
+   separately from the gap: a sequence held out of the gap and named nowhere reads as
+   anchored.
 
 ### Reading the result honestly
 
