@@ -51,6 +51,12 @@ const OPERATOR_CI_SELECTED_PATHS = [
   'packages/**/package.json',
   '.github/workflows/ci.yml',
   '.github/workflows/npm-publish.yml',
+  // The image lanes and the operator-facing deploy documents, guarded by
+  // `test/scripts/ghcr-image-references.test.ts` (#2811).
+  '.github/workflows/docker.yml',
+  '.github/workflows/operator-images.yml',
+  'DEPLOY.md',
+  'deploy/**',
   '.github/scripts/npm-publish-workflow.test.mjs',
   '.github/scripts/operator-*.test.mjs',
 ];

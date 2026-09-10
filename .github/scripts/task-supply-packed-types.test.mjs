@@ -39,6 +39,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
+  ['@jinn-network/contract-abis', join(root, 'packages', 'contract-abis')],
   ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
 ];
 

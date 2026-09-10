@@ -113,8 +113,8 @@ Inputs:
 - audit findings: {AUDIT_FINDINGS}
 - triage classifications: {TRIAGE_CLASSIFICATIONS}
 - closure outcomes: {CLOSURE_OUTCOMES}
-- release-prep verdicts: {RELEASE_PREP_VERDICTS}
-- Tier 3 verdict + evidence: {TIER_3_RESULT}
+- hermetic-gate scenario verdicts: {HERMETIC_GATE_RESULT}
+- environment-suite verdict + evidence: {ENVIRONMENT_SUITE_RESULT}
 - diff summary: {DIFF_SUMMARY}
 
 Use the template at references/handoff-doc-template.md to produce a fully

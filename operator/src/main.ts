@@ -54,7 +54,7 @@ import { applyDeploymentReadinessGate } from './preflight/deployment-readiness.j
 import { ensureStableCwd } from './preflight/stable-cwd.js';
 import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
-import { runFleetBootstrap, runBootstrapWithDegradeOpen } from './earning/bootstrap-run.js';
+import { runFleetBootstrap, runBootstrapWithDegradeOpen, resolveDegradedStart } from './earning/bootstrap-run.js';
 import { isEconomicBootstrapHalt, isPendingMasterFundingHalt } from './earning/bootstrap-halt-classification.js';
 import { startDegradedRecoveryLoops } from './daemon/degraded-recovery.js';
 import {
@@ -725,9 +725,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       operatorArtifacts: {
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
         operatorConfig: operatorArtifactsConfig,
-        onOperatorConfigUpdated: (operator) => {
-          config.operator = operator;
-        },
       },
       // Issue #420: one-click operator debug report. The bundle assembler
       // reads the live resolved `config` so the download reflects env
@@ -1134,12 +1131,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // mechAddress/safeAddress/composition/adapter resolved from a
       // COMPLETED bootstrap, none of which exist mid-halt — see
       // degraded-recovery.ts's docstring.
-      startDegraded: (envelope) => {
-        if (!isEconomicBootstrapHalt(envelope)) {
-          console.log('[main] Halt cause is integrity-class — staying fail-closed (no degraded recovery loops).');
-          return null;
-        }
-        try {
+      //
+      // #2425: the classify-then-start decision lives in
+      // `resolveDegradedStart` (bootstrap-run.ts) so it is unit-testable and
+      // so an economic halt whose loops FAIL to start is reported as
+      // `'start-failed'` rather than being flattened into the integrity
+      // halt's `'fail-closed'` — the latter left `/ready` at 503 and
+      // restart-looped a funding-halted daemon.
+      startDegraded: (envelope) => resolveDegradedStart(envelope, {
+        isEconomic: isEconomicBootstrapHalt,
+        start: () => {
           const handle = startDegradedRecoveryLoops({
             earningDir: config.earningDir,
             network: NETWORK_CHAIN,
@@ -1174,14 +1175,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               (isPendingMasterFundingHalt(envelope) ? ' balance-topup omitted (pending master-EOA funding halt).' : ''),
           );
           return handle;
-        } catch (degradedErr) {
-          console.error(
-            '[main] Failed to start degraded recovery loops (non-fatal — still waiting for retry):',
-            degradedErr instanceof Error ? degradedErr.message : degradedErr,
-          );
-          return null;
-        }
-      },
+        },
+      }),
       // hjex.6: Auto-resume funding poller. When the halt is a funding
       // shortfall, poll the master EOA balance every
       // JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance meets

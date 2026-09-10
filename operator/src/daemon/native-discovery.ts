@@ -13,7 +13,7 @@ import type {
   SourceHead,
   SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
-import { compareCodeUnitStrings, headPath, sealJson } from '@jinn-network/record-discovery-protocol';
+import { compareCodeUnitStrings, headPath, parseHeadTimestamp, sealJson } from '@jinn-network/record-discovery-protocol';
 import {
   coldSync,
   fetchHead,
@@ -28,6 +28,12 @@ import {
 } from '@jinn-network/record-discovery-client';
 import type { Store } from '../store/store.js';
 import type { AnnouncedSubmissionCard } from './native-submission-facts.js';
+import {
+  NATIVE_DISCOVERY_QUARANTINE_SCHEMA,
+  clearPoisonFailures,
+  isPoisonQuarantined,
+  recordPoisonFailure,
+} from './native-discovery-quarantine.js';
 
 const BIGINT_TAG = '$bigint';
 
@@ -93,7 +99,7 @@ CREATE TABLE IF NOT EXISTS native_discovery_withdrawals (
 );
 CREATE INDEX IF NOT EXISTS idx_native_discovery_withdrawals_pending
   ON native_discovery_withdrawals (acknowledged_at, id);
-`;
+${NATIVE_DISCOVERY_QUARANTINE_SCHEMA}`;
 
 export interface SignedSourceHighWater {
   readonly sequence: string;
@@ -433,7 +439,15 @@ function sameHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): bool
 function reSignedIdleHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): boolean {
   const held = checkpoint.signedHighWater;
   if (held.sequence !== head.head.sequence || held.entry !== head.head.entry) return false;
-  return new Date(head.head.issuedAt).getTime() > new Date(held.issuedAt).getTime();
+  // Read both instants with the protocol package's one strict helper (#3482,
+  // #4096) rather than a bare `new Date`. The two readings differ on exactly one
+  // input class the schema now admits -- a leap second, `NaN` under `new Date`
+  // and `23:59:59.999` under `parseHeadTimestamp`. `NaN` kept the refusal, so
+  // this was never a fail-open; what it was is a second answer to a question the
+  // protocol package already owns. An instant that is genuinely unreadable still
+  // yields `NaN` here and still refuses, so a rollback, a backdated re-sign and a
+  // malformed head keep the treatment the comment above describes.
+  return parseHeadTimestamp(head.head.issuedAt) > parseHeadTimestamp(held.issuedAt);
 }
 
 function deduplicateEntries(entries: readonly SyncedEntry[]): SyncedEntry[] {
@@ -813,8 +827,14 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       if (revalidated.status !== 'ok' && revalidated.status !== 'stale') {
         throw new NativeDiscoverySyncError(source, revalidated.status);
       }
+      // `parseHeadTimestamp` (#3482, #4096): the second operand is this module's own
+      // reading of the same `refreshBy` the trust adapter's `isFresh` reads for the
+      // first, and the two must not disagree. Before #3603 both answered `NaN` for a
+      // leap second -- `isFresh` reporting `stale` (so the `||` short-circuited true)
+      // while this operand read `NaN <= now` as `false`, i.e. never-stale. Now both
+      // read the instant, so which operand answers no longer changes the verdict.
       const stale = revalidated.status === 'stale'
-        || new Date(syncedHead.head.refreshBy).getTime() <= (input.now ?? (() => new Date()))().getTime();
+        || parseHeadTimestamp(syncedHead.head.refreshBy) <= (input.now ?? (() => new Date()))().getTime();
       if (stale) {
         // ## A self-hosted source's lapsed head degrades; a peer's still refuses (#2547)
         //
@@ -1008,18 +1028,33 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           withdrawals.push({ sequence: item.entry.sequence, entryDigest, announcement });
           continue;
         }
-        // ## An announcement this consumer cannot decode degrades the SOURCE (#2529 F1)
+        // ## An announcement this consumer cannot decode degrades the SOURCE (#2529 F1),
+        // ## and after N consecutive polls it is quarantined and stepped past (#2473)
         //
-        // It does not kill the pass, and it equally does not get skipped past: nothing is
-        // queued and — because this returns before `queue()` — the durable high-water does NOT
-        // advance over it. A signed announcement this consumer failed to understand stays
-        // exactly where it is, to be re-read at the next poll or by a consumer that
-        // understands it. Advancing past it would silently drop signed history on a reader
-        // bug, which is the failure mode that produced #2529 in the first place.
+        // #2529 chose to degrade rather than skip: nothing is queued and — because the throw
+        // returns before `queue()` — the durable high-water does NOT advance over it. That
+        // kept a reader bug from silently dropping signed history, and its stated trade was
+        // "loud and stuck beats silent and lossy". #2473 keeps the first half and bounds the
+        // second: stuck was FOREVER, so the same bytes were re-fetched and re-thrown at every
+        // poll and that source's queue never recovered.
         //
-        // The trade this makes is explicit: a permanently-undecodable announcement wedges that
-        // one source's queue rather than that operator's daemon. Loud and stuck beats silent
-        // and lossy — and beats dead.
+        // So the #2529 behaviour is unchanged for the first
+        // `NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD - 1` consecutive polls — long enough
+        // for any transient decode fault to clear without losing a byte. The Nth records the
+        // announcement in the durable quarantine ledger, announces it under the named event
+        // code, and steps past it: sibling announcements in this entry still queue, `queue()`
+        // still runs, and the checkpoint advances. Nothing is silent — the quarantine row
+        // names the sequence, entry digest and failure, and survives restarts.
+        //
+        // A quarantined announcement re-served on a later cold re-adoption is skipped here
+        // rather than re-decoded, so re-adopting a source cannot resurrect the wedge.
+        if (isPoisonQuarantined({
+          store: input.store,
+          scope: 'announcement',
+          source,
+          entryDigest,
+          announcementId: announcement.announcementId,
+        })) continue;
         let decoded: Card | undefined;
         try {
           decoded = await input.decode({
@@ -1030,13 +1065,34 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
             signedHighWater: highWater,
           });
         } catch (cause) {
+          // A local-authority fault is THIS machine's, never the source's: it must stay fatal
+          // and must never be counted against the announcement.
           if (cause instanceof NativeDiscoveryLocalAuthorityError) throw cause;
-          throw new NativeDiscoveryUndecodableAnnouncementError(
+          const undecodable = new NativeDiscoveryUndecodableAnnouncementError(
             source,
             announcement.announcementId,
             { cause },
           );
+          const poisoned = recordPoisonFailure({
+            store: input.store,
+            scope: 'announcement',
+            source,
+            sequence: item.entry.sequence,
+            entryDigest,
+            announcementId: announcement.announcementId,
+            detail: undecodable.message,
+            ...(input.now === undefined ? {} : { now: input.now }),
+          });
+          if (!poisoned.quarantined) throw undecodable;
+          continue;
         }
+        clearPoisonFailures({
+          store: input.store,
+          scope: 'announcement',
+          source,
+          entryDigest,
+          announcementId: announcement.announcementId,
+        });
         if (decoded === undefined) continue;
         cards.push({
           sequence: item.entry.sequence,
