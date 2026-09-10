@@ -45,10 +45,20 @@ export interface HandoffDocInput {
   independentEvidence?: string;
 }
 
-// Render a scenario verdict as a release-evidence marker value: `passed` or
-// `failed:<failClass>`. Shared by the per-scenario lines of the marker block.
+// Render a scenario verdict as a release-evidence marker value: `passed`,
+// `skipped:<reason>`, or `failed:<failClass>`. Shared by the per-scenario lines of
+// the marker block. The `skip` arm matters: without it a skipped scenario fell to the
+// fail branch and emitted `failed:null`, misreporting a skip as a failure. Matches the
+// sibling emitter in run-tier-1.ts.
 function verdictMarker(verdict: ScenarioVerdict): string {
-  return verdict.verdict === 'pass' ? 'passed' : `failed:${verdict.failClass}`;
+  switch (verdict.verdict) {
+    case 'pass':
+      return 'passed';
+    case 'skip':
+      return `skipped:${verdict.failNotes ?? 'no-reason'}`;
+    case 'fail':
+      return `failed:${verdict.failClass}`;
+  }
 }
 
 export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): Promise<void> {

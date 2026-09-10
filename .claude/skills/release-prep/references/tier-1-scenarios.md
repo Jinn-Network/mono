@@ -34,15 +34,19 @@ Four scenarios, all single-operator. Coverage differs per scenario: T1.1's contr
 
 **Catches:** read-contract drift — a producer that stops stamping `contractVersion` or stamps the wrong one; a schema shape change landed without a version-bump decision; a stale committed `openapi.v1.json`.
 
-**What it does:** Boot-less by design — no daemon, no RPC, no filesystem state beyond the checkout. Three checks: calls the real `assembleStatusV1` against a minimal `GatheredStatusRaw` and validates the output against `statusV1ResponseSchema`, asserting the stamped `contractVersion` equals `CURRENT_CONTRACT_VERSION`; recomputes the schema hash and asserts it matches `CONTRACT_SHAPE_SHA`; regenerates `openapi.v1.json` and asserts it is clean. (Spec: `docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md` §8.)
+**What it does:** Boot-less by design — no daemon, no RPC, no filesystem state beyond the checkout. Four checks, run as five logged phases: calls the real `assembleStatusV1` against a minimal `GatheredStatusRaw` and validates the output against `statusV1ResponseSchema` (phase 1), asserting the stamped `contractVersion` equals `CURRENT_CONTRACT_VERSION` (phase 2); recomputes the schema hash and asserts it matches `CONTRACT_SHAPE_SHA` (phase 3); regenerates `openapi.v1.json` and asserts it is clean (phase 4); and asserts `notificationsV1ResponseSchema` rejects a payload with no `contractVersion` and round-trips a stamped one (phase 5). (Spec: `docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md` §8. The implementation file's own header docstring predates phase 5 and still says "Three checks" — read the phases, not the docstring.)
 
 **Implementation:** `operator/test/release/tier-1/T1.3-contract-conformance.ts` — run in CI only by its `release:tier-1:T1.3` vitest wrapper, which `.github/workflows/release-tier-1.yml:78` runs weekly; no gate workflow invokes it. (`operator/scripts/release/run-tier-1.ts:6,111-113` also runs it under a local `yarn release:tier-1`.)
 
+**Wall-clock budget:** none declared — `run-tier-1.ts:111-113` sets no `wallClockBudgetMs` for T1.3 (only T1.1 declares one, 90s). Boot-less, so it runs in seconds.
+
 ## T1.4 — operator-console app-flow journeys
 
-**Catches:** broken operator-console journeys — JS errors, React error boundary firings, and regressions in the claim-policy and posting-status flows against a mocked daemon API.
+**Catches:** regressions in the claim-policy save round-trip (mode and execution-wiring rendering, the restart-required surface, the shape of the `PUT` body the console sends) and in the Network task-posts panel (windowed 1h/6h/24h counts, and the zero-state copy).
 
-**What it does:** Playwright. Runs two named console journeys — claim policy and posting status — against a mocked daemon API, asserting each renders past the spinner and completes its flow without a JS error or a visible error boundary.
+**What it does:** Playwright. Runs two named console journeys against a mocked daemon API. The claim-policy flow asserts the tab renders with the expected mode and one `prediction.v1` wiring row, edits the policy, and asserts both the restart-required surface and the exact `claimPolicy` body of the single `PUT` the console issues. The posting-status flow asserts the task-posts panel renders its three windowed counts, and separately that it renders the zero-state copy when there are no posts.
+
+It does **not** assert on JS errors, console errors, or React error boundaries — the only `pageerror` listener in the console e2e suite is in `live-console.e2e.ts`, which `e2e:app-flow` does not name and `playwright.config.ts:9` additionally `testIgnore`s. The retired all-routes shape did make those assertions; this one does not, so that regression class is not gated here.
 
 **Implementation:** `apps/operator-console/e2e/claim-policy-flow.e2e.ts` and `apps/operator-console/e2e/posting-status.e2e.ts` — the two files `apps/operator-console/package.json:13` hands to Playwright as `e2e:app-flow`. Both `operator/package.json:144` (`release:tier-1:T1.4`) and `operator/package.json:185` (`e2e:app-flow`) delegate to that one console script, and `hermetic-gate.yml:397-398` runs `yarn e2e:app-flow` with `working-directory: operator` — which is why T1.4's contract is executed by the gate. `operator/scripts/release/run-tier-1.ts:22` still names its wrapper `runT14ConsoleRouteSmoke` after the retired all-routes shape.
 

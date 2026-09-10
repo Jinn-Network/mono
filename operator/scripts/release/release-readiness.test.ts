@@ -99,6 +99,43 @@ describe('release-readiness scaffolding', () => {
     expect(content).not.toContain('human-skipped');
   });
 
+  // verdictMarker had no `skip` arm, so a skipped scenario emitted `failed:null` --
+  // a skip misreported as a failure. run-tier-1.ts's sibling emitter already got this
+  // right (`skipped:${failNotes ?? 'no-reason'}`).
+  it('writeHandoffDoc renders a skipped scenario verdict as skipped, not failed', async () => {
+    const outPath = path.join(tmpRoot, 'handoff.md');
+    await writeHandoffDoc(outPath, {
+      ...baseInput(),
+      hermeticGateVerdicts: [
+        { scenarioId: 'T1.2', verdict: 'skip', wallClockMs: 0, evidencePath: '', failClass: null, failNotes: 'no gate workflow runs it' },
+      ],
+      environmentSuiteVerdict: { scenarioId: 'T3.1', verdict: 'skip', wallClockMs: 0, evidencePath: '', failClass: null, failNotes: null },
+    });
+    const content = await fs.readFile(outPath, 'utf-8');
+    expect(content).toContain('hermetic-gate-t1-2=skipped:no gate workflow runs it');
+    expect(content).toContain('environment-suite=skipped:no-reason');
+    expect(content).not.toContain('failed:null');
+  });
+
+  // The nine template headings, pinned including the conditional one.
+  it('writeHandoffDoc places the conditional Independent evidence heading last but one', async () => {
+    const outPath = path.join(tmpRoot, 'handoff.md');
+    await writeHandoffDoc(outPath, { ...baseInput(), independentEvidence: 'warm-operator smoke, out of band' });
+    const content = await fs.readFile(outPath, 'utf-8');
+    const headings = content.split('\n').filter((l) => l.startsWith('## '));
+    expect(headings).toEqual([
+      '## Recommendation: SHIP',
+      '## Diff under audit',
+      '## Gap log',
+      '## Hermetic-gate scenarios',
+      '## Environment-suite evidence',
+      '## Walk-through script for human pass',
+      '## Open questions for human',
+      '## Independent evidence',
+      '## Marker block (final, diagnostic-only)',
+    ]);
+  });
+
   it('appendAuditTrailEntry adds a one-line entry to log/decisions/', async () => {
     const trailPath = path.join(tmpRoot, 'log', 'decisions', 'release-readiness-runs.md');
     await appendAuditTrailEntry(trailPath, {

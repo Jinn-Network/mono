@@ -50,7 +50,7 @@ Run-id: <run-id>
 ## Open questions for human
 - Q1: ...
 
-## Independent evidence
+## Independent evidence  (emitted only when `independentEvidence` is set)
 <any out-of-band signal>
 
 ## Marker block (final, diagnostic-only)
@@ -72,10 +72,12 @@ release-readiness-run=<run-id>
 ```
 
 Marker keys speak the two-gate vocabulary. One `hermetic-gate-<scenario-id>` key per
-scenario verdict (id lowercased, dots to dashes), one `environment-suite` key whose
-value is `passed`, `failed:<failClass>`, or `skipped:no-verdict-supplied` when no
-environment-suite verdict reached the run. The heading sequence above is pinned by
-`operator/scripts/release/release-readiness.test.ts`.
+scenario verdict (id lowercased, dots to dashes), plus one `environment-suite` key. Every
+value is `passed`, `skipped:<reason>`, or `failed:<failClass>`; `environment-suite` takes
+the additional value `skipped:no-verdict-supplied` when no environment-suite verdict
+reached the run at all. The heading sequence above is pinned by
+`operator/scripts/release/release-readiness.test.ts`, including the conditional
+`## Independent evidence` section, which is emitted only when that input is set.
 
 Handoffs already written under `docs/release/` keep the retired `tier-1-*` /
 `tier-3-t3-1` keys; they are dated artifacts and are not retro-edited.
