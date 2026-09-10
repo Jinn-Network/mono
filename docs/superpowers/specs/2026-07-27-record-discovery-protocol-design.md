@@ -879,17 +879,19 @@ and this procedure keeps separate, so a caller can tell a malformed envelope fro
 signer.
 
 **Two fail-closed properties.** It **adopts nothing**: the procedure itself neither reads nor
-writes the high-water mark, and §10.3 step 7 remains the only writer of the mark's
-*position*. What the caller does with the instant differs by case, and both keep `issuedAt` a
-monotonicity floor — an identical head leaves it where it is, an accepted re-sign raises it to
-the instant just accepted, so the head it replaced becomes a regression rather than an
-indefinitely replayable one. Raising the floor at an unmoved position is the caller's write,
-not this procedure's, and it is the one high-water-mark write that does not come from §10.3.
-And it **binds the head's `origin` to the source being followed**: keys are resolved from the
-head, so accepting a head that claims another agent would let any agent's valid signature
-satisfy this source's poll. §10.3 leaves that binding to its callers because its linkage
-walk catches the mismatch downstream; this procedure has no chain to catch it, so the
-binding is explicit and its failure is typed.
+writes the high-water mark, and no revalidation path advances the mark's *position* — §10.3
+step 7 is the only step of any verification procedure that moves it. What the caller does with
+the instant differs by case, and both keep `issuedAt` a monotonicity floor — an identical head
+leaves it where it is, an accepted re-sign raises it to the instant just accepted, so the head
+it replaced becomes a regression rather than an indefinitely replayable one. Raising the floor
+at an unmoved position is the caller's write, not this procedure's, and it is the only write
+to the mark that names no position of its own: the mirroring consumer's other write records
+how far its own indexing actually got, which a truncated or partly indexed walk leaves below
+the head step 7 accepted. And it **binds the head's `origin` to the source being followed**:
+keys are resolved from the head, so accepting a head that claims another agent would let any
+agent's valid signature satisfy this source's poll. §10.3 leaves that binding to its callers
+because its linkage walk catches the mismatch downstream; this procedure has no chain to catch
+it, so the binding is explicit and its failure is typed.
 
 **What it is not** is a cached acceptance. Signature, current-key validity and freshness are
 re-checked on every call, so a rotated-out or revoked signer, a tampered envelope, a window
@@ -1168,7 +1170,7 @@ unions of verified items are always safe.
 | Rollback (mirror serves an old head) | High-water mark for returning consumers; mirror-set comparison + `issuedAt` preference for cold consumers; residual window = `refreshBy`, bounded by the published-source profile (§14.1) |
 | Equivocation (forked chain, duplicate heads) | Provable from signed artifacts whenever branches meet; gap-free sequences leave no benign fork reading; head exchange (§10.2) creates meeting points; guaranteed detection is the tlog follow-up (§14.1) |
 | Old-key attack (compromised rotated-out key signs a head) | §10.3 step 2: head signer must be currently valid; old keys cannot vouch heads, and entries never need re-vouching |
-| Head-only revalidation used to launder another agent's head, or to advance a mark | §10.5 binds the head's `origin` to the source being followed, and adopts nothing; §10.3 step 7 remains the only writer of the mark's position, so a revalidated head can raise the `issuedAt` floor at a position it never moves |
+| Head-only revalidation used to launder another agent's head, or to advance a mark | §10.5 binds the head's `origin` to the source being followed, and adopts nothing; no revalidation path advances the mark's position, so a revalidated head can raise the `issuedAt` floor at a position it never moves |
 | Evidence suppression via withdrawal | §5.1: withdrawal never invalidates; retrospective kinds immune to pruning except `reorged`; reason codes make correction distinguishable from delisting |
 | Source withholding | Visible staleness (`refreshBy`); projector completeness spot-checkable against the substrate; N projectors |
 | Relay withholding | Normative head-vs-delivered comparison + entry-granular spot-checks (§9.5); direct chain walk always open |

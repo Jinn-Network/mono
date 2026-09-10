@@ -93,8 +93,9 @@ export function readProfiles(profilesRoot = factsDir) {
         /^v[0-9]+$/u,
         `${leaf.name}/profiles/${file} declares profile "${document.profile}", whose last segment is not a "v<integer>" version. Ordering newest-vs-first depends on it.`,
       );
+      // The assertion above already guarantees at least one digit after the `v`, so this
+      // parse always yields a finite integer; there is nothing further to check here.
       const version = Number.parseInt(versionSegment.slice(1), 10);
-      assert.ok(Number.isFinite(version), `${leaf.name}/profiles/${file} has a non-finite profile version.`);
       // `fields` is a flat array whose `name`s are already dotted paths
       // (`runtime.image.manifestDigest`), so a filter reaches every declared path; there
       // is no nesting to walk. This is what `referenceBearingFields()` does in each

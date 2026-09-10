@@ -47,8 +47,8 @@ D), and sequence execution.
 The *Lines* and *Tests* columns for the three unwired patchers are pre-Wave-0 and historical;
 Wave 0 removed those files and their test blocks. The rows are retained as the record of what
 was removed. The `integrations.ts` quotation below is historical for the same reason: Wave 0
-rewrote that comment block, which now records the removal rather than the deferral, and the
-line range still lands on it.
+rewrote that comment block, which now records the removal rather than the deferral; the range
+cited below is that rewritten block exactly.
 
 | File | Lines | Production callers | Tests |
 |---|---|---|---|
@@ -58,7 +58,7 @@ line range still lands on it.
 | `operator/src/cli/hook-installers/cursor.ts` | 25 | **none** | `test/scripts/install-hooks.test.ts:5` |
 | `operator/src/cli/hook-installers/gemini-cli.ts` | 33 | **none** | `test/scripts/install-hooks.test.ts:4` |
 
-`integrations.ts:12-18` states why the three are unwired: their hook file formats *"are not
+`integrations.ts:12-17` states why the three are unwired: their hook file formats *"are not
 independently verified against those tools' real hook schemas (claude-code's WAS wrong before
 verification caught it)"*. #2417 proposed to verify and wire them; #2930 supersedes it. With that
 reversal, 91 lines of patcher plus their test blocks have no forward path — they encode guesses at
