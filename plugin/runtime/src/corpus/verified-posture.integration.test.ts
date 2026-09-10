@@ -80,20 +80,28 @@ async function compose(options: {
   readonly entryCount?: number;
   readonly maxEntriesPerSync?: number;
   /**
-   * Wraps the composed transport so a test can cancel the operation mid-walk
-   * and still reach the MIRROR's own abort check (#3672).
+   * Wraps the composed transport so a test can cancel the operation at a
+   * deterministic point in the walk and reach the MIRROR's own abort check
+   * (#3672).
    *
-   * The wrapper drops the caller's signal from each request it forwards, which
-   * is not a convenience: `createFetchTransport` calls `signal.throwIfAborted()`
-   * between response chunks, so over the production transport an abort during a
-   * walk ALWAYS surfaces as a rejected read -- `source-sync-failed`, correctly,
-   * a transport failure. `collect`'s own `signal?.aborted` check is therefore
-   * reached only by a transport that does NOT honor cancellation, and `signal`
-   * is public API on the mirror interface, so such a caller is exactly what it
-   * guards. This models that transport.
+   * Where the abort LANDS is what decides which of two correct behaviors you
+   * get, and only one of them is this path:
    *
-   * `afterFetch` fires AFTER the response rather than before, so the abort lands
-   * mid-walk rather than on the first read of the cycle.
+   *  - inside an in-flight read, and `createFetchTransport`'s
+   *    `signal.throwIfAborted()` between response chunks rejects it. That is a
+   *    transport failure and is reported as `source-sync-failed` — correctly,
+   *    and not this path;
+   *  - between transport calls, or during the yield phase, and `collect`'s own
+   *    `signal?.aborted` check is what stops the walk. `coldSync` and
+   *    `returningSync` fetch every page BEFORE yielding anything
+   *    (`packages/discovery/client/src/sync.ts`), so the yield phase issues no
+   *    reads at all and is a real window, not a hypothetical one.
+   *
+   * The wrapper fires `afterFetch` once the whole transport call has returned,
+   * which puts the abort in the second window every time instead of racing the
+   * first. It is a determinism device, not a stand-in for an unreachable
+   * branch: the standing sync loop cancels every cycle on a `syncTimeoutMs`
+   * deadline (`sync-loop.ts`, `runCycle`), so production reaches this refusal.
    */
   readonly afterFetch?: (url: string) => void;
 } = {}) {
@@ -448,6 +456,12 @@ describe("a backlog larger than the per-pass entry bound (#3252)", () => {
     // NOT send the operator to raise a bound that was never the constraint.
     expect(check.remedy).toContain("CANCELLED");
     expect(check.remedy).not.toContain("corpus.maxEntriesPerSync");
+    // And it does not stop at naming the cause. The standing sync loop cancels
+    // every cycle on a `syncTimeoutMs` deadline, so that is the knob an
+    // operator whose slow source keeps timing out can actually turn; a remedy
+    // that named none would be a dead end of the same shape the member exists
+    // to remove.
+    expect(check.remedy).toContain("corpus.syncTimeoutMs");
     expect(check.remedy).not.toContain("head signature");
     expect(check.remedy).not.toContain("entry linkage it served");
   });

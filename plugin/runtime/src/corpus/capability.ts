@@ -473,18 +473,28 @@ export function createCorpusCapability(
       }
       if (aborted) {
         // Deliberately says nothing about `corpus.maxEntriesPerSync` (#3672).
-        // The bound did not cause this stop and raising it changes nothing, so
-        // naming it here would send the operator to tune a value that was never
-        // the constraint — the same misdirection the truncated remedy above
-        // exists to remove, one field over. Emitted after that remedy, and
-        // scoped to its own source, so an install carrying both reads as two
-        // per-source next steps rather than as one self-contradicting
-        // paragraph.
+        // The per-pass bound did not cause this stop and raising it changes
+        // nothing, so naming it would send the operator to tune a value that
+        // was never the constraint — the same misdirection the truncated
+        // remedy above exists to remove, one field over. Emitted after that
+        // remedy, and scoped to its own source, so an install carrying both
+        // reads as two per-source next steps rather than as one
+        // self-contradicting paragraph.
+        //
+        // It does name `corpus.syncTimeoutMs`, because that is the constraint
+        // an operator can actually act on: the standing sync loop cancels
+        // every cycle on a deadline built from it (`sync-loop.ts`, `runCycle`),
+        // so a slow link with a large backlog reaches this refusal by that
+        // timer. Answering "let it run to completion" and stopping there would
+        // be a dead end of exactly the shape this member was filed to remove.
         remedies.push(
           `A \`${SYNC_ABORTED_REASON}\` refusal is this runtime's own doing as well: that ` +
             "source's sync was CANCELLED before the walk finished, so the entry the head cites " +
             "was never fetched and the chain could not be verified. For that source neither the " +
-            "archive nor the bound is implicated — let its pass run to completion and it verifies.",
+            "archive nor the per-pass entry bound is implicated. A cycle cancelled by its own " +
+            "deadline needs `corpus.syncTimeoutMs` (default 30,000ms) raised above what that " +
+            "source's backlog takes to walk; a cycle cancelled by shutdown needs nothing — the " +
+            "next pass verifies it.",
         );
       }
       if (archiveFaulted) {

@@ -289,10 +289,13 @@ function resolveCorpusConfig(file: unknown, homeDirectory: string): CorpusConfig
   /**
    * `(agent, keyid)` → the single `validFrom` this configuration declares for it.
    *
-   * NUL-joined rather than `/`-joined like the `byArchive` key below, because
-   * `agent` is a URL and contains `/` of its own — `a/b` + `c` and `a` + `b/c`
-   * would collide. `name` has a restricted grammar, which is what lets that
-   * neighbour join on `/` safely.
+   * NUL-joined rather than `/`-joined like the `byArchive` key below. `agent`
+   * is `z.string().min(1)` — arbitrary text, never parsed — so a separator it
+   * may itself contain would collide `a/b` + `c` with `a` + `b/c`. NUL is
+   * injective here because the OTHER half cannot contain one: `keyid` must
+   * match `DID_KEY_PATTERN`, which admits no NUL, so the last NUL in the
+   * composite is always the join. That neighbour can join on `/` safely for
+   * the same kind of reason — `name` has a restricted grammar.
    *
    * Keyed by AGENT, not by archive, because that is the question the runtime
    * asks of it: `declaredSigningKeys` in `session-host-corpus.ts` aggregates

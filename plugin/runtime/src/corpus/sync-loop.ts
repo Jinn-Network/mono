@@ -415,7 +415,7 @@ export function createCorpusSyncCapability(
     if (!truncated) return text;
     // One code unit further in than the sanitizer cut, so a surrogate pair it
     // left whole can be split here. Dropping the orphaned high surrogate costs
-    // one more character and keeps the recorded value well-formed --
+    // one more character and keeps the recorded value well-formed —
     // `truncateLineBoundary` guards the identical hazard the same way.
     let cut = text.slice(0, MAX_FAILURE_CHARS - FAILURE_TRUNCATION_MARKER.length);
     if (endsWithHighSurrogate(cut)) cut = cut.slice(0, -1);
