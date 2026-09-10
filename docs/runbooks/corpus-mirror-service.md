@@ -220,8 +220,15 @@ row's full detail and remedy:
 {"detail":"1 of 1 followed archive(s) have not synced …","remedy":"…","level":"warn","message":"corpus-mirror-freshness"}
 ```
 
-Four more lines can appear. Two are `warn`, and both mean a channel degraded
-while the sync itself did not:
+Four more lines are documented here, all of them about a channel rather than
+the sync. The sync's own failures — `corpus.mirror.sync-failed` (`error`, the
+only error-level line the mirror emits), `corpus.mirror.lock-failed` and
+`corpus.mirror.index-failed` (`warn`), plus `corpus.mirror.status.unreadable`
+(`warn`) and `corpus.mirror.head-revalidated` (`debug`) — reach the same
+stderr and are read through the health rows below rather than here.
+
+Two of the four are `warn`, and both mean a channel degraded while the sync
+itself did not:
 
 - **`corpus.mirror.cycle.unreported`** — the cycle ran, but recording or
   reporting it threw; the injected clock, or a stderr sink that EPIPEd, are the

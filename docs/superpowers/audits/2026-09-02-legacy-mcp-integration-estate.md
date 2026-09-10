@@ -46,7 +46,9 @@ D), and sequence execution.
 
 The *Lines* and *Tests* columns for the three unwired patchers are pre-Wave-0 and historical;
 Wave 0 removed those files and their test blocks. The rows are retained as the record of what
-was removed.
+was removed. The `integrations.ts` quotation below is historical for the same reason: Wave 0
+rewrote that comment block, which now records the removal rather than the deferral, and the
+line range still lands on it.
 
 | File | Lines | Production callers | Tests |
 |---|---|---|---|
