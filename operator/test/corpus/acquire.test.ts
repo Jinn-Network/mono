@@ -42,6 +42,46 @@ describe('acquireArtifactContent', () => {
     expect(acquireFn).not.toHaveBeenCalled();
   });
 
+  it('treats a corrupted cache row as a miss and re-fetches', async () => {
+    // network_artifacts is a CACHE, and a content-addressed cache whose entry
+    // does not match its key is by definition a miss. Refusing outright would be
+    // a permanent denial — CorpusStorePort exposes no delete — whereas falling
+    // through lets saveNetworkArtifact's INSERT OR REPLACE repair the row.
+    const realSha = (await import('node:crypto')).createHash('sha256').update(realBytes).digest('hex');
+    store.saveNetworkArtifact({
+      sha256: realSha,
+      artifactType: 'design_document',
+      content: Buffer.from('corrupted on disk'),
+      source: 'origin',
+      paidAmountUsdc: '0',
+      fetchedAt: '2026-04-30T00:00:00.000Z',
+    });
+    const acquireFn = vi.fn(async () => realBytes);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await acquireArtifactContent({
+      sha256: realSha,
+      artifactType: 'design_document',
+      access,
+      store,
+      selfSafeAddress: '0x' + 'f'.repeat(40),
+      privateKey: TEST_KEY,
+      acquireFn,
+      ownerSafe: '0x' + 'a'.repeat(40),
+    });
+    // Captured before restore: mockRestore clears the recorded calls.
+    const warnings = warn.mock.calls.map((call) => String(call[0]));
+    warn.mockRestore();
+
+    expect(result.source).toBe('origin');
+    expect(result.bytes.equals(realBytes)).toBe(true);
+    expect(acquireFn).toHaveBeenCalledOnce();
+    // Self-heal: the next reader hits a good row.
+    expect(store.getNetworkArtifact(realSha)!.content.equals(realBytes)).toBe(true);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(realSha);
+  });
+
   it('self-store fast path serves and mirrors to cache', async () => {
     const realSha = (await import('node:crypto')).createHash('sha256').update(realBytes).digest('hex');
     store.saveServedArtifact({

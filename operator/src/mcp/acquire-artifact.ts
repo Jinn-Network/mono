@@ -86,21 +86,34 @@ export async function handleAcquireArtifact(
       },
     };
   }
+  // network_artifacts is a cache, so a row that does not hash to its own key is
+  // a miss, not a refusal: falling through to the daemon lets the mirror below
+  // replace it. Refusing outright would strand the artifact permanently, since
+  // nothing on this path can delete the row.
   const cached = store.getNetworkArtifact(args.sha256);
   if (cached) {
-    store.touchNetworkArtifactUsage(args.sha256, new Date().toISOString());
-    return {
-      ok: true,
-      content: {
-        sha256: args.sha256,
-        bytes: cached.content,
-        artifactType: cached.artifactType,
-        source: 'cache',
-        paidAmountUsdc: '0',
-        fetchedAt: cached.fetchedAt,
-        sourceOperator: cached.sourceOperator ?? undefined,
-      },
-    };
+    // Verified before the usage bump: a row we are about to discard must not
+    // have its last_used_at refreshed.
+    const verifiedCache = verifyArtifactDigest(args.sha256, cached.content);
+    if (verifiedCache.ok) {
+      store.touchNetworkArtifactUsage(args.sha256, new Date().toISOString());
+      return {
+        ok: true,
+        content: {
+          sha256: args.sha256,
+          bytes: cached.content,
+          artifactType: cached.artifactType,
+          source: 'cache',
+          paidAmountUsdc: '0',
+          fetchedAt: cached.fetchedAt,
+          sourceOperator: cached.sourceOperator ?? undefined,
+        },
+      };
+    }
+    console.warn(
+      `[mcp] cached artifact ${args.sha256} hashed to ${verifiedCache.actualSha256}; `
+        + 'treating the row as a miss and proxying to the daemon',
+    );
   }
 
   if (!daemonApiUrl) {
@@ -204,21 +217,23 @@ export async function handleAcquireArtifact(
     ? `ipfs://${ipfsSource.cid}`
     : args.access.endpoint;
 
-  // Best-effort cache mirror; errors here are non-fatal.
+  // Best-effort cache mirror; errors here are non-fatal. Unconditional: the
+  // bytes are already verified above, and INSERT OR REPLACE is a no-op except in
+  // the one case that matters — replacing a row the read just rejected. A guard
+  // here would let a corrupt row block its own repair and charge every later
+  // call a daemon round trip forever.
   try {
-    if (!store.getNetworkArtifact(args.sha256)) {
-      store.saveNetworkArtifact({
-        sha256: args.sha256,
-        artifactType,
-        envelopeCid: args.envelopeCid ?? null,
-        content: bytes,
-        source: 'origin',
-        sourceOperator: sourceOperator ?? null,
-        sourceEndpoint,
-        paidAmountUsdc,
-        fetchedAt,
-      });
-    }
+    store.saveNetworkArtifact({
+      sha256: args.sha256,
+      artifactType,
+      envelopeCid: args.envelopeCid ?? null,
+      content: bytes,
+      source: 'origin',
+      sourceOperator: sourceOperator ?? null,
+      sourceEndpoint,
+      paidAmountUsdc,
+      fetchedAt,
+    });
   } catch {
     /* ignore cache mirror failure */
   }

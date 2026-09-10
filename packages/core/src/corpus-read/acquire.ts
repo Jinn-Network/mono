@@ -89,19 +89,32 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
 
   const now = () => new Date().toISOString();
 
-  // 1. Cache hit
+  // 1. Cache hit. network_artifacts is a cache, not authoritative local state:
+  // a row that does not hash to its own key is a MISS, and every leg below
+  // re-saves through INSERT OR REPLACE, so falling through repairs it. (The
+  // self-store path at step 3 throws instead, and rightly — there is no
+  // upstream to re-fetch a corrupt served_artifacts row from.)
   const cached = store.getNetworkArtifact(sha256);
   if (cached) {
-    store.touchNetworkArtifactUsage(sha256, now());
-    return {
-      sha256,
-      bytes: cached.content,
-      artifactType: cached.artifactType,
-      source: 'cache',
-      paidAmountUsdc: '0',
-      fetchedAt: cached.fetchedAt,
-      sourceOperator: cached.sourceOperator ?? undefined,
-    };
+    // Verified before the usage bump: a row we are about to discard must not
+    // have its last_used_at refreshed.
+    const verifiedCache = verifyArtifactDigest(sha256, cached.content);
+    if (verifiedCache.ok) {
+      store.touchNetworkArtifactUsage(sha256, now());
+      return {
+        sha256,
+        bytes: cached.content,
+        artifactType: cached.artifactType,
+        source: 'cache',
+        paidAmountUsdc: '0',
+        fetchedAt: cached.fetchedAt,
+        sourceOperator: cached.sourceOperator ?? undefined,
+      };
+    }
+    console.warn(
+      `[corpus-read] cached artifact ${sha256} hashed to ${verifiedCache.actualSha256}; `
+        + 'treating the row as a miss and re-fetching',
+    );
   }
 
   // 2. Public IPFS donation source. The primitive owns the fetch, the decode,
