@@ -1647,7 +1647,7 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
       warn.mockRestore();
     });
 
-    /** `entry`, `routesFor`, and `source` above are hardcoded to one identity; these take theirs. */
+    /** `entry` and `routesFor` above hardcode one identity and `peerSource` hardcodes `ROOT`; these take both. */
     function entryFor(identity: SourceIdentity, sequence: string, digest: `sha256:${string}`): AnnouncementEntry {
       return { ...entry(sequence, null, digest), source: identity };
     }

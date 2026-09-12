@@ -1117,8 +1117,8 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           // Counted on the pass, not the outcome: the throw above, reached again on a LATER
           // announcement, would discard an outcome-carried count even though this is durable and
           // is skipped from the next poll on — reporting it zero times, ever (#4394). A fatal
-          // fault later in the same pass still re-throws out of `sync()` with the whole report;
-          // the ledger row and event are the authority there.
+          // fault later in the same pass still re-throws out of `sync()`, taking the whole
+          // report with it; the ledger row and event are the authority there.
           pass.quarantined += 1;
           continue;
         }
