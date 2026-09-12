@@ -553,7 +553,7 @@ v6.
 **No run emits v10 yet.** The producer's format selection is unchanged, because
 `0.2.1` is immutable and predates this format, so it refuses v10 at manifest
 parse --- a v10 bundle would be permanently unverifiable under its own
-instruction. The format enters the schema so a bundle can be labelled with it
+instruction. The format enters the schema so a bundle can be labeled with it
 and the round trip proven; the producer flips in the change that pins v10 to
 the release serving it.
 
