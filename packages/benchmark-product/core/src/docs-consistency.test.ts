@@ -499,7 +499,7 @@ describe("product documentation consistency", () => {
     // release is `latest`, what the `@0.2` range resolves to, which packages are still
     // unpublished -- went stale on the next publish, and nothing pinned it (#3961 was the third
     // sweep of the same prose). The format references describe pinned artifacts and immutable
-    // reader behaviour; the product README's publication paragraph is the one home for registry
+    // reader behavior; the product README's publication paragraph is the one home for registry
     // state, and the test above pins it to the version this tree pins. A block that names the
     // reader AND speaks in registry vocabulary is the defect. The co-occurrence is what keeps
     // `publish` in its bundle-emission sense legal: "the bundle published on colophon.claims"
