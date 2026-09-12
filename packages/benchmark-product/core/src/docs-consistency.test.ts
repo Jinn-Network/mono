@@ -100,9 +100,10 @@ const readerLine = (command: string): string => {
 };
 
 /** The body of every fenced block in a Markdown region, whatever its info string. Both the opener
- * and the closer must sit at a line start, as CommonMark requires: an inline ```` ```x``` ```` in
- * prose is code, not a fence, and letting it open one would shift every later fence boundary so
- * that a real fence's body fell outside any capture and its reader line went unchecked (#4509). */
+ * and the closer must sit at a line start, as a Markdown renderer reads an unindented fence (the
+ * only kind this guide writes): an inline ```` ```x``` ```` in prose is code, not a fence, and
+ * letting it open one would shift every later fence boundary so that a real fence's body fell
+ * outside any capture and its reader line went unchecked (#4509). */
 function fenceBodies(markdown: string): readonly string[] {
   return [...markdown.matchAll(/^```[^\n]*\n(.*?)^```/gmsu)].map((fence) => fence[1]!);
 }
