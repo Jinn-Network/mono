@@ -44,12 +44,13 @@ jobs:
     name: Publish package
     if: (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success') || github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'client-v') || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
-    # Stable publish verifies, never re-runs: the two-gate guard below queries
-    # the SHA-bound hermetic-gate and environment-suite check-runs on the
-    # release commit and executes no tests. The live olas-rails-smoke execute
-    # mode and app-first testnet gates require local operator config and
-    # funding; those stay in `yarn release:client --prepare` before Captain
-    # publishes the GitHub Release.
+    # Stable publish verifies the release gates, never re-runs them: the
+    # two-gate guard below queries the SHA-bound hermetic-gate and
+    # environment-suite check-runs on the release commit and executes none of
+    # their tests. The live olas-rails-smoke execute mode and app-first testnet
+    # gates require local operator config and funding; those stay in
+    # `yarn release:client --prepare` before Captain publishes the GitHub
+    # Release.
     timeout-minutes: 90
     environment: npm-publish
     env:

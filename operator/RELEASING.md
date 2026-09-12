@@ -134,14 +134,14 @@ the tagged commit. Both steps refuse loudly; run them in order:
 gh variable list --repo Jinn-Network/mono --json name,value \
   --jq '.[] | select(.name | test("^JINN_(HERMETIC_GATE|ENVIRONMENT_SUITE)_WAIVED$"))
         | "WAIVER SET: \(.name)=\(.value)"'
-# Repository-scope variables only; the workflow's vars context also resolves
+# Repository-scope variables only; the workflow vars context also resolves
 # environment- and organization-level variables, which no in-repo document
 # uses for these waivers.
 
 # 2. Both verdicts green on the exact tagged commit.
 git fetch --tags origin
 sha="$(git rev-parse 'vX.Y.Z^{commit}')"
-( # subshell: the `exit` below ends this block, not your shell
+( # subshell: the exit below ends this block, not your shell
 rc=0
 for name in hermetic-gate environment-suite; do
   n=$(gh api -X GET "repos/Jinn-Network/mono/commits/$sha/check-runs" \
