@@ -4,7 +4,12 @@
 // the query path fetches an offer, which is the property the profile exists to give an index.
 import { createHash } from "node:crypto";
 
-import { OFFER_RECORD_KIND, OfferRailSchema, sealOffer } from "@jinn-network/evidence-offer";
+import {
+  OFFER_RECORD_KIND,
+  OfferRailSchema,
+  OfferRecordSchema,
+  sealOffer,
+} from "@jinn-network/evidence-offer";
 import type { AnnouncedItem } from "@jinn-network/record-discovery-protocol";
 import { describe, expect, it } from "vitest";
 
@@ -419,9 +424,10 @@ describe("the whole listing query, from cards alone", () => {
   });
 });
 
-// `listings.ts` carries its own copies of two grammars the sealed offer schema owns: the amount
-// regex (schema: `RailAmount`) and the display-unsafe character class. They are byte-identical
-// today and nothing ties them together -- neither constant is exported from either side, so a
+// `listings.ts` carries its own copies of four grammars the sealed offer schema owns: the amount
+// regex (schema: `RailAmount`), the digest grammar (schema: `Sha256DigestSchema`), and the
+// display-unsafe and interior-format character classes. They are byte-identical today and
+// nothing ties them together -- none of the constants is exported from either side, so a
 // narrowing or widening edit to the schema's copy leaves the card reader silently accepting a
 // different language than the record it claims to summarize. The consequence is asymmetric and
 // worse than it looks: the reader accepting MORE than the record means an index ranks a card
@@ -433,7 +439,7 @@ describe("the whole listing query, from cards alone", () => {
 // sealed record package's API to serve a test, while moving the card reader onto a zod parse
 // would put one on the per-amount hot path `amountOnRail` deliberately keeps clear.
 //
-// Two traps the probes must respect. Each holds the OTHER field valid, so a refusal is
+// Two traps the probes must respect. Each holds the OTHER fields valid, so a refusal is
 // attributable to the field under test. And the card's rail-identifier rule is compared against
 // the schema's `to`, never its `rail`: `rail` is a `NormalizedAbsoluteUri` and would refuse
 // these probes for an unrelated reason -- the pairing the `DISPLAY_UNSAFE_CHARACTER` comment in
@@ -455,6 +461,34 @@ describe("the card reader's grammars track the sealed offer schema", () => {
       const readable =
         readOfferCard({ ...item, facts: { ...card, "rails.amount": [amount] } }) !== undefined;
       expect(readable, `amount ${JSON.stringify(amount)}`).toBe(railOf("0xabc", amount));
+    }
+  });
+
+  it("accepts exactly the digests the schema's Sha256DigestSchema accepts", async () => {
+    const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
+    const card = item.facts as Record<string, unknown>;
+    // Probed on `subject`, not `offerRecordDigest`: the latter must also equal the
+    // announcement's own `record.digest`, so a refusal there would not be attributable to
+    // the grammar. Compared against the schema's own `subject` field (which is trust-core's
+    // `Sha256DigestSchema`) rather than importing trust-core, which this leaf's source
+    // boundary forbids.
+    const digestOf = (digest: string) => OfferRecordSchema.shape.subject.safeParse(digest).success;
+    const hex = "0123456789abcdef".repeat(4);
+    for (const digest of [
+      `sha256:${hex}`,
+      `sha256:${hex.toUpperCase()}`,
+      `sha256:${hex.slice(0, 32)}${hex.slice(32).toUpperCase()}`,
+      `sha256:${hex.slice(0, 63)}`,
+      `sha256:${hex}0`,
+      hex,
+      `SHA256:${hex}`,
+      `sha512:${hex}`,
+      `sha256:${"g".repeat(64)}`,
+      ` sha256:${hex}`,
+      `sha256:${hex} `,
+    ]) {
+      const readable = readOfferCard({ ...item, facts: { ...card, subject: digest } }) !== undefined;
+      expect(readable, `digest ${JSON.stringify(digest)}`).toBe(digestOf(digest));
     }
   });
 

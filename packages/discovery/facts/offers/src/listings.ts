@@ -68,10 +68,13 @@ const DISPLAY_UNSAFE_CHARACTER =
  * Every Unicode format character except the two joiners, ZWNJ (U+200C) and ZWJ (U+200D). The
  * offer schema refuses these in a payment destination, where their whole effect is to hide
  * content inside the address; the same shape is applied to a rail identifier here, and it
- * narrows nothing. A rail identifier is a `NormalizedAbsoluteUri`, and `new URL` percent-encodes
- * a raw format character, so no honest spelling of a rail ever carries one — the joiners
- * included. They are kept out of the class only so the two grammars stay one rule, since the
- * parity pin in `listings.test.ts` asserts that a card refuses exactly what the record refuses.
+ * narrows nothing. A rail identifier is a `NormalizedAbsoluteUri`, and `new URL` never leaves a
+ * raw format character in place: it percent-encodes one in userinfo, path, query or fragment,
+ * and in a special-scheme host it either throws `ERR_INVALID_URL` or drops it (the UTS 46
+ * mapping ignores U+00AD, U+200B, U+2060 and U+FEFF). So no honest spelling of a rail ever
+ * carries one — the joiners included. They are kept out of the class only so the two grammars
+ * stay one rule, since the parity pin in `listings.test.ts` asserts that a card refuses exactly
+ * what the record refuses.
  *
  * Written as a negative lookahead because the `v`-flag set difference needs an ES2024 target.
  * It overlaps `DISPLAY_UNSAFE_CHARACTER` on the twelve bidi controls, which are both, and

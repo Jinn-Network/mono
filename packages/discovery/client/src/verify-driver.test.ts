@@ -8,7 +8,7 @@ import {
   sealJson,
   sha256Hex,
 } from "@jinn-network/record-discovery-protocol";
-import { loadVectorsByKind } from "@jinn-network/record-discovery-testing";
+import { loadVectorsByKind, vectorEnvelopeToWire } from "@jinn-network/record-discovery-testing";
 
 import { createInMemoryHighWaterMarkStore } from "./high-water-mark.js";
 import { createTrustAdapter } from "./trust-adapter.js";
@@ -70,6 +70,8 @@ const acceptAllVerifier: RawSignatureVerifier = {
   },
 };
 
+type VectorEnvelope = Parameters<typeof vectorEnvelopeToWire>[0];
+
 async function* toAsyncIterable<T>(items: readonly T[]): AsyncIterable<T> {
   for (const item of items) yield item;
 }
@@ -82,8 +84,8 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
       seed: { now: string; keys: FakeBindingSeed[] };
       firstAdoption: boolean;
       head: unknown;
-      headSignature: unknown;
-      entries: Array<{ entry: unknown; signature: unknown }>;
+      headSignature: VectorEnvelope;
+      entries: Array<{ entry: unknown; signature: VectorEnvelope }>;
     };
 
     const trust = createTrustAdapter({
@@ -108,9 +110,15 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
     const outcome = await driver.verifySource({
       source: { agent: "did:key:zAgentSourceOne", name: "feed" },
       head: parseSourceHead(input.head),
-      headSignature: input.headSignature as never,
+      // Corpus envelopes are legible text; production accepts only the base64 wire
+      // form, so a raw fixture envelope fails at the parse step and this case would
+      // answer `unauthorized-signer` for the wrong reason (#4436).
+      headSignature: vectorEnvelopeToWire(input.headSignature) as never,
       entries: toAsyncIterable(
-        input.entries.map((e) => ({ entry: parseAnnouncementEntry(e.entry), signature: e.signature as never })),
+        input.entries.map((e) => ({
+          entry: parseAnnouncementEntry(e.entry),
+          signature: vectorEnvelopeToWire(e.signature) as never,
+        })),
       ),
       firstAdoption: input.firstAdoption,
     });
