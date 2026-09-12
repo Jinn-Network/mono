@@ -38,8 +38,13 @@ function base64Utf8(value: string): string {
  * payload/signature text. Conformance explicitly serializes that abstract fixture form into the
  * sole strict wire representation before invoking production verification; production never
  * accepts or guesses the old raw-string form.
+ *
+ * This is the one convention for consuming a corpus envelope directly: every consumer that hands
+ * a vector's `headSignature` / entry `signature` to production verification MUST pass it through
+ * this function first. A raw fixture envelope is refused at the parse step, so the case fails
+ * for a reason unrelated to the rule it names (#4436).
  */
-function vectorEnvelopeToWire(envelope: {
+export function vectorEnvelopeToWire(envelope: {
   readonly payloadType: string;
   readonly payload: string;
   readonly signatures: readonly { readonly keyid?: string; readonly sig: string }[];
