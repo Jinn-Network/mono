@@ -10686,6 +10686,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/evidence-offer",
         "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-tag-carrier-rail-destination.json",
+        "relativeSource": "fixtures/offer/invalid-tag-carrier-rail-destination.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
         "path": "packages/evidence/offer/fixtures/offer/invalid-unnormalized-rail-identifier.json",
         "relativeSource": "fixtures/offer/invalid-unnormalized-rail-identifier.json"
       },
