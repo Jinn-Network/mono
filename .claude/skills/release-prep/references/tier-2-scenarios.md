@@ -7,7 +7,7 @@
 > documenting how the surviving two scenarios are wired and what their runtime
 > shape is; the per-scenario contracts live in `testing-jinn-app` (see below).
 
-The automated gate runs **T2.2 + T2.4** (producer/evaluator loops against an Anvil-fork-of-Base-Sepolia RPC). T2.1 and T2.3 are retired/removed; their sections below are kept for provenance. Both surviving scenarios are executed by `.github/workflows/environment-suite.yml` via `operator/scripts/release/run-tier-2.ts`; the release-prep Phase 5 invocation this file used to describe is retired with the skill's run-role.
+The automated gate runs **T2.2 + T2.4** (producer/evaluator loops against an Anvil fork of Base mainnet). T2.1 and T2.3 are retired/removed; their sections below are kept for provenance. Both surviving scenarios are executed by `.github/workflows/environment-suite.yml` via `operator/scripts/release/run-tier-2.ts`; the release-prep Phase 5 invocation this file used to describe is retired with the skill's run-role.
 
 The "what does this scenario actually exercise" contracts live in `testing-jinn-app` (one doc per scenario, Plan B). The "how is it wired and what's the runtime shape" details are below.
 
