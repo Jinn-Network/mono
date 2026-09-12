@@ -65,6 +65,21 @@ const DISPLAY_UNSAFE_CHARACTER =
   /[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/u;
 
 /**
+ * Every Unicode format character except the two joiners, ZWNJ (U+200C) and ZWJ (U+200D). The
+ * offer schema refuses these in a payment destination, where their whole effect is to hide
+ * content inside the address; the same shape is applied to a rail identifier here, and it
+ * narrows nothing. A rail identifier is a `NormalizedAbsoluteUri`, and `new URL` percent-encodes
+ * a raw format character, so no honest spelling of a rail ever carries one — the joiners
+ * included. They are kept out of the class only so the two grammars stay one rule, since the
+ * parity pin in `listings.test.ts` asserts that a card refuses exactly what the record refuses.
+ *
+ * Written as a negative lookahead because the `v`-flag set difference needs an ES2024 target.
+ * It overlaps `DISPLAY_UNSAFE_CHARACTER` on the twelve bidi controls, which are both, and
+ * neither subsumes the other.
+ */
+const INTERIOR_FORMAT_CHARACTER = /(?![\u200C\u200D])\p{Cf}/u;
+
+/**
  * Reads the offer card off an announced item, or `undefined` when the item is not an offer
  * or its card is not one this profile can read.
  *
@@ -90,12 +105,53 @@ const DISPLAY_UNSAFE_CHARACTER =
  *   A card repeating one rail at two prices reads fine otherwise, and `amountOnRail` would rank
  *   the offer at whichever of the two it met first.
  * - **Amounts and digests must match their sealed grammars**, and a rail identifier must carry
- *   no character whose only job is to make it render as a different rail.
+ *   no character whose only job is to make it render as a different rail, nor a format
+ *   character (other than the two joiners) whose only job is to hide content inside it.
+ * - **The item's `provenance` must carry the values the withdrawal key is built from**, because
+ *   a card this function returns reaches `liveOfferCards` without a second check. A shape that
+ *   cannot be destructured there throws instead of missing here; one that destructures but
+ *   carries the wrong types keys the withdrawal lookup at a value no withdrawal can match, so a
+ *   withdrawn offer reads as live. Both costs fall on the listing itself rather than on the
+ *   order of a row in it.
  */
 export function readOfferCard(item: AnnouncedItem): OfferCard | undefined {
   const record = item.record as AnnouncedItem["record"] | undefined;
   if (record === null || record === undefined) return undefined;
   if (record.kind !== OFFER_RECORD_KIND) return undefined;
+  // `provenance` is guarded for the same reason `record` is, and it was the one required
+  // field of the item that was not. A card that reaches `liveOfferCards` is destructured
+  // there unconditionally (`card.item.provenance`) and its `source` is then read for
+  // `agent`, so an unguarded item failed in one of two ways, and only the first of them
+  // throws:
+  //
+  // - Provenance absent, null, a string, a number, or an array, or an object whose
+  //   `source` is absent or null: the destructure or the `source.agent` read raises a
+  //   `TypeError` out of the withdrawal filter, turning this function's documented
+  //   miss-not-throw posture into one feed item poisoning the whole listing.
+  // - Provenance that destructures cleanly but carries a non-string (or empty) value the
+  //   key is built from -- `{ source: {}, announcementId: 7 }`, `{ source: "x", ... }`:
+  //   nothing throws. `withdrawalKey` JSON-encodes what it is given, so `7` and `"7"` are
+  //   different keys and a source's own withdrawal stops matching its own announcement.
+  //   That is the fail-OPEN direction: a delisted offer keeps showing as live.
+  //
+  // Guarding both here keeps the defect a miss, where the chain-and-facts verifier
+  // adjudicates it. Non-empty is the sealed grammar's own bound -- `announcementId`,
+  // `agent` and `name` are each `z.string().min(1)` in `entry.ts` -- so this narrows
+  // nothing an honest announcement could spell. Only the four values the withdrawal key
+  // is built from are checked: `entry` and `derivation` are read by no path in this
+  // module, and checking a field nothing consumes would narrow what an index accepts for
+  // no ordering or safety gain.
+  const provenance = item.provenance as AnnouncedItem["provenance"] | undefined;
+  if (typeof provenance !== "object" || provenance === null || Array.isArray(provenance)) {
+    return undefined;
+  }
+  const source = provenance.source as AnnouncedItem["provenance"]["source"] | undefined;
+  if (typeof provenance.announcementId !== "string" || provenance.announcementId.length === 0) {
+    return undefined;
+  }
+  if (typeof source !== "object" || source === null || Array.isArray(source)) return undefined;
+  if (typeof source.agent !== "string" || source.agent.length === 0) return undefined;
+  if (typeof source.name !== "string" || source.name.length === 0) return undefined;
   if (typeof item.facts !== "object" || item.facts === null || Array.isArray(item.facts)) {
     return undefined;
   }
@@ -114,7 +170,14 @@ export function readOfferCard(item: AnnouncedItem): OfferCard | undefined {
   if (railIds.length !== amounts.length) return undefined;
   if (priced !== (railIds.length > 0)) return undefined;
   if (!amounts.every((amount) => CARD_AMOUNT.test(amount))) return undefined;
-  if (railIds.some((rail) => rail.length === 0 || DISPLAY_UNSAFE_CHARACTER.test(rail))) {
+  if (
+    railIds.some(
+      (rail) =>
+        rail.length === 0
+        || DISPLAY_UNSAFE_CHARACTER.test(rail)
+        || INTERIOR_FORMAT_CHARACTER.test(rail),
+    )
+  ) {
     return undefined;
   }
   // Strictly ascending in UTF-16 code-unit order, which is what `<` gives and what the offer

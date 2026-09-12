@@ -93,6 +93,7 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn policy` | Show or set the resolved claim policy |
 | `jinn wiring` | Show or set execution-wiring and posting entries |
 | `jinn restart` | Ask a running daemon to restart via POST /api/admin/restart |
+| `jinn supply` | Show current requestable SolverNet supply from indexed native evidence |
 <!-- skill:cli-table:end -->
 
 ## Phase 2: MCP Configuration

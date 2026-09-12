@@ -21,6 +21,7 @@ import {
 } from "./manifest.js";
 import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT } from "./legacy-closures.js";
 import { BUNDLE_V4_EVIDENCE_ROLES } from "./schema.js";
+import { BenchmarkProductError } from "./profile/errors.js";
 import {
   FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_EXCLUDED_ROLES,
@@ -122,6 +123,25 @@ function snapshotOf(overrides: SnapshotOverrides = {}): VerifiedBundleSnapshot {
 
 function readManifest(tree: ReturnType<typeof renderFreezeRepo>): Record<string, any> {
   return JSON.parse(decoder.decode(tree.files.get(FREEZE_REPO_MANIFEST_FILENAME)!)) as Record<string, any>;
+}
+
+/** The typed refusal a call raised, so a test can assert its `code` and `issues` and not only its
+ * prose: callers branch on the code, so the code is the part a change must not move silently. */
+function expectRefusal(run: () => unknown): BenchmarkProductError {
+  let raised: unknown;
+  let threw = false;
+  try {
+    run();
+  } catch (cause) {
+    threw = true;
+    raised = cause;
+  }
+  // Asserted outside the try, because a `throw` placed inside it lands in its own catch and the
+  // test then fails on the type assertion instead: a reader chasing a regression is told
+  // "expected BenchmarkProductError, received Error" when the truth is that nothing was thrown.
+  expect(threw, "expected a refusal").toBe(true);
+  expect(raised).toBeInstanceOf(BenchmarkProductError);
+  return raised as BenchmarkProductError;
 }
 
 describe("freeze repository rendering", () => {
@@ -494,6 +514,22 @@ describe("freeze repository fail-closed rules", () => {
     expect(() => renderFreezeRepo(snapshotOf({ benchmark }))).toThrow(/not an SPDX licence expression/);
   });
 
+  test("refuses a stack-deep licence as a typed record-integrity refusal, not a RangeError", () => {
+    // What a caller sees is the point: an export that raises RangeError out of the recursive
+    // descent has told the reader nothing, and no caller branches on it (issue #3898).
+    const refusal = expectRefusal(() => renderFreezeRepo(snapshotOf({
+      benchmark: {
+        protocol: "https://spec.jinn.network/benchmarking/v1",
+        name: "Deep", description: "", version: "1.0.0",
+        license: `${"(".repeat(10000)}MIT${")".repeat(10000)}`,
+        items: [], reveal: { policy: "immediate" },
+      },
+    })));
+    expect(refusal.code).toBe("record-integrity");
+    expect(refusal.issues[0]?.path).toBe("benchmark.json.license");
+    expect(refusal.message).toMatch(/nests parentheses/);
+  });
+
   test("carries every screening role the catalog can assign, including the transcript", () => {
     // The screening branch's records are freeze artifacts; omitting one silently would drop
     // evidence from the published tree with nothing in it saying so.
@@ -566,19 +602,30 @@ describe("git-tree construction rules the renderer never exercises", () => {
 
   test("refuses a name claimed by both a file and a directory, in either arrival order", () => {
     // Git records one entry per name. Hashing these produced an oid for a tree git cannot hold.
-    expect(() => freezeRepoCommitId(
+    // These two are the set's only real collisions -- one name, two claimants -- so they keep
+    // `conflict` while the malformed-path refusals below take `validation` (issue #4055).
+    const bothOrders = expectRefusal(() => freezeRepoCommitId(
       new Map([["a", encoder.encode("file\n")], ["a/b", encoder.encode("nested\n")]]),
       "identity",
-    )).toThrow(/already a file/);
-    expect(() => freezeRepoCommitId(
+    ));
+    expect(bothOrders.code).toBe("conflict");
+    expect(bothOrders.message).toMatch(/already a file/);
+    const reversed = expectRefusal(() => freezeRepoCommitId(
       new Map([["a/b", encoder.encode("nested\n")], ["a", encoder.encode("file\n")]]),
       "identity",
-    )).toThrow(/already a directory/);
+    ));
+    expect(reversed.code).toBe("conflict");
+    expect(reversed.message).toMatch(/already a directory/);
   });
 
   test("refuses empty, dot, and dot-dot path segments", () => {
+    // A malformed path collides with nothing; it is structurally invalid input, which is what
+    // `validation` names -- and the offending path is on `issues[].path`, where a caller branches.
     for (const path of ["", "a//b", "dir/", "./a", "a/../b"]) {
-      expect(() => freezeRepoCommitId(new Map([[path, encoder.encode("x")]]), "identity"), path).toThrow();
+      const refusal = expectRefusal(() => freezeRepoCommitId(new Map([[path, encoder.encode("x")]]), "identity"));
+      expect(refusal.code, path).toBe("validation");
+      expect(refusal.issues[0]?.path, path).toBe(path);
+      expect(refusal.message, path).toMatch(/git records no such entry/);
     }
   });
 
@@ -587,8 +634,9 @@ describe("git-tree construction rules the renderer never exercises", () => {
     // distinct file sets would return one oid, and two names differing only there would emit a
     // tree body carrying the same name twice.
     for (const name of ["a\uD800", "a\uDC00"]) {
-      expect(() => freezeRepoCommitId(new Map([[name, encoder.encode("x")]]), "identity"), name)
-        .toThrow(/unpaired surrogate/);
+      const refusal = expectRefusal(() => freezeRepoCommitId(new Map([[name, encoder.encode("x")]]), "identity"));
+      expect(refusal.code, name).toBe("validation");
+      expect(refusal.message, name).toMatch(/unpaired surrogate/);
     }
     // A real U+FFFD is ordinary content and still hashes.
     expect(freezeRepoCommitId(new Map([["a\uFFFD", encoder.encode("x")]]), "identity"))
@@ -598,8 +646,9 @@ describe("git-tree construction rules the renderer never exercises", () => {
   test("refuses a NUL in a name, which would not even be a tree object", () => {
     // A tree entry is framed `<mode> <name>\0<oid>`, so a NUL in the name breaks the framing
     // itself rather than merely producing a tree git would decline to hold.
-    expect(() => freezeRepoCommitId(new Map([["a\u0000b", encoder.encode("x")]]), "identity"))
-      .toThrow(/NUL/);
+    const refusal = expectRefusal(() => freezeRepoCommitId(new Map([["a\u0000b", encoder.encode("x")]]), "identity"));
+    expect(refusal.code).toBe("validation");
+    expect(refusal.message).toMatch(/NUL/);
   });
 });
 
@@ -656,6 +705,23 @@ describe("the SPDX licence expression grammar", () => {
     expect(spdxLicenseProblem("Apache-2.0 OR MIT")).toBeUndefined();
   });
 
+  test("refuses nesting deeper than it parses, rather than overflowing the stack", () => {
+    // The grammar is a recursive descent, so a value whose parentheses nest deeply enough
+    // exhausts the stack and leaves as a RangeError -- an untyped throw out of an exported
+    // predicate that documents a boolean (issue #3898). The cap refuses first, and it measures
+    // depth rather than recursing, so both surfaces agree by construction.
+    const deep = `${"(".repeat(10000)}MIT${")".repeat(10000)}`;
+    expect(isSpdxLicenseExpression(deep)).toBe(false);
+    expect(spdxLicenseProblem(deep)).toMatch(/nests parentheses/);
+    // Both sides of the boundary, so the cap is pinned at 64 and not merely "somewhere below
+    // 10000": accepting at the cap and refusing one past it fails under any other value.
+    expect(isSpdxLicenseExpression(`${"(".repeat(64)}MIT${")".repeat(64)}`)).toBe(true);
+    expect(isSpdxLicenseExpression(`${"(".repeat(65)}MIT${")".repeat(65)}`)).toBe(false);
+    // The rule is depth, not group count: a flat expression of any length is untouched. Real SPDX
+    // expressions nest one or two deep, so the cap refuses nothing anyone writes.
+    expect(spdxLicenseProblem("(MIT) AND (Apache-2.0) AND (CC0-1.0)")).toBeUndefined();
+  });
+
   test("a dual-licensed publication renders, and cites no single list entry", () => {
     // The short-identifier check refused `Apache-2.0 OR MIT` outright, so an ordinary
     // dual-licensed publication could not be exported at all (issue #3351).
@@ -691,10 +757,100 @@ describe("generated licence text is not writable from a free-text field", () => 
     }))).toThrow(/reads as an SPDX tag/);
   });
 
+  test("refuses an SPDX tag line in any case, because scanners match case-insensitively", () => {
+    // A scanner reads `spdx-license-identifier:` as the tag it is, so a guard that reads only the
+    // canonical casing refuses nothing a splicer would actually write (issue #4053).
+    for (const tag of ["spdx-license-identifier: GPL-3.0-only", "Spdx-License-Identifier: GPL-3.0-only"]) {
+      expect(() => renderFreezeRepo(snapshotOf({
+        benchmark: withBenchmark({ citation: `Someone, 2026.\n${tag}` }),
+      })), tag).toThrow(/reads as an SPDX tag/);
+    }
+  });
+
+  test("refuses a tag anywhere on the line, because a tag's home is inside a comment", () => {
+    // The short-form identifier is SPECIFIED to live in a source comment -- `// SPDX-License-Identifier: MIT`,
+    // `# SPDX-License-Identifier: MIT` -- so every reader that implements the tag accepts an
+    // arbitrary prefix on the line. A guard anchored at the line start therefore refuses none of
+    // the forms the tag is actually written in, which is the same argument the case-insensitive
+    // match was made for (issue #4053), taken to the prefix axis.
+    for (const citation of [
+      "Acme Bench, 2026.\n# SPDX-License-Identifier: GPL-3.0-only",
+      "Acme Bench, 2026.\n// SPDX-License-Identifier: GPL-3.0-only",
+      // A leading NBSP, which no `[ \t]*` prefix covers.
+      "Acme Bench, 2026.\n\u00a0SPDX-License-Identifier: GPL-3.0-only",
+    ]) {
+      expect(() => renderFreezeRepo(snapshotOf({ benchmark: withBenchmark({ citation }) })), citation)
+        .toThrow(/reads as an SPDX tag/);
+    }
+    // A single-line field needs no line break at all, so the line-terminator refusal that guards
+    // `name` never reaches this one: the tag simply sits after the text the heading renders.
+    expect(() => renderFreezeRepo(snapshotOf({
+      benchmark: withBenchmark({ name: "Bench SPDX-License-Identifier: GPL-3.0-only" }),
+    }))).toThrow(/reads as an SPDX tag/);
+  });
+
+  test("admits a near miss, because the guard reads a tag and not the letters SPDX", () => {
+    // The widened guard still has to be a guard against the TAG. A citation naming an spdx.org
+    // licence page is ordinary provenance, and `SPD X-License:` is not a tag name -- both are
+    // refused by a guard that merely looks for "SPDX", or for a colon, or that ignores the
+    // whitespace inside the name, and neither may be refused here.
+    const tree = renderFreezeRepo(snapshotOf({
+      benchmark: withBenchmark({
+        citation: "Acme Bench, 2026. Licence text: https://spdx.org/licenses/MIT\nSPD X-License: x",
+      }),
+    }));
+    const license = decoder.decode(tree.files.get("LICENSE")!);
+    expect(license).toContain("https://spdx.org/licenses/MIT");
+    expect(license).toContain("SPD X-License: x");
+  });
+
+  test("refuses a tag separated from its colon by whitespace an ASCII class does not carry", () => {
+    // The scanners this guard is written for spell the tag `SPDX-License-Identifier\s*:`, and `\s`
+    // on a Python `str` is Unicode-aware -- so an NBSP or an ideographic space before the colon is
+    // a tag to them and was not one here. CR reaches the same place from the other direction: it
+    // is admitted in a multi-line field, so the tag can sit across it.
+    //
+    // Escaped, not literal: a formatter or a paste that normalized one of these to an ASCII
+    // space would leave the test PASSING, because a plain space matches the separator class
+    // too -- so the case it exists to pin would be gone with nothing saying so.
+    for (const separator of ["\u00a0", "\u202f", "\u3000", "\u1680", "\r", "\n"]) {
+      expect(() => renderFreezeRepo(snapshotOf({
+        benchmark: withBenchmark({ citation: `Acme Bench, 2026.\nSPDX-License-Identifier${separator}: GPL-3.0-only` }),
+      })), JSON.stringify(separator)).toThrow(/reads as an SPDX tag/);
+    }
+  });
+
+  test("scans a hostile citation in linear time, not quadratically", () => {
+    // Unanchoring the guard made the search try every position the `SPDX-` literal matches, and
+    // `-` is in the name class too, so an unbounded greedy name run backtracked the whole
+    // remaining run at each of them. Nothing caps this input: `citation` has no schema in this
+    // package and no bundle member carries a byte cap, so a sealed record can hand the READER --
+    // who is verifying precisely because the publisher is untrusted -- a value that pinned one
+    // core inside a single synchronous `.test()` call. Measured on the unbounded pattern: 4.7s at
+    // 200KB, quadrupling per doubling, ~110 minutes at 8MB. The 64-character name bound makes it
+    // linear; this value renders in ~15ms.
+    //
+    // The budget sits in the gap between the two costs: ~200x above the linear one, so ordinary
+    // host load cannot reach it, and ~5x below the 17s the unbounded pattern took on this same
+    // value, so the regression cannot hide under it either. If it ever does flake, time the guard
+    // rather than raising this number -- the render's hashing is the load-sensitive part of the
+    // window and has no bearing on what is being guarded, and there is not another doubling of
+    // slack to spend.
+    const citation = "SPDX-".repeat(80_000);
+    const started = performance.now();
+    const tree = renderFreezeRepo(snapshotOf({ benchmark: withBenchmark({ citation }) }));
+    const elapsed = performance.now() - started;
+    // Admitted, not refused: there is no colon, so this is not a tag -- the cost was the point.
+    expect(decoder.decode(tree.files.get("LICENSE")!)).toContain(citation);
+    expect(elapsed).toBeLessThan(3_000);
+  });
+
   test("refuses every line separator a licence scanner breaks on, not only the ones JS does", () => {
-    // A tag-line check that stops at U+007F is bypassed by every reader that does not. Python's
+    // A generated file's line structure is a claim -- NOTICE's fixed-column rows, LICENSE's tag
+    // and name lines, the README heading -- so a terminator this file does not recognize but a
+    // reader does lets one sealed field add a line no record stands behind. Python's
     // str.splitlines() and Java's String.lines() both break on CR, U+0085, U+2028 and U+2029, so
-    // a tag after any of them is a second licence tag to the reader that matters.
+    // a class that stopped at U+007F would leave exactly those readers such a line.
     for (const separator of ["\r", "\u0085", "\u2028", "\u2029"]) {
       expect(() => renderFreezeRepo(snapshotOf({
         benchmark: withBenchmark({ citation: `Someone, 2026.${separator}SPDX-License-Identifier: GPL-3.0-only` }),
@@ -725,7 +881,8 @@ describe("generated licence text is not writable from a free-text field", () => 
 
   test("a citation with CRLF line endings is still allowed", () => {
     // The record is sealed, so refusing CRLF would make such a bundle permanently unexportable --
-    // and it buys nothing, because the tag-line check splits on CRLF as well as LF.
+    // and it buys nothing, because the tag-line check reads the whole value and so sees a tag
+    // after a CR exactly as it sees one after an LF.
     const tree = renderFreezeRepo(snapshotOf({
       benchmark: withBenchmark({ citation: "Someone, 2026.\r\nSecond line." }),
     }));
@@ -735,23 +892,47 @@ describe("generated licence text is not writable from a free-text field", () => 
     }))).toThrow(/reads as an SPDX tag/);
   });
 
-  test("refuses a source-manifest descriptor carrying an SPDX tag line", () => {
-    // NOTICE splices every source uri verbatim, and `uri` is `z.string().min(1)` in the sealed
-    // schema -- so the rule the publication fields are held to has to hold here too.
+  /** A one-row source manifest whose `source.uri` is whatever a test wants to splice into NOTICE. */
+  function withSourceUri(uri: string): VerifiedBundleSnapshot {
     const injected = JSON.stringify({
       protocol: "https://spec.jinn.network/binary-judgment/source-manifest-entry/v1",
       provenanceSha256: `sha256:${"e".repeat(64)}`,
-      source: { uri: "https://example.test/x\nSPDX-License-Identifier: GPL-3.0-only", digest: { sha256: "e".repeat(64) } },
+      source: { uri, digest: { sha256: "e".repeat(64) } },
       license: { uri: "https://example.test/LICENSE.txt", digest: { sha256: "b".repeat(64) } },
       attribution: { uri: "https://example.test/ATTRIBUTION.txt", digest: { sha256: "c".repeat(64) } },
       publishedAt: "2026-01-02T03:04:05Z",
     });
-    expect(() => renderFreezeRepo(snapshotOf({
+    return snapshotOf({
       records: [
         { bytes: ITEM_BANK_BYTES, roles: ["item-bank"] },
         { bytes: encoder.encode(`${injected}\n`), roles: ["source-manifest"] },
       ],
-    }))).toThrow(/reads as an SPDX tag/);
+    });
+  }
+
+  test("refuses a source-manifest descriptor carrying an SPDX tag line", () => {
+    // NOTICE splices every source uri verbatim, and `uri` is `z.string().min(1)` in the sealed
+    // schema -- so the rule the publication fields are held to has to hold here too. The value is
+    // a single line and is a tag on its own, so the tag-line guard is the one under test: the two
+    // guards stay independent even now that a descriptor refuses line separators outright.
+    expect(() => renderFreezeRepo(withSourceUri("SPDX-License-Identifier: GPL-3.0-only")))
+      .toThrow(/reads as an SPDX tag/);
+    // And mid-line, where the descriptor's line-terminator refusal cannot stand in for the tag
+    // guard: `renderNotice` emits the uri on a row of its own, so the whole row is one line.
+    expect(() => renderFreezeRepo(withSourceUri("https://ex.invalid/x SPDX-License-Identifier: GPL-3.0-only")))
+      .toThrow(/reads as an SPDX tag/);
+  });
+
+  test("refuses a newline in a source-manifest descriptor, which would forge a NOTICE row", () => {
+    // `renderNotice` emits `  uri:         ${uri}`, so a newline in the value adds a second
+    // row-shaped line to NOTICE that no source manifest row stands behind. RFC 3986 excludes line
+    // terminators from a URI, so nothing legitimate is lost by refusing them (issue #4054).
+    const refusal = expectRefusal(() => renderFreezeRepo(
+      withSourceUri("https://example.test/x\n  uri:         https://evil.test/other"),
+    ));
+    expect(refusal.code).toBe("record-integrity");
+    expect(refusal.issues[0]?.path).toBe("source-manifest.source.uri");
+    expect(refusal.message).toMatch(/control character or line separator/);
   });
 
   test("a multi-line citation with no tag line is still allowed", () => {

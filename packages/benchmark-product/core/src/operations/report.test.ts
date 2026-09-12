@@ -795,7 +795,6 @@ describe("runReport — happy path", () => {
       expect(outcome.result.claimPackage.assurance.disclosure).toContain("agent-distinctness");
       expect(outcome.result.claimPackage.assurance.disclosure).toContain("party-independence");
     },
-    30_000,
   );
 });
 
@@ -839,7 +838,6 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
       // The whole point: the produced tuple must be exactly-JSON-equal to a sealed plan entry.
       expect(reportRecord.preregistered).toBe(true);
     },
-    30_000,
   );
 
   test(
@@ -856,7 +854,6 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
       expect(reportRecord.method.id).toBe("jinn.benchmarking.method/wilson");
       expect(reportRecord.preregistered).toBe(true);
     },
-    30_000,
   );
 
   /** APEX-SWE-dev is never `leaderboardSubmitReady` (DR-2026-08-18-c §5), so its protocol-named
@@ -929,7 +926,6 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
       expect(reportRecord.limitations).toContain(APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION);
       expect(reportRecord.limitations).not.toContain(SUITE_NOT_LEADERBOARD_READY_LIMITATION);
     },
-    30_000,
   );
 });
 
@@ -2088,7 +2084,6 @@ describe("runReport — claim-package write failure does not strand the draft", 
       if (!verified.ok) return;
       expect(verified.result.checks).toContain("claim-consistency");
     },
-    30_000,
   );
 });
 
@@ -2205,7 +2200,6 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
           .toEqual(published.result.additionalBundles!.map((entry) => entry.bundleIdentity).sort());
       }
     },
-    30_000,
   );
 
   // ── Proof 1a (spec §8.3): the N-bundle cold-verify proof ──────────────────────────────────
@@ -2282,7 +2276,6 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
         for (const { dir } of copiedDirs) rmSync(dir, { recursive: true, force: true });
       }
     },
-    30_000,
   );
 
   test.skipIf(!externalVerifyAvailable)(
@@ -2320,7 +2313,6 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
         for (const dir of copiedDirs) rmSync(dir, { recursive: true, force: true });
       }
     },
-    30_000,
   );
 
   test.skipIf(!externalVerifyAvailable)(
@@ -2447,6 +2439,5 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
       expect(new Set(claimRecords.map((record) => record.matrixSha256)).size).toBe(1); // EQUAL
       expect(new Set(claimRecords.map((record) => record.reportSha256)).size).toBe(2); // DIFFERS
     },
-    30_000,
   );
 });

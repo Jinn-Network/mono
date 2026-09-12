@@ -9,6 +9,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // file:-mapped so the consumer graph resolves end-to-end (mirrors
 // record-discovery-serve's own pack-smoke.mjs pattern).
 const crossTree = [
+  ["@jinn-network/contract-abis", join(packageRoot, "..", "..", "contract-abis")],
   ["@jinn-network/task-execution-protocol", join(packageRoot, "..", "..", "task-execution", "protocol")],
   ["@jinn-network/task-execution-backend", join(packageRoot, "..", "..", "task-execution", "backend")],
   ["@jinn-network/task-execution-profiles", join(packageRoot, "..", "..", "task-execution", "profiles")],

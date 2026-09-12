@@ -146,12 +146,6 @@ function subjectPublicKey(certificateDer: Uint8Array): Uint8Array {
   return children(spki)[1]!.content.subarray(1);
 }
 
-function extensionOids(certificateDer: Uint8Array): readonly string[] {
-  const tbs = children(decodeDer(certificateDer))[0]!;
-  const extensions = children(children(tbs)[7]!)[0]!;
-  return children(extensions).map((extension) => readDerOid(children(extension)[0]!));
-}
-
 function extendedKeyUsageOids(certificateDer: Uint8Array): readonly string[] {
   const tbs = children(decodeDer(certificateDer))[0]!;
   const extensions = children(children(tbs)[7]!)[0]!;
@@ -162,6 +156,19 @@ function extendedKeyUsageOids(certificateDer: Uint8Array): readonly string[] {
     return children(value).map((oid) => readDerOid(oid));
   }
   return [];
+}
+
+function extendedKeyUsageCriticalValue(certificateDer: Uint8Array): boolean | undefined {
+  const tbs = children(decodeDer(certificateDer))[0]!;
+  const extensions = children(children(tbs)[7]!)[0]!;
+  for (const extension of children(extensions)) {
+    const parts = children(extension);
+    if (readDerOid(parts[0]!) !== "2.5.29.37") continue;
+    return parts[1]?.identifier === DER_TAG.BOOLEAN
+      ? parts[1].content[0] === 0xff
+      : undefined;
+  }
+  return undefined;
 }
 
 const authority = createFixtureAuthority("anchor-kit-test");
@@ -257,7 +264,7 @@ describe("the valid token", () => {
 
   test("rule 9: extended key usage is exactly id-kp-timeStamping, and critical", () => {
     expect(extendedKeyUsageOids(valid.signerCertificateDer)).toEqual([OID_ID_KP_TIME_STAMPING]);
-    expect(extensionOids(valid.signerCertificateDer)).toContain("2.5.29.37");
+    expect(extendedKeyUsageCriticalValue(valid.signerCertificateDer)).toBe(true);
   });
 
   test("rule 10: the tsa field is the certificate's own directoryName", () => {
@@ -469,6 +476,12 @@ describe("every negative fixture carries the defect it is named for", () => {
       .toEqual([OID_ID_KP_TIME_STAMPING, OID_ID_KP_CLIENT_AUTH]);
     expect(extendedKeyUsageOids(mint({ omitExtendedKeyUsage: true }).signerCertificateDer))
       .toEqual([]);
+  });
+
+  test("rule 9: a non-critical extension retains sole id-kp-timeStamping usage", () => {
+    const nonCritical = mint({ nonCriticalExtendedKeyUsage: true }).signerCertificateDer;
+    expect(extendedKeyUsageOids(nonCritical)).toEqual([OID_ID_KP_TIME_STAMPING]);
+    expect(extendedKeyUsageCriticalValue(nonCritical)).toBeUndefined();
   });
 
   test("rule 10: the tsa field names a subject the certificate does not present", () => {

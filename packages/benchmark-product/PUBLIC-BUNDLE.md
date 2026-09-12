@@ -440,7 +440,8 @@ cannot read it is an instruction to fail. That rule is satisfiable rather than c
 `@colophon-claims/verify@0.2.1`, the registry `latest` since 2026-09-01, lists the metadata-first
 profile among the ones its manifest parse accepts; `@0.2.0` and every earlier line refuse a
 metadata-first bundle there. What a `/5` producer writes today still does not satisfy the gate:
-`PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND` resolves to the `@0.1` line and there is no
+`PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND` — the one line a `/5` claim states, since
+claim-package/3 has a single `command` field — resolves to the `@0.1` line, and there is no
 metadata-first-specific command constant, so a metadata-first bundle whose claim pins `@0.1`
 remains an instruction to fail. The gate is open and unexercised — the profile is a format
 definition and a local derivation of an already-published full-evidence bundle, and no producer
@@ -507,6 +508,56 @@ version-mismatch refusal it gives a v7 one. `colophon bundle verify --bundle
 still unpublished, so that route needs a mono checkout the `npx` line does
 not.
 
+### Composed presentation bundle v10
+
+A bundle whose report page renders the composed presentation generation emits
+`benchmark-product-public-bundle/10`. It is v6's closure exactly --- v2's member
+list, no qualification graph, an anchored trust root, the same **seven checks**,
+and `benchmark-product.claim-package/4` --- differing only in which report page
+the verifier rebuilds and byte-compares. Nothing about what the bundle proves
+moves. A presentation generation that grew a check would be claiming the render
+proves something the records did not already prove.
+
+The page is byte-pinned: `verifyPublicBundleSnapshot` rebuilds every
+presentation asset and refuses the bundle on any mismatch, and every published
+claim seals the exact reader line that performs that rebuild. Changing a
+rendered string in place would therefore break every already-published bundle
+under the command printed on its own page, which is why a prose revision takes a
+format number rather than an edit. What v10 renders is the four report-prose
+rulings of issue #3016: each of the page's statements is made once, in the
+highest-priority slot that carries it, and the narrated control above the
+per-cell disclosures is cut. No disclosure the v6 page carries is absent from
+the v10 page.
+
+Later presentation features register as capability entries inside this
+generation rather than taking a further format number.
+
+v10 cannot pin v6's first public `@0.1` line: no released `0.1` reader
+understands the format, so a claim naming one would be an instruction to fail.
+It pins the same `0.2.1` line v7 and v8 pin, with `@0.2` as the compatible line:
+
+```bash
+npx @colophon-claims/verify@0.2.1 <bundle-dir>
+```
+
+v10 is anchored, so it takes the trust-material form too:
+
+```bash
+npx @colophon-claims/verify@0.2.1 <bundle-dir> \
+  --tsa-root ./authority-root.pem \
+  --ots-headers ./bitcoin-headers.txt
+```
+
+`--tsa-root` and `--ots-headers` carry the meaning and the defaults stated for
+v6.
+
+**No run emits v10 yet.** The producer's format selection is unchanged, because
+`0.2.1` is published and immutable and predates this format, so it refuses v10
+at manifest parse --- a v10 bundle would be permanently unverifiable under its
+own instruction. The format enters the schema so a bundle can be labelled with
+it and the round trip proven; the producer flips in the change that pins v10 to
+the release serving it.
+
 ## Portable verification
 
 Verification with your own tools — no Jinn code at all — is specified in
@@ -534,6 +585,7 @@ out where it applies.
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/8` | `@0.2.1` | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
+| `benchmark-product-public-bundle/10` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a
@@ -868,20 +920,38 @@ The layout:
   SPDX licence expression: the export checks it against the SPDX 2.3 Annex D
   grammar, so free text is a refusal rather than a rendered
   `SPDX-License-Identifier:` line, while an ordinary dual licence
-  (`Apache-2.0 OR MIT`) is accepted. The grammar is not the SPDX licence list, and
-  the export deliberately does not carry a list that would date — so `LICENSE`
-  cites the SPDX list address for a single identifier and says in as many words
-  that an identifier the list does not carry will not resolve there. A
+  (`Apache-2.0 OR MIT`) is accepted. The grammar is not the whole licence check:
+  an expression nesting parentheses more than 64 deep is refused as well, though
+  it satisfies that grammar, because the renderer parses the expression by
+  recursive descent and will not present a value it cannot parse — real
+  expressions nest one or two deep. The grammar is not the SPDX licence list
+  either, and the export deliberately does not carry a list that would date — so
+  `LICENSE` cites the SPDX list address for a single identifier and says in as
+  many words that an identifier the list does not carry will not resolve there. A
   `LicenseRef-` identifier, which SPDX defines as off-list, gets no address at
   all, and neither does a compound expression, which names no one list entry. The
   publication's `name`, `version`, `author`, and `citation` are spliced into these
   generated files verbatim, so each is refused if it carries a control character
   or line separator — C0, DEL, all of C1, `U+2028` and `U+2029`, since a
-  licence scanner breaks lines on more of those than JavaScript does — or a line
-  that would read as a second `SPDX-…:` tag. In `metadata/spdx.json` a
-  source `downloadLocation` that is not a remote URL, and an `author` that is a
-  scheme-qualified machine identifier rather than a supplier name, both report
-  `NOASSERTION` rather than stating something the record does not support.
+  licence scanner breaks lines on more of those than JavaScript does — or text
+  that would read as a second `SPDX-…:` tag. That tag refusal is not line-shaped:
+  a tag is refused wherever it sits in the value, in any casing, since the
+  scanners that matter match case-insensitively; at any position on the line,
+  since the short-form identifier is specified to live inside a source comment and
+  so every reader that implements it accepts an arbitrary prefix; and separated
+  from its colon by any Unicode whitespace rather than only a space or a tab. A
+  tag mid-line in a single-line `name` is refused with no line terminator involved
+  at all. The sealed source-manifest descriptors spliced into these generated
+  files — `source.uri`, `license.uri` and `attribution.uri` into `NOTICE`,
+  `source.name` into `metadata/spdx.json` — are held to that same rule, and
+  refuse an embedded line terminator outright as well, unlike `citation`, which
+  is legitimately multi-line: `NOTICE` renders each descriptor it carries as one
+  fixed-column row, so a line break inside one would emit a second row-shaped
+  line that no source-manifest row stands behind. In
+  `metadata/spdx.json` a source `downloadLocation` that is not a remote URL, and
+  an `author` that is a scheme-qualified machine identifier rather than a
+  supplier name, both report `NOASSERTION` rather than stating something the
+  record does not support.
 - `README.md` — the doctrine, the layout, and the check.
 
 The tree's **git commit hash is the value a freeze announcement pins**. It is

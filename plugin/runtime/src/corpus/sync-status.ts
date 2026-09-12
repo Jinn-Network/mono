@@ -15,6 +15,19 @@ export const MIRROR_SYNC_STATUS_FILENAME = "mirror-sync-status.json";
 export const MAX_FAILURE_CHARS = 512;
 
 /**
+ * Appended to a recorded failure half the writer had to cut (#3822).
+ *
+ * `sanitizeUntrustedText` slices with no suffix, so without this a value that
+ * hit `MAX_FAILURE_CHARS` is written -- and rendered into the
+ * `corpus-mirror-freshness` detail -- looking complete: it just stops. An
+ * operator reading it cannot tell whether the cause was in the part they can
+ * see. One character is enough. The writer appends it OVER the tail of the cut
+ * rather than after it, so the invariant the read schema depends on holds: a
+ * marked value is still at most `MAX_FAILURE_CHARS`.
+ */
+export const FAILURE_TRUNCATION_MARKER = "\u2026";
+
+/**
  * `code` and `message` are PEER-INFLUENCED: `message` is `describeError` over
  * a transport error, and `TransportRedirectError` embeds the peer-supplied
  * `Location` header verbatim. They reach a durable file and, through the

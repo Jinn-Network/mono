@@ -2,14 +2,15 @@
 
 | | |
 |---|---|
-| **Version** | 0.2 |
-| **Date** | 2026-09-01 (v0.1); 2026-09-05 (v0.2 applies the operator ruling) |
+| **Version** | 0.3 |
+| **Date** | 2026-09-01 (v0.1); 2026-09-05 (v0.2 applies the operator ruling); 2026-09-07 (v0.3 refreshes the status claims) |
 | **Shape** | `design` |
 | **Status** | adopted — operator ruling 2026-09-05; §10's four decisions D1–D4 are closed as recommended ([PR #3476 comment 5554840223](https://github.com/Jinn-Network/mono/pull/3476#issuecomment-5554840223)) |
 | **Issue** | [#3400](https://github.com/Jinn-Network/mono/issues/3400) |
 | **Executes** | [neutral freeze-announcement surface](./2026-08-29-neutral-freeze-announcement-surface.md) §8 and §10 item 3, including its two open questions |
 | **Depends on** | [pluggable integrity providers / anchor evidence](./2026-08-17-pluggable-integrity-providers-design.md) §5, §6.1–§6.4, §7.1–§7.4; [record discovery](../plans/2026-07-28-record-discovery.md) §5.1–§5.3, §5.5, §7; [publication interoperability profile](./2026-08-13-benchmark-publication-interoperability-profile.md) §9.3 |
 | **Outcome** | both open questions settled, one mechanism specified, four decisions ruled by the product owner, and an explicit statement of the ceiling this buys |
+| **v0.3 changes** | Status erratum only, per [#4131](https://github.com/Jinn-Network/mono/issues/4131). Four present-tense claims about the head-freshness family went stale between v0.1's 2026-09-01 derivation and now — #3467 and #3468 both closed COMPLETED on 2026-09-01, and #3467's fix landed the `refreshBy` ceiling in both named verification procedures — so §2, §3, §4.1, §5.4, §6, §11, and §13 are restated against the current tree. Two drifted line-number citations are dropped in favor of the symbol names, and §4.4's misnamed `alreadyUpgraded` citation is corrected. §11 records the numbers the follow-ups were filed under. **No analysis, ruling, or non-goal changes**; §8 in particular is untouched, because a non-goal asserts this design fixes none of them and that is still true. |
 | **v0.2 changes** | Ruling erratum only. §10 flips from four open decisions to four operator rulings; the D3 skew allowance becomes configurable in §4.4 and §7; §5.3 records that the bundle does not cite `(origin, sequence)` in v1; §11 is released for filing at low priority. **The design itself (§0–§9) is otherwise unchanged**, and no analysis is rewritten. |
 
 ## 0. Decision in plain language
@@ -87,8 +88,8 @@ carries `{protocol, source, sequence, previous, timestamp, announcements[]}`. Th
 directions. So an entry commits transitively to its whole prefix.
 
 **Entry identity.** An entry's digest is `recordDigest(sealJson(entry).bytes)` —
-canonical I-JSON sealed once, hashed once (`source-writer.ts:740`,
-`protocol/src/hashing.ts`). It is the same value the head cites and the same value
+canonical I-JSON sealed once, hashed once (the seal in `source-writer.ts`'s `append`,
+and `protocol/src/hashing.ts`). It is the same value the head cites and the same value
 `previous` cites, so there is exactly one digest per entry and no second spelling.
 
 **Entries are individually signed.** Archive pages pair each entry with its own
@@ -101,7 +102,7 @@ two mechanisms.
 **The head is mutable by design.** `SourceHead` (`protocol/src/head.ts`) is
 `{protocol, origin, sequence, entry, issuedAt, refreshBy}`, DSSE-signed, one per
 source, served at `/sources/<name>/head`. `refreshHead`
-(`packages/discovery/serve/src/head.ts:60`) produces the next head **for the same
+(`packages/discovery/serve/src/head.ts`) produces the next head **for the same
 source position** — `sequence` and `entry` unchanged, `issuedAt` strictly increased,
 `refreshBy` re-based and clamped to `MAX_REFRESH_BY_AHEAD_MS`. `maintainHead` re-signs
 and writes it "even when nothing new was announced […] the live-source obligation that
@@ -117,12 +118,20 @@ calls the idle re-stamp hazard **dormant** — "Nothing in the tree re-stamps an
 head. The hazard materializes the moment someone adds a serve-side idle-freshness
 timer — which the `head.ts` primitives explicitly exist to support."
 
-That dormancy is a scheduling accident, not a property. #3468 (open) describes the
-same re-sign as the expected steady state of a live source and shows both consumers
-currently refusing it; #3467 (open) shows the `refreshBy` ceiling unenforced on the
-read side. The head-freshness family is unfinished work, and a design that binds its
-subject to the head document would be binding to the least settled object in the
-system. §4.1 does not.
+That dormancy is a scheduling accident, not a property. Two of the issues this section
+cited as open when it was derived on 2026-09-01 closed COMPLETED that same day, and both
+fixes are in the tree: #3468 described the same re-sign as the expected steady state of a
+live source and showed both consumers refusing it, and its fix (PR #3472) admits a
+same-position re-signed head onto `source-head-revalidation`; #3467 showed the `refreshBy`
+ceiling unenforced on the read side, and its fix (PR #3473) landed
+`packages/discovery/protocol/src/verify/refresh-bound.ts`, which both named verification
+procedures now consult. What had *not* settled when v0.3 was written is what a head means
+to a consumer generally: #2549 (the idle re-stamp hazard itself) and #3469 (source-head
+revalidation among the named procedures) were both still open then. A design that bound
+its subject to the head document would still be binding to the least settled object in the
+system — and, more to the point, to one the protocol obliges the publisher to re-sign on a
+timer. §4.1 does not, and its last bullet states why that argument does not depend on any
+of these four outcomes.
 
 **The anchor machinery.** `AnchorEvidence` (`packages/trust/core/src/anchor-evidence.ts`)
 is sealed-not-signed, strict-schema, and carries exactly one subject — `{kind, digest}`
@@ -147,7 +156,7 @@ obligation at all.
 | Publication-by-time | no, and not by any anchor (neutral-freeze §7.1) |
 | **Stream integrity — the publisher has not truncated, reordered, or forked its own chain** | **yes, partially: detectable to prior observers** |
 | Stream completeness — the publisher announced everything it should have | no |
-| Freshness / withholding detection | no; that is `refreshBy` and #3467 |
+| Freshness / withholding detection | no; that is `refreshBy`, whose ceiling both named verification procedures have enforced since #3467's fix landed |
 
 The residual is asymmetric in a way worth stating plainly, because it is what makes a
 cheap mechanism worth having. A publisher who forks its chain must produce a fork that
@@ -182,8 +191,8 @@ obligations.
   them is an advance.
 - **The entry is immutable and already digest-addressed.** It is the object `previous`
   links, the object the head cites, and the object whose digest the writer computes once
-  (`source-writer.ts:740`). There is exactly one digest per entry, so "anchor the entry"
-  has one meaning.
+  (the seal in `source-writer.ts`'s `append`). There is exactly one digest per entry, so
+  "anchor the entry" has one meaning.
 - **The entry commits to the prefix; the head commits to nothing extra.** `head.entry`
   *is* the entry digest. An anchor over the head document therefore proves the same
   chain content as an anchor over the entry, plus two fields (`issuedAt`, `refreshBy`)
@@ -194,9 +203,10 @@ obligations.
   (`SignedEntry.signature`) and third-party-dated (the anchor). A reader can check both
   without ever trusting the current head — which is the point, since the current head is
   precisely the object under suspicion.
-- **It is stable across the open head-freshness work.** #2549, #3467, and #3468 are all
-  live questions about what a head means to a consumer. Nothing in them can change what
-  an entry digest means.
+- **It is stable across the head-freshness work, settled or not.** #3467 and #3468 closed
+  COMPLETED on 2026-09-01; #2549 and #3469 were still open at v0.3. The bullet reads the
+  same either way, because every one of them is a question about what a *head* means to a
+  consumer, and nothing any of them can decide changes what an entry digest means.
 
 **Ruling.** `subject: "announcement-entry"`, digest `head.entry` with the `sha256:`
 prefix stripped, resolved at the moment of anchoring from the source's own committed
@@ -282,7 +292,10 @@ OTS upgrade exception (`core/src/run/state.ts`). A source is not a run: it has n
   `(entryDigest, provider)`, with the same single exception for an OpenTimestamps
   upgrade: the completed proof is appended as a new record naming the pending one, which
   stays. The predecessor-consumption rule that forbids a fork of upgrade edges
-  (`state.ts`'s `alreadyUpgraded` set) transfers verbatim; it is the same hazard.
+  (`state.ts`'s `upgradedByPair`/`upgradedOfPair` sets, inside its durable `superRefine`)
+  transfers verbatim; it is the same hazard. The operation-side set that resolves the one
+  upgradeable predecessor is a different object with a different name —
+  `alreadyUpgraded`, in `core/src/operations/run-anchor.ts` — and both are needed.
 - **No window at all.** There is no `report` to close against, and none is invented. The
   entry is immutable and its digest is meaningful forever, so an anchor obtained a year
   late is a *weaker* anchor, not an invalid one — and unlike the run path, a late anchor
@@ -390,9 +403,10 @@ state completely:
 
 Steps 1–3 are ordinary consumer operations with existing code. Step 5 is a new consumer
 rule and is **out of scope here**: the in-repo consumer path (`corpus.sources`) is not
-reachable from any entry point today, and the head-freshness family (#2549, #3467, #3468,
-#3469) is mid-flight on what a consumer should do with heads generally. Specifying a
-consumer rule into that would collide. §11 files it as a follow-up against #3469's
+reachable from any entry point today, and the head-freshness family is still mid-flight on
+what a consumer should do with heads generally — #3467 and #3468 closed COMPLETED on
+2026-09-01, but #2549 and #3469 were still open at v0.3. Specifying a consumer rule into
+that would collide. §11 files it as a follow-up against #3469's
 named-verification-procedures work, where it belongs.
 
 ## 6. What this buys and what it does not
@@ -409,9 +423,11 @@ held anchor covers the whole prefix beneath it.
   append it at all. The gap is visible; the missing announcement is not.
 - **Protection for readers who never looked.** This is the defining difference from a
   witnessed log and must never be blurred in copy.
-- **Freshness or withholding detection.** That is `refreshBy`, and it is currently
-  unenforced on the read side (#3467). A head anchor is not a substitute and must not be
-  presented as one.
+- **Freshness or withholding detection.** That is `refreshBy`, whose ceiling both named
+  verification procedures have enforced since #3467 closed
+  (`packages/discovery/protocol/src/verify/refresh-bound.ts`). A head anchor is a separate
+  mechanism answering a separate question; it is not a substitute for that one, and must
+  not be presented as one.
 - **Any change to what a lock anchor proves.** Unchanged.
 
 **Copy discipline.** Every surface that mentions this must say "anchored, so truncation
@@ -538,21 +554,26 @@ Revisit only if a consumer actually needs the pointer.
 ## 11. Follow-ups (approved for filing, low priority)
 
 Ruling D1 releases these for filing. They carry the priority that ruling names — low — and
-item 1 implements §7 under rulings D2, D3, and D4.
+item 1 implements §7 under rulings D2, D3, and D4. All four have since been filed; v0.3
+records the numbers so a reader can follow the trail.
 
-1. **`feat(benchmark-product|discovery)` — implement §7.** The identifier, facts profile,
-   ledger, operation, announcement, never-blocks hook, and operator line. One PR is
-   plausible; the identifier and facts profile can lead if the discovery package prefers
-   a separate landing.
+1. **`feat(benchmark-product|discovery)` — implement §7** ([#4127](https://github.com/Jinn-Network/mono/issues/4127)).
+   The identifier, facts profile, ledger, operation, announcement, never-blocks hook, and
+   operator line. One PR is plausible; the identifier and facts profile can lead if the
+   discovery package prefers a separate landing.
 2. **`docs` — the printed and runbook wording** for the ceiling in §6, in the
-   announcement-source runbook, using §6's copy discipline. Coordinate with #3401, which
+   announcement-source runbook, using §6's copy discipline
+   ([#4128](https://github.com/Jinn-Network/mono/issues/4128)). Coordinate with #3401, which
    already covers stream-integrity disclosure wording — this may fold into it rather than
    be filed separately.
-3. **`design`/`feat` — the consumer refusal rule** of §5.4 step 5, filed against #3469's
-   named-verification-procedures work and sequenced after #3467 and #3468 settle what a
-   head means to a consumer.
-4. **`docs` — coverage read in the runbook**: how an operator (or a stranger) enumerates
-   anchored versus unanchored sequences from the archive alone.
+3. **`design`/`feat` — the consumer refusal rule** of §5.4 step 5
+   ([#4129](https://github.com/Jinn-Network/mono/issues/4129)), filed against #3469's
+   named-verification-procedures work. It was sequenced after #3467 and #3468 settle what a
+   head means to a consumer; both closed COMPLETED on 2026-09-01, so that condition is
+   satisfied, and #3469 — still open at v0.3 — is the remaining dependency.
+4. **`docs` — coverage read in the runbook** ([#4130](https://github.com/Jinn-Network/mono/issues/4130)):
+   how an operator (or a stranger) enumerates anchored versus unanchored sequences from the
+   archive alone. It has nothing to enumerate until item 1 lands.
 
 ## 12. What this design does not prove
 
@@ -573,13 +594,21 @@ item 1 implements §7 under rulings D2, D3, and D4.
 - Adoption: operator ruling on
   [PR #3476](https://github.com/Jinn-Network/mono/pull/3476#issuecomment-5554840223),
   2026-09-05, recorded in §10. v0.2 applies it; §0–§9 are otherwise unchanged from v0.1.
+- Status erratum: v0.3, 2026-09-07, from the review of PR #3476
+  ([#4131](https://github.com/Jinn-Network/mono/issues/4131)). It refreshes status claims
+  and citations only; no analysis, ruling, or non-goal moves.
 - Ground truth re-derived from the tree on 2026-09-01: `packages/discovery/protocol`,
   `packages/discovery/serve`, `packages/benchmark-product/core/src/anchor`,
   `core/src/operations/run-anchor.ts`, `core/src/run/state.ts`, and
   `core/src/run/publication-source.ts`.
-- The head-mutability evidence in §2 and §4.1 comes from the live head-freshness family:
-  #2549 (idle re-stamp reads as rollback; dormant), #3467 (`refreshBy` ceiling unenforced
-  by consumers), #3468 (a re-signed idle head is refused as broken-chain), #3469 (record
-  source-head revalidation among the named procedures).
+- The head-mutability evidence in §2 and §4.1 comes from the head-freshness family as it
+  stood at that derivation, with each status below as of v0.3: #2549 (idle re-stamp reads
+  as rollback; dormant — still open), #3467 (`refreshBy` ceiling was unenforced by
+  consumers — closed COMPLETED 2026-09-01, fixed by PR #3473), #3468 (a re-signed idle head
+  was refused as broken-chain — closed COMPLETED 2026-09-01, fixed by PR #3472), #3469
+  (record source-head revalidation among the named procedures — still open). Every status
+  line here carries a date on purpose: v0.1's did not, which is why they went stale
+  unnoticed and this erratum exists. §4.1's last bullet states why the design's conclusion
+  is invariant to every one of these outcomes.
 - Sibling follow-ups from the same parent: #3398 (archive lock index), #3399 (freeze-post
   pointer format), #3401 (stream-integrity disclosure wording).

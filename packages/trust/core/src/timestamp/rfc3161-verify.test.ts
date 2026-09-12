@@ -236,6 +236,7 @@ const CERTIFICATE_FACTS: AnchorCertificateFacts = {
   notBefore: "2026-01-01T00:00:00Z",
   notAfter: "2036-01-01T00:00:00Z",
   extendedKeyUsageOids: [OID_ID_KP_TIME_STAMPING],
+  extendedKeyUsageCritical: true,
   subjectNames: [SUBJECT_GENERAL_NAME],
   sid: [
     {
@@ -536,6 +537,23 @@ describe("the RFC 3161 anchor proof verifier (design §6.1)", () => {
         proofBytes: buildToken().tokenDer,
       });
       expect(result.status).toBe("invalid");
+    });
+
+    test("a non-critical id-kp-timeStamping extended key usage is invalid (rule 9)", () => {
+      const nonCritical = createRfc3161AnchorProofVerifier(
+        recordingPorts({
+          certificate: {
+            ...CERTIFICATE_FACTS,
+            extendedKeyUsageCritical: false,
+          },
+        }).ports,
+      );
+      const result = nonCritical.verifyProof({
+        subjectSha256: SUBJECT_SHA256,
+        proofBytes: buildToken().tokenDer,
+      });
+      expect(result.status).toBe("invalid");
+      expect(result.status === "invalid" && result.reason).toContain("not critical");
     });
 
     test("a genTime outside the certificate window is invalid (rule 11)", () => {

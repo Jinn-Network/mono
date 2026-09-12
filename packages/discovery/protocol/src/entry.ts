@@ -79,6 +79,18 @@ const AnnouncementEntrySchema = z.looseObject({
   source: z.looseObject({ agent: z.string().min(1), name: z.string().min(1) }),
   sequence: SequenceSchema,
   previous: z.union([Sha256DigestSchema, z.null()]),
+  // Deliberately laxer than `HeadTimestampSchema`, and the asymmetry is a
+  // decision, not an oversight (#4095).
+  //
+  // `assertIntentOwnership` pins `head.issuedAt === entry.timestamp`, and
+  // `issuedAt` is calendar-strict RFC 3339 with a mandatory offset (#3482) --
+  // so on the WRITE path this field is already strict, transitively, and the
+  // durable writer is its single authority. `parseAnnouncementEntry`, by
+  // contrast, parses bytes received from a PEER during an archive walk.
+  // `timestamp` is not a §5.2 window field: nothing here reads it as an
+  // instant, and tightening the schema would retroactively refuse
+  // already-signed, digest-chained historical entries. That is a protocol
+  // compatibility change, decided in a protocol change -- not here.
   timestamp: z.string().min(1),
   announcements: z.array(AnnouncementSchema).min(1),
 });

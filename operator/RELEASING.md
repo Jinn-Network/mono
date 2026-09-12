@@ -104,22 +104,76 @@ npx @jinn-network/operator@canary --help
    The publish step creates `client-vX.Y.Z`, pushes it, creates the GitHub
    release, waits for npm/GHCR workflows, and verifies the published artifacts.
 
-For Captain-driven GitHub Release publishes, add this exact evidence marker to
-the Release body before clicking Publish. `release-commit` must be the commit
-the `vX.Y.Z` tag points at:
+For Captain-driven GitHub Release publishes, the gate is **two SHA-bound
+check-runs on the release commit** — nothing you type in the Release body:
 
-```text
-<!-- jinn-release-evidence:v1
-release-tag=vX.Y.Z
-release-commit=<git sha>
-release-client-prepare=passed
-olas-rails-smoke=passed
-app-first-testnet-acceptance=passed
--->
+- `hermetic-gate` — the native job of `.github/workflows/hermetic-gate.yml`.
+- `environment-suite` — posted by
+  `operator/scripts/release/post-check-run-verdict.mjs` from
+  `.github/workflows/environment-suite.yml`.
+
+`npm-publish.yml`'s stable-publish step resolves the release SHA, queries both
+check-runs on that exact SHA, and — with both waivers below unset — refuses the
+publish unless both are `success`-for-this-SHA. It re-runs nothing, and it
+parses no Release body. A check-run bound to a different `head_sha` is stale and
+does not count, so a rebase invalidates a stale verdict automatically. See the
+two-gate redesign
+([`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md`](../docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md)
+§7) and the guard itself at `.github/workflows/npm-publish.yml`.
+
+Both gates carry a transitional repo-variable waiver —
+`JINN_HERMETIC_GATE_WAIVED` and `JINN_ENVIRONMENT_SUITE_WAIVED`. When one is
+`'true'` the guard logs the waiver loudly and skips that verdict. Unset is the
+steady state; treat a set waiver as a cut you are publishing without that gate.
+
+Before publishing, confirm no waiver is in force and both verdicts are green on
+the tagged commit. Both steps refuse loudly; run them in order:
+
+```bash
+# 1. No waiver set. This must print nothing.
+gh variable list --repo Jinn-Network/mono --json name,value \
+  --jq '.[] | select(.name | test("^JINN_(HERMETIC_GATE|ENVIRONMENT_SUITE)_WAIVED$"))
+        | "WAIVER SET: \(.name)=\(.value)"'
+
+# 2. Both verdicts green on the exact tagged commit.
+git fetch --tags origin
+sha="$(git rev-parse 'vX.Y.Z^{commit}')"
+for name in hermetic-gate environment-suite; do
+  n=$(gh api -X GET "repos/Jinn-Network/mono/commits/$sha/check-runs" \
+        -f check_name="$name" -f per_page=100 \
+        --jq "[.check_runs[]
+               | select(.head_sha == \"$sha\" and .status == \"completed\" and .conclusion == \"success\")]
+              | length")
+  if [ "${n:-0}" -ge 1 ]; then
+    echo "$name green on $sha"
+  else
+    echo "REFUSE: $name not green on $sha"
+    exit 1
+  fi
+done
 ```
 
-`npm-publish.yml` refuses stable publishes when this marker is absent or points
-at a different commit.
+Step 1 exists because the guard's waiver warning is a `core.warning` emitted
+during the publish job — it reaches you only after the cut. A printed line means
+that repo variable exists; the guard drops the gate from its required list when
+the value is exactly `true`.
+
+Step 2 resolves the tag to a commit first, and asserts on `head_sha`, `status`
+and `conclusion` rather than eyeballing them, because both halves fail open
+otherwise: a bare ref in the `{ref}` path segment also accepts a branch name (so
+`next` would screen whatever it points at now), and `gh` exits 0 on a query that
+matches nothing, which makes a missing verdict indistinguishable from a green
+one. `check_name` is what makes the query reliable — it restricts the response to
+the one gate being asked about instead of every check-run on the release SHA. The
+endpoint's `filter` parameter already defaults to `latest`, which collapses to the
+most recent run per check name; `per_page=100` only keeps the named verdict off a
+second page.
+
+A `jinn-release-evidence:v1` block may still appear in a Release body or in a
+generated handoff under `docs/release/`. It is **diagnostic-only** — the same
+annotation `writeHandoffDoc()` and
+[`handoff-doc-template.md`](../.claude/skills/release-readiness/references/handoff-doc-template.md)
+carry. Nothing parses it, and its absence or staleness blocks no publish.
 
 For command-flow validation without the live testnet gate:
 
@@ -139,6 +193,84 @@ Release workflow contract:
   - `ghcr.io/jinn-network/operator:X.Y.Z`
   - `ghcr.io/jinn-network/operator:sha-<shortsha>`
   - `ghcr.io/jinn-network/operator:latest`
+
+If that run goes red, re-run it: `.github/workflows/docker.yml` takes a manual
+`workflow_dispatch` with a `version` input, launched **from the release tag**
+(#2811). The version must match the tag it was launched from and
+`operator/package.json` at it, so a re-run publishes the released commit and
+nothing else. Dispatching an *older* release tag is therefore also the rollback
+lever: it moves `:latest` back to that release's commit. Tags cut before this
+trigger landed cannot be dispatched at all — the workflow file runs as it exists
+on the selected ref.
+
+Resume the release from the report the failed publish already wrote — the same
+form as step 4 above:
+
+```bash
+yarn release:client --publish --resume release-runs/<version>-<timestamp>
+```
+
+`--resume` is required here, not optional. Without it `makeReleaseContext` builds
+a *fresh* report, so `publishAlreadyStarted` is false while the release tag
+already exists locally and on the remote, and `runPreflights` aborts with
+`Release tag client-vX.Y.Z already exists. Use --resume only for an in-progress
+release report.` before the docker wait is ever reached. Resumed, that wait
+accepts a successful `workflow_dispatch` run for the release commit, not only a
+`release`-triggered one, so a dispatched republish clears the
+`publish-wait-docker-workflow` step it would otherwise stay stuck on.
+
+**Release checklist, after the first cut that publishes under
+`ghcr.io/jinn-network/operator`.** Until that cut lands, several operator-facing
+files assert that `:latest` and `:<version>` are 404s under this name and route
+operators to `:next` instead (#2811). Every one of those claims becomes false on
+the first green stable run, and none of them is checkable from the repository —
+`:next` stays a published shape, so `operator/test/scripts/ghcr-image-references.test.ts`
+cannot detect the stale prose. Work the list by hand.
+
+First, verify `:latest` resolves anonymously:
+
+```bash
+docker pull ghcr.io/jinn-network/operator:latest   # no registry auth
+```
+
+Then repoint the run-it-now examples from `:next` back to `:latest`:
+
+- `DEPLOY.md` — the `image:` line in the compose snippet, and the prose above it
+  that says the compose file pulls `:next` (the lane table's `:next` row stays
+  true and must not be touched)
+- `deploy/README.md` — the unauthenticated `docker pull` example under
+  *Pulling the base*
+- `operator/docker-compose.yml` — the `image:` line
+- `operator/README.md` — the `docker run … version --json` quick test
+
+Then drop the "not published under this name yet" claims:
+
+- `DEPLOY.md` — the paragraph ending "Until then `:latest` and `:<version>` are
+  404s here."
+- `deploy/README.md` — the bolded **The stable tags have not been published under
+  this name yet.** paragraph
+- `operator/docker-compose.yml` — the comment above the `image:` line, not only
+  the line itself
+- `deploy/railway-launcher-operator/railway.toml` — the comment block asserting
+  "`latest` and `X.Y.Z` are 404s here and are not pinnable options today"
+- `deploy/railway-operator-codex/railway.toml` — the same comment block
+
+Finally, relax the guard that encodes the same assumption:
+
+- `operator/test/scripts/ghcr-image-references.test.ts` — the
+  "Relax this once the stable lane has a green run under this name." note above
+  the `ROLLING_BASE_TAGS`-only rule in *offers only pinnable BASE_TAG examples*.
+  A version-shaped `BASE_TAG` example becomes pinnable once a stable cut exists.
+  Relax that rule alone — do **not** widen `ROLLING_BASE_TAGS`. That set is
+  shared with *states one overlay base-tag default*, so adding `latest` to it
+  would silently permit the overlay default the next paragraph says must stay
+  `next`.
+
+The five `ARG BASE_TAG=next` defaults (`deploy/README.md`, both overlay
+`Dockerfile`s, both overlay `README.md`s) are **not** part of this temporary
+state and must stay `next`. That default is what a plain `docker build` of an
+overlay resolves with, and `latest` moves only on a release — so pointing it at
+`latest` is exactly how #2811 stayed invisible to CI.
 
 Post-release verification is performed by `yarn release:client --publish`.
 The underlying checks are:

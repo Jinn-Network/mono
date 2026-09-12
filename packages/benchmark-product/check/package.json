@@ -43,7 +43,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "yarn build && node --test test/*.test.mjs && vitest run",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
+    "test": "yarn build && yarn typecheck:tests && node --test test/*.test.mjs && vitest run",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },

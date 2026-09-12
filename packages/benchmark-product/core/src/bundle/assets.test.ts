@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
+import { BUNDLE_FORMAT, BUNDLE_V10_FORMAT } from "@colophon-claims/check";
 import type { PublicAssetInput } from "./assets.js";
 import { buildPublicAssets } from "./assets.js";
 
@@ -74,6 +75,12 @@ function fixture(overrides: {
     },
   };
   return {
+    // `/2`, and named rather than defaulted, because `buildPublicAssets` requires it and every
+    // fixture below spreads this one. It is also what keeps the wilson golden honest: the
+    // committed `__fixtures__/wilson-golden/` pages are `/2`'s bytes, so a wrong format here fails
+    // "wilson bundle assets serialize byte-identically" loudly rather than quietly re-pinning a
+    // second byte-frozen page to some other presentation generation.
+    format: BUNDLE_FORMAT,
     reportSha256: SHA.report,
     matrixSha256: SHA.matrix,
     recordSha256s: [SHA.recordA, SHA.recordB],
@@ -527,6 +534,30 @@ describe("binary qualification public assets", () => {
       expect(full).toContain("review-disagreement");
       expect(full.toLowerCase()).not.toMatch(/\b(?:winner|loser|ranking|preferred|selected)\b/u);
     }
+  });
+
+  test("the composed presentation generation drops the opening the claim line already states", () => {
+    // Design §6 H (issue #4191). `binaryFactsHtml` opens with the tail of the sentence
+    // `neutralClaimHtml` renders in the header, which is exactly the repetition ruling 1 retires.
+    //
+    // UNREACHABLE through a real bundle today: `/10` mirrors `/6`, which is non-qualifying, so no
+    // `/10` bundle renders a binary page. The edit is made because the ruling binds it, and
+    // because the capability entry is what the next qualification-projecting allocation will
+    // register -- at which point the drop becomes live with no further code change. Driven by a
+    // direct call for that reason, and driven HERE because this is where the binary fixture lives.
+    const opening = "Qualification facts are presented per instrument without comparative conclusions.";
+    const binary = binaryAssetFixture();
+    const published = text(buildPublicAssets(binary)["index.html"]);
+    const composed = text(buildPublicAssets({ ...binary, format: BUNDLE_V10_FORMAT })["index.html"]);
+    // Twice on the published page: `armResultsHtml` renders the facts block for the sealed Report
+    // and again for the stored claim mirror.
+    expect(published.split(opening).length - 1).toBe(2);
+    expect(composed).not.toContain(opening);
+    // What survives is the header claim line, which carries the same disclosure in its own words.
+    // Nothing is lost -- exactly one statement of it remains on the page.
+    const claimLine = "Verified binary-instrument qualification. Facts are presented per instrument"
+      + " without comparative conclusions.";
+    expect(composed.split(claimLine).length - 1).toBe(1);
   });
 
   test("keeps compact surfaces to a verified scope/report signpost", () => {

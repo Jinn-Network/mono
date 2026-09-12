@@ -9,6 +9,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // the consumer graph resolves end-to-end without reaching the npm registry. Task derivation is a
 // compile-time fixture only and is deliberately absent from this packed runtime closure.
 const packageRoots = [
+  ["@jinn-network/contract-abis", join(packageRoot, "..", "..", "contract-abis"), "contract-abis.tgz"],
   ["@jinn-network/evidence-protocol", join(packageRoot, "..", "..", "evidence", "protocol"), "evidence-protocol.tgz"],
   ["@jinn-network/trust-core", join(packageRoot, "..", "..", "trust", "core"), "trust-core.tgz"],
   ["@jinn-network/trust-resolve", join(packageRoot, "..", "..", "trust", "resolve"), "trust-resolve.tgz"],

@@ -335,6 +335,28 @@ describe("mirror sync", () => {
       expect(await marks.get({ agent: AGENT, name: NAME })).toEqual(before);
     });
 
+    test("a leap-second mark still recognises the re-sign that advances it (#4096)", async () => {
+      // `parseHeadTimestamp` reads `23:59:60` as `23:59:59.999` (#3482); a bare
+      // `new Date` returns NaN on BOTH sides of this comparison, and every
+      // comparison with NaN is false -- so a mark whose recorded instant is a
+      // leap second could never be advanced by an honest idle re-sign, and the
+      // re-sign fell through to the chain path instead. The schema admits the
+      // leap second, so this is the one input class where the two readings
+      // disagree.
+      const marks = createFileHighWaterMarkStore({ filePath: statePath, fs: corpusFs });
+      const seed = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "2026-06-30T23:59:60Z" });
+      await mirror({ highWaterMarks: marks, transport: seed.transport }).syncOnce();
+      expect((await marks.get({ agent: AGENT, name: NAME }))?.issuedAt).toBe("2026-06-30T23:59:60Z");
+
+      const posture = spyPosture();
+      const { transport } = buildArchive(executionEvidenceFixture.bytes, { issuedAt: "2026-07-31T00:00:00Z" });
+      await mirror({ highWaterMarks: marks, chainVerification: posture, transport }).syncOnce();
+
+      expect(posture.revalidateHead).toHaveBeenCalledTimes(1);
+      expect(posture.verify).not.toHaveBeenCalled();
+      expect((await marks.get({ agent: AGENT, name: NAME }))?.issuedAt).toBe("2026-07-31T00:00:00Z");
+    });
+
     test("a head naming a different chain position keeps the chain path", async () => {
       const marks = await seeded();
       const posture = spyPosture();
@@ -453,7 +475,7 @@ describe("mirror sync", () => {
     const verifySource = vi.fn(async () => ({ status: "broken-chain" }) as never);
     const outcome = await mirror({
       maxEntriesPerSync: 0,
-      chainVerification: createDriverChainVerification({ verifySource } as unknown as VerifyDriver),
+      chainVerification: createDriverChainVerification({ verifySource } as unknown as VerifyDriver, log()),
     }).syncOnce();
 
     expect(verifySource).not.toHaveBeenCalled();
@@ -464,13 +486,47 @@ describe("mirror sync", () => {
     });
   });
 
+  // #3672: an ABORT stops the walk too, and produces the same prefix -- but the
+  // operator advice differs, so the two must not arrive under one reason. The
+  // bound is a number the operator can raise; a cancellation is not.
+  test("a walk cut by an abort is refused as cancelled, not as the per-pass bound", async () => {
+    const controller = new AbortController();
+    const { transport } = buildArchive(executionEvidenceFixture.bytes);
+    const verifySource = vi.fn(async () => ({ status: "ok" }) as never);
+    // Aborted once the archive page is on the wire: `fetchHead` has already
+    // returned, so this is the abort branch inside the walk rather than a
+    // cancelled head fetch, which is a transport failure and a different story.
+    const abortingTransport = {
+      async fetch(url: string, init?: unknown) {
+        const response = await transport.fetch(url, init as never);
+        if (url === source.archiveRootUrl) controller.abort();
+        return response;
+      },
+    };
+
+    const outcome = await mirror({
+      transport: abortingTransport,
+      chainVerification: createDriverChainVerification(
+        { verifySource } as unknown as VerifyDriver,
+        log(),
+      ),
+    }).syncOnce({ signal: controller.signal });
+
+    expect(verifySource).not.toHaveBeenCalled();
+    expect(outcome.status).toBe("failed");
+    expect(outcome.sources[0]!.failure).toEqual({
+      code: "chain-verification-rejected",
+      message: "sync-aborted",
+    });
+  });
+
   // The gate is specific to truncation: an uncut walk is judged on the
   // source's own evidence, which for this fixture's bare head is its missing
   // head signature.
   test("an uncut walk is judged on the source's evidence, not refused as truncated", async () => {
     const verifySource = vi.fn(async () => ({ status: "ok" }) as never);
     const outcome = await mirror({
-      chainVerification: createDriverChainVerification({ verifySource } as unknown as VerifyDriver),
+      chainVerification: createDriverChainVerification({ verifySource } as unknown as VerifyDriver, log()),
     }).syncOnce();
 
     expect(outcome.sources[0]!.failure?.message).toBe("head-unsigned");

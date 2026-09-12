@@ -1434,7 +1434,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (parsed.configShapeVersion === CONFIG_SHAPE_VERSION) {
     const pruned = pruneMigrationBackups(dirname(filePath));
     if (pruned.removed.length > 0) {
-      console.log(
+      console.error(
         `[config] Pruned ${pruned.removed.length} pre-v2 migration ${pruned.removed.length === 1 ? 'backup' : 'backups'}.`,
       );
     }
@@ -1475,13 +1475,10 @@ export function loadConfig(configPath?: string): JinnConfig {
   };
 }
 
-/**
- * Get the config file path from --config CLI arg, if provided.
- */
-export function getConfigPathFromArgs(argv: string[] = process.argv): string | undefined {
-  const idx = argv.indexOf('--config');
-  return idx >= 0 && argv[idx + 1] ? argv[idx + 1] : undefined;
-}
+// Get the config file path from the --config CLI arg (both `--config <path>`
+// and `--config=<path>`). Implementation lives in the dependency-free leaf so
+// call sites outside this module's import graph can share it (#2393).
+export { getConfigPathFromArgs } from './config/path-args.js';
 
 /**
  * Merge one top-level value into the operator config file. Used by local setup

@@ -5,13 +5,18 @@ import {
   inspectLogVerifierMethod,
 } from "../dist/profile/inspect-assurance.js";
 
-const selection = {
-  runtime: {
-    adapterVersion: "1.2.3",
-    workerSha256: "a".repeat(64),
-    inspectVersion: "0.3.0",
-  },
-};
+// Only the three runtime fields the verifier-method digest is derived from. Writing the whole
+// Inspect selection here would assert nothing the digest depends on, so the fixture is narrowed
+// on purpose and says so rather than inflating.
+const selection = /** @type {Parameters<typeof inspectLogVerifierMethod>[0]} */ (
+  /** @type {unknown} */ ({
+    runtime: {
+      adapterVersion: "1.2.3",
+      workerSha256: "a".repeat(64),
+      inspectVersion: "0.3.0",
+    },
+  })
+);
 
 test("reader embeds only the exact disclosed singleton assurance", () => {
   assert.equal(deriveInspectEvaluationStrategy(undefined), "embedded");

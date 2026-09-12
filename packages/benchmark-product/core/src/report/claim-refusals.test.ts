@@ -28,8 +28,18 @@ import {
   type ReportRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
-import { buildClaimPackage, type ClaimPackage } from "./claim.js";
+import { buildClaimPackage, ClaimPackageSchema, type ClaimPackage } from "./claim.js";
 import { buildLocalVenueHonesty } from "../operations/run-results.js";
+import { assertClaimConsistency } from "../verification/claim-consistency.js";
+import { BUNDLE_V10_FORMAT } from "../bundle/manifest.js";
+import {
+  ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
+  BUNDLE_V6_FORMAT,
+  PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
+} from "../legacy-closures.js";
 
 const digest = (fill: string) => fill.repeat(64);
 const DRAFT_ID = "draft-1";
@@ -255,5 +265,85 @@ describe("issue #3943: core's mirror projection rebuild refuses at the source th
       verificationCommandVerb: "bundle verify",
       assurance: { preset: ASSURANCE_PRESET, resolved: { ...RESOLVED_ASSURANCE, minVerdicts: 99 } },
     })).toThrow(expect.objectContaining({ name: "Error" }));
+  });
+});
+
+/**
+ * Issue #4191, mirrored from `@colophon-claims/check`'s own
+ * `profile/claim-consistency.test.ts`. The two claim projections are hand-maintained copies that
+ * must agree byte for byte, so the pin admission they share is asserted on both sides rather than
+ * on whichever one a given entry point happens to reach.
+ *
+ * `claim-package/4` is carried by two bundle formats. `/10` is `/6`'s closure with a different
+ * report page, so its claim's SHAPE is byte-identical and minting a fifth id would be dishonest.
+ * Its reader line cannot be `/6`'s: no released `0.1` reader understands `/10`. So the admission
+ * takes either pair, and which one a bundle must carry is settled by the rebuild, from the format
+ * the bundle's own manifest declares.
+ */
+describe("issue #4191: the anchored claim package's two reader lines", () => {
+  function anchoredClaim(anchoredBundleFormat?: typeof BUNDLE_V6_FORMAT | typeof BUNDLE_V10_FORMAT): ClaimPackage {
+    return buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord,
+      reportSha256: identities.reportSha256,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, []),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+      anchors: [],
+      ...(anchoredBundleFormat === undefined ? {} : { anchoredBundleFormat }),
+    });
+  }
+
+  test("omitting the format keeps every existing anchored claim byte-identical", () => {
+    const claim = anchoredClaim();
+    expect(claim.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(claim.verification.command).toBe(PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND);
+    expect(claim.verification.compatibleCommand).toBe(PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND);
+    expect(anchoredClaim(BUNDLE_V6_FORMAT)).toEqual(claim);
+  });
+
+  test("/10 pins the 0.2.1 line and keeps claim-package/4's shape", () => {
+    const composed = anchoredClaim(BUNDLE_V10_FORMAT);
+    expect(composed.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(composed.verification.command).toBe(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND);
+    expect(composed.verification.compatibleCommand).toBe(PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND);
+    expect({ ...composed, verification: undefined })
+      .toEqual({ ...anchoredClaim(), verification: undefined });
+  });
+
+  test("the admission accepts both pairs and no third one", () => {
+    expect(ClaimPackageSchema.safeParse(anchoredClaim()).success).toBe(true);
+    expect(ClaimPackageSchema.safeParse(anchoredClaim(BUNDLE_V10_FORMAT)).success).toBe(true);
+    const mixed = {
+      ...anchoredClaim(),
+      verification: {
+        ...anchoredClaim().verification,
+        compatibleCommand: PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+      },
+    };
+    expect(ClaimPackageSchema.safeParse(mixed).success).toBe(false);
+  });
+
+  test("a /6 bundle carrying /10's pin fails claim-consistency, and declaring /10 fixes it", () => {
+    const consistency = (anchoredBundleFormat?: typeof BUNDLE_V10_FORMAT) => () => assertClaimConsistency({
+      claim: anchoredClaim(BUNDLE_V10_FORMAT),
+      identities,
+      benchmarkRecord: {} as never,
+      runRecord,
+      matrixRecord,
+      reportRecord,
+      draftId: DRAFT_ID,
+      assurancePreset: ASSURANCE_PRESET,
+      anchors: [],
+      ...(anchoredBundleFormat === undefined ? {} : { anchoredBundleFormat }),
+    });
+    expect(consistency()).toThrow(/verification\.command/u);
+    expect(consistency(BUNDLE_V10_FORMAT)).not.toThrow();
   });
 });
