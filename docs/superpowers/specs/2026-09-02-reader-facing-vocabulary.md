@@ -1,7 +1,7 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.2
-- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04)
+- **Version:** 1.3
+- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -18,6 +18,9 @@
 - **v1.2** (#3837): files §7's five presentation-rename units as issues (#3861–#3865) and
   records each number in §7. §7's closing note now says no *external* condition gates them,
   which is what "unblocked" meant before the tracker could see their order. No ruling changes.
+- **v1.3** (#3918): records under §4.2 that the gloss column stops at `colophon-verify` and
+  does not reach the product CLI's `colophon bundle verify` line, with the reasons. No earlier
+  ruling changes.
 
 ## 1. Scope
 
@@ -287,6 +290,16 @@ the `--json` keys — which are ruled *keep* for that reason.
 | `Verification uses the exact platform bytes installed from npm.` | **deferred to #2982** | — | `cli.ts:191`, and the shortened form in the usage/error text at `cli.ts:45`. Carries the reserved noun; the rest of the sentence is already plain and stands. |
 | `Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.` | keep | — | `cli.ts:190`. Names a contract origin and its honest status; both halves are load-bearing. |
 | Usage text | rename where §4.1 renames | — | Follows the same glossary. Reaches the usage and error text in full, including `cli.ts:45`; the three closing-paragraph rows above are ruled explicitly so that reach is not left to inference. |
+
+The gloss column stops at `colophon-verify`. The product CLI's `colophon bundle verify` line
+(`renderBundleVerifyLine` in `core/src/cli/main.ts`) keeps printing bare check names, and that
+is a ruling rather than an omission (#3918). The line is outside §1's scope: it is one
+comma-joined sentence for the operator who just ran the product, not a cold reader's surface,
+and it has no column a gloss could sit in. The gloss map is also private to the reader's
+`cli.ts`, and the product consumes the reader at a pinned release, so glossing "from the same
+map" would wait on a reader export that does not exist, while a copy of the map in the product
+is exactly the drift `CHECK_SUBJECTS` exists to prevent (#3691). The glossed rendering is one
+command away: run the standalone reader on the same bundle, at the line its claim pins.
 
 ### 4.3 Docs
 

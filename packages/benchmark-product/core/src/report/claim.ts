@@ -708,12 +708,26 @@ const REPORT_SOURCE = "report.json";
 
 /*
  * Issue #3943: the mirror of the accounting block in `@colophon-claims/verify`'s
- * `profile/claim.ts` (issue #3855). That file typed its ten projection-rebuild throws; this copy
- * is on a reader path of its own — `operations/verify.ts` calls core's `assertClaimConsistency`,
- * which calls this `buildClaimPackage` — so leaving it bare classified the SAME malformed sealed
- * Report two ways depending on the entry point. The same rule sorts the sites on both sides: a
- * projection check refuses when nothing earlier settles the same fact, and stays a bare throw
- * when an earlier check or the caller already does.
+ * `profile/claim.ts` (issue #3855). That file typed its ten projection-rebuild throws; core
+ * reaches this `buildClaimPackage` from TWO paths. The reader path: `operations/verify.ts`
+ * calls core's `assertClaimConsistency`, which calls this function against a sealed Report a
+ * reader was handed. The producer path: `operations/report.ts` calls it directly, after sealing
+ * the Report core's own analysis just produced, to build the claim package it writes next to it.
+ * Leaving the throws bare classified the SAME malformed sealed Report two ways depending on the
+ * entry point. The same rule sorts the sites on both sides: a projection check refuses when
+ * nothing earlier settles the same fact, and stays a bare throw when an earlier check or the
+ * caller already does.
+ *
+ * ON THE PRODUCER PATH (issue #3998). The "named disagreement with the record a reader was
+ * handed" framing below describes the reader path. Reached from `report.ts`, the same shape
+ * mismatch means core's own analysis produced a Report whose `results` do not match the method
+ * it declares — an internal producer fault, not a reader's disagreement. It is surfaced as
+ * `record-integrity` at `report.json` anyway, deliberately: `report.ts` already refuses with
+ * `record-integrity` (at source `"report"`) a few lines above this call when the produced records
+ * fail the platform's own exactness checks, so the code is not foreign to that region, and one
+ * code per condition regardless of entry point is the rule this block states. Nothing is
+ * swallowed either way — the message names the exact condition. The verify-side mirror has no
+ * producer, so the two accounting blocks legitimately diverge on exactly this paragraph.
  *
  * WHAT REFUSES. This rebuild is the FIRST reader of the sealed Report's results and method
  * identity. `ReportRecordSchema` types `results` as `JsonValueSchema` and `MethodRefSchema`'s

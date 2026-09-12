@@ -511,6 +511,36 @@ describe("product documentation consistency", () => {
     );
   });
 
+  it("keeps the two format references silent about registry state", () => {
+    // Issue #4065. Every sentence in these two documents that said what npm serves -- which
+    // release is `latest`, what the `@0.2` range resolves to, which packages are still
+    // unpublished -- went stale on the next publish, and nothing pinned it (#3961 was the third
+    // sweep of the same prose). The format references describe pinned artifacts and immutable
+    // reader behavior; the product README's publication paragraph is the one home for registry
+    // state, and the test above pins it to the version this tree pins. A block that names the
+    // reader AND speaks in registry vocabulary is the defect. The co-occurrence is what keeps
+    // `publish` in its bundle-emission sense legal: "the bundle published on colophon.claims"
+    // names no reader, and "every v5 bundle published before this profile existed" carries no
+    // auxiliary verb.
+    const reader = /@colophon-claims\/(?:verify|cli|core)|`@?\d+\.\d+(?:\.\d+)?`/u;
+    const registryState =
+      /`latest`|\bregistry\b|\bunpublished\b|\b(?:is|are|was|were|been)\s+published\b|\bpublication\s+pending\b|\bpending\s+publication\b|\bnot\s+yet\s+published\b|\bsince\s+been\s+cut\b|\bresolves?\s+to\s+`\d/iu;
+    // The guard's own negative: a literal offending sentence must trip both halves, and an
+    // emission-sense sentence beside a version token must not, or an edit to either regex that
+    // matches nothing passes silently.
+    const offending = "`@colophon-claims/verify@0.2.1` is published as `latest`.";
+    expect(reader.test(offending) && registryState.test(offending)).toBe(true);
+    const emission = "a bundle published before `0.2.1` existed pins `@0.2.0`";
+    expect(reader.test(emission)).toBe(true);
+    expect(registryState.test(emission)).toBe(false);
+    for (const path of [bundleReadmePath, externalVerificationPath]) {
+      const blocks = read(path)
+        .split(/\n\s*\n/u)
+        .filter((block) => reader.test(block) && registryState.test(block));
+      expect(blocks, path).toEqual([]);
+    }
+  });
+
   it("documents the exact private web configuration and package commands", () => {
     const webReadme = read(webReadmePath);
     const webPackage = JSON.parse(read(resolve(productRoot, "web/package.json"))) as {

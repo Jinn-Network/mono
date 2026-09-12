@@ -380,6 +380,55 @@ describe("freeze-repo CLI verbs", () => {
     expect(envelope.error.detail).toContain(`commit ${rendered.commitId}`);
   });
 
+  // Issue #3997: the #3608 signal held on the match path only. A drifted tree read from a mount
+  // that refuses the probe reported WHICH members drifted and nothing about whether the mode
+  // dimension was read at all -- on both surfaces, since the failure envelope carried no `result`.
+  // The standalone verifier reports it on both paths; this surface must too, or a reader cannot
+  // tell whether a second, mode-only drift went unlooked-for. Reached the #3607 way: one drifted
+  // member plus a repository directory that refuses the probe.
+  test.skipIf(process.geteuid?.() === 0)(
+    "the product CLI carries the skipped-mode signal on the drift path, on both surfaces",
+    async () => {
+      const bundleDir = licensedBundle;
+      const repoDir = join(tempDir("cli-drift-unprobed"), "repo");
+      await exportFreezeRepo(bundleDir, repoDir);
+      writeFileSync(join(repoDir, "README.md"), "rewritten by hand\n");
+
+      const originalMode = statSync(repoDir).mode & 0o7777;
+      chmodSync(repoDir, 0o555);
+      try {
+        const human = await runCli(
+          ["freeze-repo", "verify", "--bundle", bundleDir, "--repo", repoDir],
+          { cwd: process.cwd(), clock: () => "2026-08-29T00:00:00.000Z" },
+        );
+        expect(human.exitCode).toBe(1);
+        expect(human.stderr).toContain("README.md: changed");
+        expect(human.stderr).toContain("note: file modes were not checked (the filesystem could not be probed)");
+
+        const machine = await runCli(
+          ["freeze-repo", "verify", "--bundle", bundleDir, "--repo", repoDir, "--json"],
+          { cwd: process.cwd(), clock: () => "2026-08-29T00:00:00.000Z" },
+        );
+        expect(machine.exitCode).toBe(1);
+        const envelope = JSON.parse(machine.stdout) as {
+          ok: boolean;
+          error: { code: string; issues: { path: string; message: string }[] };
+          result?: { ok: boolean; executableBitChecked: boolean; executableBitSkipped?: string };
+        };
+        expect(envelope.ok).toBe(false);
+        // The error half is unchanged; the result is additive, read from the same key as the
+        // match path (the standalone verifier spreads it regardless of `ok`).
+        expect(envelope.error.code).toBe("record-integrity");
+        expect(envelope.error.issues).toEqual([{ path: "README.md", message: "changed" }]);
+        expect(envelope.result?.ok).toBe(false);
+        expect(envelope.result?.executableBitChecked).toBe(false);
+        expect(envelope.result?.executableBitSkipped).toBe("not-probed");
+      } finally {
+        chmodSync(repoDir, originalMode);
+      }
+    },
+  );
+
   test("the roles an export reports are the frozen catalog order, not an alphabetical one", async () => {
     // `freeze.json` renders role groups in the frozen order; the export result used to present the
     // same list alphabetically, so one list appeared in two orders on two surfaces (issue #3352).
