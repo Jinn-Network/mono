@@ -960,6 +960,7 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/facts-consistency-inconsistent/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/facts-consistency-indeterminate-unavailable-referenced-bytes/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/forked-chain-second-signed-child/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/forked-chain-seeded-mark/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/forked-chain-shared-previous/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/genesis-pinned-sequence/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/head-issued-ahead/vector.json | — | — | — |
@@ -979,6 +980,7 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/query-provenance-present-on-every-item/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/query-service-originates-rejected/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/re-announce-after-withdrawal/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/refresh-by-ceiling-exceeds-window/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/refresh-by-ceiling-inverted-window/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/rolled-back-head/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/sequence-duplicate/vector.json | — | — | — |
@@ -988,6 +990,7 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-conformance-published-profile/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-conformance-refreshby-bound/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-conformance-unpublished-profile/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/stale-head-seeded-mark/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/stale-head/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/subscribe-announcement-dedupe-key/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/subscribe-cursor-no-cursor/vector.json | — | — | — |
@@ -1005,6 +1008,7 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/valid-chain/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/withdrawal-of-foreign-announcement/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/withdrawal-of-withdrawal/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/wrong-signing-scope-seeded-mark/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/wrong-signing-scope/vector.json | — | — | — |
 | conformance | @jinn-network/record-discovery-testing | packages/discovery/testing/src/index.ts | . | ./dist/index.d.ts<br>./dist/index.js | — |
 | fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/.gitkeep | — | — | — |
@@ -1185,6 +1189,7 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-relative-rail-identifier.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-signed-amount.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-spoofable-rail-destination.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-tag-carrier-rail-destination.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-unnormalized-rail-identifier.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-unsorted-rails.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-zero-amount.json | — | — | — |

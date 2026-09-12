@@ -116,6 +116,172 @@ jobs:
           include-hidden-files: true
           retention-days: 90
 
+  # The step between "CI attested and signed the surface" and "the host serves it".
+  # Copy only: the deploy bundle is rebuilt from this run's attested roots with the
+  # same generator the runbook's break-glass recipe names, and no document is
+  # regenerated here -- the signature sidecars ride in the artifact, so the signing
+  # key is not needed and is deliberately not available to this job.
+  # The mirror decision logic lives in the tested helper
+  # `.github/scripts/refresh-profile-host.mjs`; this YAML owns only auth + the push.
+  canary-host-refresh:
+    name: canary-host-refresh
+    needs: canary-verification
+    # `github.ref` is spelled out because this workflow also fires on
+    # integration/evidence-v1, which must never deploy the public host. The repository
+    # variable is the enablement switch and the target in one, so the two cannot drift
+    # apart; until an operator sets it this job skips and `next` stays green. The
+    # `secrets` context is unreadable in a job `if:`, so the token half of the
+    # configuration is enforced by a guard step rather than by this gate.
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/next' &&
+      needs.canary-verification.result == 'success' &&
+      vars.JINN_PROFILE_HOST_REPOSITORY != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The same precedent `canary-publish` sets for the npm surface, for the same reason: the
+    # credential below publishes a public surface, so it must be an environment secret scoped
+    # to a deployment-branch policy rather than a plain repository secret every workflow in
+    # the repository can read -- this one also fires on integration/evidence-v1, so the job's
+    # own `github.ref` gate constrains the job, not the secret's availability. Provisioning
+    # is a checklist row in docs/runbooks/jinn-network-profile-hosting.md.
+    environment: profile-host-publish
+    permissions:
+      contents: read
+    env:
+      SOURCE_SHA: ${{ github.sha }}
+      HOST_REPOSITORY: ${{ vars.JINN_PROFILE_HOST_REPOSITORY }}
+      WORKFLOW_PATH: .github/workflows/stack-npm-publish.yml
+    steps:
+      - name: Checkout mono at the published SHA
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: mono
+          persist-credentials: false
+      - name: Verify exact refresh checkout
+        run: test "$(git -C mono rev-parse HEAD)" = "${SOURCE_SHA}"
+      # Before the host checkout, not before the push: the token is needed to *read* a
+      # private host repository. A half-configured repository is loud, not silent.
+      - name: Guard the host push credential
+        env:
+          JINN_PROFILE_HOST_PUSH_TOKEN: ${{ secrets.JINN_PROFILE_HOST_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${JINN_PROFILE_HOST_PUSH_TOKEN:-}" ]; then
+            echo "::error::JINN_PROFILE_HOST_PUSH_TOKEN is not configured, but JINN_PROFILE_HOST_REPOSITORY names ${HOST_REPOSITORY}. Add a fine-grained token with contents: write on that repository only; see docs/runbooks/jinn-network-profile-hosting.md."
+            exit 1
+          fi
+      # `persist-credentials: false` with an explicit `token:` uses the credential for the
+      # fetch without writing it into .git/config, so the push below still goes through
+      # its own GIT_ASKPASS rather than an ambient one.
+      - name: Checkout the profile host
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.HOST_REPOSITORY }}
+          ref: main
+          path: host
+          fetch-depth: 0
+          token: ${{ secrets.JINN_PROFILE_HOST_PUSH_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Verify the host refresh logic
+        run: node --test mono/.github/scripts/refresh-profile-host.test.mjs
+      # The attested roots are same-run only (retention-days: 1) and are restored by name
+      # from this run, never by run-id from another. Precedent: platform-verification.yml.
+      - name: Download same-run profile roots
+        uses: actions/download-artifact@v8
+        with:
+          name: platform-verification-artifacts
+          path: mono/.platform-verification
+      # Into fresh runner-temp space, never into the host checkout: the generator refuses
+      # a non-empty --out, and that refusal is what guarantees a bundle is exactly the
+      # attested set with nothing riding along. The mirror step below is what reconciles
+      # that directory with the host tree, deletions included.
+      - name: Build the deploy bundle from the attested roots
+        id: bundle
+        working-directory: mono
+        env:
+          # Declared per step, and repeated verbatim on the mirror step below, because a
+          # job-level `env:` cannot read the `runner` context -- GitHub evaluates
+          # `jobs.<job_id>.env` with only `github`, `needs`, `strategy`, `matrix`, `vars`,
+          # `secrets` and `inputs` in scope, so hoisting this to remove the duplication
+          # makes the workflow invalid at parse time. The duplication is load-bearing; the
+          # shape assertions pin BOTH declarations to runner temp space, which is what
+          # keeps the bundle out of the host checkout the mirror is about to reconcile.
+          BUNDLE_DIR: ${{ runner.temp }}/profile-host-bundle
+        run: |
+          set -euo pipefail
+          groups="$(node --input-type=module <<'NODE'
+          import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
+          process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));
+          NODE
+          )"
+          root_args=()
+          group_list=""
+          while IFS= read -r group; do
+            [ -z "${group}" ] && continue
+            root_args+=(--root ".platform-verification/${group}/profile-root")
+            group_list="${group_list:+${group_list},}${group}"
+          done <<< "${groups}"
+          if [ "${#root_args[@]}" -eq 0 ]; then
+            echo "::error::the catalog names no stack-published release group"
+            exit 1
+          fi
+          # The mirror's expected-group list is emitted from the SAME iteration that builds
+          # the `--root` arguments, so what the mirror requires the bundle to contain is
+          # exactly the set of roots this step passed the generator -- not a second
+          # derivation that could drift from it.
+          printf 'release_groups=%s\n' "${group_list}" >> "${GITHUB_OUTPUT}"
+          node .github/scripts/build-profile-host-bundle.mjs "${root_args[@]}" --out "${BUNDLE_DIR}"
+      - name: Set the host git identity
+        run: |
+          set -euo pipefail
+          git -C host config user.name "github-actions[bot]"
+          git -C host config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Mirror the bundle into the host checkout
+        id: mirror
+        env:
+          # Repeated rather than hoisted -- see the build step above for why the `runner`
+          # context forces this.
+          BUNDLE_DIR: ${{ runner.temp }}/profile-host-bundle
+          HOST_DIR: host
+          # The catalog's own answer to "which release groups is this deploy", carried from
+          # the step that passed those roots to the generator. The mirror requires the
+          # bundle's groups to equal it exactly: an extra top-level directory carrying a
+          # `manifest.json` is not silently adopted as a release group, and a bundle built
+          # from a short `--root` list cannot mirror a whole group off the live origin.
+          EXPECTED_RELEASE_GROUPS: ${{ steps.bundle.outputs.release_groups }}
+        run: |
+          set -euo pipefail
+          node mono/.github/scripts/refresh-profile-host.mjs
+      # A plain fast-forward: neither a forced update nor a `+` refspec, so a hand-push
+      # into the host repository between checkout and push is a loud red rather than a
+      # silent overwrite. The shape assertions refuse the flag anywhere in this job, so
+      # it is deliberately not named here either.
+      - name: Push to the host default branch
+        if: steps.mirror.outputs.changed == 'true'
+        env:
+          JINN_PROFILE_HOST_PUSH_TOKEN: ${{ secrets.JINN_PROFILE_HOST_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          ASKPASS="$(mktemp)"
+          trap 'rm -f "${ASKPASS}"' EXIT
+          cat > "${ASKPASS}" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "${JINN_PROFILE_HOST_PUSH_TOKEN}" ;;
+          esac
+          EOF
+          chmod 700 "${ASKPASS}"
+          GIT_ASKPASS="${ASKPASS}" GIT_TERMINAL_PROMPT=0 \
+            git -C host push "https://github.com/${HOST_REPOSITORY}.git" \
+              HEAD:refs/heads/main
+          echo "::notice::published the profile host @ ${SOURCE_SHA} to ${HOST_REPOSITORY} (main)"
+
   resolve-stable-source:
     if: >-
       (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'stack-v')) ||
@@ -249,6 +415,7 @@ jobs:
           )"
           echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
       - name: Verify the live profile host serves the attested artifact
+        id: gate
         env:
           CATALOG_DIGEST: ${{ steps.catalog.outputs.digest }}
         run: |
@@ -273,6 +440,24 @@ jobs:
               --expect-public-key-sha256 "${PUBLIC_KEY_SHA256}" \
               --out ".platform-live-host/${group}/live-host-receipt.json"
           done <<< "${groups}"
+      # Ordering, made legible instead of enforced. The push-to-next refresh
+      # (canary-host-refresh) is not a `needs:` of this gate on purpose: putting a
+      # write-credential job into the stable gate's dependency chain would let a
+      # skipped refresh skip the gate, and the gate's whole point is that a skipped
+      # upstream job is a refusal. So the cause is named here rather than sequenced.
+      # Scoped to the gate step: a bare `if: failure()` would report host drift after a
+      # failed checkout, when the job never reached the network.
+      - name: Explain a stale or lane-mismatched host
+        if: failure() && steps.gate.outcome == 'failure'
+        run: >-
+          echo "::error::The live profile host does not match this run's attested
+          artifact. Before reading this as host drift:
+          the host refresh may not have run yet for this source SHA,
+          and a host last refreshed by the push-to-next canary-host-refresh job serves
+          lane \"canary\" bytes, which never byte-match a stable manifest. The host's own
+          .jinn-profile-host-source names the source SHA and lane it was last refreshed
+          from. See docs/runbooks/jinn-network-profile-hosting.md,
+          'Automatic host refresh'."
       - name: Upload live host receipt
         uses: actions/upload-artifact@v4
         with:

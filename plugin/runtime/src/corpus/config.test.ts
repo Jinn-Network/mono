@@ -100,6 +100,156 @@ describe("corpus configuration", () => {
     ).toThrow(/repository id/);
   });
 
+  // #3444: `declaredSigningKeys` in `session-host-corpus.ts` aggregates keys per
+  // AGENT across sources and de-duplicates on `keyid` alone, keeping whichever
+  // it saw first. Two sources of one agent declaring the same key with
+  // different `validFrom` values therefore let source ORDER decide when the key
+  // is admitted. Rejecting the contradiction here is what makes that dedup
+  // provably order-independent, and it matches how the rest of this resolver
+  // handles a contradiction rather than guessing at intent.
+  describe("a signing key declared twice for one agent", () => {
+    const KEYID = `did:key:z${"6Mk".repeat(8)}` as const;
+    const signed = (validFrom: string, over: Record<string, unknown> = {}) => ({
+      ...source(),
+      ...over,
+      signingKeys: [{ keyid: KEYID, validFrom }],
+    });
+
+    test("is rejected when the two declarations disagree on validFrom", () => {
+      expect(() =>
+        resolveRuntimeConfig({
+          ...base,
+          file: {
+            corpus: {
+              sources: [
+                signed("2026-07-01T00:00:00Z"),
+                signed("2026-08-01T00:00:00Z", {
+                  name: "evaluations",
+                  repositoryId: "archive.test/evaluations",
+                }),
+              ],
+            },
+          },
+        }),
+      ).toThrow(/2026-07-01T00:00:00\.000Z.*2026-08-01T00:00:00\.000Z|2026-08-01T00:00:00\.000Z.*2026-07-01T00:00:00\.000Z/s);
+    });
+
+    test("names the agent and the keyid so the operator can find both declarations", () => {
+      expect(() =>
+        resolveRuntimeConfig({
+          ...base,
+          file: {
+            corpus: {
+              sources: [
+                signed("2026-07-01T00:00:00Z"),
+                signed("2026-08-01T00:00:00Z", {
+                  name: "evaluations",
+                  repositoryId: "archive.test/evaluations",
+                }),
+              ],
+            },
+          },
+        }),
+        // Both, not either: an `|` here would pass on a message naming only
+        // one of the two, which is the case this test exists to fail.
+      ).toThrow(new RegExp(`(?=[\\s\\S]*${KEYID})(?=[\\s\\S]*https://agents\\.test/alice)`));
+    });
+
+    test("the rejection does not depend on which source is written first", () => {
+      const write = (first: string, second: string) => () =>
+        resolveRuntimeConfig({
+          ...base,
+          file: {
+            corpus: {
+              sources: [
+                signed(first),
+                signed(second, { name: "evaluations", repositoryId: "archive.test/evaluations" }),
+              ],
+            },
+          },
+        });
+      expect(write("2026-07-01T00:00:00Z", "2026-08-01T00:00:00Z")).toThrow();
+      expect(write("2026-08-01T00:00:00Z", "2026-07-01T00:00:00Z")).toThrow();
+    });
+
+    test("an identical redeclaration is legitimate and still resolves", () => {
+      const config = resolveRuntimeConfig({
+        ...base,
+        file: {
+          corpus: {
+            sources: [
+              signed("2026-07-01T00:00:00Z"),
+              signed("2026-07-01T00:00:00Z", {
+                name: "evaluations",
+                repositoryId: "archive.test/evaluations",
+              }),
+            ],
+          },
+        },
+      });
+      expect(config.corpus.sources).toHaveLength(2);
+    });
+
+    test("two agents may declare the same keyid at different instants", () => {
+      const config = resolveRuntimeConfig({
+        ...base,
+        file: {
+          corpus: {
+            sources: [
+              signed("2026-07-01T00:00:00Z"),
+              signed("2026-08-01T00:00:00Z", {
+                agent: "https://agents.test/bob",
+                repositoryId: "archive.test/bob-attempts",
+              }),
+            ],
+          },
+        },
+      });
+      expect(config.corpus.sources).toHaveLength(2);
+    });
+
+    test("one source contradicting itself is rejected too", () => {
+      expect(() =>
+        resolveRuntimeConfig({
+          ...base,
+          file: {
+            corpus: {
+              sources: [
+                {
+                  ...source(),
+                  signingKeys: [
+                    { keyid: KEYID, validFrom: "2026-07-01T00:00:00Z" },
+                    { keyid: KEYID, validFrom: "2026-08-01T00:00:00Z" },
+                  ],
+                },
+              ],
+            },
+          },
+        }),
+      ).toThrow(/validFrom/);
+    });
+
+    test("offset spellings of one instant are not a contradiction", () => {
+      // `validFrom` is canonicalized to UTC on the way in, so the comparison
+      // is between instants, not between the digits the operator wrote.
+      const config = resolveRuntimeConfig({
+        ...base,
+        file: {
+          corpus: {
+            sources: [
+              signed("2026-08-01T00:00:00Z"),
+              signed("2026-07-31T19:00:00-05:00", {
+                name: "evaluations",
+                repositoryId: "archive.test/evaluations",
+              }),
+            ],
+          },
+        },
+      });
+      expect(config.corpus.sources).toHaveLength(2);
+    });
+  });
+
   test("rejects the same archive followed twice", () => {
     expect(() =>
       resolveRuntimeConfig({

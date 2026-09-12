@@ -18,6 +18,14 @@ function normalizedArtifactSlice(relativePath: string, names: readonly string[])
 test("today TaskCoordinator ABI is the exact compiled artifact public slice", () => {
   expect(TASK_COORDINATOR_ABI).toEqual(normalizedArtifactSlice(
     "src/tasks/TaskCoordinator.sol/TaskCoordinator.json",
-    ["TaskClaimed", "TaskCreated", "getAttempt", "getTask"],
+    [
+      "TaskClaimed",
+      "TaskCreated",
+      "getAttempt",
+      "getTask",
+      "getRequestRef",
+      "getVerdictRequestRef",
+      "getVerdict",
+    ],
   ));
 });
