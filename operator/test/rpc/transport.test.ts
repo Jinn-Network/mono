@@ -817,6 +817,20 @@ describe('maskUrlsInMessage', () => {
     expect(masked).not.toContain('/v2/');
   });
 
+  // Issue #4426: the pattern is now the shared `EMBEDDED_URL_RE` constant
+  // (also used by the debug-bundle redactor). These pin that sharing kept the
+  // transport dialect — host-only mask — for the two inputs the redactor's
+  // old private regex got wrong: a bracketed-IPv6 host and an uppercase
+  // scheme.
+  it('masks a bracketed-IPv6 URL and an uppercase-scheme URL down to their host', () => {
+    expect(
+      maskUrlsInMessage('probe wss://u:SECRETKEY123@[2001:db8::1]:8546/v2/SECRETKEY123 failed'),
+    ).toBe('probe [2001:db8::1] failed');
+    expect(maskUrlsInMessage('probe HTTPS://u:SECRETKEY123@rpc.example/v3/SECRETKEY123 failed')).toBe(
+      'probe rpc.example failed',
+    );
+  });
+
   // Decision recorded for #3035: protocol-relative `//host/path` is out of
   // scope. A bare `//` in free text is not reliably a URL (doubled path
   // separators, comment markers), it has no scheme for `new URL` to parse
