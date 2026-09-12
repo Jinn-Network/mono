@@ -883,15 +883,12 @@ writes the high-water mark, and no revalidation path advances the mark's *positi
 step 7 is the only step of any verification procedure that moves it. What the caller does with
 the instant differs by case, and both keep `issuedAt` a monotonicity floor — an identical head
 leaves it where it is, an accepted re-sign raises it to the instant just accepted, so the head
-it replaced becomes a regression rather than an indefinitely replayable one. Raising the floor
-at an unmoved position is the caller's write, not this procedure's, and it is the only write
-to the mark that names no position of its own: the mirroring consumer's other write records
-how far its own indexing actually got, which a truncated or partly indexed walk leaves below
-the head step 7 accepted. And it **binds the head's `origin` to the source being followed**:
-keys are resolved from the head, so accepting a head that claims another agent would let any
-agent's valid signature satisfy this source's poll. §10.3 leaves that binding to its callers
-because its linkage walk catches the mismatch downstream; this procedure has no chain to catch
-it, so the binding is explicit and its failure is typed.
+it replaced becomes a regression rather than an indefinitely replayable one. And it **binds
+the head's `origin` to the source being followed**: keys are resolved from the head, so
+accepting a head that claims another agent would let any agent's valid signature satisfy this
+source's poll. §10.3 leaves that binding to its callers because its linkage walk catches the
+mismatch downstream; this procedure has no chain to catch it, so the binding is explicit and
+its failure is typed.
 
 **What it is not** is a cached acceptance. Signature, current-key validity and freshness are
 re-checked on every call, so a rotated-out or revoked signer, a tampered envelope, a window
