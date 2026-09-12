@@ -163,9 +163,11 @@ describe('#3110 — Daemon.start() wires every loop crash through emitLoopCrash'
     //
     // Second boundary (#4428): the regex accepts only `err` / `error` as the
     // arrow parameter. A correctly wired `.run().catch(e => emitLoopCrash(...))`
-    // is counted by the raw `.run().catch(` split but not by the regex, so the
-    // equality below goes red with a count mismatch, not a message about
-    // parameter naming. Rename the parameter or extend the regex.
+    // is counted by the raw `.run().catch(` split but not by the regex, so one
+    // of the count assertions (the `>= 11` floor above for a renamed existing
+    // site, the equality below for an added one) goes red with a count
+    // mismatch, not a message about parameter naming. Rename the parameter or
+    // extend the regex.
     expect(source.split('.run().catch(').length - 1).toBe(sites.length);
   });
 });

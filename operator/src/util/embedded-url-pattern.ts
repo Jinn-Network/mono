@@ -10,7 +10,9 @@
  * - `]` and `)` are deliberately NOT excluded from the URL body. A bracketed
  *   IPv6 host (`wss://u:pw@[2001:db8::1]:8546/...`) contains `]`; a pattern
  *   that stops there hands `new URL` an unparseable prefix, and the caller's
- *   catch path returns the credentials intact.
+ *   catch path returns the credentials intact. Keeping `)` too means a URL
+ *   wrapped in prose parentheses swallows its closing `)` into the last path
+ *   segment — cosmetic, and it errs toward redacting more, not less.
  * - The `i` flag, because `new URL` accepts `HTTPS://` and a pattern without
  *   it matches nothing on an uppercase scheme.
  *
