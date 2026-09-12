@@ -45,9 +45,10 @@ const sleepSync = (ms: number): void => {
  * only after a failed pass, so every tree gets one attempt whatever the clock says -- the right
  * guarantee under a budget shared by the whole hook. The corollary is that a single pass slower
  * than the remaining budget yields ZERO retries: the loop warns and returns having tried exactly
- * once. That is left as it is deliberately. Guaranteeing a post-deadline retry costs an unbounded
- * extra removal pass, and the budget exists to hold `afterEach` under Vitest's 10s default hook
- * timeout -- overrunning it is the very false red this machinery removed (issue #2678).
+ * once. That is left as it is deliberately. Guaranteeing a post-deadline retry costs an extra
+ * removal pass of unknown size, and the budget exists to hold `afterEach` under Vitest's 10s
+ * default hook timeout -- overrunning it is the very false red this machinery removed (issue
+ * #2678).
  */
 export const removeAttemptTree = (dir: string, deadline = Date.now() + REMOVE_BUDGET_MS): void => {
   for (;;) {
