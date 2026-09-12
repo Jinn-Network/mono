@@ -32,6 +32,45 @@ function hasOwn(object: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(object, key);
 }
 
+/**
+ * The profile-agnostic home for task provenance: an absolute-URI top-level extension key on the
+ * sealed Task (DR-2026-09-05). A profile whose `payloadSchema` declares a `provenance` block
+ * (`repository-work/1.0`) keeps carrying it in the payload; a profile whose payload is closed
+ * (`prediction-forecast/1.0` is exactly `{forecast}`) carries it here instead. Exported so no
+ * consumer transcribes the literal.
+ */
+export const TASK_PROVENANCE_EXTENSION_KEY_V1 = "https://spec.jinn.network/task-provenance/v1";
+
+function readObject(container: unknown, key: string): { present: boolean; value: unknown } {
+  return typeof container === "object" && container !== null && !Array.isArray(container)
+    ? { present: hasOwn(container as Record<string, unknown>, key), value: (container as Record<string, unknown>)[key] }
+    : { present: false, value: undefined };
+}
+
+/**
+ * The single provenance shape gate, applied identically wherever provenance is carried: exactly
+ * one of `source`/`sourceCommitment`, plus a calendar-strict RFC 3339 `timestamp`. Factored out
+ * rather than duplicated so the two accepted locations cannot drift apart.
+ */
+function admitProvenanceValue(
+  value: unknown,
+): { ok: true; provenance: BenchmarkTaskProvenance } | { ok: false } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false };
+  const fields = value as Record<string, unknown>;
+  const sourcePresent = hasOwn(fields, "source");
+  const commitmentPresent = hasOwn(fields, "sourceCommitment");
+  if (sourcePresent === commitmentPresent || !isCalendarStrictRfc3339(fields["timestamp"])) return { ok: false };
+  const timestamp = fields["timestamp"] as string;
+  if (sourcePresent) {
+    return typeof fields["source"] === "string" && fields["source"].length > 0
+      ? { ok: true, provenance: { timestamp, cluster: { tag: "source", value: fields["source"] } } }
+      : { ok: false };
+  }
+  return typeof fields["sourceCommitment"] === "string" && /^sha256:[a-f0-9]{64}$/.test(fields["sourceCommitment"])
+    ? { ok: true, provenance: { timestamp, cluster: { tag: "sourceCommitment", value: fields["sourceCommitment"] } } }
+    : { ok: false };
+}
+
 export function resolveBenchmarkTaskProvenance(
   taskDigest: string,
   resolver: TaskBytesResolver,
@@ -53,22 +92,14 @@ export function resolveBenchmarkTaskProvenance(
   if (!LowercaseSha256HexSchema.safeParse(task.data.evaluation?.digest?.sha256).success) {
     return { ok: false, reason: "missing-evaluation-digest" };
   }
-  const payload = task.data.payload;
-  const provenance = typeof payload === "object" && payload !== null && !Array.isArray(payload)
-    ? (payload as Record<string, unknown>)["provenance"] : undefined;
-  if (typeof provenance !== "object" || provenance === null || Array.isArray(provenance)) return { ok: false, reason: "invalid-provenance" };
-  const fields = provenance as Record<string, unknown>;
-  const sourcePresent = hasOwn(fields, "source");
-  const commitmentPresent = hasOwn(fields, "sourceCommitment");
-  if (sourcePresent === commitmentPresent || !isCalendarStrictRfc3339(fields["timestamp"])) return { ok: false, reason: "invalid-provenance" };
-  if (sourcePresent) {
-    return typeof fields["source"] === "string" && fields["source"].length > 0
-      ? { ok: true, provenance: { timestamp: fields["timestamp"] as string, cluster: { tag: "source", value: fields["source"] } } }
-      : { ok: false, reason: "invalid-provenance" };
-  }
-  return typeof fields["sourceCommitment"] === "string" && /^sha256:[a-f0-9]{64}$/.test(fields["sourceCommitment"])
-    ? { ok: true, provenance: { timestamp: fields["timestamp"] as string, cluster: { tag: "sourceCommitment", value: fields["sourceCommitment"] } } }
-    : { ok: false, reason: "invalid-provenance" };
+  // Two accepted locations, never a precedence pair: BOTH present is corrupt and refuses, so a
+  // shadowed second claim can never drift unnoticed. Presence — not validity — decides, which is
+  // why the ambiguity check runs before either value is shape-checked.
+  const inPayload = readObject(task.data.payload, "provenance");
+  const inExtension = readObject(task.data, TASK_PROVENANCE_EXTENSION_KEY_V1);
+  if (inPayload.present === inExtension.present) return { ok: false, reason: "invalid-provenance" };
+  const admitted = admitProvenanceValue(inPayload.present ? inPayload.value : inExtension.value);
+  return admitted.ok ? admitted : { ok: false, reason: "invalid-provenance" };
 }
 
 /** Trusted, caller-supplied facts needed to distinguish genuinely pre-reveal material. */
