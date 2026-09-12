@@ -10,9 +10,11 @@
  * - `]` and `)` are deliberately NOT excluded from the URL body. A bracketed
  *   IPv6 host (`wss://u:pw@[2001:db8::1]:8546/...`) contains `]`; a pattern
  *   that stops there hands `new URL` an unparseable prefix, and the caller's
- *   catch path returns the credentials intact. Keeping `)` too means a URL
- *   wrapped in prose parentheses swallows its closing `)` into the last path
- *   segment — cosmetic, and it errs toward redacting more, not less.
+ *   catch path returns the credentials intact. The mirror case — a URL whose
+ *   authority is closed by a prose `]` or `)` (`[https://u:pw@host]`) —
+ *   swallows that bracket into the host and defeats `new URL` too, so this
+ *   is safe only because `redactRpcUrl`'s catch path fails closed and strips
+ *   userinfo and query textually.
  * - The `i` flag, because `new URL` accepts `HTTPS://` and a pattern without
  *   it matches nothing on an uppercase scheme.
  *

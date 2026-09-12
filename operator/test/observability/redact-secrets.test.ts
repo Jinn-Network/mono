@@ -435,4 +435,25 @@ describe('redaction — #4426 free-text URL pattern shared with transport', () =
     expect(out.note).not.toContain('SECRETpw');
     expect(out.note).not.toContain('SECRETKEYSECRETKEY01');
   });
+
+  // The shared pattern keeps `]`, so a URL closed by a prose bracket right
+  // after its authority (`[https://u:pw@host]`) swallows the `]` into the
+  // host and `new URL()` throws. The catch path must still strip the
+  // credential rather than hand the string back intact.
+  it('strips userinfo from a bracket-terminated URL that defeats `new URL`', () => {
+    const out = redactValue({
+      note: 'tried [https://u:SECRETpw@rpc.example] then gave up',
+    }) as { note: string };
+    expect(out.note).toContain('rpc.example');
+    expect(out.note).not.toContain('SECRETpw');
+  });
+
+  it('strips userinfo and query from a bracket-terminated URL with a port and query', () => {
+    const out = redactValue({
+      note: 'tried [https://u:SECRETpw@rpc.example:8545]?apikey=SECRETQ then gave up',
+    }) as { note: string };
+    expect(out.note).toContain('rpc.example');
+    expect(out.note).not.toContain('SECRETpw');
+    expect(out.note).not.toContain('SECRETQ');
+  });
 });

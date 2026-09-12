@@ -143,12 +143,19 @@ export function redactRpcUrl(url: string): string {
   try {
     parsed = new URL(url);
   } catch {
-    // Not a parseable URL. Apply only the non-URL string redactors here —
+    // Not a parseable URL. Fail closed: strip userinfo and any query/fragment
+    // textually, so a URL that defeats `new URL` (e.g. `[https://u:pw@host]`,
+    // where EMBEDDED_URL_RE swallows the `]` into the host) still cannot carry
+    // a credential out. Then apply only the non-URL string redactors —
     // calling redactStringValue would re-run EMBEDDED_URL_RE on the same
     // unparseable string and recurse straight back into redactRpcUrl,
     // overflowing the stack on a malformed URL (e.g. `http://[bad`) in an
     // error message.
-    return url.replace(HEX64_RE, marker('hex64')).replace(JWT_RE, marker('jwt'));
+    return url
+      .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, '$1')
+      .replace(/[?#].*$/, '')
+      .replace(HEX64_RE, marker('hex64'))
+      .replace(JWT_RE, marker('jwt'));
   }
 
   // Drop userinfo (user:pass@host).
