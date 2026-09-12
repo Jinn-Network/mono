@@ -6,7 +6,7 @@ import type { AnnouncementEntry } from "../entry.js";
 
 // Chain rules (design §5.3): the structural graph rules a consumer applies
 // over the entries a source (or its mirrors/peers) has surfaced, independent
-// of the two named verification procedures' signature/freshness/HWM
+// of the named verification procedures' signature/freshness/HWM
 // concerns. Two families:
 //
 //   - GLOBAL rules hold over the FULL set of observed entries, regardless of

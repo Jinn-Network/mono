@@ -1,7 +1,7 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.2
-- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04)
+- **Version:** 1.3
+- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-10)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -18,6 +18,18 @@
 - **v1.2** (#3837): files §7's five presentation-rename units as issues (#3861–#3865) and
   records each number in §7. §7's closing note now says no *external* condition gates them,
   which is what "unblocked" meant before the tracker could see their order. No ruling changes.
+- **v1.3** (#4335): discharges the seven places that deferred to #2982, whose ruling has since
+  shipped — the verdict line names the operation (`Recomputed: N of N checks passed`), and
+  §4.1's *Recompute this yourself* and *What gets recomputed* and §5's glossary row take the
+  same verb, as the verdict row's own binding text required of whatever verb #2982 picked.
+  Rewrites, rather than re-points, the four §4.2 `cli.ts` rows whose quoted strings had
+  themselves changed — under #2982, then #3675 and #3691, then #2981 — and anchors them to
+  the `const` and function names that carry those strings instead of to line numbers that had
+  all rotted. Records the v4 qualification badge as **unruled**: #2982's scope reached the
+  verdict line and not that surface, so §6 now carries the badge as the open question in
+  place of the settled verdict verb. No v1.0, v1.1 or v1.2 disposition is reversed; the badge
+  row moves from *deferred* to *explicitly unruled*, which restates its status rather than
+  changing it.
 
 ## 1. Scope
 
@@ -32,9 +44,11 @@ It is deliberately narrow at three boundaries:
   what folds. This document does not decide what appears; it decides what the things that
   appear are called. Where #2985 cuts a concept from the page entirely, the ruling here
   becomes moot for that surface and survives for the others.
-- **#2982 owns the verdict word.** The reader tool's `Verified: N of N checks passed` line is
-  ruled there, not here. This document treats "verified" as a reserved decision and states the
-  rest of the tool's vocabulary around it (§4.2).
+- **#2982 ruled the verdict word**, and the ruling has shipped. The reader tool's verdict line
+  names the operation — `Recomputed: N of N checks passed` — never *verified* / *certified* /
+  *validated* / *audited*, and its caveats render directly beneath it, unconditionally. This
+  document states the rest of the tool's vocabulary around that ruling (§4.2). The one reader
+  surface #2982's scope did not reach — the v4 qualification badge — stays unruled; see §6.
 - **#2983 owns identity rendering** (keys bound to domains). The signer-role names in §4.2 are
   ruled here; what a bound identity looks like is ruled there.
 
@@ -172,8 +186,8 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Static-bundle projection | hide | — | |
 | Benchmark record / Run record | rename | What was tested / What was run | |
 | Public trust material | rename | The public keys | |
-| Portable verification | rename | Recheck this yourself | |
-| Named checks | rename + gloss | What gets rechecked | Check-name strings are **contract**; see §4.2. |
+| Portable verification | rename | Recompute this yourself | Carries the verdict verb #2982 ruled; see §4.2. |
+| Named checks | rename + gloss | What gets recomputed | Check-name strings are **contract**; see §4.2. |
 | Trust root | rename | Whose keys these are | |
 | Exact verifier / compatible major line | rename | Exact version / compatible version | |
 | Wilson interval, interval low/high | rename + gloss | Uncertainty range | The method's own name stays in the table caption, which is where a reader who wants it will look. |
@@ -189,7 +203,7 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Independence clusters | rename + gloss | Groups that do not share a source | The counted quantity is kept; only the noun changes. |
 | Benchmark and configuration scope | rename | What was tested, and how each configuration was pinned | The `<h2>` at `assets.ts:827`; its `Arms and pinned configuration` sub-heading becomes **Each configuration, pinned**, following the `arm` → *Configuration* rename above. |
 | Evidence signpost (social card) | rename | Benchmark report | The v4 card's phrase; the current card already says "Benchmark report". Retire the older wording with the v4 assets. |
-| Colophon · verified qualification (v4 badge) | **deferred to #2982** | — | Contains the reserved word. Not ruled here. |
+| Colophon · verified qualification (v4 badge) | **unruled** | — | #2982 ruled the *verdict line* and established the reserved-word principle, but a qualification badge asserts a different act, so the ruled verb does not transfer to it. The surface is outside #2982's scope and outside this document's; §6 inventories its strings and names the decision still owed. |
 | No comparative winner stated | keep | — | Load-bearing and already plain. |
 
 #### Binary-qualification report surface (binary reports only)
@@ -265,9 +279,14 @@ sub-table. The one row that heads a sealed value — the row header, which *is* 
 Every row is **presentation** except the two marked **Contract** — the check-name strings and
 the `--json` keys — which are ruled *keep* for that reason.
 
+Rows whose target has moved since v1.0 are anchored to the exported or `const` name that
+carries the string, not to a line number: every line pointer in this section had rotted by
+#3827, and a name is greppable and rename-visible where a number is neither. Applied to the
+rows that needed it, not retrofitted across the document.
+
 | Reader-visible term today | Ruling | Reader-facing name | Note |
 | --- | --- | --- | --- |
-| `Verified: N of N checks passed` | **deferred to #2982** | — | Reserved. Whatever verb #2982 picks becomes the canonical verb for this act everywhere, including the page's "Recheck this yourself" — §5. |
+| `Recomputed: N of N checks passed` | **ruled by #2982 — shipped** | — | #2982 ruled the verb **`recompute`** and the tool ships it (`cli.ts`, `renderVerifiedBundle`'s `verdictLine`): *verified* claimed more than the tool does, which recomputes arithmetic, closure and consistency over bytes handed to it. `recompute` is therefore the canonical verb for this act on every surface — hence *Recompute this yourself* and *What gets recomputed* in §4.1, and §5's glossary row. Per #2982's ruling the caveats print directly beneath the verdict, unconditionally, so no bundle shape can push them off-screen. |
 | Bundle / bundle | keep | Bundle | One of the converged plain words. |
 | Format: `benchmark-product-public-bundle/N` | keep | Format | The identifier itself is **contract**. |
 | `manifest`, `evidence-closure`, `trust`, `matrix-rederivation`, `report-verification`, `claim-consistency`, `integrity-anchors`, `disclosure-specification`, `artifact-integrity`, `signature-validity` | **keep + gloss** | unchanged | **Contract.** These strings are sealed into `verification.checks` and asserted by the external verification path; renaming them is a format revision. The presentation fix is a plain-language gloss on the same line — e.g. `matrix-rederivation   passed   the run tally was recomputed from the evidence`. This is the single highest-value change in this document: it fixes reader comprehension at zero contract cost. |
@@ -283,10 +302,10 @@ the `--json` keys — which are ruled *keep* for that reason.
 | freeze repository | keep | — | |
 | No files were uploaded. | keep | — | |
 | `--json` keys (`ok`, `code`, `message`, `verifierVersion`, `supportedFormats`, …) | keep | — | **Contract.** Machine surface; not a reader surface. |
-| `This checks the bundle's integrity, evidence closure, calculations, report, and claim consistency. It does not prove…` | keep | — | The closing paragraph at `cli.ts:186`. Already reader-shaped, and the limitation half is exemplary. "evidence closure" here is the check name, glossed by the row above rather than renamed. |
-| `Verification uses the exact platform bytes installed from npm.` | **deferred to #2982** | — | `cli.ts:191`, and the shortened form in the usage/error text at `cli.ts:45`. Carries the reserved noun; the rest of the sentence is already plain and stands. |
-| `Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.` | keep | — | `cli.ts:190`. Names a contract origin and its honest status; both halves are load-bearing. |
-| Usage text | rename where §4.1 renames | — | Follows the same glossary. Reaches the usage and error text in full, including `cli.ts:45`; the three closing-paragraph rows above are ruled explicitly so that reach is not left to inference. |
+| `Not checked by this tool: whether the machine that produced this bundle was honest, and whether the compared identities are independent parties. What is recomputed is …` | keep | — | The `caveats` block (`cli.ts`, in `renderVerifiedBundle`). A rewrite in two passes, not a moved line: the hand-written five-check list closing with *It does not prove…* that this row once quoted no longer exists. #2982 inverted the paragraph — deleted the trailing *This checks … It does not prove …* and put the limits first, directly beneath the verdict (the `Recomputed` row above). #3691 then replaced the remaining hand-written enumeration with `describeRecomputedChecks(outcome)`: that list had dropped `trust` and pinned one lineage's closure, naming five subjects beneath a verdict reading `of 6`, `of 7` or `of 8` — one check behind the base closure, two or three behind the anchored and disclosed ones. The enumeration is glossed from `CHECK_SUBJECTS` (`outcome.ts`), keyed by the check union and derived from the same outcome the denominator is, so it cannot undercount its own verdict. Ruling unchanged — keep; "evidence closure" is a check name, glossed by the row above rather than renamed. |
+| `Checks run against the exact platform bytes installed from npm.` | keep | — | `PLATFORM_BYTES_SENTENCE`. The reserved noun this row deferred on is already gone: #2982 replaced the verdict-surface *Verification uses …* with the verb-family it ruled, and #3675 then replaced the shortened `usage()` copy — which had kept the pre-#2982 wording — with the same `const`. There is no separate shortened form any more either: de-duplicating the sentence was the other half of #3675's fix, the two copies having drifted apart while both were hand-maintained, and one `const` has fed the verdict surface and `usage()` alike ever since. The wrapper that carries it to both today, `IDENTIFIER_DISCLOSURE`, arrived later, with #2981's origin-free rewrite of the row below. |
+| `Protocol identifiers are names, not addresses — this verifier fetches nothing from them.` | keep | — | `IDENTIFIER_DISCLOSURE`. A different claim from this row's earlier quotation, not a moved line: the old string named the `https://spec.jinn.network/…` origin and disclosed that it was not hosted; the current one declines to hand a reader an unresolvable origin at all and states the fetch-nothing property in its place. Ruling unchanged — keep; both halves load-bearing. This constant also carries the platform-bytes sentence in the row above, so those two rows now describe one merged string. |
+| Usage text | rename where §4.1 renames | — | Follows the same glossary. Reaches the usage and error text in full, `usage()` included; the three closing-paragraph rows above are ruled explicitly so that reach is not left to inference. |
 
 ### 4.3 Docs
 
@@ -322,7 +341,7 @@ has found a different concept — or a bug.
 | Tasks two configurations decided differently | decided differently | `disagreements` (pairwise-disagreement) |
 | The content hash naming a thing | fingerprint | `sha256`, digest |
 | Proof that bytes existed by a time | timestamp proof | `anchor` |
-| Running the checks again over the bundle | *reserved — #2982* | `verify`, `verification.checks` |
+| Running the checks again over the bundle | recompute | `verify`, `verification.checks` |
 | Where the runs physically happened | where it ran | `venue` |
 | Who operated the runs | who ran this | `venueHonesty` |
 | What was and was not pinned | what was pinned | `disclosure`, six-variable disclosure |
@@ -366,8 +385,33 @@ leaves by rename (§4.1: `CAS record` → *Evidence file*), not by hiding.
 
 ## 6. What this spec does not decide
 
-- The verdict verb (#2982). Every "recheck" in §4 is provisional on it and must adopt whatever
-  word #2982 rules, in the same change that ships #2982.
+- The v4 qualification badge's verb. #2982 has ruled and its ruling has shipped: it ruled
+  the verdict *line* and established the reserved-word principle — never *verified* /
+  *certified* / *validated* / *audited* for an act the tool did not perform. A qualification
+  badge asserts a different act, so the ruled verb does not transfer to it and #2982's scope
+  never reached it. The decision is a separate one, not this document's, and it is owed under
+  the principle #2982 established. The strings it must reach, as they stand in `assets.ts`
+  (§4.1's row is the pointer; this is the inventory):
+  - The reserved word survives on the **binary branch only**, which is the whole of the
+    surface: `buildBadge`, `buildSocialCard` and `buildShareText` each emit it under
+    `reportFacts.kind === "binary"`, in three spellings — `Colophon · verified qualification`
+    in `buildBadge`'s visible text and in `buildShareText`'s line, `COLOPHON · VERIFIED
+    QUALIFICATION` in `buildSocialCard`'s visible text, and `Colophon verified qualification`,
+    separator dropped, in both SVG `<title>` elements — over a `<desc>` that opens
+    `Verified.` in the badge and the card.
+  - Both SVG builders also seal `verified=true` into `<metadata>`, so the assertion is
+    machine-readable and not only a caption; the decision has to reach that too.
+  - The wilson and paired branches carry no reserved word to rule, but they do not speak
+    with one voice either: `buildBadge` (in its `<title>`, with the disclaimer repeated
+    lowercase in its `data-field="neutral-status"` line) and `buildShareText` state
+    `Colophon · <run outcome>; no comparative winner stated`, while `buildSocialCard` splits
+    that in two — `Colophon · <run outcome>; neutral benchmark report` in its `<title>`, and
+    the disclaimer itself, uppercased, in its `data-field="neutral-status"` line as
+    `<run outcome> · NO COMPARATIVE WINNER STATED` — over a scope-line `<desc>`.
+  - A further reserved-word string sits in the same file — `pairedCompactFragment`'s
+    `Verified qualification signpost · full evidence at index.html` — but no surface carries
+    it: all three builders return on `binary` before reaching that call, so that branch is
+    unreachable, and it should be decided or deleted in the same pass.
 - How many of these terms survive above the fold (#2985).
 - How a signing identity is displayed (#2983).
 - Whether any contract spelling should *also* change at the next format revision. §7 queues the
@@ -405,8 +449,8 @@ reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in t
    feature that adds a surface.
 
 No external condition gates any of the five — (2)'s only one, #2985, has closed — so the order
-above is the whole of their sequencing. All five adopt the verdict verb ruled by #2982 rather
-than minting one.
+above is the whole of their sequencing. All five adopt **`recompute`**, the verb #2982 ruled,
+rather than minting one.
 
 **Contract renames — queued to a bundle-format revision, not scheduled here.** Nothing in §4
 requires one; every ruling above is reachable through presentation. The queue exists so the
