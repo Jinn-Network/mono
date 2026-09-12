@@ -469,9 +469,10 @@ describe("product documentation consistency", () => {
     // `verify` release, and the publish workflow refuses a version npm has never served. So a
     // sentence naming `verify` as unpublished contradicts the constants imported here.
     const readme = read(productReadmePath);
-    const unpublishedClaims = readme
-      .split(/\n\s*\n/u)
-      .filter((block) => /unpublished|\bnot\b(?:\s+\w+){0,2}\s+published/iu.test(block));
+    const blocks = readme.split(/\n\s*\n/u);
+    const unpublishedClaims = blocks.filter(
+      (block) => /unpublished|\bnot\b(?:\s+\w+){0,2}\s+published/iu.test(block),
+    );
     expect(unpublishedClaims.length, "README states its publication holds").toBeGreaterThan(0);
     for (const block of unpublishedClaims) {
       expect(block, block).not.toContain("@colophon-claims/verify");
@@ -479,7 +480,18 @@ describe("product documentation consistency", () => {
     // The reader surface the README sends people to is a registry command, so the README has to
     // say so rather than leaving it under the hold.
     expect(readme).toMatch(/`@colophon-claims\/verify` is published/u);
-    expect(readme).toContain(readerLine(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND).slice(1));
+    // The stated `latest` is what sends a reader to a registry version, so it has to be THE version
+    // this tree pins -- not merely a token that appears somewhere in the file. Located by its own
+    // sentence so a disagreement fails on the line that is wrong (#4206).
+    const publication = blocks.find(
+      (block) => /`@colophon-claims\/verify` is published/u.test(block),
+    );
+    expect(publication, "README publication sentence").toBeTypeOf("string");
+    // Matched against the unwrapped sentence: the hard wrap is cosmetic, so a re-flow that lands
+    // the newline between the two tokens must not be reported as a version disagreement.
+    expect(publication?.replace(/\s+/gu, " ")).toContain(
+      `\`latest\` \`${readerLine(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND).slice(1)}\``,
+    );
   });
 
   it("documents the exact private web configuration and package commands", () => {
