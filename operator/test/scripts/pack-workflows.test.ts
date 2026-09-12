@@ -278,6 +278,21 @@ describe('packed client workflow coverage', () => {
     expect(smoke).not.toContain("'jinn-layer',");
   });
 
+  // Issue #4427: the packed `jinn doctor --json` run probed the default public
+  // testnet RPC chain under a 60s spawnSync timeout, so a transient stall
+  // failed a post-merge-only lane with no PR-lane warning. The run stays (it
+  // is the one check proving a config-bearing subcommand executes end to end
+  // from the packed install) but its RPC is pinned to loopback port 9, which
+  // Node's fetch rejects client-side as a blocked port before any socket is
+  // opened, and the envelope is asserted to carry the `rpc_network` check so
+  // the probe is proven to have run.
+  it('runs the packed doctor offline and asserts its rpc_network check ran', () => {
+    const smoke = workflow('operator/scripts/smoke-test-pack.mjs');
+
+    expect(smoke).toContain("env: { ...smokeEnv, JINN_RPC_URL: 'http://127.0.0.1:9' },");
+    expect(smoke).toContain("checks.some((check) => check?.name === 'rpc_network')");
+  });
+
   it('proves the public no-install invocation without letting its guard pass on detection', () => {
     const smoke = workflow('operator/scripts/smoke-test-pack.mjs');
 
