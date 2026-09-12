@@ -402,17 +402,34 @@ describe("product documentation consistency", () => {
       // does not use -- v7 contrasts against the `@0.1` line it cannot read, v4 explains which
       // line refuses it -- so a "no foreign line anywhere" rule would be false. What a section
       // must never do is instruct a reader to RUN a line the format does not pin.
-      const stated = [...section.matchAll(/```bash\n(.*?)```/gsu)]
+      // Every fence, whatever its info string: the recipes are `bash` today, but a `sh` or bare
+      // fence is still an instruction to run, and scanning only ```bash would let one carry a line
+      // the format does not pin (#4011). Verified a no-op on the guide as it stands.
+      const stated = [...section.matchAll(/```[^\n]*\n(.*?)```/gsu)]
         .flatMap((fence) => [...fence[1]!.matchAll(/npx @colophon-claims\/verify\S*/gu)])
         .map((command) => readerLine(command[0]));
       expect(stated.length, `${format} states no reader command`).toBeGreaterThan(0);
 
       const instruction = PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[format];
-      const pinned = new Set([
-        readerLine(instruction.command),
-        readerLine(instruction.compatibleCommand),
-        ...(format === BUNDLE_FORMAT || format === BUNDLE_V4_FORMAT ? promptedLines : []),
-      ]);
+      // `/5` pins its compatible line alone: claim-package/3 states one `command`, and the table's
+      // `/5.command` reproduces the producer rather than naming a line any `/5` bundle carries --
+      // the same asymmetry the table row above follows (#3941). Reading `command` here admitted the
+      // exact producer line to a section that must never instruct a reader to run it (#4011).
+      //
+      // `/2` and `/4` keep the union of `command` and `compatibleCommand` (plus the prompted lines)
+      // as a residual: each section legitimately states an unprompted line and a prompted one, and
+      // nothing in a fence says which it is, so the pin cannot narrow to one. For the other four
+      // the union is not vacuous -- `command` and `compatibleCommand` differ -- and every fence
+      // must still be one of those two.
+      const pinned = new Set(
+        format === BUNDLE_V5_FORMAT
+          ? [readerLine(instruction.compatibleCommand)]
+          : [
+              readerLine(instruction.command),
+              readerLine(instruction.compatibleCommand),
+              ...(format === BUNDLE_FORMAT || format === BUNDLE_V4_FORMAT ? promptedLines : []),
+            ],
+      );
       for (const line of stated) {
         expect(pinned.has(line), `${format} section runs ${line}, which it does not pin`).toBe(true);
       }
