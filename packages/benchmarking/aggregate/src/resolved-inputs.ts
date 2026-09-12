@@ -42,8 +42,9 @@ export type MethodInputErrorCode =
   | "binary-binding-mismatch";
 
 /** Typed, stable fail-closed method-input failure. `digest` names whatever the code is about: the
- * exact requested record reference whose bytes were unavailable, malformed, or mismatched; the
- * cellKey for `method-incompatible-cost-unit`; the parameter for `method-parameter-out-of-range`. */
+ * exact requested record reference for the record-shaped codes (unavailable, malformed, mismatched,
+ * unverified, incompatible, or missing provenance); the cellKey for
+ * `method-incompatible-cost-unit`; the parameter for `method-parameter-out-of-range`. */
 export class MethodInputError extends Error {
   readonly name = "MethodInputError";
 
