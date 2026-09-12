@@ -112,8 +112,8 @@ const VALUE_REFERENCE = "(value reference)";
 
 /**
  * An identifier boundary rather than `\b`: `\b` is ASCII-word only, and `$` -- which JS allows in
- * an import alias -- is not a word character, so `\b$emit` matches nowhere and `\bmy$emit` matches
- * inside a longer name. Zero-width, so `match.index` and `match[0]` are the same as under `\b`.
+ * an import alias -- is not a word character, so `\b\$emit` misses a standalone `$emit(` and matches
+ * inside `my$emit(`. Zero-width, so `match.index` and `match[0]` are the same as under `\b`.
  */
 const IDENTIFIER_START = String.raw`(?<![\w$])`;
 const IDENTIFIER_END = String.raw`(?![\w$])`;
