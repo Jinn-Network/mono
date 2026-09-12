@@ -589,13 +589,19 @@ function matchCompounds(tokens) {
  * Whether the opener at `position` is the group of a function *definition* — `f () {`,
  * `f() (`, `function f {`. A `||` written after a definition guards defining the
  * function, which cannot fail; the body runs unguarded whenever the function is later
- * called, so the guard must not reach into it.
+ * called, so the guard must not reach into it. The prefix examined is the *statement the
+ * opener stands in*, cut where `leadsStatement` says a statement begins.
  */
 function opensDefinition(text, tokens, position) {
   let statementStart = 0;
   for (let index = position - 1; index >= 0; index -= 1) {
-    if (tokens[index].type === 'operator') {
-      statementStart = tokens[index].end;
+    // The token at `index` begins the statement the opener stands in when the token before it
+    // is one a statement begins after — an operator, a `case` arm's `a)`, a glued `|`/`&`, or a
+    // command-position word such as `{`, `(`, `then`, `do`. `leadsStatement` is the lint's one
+    // definition of that boundary; stopping only at an operator left `{ f () {` read as a
+    // brace-group argument, and the guard on the enclosing closer reached into the deferred body.
+    if (leadsStatement(tokens[index - 1])) {
+      statementStart = tokens[index].start;
       break;
     }
   }

@@ -1622,3 +1622,38 @@ test('a glued trailing `|` or `&` still leaves the next word in command position
     ['error:head'],
   );
 });
+
+test('a definition whose opener line begins inside an enclosing compound is still a definition (#4016)', () => {
+  // `opensDefinition` rewound the prefix to the previous *operator*, so when the opener line began
+  // with a compound keyword the prefix was `{ f () ` rather than `f () `, the definition was not
+  // recognised, and the `|| true` on the enclosing closer reached into the deferred body. The stop
+  // rule is now the one `leadsStatement` already defines, so every spelling of "a statement begins
+  // here" is a boundary — not only `{`/`(`, but `then`, `do`, `else` and a `case` arm's `a)`.
+  for (const [opener, closer] of [
+    ['{ f () {', '}'],
+    ['( f () {', ')'],
+    ['if true; then f () {', 'fi'],
+    ['case x in a) f () {', ';; esac'],
+    ['{ function f {', '}'],
+    ['{ f () (', '}'],
+  ]) {
+    const body = [opener, '  producer | head -1', opener.endsWith('(') ? '  )' : '  }', `${closer} || true`, 'f'];
+    assert.deepEqual(severities(body.join('\n'), { shell: 'bash' }), ['error:head'], opener);
+  }
+
+  // A guard written inside the body still runs with the body, so it still counts.
+  assert.deepEqual(
+    severities(['{ f () {', '  producer | head -1 || true', '  }', '} || true', 'f'].join('\n'), { shell: 'bash' }),
+    [],
+  );
+
+  // The enclosing guard still covers everything in the group that is *not* deferred: one finding,
+  // for the body, and none for the sibling pipeline the `|| true` genuinely guards.
+  assert.deepEqual(
+    severities(
+      ['{ f () {', '  producer | head -1', '  }', '  git tag | head -1', '} || true', 'f'].join('\n'),
+      { shell: 'bash' },
+    ),
+    ['error:head'],
+  );
+});
