@@ -210,6 +210,7 @@ import type { Store } from '../store/store.js';
 import { fetchRawBytesFromIpfs } from '../adapters/mech/ipfs.js';
 import { classifyIpfsFetchFailure } from '@jinn-network/core/corpus-read';
 import { getTaskCidDigest } from '../adapters/mech/contracts.js';
+import { TASK_COORDINATOR_ABI } from '@jinn-network/contract-abis/binding';
 import { openOperatorEvidence, type OperatorEvidence } from './evidence-join.js';
 import { buildLegacyExecutionEnvelope, LEGACY_ENVELOPE_EXTENSION_KEY, synthesizeLegacyExecutionDocuments } from './bridge-legacy-delivery.js';
 import { EngagementLedger } from './engagement-ledger.js';
@@ -881,25 +882,15 @@ const GET_VERDICT_VIEW_ABI = [{
  * `TaskCoordinator.getTask` — read directly off the coordinator this composition already holds,
  * not through `getTaskCidDigest`'s router→`taskCoordinator()`→`getTask` two-hop (that indirection
  * exists only for the legacy adapter, which is handed a router address).
+ *
+ * The compile-generated slice, not a hand-written literal (#1577 / #4286). The previous local
+ * copy declared `policy` as `uint8` where the deployed `TaskRecord` nests
+ * `(uint32 maxClaims, bool allowSolverSelfEvaluation)`; that static tuple occupies two head
+ * words, so every field after it decoded one word early. The three `uint32` counts shifted
+ * silently; only the trailing `creatorCredited` bool ever raised, and only when the word it
+ * landed on was neither 0 nor 1.
  */
-const GET_TASK_VIEW_ABI = [{
-  name: 'getTask', type: 'function', stateMutability: 'view',
-  inputs: [{ name: 'taskId', type: 'uint256' }],
-  outputs: [{
-    name: 'task', type: 'tuple',
-    components: [
-      { name: 'creator', type: 'address' },
-      { name: 'taskCidDigest', type: 'bytes32' },
-      { name: 'manifestDigest', type: 'bytes32' },
-      { name: 'status', type: 'uint8' },
-      { name: 'policy', type: 'uint8' },
-      { name: 'claimCount', type: 'uint32' },
-      { name: 'submittedCount', type: 'uint32' },
-      { name: 'finalizedAttemptCount', type: 'uint32' },
-      { name: 'creatorCredited', type: 'bool' },
-    ],
-  }],
-}] as const;
+export const GET_TASK_VIEW_ABI = TASK_COORDINATOR_ABI;
 
 /**
  * Why a fetch produced no bytes. FAILURE IS NOT ABSENCE (#2647), applied to the IPFS leg (#3451):
