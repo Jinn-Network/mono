@@ -202,7 +202,7 @@ Failure example (funding gate):
 
       const config = deps.loadConfig(parsed.values.config as string | undefined);
       const rpcPreflightConfig: Pick<JinnConfig, 'network' | 'rpcUrl'> = config;
-      // Resolve password: env > file > auto-generate (matches what
+      // Resolve password: --password-fd > env > file > auto-generate (matches what
       // `jinn quickstart` used to do). A brand-new operator can run
       // `jinn run` with no env var, no setup, no input. Plaintext lives at
       // ~/.jinn-client/keystore-password (mode 0600) so the next run reuses
