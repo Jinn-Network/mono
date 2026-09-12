@@ -565,11 +565,13 @@ export async function runVerifierCli(
       // party's domain while suppressing the real publisher's fingerprint. A bundle with no single
       // publisher has no "published by" to render at all, so there is nothing for a binding to
       // qualify. Both cases refuse here, which is also what keeps the limits paragraph and the
-      // identity line inseparable: neither exists without a resolved `identity`.
+      // identity line inseparable: neither exists without a resolved `identity`. The code is
+      // `validation` -- the binding's precondition is unmet, nothing collides -- and it is public,
+      // since it reaches `--json` output as `identityBinding.code` (issue #4378).
       const publishers = (result.signers ?? []).filter((signer) => signer.role === "publisher");
       if (publishers.length !== 1) {
         refuse(
-          "conflict",
+          "validation",
           "domain-binding",
           `this bundle names ${publishers.length} publisher keys, so it has no single published-by identity a binding can qualify`,
         );
