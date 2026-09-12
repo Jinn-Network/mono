@@ -72,9 +72,9 @@ const DISPLAY_UNSAFE_CHARACTER =
  * raw format character in place: it percent-encodes one in userinfo, path, query or fragment,
  * and in a special-scheme host it either throws `ERR_INVALID_URL` or drops it (the UTS 46
  * mapping ignores a few of them, U+00AD and U+200B among them). So no honest spelling of a rail
- * ever carries one — the joiners included. They are kept out of the class only so the two grammars
- * stay one rule, since the parity pin in `listings.test.ts` asserts that a card refuses exactly
- * what the record refuses.
+ * ever carries one — the joiners included. They are kept out of the class only so the two
+ * grammars stay one rule, since the parity pin in `listings.test.ts` asserts that a card refuses
+ * exactly what the record refuses.
  *
  * Written as a negative lookahead because the `v`-flag set difference needs an ES2024 target.
  * It overlaps `DISPLAY_UNSAFE_CHARACTER` on the twelve bidi controls, which are both, and
