@@ -153,7 +153,7 @@ export function redactRpcUrl(url: string): string {
     // error message.
     return url
       .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, '$1')
-      .replace(/[?#].*$/, '')
+      .replace(/[?#][\s\S]*$/, '')
       .replace(HEX64_RE, marker('hex64'))
       .replace(JWT_RE, marker('jwt'));
   }
