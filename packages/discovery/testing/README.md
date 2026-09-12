@@ -18,7 +18,9 @@ corpus a consumer runs is the corpus minus the errata.
 Vector DSSE envelopes (`headSignature`, `entries[].signature`) are stored as legible
 canonical text, not the base64 wire profile `parseWireDsseEnvelope` accepts. Any consumer
 that hands a vector envelope to production parsing or verification must first convert it
-with the exported `vectorEnvelopeToWire`; the `run*Conformance` suites do so internally.
+with the exported `vectorEnvelopeToWire`. `runSourceChainConformance` does so internally;
+`runSourceConformance` hands `refreshes[]` to the `ServeUnderTest` implementer raw, so that
+implementer converts before any production DSSE parsing.
 Handing over the raw form is refused, and downstream that refusal is reported as
 `unauthorized-signer`, so a test that skips the conversion can pass for the wrong reason.
 
