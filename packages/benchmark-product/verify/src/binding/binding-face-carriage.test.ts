@@ -111,6 +111,17 @@ const JUSTIFICATION = /\bbinding-carriage:/u;
 const VALUE_REFERENCE = "(value reference)";
 
 /**
+ * An identifier boundary rather than `\b`: `\b` is ASCII-word only, and `$` -- which JS allows in
+ * an import alias -- is not a word character, so `\b\$emit` misses a standalone `$emit(` and matches
+ * inside `my$emit(`. Zero-width, so `match.index` and `match[0]` are the same as under `\b`.
+ */
+const IDENTIFIER_START = String.raw`(?<![\w$])`;
+const IDENTIFIER_END = String.raw`(?![\w$])`;
+
+/** The name as a regex literal: an alias is interpolated into a pattern, and `$` is an anchor there. */
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+/**
  * The complete set of marker-bearing sites. A forward is not an origin: `buildLocalVenueHonesty`
  * passes its own optional parameter through, so the obligation belongs to whoever supplies it, and
  * no in-repo caller does. Any addition here is the change #3464 exists to make visible.
@@ -201,15 +212,17 @@ function blankComments(text: string): string {
  *
  * Positional same-line quote matching has a known bounded residue: a quote in a regex character
  * class, or an apostrophe/quote in template text, can be treated as an opener and paired with a
- * later matching genuine string quote, blanking a real call between them. This false negative
- * cannot cross a newline and is not live in the current 340-file sweep reported by #4045. It is
- * retained because tracking regex/template context recreated the previously reverted unsafe lexer;
- * this case is not fail-loud.
+ * later matching genuine string quote, blanking a real call between them. It shares
+ * `blankComments`' narrowness -- backticks are not tracked, and an unterminated quote blanks
+ * nothing -- but NOT its direction: there, the residue reads a comment as code, which is loud;
+ * here, blanking a real call HIDES a site, so this case is not fail-loud. The false negative
+ * cannot cross a newline and is not live in the tree-wide sweep reported by #4045. It is retained
+ * because tracking regex/template context recreated the previously reverted unsafe lexer.
  *
  * Applied only inside `emitterCallSites`, never folded into `blankComments`: `resolveOrigin` reads
  * the import SPECIFIER off that function's output, and blanking interiors there would resolve every
  * file's origin to the empty specifier and silently drop its real calls -- the barrel hole in a
- * third shape. Same narrowness as above: no backticks, and an unterminated quote blanks nothing.
+ * third shape.
  */
 function blankStringLiterals(text: string): string {
   return text.replace(/(["'])((?:\\.|[^\\\n])*?)\1/gu, (_match, quote: string, body: string) =>
@@ -455,8 +468,10 @@ export function emitterCallSites(
     // reported under the declared name either way, which is what `EXPECTED_JUSTIFIED_SITES` keys
     // on: the alias is how this file spells the emitter, not a different one.
     const alias = importedFrom(blanked, name)?.local;
-    const spelled = alias === undefined || alias === name ? name : `(?:${name}|${alias})`;
-    for (const match of blanked.matchAll(new RegExp(String.raw`\b${spelled}\s*\(`, "gu"))) {
+    const spelled = alias === undefined || alias === name
+      ? escapeRegExp(name)
+      : `(?:${escapeRegExp(name)}|${escapeRegExp(alias)})`;
+    for (const match of blanked.matchAll(new RegExp(String.raw`${IDENTIFIER_START}${spelled}\s*\(`, "gu"))) {
       const index = match.index!;
       if (/\b(?:function|const|let|var)\s+$/u.test(blanked.slice(Math.max(0, index - 24), index))) continue;
       const args = topLevelArguments(blanked, index + match[0].length - 1);
@@ -466,7 +481,7 @@ export function emitterCallSites(
     // A value reference is counted only in a file that has the emitter in hand. Everywhere else a
     // bare name match is prose, and this gate is what lets the scan read strings as ordinary text.
     if (!bindsEmitter(blanked, name, declarationPattern(name))) continue;
-    for (const match of references.matchAll(new RegExp(String.raw`\b${spelled}\b`, "gu"))) {
+    for (const match of references.matchAll(new RegExp(String.raw`${IDENTIFIER_START}${spelled}${IDENTIFIER_END}`, "gu"))) {
       const index = match.index!;
       const spelling = match[0].length;
       const before = references.slice(Math.max(0, index - 24), index);
@@ -586,6 +601,28 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     expect(importedFrom(aliased, "runBindingSentence")).toEqual({ specifier: "./report-face.js", local: "emit" });
     expect(importedFrom(withDefault, "runBindingSentence"))
       .toEqual({ specifier: "./report-face.js", local: "runBindingSentence" });
+  });
+
+  // `\b` is an ASCII-word boundary, and `$` is not a word character, so an alias that begins or
+  // ends with `$` -- legal in an import clause -- sat on no boundary at all: `$emit(` matched
+  // nothing while `my$emit(` did. The alias is also interpolated raw, so a `$` was read as an
+  // anchor. Both spellings are escaped, and the boundary is an identifier boundary (#4046).
+  test("an alias that is not a `\\w` word -- `$emit` -- is still followed (#4046)", () => {
+    const leading = 'import { runBindingSentence as $emit } from "./report-face.js";\n';
+    expect(emitterCallSites(`${leading}const s = $emit(forged);\n`, "fixture.ts")[0]).toEqual({
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    });
+    expect(emitterCallSites(`${leading}export const send = $emit;\n`, "fixture.ts")[0])
+      .toEqual({ site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false });
+    // A longer identifier that merely ends in the alias is a different binding.
+    expect(emitterCallSites(`${leading}const s = my$emit(forged);\n`, "fixture.ts")).toEqual([]);
+
+    const trailing = 'import { runBindingSentence as emit$ } from "./report-face.js";\n';
+    expect(emitterCallSites(`${trailing}export const send = emit$;\n`, "fixture.ts")[0])
+      .toEqual({ site: "fixture.ts:runBindingSentence", binding: VALUE_REFERENCE, justified: false });
+    expect(emitterCallSites(`${trailing}export const send = emit$$;\n`, "fixture.ts")).toEqual([]);
   });
 
   // Prose is read as prose without lexing it, because a file that never took the emitter in hand

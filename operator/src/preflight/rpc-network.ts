@@ -1,7 +1,7 @@
 import { createPublicClient, http, HttpRequestError } from 'viem';
 import { base, baseSepolia, mainnet, sepolia } from 'viem/chains';
 import type { JinnConfig } from '../config.js';
-import { describeFallbackChain, maskRpcHost } from '../rpc/transport.js';
+import { describeFallbackChain, maskRpcHost, sanitizeErrorText } from '../rpc/transport.js';
 
 export type ExpectedRpcNetwork = 'mainnet' | 'testnet';
 
@@ -102,11 +102,6 @@ function expectedChainForNetwork(network: ExpectedRpcNetwork) {
   return network === 'testnet' ? baseSepolia : base;
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return String(error);
-}
-
 export async function checkRpcNetwork(
   config: Pick<JinnConfig, 'network' | 'rpcUrl'>,
 ): Promise<RpcNetworkPreflightResult> {
@@ -127,7 +122,7 @@ export async function checkRpcNetwork(
       expectedChainId,
       rpcHost,
       reason: 'unreachable',
-      message: `RPC preflight failed for ${config.network} via ${rpcHost}: ${errorMessage(error)}`,
+      message: `RPC preflight failed for ${config.network} via ${rpcHost}: ${sanitizeErrorText(error)}`,
     };
   }
 

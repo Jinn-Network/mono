@@ -2114,6 +2114,36 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     return listProcessGroupPids(fingerprint.harnessPid);
   }
 
+  // Does anything of this Attempt still exist on the host? Exactly `reconcileResolvedRef`'s
+  // `processAlive` term — the one that separates `absent` (nothing left, so nothing to bound) from
+  // `orphaned` and `matching` (something is still running) — short-circuited so the group scan runs
+  // only once the shim is known dead. `shimAlive` is what separates those latter two; this is
+  // deliberately the weaker question, because the ceiling bounds occupancy, not supervisability.
+  // It answers from evidence the host has published, so it is blind in the window
+  // `reconcileResolvedRef` is blind in: the shim writes `shim.json` AFTER spawning the harness, so a
+  // backend that dies between those two points leaves a running harness with no fingerprint and the
+  // next boot reads the Attempt as gone. That Attempt is already unreapable and already terminals
+  // `absent` while its harness runs, so the slot it used to hold was masking that, not bounding it.
+  //
+  // The `catch` buys exactly one thing: an unreadable probe is not proof of death, so the safe
+  // answer is to keep the slot — the behavior this Attempt had before #3192. It is NOT
+  // constructor-safety; the caller's own `try`/`catch` already contains the throw, so without this
+  // the backend would still build and would simply take the opposite, releasing branch. What that
+  // costs is worth naming, since neither direction is loud: on Linux the probe enumerates `/proc`
+  // unguarded, so a `/proc` this process may not read throws for EVERY Attempt and holds every slot,
+  // restoring the #3192 wedge wholesale. The opposite direction is not caught here at all — on
+  // darwin `listProcessGroupPids` swallows its own failed `ps` and returns `[]`, indistinguishable
+  // from an empty group, so under fork pressure a restart can release slots for harness groups that
+  // are still running. Both predate this call site at `reconcileResolvedRef`; this is only where the
+  // invariant is now written down.
+  private attemptProcessAlive(paths: WorkspacePaths): boolean {
+    try {
+      return probeShimAlive(paths.meta).alive || this.harnessGroupPids(paths).length > 0;
+    } catch {
+      return true;
+    }
+  }
+
   private async killHarnessGroup(paths: WorkspacePaths): Promise<readonly number[]> {
     const fingerprint = readShimFingerprint(paths.meta);
     if (fingerprint?.harnessPid === undefined) return [];
@@ -2292,7 +2322,19 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         try {
           const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as PersistedAttempt;
           this.attempts.set(attempt, metadata);
-          if (!foldAttemptRecord(this.journal(attempt).read()).terminal) live.push(attempt);
+          // The ceiling bounds concurrent *execution*, not nonterminal journals: a rehydrated
+          // Attempt whose shim and harness group are both gone consumes nothing on this host and
+          // must not hold a slot, or a crash permanently narrows the backend it is restarted into
+          // (#3192). Releasing here is safe against the terminal a later `recover` appends —
+          // `release` is a set delete, so that append is a no-op rather than a double-release.
+          // It does widen slightly beyond the evaluation Attempt of #3192: a `harvesting` or
+          // `recording` Attempt released here has its `recover` re-run harvest or re-write the
+          // delivery outside the ceiling. Deliberate — those actions spawn nothing, so they are not
+          // the concurrency the ceiling exists to bound.
+          if (
+            !foldAttemptRecord(this.journal(attempt).read()).terminal
+            && this.attemptProcessAlive(this.paths(attempt))
+          ) live.push(attempt);
         } catch {
           // recover(ref) is the fail-loud reconciliation surface for corrupt attempts.
         }
@@ -2726,6 +2768,11 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     const rawOutcome = readOutcome(paths.meta);
     const outcome = rawOutcome !== null && rawOutcome.nonce === record.nonce ? rawOutcome : null;
     const groupPids = this.harnessGroupPids(paths);
+    // `processAlive` below is the same question `attemptProcessAlive` asks at rehydration, kept
+    // inline here because the surrounding fields need `shim` and `groupPids` separately. Change one
+    // and change the other: give this a third liveness signal that rehydration does not have, and
+    // rehydration frees the slot of an Attempt this then classifies `orphaned` — one whose harness
+    // group is still on the host and still to be killed — so the ceiling stops bounding it.
     let reconciliation = reconcileAttempt(record, {
       processAlive: shim.alive || groupPids.length > 0,
       shimAlive: shim.alive,

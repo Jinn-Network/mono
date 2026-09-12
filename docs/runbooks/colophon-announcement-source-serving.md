@@ -217,55 +217,80 @@ is.
 Start from the archive walk in "Verify it from another machine" step 3, which
 already yields every entry oldest-first. Then:
 
-1. **Fix the denominator.** Sequences are fixed-width, gap-free, and increment by
+1. **Enumerate every entry.** Sequences are fixed-width, gap-free, and increment by
    one, so the walked entries are the complete list — a missing sequence is a broken
    chain, not a coverage question. Compute each entry's digest the way the head cites
    it: `sealJson(entry).digest` (`@jinn-network/record-discovery-protocol`), where
    `entry` is the inner entry payload rather than the `{entry, signature}` element the
    page carries around it.
-2. **Classify each entry.** An entry is *provisionally anchor-announcing* when every
-   one of its announcements is an `available` announcement whose `record.kind` is
-   `https://spec.jinn.network/records/anchor-evidence/v1`; every other entry is
-   *substantive*. Availability is part of the predicate rather than of the domain
-   quantified over, and that placement is load-bearing: a `withdrawn` announcement
-   carries no `record` at all, so it fails the predicate rather than dereferencing an
-   absent one. Quantifying over the `available` subset instead would classify a
-   withdrawal-only entry — which this producer emits, since it appends exactly one
-   announcement per entry — as anchor-announcing *vacuously*, dropping it from the
-   report as neither anchored nor a gap; design §4.3 rules a withdrawal substantive,
-   because it is content a reader loses to truncation. `announcements` is non-empty by
-   schema, so the domain here is never empty. The classification is provisional because
-   it has so far read a record *reference* rather than a record — step 3 confirms it.
-   Anchor-announcing entries are not themselves anchored and are not part of the
-   denominator: anchoring them would not terminate, and truncating one drops nothing a
-   reader loses.
-3. **Collect the anchored set — from the records, not from `facts`.** Each anchor
-   announcement carries `facts` of the shape
-   `{subject: {kind, digest}, provider, upgrades?}`. Do not read the set out of that
-   field: `facts` is advisory metadata about an announced record while the record's own
-   bytes stay authoritative (design §5.2), it is schema-optional on the announcement,
-   and nothing in the walk this section builds on ever compares it to the record it
-   describes. Treat it as an index into which records to fetch. For each such
-   announcement, fetch the `AnchorEvidence` record from `<base>/records/<sha256>` —
-   the announcement's `record.digest` with the `sha256:` prefix stripped — and read
-   `subject` from the fetched bytes. An announcement with no facts card is a record to
-   fetch, not an absent anchor. Keep only subjects whose `subject.kind` is
+2. **Classify each entry.** Call an announcement an *anchor announcement* when it is an
+   `available` announcement whose `record.kind` is
+   `https://spec.jinn.network/records/anchor-evidence/v1`. An entry is *provisionally
+   anchor-announcing* when every one of its announcements is an anchor announcement;
+   every other entry is *substantive*. The substantive entries are the denominator
+   coverage is read against. Availability is part of the predicate rather than of the
+   domain quantified over, and that placement is load-bearing: a `withdrawn`
+   announcement carries no `record` at all, so it fails the predicate rather than
+   dereferencing an absent one. Quantifying over the `available` subset instead would
+   classify a withdrawal-only entry — which is the shape any withdrawal by this producer
+   would take, since it appends exactly one announcement per entry — as
+   anchor-announcing *vacuously*, dropping it from the report as neither anchored nor a
+   gap; design §4.3 rules a withdrawal substantive, because it is content a reader loses
+   to truncation. `announcements` is non-empty by schema, so the domain here is never
+   empty. The classification is provisional because it has so far read a record
+   *reference* rather than a record — step 3 confirms it. Anchor-announcing entries are
+   not themselves anchored and are provisionally out of the denominator too: in the
+   ordinary case — an anchor over an announcement entry — anchoring them would not
+   terminate, and truncating one drops nothing a reader loses. Step 3 reads the records
+   and revises this classification where they do not bear it out.
+3. **Collect the anchored set — from the records, not from `facts`.** Sweep every anchor
+   announcement on the chain — the announcement-level predicate step 2 names, an
+   `action` of `available` plus the anchor-evidence `record.kind`, and nothing else.
+   `facts` does not select, and neither does the classification of the announcing entry:
+   this sweep is per announcement, not per entry. Each anchor announcement *may* carry
+   `facts` of the shape `{subject: {kind, digest}, provider, upgrades?}`, and that card
+   is an aid to reading the result rather than an index into it: `facts` is advisory
+   metadata about an announced record while the record's own bytes stay authoritative
+   (design §5.2), it is schema-optional on the announcement, and nothing in the walk
+   this section builds on ever compares it to the record it describes. An announcement
+   with no facts card is a record to fetch, not an absent anchor. For each anchor
+   announcement, fetch the `AnchorEvidence` record from `<base>/records/<sha256>` — the
+   announcement's `record.digest` with the `sha256:` prefix stripped — confirm the
+   returned bytes hash to that announced digest, exactly as "Verify it from another
+   machine" step 4 requires of every announcement, and only then read `subject` from
+   them. An announcement whose record cannot be fetched, fails that check, or does not
+   parse contributes no subject, so nothing it might have anchored is counted as
+   anchored. That record is also the evidence that would have said which side of step
+   2's partition its announcing entry belongs on, so the entry cannot be resolved on it.
+   Default that entry into the denominator as substantive, because a sequence dropped
+   from the denominator is one a reader cannot see at all, and carry its sequence as
+   *unreadable* rather than as an ordinary gap, so a reader is not left to read a
+   hosting fault as a missing anchor. A missing record or a digest mismatch is a serving
+   fault, which "Verify it from another machine" step 4 diagnoses; bytes that hash
+   correctly and still do not parse as an `AnchorEvidence` record are a producer fault,
+   which it does not. Keep only subjects whose `subject.kind` is
    `https://spec.jinn.network/records/announcement-entry/v1`: §4.2 minted that URI to
    make `subject.kind` normative, and a record covering anything else anchors no
    sequence on this chain — an entry announcing only such non-entry anchors is
-   substantive after all and rejoins the denominator. That rejoin is per-entry while
-   this sweep is per-announcement, so carry each fetched subject's announcing entry
-   along with it. Sweeping announcements rather than anchor-announcing entries is
-   deliberate: an anchor riding on a mixed entry is still collected, even though the
-   ruled cadence (§5.2) and this producer's one-announcement-per-entry writer mean
-   mixed entries should not arise. Step 3 therefore revises step 2's provisional
-   partition, and steps 4 through 6 read the revised one. Deduplicate by
-   `subject.digest`, because several announcements can cover one subject two ways: an
-   OpenTimestamps upgrade is announced
-   as a second *announcement* naming the pending record through `upgrades` in its
-   facts, and the anchor ledger is keyed `(entryDigest, provider)` (§4.4), so two
-   different providers may each anchor the same entry with no upgrade relationship
-   between them. Count subjects rather than announcements.
+   substantive after all and rejoins the denominator. That rejoin refines §4.3, which
+   states its stopping rule over announcement kind alone and so would read such an entry
+   out of the denominator; neither of §4.3's own two reasons reaches it, because
+   anchoring it terminates one step later exactly as the ordinary case does, and an
+   anchor over a record of some other kind is content a reader loses to truncation — the
+   test §4.3 names. The rejoin is per-entry while this sweep is per-announcement, so
+   carry each fetched subject's announcing entry along with it. Sweeping announcements
+   rather than anchor-announcing entries is deliberate: an anchor riding on a mixed
+   entry is still collected. No design section rules mixed entries out — §4.3 rules
+   which entries are anchored and §5.2 where an anchor is announced, and §7's sketch has
+   a pending anchor ride on the next substantive append — so what keeps them off this
+   chain is only this producer's one-announcement-per-entry writer. Step 3 therefore
+   revises step 2's provisional partition, and steps 4 through 6 read the revised one.
+   Deduplicate by `subject.digest`, because several announcements can cover one subject
+   two ways: an OpenTimestamps upgrade is announced as a second *announcement* naming
+   the pending record through `upgrades` in its facts, and the anchor ledger is keyed
+   `(entryDigest, provider)` (§4.4), so two different providers may each anchor the same
+   entry with no upgrade relationship between them. Count subjects rather than
+   announcements.
 4. **Read off coverage.** A substantive entry is anchored when its digest is in that
    set. Normalize the two spellings before comparing: `sealJson` returns
    `sha256:<hex>`, while the record's `subject.digest` is a digest set carrying the
@@ -280,15 +305,18 @@ already yields every entry oldest-first. Then:
    than anchor-announcing, treat its sequence as pending rather than as a gap. Pending
    is a reading, not a verdict: at the tip an anchor that has not landed yet and one
    that never will are byte-identical, the same way a mid-chain outage and a declined
-   anchor are. Nor is *unanchored* settled anywhere on the chain — §4.4 anchors any
-   past entry on demand and rules an anchor obtained late a weaker anchor rather than
-   an invalid one, so a sequence that is a gap today can be anchored tomorrow. Excusing
+   anchor are. Nor is *unanchored* settled anywhere on the chain — §4.4 rules no
+   window at all, and rules an anchor obtained late a weaker anchor rather than an
+   invalid one, so a sequence that is a gap today can be anchored tomorrow. Excusing
    only the tip is accordingly conservative: it is the one sequence the ruled cadence
    guarantees is in flight, but §4.3 (acquisition never blocks an append) and §4.4
    together let an anchor land arbitrarily later, so a mid-chain sequence can be in
    flight too and still reads as a gap.
 6. **Name what is left exactly.** Because the denominator is exact, report the
    remaining unanchored sequences by sequence rather than as a count or a proportion.
+   List the tip's pending sequence, and any sequence step 3 marked unreadable,
+   separately from the gap: a sequence held out of the gap and named nowhere reads as
+   anchored.
 
 ### Reading the result honestly
 

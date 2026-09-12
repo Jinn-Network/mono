@@ -9,6 +9,7 @@ import {
   type Log,
   type TransactionReceipt,
 } from 'viem';
+import { TASK_COORDINATOR_ABI } from '@jinn-network/marketplace-binding';
 import {
   MECH_MARKETPLACE_ABI,
   MECH_ABI,
@@ -49,44 +50,6 @@ export class PendingTaskSubmissionError extends Error {
     );
   }
 }
-
-const TASK_COORDINATOR_ABI = [
-  {
-    name: 'getTask',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'taskId', type: 'uint256' }],
-    outputs: [
-      {
-        // Tokenless-OLAS pivot: TaskCoordinator.TaskRecord trimmed — policy is
-        // `maxClaims` + `allowSolverSelfEvaluation`; the window/lease/quorum/
-        // EvaluationPolicy fields are gone and the final flag is `creatorCredited`
-        // (was `taskCreationCredited`). `creator` then `taskCidDigest` MUST stay
-        // components 0/1 — getTaskCidDigest decodes positionally.
-        name: 'record',
-        type: 'tuple',
-        components: [
-          { name: 'creator', type: 'address' },
-          { name: 'taskCidDigest', type: 'bytes32' },
-          { name: 'manifestDigest', type: 'bytes32' },
-          { name: 'status', type: 'uint8' },
-          {
-            name: 'policy',
-            type: 'tuple',
-            components: [
-              { name: 'maxClaims', type: 'uint32' },
-              { name: 'allowSolverSelfEvaluation', type: 'bool' },
-            ],
-          },
-          { name: 'claimCount', type: 'uint32' },
-          { name: 'submittedCount', type: 'uint32' },
-          { name: 'finalizedAttemptCount', type: 'uint32' },
-          { name: 'creatorCredited', type: 'bool' },
-        ],
-      },
-    ],
-  },
-] as const;
 
 async function withRestakeLock(key: string, fn: () => Promise<void>): Promise<void> {
   const pending = restakeLocks.get(key) ?? Promise.resolve();
@@ -499,15 +462,6 @@ const CLAIM_RETRY_ATTEMPTS = 6;
 const CLAIM_RETRY_DELAY_MS = 2000;
 
 const ZERO_EVIDENCE: Hex = '0x0000000000000000000000000000000000000000000000000000000000000000';
-const JINN_ROUTER_CLAIMED_ABI = [
-  {
-    name: 'claimed',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'requestId', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-] as const;
 
 export interface ClaimDeliveryOptions {
   variant: 'v1' | 'v2' | 'v3';
@@ -526,7 +480,7 @@ export async function isDeliveryAlreadyClaimed(
 ): Promise<boolean> {
   return Boolean(await publicClient.readContract({
     address: routerAddress,
-    abi: JINN_ROUTER_CLAIMED_ABI,
+    abi: JINN_ROUTER_ABI,
     functionName: 'claimed',
     args: [requestId],
   }));
@@ -644,6 +598,11 @@ export async function getTaskCidDigest(
     functionName: 'taskCoordinator',
   }) as Address;
   const taskIdBigInt = typeof taskId === 'bigint' ? taskId : BigInt(taskId);
+  // Tokenless-OLAS pivot: TaskCoordinator.TaskRecord is trimmed — policy is `maxClaims` +
+  // `allowSolverSelfEvaluation`; the window/lease/quorum/EvaluationPolicy fields are gone and the
+  // final flag is `creatorCredited` (was `taskCreationCredited`). `creator` then `taskCidDigest`
+  // MUST stay components 0/1, because the positional branch below decodes `task[1]`. The shared
+  // slice is pinned on that guarantee by `operator/test/daemon/task-coordinator-abi.test.ts`.
   const task = await publicClient.readContract({
     address: coordinatorAddress,
     abi: TASK_COORDINATOR_ABI,

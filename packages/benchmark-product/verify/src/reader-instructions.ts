@@ -7,13 +7,14 @@ import {
   PUBLIC_BUNDLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_CHECKS,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
 } from "./legacy-closures.js";
-import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT } from "./manifest.js";
+import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V10_FORMAT } from "./manifest.js";
 
 /**
  * The exact producer-side release inside the `/5` line, for byte-for-byte reproduction.
@@ -54,10 +55,34 @@ export const PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND =
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND;
 
 /**
+ * The composed presentation generation runs exactly the anchored list (issue #4191). `/10` is `/6`
+ * with a different report page: the four report-prose rulings delete and re-word authored prose,
+ * and no record changes, so nothing new becomes checkable. A presentation allocation that grew a
+ * check would be claiming the render proves something the records did not already prove.
+ */
+export const PUBLIC_BUNDLE_V10_CHECKS = PUBLIC_BUNDLE_V6_CHECKS;
+
+/**
+ * `/10` must not inherit `/6`'s first-public `@0.1` line: no `0.1` reader understands
+ * `benchmark-product-public-bundle/10`, so a claim naming one would be an instruction to fail. It
+ * pins the same `0.2.1` line as `/7` and `/8`.
+ *
+ * **This pin is provisional and nothing seals it yet**: no producer emits `/10`
+ * (`core/src/bundle/materialize.ts`'s format selection is unchanged), precisely because `0.2.1` is
+ * published, immutable, and predates `/10` — it refuses `/10` at manifest parse. The pin is
+ * repointed by the change that publishes a release actually serving `/10`, and the producer flips
+ * there.
+ */
+export const PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND = PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND;
+export const PUBLIC_BUNDLE_V10_COMPATIBLE_VERIFICATION_COMMAND =
+  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND;
+
+/**
  * Spans every lineage, so it is composed here rather than frozen in `legacy-closures.ts`: the four
  * legacy rows come from the frozen closures, the `/5` row is the evidence-native line, and the `/8`
- * row is the disclosed closure. Every format through v6 stamps the same first public 0.1 line; v7
- * is the first that cannot, and v8 pins the same 0.2.1 line as v7.
+ * row is the disclosed closure and the `/10` row the composed presentation generation. Every
+ * format through v6 stamps the same first public 0.1 line; v7 is the first that cannot, and v8 and
+ * v10 pin the same 0.2.1 line as v7.
  *
  * `command` is the exact producer-side release and `compatibleCommand` the compatible major line.
  * On every row but `/5` the claim states both. The `/5` row is asymmetric (issue #3941): its
@@ -89,5 +114,9 @@ export const PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS = {
   [BUNDLE_V8_FORMAT]: {
     command: PUBLIC_BUNDLE_V8_VERIFICATION_COMMAND,
     compatibleCommand: PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
+  },
+  [BUNDLE_V10_FORMAT]: {
+    command: PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND,
+    compatibleCommand: PUBLIC_BUNDLE_V10_COMPATIBLE_VERIFICATION_COMMAND,
   },
 } as const;
