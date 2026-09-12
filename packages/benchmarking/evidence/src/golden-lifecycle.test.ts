@@ -1008,6 +1008,8 @@ describe("Harbor → Inspect → human evidence-first golden lifecycle", () => {
   });
 });
 
+const GOLDEN_LIFECYCLE_DIGESTS_FIXTURE = new URL("../fixtures/golden-lifecycle/digests.json", import.meta.url);
+
 describe("golden-lifecycle digest regeneration", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -1018,12 +1020,11 @@ describe("golden-lifecycle digest regeneration", () => {
   // and the repo-wide fixture drift guard (a separate job, separate checkout) would never see the
   // rewritten file. A CI runner has no legitimate reason to regenerate a pinned fixture.
   test("refuses to regenerate the pinned digests on a CI runner, leaving the fixture untouched", () => {
-    const fixture = new URL("../fixtures/golden-lifecycle/digests.json", import.meta.url);
-    const before = readFileSync(fixture);
+    const before = readFileSync(GOLDEN_LIFECYCLE_DIGESTS_FIXTURE);
     vi.stubEnv("CI", "true");
     vi.stubEnv("JINN_WRITE_GOLDEN_LIFECYCLE_DIGESTS", "1");
     expect(() => expectGoldenLifecycleDigests({})).toThrow(/CI/);
-    expect(readFileSync(fixture).equals(before)).toBe(true);
+    expect(readFileSync(GOLDEN_LIFECYCLE_DIGESTS_FIXTURE).equals(before)).toBe(true);
   });
 });
 
@@ -1033,7 +1034,6 @@ describe("golden-lifecycle digest regeneration", () => {
  * so changing a pinned value takes a dated erratum, not an edit.
  */
 function expectGoldenLifecycleDigests(actual: Record<string, string>): void {
-  const fixture = new URL("../fixtures/golden-lifecycle/digests.json", import.meta.url);
   if (process.env.JINN_WRITE_GOLDEN_LIFECYCLE_DIGESTS === "1") {
     // Regeneration mode, driven by `scripts/write-golden-lifecycle-digests.mjs`. These digests are
     // only computable by running the lifecycle, so the script runs this test with the flag set and
@@ -1046,9 +1046,9 @@ function expectGoldenLifecycleDigests(actual: Record<string, string>): void {
         "refusing to regenerate fixtures/golden-lifecycle/digests.json on a CI runner (CI is set); unset JINN_WRITE_GOLDEN_LIFECYCLE_DIGESTS",
       );
     }
-    writeFileSync(fixture, `${JSON.stringify({ version: 1, digests: actual }, null, 2)}\n`);
+    writeFileSync(GOLDEN_LIFECYCLE_DIGESTS_FIXTURE, `${JSON.stringify({ version: 1, digests: actual }, null, 2)}\n`);
   }
-  const { digests } = JSON.parse(readFileSync(fixture, "utf8")) as { digests: Record<string, string> };
+  const { digests } = JSON.parse(readFileSync(GOLDEN_LIFECYCLE_DIGESTS_FIXTURE, "utf8")) as { digests: Record<string, string> };
   expect(actual).toEqual(digests);
 }
 
