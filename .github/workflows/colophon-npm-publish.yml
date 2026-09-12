@@ -9,6 +9,10 @@ name: Colophon npm Publish
 # Setting the registry-wide `npm deprecate` flag on @colophon-claims/verify is deliberately not
 # done here: it needs a credential this trusted-publishing job does not hold. The deprecation note
 # ships in the alias's own `description` and README; the flag is a one-time operator action.
+# So is the checker's platform receipt: the `--apply` step below refuses until
+# product-release-platform-pins.json and PRODUCT_RELEASES in colophon-publish-manifest.mjs carry a
+# receipt keyed `@colophon-claims/check@<version>`. A receipt attests one publish under one name,
+# so the @colophon-claims/verify@0.2.1 receipt is not re-keyed onto the checker.
 # Do not run this on push. Do not add a registry token.
 
 on:
