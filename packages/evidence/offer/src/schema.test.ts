@@ -128,7 +128,10 @@ describe("the offer record schema", () => {
       ["a supplementary variation selector", "0xdead\u{E0100}beef"],
       ["a mongolian free variation selector", "0xdead\u180Bbeef"],
       ["a hangul filler", "0xdead\u3164beef"],
-      ["an unassigned code point", "0xdead\u{E0002}beef"],
+      // The docstring's `\p{Cn}` case. U+FDD0 is a permanent noncharacter: `\p{Cn}` by
+      // definition and never to be assigned, so unlike a merely unassigned code point this row
+      // cannot flip to `\p{Cf}` on a Unicode table update.
+      ["a noncharacter", "0xdead\uFDD0beef"],
     ])("accept a destination carrying %s, which this package does not claim to reach", (_label, to) => {
       expect(parse(offer({ rails: [{ rail: USDC, to, amount: "1" }] })).success).toBe(true);
     });

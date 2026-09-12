@@ -114,6 +114,11 @@ export type VerificationFailureReason =
 
 export interface VerificationOutcome {
   readonly ok: boolean;
+  /**
+   * Whatever step 2 resolved, attached on failure as well as success — including the
+   * `binding-not-resolved` failure for a resolver that echoed a binding for a different Agent
+   * IRI. Never infer success from its presence; `ok` is the only success signal.
+   */
   readonly resolvedBinding?: ResolvedBinding;
   readonly reason?: VerificationFailureReason;
   readonly detail?: string;

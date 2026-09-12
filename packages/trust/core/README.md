@@ -14,3 +14,13 @@ implements with chain reads.
 
 See `docs/superpowers/plans/2026-07-28-trust-layer.md` for the implementation
 plan.
+
+## Verification outcomes
+
+`verifyEnvelopeBinding` returns a `VerificationOutcome`. `ok` is the only
+success signal. `resolvedBinding` is attached whenever step 2 resolved
+*something*, on failure as well as success — including the
+`binding-not-resolved` failure produced when the resolver echoes a binding for
+a different Agent IRI than the one claimed, where the outcome carries the
+offending binding so the mismatch can be named. Never infer success from the
+presence of `resolvedBinding`; read `ok`, and `reason` / `detail` on failure.
