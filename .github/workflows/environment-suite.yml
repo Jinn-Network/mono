@@ -474,7 +474,8 @@ jobs:
       # native-e2e-rig.yml run providing supplemental advisory evidence. This suite
       # consolidates two existing real-testnet entries into one verdict:
       #   - run-tier-2 — producer/evaluator loops (T2.2 + T2.4; T2.1
-      #     retired with the x402 pivot) on port-isolated Anvil forks of Base Sepolia.
+      #     retired with the x402 pivot) on port-isolated Anvil forks of Base
+      #     mainnet (setupAnvilFixture; BASE_RPC_URL defaults to mainnet.base.org).
       #   - run-tier-3 — the real-harness producer/evaluator loop (T3.1) on real
       #     testnet (claim → real solve → deliver → verdict → settlement).
       # These run-tier scripts are REFERENCED, not rewritten (#923 ownership).

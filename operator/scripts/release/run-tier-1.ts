@@ -159,8 +159,8 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
   await fs.writeFile(path.join(outputDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
   // Maps scenario IDs to the dated tier-1-* keys of the marker.txt diagnostic
-  // artifact. Pinned (not derived from the scenario ID) so diffs against older
-  // tier-1-evidence/ directories stay stable. Nothing parses marker.txt — the
+  // artifact. Pinned rather than derived from the scenario ID because the names
+  // are descriptive (`bootstrap`, not `t1-1`). Nothing parses marker.txt — the
   // two-gate guard in npm-publish.yml queries check-runs. The release-readiness
   // handoff doc is a separate artifact with hermetic-gate-<id> keys
   // (release-readiness.ts).
