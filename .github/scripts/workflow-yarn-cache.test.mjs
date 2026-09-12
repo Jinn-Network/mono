@@ -389,6 +389,13 @@ function shellTokens(indentedRun) {
           const close = run.indexOf(inner, index + 1);
           delimiter += close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
           index = close === -1 ? run.length : close + 1;
+        } else if (inner === '\\' && index + 1 < run.length) {
+          // `<<\EOF` is the POSIX spelling of `<<'EOF'`: the backslash quotes the next
+          // character and is not part of the delimiter. Recording `\EOF` meant the real
+          // terminator never matched and the "body" ran to the end of the block, hiding
+          // every install after it — the same word rule below, applied here.
+          delimiter += run[index + 1];
+          index += 2;
         } else {
           delimiter += inner;
           index += 1;
@@ -478,6 +485,14 @@ function shellInstallDirectories(run, loopValues) {
   };
   const move = (target) => {
     if (directories === null) return;
+    // `$GITHUB_WORKSPACE` is an absolute reset to the repository root, not "stay here":
+    // joined onto the current directory it left `cd b; cd "$GITHUB_WORKSPACE"; yarn
+    // install` naming `b/yarn.lock`, a satisfiable wrong answer.
+    if (workspaceRootPattern.test(target)) {
+      previous = directories;
+      directories = ['.'];
+      return;
+    }
     const expanded = expandShellWorkingDirectories(target, loopValues);
     if (expanded.length === 0) {
       directories = null;
@@ -546,6 +561,10 @@ function shellInstallDirectories(run, loopValues) {
       ? !flags.some((flag) => informationalYarnFlags.has(flag))
       : args[0] === 'install';
     if (!isInstall) return;
+    if (cwd !== null && workspaceRootPattern.test(cwd)) {
+      installs.push(directories === null ? null : ['.']);
+      return;
+    }
     const targets = cwd === null ? ['.'] : expandShellWorkingDirectories(cwd, loopValues);
     if (directories === null || targets.length === 0 || cwd === '') {
       installs.push(null);
@@ -595,23 +614,25 @@ function shellLoopValues(run) {
   return values;
 }
 
+// The whole-value spellings of the repository root. They are absolute, so the callers
+// that compose directories handle them before expansion rather than mapping them to `.`
+// here, where `.` would be joined onto whatever directory the walk is already in.
+const workspaceRootPattern = /^(?:\$\{?GITHUB_WORKSPACE\}?|\$\{\{\s*github\.workspace\s*\}\})$/u;
+
 function expandShellWorkingDirectories(value, loopValues, depth = 0) {
   if (depth > maxExpansionDepth) return [];
-  const workspaceExpanded = value
-    .replace(/^\$\{?GITHUB_WORKSPACE\}?$/u, '.')
-    .replace(/^\$\{\{\s*github\.workspace\s*\}\}$/u, '.');
   const variablePattern = /\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/u;
-  const match = workspaceExpanded.match(variablePattern);
+  const match = value.match(variablePattern);
   // A command substitution, a glob or a brace expansion names a directory only the
   // runner can resolve. Returning the literal text answered confidently and wrongly —
   // `cd $(echo app)` required `$/yarn.lock`, a path no checkout can contain, while
   // dropping the requirement on the directory the install really runs in. Reading it as
   // underivable is the same cut `shellLoopValues` already makes for a loop's values.
-  if (!match) return /[$`*?[\]{}]/u.test(workspaceExpanded) ? [] : [workspaceExpanded];
+  if (!match) return /[$`*?[\]{}]/u.test(value) ? [] : [value];
 
   const values = loopValues.get(match[1] ?? match[2]) ?? [];
   const expanded = values.flatMap((entry) => expandShellWorkingDirectories(
-    workspaceExpanded.replace(variablePattern, entry),
+    value.replace(variablePattern, entry),
     loopValues,
     depth + 1,
   ));
@@ -1310,6 +1331,41 @@ jobs:
   });
 }
 
+// `$GITHUB_WORKSPACE` is the repository root wherever the shell is standing. Joined onto
+// the current directory it named `b/yarn.lock` — a wrong lockfile a workflow can declare,
+// leaving the real root install uncached. That wrong lockfile is the one declared here,
+// so the violation proves both that the install was seen and that it resolved to `.`.
+for (const [label, run] of [
+  ['cd "$GITHUB_WORKSPACE"', 'cd b\n          cd "$GITHUB_WORKSPACE"\n          yarn install --immutable'],
+  ['cd "${GITHUB_WORKSPACE}"', 'cd b\n          cd "${GITHUB_WORKSPACE}"\n          yarn install --immutable'],
+  ['cd "${{ github.workspace }}"', 'cd b\n          cd "${{ github.workspace }}"\n          yarn install --immutable'],
+  ['yarn --cwd "$GITHUB_WORKSPACE"', 'cd b\n          yarn --cwd "$GITHUB_WORKSPACE" install --immutable'],
+]) {
+  test(`guard resets to the repository root on ${label}`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      mkdirSync(join(fixtureRoot, 'b'), { recursive: true });
+      writeFileSync(join(fixtureRoot, 'b', 'yarn.lock'), 'nested lockfile\n');
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: b/yarn.lock
+      - run: |
+          ${run}
+`);
+      assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+        'fixture.yml job verify: setup-node must cache yarn.lock',
+      ]);
+    });
+  });
+}
+
 test('guard restores the working directory a subshell changed', () => {
   withFixture(({ fixtureRoot, fixtureWorkflows }) => {
     writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
@@ -1770,6 +1826,41 @@ jobs:
     );
   });
 });
+
+// `<<\EOF` and `<<E\OF` both open a heredoc whose terminator is `EOF`. The install
+// after the body is the proof the delimiter was read as the shell reads it: a scan that
+// kept the backslash never matched the terminator and ran the body to the end of the
+// block, imposing no requirement at all.
+for (const [label, opener] of [
+  ['a backslash-quoted heredoc delimiter', String.raw`<<\EOF`],
+  ['a heredoc delimiter with an interior backslash', String.raw`<<E\OF`],
+]) {
+  test(`guard reads the commands after ${label}`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          cat ${opener}
+          hello
+          EOF
+          cd app && yarn install
+`);
+      assert.match(
+        yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+        /must cache app\/yarn\.lock/u,
+      );
+    });
+  });
+}
 
 // What protects this is the empty-delimiter guard, not a branch of its own: the third
 // `<` stops the delimiter scan, so nothing is queued and the redirection branch consumes
