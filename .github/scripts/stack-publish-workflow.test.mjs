@@ -200,6 +200,11 @@ test('the live-host gate explains a stale or lane-mismatched host', () => {
   // failed checkout, when the job never reached the network.
   assert.match(block, /if: failure\(\) && steps\.gate\.outcome == 'failure'/u);
   assert.match(block, /host refresh may not have run yet/u);
+  // The marker is written only when the mirror commits, so it names the last
+  // content-changing refresh, not the last refresh: a no-op refresh since then leaves
+  // it untouched. The incident-time message must not invite the wrong conclusion.
+  assert.match(block, /content-changing refresh/u);
+  assert.doesNotMatch(block, /lane it was last refreshed/u);
   assert.match(block, /docs\/runbooks\/jinn-network-profile-hosting\.md/u);
 });
 

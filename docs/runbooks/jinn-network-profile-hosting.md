@@ -77,7 +77,10 @@ so re-running a workflow for the same commit pushes nothing. Note that a *new* c
 always a change even when no served document moved, because each group's `manifest.json`
 records `generatedFrom.commit` and the catalog digest — so a push to `next` normally does
 produce one host commit. Each commit message names the source SHA, the lane, and the
-release groups, and `.jinn-profile-host-source` at the host root records the same.
+release groups, and `.jinn-profile-host-source` at the host root records the same — for the
+last *content-changing* refresh. A refresh that finds identical content writes nothing, the
+marker included, so the marker never names a SHA whose bytes are not the ones on disk, and
+it is not a record of the most recent refresh run.
 
 **The host repository's `main` is entirely generated. Never hand-edit it** — the next
 refresh deletes every top-level entry except `.git` and `.jinn-profile-host-source`
@@ -108,7 +111,7 @@ manifest whose bytes do not depend on the lane. Adding a write-credential job to
 stable gate's dependency chain is not the way to close it — that would let a skipped
 refresh skip the gate. Until it is closed, a red `stable-live-host-verification` should
 be read against `.jinn-profile-host-source` at the host root, which names the SHA and
-lane the host was last refreshed from.
+lane of the host's last content-changing refresh.
 
 ## Hosting and key-provisioning checklist
 
@@ -187,9 +190,13 @@ operator's own provisioning work, which the gate can only check after it is done
 - [ ] Record the source SHA, catalog digest, artifact/receipt identities, operator, public-key URL,
       and completion date.
 
-Route budget: the merged deploy declares one `headers` entry per served path — today 760
-documents (498 in `sealed-platform-v1`, 262 in `implementations-v1`) plus 4 per-group root
-files, so 764 of the 1024-route configuration limit. The bundle generator warns at 900.
+Route budget: the merged deploy declares one `headers` entry per served path (every
+document of every group, plus each group's root files), and the host configuration is
+capped at 1024 routes. The count moves with the catalog, so this runbook does not restate
+it: read it from the bundle generator, which reports `(<N> routes)` on every run — the
+`canary-host-refresh` job log, or the break-glass invocation above — and warns once the
+count reaches 900 (`ROUTE_WARNING_THRESHOLD` and `ROUTE_LIMIT` in
+`.github/scripts/build-profile-host-bundle.mjs`).
 
 The gate is written and tested; what it has never had is a host to run against. Only after it
 has run green against the live domain may the platform stable hold be reconsidered.
