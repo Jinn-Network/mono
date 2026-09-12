@@ -1,9 +1,0 @@
-[build]
-builder = "DOCKERFILE"
-dockerfilePath = "deploy/control-api/Dockerfile"
-watchPatterns = ["/control-api/**", "/jinn-node/src/**", "/jinn-node/package.json", "/package.json", "/deploy/control-api/**"]
-
-[deploy]
-healthcheckPath = "/health"
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10

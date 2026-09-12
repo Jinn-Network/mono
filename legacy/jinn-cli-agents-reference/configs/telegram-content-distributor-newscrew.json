@@ -1,8 +1,0 @@
-{
-    "subscribedStreams": [
-        "FEED:commit-highlights"
-    ],
-    "telegramChatId": "-1002302354780",
-    "telegramTopicId": "14",
-    "lookbackPeriod": "24 hours"
-}
