@@ -40,7 +40,7 @@ import {
   type ExecutionEvidenceBuilderInput,
 } from "@jinn-network/execution-evidence-builder";
 import { dssePreAuthEncoding, sealSignedPayload, type DsseSigner } from "@jinn-network/trust-core";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   assembleEvidenceMatrix,
@@ -1008,6 +1008,25 @@ describe("Harbor → Inspect → human evidence-first golden lifecycle", () => {
   });
 });
 
+describe("golden-lifecycle digest regeneration", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // Issue #3919: in write mode the assertion is trivially true, so if the regeneration flag ever
+  // reached a CI runner the test would go green against whatever the code currently computes,
+  // and the repo-wide fixture drift guard (a separate job, separate checkout) would never see the
+  // rewritten file. A CI runner has no legitimate reason to regenerate a pinned fixture.
+  test("refuses to regenerate the pinned digests on a CI runner, leaving the fixture untouched", () => {
+    const fixture = new URL("../fixtures/golden-lifecycle/digests.json", import.meta.url);
+    const before = readFileSync(fixture);
+    vi.stubEnv("CI", "true");
+    vi.stubEnv("JINN_WRITE_GOLDEN_LIFECYCLE_DIGESTS", "1");
+    expect(() => expectGoldenLifecycleDigests({})).toThrow(/CI/);
+    expect(readFileSync(fixture).equals(before)).toBe(true);
+  });
+});
+
 /**
  * Asserts the tier-2 digests of this lifecycle against `fixtures/`, rather than against values the
  * same run recomputed. The file is covered by the repo-wide fixture drift and immutability guards,
@@ -1019,7 +1038,14 @@ function expectGoldenLifecycleDigests(actual: Record<string, string>): void {
     // Regeneration mode, driven by `scripts/write-golden-lifecycle-digests.mjs`. These digests are
     // only computable by running the lifecycle, so the script runs this test with the flag set and
     // the test writes what it computed. The assertion below is then trivially true; the fixture
-    // immutability guard, not this expectation, is what refuses an unintended change.
+    // immutability guard, not this expectation, is what refuses an unintended change. A CI runner
+    // has no legitimate reason to regenerate a pinned fixture, so the flag reaching one is refused
+    // loudly rather than silently passing against whatever was just computed (issue #3919).
+    if (process.env.CI !== undefined && process.env.CI !== "") {
+      throw new Error(
+        "refusing to regenerate fixtures/golden-lifecycle/digests.json on a CI runner (CI is set); unset JINN_WRITE_GOLDEN_LIFECYCLE_DIGESTS",
+      );
+    }
     writeFileSync(fixture, `${JSON.stringify({ version: 1, digests: actual }, null, 2)}\n`);
   }
   const { digests } = JSON.parse(readFileSync(fixture, "utf8")) as { digests: Record<string, string> };
