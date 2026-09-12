@@ -146,6 +146,7 @@ async function fixture(input: {
   const backend = {
     shutdown: vi.fn(async () => { lifecycle.push("backend"); }),
     getDeliverySignature: vi.fn(),
+    reconcileNonterminal: vi.fn(async () => []),
   } as unknown as LocalTaskExecutionBackend;
   const evidence = {
     repository: {
@@ -213,6 +214,9 @@ describe("native evaluator production composition", () => {
   it("selects evaluator custody and the exact prediction deployment without solver runtime fallbacks", async () => {
     const value = await fixture();
     const composition = await buildNativeEvaluatorComposition(value.config);
+    // #4397: untracked nonterminal attempts converge at boot, before any coordinator runs.
+    expect((value.backend as unknown as { reconcileNonterminal: ReturnType<typeof vi.fn> }).reconcileNonterminal)
+      .toHaveBeenCalledTimes(1);
     const config = value.backendConfigs[0]!;
     expect(config.launchers).toHaveLength(1);
     expect(config.launchers[0]!.capabilities().taskProfiles).toEqual([

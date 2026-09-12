@@ -182,6 +182,14 @@ export async function buildNativeSolverBackend(input: NativeSolverBackendInput):
     heartbeatIntervalMs: 10_000,
   };
   const backend = makeLocalTaskExecutionBackend(config);
+  // #4397: converge attempts no coordinator will track, before any coordinator's first recover.
+  for (const entry of await backend.reconcileNonterminal()) {
+    if (entry.outcome === 'failed') {
+      console.warn(`[native-solver] boot reconciliation failed for ${entry.attempt}: ${entry.detail ?? 'unknown'}`);
+    } else {
+      console.info(`[native-solver] boot reconciliation ${entry.classification} for ${entry.attempt}${entry.detail === undefined ? '' : ` (${entry.detail})`}`);
+    }
+  }
   return {
     backend,
     launcher: claimLauncherPort(launcher, deployment),

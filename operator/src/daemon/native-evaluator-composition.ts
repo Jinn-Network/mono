@@ -786,6 +786,14 @@ export async function buildNativeEvaluatorComposition(
     evidence: input.backend.evidence,
   };
   const backend = (input.constructBackend ?? makeLocalTaskExecutionBackend)(backendConfig);
+  // #4397: converge attempts no coordinator will track, before any coordinator's first recover.
+  for (const entry of await backend.reconcileNonterminal()) {
+    if (entry.outcome === "failed") {
+      console.warn(`[native-evaluator] boot reconciliation failed for ${entry.attempt}: ${entry.detail ?? "unknown"}`);
+    } else {
+      console.info(`[native-evaluator] boot reconciliation ${entry.classification} for ${entry.attempt}${entry.detail === undefined ? "" : ` (${entry.detail})`}`);
+    }
+  }
   const verification = buildNativeEvaluatorVerdictVerification(input.verification);
   let publisher: NativeEvaluatorPublisher | undefined;
   try {
