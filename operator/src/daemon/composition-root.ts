@@ -256,6 +256,7 @@ import {
 } from './native-solution-corrections.js';
 import { NativeMarketplaceEventRepository } from './native-canonical-observations.js';
 import { buildNativeSolutionSettlementPort } from './native-solution-settlement.js';
+import { reconcileNonterminalAtBoot } from './task-execution-boot-reconciliation.js';
 import {
   createNativeRequesterSubmissionResolver,
   type NativeRequesterSubmissionLookup,
@@ -2404,6 +2405,8 @@ export async function buildOperatorComposition(
           }),
   };
   const backend = new LocalTaskExecutionBackend(backendConfig);
+  // #4397: converge attempts no coordinator will track, before any coordinator's first recover.
+  await reconcileNonterminalAtBoot(backend, '[task-execution]', input.logger);
   // Finding E31: completes the mutable slot `verifySettlementGrade` (built above, before
   // `backend` existed) closes over.
   backendForDeliverySignatures = backend;

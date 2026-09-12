@@ -9,6 +9,7 @@ import { atomicWriteFileSync } from "./fs-atomic.js";
 import {
   buildShimSpawn, fingerprintAlive, listProcessGroupPids, readOutcome, readProcessStartTime, readShimFingerprint,
   decodeNonceIdentity, encodeNonceIdentity, resolveShimScriptEntry, writeOutcomeFile, writeShimFingerprint,
+  ProcessTableProbeError, readProcessGroupTable,
 } from "./shim.js";
 import { REMOVE_BUDGET_MS, removeAttemptTree } from "./attempt-tree-teardown.js";
 
@@ -119,6 +120,7 @@ describe("process-group scanning", () => {
     if (child.pid === undefined) throw new Error("fixture child has no PID");
     try {
       expect(listProcessGroupPids(child.pid)).toContain(child.pid);
+      expect(readProcessGroupTable().get(child.pid)).toContain(child.pid);
     } finally {
       try {
         process.kill(-child.pid, "SIGKILL");
@@ -127,6 +129,45 @@ describe("process-group scanning", () => {
       }
       await new Promise<void>((resolve) => child.once("exit", () => resolve()));
     }
+  });
+});
+
+describe("process-table probe failure (#4395)", () => {
+  const darwin = process.platform === "darwin";
+  const linux = process.platform === "linux";
+
+  it.skipIf(!darwin)("S1: an unresolvable `ps` throws ProcessTableProbeError instead of reading as an empty group", () => {
+    const emptyBin = mkdtempSync(join(tmpdir(), "jinn-empty-path-"));
+    const savedPath = process.env["PATH"];
+    process.env["PATH"] = emptyBin;
+    try {
+      expect(() => readProcessGroupTable()).toThrow(ProcessTableProbeError);
+      expect(() => listProcessGroupPids(process.pid)).toThrow(ProcessTableProbeError);
+    } finally {
+      process.env["PATH"] = savedPath;
+      rmSync(emptyBin, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!linux)("S2: an unreadable /proc throws ProcessTableProbeError instead of throwing a raw fs error or reading as empty", () => {
+    const procRoot = join(mkdtempSync(join(tmpdir(), "jinn-proc-")), "does-not-exist");
+    expect(() => readProcessGroupTable({ procRoot })).toThrow(ProcessTableProbeError);
+    expect(() => listProcessGroupPids(process.pid, { procRoot })).toThrow(ProcessTableProbeError);
+  });
+
+  it.skipIf(!linux)("S3a: a readable but empty proc root cannot see this process and is refused as a probe failure", () => {
+    const procRoot = mkdtempSync(join(tmpdir(), "jinn-proc-empty-"));
+    expect(() => readProcessGroupTable({ procRoot })).toThrow(/omits this process/u);
+  });
+
+  it("S3b: the real table contains this process in some group", () => {
+    const table = readProcessGroupTable();
+    expect([...table.values()].some((members) => members.includes(process.pid))).toBe(true);
+  });
+
+  it("S4: an invalid pgid returns [] without probing", () => {
+    expect(listProcessGroupPids(0)).toEqual([]);
+    expect(listProcessGroupPids(-1)).toEqual([]);
   });
 });
 
