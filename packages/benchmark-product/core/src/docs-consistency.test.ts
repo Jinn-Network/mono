@@ -11,6 +11,7 @@ import {
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
   BUNDLE_V8_FORMAT,
+  BUNDLE_V10_FORMAT,
   FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
@@ -26,6 +27,7 @@ import {
   PUBLIC_BUNDLE_V7_CHECKS,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_CHECKS,
+  PUBLIC_BUNDLE_V10_CHECKS,
   SUPPORTED_BUNDLE_FORMATS,
   BEACON_SOURCES,
 } from "@colophon-claims/verify";
@@ -331,6 +333,11 @@ describe("product documentation consistency", () => {
         compatible: [readerLine(instruction(BUNDLE_V8_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_V8_CHECKS,
       },
+      [`\`${BUNDLE_V10_FORMAT}\``]: {
+        pinned: [readerLine(instruction(BUNDLE_V10_FORMAT).command)],
+        compatible: [readerLine(instruction(BUNDLE_V10_FORMAT).compatibleCommand)],
+        checks: PUBLIC_BUNDLE_V10_CHECKS,
+      },
     };
 
     expect(rows.map((cells) => cells[0])).toEqual(Object.keys(expected));
@@ -371,6 +378,7 @@ describe("product documentation consistency", () => {
       [BUNDLE_V6_FORMAT]: "\n### Anchored bundle v6\n",
       [BUNDLE_V7_FORMAT]: "\n### Anchored binary qualification bundle v7\n",
       [BUNDLE_V8_FORMAT]: "\n### Disclosed anchored binary qualification bundle v8\n",
+      [BUNDLE_V10_FORMAT]: "\n### Composed presentation bundle v10\n",
     };
     // Prompted screening is the fourth axis the format string does not record, so the `/2` and
     // `/4` sections state a second, later line beside the unprompted one.
@@ -461,9 +469,10 @@ describe("product documentation consistency", () => {
     // `verify` release, and the publish workflow refuses a version npm has never served. So a
     // sentence naming `verify` as unpublished contradicts the constants imported here.
     const readme = read(productReadmePath);
-    const unpublishedClaims = readme
-      .split(/\n\s*\n/u)
-      .filter((block) => /unpublished|\bnot\b(?:\s+\w+){0,2}\s+published/iu.test(block));
+    const blocks = readme.split(/\n\s*\n/u);
+    const unpublishedClaims = blocks.filter(
+      (block) => /unpublished|\bnot\b(?:\s+\w+){0,2}\s+published/iu.test(block),
+    );
     expect(unpublishedClaims.length, "README states its publication holds").toBeGreaterThan(0);
     for (const block of unpublishedClaims) {
       expect(block, block).not.toContain("@colophon-claims/verify");
@@ -471,7 +480,18 @@ describe("product documentation consistency", () => {
     // The reader surface the README sends people to is a registry command, so the README has to
     // say so rather than leaving it under the hold.
     expect(readme).toMatch(/`@colophon-claims\/verify` is published/u);
-    expect(readme).toContain(readerLine(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND).slice(1));
+    // The stated `latest` is what sends a reader to a registry version, so it has to be THE version
+    // this tree pins -- not merely a token that appears somewhere in the file. Located by its own
+    // sentence so a disagreement fails on the line that is wrong (#4206).
+    const publication = blocks.find(
+      (block) => /`@colophon-claims\/verify` is published/u.test(block),
+    );
+    expect(publication, "README publication sentence").toBeTypeOf("string");
+    // Matched against the unwrapped sentence: the hard wrap is cosmetic, so a re-flow that lands
+    // the newline between the two tokens must not be reported as a version disagreement.
+    expect(publication?.replace(/\s+/gu, " ")).toContain(
+      `\`latest\` \`${readerLine(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND).slice(1)}\``,
+    );
   });
 
   it("documents the exact private web configuration and package commands", () => {

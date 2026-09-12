@@ -201,15 +201,17 @@ function blankComments(text: string): string {
  *
  * Positional same-line quote matching has a known bounded residue: a quote in a regex character
  * class, or an apostrophe/quote in template text, can be treated as an opener and paired with a
- * later matching genuine string quote, blanking a real call between them. This false negative
- * cannot cross a newline and is not live in the current 340-file sweep reported by #4045. It is
- * retained because tracking regex/template context recreated the previously reverted unsafe lexer;
- * this case is not fail-loud.
+ * later matching genuine string quote, blanking a real call between them. It shares
+ * `blankComments`' narrowness -- backticks are not tracked, and an unterminated quote blanks
+ * nothing -- but NOT its direction: there, the residue reads a comment as code, which is loud;
+ * here, blanking a real call HIDES a site, so this case is not fail-loud. The false negative
+ * cannot cross a newline and is not live in the tree-wide sweep reported by #4045. It is retained
+ * because tracking regex/template context recreated the previously reverted unsafe lexer.
  *
  * Applied only inside `emitterCallSites`, never folded into `blankComments`: `resolveOrigin` reads
  * the import SPECIFIER off that function's output, and blanking interiors there would resolve every
  * file's origin to the empty specifier and silently drop its real calls -- the barrel hole in a
- * third shape. Same narrowness as above: no backticks, and an unterminated quote blanks nothing.
+ * third shape.
  */
 function blankStringLiterals(text: string): string {
   return text.replace(/(["'])((?:\\.|[^\\\n])*?)\1/gu, (_match, quote: string, body: string) =>

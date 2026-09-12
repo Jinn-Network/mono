@@ -8570,6 +8570,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/record-discovery-testing",
         "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/forked-chain-seeded-mark/vector.json",
+        "relativeSource": "fixtures/vectors/forked-chain-seeded-mark/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/forked-chain-shared-previous/vector.json",
         "relativeSource": "fixtures/vectors/forked-chain-shared-previous/vector.json"
       },
@@ -8741,6 +8750,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/record-discovery-testing",
         "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/refresh-by-ceiling-exceeds-window/vector.json",
+        "relativeSource": "fixtures/vectors/refresh-by-ceiling-exceeds-window/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/refresh-by-ceiling-inverted-window/vector.json",
         "relativeSource": "fixtures/vectors/refresh-by-ceiling-inverted-window/vector.json"
       },
@@ -8815,6 +8833,15 @@
         "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/source-conformance-unpublished-profile/vector.json",
         "relativeSource": "fixtures/vectors/source-conformance-unpublished-profile/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/stale-head-seeded-mark/vector.json",
+        "relativeSource": "fixtures/vectors/stale-head-seeded-mark/vector.json"
       },
       {
         "claim": null,
@@ -8968,6 +8995,15 @@
         "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/withdrawal-of-withdrawal/vector.json",
         "relativeSource": "fixtures/vectors/withdrawal-of-withdrawal/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/wrong-signing-scope-seeded-mark/vector.json",
+        "relativeSource": "fixtures/vectors/wrong-signing-scope-seeded-mark/vector.json"
       },
       {
         "claim": null,

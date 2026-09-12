@@ -3,7 +3,7 @@ import { firstDifference, type ClaimAnchor, type ClaimDisclosureSection } from "
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
-import { buildClaimPackage, type ClaimPackage } from "../report/claim.js";
+import { buildClaimPackage, type BuildClaimPackageInput, type ClaimPackage } from "../report/claim.js";
 import { binaryInstrumentReportLimitations } from "../run/binary-instrument-profile.js";
 import { previewDisclosureSummaryLine } from "../run/preview-log.js";
 import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
@@ -47,6 +47,10 @@ export function assertClaimConsistency(input: {
    * verification path authenticated, never read out of the claim being checked. Empty rebuilds the
    * unanchored claim, so a stored claim asserting an anchor nobody carries fails here. */
   readonly anchors?: readonly ClaimAnchor[];
+  /** issue #4191: which anchored bundle format the manifest declares, so the rebuilt claim pins the
+   * reader line that format pins. Read from the BUNDLE, never from the claim under test — that is
+   * what makes a mismatched pin a difference rather than a tautology. */
+  readonly anchoredBundleFormat?: BuildClaimPackageInput["anchoredBundleFormat"];
   /** disclosure-specification-record design §7 step 10 (issue #2839): the disclosure section
    * re-derived from the sealed record's own bytes, never read from the claim under test. */
   readonly disclosure?: ClaimDisclosureSection;
@@ -97,6 +101,7 @@ export function assertClaimConsistency(input: {
     },
     ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }),
     ...(input.anchors === undefined ? {} : { anchors: input.anchors }),
+    ...(input.anchoredBundleFormat === undefined ? {} : { anchoredBundleFormat: input.anchoredBundleFormat }),
     ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }),
     ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   });

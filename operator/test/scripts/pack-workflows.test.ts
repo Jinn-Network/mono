@@ -281,12 +281,21 @@ describe('packed client workflow coverage', () => {
   it('proves the public no-install invocation without letting its guard pass on detection', () => {
     const smoke = workflow('operator/scripts/smoke-test-pack.mjs');
 
-    expect(smoke).toContain("['--no-install', '@jinn-network/operator', 'doctor']");
+    expect(smoke).toContain("['--no-install', '@jinn-network/operator', 'version', '--json']");
+    // The resolution proof must not depend on network reachability: `doctor`
+    // runs RPC probes, and the pack-smoke job is post-merge-only, so a
+    // transient stall lands as a red merge queue with no PR-lane warning
+    // (#3045).
+    expect(smoke).not.toContain("'@jinn-network/operator', 'doctor'");
     expect(smoke).toContain("publicOutput.includes('could not determine executable')");
     // `?? 1` lets a zero status through, so the guard would exit 0 on the exact
     // ambiguity it detects and skip every remaining check.
     expect(smoke).toContain('process.exit(publicNpx.status || 1);');
     expect(smoke).not.toContain('process.exit(publicNpx.status ?? 1);');
+    // A bare status is the third wrong answer: the non-zero guard admits
+    // `status === null` (signal-killed child, no `spawnSync` error), and
+    // `process.exit(null)` exits 0.
+    expect(smoke).not.toContain('process.exit(publicNpx.status);');
   });
 
   it('asserts the packed jinn-stop-hook bin link without executing the daemon client', () => {

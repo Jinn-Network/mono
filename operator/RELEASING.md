@@ -104,22 +104,76 @@ npx @jinn-network/operator@canary --help
    The publish step creates `client-vX.Y.Z`, pushes it, creates the GitHub
    release, waits for npm/GHCR workflows, and verifies the published artifacts.
 
-For Captain-driven GitHub Release publishes, add this exact evidence marker to
-the Release body before clicking Publish. `release-commit` must be the commit
-the `vX.Y.Z` tag points at:
+For Captain-driven GitHub Release publishes, the gate is **two SHA-bound
+check-runs on the release commit** — nothing you type in the Release body:
 
-```text
-<!-- jinn-release-evidence:v1
-release-tag=vX.Y.Z
-release-commit=<git sha>
-release-client-prepare=passed
-olas-rails-smoke=passed
-app-first-testnet-acceptance=passed
--->
+- `hermetic-gate` — the native job of `.github/workflows/hermetic-gate.yml`.
+- `environment-suite` — posted by
+  `operator/scripts/release/post-check-run-verdict.mjs` from
+  `.github/workflows/environment-suite.yml`.
+
+`npm-publish.yml`'s stable-publish step resolves the release SHA, queries both
+check-runs on that exact SHA, and — with both waivers below unset — refuses the
+publish unless both are `success`-for-this-SHA. It re-runs nothing, and it
+parses no Release body. A check-run bound to a different `head_sha` is stale and
+does not count, so a rebase invalidates a stale verdict automatically. See the
+two-gate redesign
+([`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md`](../docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md)
+§7) and the guard itself at `.github/workflows/npm-publish.yml`.
+
+Both gates carry a transitional repo-variable waiver —
+`JINN_HERMETIC_GATE_WAIVED` and `JINN_ENVIRONMENT_SUITE_WAIVED`. When one is
+`'true'` the guard logs the waiver loudly and skips that verdict. Unset is the
+steady state; treat a set waiver as a cut you are publishing without that gate.
+
+Before publishing, confirm no waiver is in force and both verdicts are green on
+the tagged commit. Both steps refuse loudly; run them in order:
+
+```bash
+# 1. No waiver set. This must print nothing.
+gh variable list --repo Jinn-Network/mono --json name,value \
+  --jq '.[] | select(.name | test("^JINN_(HERMETIC_GATE|ENVIRONMENT_SUITE)_WAIVED$"))
+        | "WAIVER SET: \(.name)=\(.value)"'
+
+# 2. Both verdicts green on the exact tagged commit.
+git fetch --tags origin
+sha="$(git rev-parse 'vX.Y.Z^{commit}')"
+for name in hermetic-gate environment-suite; do
+  n=$(gh api -X GET "repos/Jinn-Network/mono/commits/$sha/check-runs" \
+        -f check_name="$name" -f per_page=100 \
+        --jq "[.check_runs[]
+               | select(.head_sha == \"$sha\" and .status == \"completed\" and .conclusion == \"success\")]
+              | length")
+  if [ "${n:-0}" -ge 1 ]; then
+    echo "$name green on $sha"
+  else
+    echo "REFUSE: $name not green on $sha"
+    exit 1
+  fi
+done
 ```
 
-`npm-publish.yml` refuses stable publishes when this marker is absent or points
-at a different commit.
+Step 1 exists because the guard's waiver warning is a `core.warning` emitted
+during the publish job — it reaches you only after the cut. A printed line means
+that repo variable exists; the guard drops the gate from its required list when
+the value is exactly `true`.
+
+Step 2 resolves the tag to a commit first, and asserts on `head_sha`, `status`
+and `conclusion` rather than eyeballing them, because both halves fail open
+otherwise: a bare ref in the `{ref}` path segment also accepts a branch name (so
+`next` would screen whatever it points at now), and `gh` exits 0 on a query that
+matches nothing, which makes a missing verdict indistinguishable from a green
+one. `check_name` is what makes the query reliable — it restricts the response to
+the one gate being asked about instead of every check-run on the release SHA. The
+endpoint's `filter` parameter already defaults to `latest`, which collapses to the
+most recent run per check name; `per_page=100` only keeps the named verdict off a
+second page.
+
+A `jinn-release-evidence:v1` block may still appear in a Release body or in a
+generated handoff under `docs/release/`. It is **diagnostic-only** — the same
+annotation `writeHandoffDoc()` and
+[`handoff-doc-template.md`](../.claude/skills/release-readiness/references/handoff-doc-template.md)
+carry. Nothing parses it, and its absence or staleness blocks no publish.
 
 For command-flow validation without the live testnet gate:
 

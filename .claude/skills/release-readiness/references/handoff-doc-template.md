@@ -50,7 +50,7 @@ Run-id: <run-id>
 ## Open questions for human
 - Q1: ...
 
-## Independent evidence
+## Independent evidence  (emitted only when `independentEvidence` is set)
 <any out-of-band signal>
 
 ## Marker block (final, diagnostic-only)
@@ -60,7 +60,24 @@ SHA-bound check-runs (`hermetic-gate`, `environment-suite`) are. `npm-publish.ym
 no longer parses this block; it is retained as a human-readable diagnostic.
 
 <!-- jinn-release-evidence:v1
-release-tag=...
-...
+release-tag=<version>
+release-commit=<sha>
+hermetic-gate-t1-1=passed
+hermetic-gate-t1-4=passed
+environment-suite=passed
+release-readiness-recommendation=SHIP
+release-readiness-handoff=docs/release/<version>/handoff.md
+release-readiness-run=<run-id>
 -->
 ```
+
+Marker keys speak the two-gate vocabulary. One `hermetic-gate-<scenario-id>` key per
+scenario verdict (id lowercased, dots to dashes), plus one `environment-suite` key. Every
+value is `passed`, `skipped:<reason>`, or `failed:<failClass>`; `environment-suite` takes
+the additional value `skipped:no-verdict-supplied` when no environment-suite verdict
+reached the run at all. The heading sequence above is pinned by
+`operator/scripts/release/release-readiness.test.ts`, including the conditional
+`## Independent evidence` section, which is emitted only when that input is set.
+
+Handoffs already written under `docs/release/` keep the retired `tier-1-*` /
+`tier-3-t3-1` keys; they are dated artifacts and are not retro-edited.

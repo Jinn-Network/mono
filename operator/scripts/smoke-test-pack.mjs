@@ -324,7 +324,14 @@ try {
     const npxLegacy = runOrExit('npx', ['-p', tarball, 'jinn', 'version', '--json'], 'npx -p');
     assertVersionPayload(parseJsonOrExit(npxLegacy.stdout, 'npx -p'), 'npx -p');
 
-    const publicNpx = spawnSync('npx', ['--no-install', '@jinn-network/operator', 'doctor'], {
+    // The property this check exists to prove is bin resolution, which
+    // `version --json` demonstrates identically and without touching a socket.
+    // `doctor` runs RPC probes, and the pack-smoke job is post-merge-only, so a
+    // transient stall under the 60s timeout landed as a red merge queue or a
+    // red canary publish with no PR-lane warning (#3045). The `jinn doctor
+    // --json` call above is unchanged — doctor coverage is de-duplicated here,
+    // not dropped.
+    const publicNpx = spawnSync('npx', ['--no-install', '@jinn-network/operator', 'version', '--json'], {
       cwd: smokeDir,
       encoding: 'utf8',
       env: smokeEnv,
@@ -332,16 +339,21 @@ try {
     });
     const publicOutput = `${publicNpx.stdout}\n${publicNpx.stderr}`;
     if (publicNpx.error || publicOutput.includes('could not determine executable')) {
-      console.error('smoke-test-pack: public npx @jinn-network/operator doctor is ambiguous or failed');
+      console.error('smoke-test-pack: public npx @jinn-network/operator version is ambiguous or failed');
       console.error(publicNpx.error ?? publicOutput);
       process.exit(publicNpx.status || 1);
     }
-    if (publicNpx.status === 50) {
-      console.error('smoke-test-pack: public npx doctor crashed');
+    if (publicNpx.status !== 0) {
+      console.error('smoke-test-pack: public npx version failed');
       console.error(publicNpx.stderr || publicNpx.stdout);
-      process.exit(publicNpx.status);
+      // `|| 1`, not a bare status: this guard now admits `status === null`
+      // (a signal-killed child that `spawnSync` reports with no `error`),
+      // and `process.exit(null)` exits 0 — turning a dead check 6 into a
+      // green post-merge pack-smoke that also skipped check 7. Same idiom as
+      // the guard above and as `runOrExit`.
+      process.exit(publicNpx.status || 1);
     }
-    parseJsonOrExit(publicNpx.stdout, 'public npx doctor');
+    assertVersionPayload(parseJsonOrExit(publicNpx.stdout, 'public npx version'), 'public npx version');
 
     assertPackedStopHookBinIsLinked();
 

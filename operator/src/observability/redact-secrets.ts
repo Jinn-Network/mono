@@ -34,8 +34,12 @@ import { walkStructured } from '../util/structured-walk.js';
  * v3 (#3038): a non-plain object (`Map` / `Set` / class instance) is now an
  * `<redacted:unserializable>` marker instead of an empty object, and a `Date`
  * is kept as its ISO string instead of being flattened to `{}`.
+ *
+ * v4 (#3108): `URL_RE` covers `ws://` and `wss://`, so a WebSocket RPC URL
+ * embedded in a free-text string value now has its userinfo, path, query and
+ * fragment stripped. Under v3 it matched nothing and survived intact.
  */
-export const REDACTION_VERSION = '3';
+export const REDACTION_VERSION = '4';
 
 /** The marker substituted for a redacted value. */
 function marker(label: string): string {
@@ -97,8 +101,8 @@ function isSecretName(key: string): boolean {
 const HEX64_RE = /\b0x[0-9a-fA-F]{64}\b/g;
 /** A JWT-shaped token: three base64url segments separated by dots. */
 const JWT_RE = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
-/** Any http(s) URL embedded in free text. */
-const URL_RE = /https?:\/\/[^\s"'<>)\]]+/g;
+/** Any http(s) or ws(s) URL embedded in free text. */
+const URL_RE = /(?:https?|wss?):\/\/[^\s"'<>)\]]+/g;
 
 /**
  * Redact secret-shaped substrings inside a free-text string value.
@@ -106,8 +110,9 @@ const URL_RE = /https?:\/\/[^\s"'<>)\]]+/g;
  * - 64-hex-char (`0x...`) private-key-shaped values -> stripped. Wallet
  *   addresses (`0x` + 40 hex) are NOT 64 chars, so they survive.
  * - JWT-shaped tokens -> stripped.
- * - http(s) URLs -> run through `redactRpcUrl` so an RPC endpoint logged in
- *   an error message keeps its host but loses any embedded credential.
+ * - http(s) and ws(s) URLs -> run through `redactRpcUrl` so an RPC endpoint
+ *   logged in an error message keeps its host but loses any embedded
+ *   credential.
  */
 function redactStringValue(value: string): string {
   return value
@@ -219,9 +224,9 @@ function redactEntry(key: string, value: unknown): { value: unknown } | undefine
     if (typeof value === 'string') return { value: redactRpcUrl(value) };
     if (Array.isArray(value)) {
       // Plural RPC keys (`rpcUrls`, `archiveRpcUrls`, …) hold the full
-      // fallback chain — strip credentials from each entry directly rather
-      // than relying on the free-text URL_RE pass, which misses non-http(s)
-      // schemes like `wss://`.
+      // fallback chain. A known RPC-URL key gets URL treatment applied to the
+      // whole value rather than a substring scan of free text, which is the
+      // more precise result for a value we already know is a URL.
       return {
         value: value.map((el) => (typeof el === 'string' ? redactRpcUrl(el) : redactValue(el))),
       };
