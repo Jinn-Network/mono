@@ -28,3 +28,9 @@ sdk/.yarn
 sdk/.pnp.*
 sdk/dist
 sdk/*.log
+
+# contract-abis (built inside the image; never ship local artifacts)
+contract-abis/node_modules
+contract-abis/.yarn
+contract-abis/.pnp.*
+contract-abis/dist

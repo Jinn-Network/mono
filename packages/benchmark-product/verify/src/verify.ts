@@ -94,8 +94,9 @@ import {
   type VerifiedBundleSnapshot,
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
-import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT } from "./manifest.js";
+import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V10_FORMAT } from "./manifest.js";
 import {
+  BUNDLE_V6_FORMAT,
   LEGACY_ANCHOR_MEMBER_PATTERN,
   PUBLIC_BUNDLE_V4_FILES,
   legacyClosure,
@@ -164,7 +165,7 @@ export type PublicBundleVerificationCheck =
   | "disclosure-specification";
 
 export interface LegacyPublicBundleVerificationResult extends PublicBundleSignerDisclosure {
-  readonly format: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT;
+  readonly format: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT | typeof BUNDLE_V10_FORMAT;
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
@@ -529,11 +530,18 @@ export async function verifyPublicBundleSnapshot(
   // (issue #3205), v8 is v7 plus disclosure (issue #2839) — no axis reinterprets another. v8 adds
   // no mandatory MEMBER: the sealed disclosure record travels at the already-allowlisted
   // `records/<sha256>.bin` path, so its list is v7's, which is v4's.
+  //
+  // `/10` moves NONE of those three axes: it is v6's closure exactly, differing only in which
+  // report page `buildPublicAssets` renders (issue #4191). A presentation generation that changed
+  // a member or a check would be claiming the render proves something the records did not already
+  // prove. So it is READ FROM v6's own row rather than restated as a fourth cell here: a copy
+  // would be a second place for v6's closure to be described, and the two could silently drift.
+  // Unlike `/8`, which really is a new closure, `/10` has nothing of its own to state.
   const declaredFormat = checked.manifest.format;
   const carriesDisclosure = declaredFormat === BUNDLE_V8_FORMAT;
   const { carriesQualification, carriesAnchors, mandatoryFiles } = carriesDisclosure
     ? { carriesQualification: true, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_V4_FILES }
-    : legacyClosure(declaredFormat);
+    : legacyClosure(declaredFormat === BUNDLE_V10_FORMAT ? BUNDLE_V6_FORMAT : declaredFormat);
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
@@ -1935,6 +1943,12 @@ export async function verifyPublicBundleSnapshot(
       : {}),
     ...(assembly.header.rehearsal === undefined ? {} : { rehearsal: assembly.header.rehearsal }),
     ...(claimAnchors === undefined ? {} : { anchors: claimAnchors }),
+    // claim-package/4 admits two reader pins, one per format that carries it (issue #4191), so the
+    // rebuild is told which format the BUNDLE declares. Passed for the two anchored, non-qualifying
+    // formats only — every other closure derives its pin from facts the rebuild already has.
+    ...(declaredFormat === BUNDLE_V6_FORMAT || declaredFormat === BUNDLE_V10_FORMAT
+      ? { anchoredBundleFormat: declaredFormat }
+      : {}),
     ...(claimDisclosure === undefined ? {} : { disclosure: claimDisclosure }),
   });
   checks.push("claim-consistency");
@@ -1992,6 +2006,9 @@ export async function verifyPublicBundleSnapshot(
     })
     : undefined;
   const assetFacts = {
+    // The bundle's own declared format, never a re-derivation: it is what `bundle.json` seals, and
+    // it selects which presentation generation's page the byte-compare below expects.
+    format: checked.manifest.format,
     claim,
     matrix,
     report: verifiedReport.record,

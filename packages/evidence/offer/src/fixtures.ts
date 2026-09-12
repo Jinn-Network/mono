@@ -28,6 +28,7 @@ export const INVALID_OFFERS: readonly string[] = [
   "rail-spelled-twice",
   "equivalent-rail-spelling",
   "spoofable-rail-destination",
+  "tag-carrier-rail-destination",
 ];
 
 /**

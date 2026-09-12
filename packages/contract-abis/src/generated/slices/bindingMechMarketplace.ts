@@ -120,5 +120,59 @@ export const MECH_MARKETPLACE_ABI = [
         "indexed": false
       }
     ]
+  },
+  {
+    "type": "function",
+    "name": "mapNonces",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getRequestId",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "address",
+        "name": "mech"
+      },
+      {
+        "type": "address",
+        "name": "requester"
+      },
+      {
+        "type": "bytes",
+        "name": "data"
+      },
+      {
+        "type": "uint256",
+        "name": "deliveryRate"
+      },
+      {
+        "type": "bytes32",
+        "name": "paymentType"
+      },
+      {
+        "type": "uint256",
+        "name": "nonce"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": "requestId"
+      }
+    ]
   }
 ] as const;

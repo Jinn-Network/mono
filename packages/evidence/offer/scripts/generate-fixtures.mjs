@@ -86,6 +86,12 @@ const INVALID = {
     ...priced,
     rails: [{ ...priced.rails[1], to: `0x2222222222222222\u202E222222222222222222222222` }],
   },
+  // A destination carrying a tag character hides arbitrary invisible ASCII inside a payment
+  // address; opaque syntax is not the same as opaque content.
+  "tag-carrier-rail-destination": {
+    ...priced,
+    rails: [{ ...priced.rails[1], to: `0x2222222222222222\u{E0041}222222222222222222222222` }],
+  },
   // The same rail spelled two ways would otherwise pass uniqueness and sortedness alike.
   "rail-spelled-twice": {
     ...priced,

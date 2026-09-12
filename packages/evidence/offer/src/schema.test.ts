@@ -80,11 +80,14 @@ describe("the offer record schema", () => {
       }
     });
 
-    // The emptiness rule judges the whole value, never a character in it: ZWJ and ZWNJ are
-    // load-bearing in Indic and Arabic scripts, and a rail may put human-readable text here.
-    test("accept an invisible formatting character inside an otherwise visible destination", () => {
-      expect(parse(offer({ rails: [{ rail: USDC, to: "0xdead\u200Dbeef", amount: "1" }] })).success)
-        .toBe(true);
+    // Interior format characters are an allow-set of exactly these two, not the whole of
+    // `\p{Cf}`: ZWJ and ZWNJ are load-bearing in Indic and Arabic scripts and a rail may put
+    // human-readable text here, which no other format character can claim.
+    test.each([
+      ["zero-width joiner", "0xdead\u200Dbeef"],
+      ["zero-width non-joiner", "0xdead\u200Cbeef"],
+    ])("accept a %s inside an otherwise visible destination", (_label, to) => {
+      expect(parse(offer({ rails: [{ rail: USDC, to, amount: "1" }] })).success).toBe(true);
     });
 
     // A destination that renders as a different address in a buyer's UI, or that splices a
@@ -106,8 +109,28 @@ describe("the offer record schema", () => {
       ["nothing but a zero-width space", "\u200B"],
       ["nothing but a byte-order mark", "\uFEFF"],
       ["the empty string", ""],
+      ["carrying a tag character", "0xdead\u{E0041}beef"],
+      ["carrying a language tag", "0xdead\u{E0001}beef"],
+      ["carrying an interior zero-width space", "0xdead\u200Bbeef"],
+      ["carrying an interior soft hyphen", "0xdead\u00ADbeef"],
+      ["carrying an interior byte-order mark", "0xdead\uFEFFbeef"],
+      ["carrying an interior word joiner", "0xdead\u2060beef"],
     ])("refuse a destination that is %s", (_label, to) => {
       expect(parse(offer({ rails: [{ rail: USDC, to, amount: "1" }] })).success).toBe(false);
+    });
+
+    // The residue the docstring names, pinned so the prose cannot outrun the code again. None of
+    // these is `\p{Cf}`, so no rule here reaches them, and each still hides a payload after an
+    // ASCII character. Asserting they pass is not endorsing them: it fixes the boundary, so that
+    // widening the rule to cover one has to come back here and correct the docstring with it.
+    test.each([
+      ["a variation selector", "0xdead\uFE0Fbeef"],
+      ["a supplementary variation selector", "0xdead\u{E0100}beef"],
+      ["a mongolian free variation selector", "0xdead\u180Bbeef"],
+      ["a hangul filler", "0xdead\u3164beef"],
+      ["an unassigned code point", "0xdead\u{E0002}beef"],
+    ])("accept a destination carrying %s, which this package does not claim to reach", (_label, to) => {
+      expect(parse(offer({ rails: [{ rail: USDC, to, amount: "1" }] })).success).toBe(true);
     });
   });
 

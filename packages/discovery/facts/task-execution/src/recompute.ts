@@ -68,9 +68,15 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
  * of those unchecked mints a non-digest fact, and a card carrying it costs its WHOLE edge set --
  * `announcementEdgesFromCard` rejects the record rather than the one field. A value that is not
  * 64 lowercase hex characters is therefore skipped here, exactly as `descriptorListDigests`
- * already skips a descriptor that pins nothing: the malformed reference drops, its card's
- * well-formed siblings survive, and the dropped field recomputes to `undefined`, which
- * `factsConsistency` turns into `indeterminate` rather than a false `consistent`.
+ * already skips a descriptor that pins nothing: the malformed reference drops and its card's
+ * well-formed siblings survive.
+ *
+ * The drop fails closed either way, and this choke point has two arms, not one. A dropped
+ * SCALAR field recomputes to `undefined`, which `factsConsistency` turns into `indeterminate`.
+ * A dropped LIST member shortens the list instead -- `descriptorListDigests` returns an array
+ * unconditionally and pushes only what pins something -- which `factsConsistency` compares
+ * `inconsistent` against a card that announced the full length. Never a false `consistent`,
+ * by either route.
  */
 function prefixedSha256(digest: Record<string, unknown> | undefined): `sha256:${string}` | undefined {
   const hex = digest?.["sha256"];

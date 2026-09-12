@@ -45,6 +45,12 @@ const REFERENCING_FILES = [
   'deploy/railway-operator-codex/seed.sh',
   'operator/README.md',
   'operator/RELEASING.md',
+  // The only file in the repository that *executes* a pull of the image, rather
+  // than telling a human to: `runPublishVerifications` shells out to
+  // `docker run --rm ghcr.io/<owner>/operator:<version>`. Repoint the lanes
+  // again and the documents redden while this one silently keeps pulling the
+  // retired name, surfacing at `verify-docker-version` during a live release.
+  'operator/scripts/lib/release-client.mjs',
   'operator/docker-compose.yml',
   'deploy/railway-launcher-operator/railway.toml',
   'deploy/railway-operator-codex/railway.toml',
@@ -67,6 +73,7 @@ const BASE_TAG_EXAMPLE_FILES = [
  * prose (to say it is retired); it may never be the thing something runs.
  */
 const EXECUTABLE_FILES = new Set([
+  'operator/scripts/lib/release-client.mjs',
   'deploy/railway-launcher-operator/Dockerfile',
   'deploy/railway-launcher-operator/seed.sh',
   'deploy/railway-operator-codex/Dockerfile',
@@ -83,10 +90,17 @@ const RETIRED_PACKAGES = new Set(['client']);
 
 /**
  * Every file that states an `ARG BASE_TAG` default — the two overlay
- * Dockerfiles and the READMEs that quote them. They must all agree, and must
- * name a tag that is republished continuously.
+ * Dockerfiles, the READMEs that quote them, and the deploy README whose
+ * copy-pasteable "~4-line overlay" recipe an operator is most likely to paste.
+ * They must all agree, and must name a tag that is republished continuously.
+ *
+ * `deploy/README.md` is in `REFERENCING_FILES` too, but its
+ * `FROM ghcr.io/<owner>/operator:${BASE_TAG}` is an `isPlaceholder` skip, so the
+ * reference scan structurally cannot see the tag — the same reasoning that gives
+ * `railway.toml` its own `BASE_TAG_EXAMPLE_FILES` list above.
  */
 const BASE_TAG_FILES = [
+  'deploy/README.md',
   'deploy/railway-launcher-operator/Dockerfile',
   'deploy/railway-launcher-operator/README.md',
   'deploy/railway-operator-codex/Dockerfile',
@@ -208,20 +222,50 @@ function matchesShape(tag: string, shape: string): boolean {
 const imageReference =
   /ghcr\.io\/[^/\s]+\/([a-z0-9][a-z0-9._-]*)(?:@[^\s]+|:([^\s"'`)\]},]+))?/g;
 
+/**
+ * Sentence punctuation an un-backticked reference drags into the tag. `.` and
+ * `;` cannot simply leave the character class above: `0.2.3` is a legal tag and
+ * a leading/interior `.` is part of it. Only a *trailing* run is a terminator,
+ * and a real tag never ends in one — the registry grammar allows `.` inside a
+ * tag but the shapes these lanes publish are semver, `next`, `latest`,
+ * `canary-*` and `sha-*`.
+ *
+ * Prose only. In an `EXECUTABLE_FILES` entry there is no sentence for a
+ * terminator to end: `…/operator:next.` in a Dockerfile or a `docker run` line
+ * is a literal, legal-but-unpublished OCI tag that 404s at build time, and
+ * stripping it would hand this suite a tag nobody wrote. Masking, not
+ * mangling — no current reference changes either way — but the whole point of
+ * the executable set is that its references are pulled rather than read.
+ */
+function stripSentencePunctuation(tag: string): string {
+  return tag.replace(/[.;:!?]+$/, '');
+}
+
 type Reference = { file: string; line: number; pkg: string; tag?: string };
 
-function references(): Reference[] {
+/** Every `ghcr.io/<owner>/<pkg>[:<tag>]` in one blob of text, one per match. */
+function parseImageReferences(
+  text: string,
+  file = '<text>',
+): Reference[] {
+  const prose = !EXECUTABLE_FILES.has(file);
   const found: Reference[] = [];
-  for (const file of REFERENCING_FILES) {
-    read(file)
-      .split('\n')
-      .forEach((text, index) => {
-        for (const match of text.matchAll(imageReference)) {
-          found.push({ file, line: index + 1, pkg: match[1], tag: match[2] });
-        }
+  text.split('\n').forEach((line, index) => {
+    for (const match of line.matchAll(imageReference)) {
+      const tag = match[2];
+      found.push({
+        file,
+        line: index + 1,
+        pkg: match[1],
+        tag: tag === undefined ? undefined : prose ? stripSentencePunctuation(tag) : tag,
       });
-  }
+    }
+  });
   return found;
+}
+
+function references(): Reference[] {
+  return REFERENCING_FILES.flatMap((file) => parseImageReferences(read(file), file));
 }
 
 describe('GHCR image references', () => {
@@ -244,6 +288,46 @@ describe('GHCR image references', () => {
       'next',
       'sha-*',
     ]);
+  });
+
+  it('reads a tag out of an un-backticked sentence without its terminator', () => {
+    // The tag class excludes quotes, backtick, brackets and commas, but cannot
+    // exclude `.` or `;` — `0.2.3` is a legal tag. So a correct sentence written
+    // without backticks used to parse its own terminator into the tag, and this
+    // suite went red claiming the lane does not publish `operator:next.`.
+    expect(
+      parseImageReferences('pull ghcr.io/jinn-network/operator:next.')[0],
+    ).toMatchObject({ pkg: 'operator', tag: 'next' });
+    expect(
+      parseImageReferences('see ghcr.io/jinn-network/operator:latest;')[0],
+    ).toMatchObject({ pkg: 'operator', tag: 'latest' });
+
+    // Interior dots survive: stripping only ever removes a trailing run.
+    expect(
+      parseImageReferences('run ghcr.io/jinn-network/operator:0.2.3.')[0],
+    ).toMatchObject({ pkg: 'operator', tag: '0.2.3' });
+
+    // An executable file has no sentence, so nothing is stripped there: a
+    // trailing `.` is part of the literal tag that file would actually pull,
+    // and `operator:next.` is a 404 this suite must keep reporting.
+    expect(
+      parseImageReferences(
+        'FROM ghcr.io/jinn-network/operator:next.',
+        'deploy/railway-operator-codex/Dockerfile',
+      )[0],
+    ).toMatchObject({ pkg: 'operator', tag: 'next.' });
+
+    // Kill-check: a tag no lane publishes is still caught, terminator or not.
+    for (const text of [
+      'pull ghcr.io/jinn-network/operator:bogus',
+      'pull ghcr.io/jinn-network/operator:bogus.',
+    ]) {
+      const [reference] = parseImageReferences(text);
+      const shapes = published.get(reference.pkg) ?? new Set<string>();
+      expect([...shapes].some((shape) => matchesShape(reference.tag ?? '', shape))).toBe(
+        false,
+      );
+    }
   });
 
   it('names only packages an in-repo lane publishes', () => {

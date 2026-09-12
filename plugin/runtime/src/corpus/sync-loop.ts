@@ -10,6 +10,7 @@ import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "../errors.js";
 import type { HealthCheck } from "../health.js";
 import type { RuntimeLogger } from "../logger.js";
 import { sanitizeUntrustedText } from "../mcp/untrusted.js";
+import { endsWithHighSurrogate } from "../projection/truncate.js";
 import { indexPublicPlane } from "../relevance/indexing.js";
 import type { RelevanceIndex } from "../relevance/index-store.js";
 import type { TraceSpanSource } from "../relevance/trace-decode-adapter.js";
@@ -19,6 +20,7 @@ import type { CorpusMirror, MirrorSyncOutcome, MirrorSyncStatus } from "./mirror
 import type { CorpusReader } from "./read.js";
 import type { CorpusRetrieval } from "./retrieve.js";
 import {
+  FAILURE_TRUNCATION_MARKER,
   MAX_FAILURE_CHARS,
   MIRROR_SYNC_STATUS_FILENAME,
   MIRROR_SYNC_STATUS_FORMAT,
@@ -398,11 +400,26 @@ export function createCorpusSyncCapability(
    * `min(1)` on the read schema, so an empty one would write a document the
    * next read rejects as unrecognized, quietly costing the freshness history
    * that document exists to keep.
+   *
+   * A half the ceiling actually cut says so — see `FAILURE_TRUNCATION_MARKER`
+   * for why (#3822). What is local to this function: the truncation FLAG is
+   * what decides, not the length, so a value that arrives at exactly the
+   * ceiling was not cut and is not marked.
    */
   function recordable(value: string | undefined, fallback: string): string {
-    const sanitized =
-      value === undefined ? "" : sanitizeUntrustedText(value, MAX_FAILURE_CHARS).text;
-    return sanitized === "" ? fallback : sanitized;
+    const { text, truncated } =
+      value === undefined
+        ? { text: "", truncated: false }
+        : sanitizeUntrustedText(value, MAX_FAILURE_CHARS);
+    if (text === "") return fallback;
+    if (!truncated) return text;
+    // One code unit further in than the sanitizer cut, so a surrogate pair it
+    // left whole can be split here. Dropping the orphaned high surrogate costs
+    // one more character and keeps the recorded value well-formed —
+    // `truncateLineBoundary` guards the identical hazard the same way.
+    let cut = text.slice(0, MAX_FAILURE_CHARS - FAILURE_TRUNCATION_MARKER.length);
+    if (endsWithHighSurrogate(cut)) cut = cut.slice(0, -1);
+    return `${cut}${FAILURE_TRUNCATION_MARKER}`;
   }
 
   function followedOnly(
