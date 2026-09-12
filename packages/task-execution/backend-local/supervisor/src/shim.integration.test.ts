@@ -2,7 +2,7 @@
 
 import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -13,6 +13,7 @@ import {
   spawnShim,
   writeShimCancellationCommand,
 } from "./shim.js";
+import { REMOVE_BUDGET_MS, removeAttemptTree } from "./attempt-tree-teardown.js";
 
 const dirs: string[] = [];
 const waitForJson = async (path: string): Promise<Record<string, unknown>> => {
@@ -32,7 +33,10 @@ const waitForExit = async (child: ChildProcess): Promise<void> => {
   if (child.exitCode !== null || child.signalCode !== null) return;
   await once(child, "exit");
 };
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+  const deadline = Date.now() + REMOVE_BUDGET_MS;
+  for (const dir of dirs.splice(0)) removeAttemptTree(dir, deadline);
+});
 
 it("runs the real shim with fork-time attempt tags and records a natural exit 0", async () => {
   const root = mkdtempSync(join(tmpdir(), "jinn-shim-integration-"));
