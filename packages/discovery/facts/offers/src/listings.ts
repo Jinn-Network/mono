@@ -71,8 +71,8 @@ const DISPLAY_UNSAFE_CHARACTER =
  * narrows nothing. A rail identifier is a `NormalizedAbsoluteUri`, and `new URL` never leaves a
  * raw format character in place: it percent-encodes one in userinfo, path, query or fragment,
  * and in a special-scheme host it either throws `ERR_INVALID_URL` or drops it (the UTS 46
- * mapping ignores U+00AD, U+200B, U+2060 and U+FEFF). So no honest spelling of a rail ever
- * carries one — the joiners included. They are kept out of the class only so the two grammars
+ * mapping ignores a few of them, U+00AD and U+200B among them). So no honest spelling of a rail
+ * ever carries one — the joiners included. They are kept out of the class only so the two grammars
  * stay one rule, since the parity pin in `listings.test.ts` asserts that a card refuses exactly
  * what the record refuses.
  *
