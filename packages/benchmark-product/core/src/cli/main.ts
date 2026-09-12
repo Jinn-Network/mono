@@ -1816,18 +1816,22 @@ async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jso
   const detail = `freeze repository does not match ${result.bundleIdentity} (bundle renders commit ${result.commitId}): ${result.differences
     .map((difference) => `${difference.path} (${difference.kind})`)
     .join(", ")}`;
-  return renderResult(
-    {
-      ok: false,
-      error: {
-        code: "record-integrity",
-        detail,
-        issues: result.differences.map((difference) => ({ path: difference.path, message: difference.kind })),
-      },
-    } as OperationResult<never>,
-    jsonMode,
-    () => "",
-  );
+  const error: ProductErrorEnvelope = {
+    code: "record-integrity",
+    detail,
+    issues: result.differences.map((difference) => ({ path: difference.path, message: difference.kind })),
+  };
+  // The skipped-mode note (issue #3608) and the result it is read from are carried on this path
+  // too, not only on the matching one (issue #3997): a drift report that is silent about whether
+  // the mode dimension was read leaves its reader unable to tell whether a second, mode-only drift
+  // went unlooked-for. The standalone verifier reports both on both paths, and `PUBLIC-BUNDLE.md`
+  // promises the signal without qualifying the path. The envelope is built here rather than through
+  // `renderResult` because `OperationResult`'s failure half has no `result` slot and is not widened
+  // for one verb: `error` is unchanged, `result` is additive, and a machine caller reads
+  // `executableBitChecked` / `executableBitSkipped` from the same key on both paths.
+  const exitCode = exitCodeFor(error.code);
+  if (jsonMode) return { exitCode, stdout: `${JSON.stringify({ ok: false, error, result })}\n`, stderr: "" };
+  return { exitCode, stdout: "", stderr: `${renderHumanError(error)}${skippedModeNote(result)}` };
 }
 
 function handleDemo1PreregistrationVerify(
