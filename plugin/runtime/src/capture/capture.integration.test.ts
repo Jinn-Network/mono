@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -576,6 +576,61 @@ describe("Autopilot-driven capture (issue #3223)", () => {
     });
 
     // The record is in the local journal, which is what makes it retrievable and projectable.
+    expect(result.capture.indexed.status).toBe("indexed");
+  }, 60_000);
+
+  /**
+   * The feed above is written by this test. This one is written by the Claude adapter itself
+   * (`plugin/adapter-claude`, whose own suite asserts it still produces these exact bytes), so
+   * what is sealed here is production output rather than a Claude-shaped literal.
+   */
+  test("a feed the Claude adapter wrote seals, conforms, and reaches the journal", async () => {
+    const home = await newHome();
+    const { capture } = await startCapture(home);
+    const bytes = await readFile(
+      new URL("../../fixtures/capture/session-claude.ndjson", import.meta.url),
+    );
+    const { sessionId, feedPath } = await capture.openSession({ sessionId: "s-claude" });
+    expect(sessionId).toBe("s-claude");
+    await writeFile(feedPath, bytes);
+
+    const result = await capture.sealSession({ sessionId });
+    expect(result.sealed, JSON.stringify(result)).toBe(true);
+    if (!result.sealed) return;
+
+    const report = validateExecutionEvidence(result.capture.recordBytes);
+    expect(report.conforms, JSON.stringify(report.diagnostics)).toBe(true);
+
+    const document = JSON.parse(new TextDecoder().decode(result.capture.recordBytes)) as {
+      "@graph": readonly Record<string, unknown>[];
+    };
+    const entity = (id: string) => document["@graph"].find((value) => value["@id"] === id);
+    const identifiersOf = (value: Record<string, unknown> | undefined): unknown[] => {
+      const raw = value?.identifier;
+      return raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+    };
+    const role = (value: string) => ({
+      "@type": "PropertyValue",
+      propertyID: CONTROLLED_INPUT_ROLE_PROPERTY,
+      value,
+    });
+
+    // Gap 1: the base repository state the Claude session started from.
+    expect(entity(REPOSITORY_STATE_ENTITY_ID)?.codeRepository).toBe(
+      "https://github.com/Jinn-Network/mono",
+    );
+    // Gap 2a: the instructions the session was driven by, digest-bound rather than labelled.
+    const controlled = document["@graph"].filter((value) =>
+      String(value["@id"]).startsWith("inputs/controlled/"),
+    );
+    expect(controlled.map((value) => identifiersOf(value)[0])).toEqual([
+      role("config"),
+      role("workflow"),
+      role("prompt"),
+    ]);
+    // Gap 2b: the hosted model as a deployment identity.
+    expect(entity(MODEL_SERVICE_ENTITY_ID)).toBeDefined();
+
     expect(result.capture.indexed.status).toBe("indexed");
   }, 60_000);
 });
