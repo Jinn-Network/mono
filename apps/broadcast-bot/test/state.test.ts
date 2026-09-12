@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { StateStore, emptyState, POSTED_CAP } from '../src/state/store.js';
@@ -68,6 +68,28 @@ describe('StateStore', () => {
     try {
       const store = new StateStore(join(dir, 'missing.json'));
       expect(store.load()).toEqual(emptyState());
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('materializes empty state from the workflow bootstrap object', () => {
+    const dir = tmp();
+    try {
+      const path = join(dir, 'state.json');
+      writeFileSync(path, '{}\n');
+      expect(new StateStore(path).load()).toEqual(emptyState());
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects malformed persisted state', () => {
+    const dir = tmp();
+    try {
+      const path = join(dir, 'state.json');
+      writeFileSync(path, '{"github":{"releases":{"watermark":null,"posted":"bad"}}}\n');
+      expect(() => new StateStore(path).load()).toThrow('github.releases.posted');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
