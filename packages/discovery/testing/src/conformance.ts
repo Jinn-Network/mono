@@ -41,9 +41,8 @@ function base64Utf8(value: string): string {
  *
  * This is the one convention for consuming a corpus envelope directly: every consumer that hands
  * a vector's `headSignature` / entry `signature` to production verification MUST pass it through
- * this function first. The fixtures store legible text; `parseWireDsseEnvelope` accepts only the
- * base64 wire form, so a raw fixture envelope is refused at the parse step and the case answers
- * `unauthorized-signer` for a reason unrelated to the rule it names (#4436).
+ * this function first. A raw fixture envelope is refused at the parse step, so the case fails
+ * for a reason unrelated to the rule it names (#4436).
  */
 export function vectorEnvelopeToWire(envelope: {
   readonly payloadType: string;

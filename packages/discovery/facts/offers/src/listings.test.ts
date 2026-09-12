@@ -427,12 +427,12 @@ describe("the whole listing query, from cards alone", () => {
 // `listings.ts` carries its own copies of four grammars the sealed offer schema owns: the amount
 // regex (schema: `RailAmount`), the digest grammar (schema: `Sha256DigestSchema`), and the
 // display-unsafe and interior-format character classes. They are byte-identical today and
-// nothing ties them together -- none of the constants is exported from either side, so a
-// narrowing or widening edit to the schema's copy leaves the card reader silently accepting a
-// different language than the record it claims to summarize. The consequence is asymmetric and
-// worse than it looks: the reader accepting MORE than the record means an index ranks a card
-// whose offer the record layer will refuse; accepting LESS means an honest offer never reaches
-// the catalog at all.
+// nothing ties them together -- the card's constants are not exported, and this leaf cannot
+// import the schema's, so a narrowing or widening edit to the schema's copy leaves the card reader
+// silently accepting a different language than the record it claims to summarize. The consequence
+// is asymmetric and worse than it looks: the reader accepting MORE than the record means an index
+// ranks a card whose offer the record layer will refuse; accepting LESS means an honest offer
+// never reaches the catalog at all.
 //
 // Pinned through `readOfferCard` rather than by re-declaring the constants. A re-declared copy
 // pins nothing -- it drifts with neither side -- and exporting the constants would widen a
