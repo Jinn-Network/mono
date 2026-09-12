@@ -10,6 +10,7 @@ import {
   sealCryptoEnvironmentRecord,
 } from "./index.js";
 import {
+  chainFixtureUrl,
   loadAdversarialManifest,
   loadChainGoldenBytes,
   loadChainGoldenDigest,
@@ -28,6 +29,26 @@ const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
 const CHAIN_GOLDEN = ["closed-anchored-subset", "closed-local", "archive-dependent"] as const;
 const COMPOSITE_GOLDEN = ["chain-only", "composed", "extension"] as const;
+
+describe("fixture paths", () => {
+  test("resolve a relative path inside fixtures/", () => {
+    const root = new URL("../fixtures/", import.meta.url).href;
+    expect(chainFixtureUrl("chain/closed-local.json").href).toBe(`${root}chain/closed-local.json`);
+  });
+
+  test("refuse a path that escapes fixtures/", () => {
+    expect(() => chainFixtureUrl("/etc/passwd")).toThrow();
+    expect(() => chainFixtureUrl("../package.json")).toThrow();
+    expect(() => chainFixtureUrl("chain/../../package.json")).toThrow();
+    // WHATWG URL resolves these as double-dot path segments, so a textual ".." scan misses
+    // them and the guard has to be on the resolved url instead.
+    expect(() => chainFixtureUrl("chain/%2e%2e/%2e%2e/package.json")).toThrow();
+    expect(() => chainFixtureUrl("chain/%2E%2E/%2E%2E/package.json")).toThrow();
+    expect(() => chainFixtureUrl("chain/.%2e/.%2e/package.json")).toThrow();
+    expect(() => chainFixtureUrl("file:///etc/passwd")).toThrow();
+    expect(() => chainFixtureUrl("https://example.invalid/x")).toThrow();
+  });
+});
 
 describe.each(CHAIN_GOLDEN)("chain golden: %s", (name) => {
   test("parses under the record schema", async () => {

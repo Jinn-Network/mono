@@ -27,12 +27,23 @@ export async function loadPublishedSchema(): Promise<Record<string, unknown>> {
   ) as Record<string, unknown>;
 }
 
-/** Resolves a path inside the fixture corpus shipped by this package. */
+const FIXTURES_ROOT = new URL("../fixtures/", import.meta.url);
+
+/**
+ * Resolves a path inside the fixture corpus shipped by this package.
+ *
+ * The check is on the RESOLVED url, not on the input string. A textual `".."` scan is not
+ * enough: WHATWG URL treats `%2e%2e` (and `.%2e`, `%2e.`) as a double-dot path segment, so
+ * `x/%2e%2e/%2e%2e/package.json` passes a string scan and still resolves above
+ * `fixtures/`. These loaders are exported from `/testing`, so a consumer may pass a name it
+ * did not author.
+ */
 export function environmentFixtureUrl(relativePath: string): URL {
-  if (relativePath.startsWith("/") || relativePath.split("/").includes("..")) {
+  const resolved = new URL(relativePath, FIXTURES_ROOT);
+  if (resolved.protocol !== FIXTURES_ROOT.protocol || !resolved.href.startsWith(FIXTURES_ROOT.href)) {
     throw new Error("environment fixture paths must stay inside fixtures/");
   }
-  return new URL(`../fixtures/${relativePath}`, import.meta.url);
+  return resolved;
 }
 
 async function bytes(relativePath: string): Promise<Uint8Array> {
