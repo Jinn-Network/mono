@@ -5,9 +5,10 @@
  * no observable behaviour change — so no test here can be red before it and
  * green after. These pins encode current behaviour instead: they are a fence
  * that must stay green across the change, and each one bites on a specific way
- * the pre-sizing could be got wrong (an ungated `content-length` on an encoded
- * response, `subarray` retaining the whole backing buffer, a cumulative check
- * that stops being the authority). No peak-RSS assertions — they are flaky
+ * the pre-sizing could be got wrong (a body that outruns its declared length
+ * — which is what an encoded response looks like once decoded — `subarray`
+ * retaining the whole backing buffer, a cumulative check that stops being the
+ * authority). No peak-RSS assertions — they are flaky
  * under a shared vitest worker; the memory claim is argued in the code comment
  * and measured out of band.
  */
