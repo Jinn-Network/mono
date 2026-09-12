@@ -1641,6 +1641,17 @@ test('a definition whose opener line begins inside an enclosing compound is stil
     assert.deepEqual(severities(body.join('\n'), { shell: 'bash' }), ['error:head'], opener);
   }
 
+  // A definition's parentheses written apart are the words `(` and `)`; the rewind must not take
+  // that `(` for a statement boundary and cut the prefix down to `) `, which un-recognised the
+  // definition and let the closer's guard reach into the body — at the top level and enclosed.
+  for (const body of [
+    ['f ( ) {', '  producer | head -1', '} || true', 'f'],
+    ['function f ( ) {', '  producer | head -1', '} || true', 'f'],
+    ['{ f ( ) {', '  producer | head -1', '  }', '} || true', 'f'],
+  ]) {
+    assert.deepEqual(severities(body.join('\n'), { shell: 'bash' }), ['error:head'], body[0]);
+  }
+
   // A guard written inside the body still runs with the body, so it still counts.
   assert.deepEqual(
     severities(['{ f () {', '  producer | head -1 || true', '  }', '} || true', 'f'].join('\n'), { shell: 'bash' }),
