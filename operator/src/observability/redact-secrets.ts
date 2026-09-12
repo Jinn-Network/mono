@@ -24,6 +24,7 @@
  */
 
 import { SECRET_NAME_PATTERNS } from '../trajectory/secret-scrub.js';
+import { EMBEDDED_URL_RE } from '../util/embedded-url-pattern.js';
 import { walkStructured } from '../util/structured-walk.js';
 
 /**
@@ -38,8 +39,15 @@ import { walkStructured } from '../util/structured-walk.js';
  * v4 (#3108): `URL_RE` covers `ws://` and `wss://`, so a WebSocket RPC URL
  * embedded in a free-text string value now has its userinfo, path, query and
  * fragment stripped. Under v3 it matched nothing and survived intact.
+ *
+ * v5 (#4426): the free-text URL scanner is the shared `EMBEDDED_URL_RE`
+ * (`util/embedded-url-pattern.ts`), the same pattern `rpc/transport.ts`
+ * masks with. A URL with a bracketed-IPv6 host and a URL with an uppercase
+ * scheme are now redacted on the free-text path; under v4 the first was
+ * truncated at `[` (unparseable, credentials kept) and the second never
+ * matched.
  */
-export const REDACTION_VERSION = '4';
+export const REDACTION_VERSION = '5';
 
 /** The marker substituted for a redacted value. */
 function marker(label: string): string {
@@ -101,8 +109,6 @@ function isSecretName(key: string): boolean {
 const HEX64_RE = /\b0x[0-9a-fA-F]{64}\b/g;
 /** A JWT-shaped token: three base64url segments separated by dots. */
 const JWT_RE = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
-/** Any http(s) or ws(s) URL embedded in free text. */
-const URL_RE = /(?:https?|wss?):\/\/[^\s"'<>)\]]+/g;
 
 /**
  * Redact secret-shaped substrings inside a free-text string value.
@@ -118,7 +124,7 @@ function redactStringValue(value: string): string {
   return value
     .replace(HEX64_RE, marker('hex64'))
     .replace(JWT_RE, marker('jwt'))
-    .replace(URL_RE, (url) => redactRpcUrl(url));
+    .replace(EMBEDDED_URL_RE, (url) => redactRpcUrl(url));
 }
 
 // ── RPC URL redaction ────────────────────────────────────────────────────────
@@ -137,11 +143,19 @@ export function redactRpcUrl(url: string): string {
   try {
     parsed = new URL(url);
   } catch {
-    // Not a parseable URL. Apply only the non-URL string redactors here —
-    // calling redactStringValue would re-run URL_RE on the same unparseable
-    // string and recurse straight back into redactRpcUrl, overflowing the
-    // stack on a malformed URL (e.g. `http://[bad`) in an error message.
-    return url.replace(HEX64_RE, marker('hex64')).replace(JWT_RE, marker('jwt'));
+    // Not a parseable URL. Fail closed: strip userinfo and any query/fragment
+    // textually, so a URL that defeats `new URL` (e.g. `[https://u:pw@host]`,
+    // where EMBEDDED_URL_RE swallows the `]` into the host) still cannot carry
+    // a credential out. Then apply only the non-URL string redactors —
+    // calling redactStringValue would re-run EMBEDDED_URL_RE on the same
+    // unparseable string and recurse straight back into redactRpcUrl,
+    // overflowing the stack on a malformed URL (e.g. `http://[bad`) in an
+    // error message.
+    return url
+      .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, '$1')
+      .replace(/[?#][\s\S]*$/, '')
+      .replace(HEX64_RE, marker('hex64'))
+      .replace(JWT_RE, marker('jwt'));
   }
 
   // Drop userinfo (user:pass@host).

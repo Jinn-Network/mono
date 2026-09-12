@@ -344,7 +344,7 @@ describe('redaction report', () => {
 
 describe('redaction — #420 code-review hardening', () => {
   it('does not stack-overflow on a malformed URL in free text (mutual-recursion guard)', () => {
-    // `http://[bad` matches URL_RE but `new URL()` throws — the catch path
+    // `http://[bad` matches EMBEDDED_URL_RE but `new URL()` throws — the catch path
     // must not re-enter the URL scanner. A pre-fix build recurses to death.
     const out = redactValue({ note: 'boom at http://[bad while connecting' });
     expect((out as { note: string }).note).toContain('http://[bad');
@@ -371,7 +371,7 @@ describe('redaction — #420 code-review hardening', () => {
 
   it('redacts a wss:// URL carrying an opaque credential in free text (#3108)', () => {
     // `note` does not satisfy isRpcUrlKey, so this reaches redactStringValue's
-    // free-text URL_RE pass rather than the plural-array branch. All three
+    // free-text EMBEDDED_URL_RE pass rather than the plural-array branch. All three
     // planted values are opaque — non-hex64 and non-JWT — so HEX64_RE and
     // JWT_RE cannot catch them by shape; only the scheme widening can.
     const out = redactValue({
@@ -407,5 +407,53 @@ describe('redaction — #420 code-review hardening', () => {
     expect(out['txHash']).toBe(h);
     expect(out['blockHash']).toBe(h);
     expect(out['deliveryTxHash']).toBe(h);
+  });
+});
+
+// Issue #4426: the free-text URL scanner excluded `]` and `)` from the URL
+// body and had no `i` flag. A bracketed-IPv6 host was truncated at `[`, so
+// `new URL` threw and the catch path returned the credentials intact; an
+// uppercase scheme never matched at all. `transport.ts`'s
+// `maskUrlsInMessage` already had the correct pattern — the two now share
+// one constant so they cannot drift apart again.
+describe('redaction — #4426 free-text URL pattern shared with transport', () => {
+  it('redacts userinfo, key path and query from a bracketed-IPv6 wss:// URL in free text', () => {
+    const out = redactValue({
+      note: 'probe failed: wss://u:SECRETpw@[2001:db8::1]:8546/v2/SECRETKEYSECRETKEY01?apikey=SECRETQ',
+    }) as { note: string };
+    expect(out.note).toContain('[2001:db8::1]:8546');
+    expect(out.note).not.toContain('SECRETpw');
+    expect(out.note).not.toContain('SECRETKEYSECRETKEY01');
+    expect(out.note).not.toContain('SECRETQ');
+  });
+
+  it('redacts an uppercase-scheme URL in free text', () => {
+    const out = redactValue({
+      note: 'HTTPS://u:SECRETpw@rpc.example/v3/SECRETKEYSECRETKEY01',
+    }) as { note: string };
+    expect(out.note).toContain('rpc.example');
+    expect(out.note).not.toContain('SECRETpw');
+    expect(out.note).not.toContain('SECRETKEYSECRETKEY01');
+  });
+
+  // The shared pattern keeps `]`, so a URL closed by a prose bracket right
+  // after its authority (`[https://u:pw@host]`) swallows the `]` into the
+  // host and `new URL()` throws. The catch path must still strip the
+  // credential rather than hand the string back intact.
+  it('strips userinfo from a bracket-terminated URL that defeats `new URL`', () => {
+    const out = redactValue({
+      note: 'tried [https://u:SECRETpw@rpc.example] then gave up',
+    }) as { note: string };
+    expect(out.note).toContain('rpc.example');
+    expect(out.note).not.toContain('SECRETpw');
+  });
+
+  it('strips userinfo and query from a bracket-terminated URL with a port and query', () => {
+    const out = redactValue({
+      note: 'tried [https://u:SECRETpw@rpc.example:8545]?apikey=SECRETQ then gave up',
+    }) as { note: string };
+    expect(out.note).toContain('rpc.example');
+    expect(out.note).not.toContain('SECRETpw');
+    expect(out.note).not.toContain('SECRETQ');
   });
 });

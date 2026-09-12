@@ -303,10 +303,21 @@ try {
     assertVersionPayload(payload, 'npm exec');
 
     runOrExit('npm', ['exec', '--', 'jinn', '--help'], 'packed jinn --help');
+    // `doctor` is the one check that proves a config-bearing subcommand runs
+    // end to end from the packed install and emits its JSON envelope. Its
+    // `rpc_network` probe used to hit the default public testnet RPC chain,
+    // and this lane is post-merge-only, so a transient stall under the 60s
+    // timeout landed as a red merge queue with no PR-lane warning (#4427).
+    // Pinning the RPC to loopback port 9 makes the probe complete
+    // deterministically: port 9 is on the fetch spec's blocked-port list, so
+    // Node's fetch rejects it client-side (`bad port`) and no socket is ever
+    // opened; the check lands as `ok: false`. doctor exits 0 by contract even
+    // when checks fail, so the run still proves the subcommand and envelope
+    // without depending on the network.
     const doctor = spawnSync('npm', ['exec', '--', 'jinn', 'doctor', '--json'], {
       cwd: smokeDir,
       encoding: 'utf8',
-      env: smokeEnv,
+      env: { ...smokeEnv, JINN_RPC_URL: 'http://127.0.0.1:9' },
       timeout: 60_000,
     });
     if (doctor.error || doctor.status === 50) {
@@ -314,7 +325,13 @@ try {
       console.error(doctor.error ?? doctor.stderr ?? doctor.stdout);
       process.exit(doctor.status ?? 1);
     }
-    parseJsonOrExit(doctor.stdout, 'packed jinn doctor');
+    const doctorPayload = parseJsonOrExit(doctor.stdout, 'packed jinn doctor');
+    const checks = Array.isArray(doctorPayload?.checks) ? doctorPayload.checks : [];
+    if (!checks.some((check) => check?.name === 'rpc_network')) {
+      console.error('smoke-test-pack: packed jinn doctor envelope has no rpc_network check');
+      console.error(doctor.stdout);
+      process.exit(1);
+    }
 
     runOrExit(process.execPath, [nodePtyFix, '--verify'], 'node-pty verification');
 
@@ -329,8 +346,8 @@ try {
     // `doctor` runs RPC probes, and the pack-smoke job is post-merge-only, so a
     // transient stall under the 60s timeout landed as a red merge queue or a
     // red canary publish with no PR-lane warning (#3045). The `jinn doctor
-    // --json` call above is unchanged — doctor coverage is de-duplicated here,
-    // not dropped.
+    // --json` call above is kept, pinned offline (#4427) — doctor coverage is
+    // de-duplicated here, not dropped.
     const publicNpx = spawnSync('npx', ['--no-install', '@jinn-network/operator', 'version', '--json'], {
       cwd: smokeDir,
       encoding: 'utf8',
