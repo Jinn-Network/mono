@@ -203,10 +203,12 @@ function blankComments(text: string): string {
  * class, or an apostrophe/quote in template text, can be treated as an opener and paired with a
  * later matching genuine string quote, blanking a real call between them. It shares
  * `blankComments`' narrowness -- backticks are not tracked, and an unterminated quote blanks
- * nothing -- but NOT its direction: there, the residue reads a comment as code, which is loud;
- * here, blanking a real call HIDES a site, so this case is not fail-loud. The false negative
- * cannot cross a newline and is not live in the tree-wide sweep reported by #4045. It is retained
- * because tracking regex/template context recreated the previously reverted unsafe lexer.
+ * nothing -- but NOT that residue's direction: the unterminated-quote residue there reads a
+ * comment as code, which is loud; here, blanking a real call HIDES a site, so this case is not
+ * fail-loud. (`blankComments`' template-literal residue is the hiding-direction one, and it sits
+ * in the one form neither walker tracks; this function closes the quoted forms only.) The false
+ * negative cannot cross a newline and is not live in the tree-wide sweep reported by #4045. It is
+ * retained because tracking regex/template context recreated the previously reverted unsafe lexer.
  *
  * Applied only inside `emitterCallSites`, never folded into `blankComments`: `resolveOrigin` reads
  * the import SPECIFIER off that function's output, and blanking interiors there would resolve every

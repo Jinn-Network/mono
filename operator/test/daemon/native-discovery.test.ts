@@ -1647,6 +1647,94 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
       warn.mockRestore();
     });
 
+    /** `entry`, `routesFor`, and `source` above are hardcoded to one identity; these take theirs. */
+    function entryFor(identity: SourceIdentity, sequence: string, digest: `sha256:${string}`): AnnouncementEntry {
+      return { ...entry(sequence, null, digest), source: identity };
+    }
+
+    function routesForSource(identity: SourceIdentity, root: string, entries: readonly AnnouncementEntry[]) {
+      const routes = new Map<string, unknown>();
+      for (let index = 0; index < entries.length; index += 1) {
+        const current = String(index + 1).padStart(16, '0');
+        const previous = index === 0 ? null : String(index).padStart(16, '0');
+        routes.set(
+          `${root}${archivePagePath(identity.name, current)}`,
+          { ...page(current, previous, [signed(entries[index]!)]), source: identity.name },
+        );
+      }
+      const last = entries.at(-1)!;
+      routes.set(
+        `${root}${headPath(identity.name)}`,
+        wireHead({ ...head(last), origin: `${identity.agent}/${identity.name}` }),
+      );
+      return routes;
+    }
+
+    function sourceAt(identity: SourceIdentity, root: string): NativeDiscoverySource {
+      return peerSource(identity, {
+        resolveEndpoint: async () => ({
+          agent: identity.agent,
+          name: identity.name,
+          servingRoot: root,
+          archiveRootUrl: `${root}${archivePagePath(identity.name, '0000000000000001')}`,
+        }),
+      });
+    }
+
+    it('counts one crossing per source when two sources cross in the same pass (#4480)', async () => {
+      // Two sources — distinct agents, distinct serving roots, one permanently undecodable
+      // announcement each — cross the threshold on the same poll. The count is per PASS, not
+      // per source: a counter that set rather than added would report 1 here.
+      const first: SourceIdentity = { agent: 'did:key:zFirstRequester', name: 'requester' };
+      const second: SourceIdentity = { agent: 'did:key:zSecondRequester', name: 'requester' };
+      const firstEntry = entryFor(first, '0000000000000001', DIGEST_A);
+      const secondEntry = entryFor(second, '0000000000000001', DIGEST_B);
+      const routes = new Map<string, unknown>([
+        ...routesForSource(first, 'https://first.example', [firstEntry]),
+        ...routesForSource(second, 'https://second.example', [secondEntry]),
+      ]);
+      const store = new Store(':memory:');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const synced = createNativeDiscoveryConsumer({
+        store,
+        sources: [sourceAt(first, 'https://first.example'), sourceAt(second, 'https://second.example')],
+        transport: silentTransport(routes),
+        decode: async () => { throw new Error('chainId is not a canonical unsigned integer'); },
+        now: () => FRESH_FIXTURE_TIME,
+      });
+
+      for (let poll = 1; poll < NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD; poll += 1) {
+        await expect(synced.sync()).resolves.toMatchObject({
+          accepted: 0,
+          verifiedSources: 0,
+          degraded: [
+            { source: first, reason: 'undecodable' },
+            { source: second, reason: 'undecodable' },
+          ],
+          quarantined: 0,
+        });
+      }
+
+      // The threshold poll: both cross, both sources resume, and the pass reports both.
+      await expect(synced.sync()).resolves.toEqual({
+        accepted: 0,
+        verifiedSources: 2,
+        degraded: [],
+        quarantined: 2,
+      });
+      // Two distinct ledger rows, not one counted twice.
+      for (const [identity, entryValue] of [[first, firstEntry], [second, secondEntry]] as const) {
+        expect(isPoisonQuarantined({
+          store,
+          scope: 'announcement',
+          source: identity,
+          entryDigest: sealJson(entryValue).digest,
+          announcementId: 'announcement-0000000000000001',
+        })).toBe(true);
+      }
+      warn.mockRestore();
+    });
+
     it('never counts a local-authority fault against the announcement — that stays fatal', async () => {
       const first = entry('0000000000000001', null, DIGEST_A);
       const store = new Store(':memory:');
