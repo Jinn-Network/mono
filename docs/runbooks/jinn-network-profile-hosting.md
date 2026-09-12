@@ -79,8 +79,9 @@ records `generatedFrom.commit` and the catalog digest — so a push to `next` no
 produce one host commit. Each commit message names the source SHA, the lane, and the
 release groups, and `.jinn-profile-host-source` at the host root records the same — for the
 last *content-changing* refresh. A refresh that finds identical content writes nothing, the
-marker included, so the marker never names a SHA whose bytes are not the ones on disk, and
-it is not a record of the most recent refresh run.
+marker included (it rewrites only a missing or malformed marker), so the marker never names
+a SHA whose bytes are not the ones on disk, and it is not a record of the most recent
+refresh run.
 
 **The host repository's `main` is entirely generated. Never hand-edit it** — the next
 refresh deletes every top-level entry except `.git` and `.jinn-profile-host-source`
