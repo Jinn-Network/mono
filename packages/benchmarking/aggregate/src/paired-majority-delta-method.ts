@@ -11,7 +11,7 @@ import {
   type BinaryInstrumentQualificationComputeInput,
 } from "./binary-instrument-method.js";
 import type { Method } from "./method.js";
-import { resolveTaskProvenance } from "./resolved-inputs.js";
+import { MethodInputError, resolveTaskProvenance } from "./resolved-inputs.js";
 import { clusteredPairedDeltaInterval, sourceClusterManifest,
   MIN_PAIRED_DELTA_TASKS,
 } from "./stats/paired-delta.js";
@@ -215,6 +215,21 @@ export function validatePairedMajorityDeltaParameters(
 }
 
 function parametersFrom(input: Readonly<Record<string, unknown>>): PairedMajorityDeltaParameters {
+  // Typed pre-check (#3367), the same shape as the two #2583 guards in registry.ts: a `resamples`
+  // range violation is reported as `MethodInputError("method-parameter-out-of-range")` so all
+  // three registered methods report that one failure class the same way to a programmatic
+  // consumer. Every other parameter issue -- missing or unknown keys, vocabulary, `k` parity,
+  // `seed`, `alpha` -- is a contract-shape failure and deliberately stays the aggregate
+  // validator's untyped Error below; `validatePairedMajorityDeltaParameters` keeps its prose
+  // issue-list contract because it backs `Method.validateParameters`.
+  const resamples = input["resamples"];
+  if (
+    typeof resamples === "number"
+    && Number.isSafeInteger(resamples)
+    && (resamples < 1 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1)
+  ) {
+    throw new MethodInputError("method-parameter-out-of-range", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
+  }
   const validation = validatePairedMajorityDeltaParameters(input);
   if (!validation.ok) {
     throw new Error(`invalid paired-majority-delta@1 parameters: ${validation.issues.join("; ")}`);
