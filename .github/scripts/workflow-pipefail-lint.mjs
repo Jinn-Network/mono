@@ -420,9 +420,26 @@ export function earlyExitConsumer(segment) {
 // Compound statements
 // ---------------------------------------------------------------------------
 
-// One logical line as shell words and the `;` / `&&` / `||` operators between them.
-// A single `|` stays inside its word: the pipeline split is `splitUnquoted`'s job, and
-// only the operators that separate *statements* matter here.
+// The command separator at `index` — `|`, `&` or `|&` — or null when the character
+// there is not one. Only shell syntax counts (a quoted or escaped `|` is an ordinary
+// character), `&&` and `||` are operators rather than separators, and the `|`/`&`
+// inside a redirection — `2>&1`, `<&3`, `>|f`, `&>f`, `&>>f` — separates nothing.
+function separatorAt(text, mask, index) {
+  if (mask[index] !== true) return null;
+  const char = text[index];
+  if (char !== '|' && char !== '&') return null;
+  if (text[index + 1] === char && mask[index + 1] === true) return null;
+  if (mask[index - 1] === true && (text[index - 1] === '>' || text[index - 1] === '<')) return null;
+  if (char === '&' && text[index + 1] === '>') return null;
+  if (char === '|' && text[index + 1] === '&' && mask[index + 1] === true) return '|&';
+  return char;
+}
+
+// One logical line as shell words, the `;` / `&&` / `||` operators that separate
+// *statements*, and the `|` / `&` / `|&` separators that begin a new command without
+// ending the statement. Separators are their own tokens whether or not a space is
+// written around them (#4067, #4165); the pipeline split itself is `splitUnquoted`'s
+// job, and `splitTopLevel` reads operators only.
 function shellTokens(text) {
   const { mask, substDepth } = syntaxMask(text);
   const tokens = [];
@@ -457,6 +474,18 @@ function shellTokens(text) {
         continue;
       }
     }
+    const separator = separatorAt(text, mask, index);
+    if (separator !== null) {
+      tokens.push({
+        type: 'separator',
+        value: separator,
+        start: index,
+        end: index + separator.length,
+        subst: substDepth[index] > 0,
+      });
+      index += separator.length;
+      continue;
+    }
     const start = index;
     while (index < text.length) {
       if (mask[index] !== true) {
@@ -466,6 +495,7 @@ function shellTokens(text) {
       const char = text[index];
       if (/\s/u.test(char) || char === ';') break;
       if ((char === '&' || char === '|') && text[index + 1] === char && mask[index + 1] === true) break;
+      if (separatorAt(text, mask, index) !== null) break;
       index += 1;
     }
     tokens.push({
@@ -479,34 +509,28 @@ function shellTokens(text) {
       // nor closes a compound.
       opensParen: mask[start] === true && text[start] === '(',
       closesParen: mask[index - 1] === true && text[index - 1] === ')',
-      // A shell-syntax `|` or `&` glued to the end of the word. It is a command
-      // separator, so a statement begins right after it — but only when the mask says it
-      // is syntax: a quoted or escaped `|` is an ordinary character.
-      endsSeparator:
-        mask[index - 1] === true && (text[index - 1] === '|' || text[index - 1] === '&'),
     });
   }
   return tokens;
 }
 
 // Words after which the shell begins a new command, so a reserved word standing there
-// is a keyword rather than an argument. `|` and `&` stay inside a word token, only `&&`,
-// `||` and `;` being operators — so a word that merely *ends* in one is matched by
-// `endsSeparator` rather than by this set.
-const COMMAND_POSITION_WORDS = new Set(['(', '|', '&', '!', 'then', 'else', 'elif', 'do', '{', 'time']);
+// is a keyword rather than an argument. A `|` or `&` is never a word — spaced or glued,
+// it is a separator token — so it is matched by `leadsStatement`'s type test rather
+// than by this set.
+const COMMAND_POSITION_WORDS = new Set(['(', '!', 'then', 'else', 'elif', 'do', '{', 'time']);
 
 const BRACE_TOKENS = new Set(['{', '}']);
 
 function leadsStatement(previous) {
   if (previous === undefined) return true;
-  if (previous.type === 'operator') return true;
+  // A statement begins after `;`/`&&`/`||`, and a command begins after `|`/`&`/`|&` —
+  // whether the separator was written spaced or glued to a neighbor (#4067, #4165).
+  if (previous.type === 'operator' || previous.type === 'separator') return true;
   // A `case` arm pattern — `a)`, `*)`, `b|c)` — ends the word it is glued to, and the arm
   // body begins right after it. Without this a compound leading an arm was read as an
   // argument, which is the same false red this positional rule exists to remove.
   if (previous.closesParen === true) return true;
-  // `cat f| while …` tokenizes as one word `cat f|`, so the set lookup below — which
-  // tests the whole value — never sees the pipe that ends it (#4067).
-  if (previous.endsSeparator === true) return true;
   return COMMAND_POSITION_WORDS.has(previous.value);
 }
 
