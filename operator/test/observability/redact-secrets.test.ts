@@ -369,6 +369,23 @@ describe('redaction — #420 code-review hardening', () => {
     expect(out.rpcUrls[1]).not.toContain('PLANTEDwssPass');
   });
 
+  it('redacts a wss:// URL carrying an opaque credential in free text (#3108)', () => {
+    // `note` does not satisfy isRpcUrlKey, so this reaches redactStringValue's
+    // free-text URL_RE pass rather than the plural-array branch. All three
+    // planted values are opaque — non-hex64 and non-JWT — so HEX64_RE and
+    // JWT_RE cannot catch them by shape; only the scheme widening can.
+    const out = redactValue({
+      note:
+        'socket wss://operator:PLANTEDwssUser@ws.example.com/v2/PLANTEDwssPath01' +
+        '?token=PLANTEDwssQuery closed',
+    }) as { note: string };
+
+    expect(out.note).toContain('ws.example.com');
+    expect(out.note).not.toContain('PLANTEDwssUser');
+    expect(out.note).not.toContain('PLANTEDwssPath01');
+    expect(out.note).not.toContain('PLANTEDwssQuery');
+  });
+
   it('strips a credential hidden in a URL fragment', () => {
     const out = redactRpcUrl('https://rpc.example.com/#apikey=PLANTEDfragmentKey');
     expect(out).toContain('rpc.example.com');

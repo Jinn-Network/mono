@@ -24,7 +24,16 @@ import {
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
 import { assertClaimConsistency, firstDifference, type ClaimRecordIdentities } from "./claim-consistency.js";
-import { buildClaimPackage, type ClaimPackage } from "./claim.js";
+import { buildClaimPackage, ClaimPackageSchema, type ClaimPackage } from "./claim.js";
+import {
+  ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
+  BUNDLE_V6_FORMAT,
+  PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
+} from "../legacy-closures.js";
+import { BUNDLE_V10_FORMAT } from "../manifest.js";
 import { BenchmarkProductError } from "./errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 import { binaryInstrumentReportLimitations, BINARY_INSTRUMENT_REPORT_LIMITATIONS } from "./binary-qualification.js";
@@ -143,6 +152,110 @@ function refusalFor(tamper: (claim: Record<string, unknown>) => void): Benchmark
   }
   throw new Error("expected assertClaimConsistency to refuse the tampered claim");
 }
+
+/**
+ * Issue #4191: `claim-package/4` is carried by two bundle formats, and its pin admission has to
+ * say so.
+ *
+ * `/10` is `/6`'s closure with a different report page, so its claim's SHAPE is byte-identical to
+ * `/6`'s — minting a fifth claim-package id for an identical shape would be dishonest. What does
+ * differ is the reader line: `/6` stamps the first public `0.1` line, and `/10` cannot, because no
+ * released `0.1` reader understands the format. So the admission accepts either pair and nothing
+ * else, and which one a bundle must carry is settled where it can be: `claim-consistency` rebuilds
+ * the claim from the format the bundle's own manifest declares, so a `/6` bundle carrying `/10`'s
+ * pin fails on the exact field that disagrees.
+ */
+describe("issue #4191: the anchored claim package's two reader lines", () => {
+  function anchoredClaim(anchoredBundleFormat?: typeof BUNDLE_V6_FORMAT | typeof BUNDLE_V10_FORMAT): ClaimPackage {
+    return buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, []),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+      anchors: [],
+      ...(anchoredBundleFormat === undefined ? {} : { anchoredBundleFormat }),
+    });
+  }
+
+  test("omitting the format keeps every existing anchored claim byte-identical", () => {
+    const claim = anchoredClaim();
+    expect(claim.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(claim.verification.command).toBe(PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND);
+    expect(claim.verification.compatibleCommand).toBe(PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND);
+    expect(anchoredClaim(BUNDLE_V6_FORMAT)).toEqual(claim);
+  });
+
+  test("/10 pins the 0.2.1 line and keeps claim-package/4's shape", () => {
+    const composed = anchoredClaim(BUNDLE_V10_FORMAT);
+    expect(composed.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(composed.verification.command).toBe(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND);
+    expect(composed.verification.compatibleCommand).toBe(PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND);
+    // The shape, not merely the id: the whole justification for not minting a fifth id is that
+    // nothing but the two reader lines moves.
+    expect({ ...composed, verification: undefined })
+      .toEqual({ ...anchoredClaim(), verification: undefined });
+  });
+
+  test("the admission accepts both pairs and no third one", () => {
+    expect(ClaimPackageSchema.safeParse(anchoredClaim()).success).toBe(true);
+    expect(ClaimPackageSchema.safeParse(anchoredClaim(BUNDLE_V10_FORMAT)).success).toBe(true);
+    const mixed = {
+      ...anchoredClaim(),
+      verification: {
+        ...anchoredClaim().verification,
+        compatibleCommand: PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+      },
+    };
+    // A pair split across the two formats is not a pair either format pins.
+    expect(ClaimPackageSchema.safeParse(mixed).success).toBe(false);
+  });
+
+  test("a /6 bundle carrying /10's pin fails claim-consistency on the field that disagrees", () => {
+    // The admission alone cannot settle this — both pairs are legal claim-package/4 — so the
+    // binding is done by the rebuild, from the format the bundle's own manifest declares.
+    try {
+      assertClaimConsistency({
+        claim: anchoredClaim(BUNDLE_V10_FORMAT),
+        identities,
+        benchmarkRecord: {} as unknown as BenchmarkRecord,
+        runRecord,
+        matrixRecord,
+        reportRecord,
+        draftId: DRAFT_ID,
+        assurancePreset: ASSURANCE_PRESET,
+        anchors: [],
+      });
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(BenchmarkProductError);
+      expect((cause as BenchmarkProductError).message).toContain("verification.command");
+      return;
+    }
+    throw new Error("expected the mismatched reader pin to be refused");
+  });
+
+  test("declaring the bundle's own format makes the same claim consistent", () => {
+    expect(() => assertClaimConsistency({
+      claim: anchoredClaim(BUNDLE_V10_FORMAT),
+      identities,
+      benchmarkRecord: {} as unknown as BenchmarkRecord,
+      runRecord,
+      matrixRecord,
+      reportRecord,
+      draftId: DRAFT_ID,
+      assurancePreset: ASSURANCE_PRESET,
+      anchors: [],
+      anchoredBundleFormat: BUNDLE_V10_FORMAT,
+    })).not.toThrow();
+  });
+});
 
 describe("firstDifference", () => {
   test("equal objects report no difference even when later keys would sort first", () => {

@@ -11,6 +11,7 @@ import {
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
   BUNDLE_V8_FORMAT,
+  BUNDLE_V10_FORMAT,
   FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
@@ -26,6 +27,7 @@ import {
   PUBLIC_BUNDLE_V7_CHECKS,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_CHECKS,
+  PUBLIC_BUNDLE_V10_CHECKS,
   SUPPORTED_BUNDLE_FORMATS,
   BEACON_SOURCES,
 } from "@colophon-claims/verify";
@@ -331,6 +333,11 @@ describe("product documentation consistency", () => {
         compatible: [readerLine(instruction(BUNDLE_V8_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_V8_CHECKS,
       },
+      [`\`${BUNDLE_V10_FORMAT}\``]: {
+        pinned: [readerLine(instruction(BUNDLE_V10_FORMAT).command)],
+        compatible: [readerLine(instruction(BUNDLE_V10_FORMAT).compatibleCommand)],
+        checks: PUBLIC_BUNDLE_V10_CHECKS,
+      },
     };
 
     expect(rows.map((cells) => cells[0])).toEqual(Object.keys(expected));
@@ -371,6 +378,7 @@ describe("product documentation consistency", () => {
       [BUNDLE_V6_FORMAT]: "\n### Anchored bundle v6\n",
       [BUNDLE_V7_FORMAT]: "\n### Anchored binary qualification bundle v7\n",
       [BUNDLE_V8_FORMAT]: "\n### Disclosed anchored binary qualification bundle v8\n",
+      [BUNDLE_V10_FORMAT]: "\n### Composed presentation bundle v10\n",
     };
     // Prompted screening is the fourth axis the format string does not record, so the `/2` and
     // `/4` sections state a second, later line beside the unprompted one.
@@ -394,17 +402,34 @@ describe("product documentation consistency", () => {
       // does not use -- v7 contrasts against the `@0.1` line it cannot read, v4 explains which
       // line refuses it -- so a "no foreign line anywhere" rule would be false. What a section
       // must never do is instruct a reader to RUN a line the format does not pin.
-      const stated = [...section.matchAll(/```bash\n(.*?)```/gsu)]
+      // Every fence, whatever its info string: the recipes are `bash` today, but a `sh` or bare
+      // fence is still an instruction to run, and scanning only ```bash would let one carry a line
+      // the format does not pin (#4011). Verified a no-op on the guide as it stands.
+      const stated = [...section.matchAll(/```[^\n]*\n(.*?)```/gsu)]
         .flatMap((fence) => [...fence[1]!.matchAll(/npx @colophon-claims\/verify\S*/gu)])
         .map((command) => readerLine(command[0]));
       expect(stated.length, `${format} states no reader command`).toBeGreaterThan(0);
 
       const instruction = PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[format];
-      const pinned = new Set([
-        readerLine(instruction.command),
-        readerLine(instruction.compatibleCommand),
-        ...(format === BUNDLE_FORMAT || format === BUNDLE_V4_FORMAT ? promptedLines : []),
-      ]);
+      // `/5` pins its compatible line alone: claim-package/3 states one `command`, and the table's
+      // `/5.command` reproduces the producer rather than naming a line any `/5` bundle carries --
+      // the same asymmetry the table row above follows (#3941). Reading `command` here admitted the
+      // exact producer line to a section that must never instruct a reader to run it (#4011).
+      //
+      // `/2` and `/4` keep the union of `command` and `compatibleCommand` (plus the prompted lines)
+      // as a residual: each section legitimately states an unprompted line and a prompted one, and
+      // nothing in a fence says which it is, so the pin cannot narrow to one. For the other four
+      // the union is not vacuous -- `command` and `compatibleCommand` differ -- and every fence
+      // must still be one of those two.
+      const pinned = new Set(
+        format === BUNDLE_V5_FORMAT
+          ? [readerLine(instruction.compatibleCommand)]
+          : [
+              readerLine(instruction.command),
+              readerLine(instruction.compatibleCommand),
+              ...(format === BUNDLE_FORMAT || format === BUNDLE_V4_FORMAT ? promptedLines : []),
+            ],
+      );
       for (const line of stated) {
         expect(pinned.has(line), `${format} section runs ${line}, which it does not pin`).toBe(true);
       }
@@ -461,9 +486,10 @@ describe("product documentation consistency", () => {
     // `verify` release, and the publish workflow refuses a version npm has never served. So a
     // sentence naming `verify` as unpublished contradicts the constants imported here.
     const readme = read(productReadmePath);
-    const unpublishedClaims = readme
-      .split(/\n\s*\n/u)
-      .filter((block) => /unpublished|\bnot\b(?:\s+\w+){0,2}\s+published/iu.test(block));
+    const blocks = readme.split(/\n\s*\n/u);
+    const unpublishedClaims = blocks.filter(
+      (block) => /unpublished|\bnot\b(?:\s+\w+){0,2}\s+published/iu.test(block),
+    );
     expect(unpublishedClaims.length, "README states its publication holds").toBeGreaterThan(0);
     for (const block of unpublishedClaims) {
       expect(block, block).not.toContain("@colophon-claims/verify");
@@ -471,7 +497,18 @@ describe("product documentation consistency", () => {
     // The reader surface the README sends people to is a registry command, so the README has to
     // say so rather than leaving it under the hold.
     expect(readme).toMatch(/`@colophon-claims\/verify` is published/u);
-    expect(readme).toContain(readerLine(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND).slice(1));
+    // The stated `latest` is what sends a reader to a registry version, so it has to be THE version
+    // this tree pins -- not merely a token that appears somewhere in the file. Located by its own
+    // sentence so a disagreement fails on the line that is wrong (#4206).
+    const publication = blocks.find(
+      (block) => /`@colophon-claims\/verify` is published/u.test(block),
+    );
+    expect(publication, "README publication sentence").toBeTypeOf("string");
+    // Matched against the unwrapped sentence: the hard wrap is cosmetic, so a re-flow that lands
+    // the newline between the two tokens must not be reported as a version disagreement.
+    expect(publication?.replace(/\s+/gu, " ")).toContain(
+      `\`latest\` \`${readerLine(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND).slice(1)}\``,
+    );
   });
 
   it("documents the exact private web configuration and package commands", () => {

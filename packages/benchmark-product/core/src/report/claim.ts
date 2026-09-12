@@ -45,6 +45,8 @@ import {
   ClaimDisclosureSectionSchema,
   PROMPTED_SCREENING_PROFILE,
   PUBLIC_BUNDLE_V8_CHECKS as READER_DISCLOSED_VERIFICATION_CHECKS,
+  PUBLIC_BUNDLE_V10_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND,
   SELF_RUN_TRUST_ROOT,
   anchoredTrustRoot,
 } from "@colophon-claims/verify";
@@ -65,11 +67,13 @@ import {
   PUBLIC_BUNDLE_V6_CHECKS as READER_ANCHORED_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
+  BUNDLE_V6_FORMAT,
   PUBLIC_BUNDLE_V7_CHECKS as READER_ANCHORED_QUALIFICATION_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
 } from "../legacy-closures.js";
 import { join } from "node:path";
+import { BUNDLE_V10_FORMAT } from "../bundle/manifest.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { artifactsDir, claimPackageArtifactPath } from "../workspace/layout.js";
@@ -411,11 +415,23 @@ const ClaimPackageWireSchema = z.object({
         path: ["headline"],
       });
     }
-    if (
-      claim.verification.command !== PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
-      || claim.verification.compatibleCommand !== PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
-    ) {
-      ctx.addIssue({ code: "custom", message: "anchored claim package must pin verifier 0.1.0/@0.1", path: ["verification"] });
+    // Two formats carry claim-package/4: `/6` and, since issue #4191, the composed presentation
+    // generation `/10`. Their claim SHAPES are byte-identical, which is why no fifth id was minted
+    // — but their reader lines cannot be: `/6` stamps the first public 0.1 line and `/10` cannot,
+    // because no released 0.1 reader understands the format. So both pairs are admitted here and
+    // nothing else, and WHICH one a given bundle must carry is settled by `claim-consistency`,
+    // which rebuilds the claim from the format the bundle's own manifest declares. Mirrors
+    // `@colophon-claims/verify`'s `profile/claim.ts` exactly; the two copies must agree.
+    const pinsV6 = claim.verification.command === PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
+      && claim.verification.compatibleCommand === PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND;
+    const pinsV10 = claim.verification.command === PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND
+      && claim.verification.compatibleCommand === PUBLIC_BUNDLE_V10_COMPATIBLE_VERIFICATION_COMMAND;
+    if (!pinsV6 && !pinsV10) {
+      ctx.addIssue({
+        code: "custom",
+        message: "anchored claim package must pin verifier 0.1.0/@0.1 or 0.2.1/@0.2",
+        path: ["verification"],
+      });
     }
     if (
       claim.verification.checks.length !== READER_ANCHORED_VERIFICATION_CHECKS.length
@@ -649,6 +665,13 @@ export interface BuildClaimPackageInput {
    * here: this builder is pure, and the derivation needs the record bytes the caller already
    * authenticated. */
   readonly anchors?: readonly ClaimAnchor[];
+  /**
+   * Which anchored bundle format this claim is for (issue #4191). Read only when `anchors` makes
+   * this an anchored claim, and only to choose between the two reader lines claim-package/4 admits;
+   * it changes nothing else about the projection. Defaults to `/6`, which is what keeps every
+   * existing anchored claim byte-identical.
+   */
+  readonly anchoredBundleFormat?: typeof BUNDLE_V6_FORMAT | typeof BUNDLE_V10_FORMAT;
   /** disclosure-specification-record design §6.6: the projected disclosure section, already derived
    * from the sealed record's exact bytes by the shared `deriveDisclosureSpecification`. Absent for
    * every run with no declaration, which is what keeps every existing claim byte-identical. */
@@ -1008,6 +1031,9 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
   // this builder produced before the feature existed.
   const anchors = input.anchors ?? [];
   const anchored = input.anchors !== undefined;
+  // Defaulted rather than required, so a caller that predates issue #4191 produces exactly the
+  // bytes it produced before the composed generation existed.
+  const anchoredBundleFormat = input.anchoredBundleFormat ?? BUNDLE_V6_FORMAT;
   // Strictly opt-in, exactly like `anchors`: a run with no sealed disclosure declaration produces
   // the claim this builder produced before the feature existed, byte for byte (issue #2839).
   const disclosure = input.disclosure;
@@ -1085,7 +1111,9 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       command: anchoredQualification
         ? PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND
         : anchored
-          ? PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
+          ? anchoredBundleFormat === BUNDLE_V10_FORMAT
+            ? PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND
+            : PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
           : promptedScreening
             ? PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND
             : projection.qualification === undefined
@@ -1094,7 +1122,9 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       compatibleCommand: anchoredQualification
         ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
         : anchored
-          ? PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
+          ? anchoredBundleFormat === BUNDLE_V10_FORMAT
+            ? PUBLIC_BUNDLE_V10_COMPATIBLE_VERIFICATION_COMMAND
+            : PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
           : promptedScreening
             ? PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
             : projection.qualification === undefined

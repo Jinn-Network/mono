@@ -145,6 +145,35 @@ test('ignored public-root files do not alter profile bytes or counts while unign
   }
 });
 
+test('a Git control name in a public surface directory is refused before it is attested', () => {
+  // The served-path law applies to every served document, and a document with no declared
+  // identity reaches the host exactly as publicly as one with a claim. The case that
+  // matters cannot take the claimed branch at all: `declaredClaim` returns null for
+  // anything not ending in `.json`, so a `.gitignore` committed into a declared
+  // publicSurface directory -- an ordinary developer act, not an attack -- can never HAVE a
+  // claim. Unguarded, it produced an attested, signed profile root serving
+  // `profiles/.gitignore`, and only the deploy bundle refused it: red on `next` after
+  // attestation instead of here, in platform verification.
+  for (const controlName of ['.gitignore', '.gitattributes', 'nested/.gitmodules']) {
+    const root = scratchRepo();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-control-out-'));
+    try {
+      const target = join(root, 'packages/evidence/protocol/profiles', controlName);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, '*.json\n', 'utf8');
+      assert.throws(
+        () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
+        /public surface document.*must name a canonical relative spec\.jinn\.network hosted path/u,
+        `${controlName} must be refused while the profile root is being built`,
+      );
+      assert.equal(existsSync(join(outDir, 'profiles', controlName)), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  }
+});
+
 test('the profile manifest binds catalog digest, release group, lane, and exact package set', () => {
   const root = scratchRepo();
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));

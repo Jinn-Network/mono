@@ -159,10 +159,7 @@ describe('parseWithdrawArgv', () => {
     ).toThrow('Missing value for --config');
   });
 
-  // #4374: the bare form accepted an empty value, so `--config ''` consumed
-  // the token, escaped the unexpected-argument check, and this funds-moving
-  // command silently fell back to the default config.
-  it('still rejects an empty bare --config value', () => {
+  it('rejects an empty --config value in the space form', () => {
     expect(() =>
       parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--config', '']),
     ).toThrow('Missing value for --config');

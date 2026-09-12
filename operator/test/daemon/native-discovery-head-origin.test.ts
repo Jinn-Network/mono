@@ -15,7 +15,14 @@
  * trust catalog resolves no keys, so a head whose origin DOES match gets as far as signature
  * resolution and answers `unauthorized-signer`. Delete the origin comparison from
  * `verifySourceHead` and the foreign-origin cases answer `unauthorized-signer` too, reddening
- * every one of them.
+ * three of the four.
+ *
+ * The fourth, `'not-an-origin'`, discriminates the OTHER guard and is kept deliberately. It
+ * carries no `/`, so `splitOrigin` throws and `verifySourceHead` answers the same
+ * `head-origin-mismatch` from its parse `catch` one step earlier — the comparison is never
+ * reached, so deleting it leaves that case green. What the case covers is the malformed-origin
+ * half of the same refusal: a head whose origin is not a source origin at all must be refused
+ * rather than crashing the revalidation path.
  */
 import { describe, expect, it } from 'vitest';
 import {

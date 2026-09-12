@@ -185,6 +185,7 @@ jobs:
             .github/scripts/platform-verification-receipt.test.mjs \
             .github/scripts/platform-verification-workflow.test.mjs \
             .github/scripts/stack-publish-workflow.test.mjs \
+            .github/scripts/refresh-profile-host.test.mjs \
             .github/scripts/stack-publication-surface.test.mjs \
             .github/scripts/stack-trusted-publishers.test.mjs \
             .github/scripts/colophon-publish-manifest.test.mjs \

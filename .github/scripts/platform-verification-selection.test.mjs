@@ -53,7 +53,7 @@ test('a leaf protocol package reaches every verified lane it can reach', () => {
 });
 
 test('a contract-abis change selects the contracts lane and its consumers', () => {
-  const result = select(['packages/contract-abis/src/generated/slices/jinn-router-v3.ts']);
+  const result = select(['packages/contract-abis/src/generated/slices/bindingJinnRouterV3.ts']);
   assert.equal(result.run, true);
   assert.ok(
     result.selectedDomains.includes('contracts'),

@@ -43,7 +43,33 @@ export const BUNDLE_V5_FORMAT = "benchmark-product-public-bundle/5" as const;
  * declared here rather than in `legacy-closures.ts`.
  */
 export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
-/** Spans every lineage: the four frozen legacy closures, the evidence-native bundle, and `/8`. */
+/**
+ * The composed presentation generation (issue #4191, #3016 AC1/AC3): v6's exact closure — same
+ * mandatory members, same seven checks, same `claim-package/4` shape — rendering the report page
+ * the four operator rulings on report prose direct. Nothing about what the bundle PROVES moves; a
+ * presentation allocation that grew a check would be claiming the render proves something the
+ * records did not already prove.
+ *
+ * It is a new format number rather than an edit because the page is byte-pinned:
+ * `verifyPublicBundleSnapshot` rebuilds every presentation asset and byte-compares it, and every
+ * published claim seals the exact `npx` line that performs that rebuild. Changing a rendered
+ * string in place would break every already-published bundle under the command printed on its own
+ * page.
+ *
+ * Unlike v6, v7, and v8 it carries a presentation CAPABILITY REGISTRY rather than one more
+ * feature-shaped boolean: `FORMAT_PRESENTATION_CAPABILITIES` in `assets.ts` seeds this format with
+ * `report-prose-singularity`, and the next presentation feature registers an entry there instead of
+ * taking an eleventh format number (operator ruling 2026-09-05, amended 2026-09-07).
+ */
+export const BUNDLE_V10_FORMAT = "benchmark-product-public-bundle/10" as const;
+/**
+ * Spans every lineage: the four frozen legacy closures, the evidence-native bundle, `/8`, and the
+ * composed presentation generation `/10`.
+ *
+ * `/9` is a DELIBERATE HOLE. It is allocated on an open branch (PR #4090, issue #3698) that has not
+ * landed on the default branch, so this package must not claim to read it; both allocations are
+ * additive and coexist once that branch merges.
+ */
 export const SUPPORTED_BUNDLE_FORMATS = [
   BUNDLE_FORMAT,
   BUNDLE_V4_FORMAT,
@@ -51,6 +77,7 @@ export const SUPPORTED_BUNDLE_FORMATS = [
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
   BUNDLE_V8_FORMAT,
+  BUNDLE_V10_FORMAT,
 ] as const;
 export type SupportedBundleFormat = (typeof SUPPORTED_BUNDLE_FORMATS)[number];
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
@@ -64,7 +91,7 @@ export const BundleManifestFileSchema = z.object({
 });
 
 const LegacyBundleManifestSchema = z.object({
-  format: z.union([LegacyBundleFormatSchema, z.literal(BUNDLE_V8_FORMAT)]),
+  format: z.union([LegacyBundleFormatSchema, z.literal(BUNDLE_V8_FORMAT), z.literal(BUNDLE_V10_FORMAT)]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
 
@@ -93,7 +120,7 @@ export interface VerifyBundleSnapshotDeps {
 
 export interface BuildBundleManifestOptions {
   /** Defaults to v2 so existing producer and golden bytes remain immutable. */
-  readonly format?: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT;
+  readonly format?: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT | typeof BUNDLE_V10_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {

@@ -641,6 +641,7 @@ describe('#2523 — cold start with every archive mounted and nothing ever publi
     accepted: 0,
     verifiedSources: 0,
     degraded: [expect.objectContaining({ reason: 'unpublished' })],
+    quarantined: 0,
   };
 
   for (const order of ['A then B', 'B then A'] as const) {

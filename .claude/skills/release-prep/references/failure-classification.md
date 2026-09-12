@@ -4,7 +4,8 @@
 > mechanical run-role is retired (see `.claude/skills/release-prep/SKILL.md`);
 > the publish gate is the two SHA-bound check-runs `hermetic-gate` and
 > `environment-suite`. This file is retained because it is the only prose
-> documenting the scenario contracts those workflows still execute.
+> documenting the fail-class taxonomy (`FailClassSchema` / `classifyFailure`) that
+> those workflows still map scenario exit codes onto.
 
 Every `fail` verdict has a `failClass` — release-readiness uses it to decide whether a fail blocks ship.
 

@@ -65,7 +65,9 @@
         "forfeitDeliveredReservation",
         "closeTask",
         "claimSolutionDelivery",
-        "claimVerdictDelivery"
+        "claimVerdictDelivery",
+        "solutionReservations",
+        "tokenPaymentType"
       ]
     },
     "indexerTaskCoordinator": {
@@ -76,7 +78,15 @@
     "bindingTaskCoordinator": {
       "contract": "TaskCoordinator",
       "export": "TASK_COORDINATOR_ABI",
-      "items": ["TaskClaimed", "TaskCreated", "getAttempt", "getTask"]
+      "items": [
+        "TaskClaimed",
+        "TaskCreated",
+        "getAttempt",
+        "getTask",
+        "getRequestRef",
+        "getVerdictRequestRef",
+        "getVerdict"
+      ]
     },
     "operatorMechMarketplace": {
       "contract": "MechMarketplace",
@@ -97,7 +107,9 @@
         "mapAgentMechFactories",
         "request",
         "mapRequestIdInfos",
-        "MarketplaceRequest"
+        "MarketplaceRequest",
+        "mapNonces",
+        "getRequestId"
       ]
     },
     "operatorMechMarketplaceDeliver": {

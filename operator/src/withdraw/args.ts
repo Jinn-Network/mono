@@ -171,11 +171,11 @@ export function parseWithdrawArgv(argv: string[]): WithdrawParsedArgs {
   }
 
   const configIdx = args.findIndex((a) => a === '--config' || a.startsWith('--config='));
-  // Both forms reject an empty value (the bare form also refuses a following
-  // `--flag` token), so `--config ''` and `--config=` fail identically —
-  // otherwise the token is consumed, escapes the unexpected-argument check,
-  // and this funds-moving command silently falls back to the default config.
   if (configIdx !== -1) {
+    // An empty value (`--config ''` or `--config=`) is rejected in both forms
+    // so they fail identically — otherwise the token is consumed, escapes the
+    // unexpected-argument check, and this funds-moving command silently falls
+    // back to the default config.
     if (args[configIdx] === '--config') {
       const configPath = args[configIdx + 1];
       if (configPath === undefined || configPath === '' || configPath.startsWith('--')) {

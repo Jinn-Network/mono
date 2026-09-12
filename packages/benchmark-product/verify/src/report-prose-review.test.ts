@@ -3,17 +3,24 @@
 /**
  * Issue #3016: the report page's prose review, and the ratchet that keeps it running.
  *
- * The first test set covers the rules themselves. The second runs the review over the published
- * page — the conformance kit's golden bundle is a complete, real report — and requires its
- * findings to be exactly `FROZEN_REPORT_PROSE_FINDINGS`. That is the criterion's "runs as part of
- * producing a report, not as a one-off cleanup": new prose that repeats a statement, narrates a
- * control, or reads as machine-written fails the build of the package that produces reports, and
- * a frozen finding cannot be quietly forgotten because a dead entry fails too.
+ * The first test set covers the rules themselves. The second runs the review over the page the
+ * product actually renders and requires its findings to be exactly
+ * `FROZEN_REPORT_PROSE_FINDINGS`. That is the criterion's "runs as part of producing a report,
+ * not as a one-off cleanup": new prose that repeats a statement, narrates a control, or reads as
+ * machine-written fails the build of the package that produces reports, and a frozen finding
+ * cannot be quietly forgotten because a dead entry fails too.
+ *
+ * That subject is the composed `/10` rendering, not the golden bundle's published `/2` bytes
+ * (issue #4191). The frozen list was never a waiver list: it recorded findings a byte-pinned page
+ * still carried together with the wording that replaces them, and `/10` renders the replacement.
+ * Reviewing `/2` from here would freeze the ratchet against a page no future revision can change.
+ * The proof that those published bytes did not move lives in `assets-report-prose.test.ts`, which
+ * builds its page from the same `goldenInput` helper so the two suites cannot pin different pages.
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
+import { buildPublicAssets } from "./assets.js";
+import { BUNDLE_V10_FORMAT } from "./manifest.js";
 import {
   FROZEN_REPORT_PROSE_FINDINGS,
   REPORT_PROSE_RULES,
@@ -22,11 +29,16 @@ import {
   reportProseWordCount,
   reviewReportProse,
 } from "./report-prose-review.js";
+import { goldenInput } from "./testing/golden-asset-input.js";
 
-const GOLDEN_INDEX = fileURLToPath(
-  new URL("../fixtures/public-bundle-conformance-v1/golden/index.html", import.meta.url),
-);
-const publishedPage = readFileSync(GOLDEN_INDEX, "utf8");
+/** The golden bundle's own verified facts, rendered at the current presentation format. */
+let composedPage: string;
+
+beforeAll(async () => {
+  composedPage = new TextDecoder().decode(
+    buildPublicAssets(await goldenInput(BUNDLE_V10_FORMAT))["index.html"]!,
+  );
+});
 
 const page = (body: string): string => `<!doctype html><html><body>${body}</body></html>`;
 
@@ -107,7 +119,7 @@ describe("reviewReportProse", () => {
   });
 
   test("leaves the page's neutral, factual prose alone", () => {
-    for (const block of authoredReportProse(publishedPage)) {
+    for (const block of authoredReportProse(composedPage)) {
       const findings = reviewReportProse(page(`<p>${block.replace(/&/gu, "&amp;")}</p>`))
         .filter((finding) => finding.rule === "signs-of-ai-writing");
       expect(findings, block).toEqual([]);
@@ -115,18 +127,23 @@ describe("reviewReportProse", () => {
   });
 });
 
-describe("the published report page", () => {
-  test("carries exactly the findings the presentation revision retires", () => {
-    expect(reviewReportProse(publishedPage).map(({ rule, text }) => ({ rule, text })))
+describe("the report page this revision renders", () => {
+  test("carries exactly the findings the frozen list still records", () => {
+    expect(reviewReportProse(composedPage).map(({ rule, text }) => ({ rule, text })))
       .toEqual(FROZEN_REPORT_PROSE_FINDINGS.map(({ rule, text }) => ({ rule, text })));
   });
 
   test("every frozen finding names a rule that still exists", () => {
+    // Vacuous while the frozen list is empty (issue #4191 retired all four): the page this
+    // revision renders carries no finding, so this asserts nothing today. It is kept armed rather
+    // than deleted because the list is the mechanism, not a one-off -- the next presentation
+    // revision that defers a finding refills it, and this is the check that stops a deferral from
+    // naming a rule the review no longer runs.
     const ruleIds = new Set(REPORT_PROSE_RULES.map((rule) => rule.id));
     for (const frozen of FROZEN_REPORT_PROSE_FINDINGS) expect(ruleIds, frozen.text).toContain(frozen.rule);
   });
 
   test("does not grow past the pinned prose ceiling", () => {
-    expect(reportProseWordCount(publishedPage)).toBeLessThanOrEqual(REPORT_PROSE_WORD_CEILING);
+    expect(reportProseWordCount(composedPage)).toBeLessThanOrEqual(REPORT_PROSE_WORD_CEILING);
   });
 });
