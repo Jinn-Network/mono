@@ -24,7 +24,11 @@ import { test } from 'node:test';
 // The map lives here rather than in the fixtures tree on purpose. Everything under
 // `fixtures/` is digested by `fixture-manifest.mjs` and frozen append-only by
 // `fixture-immutability.mjs`, so a coverage map placed there could never be edited again
-// without a dated erratum — and it must change every time §18 or the corpus changes.
+// without a dated erratum — and it must change every time §18 or the corpus changes. And
+// the guard is a repo-level `node --test` rather than a vitest in `packages/discovery/testing`
+// (#3557's first-named home) because one of its two inputs, the design document, lives
+// outside that package: the cross-tree read belongs beside the §12 audit-table guard, in the
+// `architecture` job that already runs the record-discovery guards with no install.
 
 const root = resolve(import.meta.dirname, '../..');
 const specPath = join(root, 'docs', 'superpowers', 'specs', '2026-07-27-record-discovery-protocol-design.md');

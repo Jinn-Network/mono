@@ -874,9 +874,11 @@ one followed); `head-payload-mismatch` (the envelope does not carry these head b
 `invalid-head-envelope` (not a parseable wire DSSE envelope). The first five discharge
 §10.3's obligation directly: `refresh-by-ceiling` and `head-issued-ahead` are the same two
 slugs under the same spelling, top-level here because there is no `broken-chain` to fold them
-into. The last three are the envelope-shaped refusals §10.3 folds into `unauthorized-signer`
-and this procedure keeps separate, so a caller can tell a malformed envelope from a wrong
-signer.
+into. The last two — `head-payload-mismatch` and `invalid-head-envelope` — are the
+envelope-shaped refusals §10.3 folds into `unauthorized-signer` and this procedure keeps
+separate, so a caller can tell a malformed envelope from a wrong signer.
+`head-origin-mismatch` is neither: §10.3 does not check it at all, and this procedure adds it
+as the binding described below.
 
 **Two fail-closed properties.** It **adopts nothing**: the procedure itself neither reads nor
 writes the high-water mark, and no revalidation path advances the mark's *position* — §10.3
@@ -1042,7 +1044,7 @@ audited and does not independently prove any row complete.
 `.github/scripts/record-discovery-audit-table.test.mjs` reads the table back against the profile
 documents, so a record kind that arrives without a row, and a change to the two profiles the
 table actually quotes — the newest and the first — fail there rather than leaving the table
-stale. It reads no revision between those two, so a change to a middle revision falsifies only
+stale. It compares no revision between those two, so a change to a middle revision falsifies only
 the *Revision* cell's prose and is caught by that leaf's `profiles.test.ts` pins instead. That
 guard is a change-detector of the same kind as the pins: it proves the table and the profiles
 agree, and neither proves a profile complete against the schema it describes.
