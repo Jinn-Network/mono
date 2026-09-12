@@ -171,10 +171,10 @@ export function parseWithdrawArgv(argv: string[]): WithdrawParsedArgs {
   }
 
   const configIdx = args.findIndex((a) => a === '--config' || a.startsWith('--config='));
-  // Either form rejects an empty or flag-shaped value, so `--config ''` and
-  // `--config=` fail identically — otherwise the token is consumed, escapes
-  // the unexpected-argument check, and this funds-moving command silently
-  // falls back to the default config.
+  // Both forms reject an empty value (the bare form also refuses a following
+  // `--flag` token), so `--config ''` and `--config=` fail identically —
+  // otherwise the token is consumed, escapes the unexpected-argument check,
+  // and this funds-moving command silently falls back to the default config.
   if (configIdx !== -1) {
     if (args[configIdx] === '--config') {
       const configPath = args[configIdx + 1];
@@ -194,8 +194,9 @@ export function parseWithdrawArgv(argv: string[]): WithdrawParsedArgs {
   const passwordFdIdx = args.findIndex(
     (a) => a === '--password-fd' || a.startsWith('--password-fd='),
   );
-  // Both forms are stripped, and both reject an empty or flag-shaped value, so
-  // the equals form does not trip the unexpected-argument check below.
+  // Both forms are stripped, and both reject an empty value (the bare form
+  // also refuses a following `--flag` token), so the equals form does not trip
+  // the unexpected-argument check below.
   // Numeric validity stays `parsePasswordFdFromArgv`'s job, exactly as this
   // stripper does not validate the config path.
   if (passwordFdIdx !== -1) {

@@ -32,8 +32,8 @@ import { resolveDefaultStateDir } from '../state-dir.js';
  * Resolve the file descriptor from `--password-fd <n>` or `--password-fd=<n>`.
  *
  * The first *usable* occurrence wins -- `resolveCliPassword` merges the verb
- * argv with `process.argv`, so the flag routinely appears twice. A present but
- * unusable value throws: silently returning undefined fell through to
+ * argv with `process.argv`, so the flag routinely appears twice. A present flag
+ * with no usable occurrence throws: silently returning undefined fell through to
  * `JINN_PASSWORD` or the keystore-password file, decrypting with a different
  * secret than the operator supplied (#4375).
  */
