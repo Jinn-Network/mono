@@ -1215,6 +1215,53 @@ describe("restart reconstruction and §6.4 actions", () => {
     expect(probe.count.value).toBe(1);
     void restarted;
   });
+
+  // #4397: attempts no coordinator will ever `recover` converge at boot through the same
+  // reconciliation, in both directions — a dead one terminals, a live one resumes supervision.
+  test("reconcileNonterminal terminals a nonterminal attempt no caller will recover", async () => {
+    const root = await stateRoot("sweep-absent");
+    const pause = barrier();
+    const first = fixture(root, {
+      maxConcurrentAttempts: 1,
+      completionBarrier: { phase: "after-outcome", barrier: pause },
+    });
+    const { attempt } = await submit(first);
+    await pause.entered;
+    const workspace = paths(root, attempt);
+    await rm(join(workspace.meta, "outcome.json"));
+    const recovered = await restartWhilePaused(root, first, pause, attempt, { maxConcurrentAttempts: 1 });
+    await waitFor(
+      () => !probeShimAlive(workspace.meta).alive && harnessGroupEmpty(workspace.meta),
+      "completed harness did not relinquish its process group",
+    );
+
+    expect(await recovered.reconcileNonterminal()).toEqual([
+      { attempt, outcome: "reconciled", classification: "absent", detail: "absent" },
+    ]);
+    expect((await recovered.observe(attempt)).descriptor.derived).toMatchObject({ terminal: true, state: "lost" });
+    await expect(submit(recovered)).resolves.toBeDefined();
+    pause.release();
+  });
+
+  test("reconcileNonterminal resumes supervision of live work instead of killing it", async () => {
+    const root = await stateRoot("sweep-matching");
+    const pause = barrier();
+    const first = fixture(root, {
+      processDelayMs: 2_000,
+      completionBarrier: { phase: "before-outcome-wait", barrier: pause },
+    });
+    const { attempt } = await submit(first);
+    await pause.entered;
+    const workspace = paths(root, attempt);
+    const recovered = await restartWhilePaused(root, first, pause, attempt, { processDelayMs: 2_000 });
+
+    expect(await recovered.reconcileNonterminal()).toEqual([
+      { attempt, outcome: "reconciled", classification: "matching" },
+    ]);
+    expect(probeShimAlive(workspace.meta).alive).toBe(true);
+    expect(harnessGroupEmpty(workspace.meta)).toBe(false);
+    expect(await terminalState(recovered, attempt)).toBe("delivered");
+  });
 });
 
 // waitForOutcome polls "read the outcome, else probe liveness". The shim can write outcome.json

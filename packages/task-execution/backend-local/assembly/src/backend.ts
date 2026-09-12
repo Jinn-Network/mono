@@ -2839,6 +2839,38 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     return this.trackInflight(this.recoverRef(ref));
   }
 
+  /**
+   * Boot-time convergence for attempts no caller will `recover` (#4397): runs the ordinary
+   * reconciliation for every rehydrated nonterminal attempt, in order, one failure per attempt.
+   * Backend-local surface — the frozen `TaskExecutionBackend` contract is untouched.
+   */
+  async reconcileNonterminal(): Promise<readonly NonterminalSweepEntry[]> {
+    const entries: NonterminalSweepEntry[] = [];
+    for (const attempt of [...this.attempts.keys()]) {
+      try {
+        if (foldAttemptRecord(this.journal(attempt).read()).terminal) continue;
+      } catch {
+        // Not known terminal — `recover` below is the fail-loud surface for a corrupt journal.
+      }
+      try {
+        const report = await this.recover(attempt);
+        entries.push({
+          attempt,
+          outcome: "reconciled",
+          classification: report.classification,
+          ...(report.detail === undefined ? {} : { detail: report.detail }),
+        });
+      } catch (error) {
+        entries.push({
+          attempt,
+          outcome: "failed",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return entries;
+  }
+
   private async recoverRef(ref: SubmissionUri | AttemptUri): Promise<ReconciliationReport> {
     this.assertWriter();
     const override = this.reconciliationOverrides.get(ref);
