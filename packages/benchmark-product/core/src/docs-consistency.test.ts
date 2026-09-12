@@ -578,8 +578,13 @@ const aliasReadmePath = resolve(productRoot, "verify/README.md");
 const RETIRED_READER_TOKEN =
   /@colophon-claims\/verify(?:@[0-9][0-9.]*)?(?![-\w])|colophon-verify(?![-\w])/gu;
 
-/** An instruction to RUN the retired reader, pinned or unpinned. */
-const RETIRED_READER_INSTRUCTION = /npx\s+@colophon-claims\/verify(?![-\w])/u;
+/**
+ * An instruction to RUN the retired reader, pinned or unpinned: its package name anywhere after a
+ * package-manager verb on the same line (`npx -y …`, `npm exec …`, `npm i -g …`, `yarn dlx …`), or
+ * its binary by name. A bare `npx` prefix would let every other spelling through.
+ */
+const RETIRED_READER_INSTRUCTION =
+  /\b(?:npx|npm|yarn|pnpm)\b[^\n]*@colophon-claims\/verify(?![-\w])|(?<![-\w])colophon-verify(?![-\w])/u;
 
 /** Generated trees and sealed bundle bytes are not surfaces this repository emits. */
 const UNSWEPT_DIRECTORIES = new Set(["node_modules", "dist", ".next", "fixtures", "__fixtures__"]);
