@@ -2388,6 +2388,8 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           return { table: this.readProcessGroupTable() };
         } catch (error) {
           if (error instanceof ProcessTableProbeError) return { failure: error };
+          // Anything else lands in the loop's swallow-all catch below and takes the RELEASING branch;
+          // only the typed probe failure is the fail-closed hold, so keep every table-read failure typed.
           throw error;
         }
       })();
