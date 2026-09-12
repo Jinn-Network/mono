@@ -2126,6 +2126,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     for (let tries = 0; tries < 200; tries += 1) {
       try {
         if (this.groupMembers(fingerprint.harnessPid).length === 0) return;
+        lastProbeFailure = undefined; // a later successful read supersedes an earlier failure
       } catch (error) {
         if (!(error instanceof ProcessTableProbeError)) throw error;
         lastProbeFailure = error.message; // not yet proven empty (#4395)
@@ -2155,7 +2156,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   // An unverifiable answer is not proof of death, so it reads as alive and keeps the slot — the
   // behavior this Attempt had before #3192 — and is reported as such so the caller can journal it
   // (#4395). Both directions are explicit here: an unreadable fingerprint and an unreadable
-  // process table each hold; neither is inherited from a swallowed probe.
+  // process table each hold. The one probe this does not own is `probeShimAlive`'s start-time
+  // read, which by the supervisor's documented contract treats an unverifiable start time as
+  // not-alive; a shim whose `ps -o lstart` fails therefore still falls through to the group check.
   private attemptLiveness(paths: WorkspacePaths, table: () => ProcessGroupTable): {
     readonly alive: boolean;
     readonly unverifiable?: {

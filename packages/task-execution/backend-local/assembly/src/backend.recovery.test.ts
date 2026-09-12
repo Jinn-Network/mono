@@ -1193,9 +1193,8 @@ describe("restart reconstruction and §6.4 actions", () => {
   // #4396: rehydration takes one process-table snapshot per boot, not one per attempt.
   test("rehydration reads the process table at most once regardless of how many nonterminal attempts are on disk", async () => {
     const probe = countingProcessGroupTable();
-    const empty = fixture(await stateRoot("bound-empty"), { maxConcurrentAttempts: 3, faults: probe.faults });
+    fixture(await stateRoot("bound-empty"), { maxConcurrentAttempts: 3, faults: probe.faults });
     expect(probe.count.value).toBe(0);
-    void empty;
     const root = await stateRoot("bound-three");
     const first = fixture(root, { maxConcurrentAttempts: 3 });
     const attempts = [await submit(first), await submit(first), await submit(first)].map(({ attempt }) => attempt);
@@ -1210,10 +1209,9 @@ describe("restart reconstruction and §6.4 actions", () => {
         events.filter(({ type }) => type !== "attempt-terminal"));
     }
     probe.count.value = 0;
-    const restarted = fixture(root, { maxConcurrentAttempts: 3, faults: probe.faults });
+    fixture(root, { maxConcurrentAttempts: 3, faults: probe.faults });
     // Read synchronously by the constructor, before any worker runs.
     expect(probe.count.value).toBe(1);
-    void restarted;
   });
 
   // #4397: attempts no coordinator will ever `recover` converge at boot through the same
