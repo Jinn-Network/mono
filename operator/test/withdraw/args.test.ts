@@ -165,6 +165,45 @@ describe('parseWithdrawArgv', () => {
     ).toThrow('Missing value for --config');
   });
 
+  // #4375: the stripper matched the two-token form only, so
+  // `--password-fd=3` survived the splice and tripped `Unexpected arguments:`,
+  // and an empty value was consumed silently.
+  it('accepts the --password-fd equals form leading and trailing', () => {
+    expect(() =>
+      parseWithdrawArgv([
+        '--password-fd=3',
+        '--to',
+        '0x000000000000000000000000000000000000dEaD',
+        '--dry-run',
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      parseWithdrawArgv([
+        '--to',
+        '0x000000000000000000000000000000000000dEaD',
+        '--dry-run',
+        '--password-fd=3',
+      ]),
+    ).not.toThrow();
+  });
+
+  it('rejects an empty --password-fd= value', () => {
+    expect(() =>
+      parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--password-fd=']),
+    ).toThrow('Missing value for --password-fd');
+  });
+
+  it('rejects an empty bare --password-fd value', () => {
+    expect(() =>
+      parseWithdrawArgv([
+        '--to',
+        '0x000000000000000000000000000000000000dEaD',
+        '--password-fd',
+        '',
+      ]),
+    ).toThrow('Missing value for --password-fd');
+  });
+
   it('rejects unknown tokens', () => {
     expect(() => parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--what'])).toThrow();
   });

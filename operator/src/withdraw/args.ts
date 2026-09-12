@@ -191,13 +191,27 @@ export function parseWithdrawArgv(argv: string[]): WithdrawParsedArgs {
     }
   }
 
-  const passwordFdIdx = args.indexOf('--password-fd');
+  const passwordFdIdx = args.findIndex(
+    (a) => a === '--password-fd' || a.startsWith('--password-fd='),
+  );
+  // Both forms are stripped, and both reject an empty value (the bare form
+  // also refuses a following `--flag` token), so the equals form does not trip
+  // the unexpected-argument check below.
+  // Numeric validity stays `parsePasswordFdFromArgv`'s job, exactly as this
+  // stripper does not validate the config path.
   if (passwordFdIdx !== -1) {
-    const fdVal = args[passwordFdIdx + 1];
-    if (fdVal === undefined || fdVal.startsWith('--')) {
-      throw new Error('Missing value for --password-fd');
+    if (args[passwordFdIdx] === '--password-fd') {
+      const fdVal = args[passwordFdIdx + 1];
+      if (fdVal === undefined || fdVal === '' || fdVal.startsWith('--')) {
+        throw new Error('Missing value for --password-fd');
+      }
+      args.splice(passwordFdIdx, 2);
+    } else {
+      if (args[passwordFdIdx]!.slice('--password-fd='.length) === '') {
+        throw new Error('Missing value for --password-fd');
+      }
+      args.splice(passwordFdIdx, 1);
     }
-    args.splice(passwordFdIdx, 2);
   }
 
   if (args.length > 0) {
