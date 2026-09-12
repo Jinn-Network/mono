@@ -221,7 +221,7 @@ describe("the normalized-identifier guarantee, under the special schemes", () =>
   // rule could falsify the enumeration with a green suite.
   test.each([
     ["refuses a raw apostrophe in a query", "https://r.example/v1?a'b", false],
-    ["accepts its escape, which is a different identifier", "https://r.example/v1?a%27b", true],
+    ["accepts its escape, the accepted spelling of the same identifier", "https://r.example/v1?a%27b", true],
     ["accepts a raw apostrophe in a path", "https://r.example/v1'x", true],
     ["accepts a raw apostrophe in a fragment", "https://r.example/v1#a'b", true],
   ])("%s", (_label, uri, accepted) => {

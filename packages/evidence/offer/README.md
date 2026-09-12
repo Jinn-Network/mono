@@ -50,10 +50,9 @@ The protocol takes no fee and no cut, ever. There is no fee field to take one wi
   inside the value it may carry no format character but ZWJ and ZWNJ. Those two are kept
   because they are load-bearing in Indic and Arabic scripts; the rest go because the
   96-character tag block among them hides arbitrary ASCII inside a payment address. That last
-  rule shrinks the invisible-payload alphabet
-  rather than emptying it — variation selectors and other invisible non-`Cf` characters are
-  outside its reach, as `src/schema.ts` records — because emptying it is the unbounded
-  confusables problem this package declines.
+  rule shrinks the invisible-payload alphabet rather than emptying it — variation selectors
+  and other invisible non-`Cf` characters are outside its reach, as `src/schema.ts` records —
+  because emptying it is the unbounded confusables problem this package declines.
 - **No reference currency and no conversion, anywhere.** Equivalence across a multi-rail
   offer is the holder's assertion, sealed with the offer.
 - **Repricing is supersession, never mutation.** A new price is a new record with a new
