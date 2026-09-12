@@ -6,8 +6,9 @@ import {
   parseSourceHead,
   parseWireDsseEnvelope,
 } from "@jinn-network/record-discovery-protocol";
+import type { DsseEnvelope } from "@jinn-network/trust-core";
 
-import { isRunnableSourceChainInput, vectorEnvelopeToWire } from "./harness.js";
+import { vectorEnvelopeToWire } from "./harness.js";
 import { loadVectors, loadVectorsByKind, VECTOR_KINDS } from "./vectors.js";
 
 // Task 10 Step 2: every fixture loads, parses under protocol schemas where
@@ -196,24 +197,29 @@ describe("named checks in isolation are represented (design §18)", () => {
 // direct consumer cannot mistake the parser's refusal (which surfaces as
 // `unauthorized-signer` downstream) for the rule its test names.
 describe("vector DSSE envelopes are wire-form only after vectorEnvelopeToWire", () => {
-  const envelopes = loadVectorsByKind("source-chain")
-    .filter((vector) => isRunnableSourceChainInput(vector.input))
-    .flatMap((vector) => {
-      const input = vector.input as { headSignature: unknown; entries: Array<{ signature?: unknown }> };
-      return [
-        { vector: vector.name, label: "headSignature", envelope: input.headSignature },
-        ...input.entries.flatMap((e, index) =>
-          e.signature === undefined ? [] : [{ vector: vector.name, label: `entries[${index}].signature`, envelope: e.signature }],
-        ),
-      ];
-    });
+  // Walk every vector's whole `input`: the source-conformance and cross-head
+  // fork vectors carry envelopes under their own keys (`headA`, `refreshes`,
+  // entries without a `head`), so a shape-specific pick would skip them.
+  function isEnvelopeShaped(value: unknown): value is DsseEnvelope {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const record = value as Record<string, unknown>;
+    return typeof record["payloadType"] === "string" && typeof record["payload"] === "string" && Array.isArray(record["signatures"]);
+  }
+  function collectEnvelopes(value: unknown, path: string): Array<{ label: string; envelope: DsseEnvelope }> {
+    if (isEnvelopeShaped(value)) return [{ label: path, envelope: value }];
+    if (typeof value !== "object" || value === null) return [];
+    return Object.entries(value).flatMap(([key, child]) => collectEnvelopes(child, path === "" ? key : `${path}.${key}`));
+  }
+  const envelopes = loadVectors().flatMap((vector) =>
+    collectEnvelopes(vector.input, "").map(({ label, envelope }) => ({ vector: vector.name, label, envelope })),
+  );
 
-  it("covers at least the runnable source-chain corpus", () => {
+  it("covers the whole corpus", () => {
     expect(envelopes.length).toBeGreaterThan(0);
   });
 
   it.each(envelopes)("$vector $label: raw form is refused, converted form parses", ({ envelope }) => {
     expect(() => parseWireDsseEnvelope(envelope)).toThrow(/not canonical standard base64/u);
-    expect(() => parseWireDsseEnvelope(vectorEnvelopeToWire(envelope as never))).not.toThrow();
+    expect(() => parseWireDsseEnvelope(vectorEnvelopeToWire(envelope))).not.toThrow();
   });
 });
