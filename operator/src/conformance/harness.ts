@@ -168,9 +168,10 @@ export async function runConformance(args: RunConformanceArgs): Promise<Conforma
       } catch (err) {
         // Leave undefined — task CID resolution is optional in V1 because many
         // envelope fixtures use stub CIDs. Checks that need the Task skip/fail.
-        // A stub CID answers 404, which classifies `not-found` and stays silent
-        // under exactly this rule, so classifying preserves that intent while
-        // surfacing what the bare catch never contemplated: a cap refusal, a
+        // Only a gateway that answers 404/410 stays silent; a malformed stub CID
+        // draws 400 or 5xx from a real gateway and so warns as `unavailable`,
+        // which is one truthful line rather than a silent skip. Classifying
+        // surfaces what the bare catch never contemplated: a cap refusal, a
         // blocked redirect, a transport failure (#3758).
         const classification = classifyIpfsFetchFailure(err);
         if (classification !== 'not-found') {
@@ -271,7 +272,8 @@ export async function runConformance(args: RunConformanceArgs): Promise<Conforma
             console.warn(
               `[conformance] source bundle ${bundleCid} could not be read `
                 + `(${classification}); Layer 2 static checks will skip. The read covers the `
-                + `manifest and every file it lists, so the failure may be either: `
+                + `manifest and every file it lists, so the failure may be in the manifest or in `
+                + `a listed file: `
                 + `${err instanceof Error ? err.message : String(err)}`,
             );
           }

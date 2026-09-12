@@ -105,14 +105,14 @@ export class IpfsFetchFailedError extends Error {
  * non-answer as `'not-found'` costs silent treatment as absent, no retry signal, and a data gap
  * indistinguishable from real data: expensive, permanent, invisible.
  *
- * Correcting a claim that has been restated as fact: it is NOT true that no control flow branches
- * on `'not-found'`. Five sites do, so the strictness has an observable cost (noisier
- * `'unavailable'` warnings for content that is genuinely absent) rather than none —
+ * The strictness is not free: control flow does branch on `'not-found'`, so its cost is noisier
+ * `'unavailable'` warnings for content that is genuinely absent, rather than none —
  * `buildFetchIpfsBytes` (returns `undefined` instead of the refusal string) and `narrowIpfsBytes`
  * (silent instead of `logger.warn`) in `operator/src/daemon/composition-root.ts`;
  * `warnIpfsFallThrough` (silent instead of `console.warn`) and `ipfsReason` (reason `not_found`
- * instead of `too_large` / `unavailable`) in `./artifact-retrieval.ts`; and the trajectory read in
- * `operator/src/conformance/harness.ts` (silent instead of `console.warn`).
+ * instead of `too_large` / `unavailable`) in `./artifact-retrieval.ts`; and the task, trajectory,
+ * and source-bundle reads in `operator/src/conformance/harness.ts` (silent instead of
+ * `console.warn`).
  */
 export function classifyIpfsFetchFailure(
   error: unknown,

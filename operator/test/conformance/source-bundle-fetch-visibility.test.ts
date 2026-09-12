@@ -5,8 +5,9 @@
  * report showed the same skipped checks whether the content is genuinely not
  * on IPFS or the byte cap refused it, the redirect guard blocked it, or the
  * transport failed. Step 4 already classified before warning; these two now do
- * the same. Only genuine absence is silent — which is exactly what the step-3
- * comment about stub CIDs was protecting, since a stub CID answers 404.
+ * the same. Only a gateway that answered 404/410 is silent; anything else,
+ * including the 400 a real gateway gives a malformed stub CID, is one warning
+ * line naming its classification.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -136,7 +137,7 @@ describe('conformance task read visibility (#3758)', () => {
     expect(warnings.some((line) => line.includes('too-large'))).toBe(true);
   });
 
-  it('stays silent for the stub CID case the bare catch protected', async () => {
+  it('stays silent when the gateway answered that it is not there', async () => {
     const warnings = await runWithTaskFailure(new IpfsContentNotFoundError('missing', 404));
     expect(warnings.filter((line) => line.startsWith('[conformance] task'))).toEqual([]);
   });
