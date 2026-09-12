@@ -7,7 +7,7 @@
 > documenting how the surviving two scenarios are wired and what their runtime
 > shape is; the per-scenario contracts live in `testing-jinn-app` (see below).
 
-The automated gate runs **T2.2 + T2.4** (producer/evaluator loops against an Anvil-fork-of-Base-Sepolia RPC). T2.1 and T2.3 are retired/removed; their sections below are kept for provenance. Both surviving scenarios are executed by `.github/workflows/environment-suite.yml` via `operator/scripts/release/run-tier-2.ts`; the release-prep Phase 5 invocation this file used to describe is retired with the skill's run-role.
+The automated gate runs **T2.2 + T2.4** (producer/evaluator loops against an Anvil fork of Base mainnet). T2.1 and T2.3 are retired/removed; their sections below are kept for provenance. Both surviving scenarios are executed by `.github/workflows/environment-suite.yml` via `operator/scripts/release/run-tier-2.ts`; the release-prep Phase 5 invocation this file used to describe is retired with the skill's run-role.
 
 The "what does this scenario actually exercise" contracts live in `testing-jinn-app` (one doc per scenario, Plan B). The "how is it wired and what's the runtime shape" details are below.
 
@@ -57,7 +57,7 @@ The automated live-fork T2.3 gate was **removed** by DR-2026-06-03 / [#1014](htt
 
 **Deterministic replacement:** none for the launcher-join journey. `operator/test/dashboard/` no longer exists and no automated gate exercises the two-operator join journey end to end; what survives automatically is per-leg unit coverage (`operator/test/solvernets/launch-state-machine.test.ts`, `operator/test/solver-nets/registry-register-joined.test.ts`). The surviving `yarn e2e:app-flow` flows — `apps/operator-console/e2e/claim-policy-flow.e2e.ts` + `apps/operator-console/e2e/posting-status.e2e.ts` (hermetic gate, the same two T1.4 runs) — cover claim-policy save and task-post counts, not join.
 
-**Real cross-operator experience:** the MANUAL paired-flow gate — [`testing-jinn-app/references/scenario-multi-op-spa-flow.md`](../../testing-jinn-app/references/scenario-multi-op-spa-flow.md) — run by the Captain per DR-2026-06-08 (a human-run spot check, not automated).
+**Real cross-operator experience:** the MANUAL paired-flow gate — [`testing-jinn-app/references/scenario-multi-op-console-flow.md`](../../testing-jinn-app/references/scenario-multi-op-console-flow.md) — run by the Captain per DR-2026-06-08 (a human-run spot check, not automated).
 
 ## Parallelism
 

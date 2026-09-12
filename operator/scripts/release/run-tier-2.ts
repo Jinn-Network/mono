@@ -93,7 +93,10 @@ export async function runTier2(opts: RunTier2Options = {}): Promise<RunTier2Resu
   };
   await fs.writeFile(path.join(outputDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
-  // Marker block
+  // Marker block — the marker.txt diagnostic artifact (dated tier-2-* keys). It
+  // is a separate artifact from the release-readiness handoff doc's block
+  // (environment-suite key, release-readiness.ts) and nothing parses it: the
+  // two-gate guard in npm-publish.yml queries check-runs and executes no tests.
   const markerLines: string[] = [
     '<!-- jinn-release-evidence:v1',
     `release-candidate=${opts.candidateVersion ?? 'unknown'}`,

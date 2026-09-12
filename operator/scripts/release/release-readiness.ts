@@ -128,14 +128,22 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
     push(`- ${v.scenarioId}: ${v.verdict}${v.failClass ? ` (${v.failClass})` : ''} (${v.wallClockMs}ms)`);
   }
   push();
-  if (input.environmentSuiteVerdict && input.environmentSuiteEvidence) {
+  // Prose branches on the verdict alone, matching the marker line below;
+  // evidence is optional detail.
+  if (input.environmentSuiteVerdict) {
+    const verdict = input.environmentSuiteVerdict;
+    const evidence = input.environmentSuiteEvidence;
     push(`## Environment-suite evidence`);
-    push(`- Scenario: ${input.environmentSuiteEvidence.scenario}`);
-    push(`- Hermes model: ${input.environmentSuiteEvidence.hermesModel}`);
-    push(`- Verdict: ${input.environmentSuiteVerdict.verdict} (verdictCode=${input.environmentSuiteEvidence.verdictCode})`);
-    push(`- Tx: deliver ${input.environmentSuiteEvidence.deliveryTxHash}, verdict ${input.environmentSuiteEvidence.verdictTxHash}`);
-    push(`- Cost: $${input.environmentSuiteEvidence.costUsd.toFixed(2)}`);
-    push(`- Wall-clock: ${input.environmentSuiteVerdict.wallClockMs}ms`);
+    push(`- Verdict: ${verdict.verdict}${evidence ? ` (verdictCode=${evidence.verdictCode})` : ''}`);
+    push(`- Wall-clock: ${verdict.wallClockMs}ms`);
+    if (evidence) {
+      push(`- Scenario: ${evidence.scenario}`);
+      push(`- Hermes model: ${evidence.hermesModel}`);
+      push(`- Tx: deliver ${evidence.deliveryTxHash}, verdict ${evidence.verdictTxHash}`);
+      push(`- Cost: $${evidence.costUsd.toFixed(2)}`);
+    } else {
+      push(`- Evidence record: none supplied (scenario, model, tx hashes, cost unavailable)`);
+    }
     push();
   } else {
     push(`## Environment-suite evidence`);
