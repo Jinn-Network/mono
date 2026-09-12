@@ -577,9 +577,9 @@ out where it applies.
 | `bundle.json` format | Pinned line | Compatible line | Checks | Anchor flags |
 | --- | --- | --- | --- | --- |
 | `benchmark-product-public-bundle/2`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
-| `benchmark-product-public-bundle/2`, prompted screening | `@0.2.1` (`@0.2.0` if already materialized) | `@0.2`; `@0.1` also verifies, since claim-package/1 states no reader requirement | six | not applicable |
+| `benchmark-product-public-bundle/2`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2`; `@0.1` also verifies, since claim-package/1 states no reader requirement | six | not applicable |
 | `benchmark-product-public-bundle/4`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
-| `benchmark-product-public-bundle/4`, prompted screening | `@0.2.1` (`@0.2.0` if already materialized) | `@0.2`, which reads either pin; `@0.1` refuses | six | not applicable |
+| `benchmark-product-public-bundle/4`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2`, which reads either pin; `@0.1` refuses | six | not applicable |
 | `benchmark-product-public-bundle/5` | `@0.1` | none pinned | seven | not applicable |
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
