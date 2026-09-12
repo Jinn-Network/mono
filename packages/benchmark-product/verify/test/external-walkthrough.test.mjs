@@ -22,7 +22,8 @@ async function externalVerify(dir) {
     const result = await exec("python3", [script, dir]);
     return { code: 0, stdout: result.stdout };
   } catch (error) {
-    return { code: error.code ?? 2, stdout: error.stdout ?? "", stderr: error.stderr ?? "" };
+    const failure = /** @type {{ code?: number, stdout?: string, stderr?: string }} */ (error);
+    return { code: failure.code ?? 2, stdout: failure.stdout ?? "", stderr: failure.stderr ?? "" };
   }
 }
 

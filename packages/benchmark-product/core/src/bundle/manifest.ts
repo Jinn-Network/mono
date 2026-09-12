@@ -34,6 +34,21 @@ export const BUNDLE_V3_FORMAT = "benchmark-product-public-bundle/3" as const;
  * or the producer cannot emit what the verifier accepts.
  */
 export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
+/**
+ * The composed presentation generation (issue #4191): `/6`'s closure exactly, rendering the report
+ * page the four report-prose rulings direct. A SECOND, independent copy of the verifier's own
+ * constant, for the same reason `/8`'s is -- both packages must carry it or the producer cannot
+ * emit what the verifier accepts.
+ *
+ * **No run emits it.** `materialize.ts`'s format selection is unchanged and does not name this
+ * constant: a `/10` claim seals `PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND`, a released and immutable
+ * reader that predates `/10` and refuses it at manifest parse, so the bundle would be permanently
+ * unverifiable under its own instruction. `/10` enters this schema so a bundle can be LABELLED
+ * with it -- which is what lets `v10-verify.test.ts` round-trip one through the portable reader --
+ * never so one can be produced. The producer flips in the change that pins `/10` to the release
+ * serving it.
+ */
+export const BUNDLE_V10_FORMAT = "benchmark-product-public-bundle/10" as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -52,6 +67,7 @@ export const BundleManifestSchema = z.object({
     z.literal(BUNDLE_V6_FORMAT),
     z.literal(BUNDLE_V7_FORMAT),
     z.literal(BUNDLE_V8_FORMAT),
+    z.literal(BUNDLE_V10_FORMAT),
   ]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
@@ -82,7 +98,8 @@ export interface BuildBundleManifestOptions {
     | typeof BUNDLE_V4_FORMAT
     | typeof BUNDLE_V6_FORMAT
     | typeof BUNDLE_V7_FORMAT
-    | typeof BUNDLE_V8_FORMAT;
+    | typeof BUNDLE_V8_FORMAT
+    | typeof BUNDLE_V10_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {

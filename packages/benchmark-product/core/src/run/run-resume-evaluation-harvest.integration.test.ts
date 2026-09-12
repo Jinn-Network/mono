@@ -330,19 +330,26 @@ describe("resume recovers an evaluation attempt killed during harvest", () => {
       // ── resume through the PUBLIC operation, on a fresh venue ───────────────────────────
       // Capacity is deliberately taken OFF the table: the ceiling is the platform maximum, well
       // above the twelve attempts this run can ever hold live at once (six cells, each a solve
-      // leg and an evaluation leg). A smaller ceiling makes the test's own crash a race.
-      // `LocalBackend`'s rehydration calls `capacity.restore(live)` over every attempt on disk
-      // that has no `attempt-terminal` event, and the abandoned drive above leaves a
+      // leg and an evaluation leg). Everything from here to the end of this comment is
+      // retrospective — it records why the ceiling was raised, not behavior that still exists.
+      // `LocalBackend`'s rehydration used to call `capacity.restore(live)` over every attempt on
+      // disk that had no `attempt-terminal` event, and the abandoned drive above left a
       // TIMING-DEPENDENT number of those: the interrupted evaluation attempt always (it is
       // rewound past its terminal on purpose), plus however many solve legs happened not to have
       // terminaled at the instant the drive was abandoned — more of them on a slower or busier
-      // machine. Each holds a slot, and the evaluation one holds its until that leg reaches
-      // `dispatchEvaluation` (its own defect, issue #3192). Whenever the held count exceeds the
-      // headroom, an unrelated cell loses its dispatch to "local backend capacity exhausted" and
-      // expires — collateral of the crash, not the verdict-recovery question under test. A fixed
-      // small headroom cannot bound a count that varies with machine speed, so this does not use
-      // one: verified by sweeping the ceiling down, which reproduces exactly the CI failure
-      // (a cell `expired` at `dispatches: 1`, no attempt, no verdict) at and below 5.
+      // machine. Each held a slot, and whenever the held count exceeded the headroom an unrelated
+      // cell lost its dispatch to "local backend capacity exhausted" and expired — collateral of
+      // the crash, not the verdict-recovery question under test. A fixed small headroom could not
+      // bound a count that varied with machine speed, so this did not use one: verified by
+      // sweeping the ceiling down, which reproduced exactly the CI failure (a cell `expired` at
+      // `dispatches: 1`, no attempt, no verdict) at and below 5.
+      // #3192 fixed that starvation at its source — rehydration now restores a slot only for an
+      // attempt whose shim or harness group actually still exists, and the attempts the abandoned
+      // drive left behind have neither once their shims finish exiting. That is a bound on the
+      // steady state rather than on the instant this venue happens to boot (`venue.shutdown()`
+      // drains in-process workers, not the shims they spawned), which is precisely why the ceiling
+      // below is kept: this test's subject is harvest recovery, not capacity, so taking capacity
+      // off the table costs it nothing, and belt-and-braces beats re-tuning it.
       const resumed = await runResume(contextFor(clock), {
         draftId,
         maxConcurrentCells: MAX_CONCURRENT_CELLS,

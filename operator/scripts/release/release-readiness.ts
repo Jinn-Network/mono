@@ -30,9 +30,9 @@ export interface HandoffDocInput {
     surfacesTouched: string[];
   };
   gaps: Gap[];
-  releasePrepVerdicts: ScenarioVerdict[];
-  tier3Verdict: ScenarioVerdict | null;
-  tier3Evidence: {
+  hermeticGateVerdicts: ScenarioVerdict[];
+  environmentSuiteVerdict: ScenarioVerdict | null;
+  environmentSuiteEvidence: {
     scenario: string;
     hermesModel: string;
     verdictCode: number;
@@ -45,10 +45,45 @@ export interface HandoffDocInput {
   independentEvidence?: string;
 }
 
-// Render a scenario verdict as a release-evidence marker value: `passed` or
-// `failed:<failClass>`. Shared by the per-scenario lines of the marker block.
+// Keep a marker key or value inside its own `key=value` line of the marker block. The
+// block is line-oriented and lives in an HTML comment, so a CR/LF injects an extra
+// marker line (a forged `release-readiness-recommendation=SHIP`, say) and a `>` closes
+// the comment early via `-->`, spilling the rest into rendered markdown.
+//
+// Hardening, not a live vulnerability -- but not because the inputs are in-repo
+// literals. Skip and fail reasons carry caught `Error.message` text (run-tier-1.ts,
+// run-tier-2.ts, scenario-types.ts, test/release/tier-2/scenario-evidence.ts,
+// test/release/tier-3/T3.1-producer-evaluator-real.ts) and runtime precondition strings
+// (test/release/tier-2/T2.4-producer-evaluator-swe-rebench.ts), and `writeHandoffDoc`
+// has no in-repo production caller -- the input is whatever the agent running the
+// release-readiness skill assembles from a run. None of that is adversary-controlled,
+// and all of it can be multi-line by accident. Accident-proofing is the point.
+function sanitizeMarkerValue(value: string): string {
+  return value.replace(/[\r\n>]/g, ' ');
+}
+
+// The one seam every marker line goes through, so a field added later is sanitized by
+// construction rather than by remembering to wrap its call site. Both halves are
+// sanitized: the per-scenario keys interpolate a free-text `scenarioId`.
+function markerLine(key: string, value: string): string {
+  return `${sanitizeMarkerValue(key)}=${sanitizeMarkerValue(value)}`;
+}
+
+// Render a scenario verdict as a release-evidence marker value: `passed`,
+// `skipped:<reason>`, or `failed:<failClass>`. Shared by the per-scenario lines of
+// the marker block. The `skip` arm matters: without it a skipped scenario fell to the
+// fail branch and emitted `failed:null`, misreporting a skip as a failure. Matches the
+// sibling emitter in run-tier-1.ts. Sanitizing is markerLine's job, not this one's --
+// the free-text `failNotes` is covered there along with every other marker value.
 function verdictMarker(verdict: ScenarioVerdict): string {
-  return verdict.verdict === 'pass' ? 'passed' : `failed:${verdict.failClass}`;
+  switch (verdict.verdict) {
+    case 'pass':
+      return 'passed';
+    case 'skip':
+      return `skipped:${verdict.failNotes ?? 'no-reason'}`;
+    case 'fail':
+      return `failed:${verdict.failClass}`;
+  }
 }
 
 export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): Promise<void> {
@@ -89,18 +124,18 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
   });
   gapSection('Already met', 'ALREADY-MET', (g) => `- **${g.id}** [${g.source}]: ${g.notes}`);
   push(`## Hermetic-gate scenarios`);
-  for (const v of input.releasePrepVerdicts) {
+  for (const v of input.hermeticGateVerdicts) {
     push(`- ${v.scenarioId}: ${v.verdict}${v.failClass ? ` (${v.failClass})` : ''} (${v.wallClockMs}ms)`);
   }
   push();
-  if (input.tier3Verdict && input.tier3Evidence) {
+  if (input.environmentSuiteVerdict && input.environmentSuiteEvidence) {
     push(`## Environment-suite evidence`);
-    push(`- Scenario: ${input.tier3Evidence.scenario}`);
-    push(`- Hermes model: ${input.tier3Evidence.hermesModel}`);
-    push(`- Verdict: ${input.tier3Verdict.verdict} (verdictCode=${input.tier3Evidence.verdictCode})`);
-    push(`- Tx: deliver ${input.tier3Evidence.deliveryTxHash}, verdict ${input.tier3Evidence.verdictTxHash}`);
-    push(`- Cost: $${input.tier3Evidence.costUsd.toFixed(2)}`);
-    push(`- Wall-clock: ${input.tier3Verdict.wallClockMs}ms`);
+    push(`- Scenario: ${input.environmentSuiteEvidence.scenario}`);
+    push(`- Hermes model: ${input.environmentSuiteEvidence.hermesModel}`);
+    push(`- Verdict: ${input.environmentSuiteVerdict.verdict} (verdictCode=${input.environmentSuiteEvidence.verdictCode})`);
+    push(`- Tx: deliver ${input.environmentSuiteEvidence.deliveryTxHash}, verdict ${input.environmentSuiteEvidence.verdictTxHash}`);
+    push(`- Cost: $${input.environmentSuiteEvidence.costUsd.toFixed(2)}`);
+    push(`- Wall-clock: ${input.environmentSuiteVerdict.wallClockMs}ms`);
     push();
   } else {
     push(`## Environment-suite evidence`);
@@ -131,20 +166,21 @@ export async function writeHandoffDoc(outPath: string, input: HandoffDocInput): 
   );
   push();
   push(`<!-- jinn-release-evidence:v1`);
-  push(`release-tag=${input.candidateVersion}`);
-  push(`release-commit=${input.branchSha}`);
-  for (const v of input.releasePrepVerdicts) {
-    const key = v.scenarioId.toLowerCase().replace(/\./g, '-').replace(/^t/, 'tier-');
-    push(`${key}=${verdictMarker(v)}`);
+  push(markerLine('release-tag', input.candidateVersion));
+  push(markerLine('release-commit', input.branchSha));
+  for (const v of input.hermeticGateVerdicts) {
+    push(markerLine(`hermetic-gate-${v.scenarioId.toLowerCase().replace(/\./g, '-')}`, verdictMarker(v)));
   }
-  if (input.tier3Verdict) {
-    push(`tier-3-t3-1=${verdictMarker(input.tier3Verdict)}`);
+  if (input.environmentSuiteVerdict) {
+    push(markerLine('environment-suite', verdictMarker(input.environmentSuiteVerdict)));
   } else {
-    push(`tier-3-t3-1=skipped:${input.mode === 'autonomous' ? 'autonomous-mode' : 'human-skipped'}`);
+    // Mode-independent: the SKIPPED prose above deliberately asserts no mode gate,
+    // only that no environment-suite verdict reached this run.
+    push(markerLine('environment-suite', 'skipped:no-verdict-supplied'));
   }
-  push(`release-readiness-recommendation=${input.recommendation}`);
-  push(`release-readiness-handoff=docs/release/${input.candidateVersion}/handoff.md`);
-  push(`release-readiness-run=${input.runId}`);
+  push(markerLine('release-readiness-recommendation', input.recommendation));
+  push(markerLine('release-readiness-handoff', `docs/release/${input.candidateVersion}/handoff.md`));
+  push(markerLine('release-readiness-run', input.runId));
   push(`-->`);
 
   await fs.writeFile(outPath, lines.join('\n') + '\n');
