@@ -15,6 +15,13 @@ unedited and replaced by a new one plus a dated erratum in
 `fixtures/manifest.sha256.json`. `loadVectors` skips every superseded vector, so the
 corpus a consumer runs is the corpus minus the errata.
 
+Vector DSSE envelopes (`headSignature`, `entries[].signature`) are stored as legible
+canonical text, not the base64 wire profile `parseWireDsseEnvelope` accepts. Any consumer
+that hands a vector envelope to production parsing or verification must first convert it
+with the exported `vectorEnvelopeToWire`; the `run*Conformance` suites do so internally.
+Handing over the raw form is refused, and downstream that refusal is reported as
+`unauthorized-signer`, so a test that skips the conversion can pass for the wrong reason.
+
 Depends only on `@jinn-network/record-discovery-protocol` — no cross-tree Jinn dependency.
 
 ## Development

@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 import {
   parseAnnouncementEntry,
   parseSourceHead,
+  parseWireDsseEnvelope,
 } from "@jinn-network/record-discovery-protocol";
 
+import { isRunnableSourceChainInput, vectorEnvelopeToWire } from "./harness.js";
 import { loadVectors, loadVectorsByKind, VECTOR_KINDS } from "./vectors.js";
 
 // Task 10 Step 2: every fixture loads, parses under protocol schemas where
@@ -186,5 +188,32 @@ describe("named checks in isolation are represented (design §18)", () => {
     for (const required of ["present", "fabricated", "reorged-away"]) {
       expect(outcomes).toContain(required);
     }
+  });
+});
+
+// The corpus stores DSSE envelopes in legible fixture form, not the wire
+// profile production parses (#4436). Pin that precondition corpus-wide so a
+// direct consumer cannot mistake the parser's refusal (which surfaces as
+// `unauthorized-signer` downstream) for the rule its test names.
+describe("vector DSSE envelopes are wire-form only after vectorEnvelopeToWire", () => {
+  const envelopes = loadVectorsByKind("source-chain")
+    .filter((vector) => isRunnableSourceChainInput(vector.input))
+    .flatMap((vector) => {
+      const input = vector.input as { headSignature: unknown; entries: Array<{ signature?: unknown }> };
+      return [
+        { vector: vector.name, label: "headSignature", envelope: input.headSignature },
+        ...input.entries.flatMap((e, index) =>
+          e.signature === undefined ? [] : [{ vector: vector.name, label: `entries[${index}].signature`, envelope: e.signature }],
+        ),
+      ];
+    });
+
+  it("covers at least the runnable source-chain corpus", () => {
+    expect(envelopes.length).toBeGreaterThan(0);
+  });
+
+  it.each(envelopes)("$vector $label: raw form is refused, converted form parses", ({ envelope }) => {
+    expect(() => parseWireDsseEnvelope(envelope)).toThrow(/not canonical standard base64/u);
+    expect(() => parseWireDsseEnvelope(vectorEnvelopeToWire(envelope as never))).not.toThrow();
   });
 });
