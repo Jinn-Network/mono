@@ -134,10 +134,15 @@ the tagged commit. Both steps refuse loudly; run them in order:
 gh variable list --repo Jinn-Network/mono --json name,value \
   --jq '.[] | select(.name | test("^JINN_(HERMETIC_GATE|ENVIRONMENT_SUITE)_WAIVED$"))
         | "WAIVER SET: \(.name)=\(.value)"'
+# Repository-scope variables only; the workflow's vars context also resolves
+# environment- and organization-level variables, which no in-repo document
+# uses for these waivers.
 
 # 2. Both verdicts green on the exact tagged commit.
 git fetch --tags origin
 sha="$(git rev-parse 'vX.Y.Z^{commit}')"
+( # subshell: the `exit` below ends this block, not your shell
+rc=0
 for name in hermetic-gate environment-suite; do
   n=$(gh api -X GET "repos/Jinn-Network/mono/commits/$sha/check-runs" \
         -f check_name="$name" -f per_page=100 \
@@ -148,9 +153,11 @@ for name in hermetic-gate environment-suite; do
     echo "$name green on $sha"
   else
     echo "REFUSE: $name not green on $sha"
-    exit 1
+    rc=1
   fi
 done
+exit "$rc"
+)
 ```
 
 Step 1 exists because the guard's waiver warning is a `core.warning` emitted
@@ -167,7 +174,9 @@ one. `check_name` is what makes the query reliable — it restricts the response
 the one gate being asked about instead of every check-run on the release SHA. The
 endpoint's `filter` parameter already defaults to `latest`, which collapses to the
 most recent run per check name; `per_page=100` only keeps the named verdict off a
-second page.
+second page. The block runs in a subshell so its `exit` reports the status (`$?`
+is 1 on refusal) without ending an interactive shell; saved as a script, the
+subshell's status is the script's status.
 
 A `jinn-release-evidence:v1` block may still appear in a Release body or in a
 generated handoff under `docs/release/`. It is **diagnostic-only** — the same

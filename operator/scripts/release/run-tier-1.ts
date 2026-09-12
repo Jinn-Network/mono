@@ -116,8 +116,9 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
     {
       // T1.4 needs a separate subprocess (Playwright against the operator console);
       // runT14ConsoleRouteSmoke already resolves with a verdict for both spawn-error
-      // and close cases. Marker key stays `tier-1-spa-route-smoke` (release-readiness
-      // schema; dated spec is not retro-edited).
+      // and close cases. Marker key stays `tier-1-spa-route-smoke` in the `marker.txt`
+      // diagnostic family; the release-readiness handoff doc reports this run as
+      // `hermetic-gate-t1-4`.
       id: 'T1.4',
       run: () => runT14ConsoleRouteSmoke(outputDir),
     },
@@ -157,10 +158,12 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
   };
   await fs.writeFile(path.join(outputDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
-  // Maps scenario IDs to the canonical marker keys defined in the release
-  // readiness spec §"Marker schema extension" (2026-05-19). The key names are
-  // load-bearing — release-readiness parses them — so they are pinned here
-  // rather than derived from the scenario ID.
+  // Maps scenario IDs to the dated tier-1-* keys of the marker.txt diagnostic
+  // artifact. Pinned (not derived from the scenario ID) so diffs against older
+  // tier-1-evidence/ directories stay stable. Nothing parses marker.txt — the
+  // two-gate guard in npm-publish.yml queries check-runs. The release-readiness
+  // handoff doc is a separate artifact with hermetic-gate-<id> keys
+  // (release-readiness.ts).
   const MARKER_KEY_BY_SCENARIO: Record<string, string> = {
     'T1.1': 'tier-1-bootstrap',
     'T1.2': 'tier-1-harness-readiness',

@@ -24,7 +24,7 @@ Every `fail` verdict has a `failClass` — release-readiness uses it to decide w
 
 ## Adding patterns
 
-When a real infrastructure issue keeps showing up as `real-bug`, extend the `FLAKE_INFRA_PATTERNS` or `FLAKE_TIMING_PATTERNS` lists in `scenario-types.ts`. Each addition should be accompanied by a regression test in `scenario-types.test.ts` so the classification is durable.
+When a real infrastructure issue keeps showing up as `real-bug`, extend the `patterns` array of the matching `FLAKE_RULES` entry (`klass: 'flake-infra'` or `'flake-timing'`) in `operator/scripts/release/scenario-types.ts`; rule order is precedence and an unmatched failure defaults to `real-bug`. Each addition should be accompanied by a regression test in `operator/test/release/scenario-types.test.ts` so the classification is durable.
 
 ## What release-readiness does with each class
 

@@ -57,7 +57,7 @@ The automated live-fork T2.3 gate was **removed** by DR-2026-06-03 / [#1014](htt
 
 **Deterministic replacement:** none for the launcher-join journey. `operator/test/dashboard/` no longer exists and no automated gate exercises the two-operator join journey end to end; what survives automatically is per-leg unit coverage (`operator/test/solvernets/launch-state-machine.test.ts`, `operator/test/solver-nets/registry-register-joined.test.ts`). The surviving `yarn e2e:app-flow` flows — `apps/operator-console/e2e/claim-policy-flow.e2e.ts` + `apps/operator-console/e2e/posting-status.e2e.ts` (hermetic gate, the same two T1.4 runs) — cover claim-policy save and task-post counts, not join.
 
-**Real cross-operator experience:** the MANUAL paired-flow gate — [`testing-jinn-app/references/scenario-multi-op-spa-flow.md`](../../testing-jinn-app/references/scenario-multi-op-spa-flow.md) — run by the Captain per DR-2026-06-08 (a human-run spot check, not automated).
+**Real cross-operator experience:** the MANUAL paired-flow gate — [`testing-jinn-app/references/scenario-multi-op-console-flow.md`](../../testing-jinn-app/references/scenario-multi-op-console-flow.md) — run by the Captain per DR-2026-06-08 (a human-run spot check, not automated).
 
 ## Parallelism
 

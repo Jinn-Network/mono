@@ -56,8 +56,9 @@ From the operator package the same scripts are aliases:
 `yarn e2e:app-flow` / `yarn e2e:funding-sequence`.
 
 T1.4 (`yarn release:tier-1:T1.4`) is the console app-flow smoke. The
-release-readiness marker key remains `tier-1-spa-route-smoke` (dated schema;
-not retro-edited).
+`marker.txt` key written by `run-tier-1.ts` remains `tier-1-spa-route-smoke`
+(diagnostic artifact; nothing parses it); the release-readiness handoff doc
+reports the same run as `hermetic-gate-t1-4`.
 
 ## Multi-operator
 

@@ -473,8 +473,8 @@ jobs:
       # modes are operator-run, non-CI cutover evidence, with the scheduled/manual
       # native-e2e-rig.yml run providing supplemental advisory evidence. This suite
       # consolidates two existing real-testnet entries into one verdict:
-      #   - run-tier-2 — cross-operator donation handshake (T2.1) + producer/
-      #     evaluator (T2.2) on real testnet, two warm operators.
+      #   - run-tier-2 — producer/evaluator loops (T2.2 + T2.4; T2.1
+      #     retired with the x402 pivot) on port-isolated Anvil forks of Base Sepolia.
       #   - run-tier-3 — the real-harness producer/evaluator loop (T3.1) on real
       #     testnet (claim → real solve → deliver → verdict → settlement).
       # These run-tier scripts are REFERENCED, not rewritten (#923 ownership).
@@ -512,7 +512,7 @@ jobs:
           yarn build
 
           set +e
-          # 1. Cross-op donation + producer/evaluator (real testnet, two warm ops).
+          # 1. Producer/evaluator loops (T2.2 + T2.4) on port-isolated Anvil forks.
           yarn tsx scripts/release/run-tier-2.ts "${CANDIDATE_SHA}" 2>&1 | tee "${RESULT_DIR}/tier-2.log"
           T2_CODE=${PIPESTATUS[0]}
 
