@@ -56,6 +56,60 @@ The gate existing is not the hold lifting. There is still no stable publisher jo
 because no host is deployed. Do not enable a stable publisher or claim external conformance
 before this gate has run green against the live domain.
 
+## Automatic host refresh
+
+`stack-npm-publish.yml` job `canary-host-refresh` runs on a push to `next`, after that
+run's own `canary-verification` succeeds. It runs on no other branch — the workflow also
+fires on `integration/evidence-v1`, which must never deploy the public host — and on no
+part of the stable path.
+
+It rebuilds the deploy bundle from the same run's attested profile roots with
+`build-profile-host-bundle.mjs` — the same generator the break-glass recipe below names —
+and mirrors that bundle to the host repository's `main`. It copies and never authors: no
+document is regenerated, the signature sidecars ride in the artifact, and the manifest
+signing key is not available to the job. Before publishing, it re-reads
+`generatedFrom.commit` out of the bytes it is about to push and refuses to continue
+unless it equals the commit this run is publishing, so "the host serves this commit's
+attested artifact" is a property of the copied bytes rather than trust in the download.
+
+The mirror is idempotent: it stages the result and commits only when something changed,
+so re-running a workflow for the same commit pushes nothing. Note that a *new* commit is
+always a change even when no served document moved, because each group's `manifest.json`
+records `generatedFrom.commit` and the catalog digest — so a push to `next` normally does
+produce one host commit. Each commit message names the source SHA, the lane, and the
+release groups, and `.jinn-profile-host-source` at the host root records the same.
+
+**The host repository's `main` is entirely generated. Never hand-edit it** — the next
+refresh deletes every top-level entry except `.git` and `.jinn-profile-host-source`
+before copying the bundle in. That replacement, rather than an overlay, is what makes a
+document withdrawn from the catalog stop being served. The source of truth is the catalog
+in `Jinn-Network/mono`.
+
+A failed refresh is a real alarm, not noise: the host is now behind `next`, which is the
+drift this job exists to remove. Every step fails the job on a non-zero exit — the
+multi-command ones under `set -euo pipefail` — the job carries no `continue-on-error`,
+and the push is a plain fast-forward that fails rather than overwrites.
+
+The refresh is deliberately **not** a `needs:` of `stable-live-host-verification`. Adding
+a write-credential job to that gate's dependency chain would let a skipped refresh skip
+the gate, and a skipped upstream job being a refusal is the whole point of
+`stable-publish-gate`. The ordering is instead made legible: when the live-host gate
+fails it annotates its own failure with the causes to check first.
+
+The profile manifest embeds `lane` and `generatedFrom.commit`, and the automatic refresh
+runs on the canary lane. A host refreshed from a push to `next` therefore serves
+`"lane": "canary"` manifest bytes, while `stable-live-host-verification` byte-compares a
+`lane: "stable"` manifest — so a canary-refreshed host cannot make the stable gate green.
+Nothing is broken by this today: there is no stable publisher, the hard stable hold is in
+force, and the stable gate fires only on a `stack-v*` release or a manual dispatch. But
+it is a real gap and it is the stable path's, not the refresh's: closing it is part of
+lifting the hold, and takes either a stable-lane refresh on the release path or a
+manifest whose bytes do not depend on the lane. Adding a write-credential job to the
+stable gate's dependency chain is not the way to close it — that would let a skipped
+refresh skip the gate. Until it is closed, a red `stable-live-host-verification` should
+be read against `.jinn-profile-host-source` at the host root, which names the SHA and
+lane the host was last refreshed from.
+
 ## Hosting and key-provisioning checklist
 
 An operator with control of `spec.jinn.network` and the organization settings must:
@@ -69,11 +123,47 @@ operator's own provisioning work, which the gate can only check after it is done
 - [ ] Add its identifier as `JINN_PROFILE_MANIFEST_KEY_ID`.
 - [ ] Publish the corresponding public key at a stable URL and record that URL in the deployment
       record.
+- [ ] Create the static host repository and record its `owner/name` as the repository
+      **variable** `JINN_PROFILE_HOST_REPOSITORY`. Its default branch must be `main`, and it
+      must already have a commit on it — the refresh checks the host out at `ref: main` and a
+      repository created with no initial commit has no branch to check out, so leaving it
+      empty turns every push to `next` red rather than skipping. Until this variable is set,
+      `canary-host-refresh` skips and the host is refreshed only by hand.
+- [ ] Create the Actions **environment** `profile-host-publish` and give it a
+      deployment-branch policy of `next` only. `canary-host-refresh` declares this
+      environment, so the push credential below is an environment secret rather than a plain
+      repository secret. A repository secret is readable by *any* workflow in the repository
+      — including one landed on `integration/evidence-v1`, which this workflow also fires on
+      — so the job's own `github.ref` gate constrains the job, not the secret's availability.
+      Precedent: `canary-publish` gates the comparable npm surface behind `npm-publish`.
+- [ ] Add a fine-grained token with `contents: write` on **that repository only** as the
+      `profile-host-publish` environment secret `JINN_PROFILE_HOST_PUSH_TOKEN`. This
+      credential grants write to the host content and nothing else: it must not carry write
+      on `Jinn-Network/mono`, it must **not** carry the `Workflows` permission (that would
+      let a host push rewrite the workflows that drive it), and it is not the manifest
+      signing key. Setting the variable without the secret makes the job fail loudly rather
+      than skip.
+- [ ] **Delete any repository secret named `JINN_PROFILE_HOST_PUSH_TOKEN`**, and confirm none
+      exists, once the environment secret above is in place. This step is not tidying, and
+      skipping it leaves the previous step doing nothing. `environment:` does not scope a
+      credential: an environment secret *overrides* a same-named repository secret, but a job
+      declaring an environment still reads the repository secret when no environment-level one
+      exists — so an operator who provisioned under the earlier instruction (which said to add
+      a repository secret) keeps a working job, a green workflow assertion, and the unchanged
+      blast radius the environment was added to close. And a repository secret is readable by
+      any workflow in the repository, including one landed on `integration/evidence-v1`, which
+      would simply not declare the environment: while it exists the deployment-branch policy
+      protects nothing. Revoke and reissue the token if it ever existed as a repository secret.
 - [ ] Configure a static host for `spec.jinn.network` that preserves manifest paths exactly. The
       apex stays purely the product site and serves no protocol bytes.
 - [ ] Serve each document with the media type declared by `manifest.json`, including extensionless
       task and facts profiles.
 - [ ] Deploy one exact attested profile-root artifact per group; never rebuild them at the host.
+      The normal path is the automatic `canary-host-refresh` above; the recipe below is the
+      **break-glass** path, for when that refresh is unavailable — unconfigured, mid
+      credential rotation, or restoring the host repository. Run by hand, it must honor the
+      same mirror contract: replace the host content, do not overlay it, or a document
+      withdrawn from the catalog stays served.
       Turn the attested roots into one deploy directory with
       `node .github/scripts/build-profile-host-bundle.mjs --root <sealed-platform-v1-root> --root <implementations-v1-root> --out <deploy-dir>`,
       which byte-copies the attested bytes of every group and generates one merged host
@@ -81,6 +171,13 @@ operator's own provisioning work, which the gate can only check after it is done
       per group; a document path claimed by two groups is refused before anything is written.
       `/manifest.json` and `/manifest.dsse.json` are deliberately not served, and the gate
       probes both as must-404s.
+      Mirroring that directory to the host is `refresh-profile-host.mjs`, driven by
+      `BUNDLE_DIR`, `HOST_DIR`, `SOURCE_SHA` and `EXPECTED_RELEASE_GROUPS` — the last being
+      the comma-separated group ids this deploy covers, which the mirror requires the bundle
+      to match exactly. It has no default, because the mirror REPLACES the host content: a
+      bundle short one group would otherwise unpublish that group from the live origin, and
+      a short `--root` list above is the easiest way to build one by hand. Name every
+      stack-published group in both places, or the mirror refuses before it writes.
 - [ ] *(gate)* `stable-live-host-verification` fetches `<release-group>/manifest.json` from the
       live domain, verifies its signature against the digest-pinned published key, and
       byte-compares every hosted document, media type and digest with the same-run attested
