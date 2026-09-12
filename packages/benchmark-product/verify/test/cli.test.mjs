@@ -625,13 +625,14 @@ test("the golden bundle's default output carries no identifier and no verdict wo
   assert.equal(human.code, undefined);
   assert.doesNotMatch(human.stdout, /urn:/);
   assert.doesNotMatch(human.stdout, /did:key/);
-  // The retired verdict word over the whole real render (issue #3510). This is the only assertion
-  // that runs the real binary, and the only one reaching the signer block; the cross-shape test
-  // below owns the artifact-content and anchor paragraphs, which render empty over golden's
-  // format /2. Regenerating golden to an anchor-carrying format would bring those paragraphs in
-  // here, and this would still pass: `invoke` supplies no anchor trust material and this package
-  // ships none, so a well-formed proof renders `present`, never `verified` (`src/verify.ts`,
-  // `anchorTrust`).
+  // The retired verdict word over the whole real render (issue #3510). This is the only
+  // verdict-word assertion that runs the real binary; it reaches the signer block, but so do the
+  // two in-process ones below, which pass `publisherResult` and therefore render a publisher too.
+  // The cross-shape test below owns the artifact-content and anchor paragraphs, which render empty
+  // over golden's format /2. Regenerating golden to an anchor-carrying format would bring those
+  // paragraphs in here, and this would still pass: `invoke` supplies no anchor trust material and
+  // this package ships none, so a well-formed proof renders `present`, never `verified`
+  // (`src/verify.ts`, `anchorTrust`).
   assert.doesNotMatch(human.stdout, /verified|certified|validated|audited/i);
   // The publisher line now carries the bare key fingerprint (issue #2983): with no binding supplied
   // that digest is the only name this key has, and printing nothing would read as nothing to say.
@@ -984,6 +985,10 @@ test("a verified binding renders the domain and names the proof mechanism plainl
   // The limits paragraph names the remaining step and what trusting its answer rests on.
   assert.match(result.stdout, /DNS resolution/);
   assert.match(result.stdout, /registrar/);
+  // The retired verdict word reaches this paragraph only through --identity-binding, and this is
+  // the one verdict-word assertion that renders it (issue #4269); other tests pass the flag and
+  // assert other things about the same paragraph.
+  assert.doesNotMatch(result.stdout, /verified|certified|validated|audited/i);
   // This is the one actionable raw identifier on the human surface: the exact TXT value to compare.
   assert.equal(result.stdout.match(/did:key:/g)?.length, 1);
   assert.match(result.stdout, new RegExp(`\n {4}expect: colophon-domain-binding=1; key=${keyId}\n`));
@@ -1205,6 +1210,10 @@ test("a checked mode dimension adds no note at all", async () => {
   });
   assert.equal(result.exitCode, 0);
   assert.doesNotMatch(result.stdout, /file modes were not checked/);
+  // renderFreezeRepoCheck is appended to the same stdout, and no other verdict-word guard in this
+  // file renders it: this is the one verdict-word assertion that reaches it (issue #4269); other
+  // tests render the same block and assert other things about it.
+  assert.doesNotMatch(result.stdout, /verified|certified|validated|audited/i);
 });
 
 // ── The freeze tree renders from the reported verdict's own snapshot (issue #4386) ─────────────
@@ -1376,7 +1385,29 @@ const V8_SHAPE = {
   identity: "a".repeat(64),
   checks: V8_CHECKS,
   ...V6_IDENTITIES,
-  anchors: { anchors: [], subjects: [], invalid: [] },
+  // The anchor block is a shape `evaluateIntegrityAnchors` can actually emit, so the render this
+  // guard walks is the render the product produces. The `@type` annotation above this literal
+  // binds it to `PublicBundleVerificationResult`, and `tsconfig.tests.json` (issue #4385) turns
+  // on the `checkJs` that honors it, so the field shape is enforced -- including that every
+  // `subject` here is one of `ClaimAnchorSubject`'s two members (`lock`/`matrix`). Emittability
+  // is not enforced, because that type admits blocks the closure never produces. Those are the
+  // parts only this comment holds: the subject rows are the fixed pair that closure maps over,
+  // never a one-row reduction (`subjects` is an unbounded `readonly AnchorSubjectReport[]`) -- so
+  // a subject-keyed line in `renderSubject` or `renderAnchor` reaches this guard instead of being
+  // skipped by a subject the closure never emits. A `present` RFC 3161 entry has parsed, so it
+  // carries the `provider` and `facts` its own type documents for that status (both are optional
+  // on a flat interface, and `facts` is typed `unknown`, so its contents are this comment's
+  // charge too); `genTime` is what `anchoredValue` reads for the head line's value segment.
+  anchors: {
+    anchors: [{
+      recordSha256: "9".repeat(64), status: "present", subject: "lock",
+      provider: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+      timeBasis: "authority-time", trustMaterial: "none",
+      facts: { genTime: "2026-01-02T03:04:05Z" },
+    }],
+    subjects: [{ subject: "lock", outcome: "anchored" }, { subject: "matrix", outcome: "absent" }],
+    invalid: [],
+  },
 };
 
 /** The rendered check rows: every line that begins with one of the checks the shape declares. */
@@ -1473,9 +1504,11 @@ test("no paragraph of the default human render carries a retired verdict word (i
   // artifact-content report and its limitation, `/8` the anchor block and the anchor-limits
   // paragraph. All four render empty over golden's format /2, so the real-binary assertion in the
   // golden test guards the signer block and this one guards the rest — they are not two spellings
-  // of the same coverage. `/8`'s anchor list is empty on purpose: `renderAnchor` prints
-  // `entry.status` verbatim and `verified` is a legitimate status there, so an entry added to this
-  // shared fixture would fail this test on a correct render.
+  // of the same coverage. `renderAnchor` prints `entry.status` verbatim and `verified` is a
+  // legitimate status there, so a `verified`-status entry added to this shared fixture would fail
+  // this test on a correct render. A `present` entry does not, which is why one is carried above
+  // (issue #4269): it renders `renderAnchor`, `evaluationNote`, and `renderSubject` over both an
+  // anchored and an absent subject, none of which match the word list.
   for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
     assert.doesNotMatch(renderVerifiedBundle(shape), /verified|certified|validated|audited/i, shape.format);
   }

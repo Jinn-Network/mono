@@ -180,17 +180,27 @@ Recomputed: 6 of 6 checks passed
 Bundle: sha256:<bundle-id>
 Format: benchmark-product-public-bundle/2
 
-manifest                passed
-evidence-closure        passed
-trust                   passed
-matrix-rederivation     passed
-report-verification     passed
-claim-consistency       passed
+Not checked by this tool: whether the machine that produced this bundle was
+honest, and whether the compared identities are independent parties. What is
+recomputed is the bundle's integrity, evidence closure, signing trust,
+calculations, the report, and claim consistency — against the bytes the
+bundle carries, nothing else.
 
-This checks the bundle's integrity, evidence closure, calculations, report,
-and claim consistency. It does not prove that the machine that produced the
-bundle was honest or that the compared identities are independent parties.
+manifest                  passed       every listed file is here, unaltered
+evidence-closure          passed       every run's evidence is carried here
+trust                     passed       the signing keys match the identities
+matrix-rederivation       passed       the run tally follows from the evidence
+report-verification       passed       the result follows from the runs
+claim-consistency         passed       the claim agrees with the records here
+
+Signed by
+  publisher · 1 key
+    key sha256:<publisher-key-fingerprint> — no domain bound
+  automated grader — same operator · 1 key
+
 No files were uploaded.
+Protocol identifiers are names, not addresses — this verifier fetches nothing
+from them. Checks run against the exact platform bytes installed from npm.
 ```
 
 `--json` remains stable for automation and returns the six canonical checks plus verifier version, accepted format, bundle identity, and failure details. Human output uses plain language; machine output does not mix with progress messages.
@@ -265,14 +275,10 @@ The last lines state what happened and what did not:
 ```text
 Published locally; nothing was uploaded.
 Bundle: <absolute-path>/bundle
+Receipt: <absolute-path>/quickstart-receipt.json
 Identity: sha256:<bundle-id>
 Recomputed: 6 of 6 checks passed
-
-Check it again:
-  npx @colophon-claims/verify@0.1 <absolute-path>/bundle
-
-Use your own work:
-  colophon open
+Complete comparison; no comparative winner stated.
 ```
 
 Progress goes to stderr and is concise: preflight, sample preparation, two arms, report, local publication, copied-bundle verification. There is no spinner-only state; long steps show the current arm/cell and elapsed time without inventing an ETA.

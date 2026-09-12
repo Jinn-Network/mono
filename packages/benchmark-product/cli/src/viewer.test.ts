@@ -158,7 +158,7 @@ describe("verified bundle viewer", () => {
     expect(page).toContain("colophon bundle verify --bundle");
   });
 
-  test("offers the profile-aware command for a metadata-first bundle that deferred nothing", async () => {
+  test("offers the profile-aware command for a metadata-first bundle that deferred nothing, and names its scope without a verdict word", async () => {
     const root = mkdtempSync(join(tmpdir(), "colophon-viewer-metadata-first-complete-"));
     roots.push(root);
     writeFileSync(join(root, "report.json"), "{}");
@@ -172,6 +172,12 @@ describe("verified bundle viewer", () => {
     const page = await (await fetch(session.base, { headers: { cookie: session.cookie } })).text();
 
     expect(page).toContain("7 of 7 bundle checks passed.");
+    // The v5 heading branch, guarded the same way as the v4 one below (#4262). This is the
+    // fixture where the word is actually in the input: `artifactContent.status` reads `verified`
+    // exactly when no body was deferred, so a page that ever printed that value verbatim would
+    // fail here rather than ship.
+    expect(page).toContain("Evidence-native benchmark");
+    expect(page).not.toMatch(/verified|certified|validated|audited/i);
     expect(page).not.toContain("npx @colophon-claims/verify@");
     expect(page).toContain("colophon bundle verify --bundle");
   });
@@ -293,7 +299,12 @@ describe("verified bundle viewer", () => {
     viewers.push(viewer);
     const session = await claim(viewer);
     const html = await (await fetch(session.base, { headers: { cookie: session.cookie } })).text();
-    expect(html).toContain("Verified binary qualification");
+    // Pinned as the `<h1>` element, not as bare text: the qualification section's `<h2>` carries
+    // the same words, so a text-only match survives a rename of the heading branch above it.
+    expect(html).toContain("<h1>Binary qualification</h1>");
+    // #4262 extended the #2982 ruling to this surface; the whole response is the guard because the
+    // word reached the page through a heading, an eyebrow, and the document title.
+    expect(html).not.toMatch(/verified|certified|validated|audited/i);
     expect(html).toContain("two-human-unanimous");
     expect(html).toContain("factuality");
     expect(html).toContain("@colophon-claims/verify@0.1");
