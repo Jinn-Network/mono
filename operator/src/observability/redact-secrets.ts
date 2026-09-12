@@ -125,7 +125,24 @@ function redactStringValue(value: string): string {
   return value
     .replace(HEX64_RE, marker('hex64'))
     .replace(JWT_RE, marker('jwt'))
-    .replace(URL_IN_TEXT_RE, (url) => redactRpcUrl(url));
+    .replace(URL_IN_TEXT_RE, (url) => redactUrlInText(url));
+}
+
+/**
+ * Redact one `URL_IN_TEXT_RE` match. The class does not stop at `)` or `]`
+ * (a `]` closes an IPv6 host literal), so a match can carry closing brackets
+ * from the surrounding prose: `(see https://u:pw@host:8545)` matches through
+ * the `)`, the port becomes `8545)`, `new URL` throws, and redactRpcUrl's
+ * unparseable fallback would keep the userinfo verbatim. Peel trailing
+ * brackets one at a time until the URL parses, redact, and put them back.
+ */
+function redactUrlInText(url: string): string {
+  let tail = '';
+  while (!URL.canParse(url) && /[)\]]$/.test(url)) {
+    tail = url.slice(-1) + tail;
+    url = url.slice(0, -1);
+  }
+  return redactRpcUrl(url) + tail;
 }
 
 // ── RPC URL redaction ────────────────────────────────────────────────────────

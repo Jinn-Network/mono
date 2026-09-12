@@ -454,4 +454,22 @@ describe('redaction — #4426 URL_IN_TEXT_RE alignment with rpc/transport maskUr
     expect(out.note).toContain('rpc.example');
     expect(out.note).not.toContain('PLANTEDparenKey01');
   });
+
+  it.each([
+    ['(see https://u:PLANTEDbracketPw@rpc.example:8545)', 'rpc.example:8545', ')'],
+    ['[wss://u:PLANTEDbracketPw@rpc.example]', 'rpc.example', ']'],
+    ['(wss://u:PLANTEDbracketPw@[2001:db8::1]:8546)', '[2001:db8::1]:8546', ')'],
+  ])(
+    'still strips userinfo when a prose bracket lands right after the host/port: %s',
+    (note, host, bracket) => {
+      // The wider class swallows the closing bracket into the match, which
+      // makes the port (or host) unparseable. Without peeling it back off,
+      // redactRpcUrl's unparseable fallback returns the whole URL verbatim —
+      // the exact leak this class change was meant to close.
+      const out = redactValue({ note }) as Record<string, unknown>;
+      expect(out.note).toContain(host);
+      expect(out.note).not.toContain('PLANTEDbracketPw');
+      expect((out.note as string).endsWith(bracket)).toBe(true);
+    },
+  );
 });

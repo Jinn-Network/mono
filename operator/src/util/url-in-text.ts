@@ -8,7 +8,10 @@
  * The class stops only at whitespace and quote/angle delimiters. `)` and `]`
  * are deliberately NOT excluded: `]` closes an IPv6 host literal, and a
  * trailing `)` swallowed from prose costs one bracket while an excluded one
- * cost the whole redaction. Case-insensitive because URL schemes are, and
+ * cost the whole redaction. A swallowed bracket that lands right after the
+ * host or port makes the match unparseable; each consumer handles that
+ * (`redactUrlInText` peels it, `maskRpcHost` fails closed). Case-insensitive
+ * because URL schemes are, and
  * nothing normalizes an operator-typed `HTTPS://` before it reaches a log.
  *
  * Global + stateful: use with `String.prototype.replace` only (which resets
