@@ -117,7 +117,7 @@ import {
   SuiteProtocolSelectionSchema,
   suiteProtocolSelectionBytes,
 } from "./suite-protocol/manifest.js";
-import { INSPECT_SELECTION_CORRELATION_ROLE } from "@colophon-claims/verify";
+import { INSPECT_SELECTION_CORRELATION_ROLE } from "@colophon-claims/check";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
 export const NATIVE_RUNTIME_EVIDENCE_PROFILE = "https://runtime.jinn.network/profiles/native-evidence/v1";

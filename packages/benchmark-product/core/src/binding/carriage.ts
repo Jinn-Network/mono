@@ -7,7 +7,7 @@
  * - **Bytes come out of the sealed store, never out of RunState.** RunState names one record
  *   digest; `getSealedBytes` re-verifies it on read, so a binding edited in place surfaces as its
  *   own `record-integrity` refusal naming the store path before anything projects it.
- * - **The projection is the shared one.** `verifyRunBinding` lives in `@colophon-claims/verify` and
+ * - **The projection is the shared one.** `verifyRunBinding` lives in `@colophon-claims/check` and
  *   is the same function an external reader recomputes with. A second local implementation would
  *   turn "the verifier recomputes and fails on mismatch" into a comparison of two guesses.
  * - **The record must belong to THIS run.** `verifyRunBinding` proves a record is internally
@@ -23,8 +23,8 @@
  *   package boundary.
  */
 
-import { RunBindingError, verifyRunBinding } from "@colophon-claims/verify";
-import type { VerifiedRunBinding } from "@colophon-claims/verify";
+import { RunBindingError, verifyRunBinding } from "@colophon-claims/check";
+import type { VerifiedRunBinding } from "@colophon-claims/check";
 import { parseRun, readBeaconSource } from "@jinn-network/benchmarking-records";
 import { refuse } from "../errors.js";
 import type { RunState } from "../run/state.js";

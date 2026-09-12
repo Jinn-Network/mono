@@ -18,13 +18,19 @@ const COLOPHON_SCOPE = '@colophon-claims/';
 const PRODUCT_PACKAGES = [
   ['core', '@colophon-claims/core', 'public'],
   ['cli', '@colophon-claims/cli', 'public'],
+  ['check', '@colophon-claims/check', 'public'],
+  // The name the checker published under first, kept as a passthrough alias so no sealed bundle
+  // instruction stops resolving. It is public, and it is built from nothing (issue #4188).
   ['verify', '@colophon-claims/verify', 'public'],
   ['web', '@colophon-claims/web', 'private'],
 ];
 const PACKAGE_VERSIONS = new Map([
   ['@colophon-claims/core', '0.1.0'],
   ['@colophon-claims/cli', '0.1.0'],
-  ['@colophon-claims/verify', '0.2.1'],
+  ['@colophon-claims/check', '0.2.1'],
+  // The next free patch under @0.2: 0.2.1 is immutable on npm, and anything in 0.3.x would leave
+  // `npx @colophon-claims/verify@0.2` resolving to the pre-rename real package, not the alias.
+  ['@colophon-claims/verify', '0.2.2'],
   ['@colophon-claims/web', '0.1.0'],
 ]);
 
@@ -50,12 +56,12 @@ const CORE_JINN = [
   // published package.
   '@jinn-network/trust-testing',
 ];
-const VERIFY_JINN = [
+const CHECK_JINN = [
   '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-records',
   '@jinn-network/benchmarking-run', '@jinn-network/benchmarking-protocol', '@jinn-network/task-admission',
   '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
-  // `trust-testing` is the Trust layer's conformance kit and a devDependency only: verify runs
+  // `trust-testing` is the Trust layer's conformance kit and a devDependency only: the checker runs
   // the anchor-proof contract suite (anchor-evidence design §11) against its own node:crypto
   // ports. The source-boundaries guard pins it to `src/**/*.test.ts`, which `tsconfig.build.json`
   // excludes from `dist/`, so it never reaches the published package.
@@ -83,37 +89,40 @@ const PUBLICATION_PORTALS = [
   '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve',
   '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication',
 ];
-const VERIFY_PORTALS = [
+const CHECK_PORTALS = [
   '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-records',
   '@jinn-network/benchmarking-run', '@jinn-network/benchmarking-protocol', '@jinn-network/environment-record', '@jinn-network/evidence-protocol',
   '@jinn-network/task-admission',
   '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
-  // `trust-resolve` is not imported anywhere in verify: it arrives as a declared dependency of
-  // the `trust-testing` devDependency, and a portal resolution is what keeps it pointed at the
+  // `trust-resolve` is not imported anywhere in the checker: it arrives as a declared dependency
+  // of the `trust-testing` devDependency, and a portal resolution is what keeps it pointed at the
   // live tree rather than at a registry version that does not exist.
   '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
 ];
 
 const APPROVED = new Map([
-  ['core', { colophon: ['@colophon-claims/verify'], jinn: CORE_JINN, portals: [
-    '@colophon-claims/verify', ...CORE_JINN, '@jinn-network/environment-record', '@jinn-network/evidence-discovery',
+  ['core', { colophon: ['@colophon-claims/check'], jinn: CORE_JINN, portals: [
+    '@colophon-claims/check', ...CORE_JINN, '@jinn-network/environment-record', '@jinn-network/evidence-discovery',
     '@jinn-network/evidence-protocol',
     '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
     '@jinn-network/record-discovery-client',
-    // As in `verify`: `trust-resolve` is imported nowhere in core, and arrives only as a declared
+    // As in `check`: `trust-resolve` is imported nowhere in core, and arrives only as a declared
     // dependency of the `trust-testing` devDependency. A portal resolution is what keeps it
     // pointed at the live tree rather than at a registry version that does not exist.
     '@jinn-network/trust-resolve',
   ] }],
-  ['cli', { colophon: ['@colophon-claims/core', '@colophon-claims/verify'], jinn: [], portals: [
-    '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
+  ['cli', { colophon: ['@colophon-claims/check', '@colophon-claims/core'], jinn: [], portals: [
+    '@colophon-claims/check', '@colophon-claims/core', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
   ] }],
-  ['verify', { colophon: [], jinn: VERIFY_JINN, portals: VERIFY_PORTALS }],
+  ['check', { colophon: [], jinn: CHECK_JINN, portals: CHECK_PORTALS }],
+  // The alias declares the checker and nothing else: no Jinn closure and no portal, because it is
+  // never built from the live tree. Six files of re-export are its whole published surface.
+  ['verify', { colophon: ['@colophon-claims/check'], jinn: [], portals: [] }],
   ['web', { colophon: ['@colophon-claims/core'], jinn: [], portals: [
-    // Verify is core's public runtime dependency. Web resolves it only as portal plumbing;
+    // The checker is core's public runtime dependency. Web resolves it only as portal plumbing;
     // source-boundaries still permits web to import core alone.
-    '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
+    '@colophon-claims/core', '@colophon-claims/check', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
   ] }],
 ]);
 
@@ -196,7 +205,8 @@ test('the Colophon claims inventory is explicit and derives its membership from 
     assert.equal(manifest.private === true, visibility === 'private', `${name} visibility drifted`);
     for (const dependency of dependencyNames(manifest, COLOPHON_SCOPE)) {
       // Core and CLI remain at product version 0.1, while their current-artifact dependency
-      // closure uses verifier 0.2 for the prompted-screening admission surface.
+      // closure uses checker 0.2 for the prompted-screening admission surface. The alias pins the
+      // checker exactly for the same reason every public sibling does.
       const expectedVersion = PACKAGE_VERSIONS.get(dependency);
       assert.equal(manifest.dependencies?.[dependency], expectedVersion, `${name} must pin public sibling ${dependency} exactly`);
     }
@@ -207,7 +217,9 @@ test('the public Colophon members and private web have the intended publication 
   const expectedBins = new Map([
     ['core', undefined],
     ['cli', { colophon: './dist/bin.js' }],
-    ['verify', { 'colophon-verify': './dist/bin.js' }],
+    ['check', { 'colophon-check': './dist/bin.js' }],
+    // The alias has no build, so its executable ships from the package root rather than `dist/`.
+    ['verify', { 'colophon-verify': './bin.js' }],
   ]);
   for (const [directory, name, visibility] of PRODUCT_PACKAGES) {
     const manifest = readPackage(directory);

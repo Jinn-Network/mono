@@ -32,7 +32,7 @@ import {
   PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND,
   verifyPublicBundle,
   verifyPublicBundleSnapshot,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { buildPublicAssets, type PublicAssetInput } from "./assets.js";
 import { buildBundleManifest } from "./manifest.js";
 import { BUNDLE_V6_FORMAT } from "../legacy-closures.js";

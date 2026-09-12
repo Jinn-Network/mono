@@ -163,7 +163,7 @@ export type HumanReviewRevealReceipt = z.infer<typeof HumanReviewRevealReceiptSc
  * `screening-reveal-receipt/v1` (spec §6.6): a bank-scoped sibling of `HumanReviewRevealReceiptSchema`
  * above. Same ordering primitive, same attestor role, same `judgeExecutionState: "not-started"`
  * gate — differing only in subject: the bank (`screeningTableSha256`), not an item (`itemSha256`).
- * `AdmissionAuthorityRole` (`verify/src/admission/verification.ts`) is deliberately unchanged: this
+ * `AdmissionAuthorityRole` (`check/src/admission/verification.ts`) is deliberately unchanged: this
  * reuses `truth-reveal-attestor` rather than minting a new role.
  */
 export const ScreeningRevealReceiptSchema = z.strictObject({
@@ -516,7 +516,7 @@ export type ScreeningTableV2 = z.infer<typeof ScreeningTableV2Schema>;
 
 // The two-human-review reasons (unchanged) and the screened-branch reasons this packet adds
 // (spec §6.4; packet P6). This is one of four widened copies of the closed reason vocabulary
-// (the other three: verify/src/schema.ts's exclusions[].reason, verify/src/admission/
+// (the other three: check/src/schema.ts's exclusions[].reason, check/src/admission/
 // verification.ts's VerifiedBinaryJudgmentAdmissionExclusion.reason, and
 // core/src/operations/human-review.ts's HumanAdmissionExclusionSummary.reason) — duplicated
 // with a comment at each site rather than imported, matching this package's existing pattern for

@@ -17,7 +17,7 @@ name: Benchmark Product CI
 # for a split lane, and turning an unmeasured guess into a required check is how a merge queue
 # wedges.
 #
-# What was done instead. `packages/benchmark-product/verify/tsconfig.tests.json` typechecks the
+# What was done instead. `packages/benchmark-product/check/tsconfig.tests.json` typechecks the
 # `.mjs` suites against the published surface they exercise, so a stub written against a
 # superseded seam shape now fails to compile at its own line rather than crashing several frames
 # inside the renderer, as #4272 did. Detection stays post-merge; diagnosis stops being an
@@ -229,7 +229,7 @@ jobs:
             packages/task-execution/backend-local/assembly/yarn.lock
             packages/benchmarking/run/yarn.lock
             packages/benchmarking/local/yarn.lock
-            packages/benchmark-product/verify/yarn.lock
+            packages/benchmark-product/check/yarn.lock
             packages/benchmark-product/core/yarn.lock
             packages/benchmark-product/web/yarn.lock
             packages/benchmark-product/cli/yarn.lock
@@ -301,11 +301,11 @@ jobs:
           (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn vitest run src/backend.shutdown.test.ts && yarn build)
           (cd packages/benchmarking/run && yarn install --immutable && yarn build)
           (cd packages/benchmarking/local && yarn install --immutable && yarn build)
-      # The public family is ordered by its public dependencies: verify is standalone,
-      # core consumes verify, and cli consumes both. The private web is CLI build input,
+      # The public family is ordered by its public dependencies: check is standalone,
+      # core consumes check, and cli consumes both. The private web is CLI build input,
       # so its dependency tree must be installed after core and before the CLI packs it.
-      - name: Verify public bundle verifier
-        working-directory: packages/benchmark-product/verify
+      - name: Verify public bundle checker
+        working-directory: packages/benchmark-product/check
         run: |
           yarn install --immutable
           yarn typecheck

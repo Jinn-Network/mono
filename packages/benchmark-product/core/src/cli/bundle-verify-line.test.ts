@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, test } from "vitest";
-import type { PublicBundleVerificationResult } from "@colophon-claims/verify";
+import type { PublicBundleVerificationResult } from "@colophon-claims/check";
 import { renderBundleVerifyLine } from "./main.js";
 
 const V4_RESULT: PublicBundleVerificationResult = {

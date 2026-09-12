@@ -5,7 +5,7 @@
  * Every legacy closure fact the producer names — the format literals, the mandatory member lists,
  * the claim-package schema ids, the pinned reader instructions, and the check arrays the claim
  * builder stamps — is read from here and nowhere else. The verifier keeps the mirror of this file
- * (`@colophon-claims/verify`'s own `legacy-closures`) forever; this one exists so the C5 cutover to
+ * (`@colophon-claims/check`'s own `legacy-closures`) forever; this one exists so the C5 cutover to
  * the composed `/8` generation retargets one import surface rather than hunting through the
  * producer for hand-allocated numbers
  * (`docs/superpowers/specs/2026-08-29-bundle-capability-composition-design.md` §10 step 1, §13
@@ -36,7 +36,7 @@ export {
   PUBLIC_BUNDLE_V7_CHECKS,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 
 // ── Format literals ────────────────────────────────────────────────────────────────────────────
 
