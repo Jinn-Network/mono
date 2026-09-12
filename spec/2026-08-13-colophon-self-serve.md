@@ -400,7 +400,7 @@ The winner is therefore **one Colophon npm runner plus a smaller verifier, both 
 
 ### 6.2 Required package boundary
 
-All product code is Colophon-owned Tier 4 code. `@colophon-claims/core` owns the canonical operations and product composition, `@colophon-claims/cli` is the thin executable/install surface over it, and `@colophon-claims/check` owns the independently installable reader path. The private `@colophon-claims/web` source package is built into the local CLI distribution; it is not a fourth public install choice. No benchmark-product package publishes under `@jinn-network/*`.
+All product code is Colophon-owned Tier 4 code. `@colophon-claims/core` owns the canonical operations and product composition, `@colophon-claims/cli` is the thin executable/install surface over it, and `@colophon-claims/verify` owns the independently installable reader path. The private `@colophon-claims/web` source package is built into the local CLI distribution; it is not a fourth public install choice. No benchmark-product package publishes under `@jinn-network/*`.
 
 The runner package must contain:
 
