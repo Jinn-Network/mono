@@ -21,7 +21,7 @@ import {
 } from "./manifest.js";
 import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT } from "./legacy-closures.js";
 import { BUNDLE_V4_EVIDENCE_ROLES } from "./schema.js";
-import { BenchmarkProductError } from "./profile/errors.js";
+import { expectRefusal } from "./testing/expect-refusal.js";
 import {
   FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_EXCLUDED_ROLES,
@@ -125,24 +125,6 @@ function readManifest(tree: ReturnType<typeof renderFreezeRepo>): Record<string,
   return JSON.parse(decoder.decode(tree.files.get(FREEZE_REPO_MANIFEST_FILENAME)!)) as Record<string, any>;
 }
 
-/** The typed refusal a call raised, so a test can assert its `code` and `issues` and not only its
- * prose: callers branch on the code, so the code is the part a change must not move silently. */
-function expectRefusal(run: () => unknown): BenchmarkProductError {
-  let raised: unknown;
-  let threw = false;
-  try {
-    run();
-  } catch (cause) {
-    threw = true;
-    raised = cause;
-  }
-  // Asserted outside the try, because a `throw` placed inside it lands in its own catch and the
-  // test then fails on the type assertion instead: a reader chasing a regression is told
-  // "expected BenchmarkProductError, received Error" when the truth is that nothing was thrown.
-  expect(threw, "expected a refusal").toBe(true);
-  expect(raised).toBeInstanceOf(BenchmarkProductError);
-  return raised as BenchmarkProductError;
-}
 
 describe("freeze repository rendering", () => {
   test("the same bundle regenerates a byte-identical tree", () => {
@@ -262,8 +244,11 @@ describe("freeze repository rendering", () => {
   });
 
   test("refuses a bundle with no qualification graph rather than emitting an empty repository", () => {
-    expect(() => renderFreezeRepo(snapshotOf({ format: BUNDLE_FORMAT })))
-      .toThrow(/requires a qualification bundle/);
+    const refusal = expectRefusal(() => renderFreezeRepo(snapshotOf({ format: BUNDLE_FORMAT })));
+    expect(refusal.message).toMatch(/requires a qualification bundle/);
+    // `validation`, not `conflict`: the bundle fails the operation's precondition, and nothing
+    // collides with anything -- a caller retrying under another name could never succeed.
+    expect(refusal.code).toBe("validation");
   });
 
   test("names every accepted format when it refuses one that is not accepted", () => {
@@ -322,7 +307,12 @@ describe("freeze repository rendering", () => {
       name: "Unlicensed", description: "", version: "1.0.0",
       items: [], reveal: { policy: "immediate" },
     };
-    expect(() => renderFreezeRepo(snapshotOf({ benchmark }))).toThrow(/declares no licence/);
+    const refusal = expectRefusal(() => renderFreezeRepo(snapshotOf({ benchmark })));
+    expect(refusal.message).toMatch(/declares no licence/);
+    // A missing required field is `validation`: the record met no existing state, so `conflict`
+    // -- one name claimed twice -- would send a caller branching on the code down a retry that
+    // cannot succeed (issue #4378).
+    expect(refusal.code).toBe("validation");
   });
 
   test("refuses a catalog that assigns no freeze-artifact role", () => {
@@ -802,6 +792,31 @@ describe("generated licence text is not writable from a free-text field", () => 
     const license = decoder.decode(tree.files.get("LICENSE")!);
     expect(license).toContain("https://spdx.org/licenses/MIT");
     expect(license).toContain("SPD X-License: x");
+    // A tag name starts with a letter: `SPDX-1abc:` is not one, and the scan's first-character
+    // rule is what says so -- pinned here so a rewrite of the scan cannot drop it silently.
+    const digitFirst = renderFreezeRepo(snapshotOf({
+      benchmark: withBenchmark({ citation: "Acme Bench, 2026.\nSPDX-1abc: x" }),
+    }));
+    expect(decoder.decode(digitFirst.files.get("LICENSE")!)).toContain("SPDX-1abc: x");
+  });
+
+  test("refuses a tag whose name runs past any bound, because no finite bound closes the family", () => {
+    // `SPDX-License-Identifier` followed by 60 dashes and a colon was the one shape the 64-character
+    // name bound admitted: a 78-character name run that no backtrack position reached the colon
+    // through, yet a reader matching the bare `SPDX-License-Identifier` substring still reads a
+    // licence out of it. 300 dashes beat any larger bound the same way. The hand-rolled scan has
+    // no bound -- it walks the name run once and resumes at its end -- so both are refused, in a
+    // citation and lower-cased alike.
+    for (const dashes of [60, 300]) {
+      for (const tag of [
+        `SPDX-License-Identifier${"-".repeat(dashes)}: GPL-3.0-only`,
+        `spdx-license-identifier${"-".repeat(dashes)}: GPL-3.0-only`,
+      ]) {
+        expect(() => renderFreezeRepo(snapshotOf({
+          benchmark: withBenchmark({ citation: `Acme Bench, 2026.\n${tag}` }),
+        })), `${dashes} dashes: ${tag.slice(0, 24)}`).toThrow(/reads as an SPDX tag/);
+      }
+    }
   });
 
   test("refuses a tag separated from its colon by whitespace an ASCII class does not carry", () => {
@@ -827,8 +842,9 @@ describe("generated licence text is not writable from a free-text field", () => 
     // package and no bundle member carries a byte cap, so a sealed record can hand the READER --
     // who is verifying precisely because the publisher is untrusted -- a value that pinned one
     // core inside a single synchronous `.test()` call. Measured on the unbounded pattern: 4.7s at
-    // 200KB, quadrupling per doubling, ~110 minutes at 8MB. The 64-character name bound makes it
-    // linear; this value renders in ~15ms.
+    // 200KB, quadrupling per doubling, ~110 minutes at 8MB. The hand-rolled scan is linear with no
+    // name bound, because it resumes at the END of each name run rather than at the next position
+    // (issue #4377); this value renders in ~15ms.
     //
     // The budget sits in the gap between the two costs: ~200x above the linear one, so ordinary
     // host load cannot reach it, and ~5x below the 17s the unbounded pattern took on this same
