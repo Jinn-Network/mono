@@ -81,7 +81,7 @@ for the snapshot-rendering path the CLI actually runs, so a seam typed against t
 document a call the CLI no longer makes.
 
 Two of those three are breaking for an embedder — the `deps.verify` and `deps.freezeRepo` seam
-changes, which stop a supplied stub type-checking; the added export is not. Seven further public
+changes, which stop a supplied stub type-checking; the added export is not. Eight further public
 behaviors move alongside them. `freezeRepoCommitId` raises `validation` where it raised `conflict`
 for a malformed path (an empty or dot segment, an unpaired surrogate, a NUL — none of which
 collides with anything), so a caller branching on `code` sees a code it does not handle. Four
