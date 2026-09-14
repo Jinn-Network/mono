@@ -409,3 +409,73 @@ describe('redaction — #420 code-review hardening', () => {
     expect(out['deliveryTxHash']).toBe(h);
   });
 });
+
+describe('redaction — #4426 URL_IN_TEXT_RE alignment with rpc/transport maskUrlsInMessage', () => {
+  it('redacts a bracketed-IPv6 URL carrying credentials in userinfo, path and query on the free-text path', () => {
+    // `note` is not an rpcUrl key, so this reaches redactStringValue. The
+    // planted values are opaque (non-hex64, non-JWT) so only the URL pass can
+    // catch them. Under the old character class the match stopped at `]`,
+    // `new URL` threw on the truncated string, and redactRpcUrl's catch path
+    // returned the whole thing verbatim — every credential survived.
+    const out = redactValue({
+      note:
+        'probe failed: wss://u:PLANTEDipv6Pw@[2001:db8::1]:8546/v2/PLANTEDipv6Path0001' +
+        '?apikey=PLANTEDipv6Query',
+    }) as Record<string, unknown>;
+    expect(out.note).toContain('[2001:db8::1]');
+    expect(out.note).not.toContain('PLANTEDipv6Pw');
+    expect(out.note).not.toContain('PLANTEDipv6Path0001');
+    expect(out.note).not.toContain('PLANTEDipv6Query');
+  });
+
+  it('redacts an uppercase-scheme URL on the free-text path', () => {
+    // The old regex had no `i` flag; `WSS://` matched nothing and the string
+    // survived intact. The sibling in rpc/transport.ts already caught it.
+    const out = redactValue({
+      note:
+        'upper WSS://u:PLANTEDupperPw@rpc.example/v2/PLANTEDupperPath01' +
+        '?apikey=PLANTEDupperQuery done',
+    }) as Record<string, unknown>;
+    expect(out.note).toContain('rpc.example');
+    expect(out.note).not.toContain('PLANTEDupperPw');
+    expect(out.note).not.toContain('PLANTEDupperPath01');
+    expect(out.note).not.toContain('PLANTEDupperQuery');
+  });
+
+  it('still strips the key from a URL wrapped in prose parentheses (characterization)', () => {
+    // Characterization, not a regression guard: the old class also stripped
+    // this. It pins the accepted trade-off that a trailing `)` directly after
+    // a redacted segment is consumed with it, so a future change that
+    // re-excludes `)` (and re-breaks IPv6 by the same logic) is a conscious
+    // choice, not drift.
+    const out = redactValue({
+      note: '(see https://rpc.example/v2/PLANTEDparenKey01)',
+    }) as Record<string, unknown>;
+    expect(out.note).toContain('rpc.example');
+    expect(out.note).not.toContain('PLANTEDparenKey01');
+  });
+
+  it.each([
+    ['(see https://u:PLANTEDbracketPw@rpc.example:8545)', 'rpc.example:8545', ')'],
+    ['[wss://u:PLANTEDbracketPw@rpc.example]', 'rpc.example', ']'],
+    ['(wss://u:PLANTEDbracketPw@[2001:db8::1]:8546)', '[2001:db8::1]:8546', ')'],
+    ['(see https://u:PLANTEDbracketPw@rpc.example:8545).', 'rpc.example:8545', ').'],
+    ['see https://u:PLANTEDbracketPw@rpc.example:8545,', 'rpc.example:8545', ','],
+    ['[wss://u:PLANTEDbracketPw@rpc.example:8545];', 'rpc.example:8545', '];'],
+    ['at https://u:PLANTEDbracketPw@rpc.example:8545:', 'rpc.example:8545', ':'],
+  ])(
+    'still strips userinfo when prose punctuation lands right after the host/port: %s',
+    (note, host, bracket) => {
+      // Guards the peel loop in redactUrlInText. The wider class swallows a
+      // closing bracket into the match, and the class never stopped at `.`,
+      // `,`, `;` or `:`, so trailing prose punctuation makes the port (or
+      // host) unparseable. Without peeling it back off, redactRpcUrl's
+      // unparseable fallback returns the whole URL verbatim — the exact leak
+      // this class change was meant to close.
+      const out = redactValue({ note }) as Record<string, unknown>;
+      expect(out.note).toContain(host);
+      expect(out.note).not.toContain('PLANTEDbracketPw');
+      expect((out.note as string).endsWith(bracket)).toBe(true);
+    },
+  );
+});

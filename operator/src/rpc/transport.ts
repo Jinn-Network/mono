@@ -37,6 +37,7 @@ import {
 } from 'viem';
 
 import { walkStructured } from '../util/structured-walk.js';
+import { URL_IN_TEXT_RE } from '../util/url-in-text.js';
 
 /**
  * Hard cap on the number of providers in a single fallback chain. Six covers
@@ -258,7 +259,7 @@ export function maskRpcHost(url: string): string {
  * false-positive rate against a leak that cannot occur.
  */
 export function maskUrlsInMessage(message: string): string {
-  return message.replace(/(?:https?|wss?):\/\/[^\s"'<>]+/gi, (url) => maskRpcHost(url));
+  return message.replace(URL_IN_TEXT_RE, (url) => maskRpcHost(url));
 }
 
 /**

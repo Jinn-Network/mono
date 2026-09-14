@@ -25,6 +25,7 @@
 
 import { SECRET_NAME_PATTERNS } from '../trajectory/secret-scrub.js';
 import { walkStructured } from '../util/structured-walk.js';
+import { URL_IN_TEXT_RE } from '../util/url-in-text.js';
 
 /**
  * Bumped whenever the redaction logic changes in a way that affects what is
@@ -38,8 +39,18 @@ import { walkStructured } from '../util/structured-walk.js';
  * v4 (#3108): `URL_RE` covers `ws://` and `wss://`, so a WebSocket RPC URL
  * embedded in a free-text string value now has its userinfo, path, query and
  * fragment stripped. Under v3 it matched nothing and survived intact.
+ *
+ * v5 (#4426): `URL_IN_TEXT_RE` (shared with `rpc/transport.ts`) no longer
+ * stops at `)` or `]` and matches schemes case-insensitively. A bracketed
+ * IPv6 URL in free text was truncated at `]`, failed to parse, and fell
+ * through the unparseable-URL path with its userinfo, path key and query
+ * intact; an uppercase `HTTPS://` / `WSS://` scheme matched nothing. Both
+ * now have their credentials stripped. A trailing `)` directly after a
+ * redacted path segment is now consumed with it; trailing prose brackets or
+ * punctuation (`)`, `]`, `.`, `,`, `;`, `:`) directly after the host/port are
+ * peeled off before redaction and re-appended.
  */
-export const REDACTION_VERSION = '4';
+export const REDACTION_VERSION = '5';
 
 /** The marker substituted for a redacted value. */
 function marker(label: string): string {
@@ -101,8 +112,6 @@ function isSecretName(key: string): boolean {
 const HEX64_RE = /\b0x[0-9a-fA-F]{64}\b/g;
 /** A JWT-shaped token: three base64url segments separated by dots. */
 const JWT_RE = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
-/** Any http(s) or ws(s) URL embedded in free text. */
-const URL_RE = /(?:https?|wss?):\/\/[^\s"'<>)\]]+/g;
 
 /**
  * Redact secret-shaped substrings inside a free-text string value.
@@ -118,7 +127,26 @@ function redactStringValue(value: string): string {
   return value
     .replace(HEX64_RE, marker('hex64'))
     .replace(JWT_RE, marker('jwt'))
-    .replace(URL_RE, (url) => redactRpcUrl(url));
+    .replace(URL_IN_TEXT_RE, (url) => redactUrlInText(url));
+}
+
+/**
+ * Redact one `URL_IN_TEXT_RE` match. The class does not stop at `)` or `]`
+ * (a `]` closes an IPv6 host literal) and never stopped at `.`, `,`, `;` or
+ * `:`, so a match can carry closing brackets and sentence punctuation from
+ * the surrounding prose: `(see https://u:pw@host:8545).` matches through the
+ * `).`, the port becomes `8545).`, `new URL` throws, and redactRpcUrl's
+ * unparseable fallback would keep the userinfo verbatim. Peel trailing
+ * brackets and punctuation one character at a time until the URL parses,
+ * redact, and put them back.
+ */
+function redactUrlInText(url: string): string {
+  let tail = '';
+  while (!URL.canParse(url) && /[)\].,;:]$/.test(url)) {
+    tail = url.slice(-1) + tail;
+    url = url.slice(0, -1);
+  }
+  return redactRpcUrl(url) + tail;
 }
 
 // ── RPC URL redaction ────────────────────────────────────────────────────────
@@ -138,7 +166,7 @@ export function redactRpcUrl(url: string): string {
     parsed = new URL(url);
   } catch {
     // Not a parseable URL. Apply only the non-URL string redactors here —
-    // calling redactStringValue would re-run URL_RE on the same unparseable
+    // calling redactStringValue would re-run URL_IN_TEXT_RE on the same unparseable
     // string and recurse straight back into redactRpcUrl, overflowing the
     // stack on a malformed URL (e.g. `http://[bad`) in an error message.
     return url.replace(HEX64_RE, marker('hex64')).replace(JWT_RE, marker('jwt'));
