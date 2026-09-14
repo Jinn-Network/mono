@@ -80,8 +80,10 @@ produce one host commit. Each commit message names the source SHA, the lane, and
 release groups, and `.jinn-profile-host-source` at the host root records the same — for the
 last *content-changing* refresh. A refresh that finds identical content writes nothing, the
 marker included (it rewrites only a missing or malformed marker), so the marker never names
-a SHA whose bytes are not the ones on disk, and it is not a record of the most recent
-refresh run.
+a SHA whose bytes are not the ones on disk. Because each group manifest pins both the
+source commit and the lane, a refresh that finds identical content is always a re-run at
+the marker's own SHA and lane: the marker's commit does not date the most recent run, but
+its SHA and lane are always the most recent run's.
 
 **The host repository's `main` is entirely generated. Never hand-edit it** — the next
 refresh deletes every top-level entry except `.git` and `.jinn-profile-host-source`
@@ -194,7 +196,7 @@ operator's own provisioning work, which the gate can only check after it is done
 Route budget: the merged deploy declares one `headers` entry per served path (every
 document of every group, plus each group's root files), and the host configuration is
 capped at 1024 routes. The count moves with the catalog, so this runbook does not restate
-it: read it from the bundle generator, which reports `(<N> routes)` on every run — the
+it: read it from the bundle generator, which reports `(<N> routes)` on every successful run — the
 `canary-host-refresh` job log, or the break-glass invocation above — and warns once the
 count reaches 900 (`ROUTE_WARNING_THRESHOLD` and `ROUTE_LIMIT` in
 `.github/scripts/build-profile-host-bundle.mjs`).
