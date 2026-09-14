@@ -37,6 +37,15 @@ export function nodeErrorCode(error: unknown): string | undefined {
     : undefined;
 }
 
+/**
+ * Peer-influenced, and NOT stripped of terminal-control sequences at the log
+ * boundary: `sanitizeUntrustedText` runs at the durable-file and rendered-row
+ * boundaries instead. The line logger emits JSON, which escapes C0 (ESC lands
+ * as the six-character backslash-u-001b escape), so what passes through is
+ * DEL and C1 (U+0080-U+009F).
+ * Accepted (#4482); a logger-level strip in `logger.ts` is the candidate
+ * follow-up, not a per-site fix.
+ */
 export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
