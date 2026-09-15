@@ -289,7 +289,10 @@ describe("freeze-repository export against a real v4 bundle", () => {
     expect(payload.identity).toEqual(expect.any(String));
     expect(payload.checks).toEqual(expect.arrayContaining(["manifest"]));
     expect(payload.freezeRepo.ok).toBe(false);
-    expect(payload.freezeRepo.code).toBe("conflict");
+    // `validation`, not `conflict`: a record that declares no licence is missing a required
+    // field and collides with nothing. The code is public on this JSON surface, which is why
+    // core pins it (verify issue #4378).
+    expect(payload.freezeRepo.code).toBe("validation");
     expect(payload.freezeRepo.message).toMatch(/declares no licence/);
 
     const human = await runVerifierCli([unlicensedBundle, "--freeze-repo", repoDir]);

@@ -34,7 +34,9 @@ export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: Scena
 
   ScenarioVerdictSchema.parse(verdict);
   const verdicts = [verdict];
-  const allPassed = verdict.verdict === 'pass';
+  // fail is the only blocking verdict — skip is non-blocking, as run-tier-2.ts
+  // and exitCodeForVerdicts.
+  const allPassed = verdict.verdict !== 'fail';
 
   const summary = {
     candidateVersion,
@@ -45,10 +47,24 @@ export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: Scena
   };
   await fs.writeFile(path.join(outputDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
+  // Marker block — the marker.txt diagnostic artifact (dated tier-3-* keys). It
+  // is a separate artifact from the release-readiness handoff doc's block
+  // (environment-suite key, release-readiness.ts) and nothing parses it: the
+  // two-gate guard in npm-publish.yml queries check-runs and executes no tests.
+  const markerValue = (v: ScenarioVerdict): string => {
+    switch (v.verdict) {
+      case 'pass':
+        return 'passed';
+      case 'skip':
+        return `skipped:${v.failNotes ?? 'no-reason'}`;
+      case 'fail':
+        return `failed:${v.failClass}`;
+    }
+  };
   const markerLines = [
     '<!-- jinn-release-evidence:v1',
     `release-candidate=${candidateVersion}`,
-    `tier-3-t3-1=${verdict.verdict === 'pass' ? 'passed' : `failed:${verdict.failClass}`}`,
+    `tier-3-t3-1=${markerValue(verdict)}`,
     `tier-3-overall=${allPassed ? 'passed' : 'failed'}`,
     '-->',
   ];

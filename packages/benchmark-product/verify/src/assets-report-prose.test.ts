@@ -211,4 +211,30 @@ describe("no disclosure is lost under a method whose claim line does not carry i
     expect((await page(BUNDLE_V10_FORMAT)).split(WINNER).length - 1).toBe(1);
     expect(GOLDEN_PUBLISHED_PAGE.split(WINNER).length - 1).toBe(2);
   });
+
+  const PAIRWISE_DISAGREEMENT = {
+    id: "jinn.benchmarking.method/pairwise-disagreement",
+    parameters: { alpha: "0.05" },
+  };
+
+  const pairwiseDisagreementResults = {
+    pairs: [{
+      armA: "baseline",
+      armB: "sample-uniform",
+      n: 3,
+      disagreements: 1,
+      rate: "0.333333",
+      interval: { lower: "0.017084", upper: "0.794613", alpha: "0.05" },
+    }],
+    conflicted: { count: 0, cellKeys: [] },
+  };
+
+  test("pairwise-disagreement@1 states it once, from the header, like wilson@1", async () => {
+    // The second `true` branch of `neutralClaimStatesNoWinner` (#4407): its header claim line
+    // carries the statement, so the comparison sites drop theirs. Narrowing the predicate to
+    // `wilson` alone would render it twice here.
+    const composed = await methodPage(PAIRWISE_DISAGREEMENT, pairwiseDisagreementResults);
+    expect(composed).toContain(WINNER + "; pairwise-disagreement@1");
+    expect(composed.split(WINNER).length - 1).toBe(1);
+  });
 });

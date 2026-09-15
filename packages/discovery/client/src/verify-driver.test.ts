@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BindingResolver, BindingResolverQuery, ResolvedBinding } from "@jinn-network/trust-core";
+import type { BindingResolver, BindingResolverQuery, DsseEnvelope, ResolvedBinding } from "@jinn-network/trust-core";
 import type { AnnouncedItem, AnnouncementEntry, SourceHead } from "@jinn-network/record-discovery-protocol";
 import {
   DISCOVERY_SIGNING_SCOPE,
@@ -70,29 +70,34 @@ const acceptAllVerifier: RawSignatureVerifier = {
   },
 };
 
-type VectorEnvelope = Parameters<typeof vectorEnvelopeToWire>[0];
-
 async function* toAsyncIterable<T>(items: readonly T[]): AsyncIterable<T> {
   for (const item of items) yield item;
 }
 
 describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into the named verification procedures)", () => {
-  it("verifySource rejects a head signed by a rotated-out key (unauthorized-signer)", async () => {
+  // The §18 corpus stores DSSE envelopes in legible fixture form, which
+  // production parsing refuses -- and `verifySignedBy` reports that refusal
+  // as `unauthorized-signer`, indistinguishable from the rule under test.
+  // So the case is self-proving: the control drives the SAME envelopes with
+  // the rotated-out key kept valid and must answer `ok`, which proves the
+  // envelopes parse and every other step passes; only then can the rule
+  // assertion's `unauthorized-signer` be attributed to the validity window.
+  async function driveRotatedOutKeyVector(seeds: FakeBindingSeed[]): Promise<string> {
     const vector = loadVectorsByKind("source-chain").find((v) => v.name === "competing-head-rotated-out-key");
     expect(vector).toBeDefined();
     const input = vector!.input as {
       seed: { now: string; keys: FakeBindingSeed[] };
       firstAdoption: boolean;
       head: unknown;
-      headSignature: VectorEnvelope;
-      entries: Array<{ entry: unknown; signature: VectorEnvelope }>;
+      headSignature: DsseEnvelope;
+      entries: Array<{ entry: unknown; signature: DsseEnvelope }>;
     };
 
     const trust = createTrustAdapter({
-      bindingResolver: makeFakeBindingResolver(input.seed.keys),
+      bindingResolver: makeFakeBindingResolver(seeds),
       keyCatalog: {
         async candidateKeys(agent: string): Promise<AgentKeyCatalogEntry[]> {
-          return input.seed.keys.filter((k) => k.agent === agent).map((k) => ({ keyid: k.keyid, probeAt: k.validFrom }));
+          return seeds.filter((k) => k.agent === agent).map((k) => ({ keyid: k.keyid, probeAt: k.validFrom }));
         },
       },
       verifier: vectorCompatibleVerifier,
@@ -110,20 +115,27 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
     const outcome = await driver.verifySource({
       source: { agent: "did:key:zAgentSourceOne", name: "feed" },
       head: parseSourceHead(input.head),
-      // Corpus envelopes are legible text; production accepts only the base64 wire
-      // form, so a raw fixture envelope fails at the parse step and this case would
-      // answer `unauthorized-signer` for the wrong reason (#4436).
       headSignature: vectorEnvelopeToWire(input.headSignature),
       entries: toAsyncIterable(
-        input.entries.map((e) => ({
-          entry: parseAnnouncementEntry(e.entry),
-          signature: vectorEnvelopeToWire(e.signature),
-        })),
+        input.entries.map((e) => ({ entry: parseAnnouncementEntry(e.entry), signature: vectorEnvelopeToWire(e.signature) })),
       ),
       firstAdoption: input.firstAdoption,
     });
+    return outcome.status;
+  }
 
-    expect(outcome.status).toBe("unauthorized-signer");
+  function rotatedOutKeyVectorSeeds(): FakeBindingSeed[] {
+    const vector = loadVectorsByKind("source-chain").find((v) => v.name === "competing-head-rotated-out-key");
+    return (vector!.input as { seed: { keys: FakeBindingSeed[] } }).seed.keys;
+  }
+
+  it("verifySource rejects a head signed by a rotated-out key (unauthorized-signer)", async () => {
+    // Control: the rotated-out key's window left open -> the head verifies.
+    const control = rotatedOutKeyVectorSeeds().map((k) => (k.keyid === "key-old" ? { ...k, validTo: null } : k));
+    expect(await driveRotatedOutKeyVector(control)).toBe("ok");
+
+    // Rule: the vector's own seeds, where key-old expired before `now`.
+    expect(await driveRotatedOutKeyVector(rotatedOutKeyVectorSeeds())).toBe("unauthorized-signer");
   });
 
   it("verifyHead is wired to the adapter's keys and the driver's clock (#3443)", async () => {
