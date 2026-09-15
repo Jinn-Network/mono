@@ -340,12 +340,12 @@ None of the four runs today, so under mixed mode each substitutes classify-and-r
 else changes. Parametrizing all of them rather than step 5 alone is what makes §10's "unchecked,
 exactly as today" true of a legacy anchor: were step 2 or the uniqueness rule left unconditional,
 a mixed-mode verifier built literally from this section would refuse an entire catalog over a
-`ceremony-anchor/v1` anchor whose referencing records collide — the uniqueness limb; step 2's
-shape is an anchor referenced by both a binding and a revocation, and the conclusion is the same
-— a shape that today opens and degrades only the affected key, because `uniqueBy` at
-`native-trust-catalog.ts:310` is over binding digests and the conflict surfaces per authorization
-at `:427-434`. That is one rule with a posture parameter, not two
-rules, and the profile document must publish it as one (§11 item 5).
+`ceremony-anchor/v1` anchor whose referencing records collide — a shape that today opens and
+degrades only the affected key, because `uniqueBy` at `native-trust-catalog.ts:310` is over
+binding digests and the conflict surfaces per authorization at `:427-434`. That example works
+the uniqueness limb; step 2's shape is an anchor referenced by both a binding and a revocation,
+and the conclusion holds there too. That is one rule with a posture parameter, not two rules, and
+the profile document must publish it as one (§11 item 5).
 
 The verifier's procedure, sited in `openNativeTrustCatalog` alongside the referential-integrity
 loop it already runs (`native-trust-catalog.ts:325-343`) and before the anchor-observation loop
