@@ -247,12 +247,6 @@ function checkDaemonRuntimeReady(): CheckResult {
   };
 }
 
-/**
- * On testnet, warn if the stOLAS distributor pool is drained. Operators can
- * neither fix this themselves nor bootstrap past it — the protocol team has
- * to refill the distributor. Emitted as a warning, not a hard failure,
- * because a refill may be in-flight.
- */
 /** Reads the distributor's OLAS balance via RPC; tests inject a fake. */
 async function readDistributorBalance(config: JinnConfig, olasToken: Address, distributor: Address): Promise<bigint> {
   const client = createPublicClient({ chain: baseSepolia, transport: http(config.rpcUrl) });
@@ -264,6 +258,12 @@ async function readDistributorBalance(config: JinnConfig, olasToken: Address, di
   });
 }
 
+/**
+ * On testnet, warn if the stOLAS distributor pool is drained. Operators can
+ * neither fix this themselves nor bootstrap past it — the protocol team has
+ * to refill the distributor. Emitted as a warning, not a hard failure,
+ * because a refill may be in-flight.
+ */
 export async function checkDistributorReachable(
   config: JinnConfig,
   readBalance: typeof readDistributorBalance = readDistributorBalance,
