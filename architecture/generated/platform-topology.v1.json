@@ -2543,15 +2543,21 @@
       },
       "publishPolicy": "independent",
       "releaseGroup": "colophon-claims-v1",
-      "replacedBy": [],
+      "replacedBy": [
+        "@colophon-claims/check"
+      ],
       "requiredGateIds": [
         "benchmark-product-ci"
       ],
       "role": "deprecated passthrough alias onto the Colophon public-bundle reader checker",
-      "stability": "experimental",
+      "stability": "deprecated",
       "supersedes": [],
       "tier": 4,
-      "transition": null,
+      "transition": {
+        "reason": "The checker publishes as @colophon-claims/check (#4188); this name is a permanent passthrough alias so every sealed bundle instruction that pins it keeps resolving.",
+        "status": "permanent passthrough alias re-released with every checker version",
+        "sunsetCondition": "None planned: sealed bundle READMEs pin this name immutably, so the alias stays published for as long as npm serves the registry; the entry leaves the catalog only with its manifest."
+      },
       "version": "0.2.2"
     },
     {
@@ -18917,6 +18923,22 @@
         "reason": "The operator is being recomposed onto cataloged platform applications.",
         "status": "independently published during recomposition",
         "sunsetCondition": "The operator-daemon cutover is complete and the legacy release coupling is retired."
+      }
+    },
+    {
+      "name": "@colophon-claims/verify",
+      "path": "packages/benchmark-product/verify",
+      "publishPolicy": "independent",
+      "releaseGroup": "colophon-claims-v1",
+      "replacedBy": [
+        "@colophon-claims/check"
+      ],
+      "stability": "deprecated",
+      "supersedes": [],
+      "transition": {
+        "reason": "The checker publishes as @colophon-claims/check (#4188); this name is a permanent passthrough alias so every sealed bundle instruction that pins it keeps resolving.",
+        "status": "permanent passthrough alias re-released with every checker version",
+        "sunsetCondition": "None planned: sealed bundle READMEs pin this name immutably, so the alias stays published for as long as npm serves the registry; the entry leaves the catalog only with its manifest."
       }
     },
     {

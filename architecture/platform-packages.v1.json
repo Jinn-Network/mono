@@ -674,7 +674,7 @@
       "role": "deprecated passthrough alias onto the Colophon public-bundle reader checker",
       "tier": 4,
       "classification": "product",
-      "stability": "experimental",
+      "stability": "deprecated",
       "authority": {
         "documents": [
           {
@@ -704,7 +704,14 @@
         "conformance": []
       },
       "supersedes": [],
-      "replacedBy": []
+      "replacedBy": [
+        "@colophon-claims/check"
+      ],
+      "transition": {
+        "reason": "The checker publishes as @colophon-claims/check (#4188); this name is a permanent passthrough alias so every sealed bundle instruction that pins it keeps resolving.",
+        "status": "permanent passthrough alias re-released with every checker version",
+        "sunsetCondition": "None planned: sealed bundle READMEs pin this name immutably, so the alias stays published for as long as npm serves the registry; the entry leaves the catalog only with its manifest."
+      }
     },
     {
       "name": "@colophon-claims/web",
