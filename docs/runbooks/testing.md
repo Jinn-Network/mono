@@ -484,7 +484,7 @@ git grep -nE 'timeout:[[:space:]]*[0-9_]+' -- operator/test # object form
 Two real test bounds at 5000ms were found. Classification per site:
 
 - `operator/test/harnesses/impls/claude-mcp-hyperliquid/mcp-tools.test.ts`
-  (`'passes an AbortSignal to fetch'`, formerly `}, 5_000)`) — **incidental,
+  (`'rejects within timeout + slack when fetch never resolves'`, formerly `}, 5_000)`) — **incidental,
   removed.** The test awaits a 10ms tick and asserts a signal was passed to
   `fetch`; nothing in it depends on 5s. It now inherits the suite's 30s.
 - `operator/test/daemon/native-base-sepolia-infrastructure.test.ts`
