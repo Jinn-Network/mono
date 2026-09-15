@@ -2,6 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ClaimPackageSchema } from "../dist/index.js";
 
+/**
+ * A claim carrying one field the schema must refuse. These fixtures are inferred structurally, so
+ * a field that is invalid by construction has no place in their type -- writing it as an
+ * assignment made the fixture, rather than the schema, the thing that rejected it.
+ *
+ * @param {object} claim
+ * @param {Record<string, unknown>} overrides
+ * @returns {Record<string, unknown>}
+ */
+function withField(claim, overrides) {
+  return { ...claim, ...overrides };
+}
+
 function zeroRate() {
   return { numerator: 0, denominator: 0, estimate: null, wilsonInterval: null, withheldReason: "zero-denominator" };
 }
@@ -72,9 +85,12 @@ test("claim-package/2 rejects top-level and nested ranking conclusions", () => {
   promptedMixed.verification.compatibleCommand = "npx @colophon-claims/verify@0.1 <bundle-dir>";
   assert.equal(ClaimPackageSchema.safeParse(promptedMixed).success, false);
   assert.equal(ClaimPackageSchema.safeParse({ ...claim, ranking: ["arm-a"] }).success, false);
-  const nested = structuredClone(claim);
-  nested.scope.arms = [{ armId: "arm-a", pinning: {}, winner: true }];
-  assert.equal(ClaimPackageSchema.safeParse(nested).success, false);
+  assert.equal(
+    ClaimPackageSchema.safeParse(
+      withField(claim, { scope: withField(claim.scope, { arms: [{ armId: "arm-a", pinning: {}, winner: true }] }) }),
+    ).success,
+    false,
+  );
 });
 
 test("claim-package/1 preserves historical unknown-field stripping", () => {
@@ -256,13 +272,14 @@ test("claim-package/5 refuses a sibling method projection alongside the qualific
 });
 
 test("claim-package/5 refuses top-level and nested ranking conclusions, exactly as /2 does", () => {
-  const topLevel = validAnchoredBinaryClaim();
-  topLevel.ranking = ["arm-a"];
-  assert.equal(ClaimPackageSchema.safeParse(topLevel).success, false);
-
-  const nested = validAnchoredBinaryClaim();
-  nested.scope = { ...nested.scope, arms: [{ armId: "arm-a", pinning: {}, winner: true }] };
-  assert.equal(ClaimPackageSchema.safeParse(nested).success, false);
+  const base = validAnchoredBinaryClaim();
+  assert.equal(ClaimPackageSchema.safeParse(withField(base, { ranking: ["arm-a"] })).success, false);
+  assert.equal(
+    ClaimPackageSchema.safeParse(
+      withField(base, { scope: withField(base.scope, { arms: [{ armId: "arm-a", pinning: {}, winner: true }] }) }),
+    ).success,
+    false,
+  );
 
   const ranked = structuredClone(validAnchoredBinaryClaim());
   ranked.qualification.ranking = ["arm-a"];
@@ -418,9 +435,10 @@ test("claim-package/6 inherits /5's refusals: anchors, conclusions, and the qual
   ranked.results.perSubject[0].results.ranking = ["arm-a"];
   assert.equal(ClaimPackageSchema.safeParse(ranked).success, false);
 
-  const topLevel = structuredClone(validDisclosedClaim());
-  topLevel.ranking = ["arm-a"];
-  assert.equal(ClaimPackageSchema.safeParse(topLevel).success, false);
+  assert.equal(
+    ClaimPackageSchema.safeParse(withField(validDisclosedClaim(), { ranking: ["arm-a"] })).success,
+    false,
+  );
 });
 
 test("the disclosure section is strict: the six keys, the standard literal, and the record's own union", () => {
@@ -446,7 +464,6 @@ test("the disclosure section is strict: the six keys, the standard literal, and 
     false,
   );
 
-  const extraKey = disclosureSection();
-  extraKey.completenessScore = 2;
+  const extraKey = withField(disclosureSection(), { completenessScore: 2 });
   assert.equal(ClaimPackageSchema.safeParse(validDisclosedClaim({ disclosure: extraKey })).success, false);
 });

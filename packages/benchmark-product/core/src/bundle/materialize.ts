@@ -1078,7 +1078,25 @@ function recordClosure(input: MaterializeBundleInput): {
       getSealedBytes(workspaceDir, record.sha256),
     ])),
   });
+  // Hoisted above the render because `buildPublicAssets` now needs it: the format selects which
+  // presentation generation's page is rendered, and the verifier byte-compares the result against
+  // the same selection read from `bundle.json`. THE EMITTED FORMAT IS UNCHANGED -- this is the
+  // same expression the return below used to compute inline, moved, not edited. No run emits
+  // `/10`: its claim seals `PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND`, a released reader that
+  // predates `/10` and refuses it at manifest parse, so the bundle would be permanently
+  // unverifiable under its own instruction (issue #4191). The producer flips in the change that
+  // pins `/10` to the release serving it.
+  const format = anchored
+    ? binaryQualification
+      ? disclosed
+        ? BUNDLE_V8_FORMAT
+        : BUNDLE_V7_FORMAT
+      : BUNDLE_V6_FORMAT
+    : binaryQualification
+      ? BUNDLE_V4_FORMAT
+      : BUNDLE_FORMAT;
   for (const [path, bytes] of Object.entries(buildPublicAssets({
+    format,
     claim,
     matrix,
     report,
@@ -1097,16 +1115,10 @@ function recordClosure(input: MaterializeBundleInput): {
     // Three independent axes: carrying an anchor moves a bundle onto an anchored closure,
     // projecting a binary qualification moves it onto a qualification closure, and declaring a
     // disclosure record moves it onto the disclosed one. Everything else emits exactly the version
-    // it emitted before any of these features existed, byte for byte.
-    format: anchored
-      ? binaryQualification
-        ? disclosed
-          ? BUNDLE_V8_FORMAT
-          : BUNDLE_V7_FORMAT
-        : BUNDLE_V6_FORMAT
-      : binaryQualification
-        ? BUNDLE_V4_FORMAT
-        : BUNDLE_FORMAT,
+    // it emitted before any of these features existed, byte for byte. Derived above, where the
+    // presentation render also reads it -- one selection, so the manifest and the page can never
+    // disagree about which generation this bundle is.
+    format,
   };
 }
 

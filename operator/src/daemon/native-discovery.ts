@@ -285,6 +285,19 @@ export interface NativeDiscoverySyncReport {
    * neither `accepted` nor `verifiedSources`, and are retried on the next poll.
    */
   readonly degraded: readonly NativeDiscoveryDegradedSource[];
+  /**
+   * Announcements this pass stepped past by crossing the poison-quarantine threshold (#2473).
+   * The CROSSING only: an announcement quarantined by an earlier pass is skipped at the top of
+   * the loop and counts nothing, so this stays 0 once the wedge has cleared rather than reading
+   * non-zero forever. A crossing counts even when a LATER announcement degrades that same
+   * source in the same pass (#4394) -- the crossing is durable and is skipped from then on, so
+   * dropping it with the discarded source result would report it zero times, ever. The durable
+   * `native_discovery_quarantine` row and the `native_discovery_poison_quarantined` event are
+   * the authority for what is quarantined; this is a per-pass summary, not a running total.
+   * Withdrawal-scope quarantine is not a sync-pass event and is not counted here --
+   * `drainNativeDiscoveryWithdrawals` owns that lane.
+   */
+  readonly quarantined: number;
 }
 
 export interface NativeDiscoveryConsumer<Card = AnnouncedSubmissionCard> {
@@ -735,7 +748,18 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
     | { readonly accepted: number }
     | { readonly reason: NativeDiscoveryDegradedReason; readonly detail: string };
 
-  async function pollSource(configured: NativeDiscoverySource): Promise<SourcePollOutcome> {
+  /**
+   * The pass-scoped quarantine count (#4394). It is NOT on the success arm above and NOT
+   * closure state: `sync()` allocates one per call and every `pollSource` in that pass
+   * shares it. A crossing is durable the moment the ledger row is written, so it must
+   * survive a later announcement degrading the same source — which discards the outcome.
+   */
+  interface SyncPass { quarantined: number }
+
+  async function pollSource(
+    configured: NativeDiscoverySource,
+    pass: SyncPass,
+  ): Promise<SourcePollOutcome> {
     const source = configured.identity;
     const prior = checkpoint(source);
     // Poll-time introduction resolution (#2521). A source that cannot be resolved — 404, or
@@ -1084,6 +1108,10 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
             ...(input.now === undefined ? {} : { now: input.now }),
           });
           if (!poisoned.quarantined) throw undecodable;
+          // Counted on the pass, not the outcome: the throw above, reached again on a LATER
+          // announcement, would discard an outcome-carried count even though this is durable and
+          // is skipped from the next poll on — reporting it zero times, ever (#4394).
+          pass.quarantined += 1;
           continue;
         }
         clearPoisonFailures({
@@ -1118,12 +1146,14 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
     async sync() {
       let accepted = 0;
       let verifiedSources = 0;
+      // Per-pass, never a running total: allocated here, on every call.
+      const pass: SyncPass = { quarantined: 0 };
       const degraded: NativeDiscoveryDegradedSource[] = [];
       for (const configured of sources) {
         const source = configured.identity;
         let outcome: SourcePollOutcome;
         try {
-          outcome = await pollSource(configured);
+          outcome = await pollSource(configured, pass);
         } catch (cause) {
           // Fail-CLOSED: only the shapes `degradedReason` recognises as "unavailable or
           // unintelligible" are isolated to their source. Everything else — every trust, identity,
@@ -1146,7 +1176,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         accepted += outcome.accepted;
         verifiedSources += 1;
       }
-      return { accepted, verifiedSources, degraded };
+      return { accepted, verifiedSources, degraded, quarantined: pass.quarantined };
     },
 
     takePending() {

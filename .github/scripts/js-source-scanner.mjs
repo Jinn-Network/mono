@@ -85,7 +85,8 @@ function keywordEndsAt(source, back) {
  * that can end an operand. Closing brackets are read as operands, so `f(x) / 2` is division; a
  * regex directly after one — `(a + b) /re/.test(c)` — is not valid code anyway.
  *
- * Two characters are ambiguous on their own and are resolved by looking behind them:
+ * Three characters are ambiguous on their own. Two are resolved by looking behind them; the third
+ * is resolved by choosing which way to be wrong.
  *
  * `--`/`++` read the wrong way round from the character alone: the trailing `-` of `x-- / 2` looks
  * like an operator. So a `+`/`-` doubled with the character before it counts as an operand end.
@@ -99,13 +100,31 @@ function keywordEndsAt(source, back) {
  * Both matter for the same reason: consuming a division as a regex takes the rest of its line —
  * including any structure and, where the line ends in a comment, the first `/` of its `//` — which
  * hands the comment's prose back as live source in miniature (#3027).
+ *
+ * `>` is the third, and it stays in the set below on purpose. It ends a TypeScript generic and it
+ * ends an arrow: `previousSignificant` before the `/` of `(x) => /re/.test(x)` is that `>`, and
+ * reading it as an operand end makes an arrow body opening with a regex scan as a division — the
+ * same fail-open as the `--` and `!` cases above, on a shape configs write freely. Keeping it costs
+ * the other reading: `x: a<b> / 2` consumes the division as a regex to the end of its line, and
+ * where that line ends in a comment its prose comes back as live source. Nothing in the tree writes
+ * that shape, and separating a generic close from a comparison needs matched `<`/`>` pairs, which a
+ * real TypeScript parser resolves by backtracking and a character-at-a-time scanner cannot.
+ *
+ * `<` used to sit in the set too, on the same reasoning, and it does not any more (#3170). It was
+ * what made the `/` of a JSX closing tag — `</Link>` — read as opening a regex literal, and that
+ * phantom literal ran to the end of its line and swallowed the opening backtick of the template
+ * beside it. From there every backtick in the file paired off by one, which desynced the scanner
+ * across two shipped `.tsx` files that `benchmark-product-source-boundaries.test.mjs` reads on
+ * every run. Dropping it loses only the mirror of the generic-close cost above — an operand may not
+ * legally follow a comparison's `<` with a regex anyway — so the asymmetry with `>` is real and
+ * deliberate rather than an oversight.
  */
 function valueMayBeginAfter(source, back) {
   if (back < 0) return true;
   const character = source[back];
   if ((character === '+' || character === '-') && source[back - 1] === character) return false;
   if (character === '!') return valueMayBeginAfter(source, previousSignificant(source, back - 1));
-  if ('(,=:[&|?{;+-*%~^<>'.includes(character)) return true;
+  if ('(,=:[&|?{;+-*%~^>'.includes(character)) return true;
   return keywordEndsAt(source, back);
 }
 
@@ -122,6 +141,65 @@ export function regexStartsAt(source, index) {
 }
 
 /**
+ * The index just past the `}` that closes the `${` interpolation whose `{` is at `start`, or
+ * `source.length` where it never closes.
+ *
+ * An interpolation body is ordinary code, not span text, and it is reached only from a backtick
+ * span. That makes this the one place the walk re-enters code from inside a string, so it repeats
+ * the same four checks the top-level walk makes rather than counting braces.
+ *
+ * Repeating them is not thoroughness for its own sake — a brace-and-string-only version is measured
+ * WORSE than not entering the body at all. Over the 5,792 first-party source files, it leaves 4
+ * files desynced against a baseline of 2, and only one of the 2 is among them: it fixes one and
+ * breaks three that were previously fine. The shape that breaks them is ordinary —
+ * `` `"${term.replace(/"/gu, '""')}"` `` — where the body holds a regex literal whose own body is a
+ * quote character. Without the regex check that quote opens a phantom string, and the desync it
+ * causes is the same one this function exists to remove, just relocated. The comment checks are
+ * there for the same reason one level up: a `//` or `/*` inside a multi-line interpolation would
+ * otherwise have its prose read as structure. They bound that reading and nothing more — an
+ * interpolation's comment text is still emitted verbatim by `stripComments`, exactly as it was
+ * before this walk existed, because the enclosing backtick span is copied through unblanked.
+ *
+ * `quotedSpanEnd` and this function are mutually recursive, bounded by template nesting depth. Real
+ * source nests one or two deep and the deepest in this tree is 2, so no explicit depth guard is
+ * warranted; a hand-written stack would be more machinery than the bound needs.
+ *
+ * Not exported. It has one caller, and the behavior is pinned through `quotedSpanEnd`.
+ */
+function interpolationEnd(source, start) {
+  let depth = 0;
+  let index = start + 1;
+  while (index < source.length) {
+    const character = source[index];
+    if (character === "'" || character === '"' || character === '`') {
+      index = Math.min(quotedSpanEnd(source, index) + 1, source.length);
+      continue;
+    }
+    if (character === '/' && source[index + 1] === '/') {
+      const newline = source.indexOf('\n', index);
+      index = newline === -1 ? source.length : newline;
+      continue;
+    }
+    if (character === '/' && source[index + 1] === '*') {
+      const end = source.indexOf('*/', index + 2);
+      index = end === -1 ? source.length : end + 2;
+      continue;
+    }
+    if (character === '/' && regexStartsAt(source, index)) {
+      index = Math.min(regexLiteralEnd(source, index) + 1, source.length);
+      continue;
+    }
+    if (character === '{') depth += 1;
+    else if (character === '}') {
+      if (depth === 0) return index + 1;
+      depth -= 1;
+    }
+    index += 1;
+  }
+  return source.length;
+}
+
+/**
  * The index of the character that closes the quoted span opened at `start` — the matching quote, or
  * the newline that bounds it, or `source.length`.
  *
@@ -135,15 +213,52 @@ export function regexStartsAt(source, index) {
  * the next one anywhere in the source: in `stripComments` that handed later comments back as live
  * source, and in the balanced scanners it ran past a `projects` entry's closing brace and dropped
  * every range, putting each allowance and seam path back in one scope (issues #3027, #3154).
+ *
+ * A `${` inside a backtick span leaves span text and re-enters code, so it is handed to
+ * `interpolationEnd` rather than walked as more of the string. Reading the body as span text let a
+ * nested template's opening backtick close the outer span, and from there every backtick in the
+ * file paired off by one — the scanner walking that file's strings and its code exactly inverted
+ * (#3088). An escaped `\${` never reaches the check, because the escape advance consumes the `$`
+ * with its backslash first.
  */
 export function quotedSpanEnd(source, start) {
   const quote = source[start];
   let index = start + 1;
   while (index < source.length && source[index] !== quote) {
     if (quote !== '`' && source[index] === '\n') return index;
+    if (quote === '`' && source[index] === '$' && source[index + 1] === '{') {
+      index = interpolationEnd(source, index + 1);
+      continue;
+    }
     index += source[index] === '\\' ? 2 : 1;
   }
   return index;
+}
+
+/**
+ * Thrown by `stripComments` when backtick pairing reaches the end of the source.
+ *
+ * Carries the `offset` pairing ran out from and the 1-based `line` holding it, because that is all
+ * this module can say: it is handed source text and never a path. The two guards that call
+ * `stripComments` add the file name when they catch this (#3088).
+ *
+ * The message names that position and stops short of naming a cause, because the span it points at
+ * need not be the broken one. An earlier mis-read that swallows a backtick — the `>` generic-close
+ * residual documented above is one — leaves the count odd, and the walk then opens a span on a
+ * closing backtick and runs off the end: `const n = a<b> / 2; // note the \`` followed by a
+ * well-formed `` const s = `hello`; `` reports the second line, whose literal is closed correctly.
+ * Telling the reader to close that literal would be wrong advice on a correct line.
+ */
+export class UnterminatedTemplateError extends Error {
+  constructor(offset, line) {
+    super(
+      `backtick pairing ran to the end of the file from line ${line}: either that literal is `
+      + 'unterminated, or an earlier mis-read swallowed a backtick',
+    );
+    this.name = 'UnterminatedTemplateError';
+    this.offset = offset;
+    this.line = line;
+  }
 }
 
 /**
@@ -165,6 +280,36 @@ export function quotedSpanEnd(source, start) {
  * way, and every reader below skips them itself, so leaving them intact keeps this pass to the one
  * job its name states. A comment marker wins over a regex — `//` never opens a regex literal, and
  * `/*` cannot start a valid one — so the comment checks run first.
+ *
+ * This function is partial: backtick pairing that runs to the end of the source raises
+ * `UnterminatedTemplateError` rather than returning a desynced read. What it reports is that
+ * position, not a cause — the span it names may be unterminated, or an earlier mis-read may have
+ * swallowed a backtick and left the count odd, and a character-at-a-time walk cannot tell those
+ * apart. Every other mis-read this module can make is bounded to a
+ * line, because a `'`/`"` span and a regex literal both stop at a newline — so their worst case is
+ * the rest of one line and the readers stay worth running. Only a backtick crosses lines, so only a
+ * backtick's failure is unbounded: everything past it comes back with the file's strings and its
+ * code swapped, and a reader matching over that output is not reading the file it was handed. The
+ * `'`/`"` cases keep their tolerated end-of-source behavior for exactly that reason, and
+ * `stripComments("a: 'unterminated // x")` returning itself stays pinned.
+ *
+ * Three places could hold this check, and the other two are worse:
+ *
+ * `quotedSpanEnd`'s contract is documented as total, and four readers — `balancedEnd`,
+ * `projectEntryRanges`, `arrayElements` and `stringLiterals` — are deliberately fail-closed-empty
+ * on an unterminated literal. Throwing there makes every one of those documented paths
+ * unreachable.
+ *
+ * The guard level would mean two guards each re-walking the file to ask the question, which is the
+ * duplication this module's header exists to end.
+ *
+ * `stripComments` is the seam: the single production entry point both guards take, already owning
+ * the full-awareness walk, and the place the damage manifests — #3027 is a property of this
+ * function's output.
+ *
+ * The blast radius is its two readers, not the tree. `benchmark-product-source-boundaries.test.mjs`
+ * walks `benchmark-product/{cli,core,verify,web}/src` and `vitest-tmp-isolation.test.mjs` walks the
+ * Vitest configs; a file outside both is no more covered after this than before.
  */
 export function stripComments(source) {
   let out = '';
@@ -172,7 +317,11 @@ export function stripComments(source) {
   while (index < source.length) {
     const char = source[index];
     if (char === "'" || char === '"' || char === '`') {
-      const stop = Math.min(quotedSpanEnd(source, index) + 1, source.length);
+      const end = quotedSpanEnd(source, index);
+      if (char === '`' && end >= source.length) {
+        throw new UnterminatedTemplateError(index, source.slice(0, index).split('\n').length);
+      }
+      const stop = Math.min(end + 1, source.length);
       out += source.slice(index, stop);
       index = stop;
       continue;
@@ -187,7 +336,12 @@ export function stripComments(source) {
     if (char === '/' && source[index + 1] === '*') {
       const end = source.indexOf('*/', index + 2);
       const stop = end === -1 ? source.length : end + 2;
-      out += source.slice(index, stop).replace(/[^\n]/gu, ' ');
+      // Deliberately without `u`, alone among the `u`-carrying regexes in this module. Blanking is
+      // by UTF-16 code unit, which is the unit every offset here is expressed in; under `u` an
+      // astral character matches once and becomes one space, shortening the output and shifting
+      // every offset past the comment — which contradicts this function's stated offset-preserving
+      // contract (#3089). `\n` is a BMP character, so line structure is preserved either way.
+      out += source.slice(index, stop).replace(/[^\n]/g, ' ');
       index = stop;
       continue;
     }

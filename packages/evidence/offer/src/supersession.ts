@@ -4,7 +4,18 @@ import type { Sha256Digest, ValidationDiagnostic } from "@jinn-network/trust-cor
 
 import type { OfferRecord } from "./schema.js";
 
-/** One verified offer, as a caller holds it: its identity, its terms, and whose it is. */
+/**
+ * One verified offer, as a caller holds it: its identity, its terms, and whose it is.
+ *
+ * Both `digest` and `holder` must come from `verifyOffer`. `resolveLiveOffers` is a pure fold
+ * and takes them on trust: an entry that claims a victim's digest and is listed first shadows
+ * the genuine offer out of `live`, and an entry that claims a victim's holder can supersede
+ * offers that are not its own. Neither is fixable inside this package — the digest is the
+ * envelope's, and the holder is what a resolved binding said — so the contract that both
+ * fields are carried across from a verification, never assembled by the feed, is what carries
+ * the weight. The shadowing is at least not silent: the dropped copy is reported as a
+ * `DUPLICATE_OFFER` diagnostic.
+ */
 export interface OfferEntry {
   readonly digest: Sha256Digest;
   readonly offer: OfferRecord;

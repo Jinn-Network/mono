@@ -189,7 +189,7 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Independence clusters | rename + gloss | Groups that do not share a source | The counted quantity is kept; only the noun changes. |
 | Benchmark and configuration scope | rename | What was tested, and how each configuration was pinned | The `<h2>` at `assets.ts:827`; its `Arms and pinned configuration` sub-heading becomes **Each configuration, pinned**, following the `arm` → *Configuration* rename above. |
 | Evidence signpost (social card) | rename | Benchmark report | The v4 card's phrase; the current card already says "Benchmark report". Retire the older wording with the v4 assets. |
-| Colophon · verified qualification (v4 badge) | **deferred to #2982** | — | Contains the reserved word. Not ruled here. |
+| Colophon · verified qualification (v4 badge) | rename (held) | Colophon · binary qualification | Ruled in #4270: the reserved word is retired from the badge, social card, share text, index prose, and the report README's status line (`assets.ts:1096`) — the five sites the emission-site comment enumerates. A badge carries no room for the caveats the CLI prints under its verdict, so it names the scope instead. **Held pending a bundle-format allocation**, not yet applied: `verify.ts` byte-compares every presentation asset against the reader's own rebuild, and every qualifying format pins a published reader, so moving these bytes without an allocation makes each side refuse the other. The hold is recorded at the emission site (`verify/src/assets.ts`, above `buildBadge`), beside the #2980 and #2977 holds. |
 | No comparative winner stated | keep | — | Load-bearing and already plain. |
 
 #### Binary-qualification report surface (binary reports only)

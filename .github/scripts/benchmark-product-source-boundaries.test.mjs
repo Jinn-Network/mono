@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { stripComments } from './js-source-scanner.mjs';
+import { stripComments, UnterminatedTemplateError } from './js-source-scanner.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const packageRoot = join(root, 'packages', 'benchmark-product');
@@ -242,7 +242,18 @@ function registeredMethodIds() {
 function hardcodedMethodIds(sourceFiles) {
   const pattern = new RegExp(`${REGISTERED_METHOD_NAMESPACE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[A-Za-z0-9._-]*`, 'g');
   return sourceFiles.filter((file) => !isTestSource(file)).flatMap((file) => {
-    const code = stripComments(readFileSync(file, 'utf8'));
+    // The scanner knows the source but never the path, so the file name is attached here (#3088).
+    let code;
+    try {
+      code = stripComments(readFileSync(file, 'utf8'));
+    } catch (error) {
+      if (!(error instanceof UnterminatedTemplateError)) throw error;
+      assert.fail(
+        `${relative(root, file)}:${error.line}: backtick pairing ran to the end of the file from ` +
+          'here — either that literal is unterminated, or an earlier mis-read swallowed a ' +
+          'backtick. Either way the method-identifier read of this file is worthless.',
+      );
+    }
     return [...new Set(code.match(pattern) ?? [])].map((id) => `${relative(root, file)} -> ${id}`);
   }).sort();
 }

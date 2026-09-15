@@ -36,8 +36,8 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
   });
 
   it('returns from network_artifacts cache without proxying to daemon', async () => {
-    const sha256 = 'b'.repeat(64);
     const bytes = Buffer.from('cached content');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
     store.saveNetworkArtifact({
       sha256,
       artifactType: 'design_document',
@@ -245,11 +245,12 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
   });
 
   it('touches network_artifacts last_used_at on cache hit', async () => {
-    const sha256 = 'f'.repeat(64);
+    const bytes = Buffer.from('cached');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
     store.saveNetworkArtifact({
       sha256,
       artifactType: 'design_document',
-      content: Buffer.from('cached'),
+      content: bytes,
       source: 'origin',
       paidAmountUsdc: '0',
       fetchedAt: '2026-04-30T00:00:00.000Z',
@@ -267,8 +268,101 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
   //
   // The daemon-proxy path used to trust the HTTP hop ("hash verification was
   // already done daemon-side") and mirror the decoded bytes straight into the
-  // shared cache, where the unverified-cache-read fast path would then serve
-  // them to every later caller. These cases close that.
+  // shared cache, which the cache-read fast path then served unverified to
+  // every later caller. These cases close both ends — bytes are hashed on the
+  // way in, and a row that no longer hashes to its key is a miss on the way
+  // out — and pin that the mirror repairs only rows it has proven unusable.
+
+  it('treats a corrupted network_artifacts row as a miss and repairs it', async () => {
+    const bytes = Buffer.from('the real bytes');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    store.saveNetworkArtifact({
+      sha256,
+      artifactType: 'design_document',
+      content: Buffer.from('corrupted on disk'),
+      source: 'origin',
+      paidAmountUsdc: '0',
+      fetchedAt: '2026-04-30T00:00:00.000Z',
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          ok: true,
+          sha256,
+          content: bytes.toString('base64'),
+          artifactType: 'design_document',
+          source: 'origin',
+          paidAmountUsdc: '0',
+          fetchedAt: '2026-04-30T00:00:00.000Z',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await handleAcquireArtifact('http://127.0.0.1:7331', store, {
+      sha256,
+      access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+    });
+    // Captured before restore: mockRestore clears the recorded calls.
+    const warnings = warn.mock.calls.map((call) => String(call[0]));
+    warn.mockRestore();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.content.bytes.equals(bytes)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    // The mirror must replace the corrupt row, not be blocked by it.
+    expect(store.getNetworkArtifact(sha256)!.content.equals(bytes)).toBe(true);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(sha256);
+    fetchSpy.mockRestore();
+  });
+
+  it('leaves a row the daemon wrote during the proxied call alone', async () => {
+    // The MCP subprocess and the daemon open the same SQLite file (main.ts hands
+    // `config.dbPath` to buildHarnesses), so the daemon's own cache write lands
+    // while this call is still in flight — and it names how the bytes were
+    // really acquired. The mirror reconstructs source/sourceEndpoint from the
+    // request, so overwriting that row fabricates an endpoint the artifact never
+    // came from, which search-records and corpus-knowledge hand back to agents
+    // as a real `access.endpoint`.
+    const bytes = Buffer.from('resolved through a route');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      store.saveNetworkArtifact({
+        sha256,
+        artifactType: 'design_document',
+        content: bytes,
+        source: 'route-resolver',
+        sourceEndpoint: null,
+        paidAmountUsdc: '0',
+        fetchedAt: '2026-04-30T00:00:00.000Z',
+      });
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sha256,
+          content: bytes.toString('base64'),
+          artifactType: 'design_document',
+          source: 'route-resolver',
+          paidAmountUsdc: '0',
+          fetchedAt: '2026-04-30T00:00:00.000Z',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+
+    const result = await handleAcquireArtifact('http://127.0.0.1:7331', store, {
+      sha256,
+      access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+    });
+    fetchSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    const row = store.getNetworkArtifact(sha256)!;
+    expect(row.source).toBe('route-resolver');
+    expect(row.sourceEndpoint).toBeNull();
+  });
 
   it('refuses daemon-proxied bytes that do not hash to the requested address', async () => {
     const sha256 = createHash('sha256').update(Buffer.from('the real bytes')).digest('hex');

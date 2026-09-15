@@ -90,8 +90,13 @@ export interface ArtifactFetchAttempt {
   /** `ipfs://<cid>` or the exact URL `buildArtifactUrl` produced; empty when skipped. */
   readonly sourceUri: string;
   readonly outcome: 'verified' | 'skipped' | 'failed' | 'digest_mismatch';
-  /** Present on `failed`; the classified reason, never a raw string match. */
-  readonly reason?: ArtifactFetchFailureReason;
+  /**
+   * Present on `failed`; the classified reason, never a raw string match.
+   * `digest_mismatch` is excluded because `refuse()` records that outcome with
+   * no `reason` field — no attempt ever carries the token, and saying so here
+   * is what lets the failure union below narrow without a cast.
+   */
+  readonly reason?: Exclude<ArtifactFetchFailureReason, 'digest_mismatch'>;
   readonly message?: string;
 }
 
@@ -129,24 +134,49 @@ export type ArtifactFetchFailureReason =
   | 'too_large'
   | 'timeout'
   /** Transport failure — nothing was learned about whether the content exists. */
-  | 'unavailable';
+  | 'unavailable'
+  /**
+   * A locator resolved and what it served is permanently not this artifact —
+   * a broken donation payload. Conclusive absence AT THAT LOCATOR, so it is
+   * not retryable; never conclusive globally, so it never outranks a leg that
+   * learned nothing (#3441).
+   */
+  | 'malformed_payload';
 
-export interface FetchVerifiedArtifactFailure {
+/** Evidence, not content. Present on `digest_mismatch` and only there. */
+export interface ArtifactDigestMismatch {
+  readonly expectedSha256: string;
+  readonly actualSha256: string;
+  readonly sourceUri: string;
+  readonly sourceOperator?: string;
+}
+
+interface FetchVerifiedArtifactFailureBase {
   readonly ok: false;
   readonly sha256: string;
-  readonly reason: ArtifactFetchFailureReason;
   /** Derived from `reason`, never caller-supplied. */
   readonly retryable: boolean;
   readonly message: string;
   readonly attempts: readonly ArtifactFetchAttempt[];
-  /** Present only on `digest_mismatch`. Evidence, not content. */
-  readonly mismatch?: {
-    readonly expectedSha256: string;
-    readonly actualSha256: string;
-    readonly sourceUri: string;
-    readonly sourceOperator?: string;
-  };
 }
+
+/**
+ * Discriminated on `reason` so the compiler, not a constructor comment, carries
+ * the invariant that `digest_mismatch` always ships its evidence. `refuse()` is
+ * the sole producer of that reason and has always set `mismatch`; before this
+ * split, callers reading the evidence had to assert it with `!`.
+ */
+export type FetchVerifiedArtifactFailure =
+  | (FetchVerifiedArtifactFailureBase & {
+      readonly reason: 'digest_mismatch';
+      readonly mismatch: ArtifactDigestMismatch;
+    })
+  | (FetchVerifiedArtifactFailureBase & {
+      readonly reason: Exclude<ArtifactFetchFailureReason, 'digest_mismatch'>;
+      // Declared-and-undefined rather than omitted so a caller holding a value
+      // narrowed only by `!ok` may still read `mismatch` and narrow on it.
+      readonly mismatch?: undefined;
+    });
 
 export type FetchVerifiedArtifactResult =
   | { readonly ok: true; readonly artifact: VerifiedArtifact }
@@ -156,6 +186,12 @@ export type FetchVerifiedArtifactResult =
 const RETRYABLE_REASONS: ReadonlySet<ArtifactFetchFailureReason> = new Set([
   'timeout',
   'unavailable',
+]);
+
+/** Reasons that are positive proof of absence at the leg that reported them. */
+const CONCLUSIVE_ABSENCE: ReadonlySet<ArtifactFetchFailureReason> = new Set([
+  'not_found',
+  'malformed_payload',
 ]);
 
 /**
@@ -177,13 +213,26 @@ export function verifyArtifactDigest(
  * content exists, so it must not read like an ordinary miss.
  */
 function warnIpfsFallThrough(subject: string, error: unknown): void {
-  const classification = classifyIpfsFetchFailure(error);
+  // A broken donation is not the ordinary absence #3441 carved out of the
+  // warning, so it still warns — but it must not read as a transport failure.
+  const classification = error instanceof DonationDecodeError
+    ? 'malformed-payload'
+    : classifyIpfsFetchFailure(error);
   if (classification === 'not-found') return;
   const detail = error instanceof Error ? error.message : String(error);
   console.warn(
     `[corpus-read] IPFS source for ${subject} could not be used (${classification}), `
       + `falling through to the next source: ${detail}`,
   );
+}
+
+/**
+ * A donation payload that will never decode into this artifact. Distinct from a
+ * gateway transport failure: the CID resolved, and what it resolved to is not
+ * the requested bytes — including a valid donation for a *different* artifact.
+ */
+class DonationDecodeError extends Error {
+  override readonly name = 'DonationDecodeError';
 }
 
 /**
@@ -196,28 +245,32 @@ function warnIpfsFallThrough(subject: string, error: unknown): void {
  */
 function decodeDonationArtifact(raw: unknown, expectedSha256: string): Buffer {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('donation artifact payload is not an object');
+    throw new DonationDecodeError('donation artifact payload is not an object');
   }
   const record = raw as Record<string, unknown>;
   if (record['schemaVersion'] !== DONATION_ARTIFACT_ENCODING || record['encoding'] !== DONATION_ARTIFACT_ENCODING) {
-    throw new Error('donation artifact payload has unexpected encoding');
+    throw new DonationDecodeError('donation artifact payload has unexpected encoding');
   }
   if (record['sha256'] !== expectedSha256) {
-    throw new Error('donation artifact sha256 does not match requested artifact');
+    throw new DonationDecodeError('donation artifact sha256 does not match requested artifact');
   }
   if (typeof record['data'] !== 'string') {
-    throw new Error('donation artifact payload is missing base64 data');
+    throw new DonationDecodeError('donation artifact payload is missing base64 data');
   }
   return Buffer.from(record['data'], 'base64');
 }
 
 /** `fetchArtifactContent`'s vocabulary → the primitive's. */
-function originReason(reason: Exclude<AcquireResult, { ok: true }>['reason']): ArtifactFetchFailureReason {
+function originReason(
+  reason: Exclude<AcquireResult, { ok: true }>['reason'],
+): Exclude<ArtifactFetchFailureReason, 'digest_mismatch'> {
   return reason === 'network_error' ? 'unavailable' : reason;
 }
 
 /** `classifyIpfsFetchFailure`'s hyphenated vocabulary → the primitive's. */
-function ipfsReason(classification: 'too-large' | 'not-found' | 'unavailable'): ArtifactFetchFailureReason {
+function ipfsReason(
+  classification: 'too-large' | 'not-found' | 'unavailable',
+): Exclude<ArtifactFetchFailureReason, 'digest_mismatch'> {
   if (classification === 'too-large') return 'too_large';
   if (classification === 'not-found') return 'not_found';
   return 'unavailable';
@@ -310,15 +363,20 @@ export async function fetchVerifiedArtifact(
       if (!verified.ok) return refuse('ipfs', sourceUri, verified.actualSha256);
       return admit('ipfs', sourceUri, bytes);
     } catch (err) {
-      // A gateway failure or a malformed donation payload is opportunistic
-      // noise, not a verdict on the artifact: classify, warn unless it was
-      // proven absence, and let the next locator answer.
+      // Neither a gateway failure nor a malformed donation payload is a verdict
+      // on the artifact *globally*, so both fall through and let the next
+      // locator answer. They differ in what they proved here: a transport
+      // failure learned nothing, while a payload that will never decode into
+      // this artifact is absence at this locator — hence the split reason. Both
+      // still warn; only a gateway's own "not there" is silent (#3441).
       warnIpfsFallThrough(`donation artifact ${sha256}`, err);
       attempts.push({
         leg: 'ipfs',
         sourceUri,
         outcome: 'failed',
-        reason: ipfsReason(classifyIpfsFetchFailure(err)),
+        reason: err instanceof DonationDecodeError
+          ? 'malformed_payload'
+          : ipfsReason(classifyIpfsFetchFailure(err)),
         message: errorMessage(err),
       });
     }
@@ -377,10 +435,10 @@ export async function fetchVerifiedArtifact(
   // cheapest-first — the opportunistic donated mirror, then the operator's own
   // origin — so the last leg to answer is the artifact's actual home, and its
   // reason is the one the operator can act on.
-  const inconclusive = failures.filter((attempt) => attempt.reason !== 'not_found');
-  const reason = inconclusive.length > 0
-    ? inconclusive[inconclusive.length - 1]!.reason!
-    : 'not_found';
+  // Absence is a set, not one literal: a leg that resolved and served bytes that
+  // are permanently not this artifact answered as conclusively as a 404 did.
+  const inconclusive = failures.filter((attempt) => !CONCLUSIVE_ABSENCE.has(attempt.reason!));
+  const reason = (inconclusive.length > 0 ? inconclusive : failures).at(-1)!.reason!;
   return {
     ok: false,
     sha256,

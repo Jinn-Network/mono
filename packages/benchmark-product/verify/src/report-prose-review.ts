@@ -178,13 +178,13 @@ export function reviewReportProse(html: string): readonly ReportProseFinding[] {
 }
 
 /**
- * A finding the published page still carries, with the wording that replaces it.
+ * A finding a rendered page still carries, with the wording that replaces it.
  *
- * These are not waivers. `verifyPublicBundleSnapshot` byte-compares every presentation asset
+ * These were never waivers. `verifyPublicBundleSnapshot` byte-compares every presentation asset
  * against its own rebuild, and every published claim advertises its compatible verifier as a minor
  * line (see `legacy-closures.ts`), so changing one of these strings in place would make every
- * already-published bundle fail under the command it printed. Adopting the rulings is
- * therefore a bundle-format allocation, exactly as
+ * already-published bundle fail under the command it printed. Adopting a ruling is therefore a
+ * bundle-format allocation, exactly as
  * `spec/2026-09-02-report-page-information-architecture.md` §8 rules for the reading order that
  * lands in the same revision.
  */
@@ -195,45 +195,35 @@ export interface FrozenReportProseFinding {
   readonly ruling: string;
 }
 
-export const FROZEN_REPORT_PROSE_FINDINGS: readonly FrozenReportProseFinding[] = [
-  {
-    rule: "repeated-statement",
-    text: "no comparative winner is stated",
-    ruling:
-      "The claim line in the header is the page's single statement of it. The bundled-sample note "
-      + "ends at \"derived from the sample consensus inputs.\" and the descriptive line ends at "
-      + "\"Lower is better.\"; neither restates the header. The binary profile carries the same "
-      + "repetition off this page -- `binaryFactsHtml` opens with the tail of the claim line "
-      + "`neutralClaimHtml` already rendered -- and drops it in the same revision.",
-  },
-  {
-    rule: "repeated-statement",
-    text: "values below are copied without reconciliation",
-    ruling:
-      "The Matrix, Report, and Claim sections each keep their authenticated source link. The "
-      + "non-reconciliation disclosure is a property of the page, not of a section, so it is "
-      + "stated once, on the first sealed-source section, and the later source labels end at "
-      + "their record link.",
-  },
-  {
-    rule: "repeated-statement",
-    text: "built on jinn",
-    ruling:
-      "Attribution renders once, in the footer imprint. The verification section drops its copy "
-      + "(report UI kit structural rule 5; also §1.3 of the information-architecture spec).",
-  },
-  {
-    rule: "narrated-control",
-    text: "Open a cell to inspect its evidence",
-    ruling:
-      "Cut. The disclosure controls beneath it are self-evident, and CLAUDE.md §Frontends bans "
-      + "instructions for self-evident controls outright.",
-  },
-] as const;
+/**
+ * Every finding the page this revision renders still carries, with the wording that replaces it.
+ *
+ * Empty is a stated fact, not an omission: the `/10` composed presentation (issue #4191) renders
+ * all four rulings the `/2` page's findings named, so the review finds nothing on the page the
+ * product now produces. The list stays as the mechanism. `reviewReportProse`'s output is compared
+ * against it for exact equality, so any new prose that repeats a statement, narrates a control, or
+ * reads as machine-written still fails the build of the package that produces reports.
+ *
+ * The four retired rulings, kept legible because the `/2` bundle a third party already holds
+ * carries their findings and its bytes can never change:
+ *
+ * - `repeated-statement` "no comparative winner is stated" — the header claim line is the page's
+ *   single statement of it; the bundled-sample note and the descriptive line no longer restate it.
+ *   Methods whose claim line renders an estimate instead keep their own copy, which is the only
+ *   statement they have.
+ * - `repeated-statement` "values below are copied without reconciliation" — a property of the
+ *   page, not of a section, so it is stated once on the first sealed-source section while every
+ *   section keeps its authenticated record link.
+ * - `repeated-statement` "built on jinn" — attribution renders once, in the footer imprint; the
+ *   verification section ends at its trust root.
+ * - `narrated-control` "Open a cell to inspect its evidence" — cut, per CLAUDE.md §Frontends.
+ */
+export const FROZEN_REPORT_PROSE_FINDINGS: readonly FrozenReportProseFinding[] = [] as const;
 
 /**
- * The published page's authored-prose word count, pinned at the count this review first measured.
- * A ceiling, not a target: issue #3016 requires reading length to fall and forbids buying the
- * reduction by dropping a disclosure, so prose may shrink freely and may not grow.
+ * The authored-prose word count of the page this revision renders, measured on the `/10` composed
+ * page (issue #4191); the `/2` page this review first measured counted 363. A ceiling, not a
+ * target: issue #3016 requires reading length to fall and forbids buying the reduction by dropping
+ * a disclosure, so prose may shrink freely and may not grow.
  */
-export const REPORT_PROSE_WORD_CEILING = 363;
+export const REPORT_PROSE_WORD_CEILING = 327;

@@ -458,14 +458,18 @@ describe("the card reader's grammars track the sealed offer schema", () => {
     }
   });
 
-  it("refuses exactly the display-unsafe characters the schema refuses in a destination", async () => {
+  it("refuses exactly the display-unsafe and interior-format characters the schema refuses in a destination", async () => {
     const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
     const card = item.facts as Record<string, unknown>;
     // Each in-class codepoint is paired with an adjacent out-of-class one, so a narrowed class
-    // and a widened one both show up rather than only one direction.
+    // and a widened one both show up rather than only one direction. The second class the
+    // schema refuses — every format character except the joiners U+200C/U+200D — is probed in
+    // both directions too: the two joiners as accepted, and U+2060 WORD JOINER, U+206A, U+FEFF
+    // and U+E0041 (the tag block) as refused.
     for (const code of [
-      0x00, 0x0a, 0x1f, 0x20, 0x7e, 0x7f, 0x9f, 0xa0, 0x061c, 0x061d, 0x200d, 0x200e, 0x200f,
-      0x2028, 0x2029, 0x202a, 0x202e, 0x202f, 0x2065, 0x2066, 0x2069, 0x206a, 0xfeff,
+      0x00, 0x0a, 0x1f, 0x20, 0x7e, 0x7f, 0x9f, 0xa0, 0x061c, 0x061d, 0x200c, 0x200d, 0x200e,
+      0x200f, 0x2028, 0x2029, 0x202a, 0x202e, 0x202f, 0x2060, 0x2065, 0x2066, 0x2069, 0x206a,
+      0xfeff, 0xe0041,
     ]) {
       const char = String.fromCodePoint(code);
       const readable =

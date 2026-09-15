@@ -62,25 +62,90 @@ export function readNormalizedArtifactAbi(artifactPath) {
   return normalizeFullAbi(artifact.abi);
 }
 
+/** @param {{ type: string; components?: readonly unknown[] }} component */
+function canonicalType(component) {
+  if (component.type.startsWith("tuple")) {
+    const inner = (component.components ?? [])
+      .map((child) => canonicalType(/** @type {{ type: string }} */ (child)))
+      .join(",");
+    // The suffix carries any array shape (`[]`, `[2]`), so a tuple[] stays expressible.
+    return `(${inner})${component.type.slice("tuple".length)}`;
+  }
+  return component.type;
+}
+
+/** @param {{ inputs?: readonly unknown[] }} item */
+function canonicalInputs(item) {
+  return (item.inputs ?? [])
+    .map((input) => canonicalType(/** @type {{ type: string }} */ (input)))
+    .join(",");
+}
+
 /**
+ * @param {string} entry
+ * @param {readonly {type: string; name?: string; inputs?: readonly unknown[]}[]} candidates
+ * @param {string} [context]
+ */
+function ambiguousItemError(entry, candidates, context) {
+  const where = context === undefined ? "" : ` in ${context}`;
+  const listed = candidates
+    .map((item) => `  ${item.type} ${item.name}(${canonicalInputs(item)})`)
+    .join("\n");
+  const example = `${candidates[0].name}(${canonicalInputs(candidates[0])})`;
+  return new Error(
+    `Ambiguous ABI item "${entry}"${where}:\n${candidates.length} items match:\n${listed}\n` +
+      `Disambiguate in slices.manifest.json with the full signature, e.g. "${example}".`,
+  );
+}
+
+/**
+ * Resolve manifest entries against a full ABI. An entry is either a bare name
+ * (`"createTask"`) or a canonical signature (`"claimTask(uint256,address)"`),
+ * which selects one overload. A name matching more than one item is a hard
+ * error rather than a silent last-wins pick. `context` names the caller (the
+ * generator passes its slice and contract) and is appended to that error.
+ *
+ * Kept deliberately in step with `src/pick.ts`: `yarn generate` must not depend
+ * on a prior `yarn build`. `test/pick.test.ts` runs both copies through the
+ * same cases, including the error text.
+ *
  * @param {readonly unknown[]} fullAbi
  * @param {readonly string[]} names
+ * @param {string} [context]
  */
-export function pickAbiItems(fullAbi, names) {
+export function pickAbiItems(fullAbi, names, context) {
   const byName = new Map();
   for (const item of fullAbi) {
     const entry = /** @type {{ name?: string }} */ (item);
     if (entry.name !== undefined) {
-      byName.set(entry.name, normalizeAbiValue(item));
+      const existing = byName.get(entry.name);
+      if (existing === undefined) {
+        byName.set(entry.name, [normalizeAbiValue(item)]);
+      } else {
+        existing.push(normalizeAbiValue(item));
+      }
     }
   }
   const picked = [];
-  for (const name of names) {
-    const item = byName.get(name);
-    if (item === undefined) {
-      throw new Error(`ABI item not found: ${name}`);
+  for (const entry of names) {
+    const open = entry.indexOf("(");
+    const candidates = byName.get(open === -1 ? entry : entry.slice(0, open)) ?? [];
+    const matches =
+      open === -1
+        ? candidates
+        : candidates.filter(
+            // `slice(open + 1, -1)` requires the entry to END at its closing paren, so a
+            // malformed `"foo(uint256)junk"` falls through to the not-found error rather than
+            // silently resolving.
+            (item) => canonicalInputs(item) === entry.slice(open + 1, -1),
+          );
+    if (matches.length === 0) {
+      throw new Error(`ABI item not found: ${entry}`);
     }
-    picked.push(item);
+    if (matches.length > 1) {
+      throw ambiguousItemError(entry, matches, context);
+    }
+    picked.push(matches[0]);
   }
   return picked;
 }

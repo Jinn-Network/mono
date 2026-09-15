@@ -1434,7 +1434,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (parsed.configShapeVersion === CONFIG_SHAPE_VERSION) {
     const pruned = pruneMigrationBackups(dirname(filePath));
     if (pruned.removed.length > 0) {
-      console.log(
+      console.error(
         `[config] Pruned ${pruned.removed.length} pre-v2 migration ${pruned.removed.length === 1 ? 'backup' : 'backups'}.`,
       );
     }

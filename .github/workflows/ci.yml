@@ -159,6 +159,7 @@ jobs:
             '^DEPLOY\.md$'
             '^deploy/'
             '^\.github/scripts/npm-publish-workflow\.test\.mjs$'
+            '^\.github/scripts/docker-workflow\.test\.mjs$'
             '^\.github/scripts/operator-[^/]*\.test\.mjs$'
             '^packages/contract-abis/'
             '^packages/discovery/client/'
@@ -327,6 +328,12 @@ jobs:
       # Unit tests must not inherit agent credentials. Remove them rather than
       # assigning empty values, which would override explicit test env files.
       - run: node --test ../.github/scripts/npm-publish-workflow.test.mjs
+      # Pins docker.yml's three #2811 controls: the release-tag allowlist on the
+      # manual-publish path, the semver validation that covers `client-v*` too,
+      # and the `env:` indirection keeping attacker-shaped values out of `${{ }}`
+      # inside a `run:` block. Nothing else in the repository exercises them —
+      # this lane is never dispatched from CI and the overlays pin by digest.
+      - run: node --test ../.github/scripts/docker-workflow.test.mjs
       - run: env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY yarn test
         env:
           SKIP_HL_TESTS: '1'

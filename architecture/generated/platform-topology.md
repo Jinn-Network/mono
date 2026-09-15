@@ -1189,6 +1189,7 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-relative-rail-identifier.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-signed-amount.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-spoofable-rail-destination.json | — | — | — |
+| fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-tag-carrier-rail-destination.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-unnormalized-rail-identifier.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-unsorted-rails.json | — | — | — |
 | fixtures | @jinn-network/evidence-offer | packages/evidence/offer/fixtures/offer/invalid-zero-amount.json | — | — | — |

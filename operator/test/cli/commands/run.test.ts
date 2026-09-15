@@ -100,6 +100,30 @@ describe('run command', () => {
     expect(fakeDeps.mainFn).toHaveBeenCalledOnce();
   });
 
+  // #4375: an explicit but unusable --password-fd must not be mistaken for
+  // "nothing configured" -- that branch overwrites ~/.jinn-operator/keystore-password
+  // with a fresh random secret, leaving the existing keystore undecryptable.
+  it('does not auto-generate a keystore password when --password-fd is given but unusable', async () => {
+    fakeDeps = makeFakeDeps({
+      resolveCliPassword: vi.fn(() => ({
+        ok: false as const,
+        message: 'Missing or invalid value for --password-fd (expected a non-negative file descriptor)',
+      })) as unknown as RunDeps['resolveCliPassword'],
+    });
+    const run = createRunCommand(fakeDeps);
+    const { ctx, writes, exits } = makeCommandCtx({
+      env: { HOME: fakeHome },
+      argv: ['--password-fd='],
+    });
+    await run.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.message).toContain('--password-fd');
+    expect(exits[exits.length - 1]).not.toBe(0);
+    expect(fakeDeps.mainFn).not.toHaveBeenCalled();
+    expect(existsSync(join(fakeHome, '.jinn-operator', 'keystore-password'))).toBe(false);
+  });
+
   it('treats leftover --native-config as invalid_invocation', async () => {
     const run = createRunCommand(fakeDeps);
     const { ctx, writes, exits } = makeCommandCtx({

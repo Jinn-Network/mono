@@ -54,9 +54,14 @@ function legacyAssetInput(bundleDir: string): PublicAssetInput {
     readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
   };
   const manifest = JSON.parse(readFileSync(join(bundleDir, "bundle.json"), "utf8")) as {
+    readonly format: PublicAssetInput["format"];
     readonly files: readonly { readonly path: string }[];
   };
   return {
+    // Read from the fixture's own manifest rather than named here: the point of this test is that
+    // the legacy rendering differs from the published one for a REASON (the absent comparison), so
+    // a hard-coded format could make the refusal below pass for the wrong reason.
+    format: manifest.format,
     claim,
     matrix: parseMatrix(read("matrix.json")),
     report: parseReport(read("report.json")),
