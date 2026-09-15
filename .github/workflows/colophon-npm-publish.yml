@@ -63,6 +63,14 @@ jobs:
       - name: Pin platform dependencies to the recorded product-release receipt
         run: node .github/scripts/colophon-publish-manifest.mjs --apply packages/benchmark-product/check/package.json
 
+      # The alias's guard runs before the checker's publish, not after it: npm versions are immutable,
+      # so a checker released with its alias then refused would leave `npx @colophon-claims/verify@0.2`
+      # resolving to the pre-rename 0.2.1 until a further checker version ships. The alias itself is
+      # source-only: no build, no install, no platform receipt to apply, because it declares no
+      # @jinn-network dependency for --apply to rewrite.
+      - name: Refuse an alias publish the in-tree claim pins do not name
+        run: node .github/scripts/colophon-publish-manifest.mjs --check-claim-pins packages/benchmark-product/verify/package.json
+
       - name: Install, build, and publish from the public registry
         working-directory: packages/benchmark-product/check
         run: |
@@ -70,11 +78,6 @@ jobs:
           npm install
           npm run build
           npm publish --access public
-
-      # The alias is source-only: no build, no install, no platform receipt to apply, because it
-      # declares no @jinn-network dependency for --apply to rewrite.
-      - name: Refuse an alias publish the in-tree claim pins do not name
-        run: node .github/scripts/colophon-publish-manifest.mjs --check-claim-pins packages/benchmark-product/verify/package.json
 
       - name: Require the pinned checker version to resolve before releasing the alias
         working-directory: packages/benchmark-product/verify

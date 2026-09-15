@@ -371,9 +371,16 @@ test('the publish workflow guards each package, and releases the alias only afte
   assert.ok(guard > 0, 'the workflow must run the claim-pin guard');
   assert.ok(guard < apply, 'the guard must refuse before the manifest is rewritten for publish');
   const aliasGuard = workflow.indexOf('--check-claim-pins packages/benchmark-product/verify/package.json');
-  assert.ok(aliasGuard > apply, 'the alias is guarded and published after the checker it re-enters');
-  // npm versions are immutable, so an alias released against a checker version that is not there
-  // permanently breaks `npx @colophon-claims/verify@0.2`.
+  const checkerPublish = workflow.indexOf('npm run build');
+  const aliasGate = workflow.indexOf('npm view "@colophon-claims/check@${pinned}" version');
+  assert.ok(aliasGuard > apply, 'the alias is guarded after the checker manifest is rewritten');
+  // npm versions are immutable in both directions. A checker published and then refused its alias
+  // leaves `npx @colophon-claims/verify@0.2` on the pre-rename 0.2.1 until another checker version
+  // ships, so the alias's own guard refuses before the checker goes out; and an alias released
+  // against a checker version that is not there permanently breaks that same command, so the alias
+  // publishes only after the checker resolves on npm.
+  assert.ok(checkerPublish > 0 && aliasGuard < checkerPublish, 'the alias guard refuses before the checker is published');
+  assert.ok(aliasGate > checkerPublish, 'the alias is published after the checker it re-enters');
   assert.match(workflow, /npm view "@colophon-claims\/check@\$\{pinned\}" version/u);
 });
 
