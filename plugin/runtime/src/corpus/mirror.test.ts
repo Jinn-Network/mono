@@ -242,6 +242,24 @@ describe("mirror sync", () => {
       expect(await marks.get({ agent: AGENT, name: NAME })).toEqual(before);
     });
 
+    test("a logger that throws on the revalidation line does not fail a clean revalidation (#4482)", async () => {
+      const marks = await seeded();
+
+      const second = await mirror({
+        highWaterMarks: marks,
+        chainVerification: spyPosture(),
+        log: {
+          ...log(),
+          debug: vi.fn(() => {
+            throw new Error("EPIPE: broken pipe");
+          }),
+        },
+      }).syncOnce();
+
+      expect(second.status).toBe("synced");
+      expect(second.sources[0]!.failure).toBeUndefined();
+    });
+
     test("a head whose issuedAt REGRESSED is a chain claim and keeps the chain path", async () => {
       const marks = await seeded();
       const posture = spyPosture();
@@ -451,6 +469,78 @@ describe("mirror sync", () => {
     }).syncOnce();
     expect(outcome.status).toBe("failed");
     expect(outcome.sources[0]!.failure?.message).toContain("network down");
+  });
+
+  // #4482: the driver posture warns from inside its own catch, and the mirror
+  // warns from inside its per-announcement catch. A logger that throws at
+  // either -- a stderr EPIPE -- must not change what the source is reported
+  // as: the failure CODE feeds the durable freshness row and the health
+  // check's remedy, so a refusal recorded as a sync failure sends the
+  // operator to the wrong place.
+  function faultingWarn() {
+    return {
+      ...log(),
+      warn: vi.fn(() => {
+        throw new Error("EPIPE: broken pipe");
+      }),
+    };
+  }
+
+  test("a logger that throws cannot report a chain-verification refusal as a sync failure", async () => {
+    const faulting = faultingWarn();
+    const driver = {
+      verifySource: async () => {
+        throw new Error("transport failed");
+      },
+    } as unknown as VerifyDriver;
+    // The fixture's head is bare, which the driver posture refuses as
+    // `head-unsigned` before the driver is asked anything. Served inside a
+    // wire envelope it reaches the driver -- the signature is never checked
+    // here, because the throwing driver IS the thing under test.
+    const { transport: inner } = buildArchive(executionEvidenceFixture.bytes);
+    const transport: Transport = {
+      fetch: async (url, init) => {
+        const response = await inner.fetch(url, init);
+        if (url !== `https://archive.test${headPath(NAME)}`) return response;
+        const envelope = {
+          payloadType: "application/vnd.jinn.record-discovery.head+json",
+          payload: Buffer.from(response.bytes).toString("base64"),
+          signatures: [{ sig: Buffer.from("not checked").toString("base64") }],
+        };
+        return { status: 200, bytes: new TextEncoder().encode(JSON.stringify(envelope)) };
+      },
+    };
+
+    const outcome = await mirror({
+      transport,
+      chainVerification: createDriverChainVerification(driver, faulting),
+      log: faulting,
+    }).syncOnce();
+
+    expect(outcome.sources[0]!.failure).toEqual({
+      code: "chain-verification-rejected",
+      message: "verification-failed",
+    });
+  });
+
+  test("a logger that throws on an index failure does not wedge the rest of the source", async () => {
+    const { transport: inner } = buildArchive(executionEvidenceFixture.bytes);
+    // The record itself is unfetchable, so the indexer THROWS (a nonconforming
+    // record is a terminal `rejected` result and never enters the catch).
+    const transport: Transport = {
+      fetch: (url) =>
+        url.startsWith("https://archive.test/records/")
+          ? Promise.resolve({ status: 404, bytes: new Uint8Array() })
+          : inner.fetch(url),
+    };
+    const marks = createFileHighWaterMarkStore({ filePath: statePath, fs: corpusFs });
+
+    const outcome = await mirror({ transport, highWaterMarks: marks, log: faultingWarn() }).syncOnce();
+
+    expect(outcome.status).toBe("synced");
+    expect(outcome.sources[0]).toMatchObject({ entriesWalked: 1, indexed: 0, rejected: 1 });
+    expect(outcome.sources[0]!.failure).toBeUndefined();
+    expect(await marks.get({ agent: AGENT, name: NAME })).toBeDefined();
   });
 
   test("one bad record does not wedge the rest of a source's entries", async () => {

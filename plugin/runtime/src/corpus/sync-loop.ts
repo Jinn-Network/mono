@@ -14,7 +14,7 @@ import { endsWithHighSurrogate } from "../projection/truncate.js";
 import { indexPublicPlane } from "../relevance/indexing.js";
 import type { RelevanceIndex } from "../relevance/index-store.js";
 import type { TraceSpanSource } from "../relevance/trace-decode-adapter.js";
-import { describeError } from "./errors.js";
+import { bestEffortLogger, describeError } from "./errors.js";
 import type { CorpusFilesystem } from "./fs.js";
 import type { CorpusMirror, MirrorSyncOutcome, MirrorSyncStatus } from "./mirror.js";
 import type { CorpusReader } from "./read.js";
@@ -130,6 +130,7 @@ export function createCorpusSyncCapability(
     name: "corpus-sync",
 
     async start(context: CapabilityContext): Promise<void> {
+      const log = bestEffortLogger(context.log);
       const statusStore = createFileMirrorSyncStatusStore({
         // Derived from the home directory rather than carried on
         // `RuntimeConfig`: this file is the sync SERVICE's report, and no
@@ -138,14 +139,14 @@ export function createCorpusSyncCapability(
         // consumer's benefit.
         filePath: join(context.config.homeDirectory, MIRROR_SYNC_STATUS_FILENAME),
         fs: options.fs,
-        log: context.log,
+        log,
       });
       const seed = await statusStore.read();
 
       const state: Started = {
         config: context.config,
         corpus: context.config.corpus,
-        log: context.log,
+        log,
         index: await options.openIndex(context.config),
         statusStore,
         ...(seed?.lastCycle === undefined ? {} : { lastCycle: seed.lastCycle }),
