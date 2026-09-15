@@ -305,17 +305,17 @@ already yields every entry oldest-first. Then:
    held out of the gap here, because its true side of the partition is unknown rather
    than known to be missing. The second is at the tip. An entry's anchor is announced
    by a *later* entry, so a substantive append whose anchor-announcing append has not
-   landed yet reads as unanchored until it does. If the newest entry on the chain is substantive rather
-   than anchor-announcing, treat its sequence as pending rather than as a gap. Pending
-   is a reading, not a verdict: at the tip an anchor that has not landed yet and one
-   that never will are byte-identical, the same way a mid-chain outage and a declined
-   anchor are. Nor is *unanchored* settled anywhere on the chain — §4.4 rules no
-   window at all, and rules an anchor obtained late a weaker anchor rather than an
-   invalid one, so a sequence that is a gap today can be anchored tomorrow. Excusing
-   only the tip as pending is accordingly conservative: it is the one sequence the ruled cadence
-   guarantees is in flight, but §4.3 (acquisition never blocks an append) and §4.4
-   together let an anchor land arbitrarily later, so a mid-chain sequence can be in
-   flight too and still reads as a gap.
+   landed yet reads as unanchored until it does. If the newest entry on the chain is
+   substantive rather than anchor-announcing, treat its sequence as pending rather than
+   as a gap. Pending is a reading, not a verdict: at the tip an anchor that has not
+   landed yet and one that never will are byte-identical, the same way a mid-chain
+   outage and a declined anchor are. Nor is *unanchored* settled anywhere on the chain
+   — §4.4 rules no window at all, and rules an anchor obtained late a weaker anchor
+   rather than an invalid one, so a sequence that is a gap today can be anchored
+   tomorrow. Excusing only the tip as pending is accordingly conservative: it is the one
+   sequence the ruled cadence guarantees is in flight, but §4.3 (acquisition never
+   blocks an append) and §4.4 together let an anchor land arbitrarily later, so a
+   mid-chain sequence can be in flight too and still reads as a gap.
 6. **Name what is left exactly.** Because the denominator is exact — up to the
    unreadable sequences, which step 3 placed in it by default rather than by evidence —
    report the remaining unanchored sequences by sequence rather than as a count or a
