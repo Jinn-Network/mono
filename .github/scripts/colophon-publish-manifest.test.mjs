@@ -382,6 +382,12 @@ test('the publish workflow guards each package, and releases the alias only afte
   assert.ok(checkerPublish > 0 && aliasGuard < checkerPublish, 'the alias guard refuses before the checker is published');
   assert.ok(aliasGate > checkerPublish, 'the alias is published after the checker it re-enters');
   assert.match(workflow, /npm view "@colophon-claims\/check@\$\{pinned\}" version/u);
+  // The checker step is re-entrant: a version npm already serves is skipped rather than
+  // republished, so a run that failed after the checker went out (alias gate, alias publish) can
+  // be re-dispatched to finish the pair instead of dying on the immutable version with E403.
+  const checkerSkip = workflow.indexOf('npm view "@colophon-claims/check@${version}" version');
+  assert.ok(checkerSkip > checkerPublish && checkerSkip < aliasGate, 'the checker publish is gated on its own version being absent from npm');
+  assert.match(workflow, /if npm view "@colophon-claims\/check@\$\{version\}" version[^\n]*; then\n[^\n]*skipping[^\n]*\n\s+else\n\s+npm publish --access public\n\s+fi/u);
 });
 
 test('the guard reads what npm actually serves, and fails closed when it cannot', async () => {

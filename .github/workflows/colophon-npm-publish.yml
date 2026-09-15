@@ -71,13 +71,24 @@ jobs:
       - name: Refuse an alias publish the in-tree claim pins do not name
         run: node .github/scripts/colophon-publish-manifest.mjs --check-claim-pins packages/benchmark-product/verify/package.json
 
+      # Re-entrant on purpose. Everything after this step (the alias gate, the alias publish) can
+      # fail for reasons that have nothing to do with the checker -- registry replication lag on
+      # `npm view`, a trusted-publisher binding missing for the alias name -- and npm versions are
+      # immutable, so a re-dispatch that unconditionally republished would die here with E403 and
+      # leave the alias unshippable until a checker version bump. A version npm already serves is
+      # skipped, not republished; the run then proceeds to the steps that actually failed.
       - name: Install, build, and publish from the public registry
         working-directory: packages/benchmark-product/check
         run: |
           unset NODE_AUTH_TOKEN
           npm install
           npm run build
-          npm publish --access public
+          version="$(node -p 'require("./package.json").version')"
+          if npm view "@colophon-claims/check@${version}" version >/dev/null 2>&1; then
+            echo "@colophon-claims/check@${version} is already published; skipping the checker publish"
+          else
+            npm publish --access public
+          fi
 
       - name: Require the pinned checker version to resolve before releasing the alias
         working-directory: packages/benchmark-product/verify

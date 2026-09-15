@@ -445,7 +445,7 @@ describe("T1 provider-free binary qualification cold lifecycle", () => {
     const verified = JSON.parse(replay.stdout) as Record<string, any>;
     expect(verified).toMatchObject({
       ok: true,
-      verifierVersion: expect.stringMatching(/^2\./u),
+      verifierVersion: expect.stringMatching(/^0\.2\./u),
       format: "benchmark-product-public-bundle/4",
       identity,
       checks: CHECKS,
