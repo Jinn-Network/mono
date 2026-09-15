@@ -28,13 +28,37 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { resolveDefaultStateDir } from '../state-dir.js';
 
+/**
+ * Resolve the file descriptor from `--password-fd <n>` or `--password-fd=<n>`.
+ *
+ * The first *usable* occurrence wins -- `resolveCliPassword` merges the verb
+ * argv with `process.argv`, so the flag routinely appears twice. A present flag
+ * with no usable occurrence throws: silently returning undefined fell through to
+ * `JINN_PASSWORD` or the keystore-password file, decrypting with a different
+ * secret than the operator supplied (#4375).
+ */
 export function parsePasswordFdFromArgv(argv: string[]): number | undefined {
-  const idx = argv.indexOf('--password-fd');
-  if (idx === -1) return undefined;
-  const raw = argv[idx + 1];
-  const n = raw !== undefined ? parseInt(raw, 10) : NaN;
-  if (!Number.isFinite(n) || n < 0) return undefined;
-  return n;
+  let seen = false;
+  for (const [idx, arg] of argv.entries()) {
+    let raw: string | undefined;
+    if (arg === '--password-fd') {
+      seen = true;
+      raw = argv[idx + 1];
+    } else if (arg.startsWith('--password-fd=')) {
+      seen = true;
+      raw = arg.slice('--password-fd='.length);
+    } else {
+      continue;
+    }
+    const n = raw ? parseInt(raw, 10) : NaN;
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  if (seen) {
+    throw new Error(
+      'Missing or invalid value for --password-fd (expected a non-negative file descriptor)',
+    );
+  }
+  return undefined;
 }
 
 export function readPasswordFromFd(fd: number): string {
@@ -66,7 +90,12 @@ export function resolveCliPassword(
 ): { ok: true; password: string } | { ok: false; message: string } {
   // 1. --password-fd wins (explicit scripted task).
   const merged = mergeArgv(argv);
-  const fd = parsePasswordFdFromArgv(merged);
+  let fd: number | undefined;
+  try {
+    fd = parsePasswordFdFromArgv(merged);
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+  }
   if (fd !== undefined) {
     try {
       const password = readPasswordFromFd(fd);
