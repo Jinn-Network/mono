@@ -66,8 +66,8 @@ const COVERAGE = [
   {
     label: 'Golden vectors',
     claim:
-      "a head issued further ahead of the verifier's clock than one profile window (must reject `head-issued-ahead`, §5.2 rule 3, and persist no high-water mark) and a head whose window is inverted (must reject `refresh-by-ceiling`, §5.2 rule 1)",
-    vectors: ['head-issued-ahead', 'refresh-by-ceiling-inverted-window'],
+      "a head issued further ahead of the verifier's clock than one profile window (must reject `head-issued-ahead`, §5.2 rule 3, and persist no high-water mark), a head whose window is inverted (must reject `refresh-by-ceiling`, §5.2 rule 1) and a head whose window exceeds the profile ceiling (must also reject `refresh-by-ceiling`, §5.2 rule 2)",
+    vectors: ['head-issued-ahead', 'refresh-by-ceiling-inverted-window', 'refresh-by-ceiling-exceeds-window'],
   },
   {
     label: 'Golden vectors',
@@ -249,15 +249,32 @@ const COVERAGE = [
   {
     label: 'Named checks in isolation',
     claim:
-      '`source-chain-verification` outcomes (`stale`, `forked`, `broken-chain` (including `at: refresh-by-ceiling` and `at: head-issued-ahead`), `unauthorized-signer`), `facts-consistency` (all three outcomes), `derivation-consistency` (present, fabricated, reorged-away)',
+      '`source-chain-verification` outcomes (`stale`, `forked`, `broken-chain` (including `at: refresh-by-ceiling` and `at: head-issued-ahead`), `unauthorized-signer`), each exercised both from first adoption and against a seeded high-water mark, so the kit proves the *preserve* half of §10.3 step 7 — a refused head leaves a stored mark neither advanced nor cleared — across all four typed failures',
+    // The seeded half of each typed failure: `stale`, `unauthorized-signer`, and `forked`
+    // by the three `*-seeded-mark` vectors; `broken-chain` by `rolled-back-head`
+    // (`at: linkage`) and `issued-at-regression-v2` (`at: issued-at-monotonicity`), which
+    // are seeded (`firstAdoption: false` with a stored `hwm`) by construction. The harness
+    // (`conformance.ts`) asserts mark preservation on every non-`ok` vector, so each of
+    // these discharges the preserve half as well as the refusal.
     vectors: [
       'stale-head',
+      'stale-head-seeded-mark',
       'forked-chain-shared-previous',
       'forked-chain-second-signed-child',
+      'forked-chain-seeded-mark',
       'refresh-by-ceiling-inverted-window',
       'head-issued-ahead',
+      'rolled-back-head',
+      'issued-at-regression-v2',
       'wrong-signing-scope',
+      'wrong-signing-scope-seeded-mark',
       'competing-head-rotated-out-key',
+    ],
+  },
+  {
+    label: 'Named checks in isolation',
+    claim: '`facts-consistency` (all three outcomes), `derivation-consistency` (present, fabricated, reorged-away)',
+    vectors: [
       'facts-consistency-consistent',
       'facts-consistency-inconsistent',
       'facts-consistency-indeterminate-unavailable-referenced-bytes',
