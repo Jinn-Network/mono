@@ -1108,7 +1108,7 @@ test("with no single publisher there is no identity to qualify, so neither line 
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId, bytes } = await mintDomainBinding();
   const second = await mintDomainBinding();
-  const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], {
+  const deps = {
     readFile: () => bytes,
     verify: async () => verified({
       format: "benchmark-product-public-bundle/6",
@@ -1120,12 +1120,23 @@ test("with no single publisher there is no identity to qualify, so neither line 
         { role: "publisher", identity: "urn:jinn:agent:beta", keyId: second.keyId, custody: "same-operator" },
       ],
     }),
-  });
+  };
+  const result = await runVerifierCli(["bundle", "--identity-binding", "binding.json"], deps);
   assert.equal(result.exitCode, 2);
   assert.match(result.stderr, /2 publisher keys/);
   assert.doesNotMatch(result.stdout, /claims publication/);
   // The limits paragraph must not qualify a name the report never showed.
   assert.doesNotMatch(result.stdout, /registrar/);
+
+  // The refusal's code is public through `--json`, and it is `validation`: the binding's
+  // precondition -- exactly one publisher key -- is unmet, and nothing collides with anything, so
+  // `conflict` would tell an embedder branching on the code to retry under another name (#4378).
+  const json = await runVerifierCli(["bundle", "--json", "--identity-binding", "binding.json"], deps);
+  assert.equal(json.exitCode, 2);
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(parsed.identityBinding.ok, false);
+  assert.equal(parsed.identityBinding.code, "validation");
+  assert.match(parsed.identityBinding.message, /2 publisher keys/);
 });
 
 test("a drifted freeze repository still exits 1 when an unrelated binding also failed", async () => {
