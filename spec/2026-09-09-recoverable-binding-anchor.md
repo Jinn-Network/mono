@@ -21,7 +21,7 @@ straight off a catalog, with no `role` label and no Safe. The re-anchor it impli
 owed at the earliest of three inspectable events, the primary one being the first release in
 which the catalog opener refuses an anchor on preimage recomputation for any anchor class:
 work Jinn has already authorized, not an event it waits on. The re-author mints a fresh anchor
-whenever the act's bindings change — which, on the runbook's scope, is every re-author it covers;
+whenever a preimage term changes — which, on the runbook's scope, is every re-author it covers;
 under the successor that stops being a judgment and becomes a mechanism, because a scope widening
 changes the digest and the reuse path correctly falls through.
 
@@ -51,8 +51,8 @@ The tree corroborates it: `architecture/platform-packages.v1.json` carries no pi
 `pinned` marker, which DR-2026-09-03 §Consequences attaches to #3911, the pin-and-vendor
 follow-up that runs after `Jinn-Network/spec` issue 1's byte-identical import
 ([`log/decisions/2026-09-03-protocol-spec-repository.md:52`](../log/decisions/2026-09-03-protocol-spec-repository.md),
-`:54`). That absence is consistent with the import still being ahead rather than direct evidence
-of it, which is why it is corroboration and not the argument.
+`:53`, `:54`). That absence is consistent with the import still being ahead rather than direct
+evidence of it, which is why it is corroboration and not the argument.
 
 So issue #4172's first acceptance criterion — that the anchor-locator profile under
 DR-2026-09-03 specifies a third-party-recomputable successor preimage and the re-anchor
@@ -193,9 +193,9 @@ each is out for a named reason rather than to taste — the first two bullets by
 for reasons of its own that the bullet names field by field, the fourth by a separate choice
 stated as such. The rule alone therefore does not close the set; the enumeration below does:
 
-- `relationship` and `strength` are **constants of the authoring path** — `authorRoleBinding`
-  writes `"controls"` and `"strong"` literally
-  (`packages/trust/authoring/src/binding.ts:107`, `:111`) — so they can vary between no two
+- `relationship`, `strength`, and `ceremony.type` are **constants of the authoring path** —
+  `authorRoleBinding` writes `"controls"`, `"strong"`, and `"eoa"` literally
+  (`packages/trust/authoring/src/binding.ts:107`, `:111`, `:110`) — so they can vary between no two
   bindings anywhere. `voucher` is out by the same clause for a narrower reason: it is derived
   from the one ceremony account the act runs under (`binding.ts:102-106`), so it varies between
   acts but is constant across every element of one act's array.
@@ -216,6 +216,10 @@ stated as such. The rule alone therefore does not close the set; the enumeration
   they are still omitted, for a third reason stated as such: committing to them would foreclose
   §13.2's supersede shape, which §12 names the most valuable of the five follow-ups. That
   omission is a design choice rather than a consequence of the rule, and it is the only one.
+
+`KeyBindingSchema` is `z.looseObject` (`key-binding.ts:55`), so a hand-authored record may carry
+members the schema does not name. Those are outside this enumeration and never enter the
+preimage: the enumeration, not the schema, closes the set.
 
 `scope` passes both tests, and §9's argument 2 says why it earns its place beyond passing them:
 it commits to authority rather than to existence alone.
@@ -330,14 +334,17 @@ at most one entry and the referencing set is a function of the digest alone.
 
 **The procedure below is the successor-required procedure** (§8). It is written for the posture
 in which every anchor must recompute, and the posture is a parameter over **every** refusal the
-procedure introduces — step 2's both-classes refusal, the §3.2.2 uniqueness refusal that step 4
-invokes while building the preimage, and step 5's mismatch. None of the three runs today, so
-under mixed mode each substitutes classify-and-report and nothing else changes. Parametrizing all
+procedure introduces — step 2's both-classes refusal, the §3.3 ASCII refusal and the §3.2.2
+uniqueness refusal that step 4 invokes while building the preimage, and step 5's mismatch.
+None of the four runs today, so under mixed mode each substitutes classify-and-report and nothing
+else changes. Parametrizing all
 of them rather than step 5 alone is what makes §10's "unchecked, exactly as today" true of a
 legacy anchor: were step 2 or the uniqueness rule left unconditional, a mixed-mode verifier built
 literally from this section would refuse an entire catalog over a `ceremony-anchor/v1` anchor
-whose referencing records collide — a shape that today opens and degrades only the affected key,
-because `uniqueBy` at `native-trust-catalog.ts:309` is over binding digests and the conflict
+whose referencing records collide — the uniqueness limb; step 2's shape is an anchor referenced
+by both a binding and a revocation, and the conclusion is the same — a shape that today opens
+and degrades only the affected key, because `uniqueBy` at `native-trust-catalog.ts:310` is over
+binding digests and the conflict
 surfaces per authorization at `:427-434`. That is one rule with a posture parameter, not two
 rules, and the profile document must publish it as one (§11 item 5).
 
@@ -381,11 +388,12 @@ separate admission-agent term.
 
 The ceremony spec §10 (f) is explicit that this is not only a legibility question: recomputation
 is what *converts* the borrowed-anchor residual, and the §7.4a genesis exemption is reachable
-only through an anchor time earlier than the victim's — which recomputation makes expensive
-rather than free. §10 (f) writes that reachability condition as "a borrowed anchor time"; the
-wider phrasing here is deliberate and is this document's, not §10 (f)'s, for the reason the
-second paragraph below gives. That chain is verified rather than accepted: the consent chain
-exits at `if (resolved.isGenesis) return { ok: true }`
+only through an anchor time earlier than the victim's, or equal to it with a lower binding digest
+(`binding-resolver.ts:221`, the same tie-break §6.2 relies on) — which recomputation makes
+expensive rather than free. §10 (f) writes that reachability condition as "a borrowed anchor
+time"; the wider phrasing here is deliberate and is this document's, not §10 (f)'s, for the
+reason the second paragraph below gives. That chain is verified rather than accepted: the consent
+chain exits at `if (resolved.isGenesis) return { ok: true }`
 (`packages/trust/core/src/verify.ts:201`), genesis is decided by earliest effective start among
 the agent's bindings (`isGenesisAmong`,
 `packages/trust/resolve/src/binding-resolver.ts:217-223`, applied at `:298`), and the effective
@@ -517,7 +525,7 @@ ship the check, and shipping it is the event.
 
 ### 6.1 The ruling
 
-**Mint fresh whenever the act's bindings change. Under `binding-anchor/v1` that is not a rule to
+**Mint fresh whenever a preimage term changes. Under `binding-anchor/v1` that is not a rule to
 follow but a consequence, so the choice is removed rather than ruled per case.**
 
 The rule is stated as the mechanism implements it rather than as a flat "always", because the two
@@ -569,7 +577,7 @@ Two things the gap does *not* break, checked rather than assumed. Genesis surviv
 `isGenesisAmong` operates over the catalog's current binding list for the agent
 (`binding-resolver.ts:217-223`, over `listBindingsForAgent` at
 `operator/src/daemon/native-trust-catalog.ts:367`), so after a wholesale rewrite exactly one
-re-authored binding is genesis again and the consent chain exits at
+re-authored binding **per Agent IRI** is genesis again and the consent chain exits at
 `packages/trust/core/src/verify.ts:201` as before. Which one is not "the earliest": §6 law 2
 gives every re-authored binding the same `validFrom`, so they share one `effectiveStart` and the
 digest tie-break picks the genesis (`binding-resolver.ts:221`). And live operation is unaffected:
@@ -686,7 +694,8 @@ Stated because a check that only ever refuses bad catalogs would be a check nobo
 about, and this is not one. Each is a constraint the successor introduces, not a clarification
 of an existing one.
 
-- **F1 — a catalog carrying a proper subset of an act's bindings is refused.** Nothing in the
+- **F1 — a catalog carrying a proper subset of an act's bindings is refused under
+  successor-required (classified and reported under mixed mode, §4).** Nothing in the
   tree produces one today: `authorCatalog` and `appendOperator` write an operator's bindings
   whole, and `authorRoleBinding` writes a single-element `anchors` array per binding
   (`packages/trust/authoring/src/binding.ts:112`). But the range rule forecloses any future
@@ -696,8 +705,9 @@ of an existing one.
 - **F2 — one anchor may no longer back two acts.** Ceremony spec §6 law 1 currently permits
   "one shared anchor digest [to] back multiple bindings", and the resolver handles anchors
   per-reference (`packages/trust/resolve/src/binding-resolver.ts:127-135`). Under the range rule
-  that stays true within one act and becomes false across acts: two acts sharing a digest present
-  a union that recomputes to neither. This narrows a permission nothing exercises — every
+  that stays true within one act and becomes false across acts under the posture of §4 — refused
+  under successor-required, classified and reported under mixed mode: two acts sharing a digest
+  present a union that recomputes to neither. This narrows a permission nothing exercises — every
   Jinn-authored session writes one digest across its own bindings — and it strengthens law 1's
   existing rebind-always-fresh rule rather than replacing it. Law 1 still needs that rule,
   because two acts binding an *identical* set would still recompute the shared digest.
@@ -706,7 +716,8 @@ of an existing one.
   conforming catalog may contain, and it is the successor's doing.
 - **F4 — a scope widening now breaks two things instead of one.** Today a widening breaks
   `RoleIdentitySet.open` at boot. Under the successor it also breaks anchor recomputation at
-  catalog-open. The recovery is the same re-author either way, and the second refusal is what
+  catalog-open — a refusal under successor-required, a classified report under mixed mode (§4).
+  The recovery is the same re-author either way, and the second refusal is what
   makes §6's ruling structural — but a deployment sees two refusals rather than one, and the
   second one's error message must say so plainly or an operator will chase it as a separate
   defect.
@@ -870,7 +881,7 @@ one criterion this document can meet outright.
   `verifyOnchainAuthority` — a method on the object `openNativeTrustCatalog` returns
   (`operator/src/daemon/native-trust-catalog.ts:503`, declared at `:220`), run per settlement
   authorization at resolution time rather than on the catalog-open path — checks that resource
-  against the Safe the caller is asking about (`:552-566`) and then against the on-chain Safe
+  against the Safe the caller is asking about (`:553-566`) and then against the on-chain Safe
   owner (`:567-584`). That Safe address is a **parameter of the call**, not a field of the record:
   `KeyBinding` declares no settlement address (`packages/trust/core/src/key-binding.ts:55-74`), so
   there is no record field for a catalog-internal cross-check to read. The commitment the ratified
@@ -923,11 +934,12 @@ two items are DR-2026-09-06 decision 9's, restated here in its own terms rather 
    classified-and-reported under mixed mode.
 5. **The range rule and the recomputation procedure**, including the both-classes refusal at step
    2 and the mismatch behavior at step 5: §4. The procedure is the **successor-required**
-   procedure; under mixed mode **every** refusal it introduces — step 2, the §3.2.2 uniqueness
-   refusal step 4 invokes, and step 5's mismatch — substitutes classify-and-report, and nothing
-   else changes. The parameter must be total, or §10's "unchecked, exactly as today" is false for
-   a legacy anchor whose referencing records collide. Publish that as **one** rule with a posture
-   parameter — not as an unconditional refusal here and a reporting mode in item 11, which would
+   procedure; under mixed mode **every** refusal it introduces — step 2, the §3.3 ASCII refusal
+   and the §3.2.2 uniqueness refusal that step 4 invokes, and step 5's mismatch — substitutes
+   classify-and-report, and nothing else changes. The parameter must be total, or §10's
+   "unchecked, exactly as today" is false for a legacy anchor whose referencing records collide.
+   Publish that as **one** rule with a posture parameter — not as an unconditional refusal here
+   and a reporting mode in item 11, which would
    hand the reader two contradictory normative rules about one behavior. Step 5's refusal names the
    records in `R(a)` as well as the anchor digest, for the reason item 10 gives.
 6. **The re-anchor trigger** as a three-limb disjunction, with what each limb inspects and by

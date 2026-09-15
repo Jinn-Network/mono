@@ -1,7 +1,7 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.5 (corrects §3.2b's and §10 (e)'s statement of the fresh-anchor coverage gap —
-it is wholesale across every role, not confined to the widened scope — and points §3.2b and
+**Version:** 0.5 (sharpens §3.2b's and §10 (e)'s statement of the fresh-anchor coverage gap —
+wholesale across every role, which both left implicit — and points §3.2b and
 §10 (e)/(f) at the proposed successor preimage, trigger, and ruling in
 [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md); no rule
 here is retired and nothing there is adopted. v0.4 was the §3.2b amendment — the anchor target
@@ -646,10 +646,11 @@ resumes onto the already-mined anchor unless the receipt is moved aside too. The
 this and both options' costs. They differ semantically. Reuse preserves
 the original `validFrom` and effective window, so the *widened* scope is claimed retroactively
 over evidence signed before the widening; a fresh anchor refuses that retroactivity at the cost
-of a coverage gap between the old anchor time and the new one, and that gap is wholesale rather
-than confined to the widened scope: the re-author rewrites the catalog and §6 law 2 gives every
-re-authored binding the new anchor's block time, so evidence signed inside the window
-de-attributes for every role. The reuse-vs-fresh choice is a
+of a coverage gap between the old anchor time and the new one, and that gap is wholesale: the
+re-author rewrites the catalog and §6 law 2 gives every re-authored binding the new anchor's
+block time, so evidence signed inside the window de-attributes for every role. That qualifier is
+more precise than DR-2026-09-06 decision 8's "a coverage gap"; no rule moves. The
+reuse-vs-fresh choice is a
 per-widening judgment the runbook MUST state and the operator MUST record with its reason.
 Which is right in general is a retroactive-authority question left open at §10 (e). A
 mint-fresh ruling is **proposed**, not adopted, in
@@ -1232,15 +1233,15 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   state its choice. Reuse preserves the original `validFrom` and effective window, which
   claims the *widened* scope retroactively over evidence signed before the widening; a fresh
   anchor refuses that retroactivity and pays a coverage gap between the old anchor time and
-  the new one — and that gap is **wholesale**, not confined to the widened scope, because the
+  the new one — and that gap is **wholesale** (left implicit before v0.5), because the
   re-author rewrites the catalog and §6 law 2 gives every re-authored binding the new anchor's
   block time, so evidence signed inside the window de-attributes for every role. Which is right
   in general is a retroactive-authority policy question that exceeds an anchor-format
   ratification, and it is not settled here. Owned by
   [#4172](https://github.com/Jinn-Network/mono/issues/4172), whose output
   [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §6
-  **proposes** mint-fresh whenever the act's bindings change, and is pending the operator's
-  ruling on the PR that carries it.
+  **proposes** mint-fresh whenever a term of its successor preimage changes, and is pending the
+  operator's ruling on the PR that carries it.
 - **(f) Should a successor binding-anchor preimage be *directly* third-party recomputable, and
   when is the re-anchor worth paying?** §3.2b records, as a named defect, that
   `ceremony-anchor/v1` commits to `role` labels no third party can read off a catalog. For a
