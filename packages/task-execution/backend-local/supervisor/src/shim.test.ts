@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +11,7 @@ import {
   decodeNonceIdentity, encodeNonceIdentity, resolveShimScriptEntry, writeOutcomeFile, writeShimFingerprint,
   ProcessTableProbeError, readProcessGroupTable,
 } from "./shim.js";
+import { REMOVE_BUDGET_MS, removeAttemptTree } from "./attempt-tree-teardown.js";
 
 const tempDirs: string[] = [];
 function tempMetaDir(): string {
@@ -19,7 +20,8 @@ function tempMetaDir(): string {
   return dir;
 }
 afterEach(() => {
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  const deadline = Date.now() + REMOVE_BUDGET_MS;
+  for (const dir of tempDirs.splice(0)) removeAttemptTree(dir, deadline);
 });
 
 describe("fingerprint round trip", () => {

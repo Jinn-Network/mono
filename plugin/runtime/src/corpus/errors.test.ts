@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { PluginRuntimeError } from "../errors.js";
-import { CORPUS_ERROR_CODES, CorpusMirrorError } from "./errors.js";
+import { CORPUS_ERROR_CODES, CorpusMirrorError, bestEffortLogger } from "./errors.js";
 import { compareCodeUnitStrings } from "./order.js";
 
 describe("corpus errors", () => {
@@ -40,5 +40,29 @@ describe("compareCodeUnitStrings", () => {
 
   test("sorts a key list deterministically", () => {
     expect(["b", "ä", "Z", "a"].sort(compareCodeUnitStrings)).toEqual(["Z", "a", "b", "ä"]);
+  });
+});
+
+describe("bestEffortLogger", () => {
+  const LEVELS = ["debug", "info", "warn", "error"] as const;
+
+  test.each(LEVELS)("%s: a logger that throws is absorbed", (level) => {
+    const inner = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      [level]: vi.fn(() => {
+        throw new Error("EPIPE: broken pipe");
+      }),
+    };
+    expect(() => bestEffortLogger(inner)[level]("m", { k: 1 })).not.toThrow();
+  });
+
+  test.each(LEVELS)("%s: message and fields are forwarded when the logger works", (level) => {
+    const inner = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    bestEffortLogger(inner)[level]("m", { k: 1 });
+    expect(inner[level]).toHaveBeenCalledTimes(1);
+    expect(inner[level]).toHaveBeenCalledWith("m", { k: 1 });
   });
 });

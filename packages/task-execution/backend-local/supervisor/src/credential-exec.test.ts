@@ -1,15 +1,19 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnShim } from "./shim.js";
+import { REMOVE_BUDGET_MS, removeAttemptTree } from "./attempt-tree-teardown.js";
 
 const roots: string[] = [];
 const wrapper = new URL("./credential-exec.mjs", import.meta.url).pathname;
 
-afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
+afterEach(() => {
+  const deadline = Date.now() + REMOVE_BUDGET_MS;
+  for (const root of roots.splice(0)) removeAttemptTree(root, deadline);
+});
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "jinn-credential-exec-"));

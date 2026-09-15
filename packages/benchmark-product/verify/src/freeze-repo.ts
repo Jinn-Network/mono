@@ -347,31 +347,62 @@ export function isSpdxLicenseExpression(value: string): boolean {
  * ideographic space there, and `\s` on a Python `str` is Unicode-aware. An ASCII-only separator
  * class admitted every one of those.
  *
- * The tag name is capped at 64 characters after its first, and that bound is load-bearing rather
- * than cosmetic. Unanchoring made the search try every position the `SPDX-` literal matches, and
- * `-` is itself in the name class, so an unbounded greedy run backtracked the whole remaining run
- * at each of them: `"SPDX-".repeat(n)` — which no field forbids, since `citation` has no schema
- * and no bundle member has a byte cap — cost 4.7s at 200KB and quadruples per doubling, about
- * 110 minutes at 8MB, on the reader's machine and inside one synchronous call. The bound makes
- * each start position cost at most 64 steps, so the scan is linear (281ms at 8MB) for a value
- * whose refusal is unchanged; `SPDX-License-Identifier`, the tag this guard exists for, spends 17
- * of the 64, and no source-file tag SPDX defines comes near it. What it gives up is `SPDX-`
- * followed by 66 or more name characters and a colon, which names no registered tag but can still
- * carry one as a prefix: `SPDX-License-Identifier` plus 60 dashes and `: GPL-3.0-only` is admitted
- * here, yet a reader matching the bare substring rather than the specified
- * `SPDX-License-Identifier\s*:` still reads a licence out of it. The bound is kept because no
- * finite bound closes that — 300 dashes beats any of them — while an unbounded run reinstates the
- * measured quadratic above; what a scanner spelling the tag as specified reads is unchanged.
+ * Hand-rolled rather than one regex, and the reason is the name run's length. Unanchoring made the
+ * search try every position the `SPDX-` literal matches, and `-` is itself in the name class, so
+ * an unbounded greedy `[A-Za-z0-9-]*` backtracked the whole remaining run at each of them:
+ * `"SPDX-".repeat(n)` — which no field forbids, since `citation` has no schema and no bundle
+ * member has a byte cap — cost 4.7s at 200KB and quadrupled per doubling, about 110 minutes at
+ * 8MB, on the reader's machine and inside one synchronous call. A `{0,64}` bound on the name made
+ * that linear, but bought it with an admitted shape: `SPDX-License-Identifier` plus 60 dashes and
+ * `: GPL-3.0-only` has a 78-character name run that no backtrack position reaches the colon
+ * through, yet a reader matching the bare substring rather than the specified
+ * `SPDX-License-Identifier\s*:` still reads a licence out of it — and no finite bound closes the
+ * family, since 300 dashes beats any of them (issue #4377).
  *
- * The separator run stays unbounded, which is safe for a structural reason rather than a measured
- * one: the name class and `White_Space` are disjoint, so from any start position the whitespace
- * loop is entered at exactly one place — where the greedy name run ends — and every shorter name
- * length the engine falls back to lands on a name character, where the loop matches nothing.
- * There is no second quantifier for it to interleave with, so the run is walked once. Bounding it
- * would cost a real refusal: a scanner's `\s*` matches a separator of any length, so a tag held
- * off its colon by a long run of spaces is a tag to the reader that matters.
+ * The scan below is linear with no name bound at all, because it never backtracks. At a position
+ * where the literal matches and a letter follows, it walks the name run once to its end `e`, then
+ * the whitespace, then tests for the colon — and on failure resumes at `e`, not at the next
+ * position. That resumption is the load-bearing step. Every `SPDX-` that starts inside the run
+ * is made of name characters, so its own name run walks to the same `e`, meets the same
+ * separator, and fails the same colon test; and no literal can start in the last four characters
+ * before `e`, because its `PDX-` would then be name characters past the run's end. Skipping to
+ * `e` therefore loses nothing, every character is visited a bounded number of times, and the
+ * 65-character gap is gone: a name of any length followed by any Unicode whitespace and a colon
+ * is refused. The separator run stays unbounded for the reason it always was — a scanner's `\s*`
+ * matches a separator of any length, so a tag held off its colon by a long run of spaces is a tag
+ * to the reader that matters — and costs nothing here, since it is walked once per name run.
+ *
+ * Each step is a fixed-width test — a sticky match of the five-character literal, or one
+ * character against a class — so the per-position cost is constant. They are spelled as `iu`
+ * regexes rather than ASCII code-point compares to keep the fold the case-insensitivity paragraph
+ * above relies on: Python's `re.IGNORECASE` reads `ſPDX-License-Identifier:` as the tag, and so
+ * did the single regex this replaces. Lowercasing the whole value first was not an option, since
+ * Unicode case mapping can change a string's length and move every index. The whitespace test
+ * runs one UTF-16 unit at a time, which is exact because every `White_Space` code point is in the
+ * BMP — a lone surrogate never matches.
  */
-const SPDX_TAG = /SPDX-[A-Za-z][A-Za-z0-9-]{0,64}\p{White_Space}*:/iu;
+const SPDX_LITERAL = /SPDX-/iuy;
+const SPDX_NAME_FIRST = /[A-Za-z]/iu;
+const SPDX_NAME_CHARACTER = /[A-Za-z0-9-]/iu;
+const SPDX_SEPARATOR = /\p{White_Space}/u;
+
+function readsAsSpdxTag(value: string): boolean {
+  let index = 0;
+  while (index < value.length) {
+    SPDX_LITERAL.lastIndex = index;
+    if (!SPDX_LITERAL.test(value) || !SPDX_NAME_FIRST.test(value[index + 5] ?? "")) {
+      index += 1;
+      continue;
+    }
+    let end = index + 6;
+    while (end < value.length && SPDX_NAME_CHARACTER.test(value[end]!)) end += 1;
+    let cursor = end;
+    while (cursor < value.length && SPDX_SEPARATOR.test(value[cursor]!)) cursor += 1;
+    if (value[cursor] === ":") return true;
+    index = end;
+  }
+  return false;
+}
 
 function renderableFreeTextProblem(value: string, multiline: boolean): string | undefined {
   // Tab is carried in both cases; CR and LF only where the field is documented as multi-line. CR
@@ -384,7 +415,7 @@ function renderableFreeTextProblem(value: string, multiline: boolean): string | 
   if (forbidden.test(value)) {
     return "carries a control character or line separator; a freeze repository renders it into generated text and will not emit one";
   }
-  if (SPDX_TAG.test(value)) {
+  if (readsAsSpdxTag(value)) {
     return "carries text that reads as an SPDX tag; a freeze repository generates LICENSE from the declared licence alone and will not splice a second tag into it";
   }
   return undefined;
@@ -568,10 +599,11 @@ function emptyNode(): TreeNode {
  * NUL — collides with nothing; it is structurally invalid input, which is what `validation`
  * names. Only the two genuine collisions below, where one name is claimed twice, are `conflict`
  * here: for a path, that code would say the write met existing state, and a caller that retries a
- * `conflict` under another name would retry a malformed path forever. Other refusals elsewhere in
- * this file carry `conflict` for their own reasons and are not governed by this paragraph.
- * `refuse` carries the offending path on `issues[].path` either way, which is where a caller
- * branches.
+ * `conflict` under another name would retry a malformed path forever. The same test now governs
+ * every `conflict` in this package (issue #4378): the only other sites that keep it are
+ * `exportFreezeRepo`'s, where a write meets a directory that is occupied or cannot be shown not
+ * to be. `refuse` carries the offending path on `issues[].path` either way, which is where a
+ * caller branches.
  */
 function insert(root: TreeNode, path: string, bytes: Uint8Array): void {
   const segments = path.split("/");
@@ -706,9 +738,11 @@ function readPublication(snapshot: VerifiedBundleSnapshot): FreezeRepoPublicatio
   if (typeof license !== "string" || license.length === 0) {
     // Licence scaffolding is generated from licence data or it is not generated at all. Inventing
     // a licence for a publication that never declared one is exactly the hand-assembly this
-    // export exists to replace.
+    // export exists to replace. `validation`, because a missing required field collides with
+    // nothing: `conflict` says one name was claimed twice, and a caller retrying it under another
+    // name could never succeed (issue #4378).
     refuse(
-      "conflict",
+      "validation",
       "benchmark.json.license",
       "the sealed Benchmark record declares no licence; a freeze repository's LICENSE, NOTICE, and SPDX metadata are generated from the bundle's licence data",
     );
@@ -756,15 +790,19 @@ function readSourceLicences(sourceManifestBytes: readonly Uint8Array[]): readonl
         refuse("record-integrity", "source-manifest", "a sealed source-manifest row does not match the pinned schema");
       }
       const entry = parsed.data;
-      // `uri` is `z.string().min(1)` in the sealed schema, and `renderNotice` splices each of
-      // these into NOTICE verbatim — so the rule the publication fields are held to holds here
-      // too: a generated licence-bearing file is not writable from a free-text field.
+      // `uri` is `z.string().min(1)` in the sealed schema, and each of these is spliced verbatim
+      // into a generated file — so the rule the publication fields are held to holds here too: a
+      // generated licence-bearing file is not writable from a free-text field.
       //
-      // Single-line, unlike `citation`. NOTICE renders each descriptor as one labelled row
-      // (`  uri:         <value>`), so a newline in the value emits a second row-shaped line that
-      // no source-manifest row stands behind — a forged attribution in a file whose whole job is
-      // to state attributions. Admitting it bought nothing legitimate either: RFC 3986 excludes
-      // line terminators from a URI, and a `source.name` carrying one is not a name. The
+      // Single-line, unlike `citation`, for two reasons that split by field. `source.uri`,
+      // `license.uri` and `attribution.uri` reach NOTICE, which `renderNotice` writes as one
+      // labelled row per descriptor (`  uri:         <value>`), so a newline in one of them emits
+      // a second row-shaped line that no source-manifest row stands behind — a forged attribution
+      // in a file whose whole job is to state attributions. `source.name` reaches no NOTICE row:
+      // its only render site is `renderSpdxMetadata`, into `metadata/spdx.json` through
+      // `JSON.stringify`, where a newline is escaped to `\n` and cannot break a line. It is
+      // single-line because a name carrying a line terminator is not a name. Admitting one bought
+      // nothing legitimate for either group: RFC 3986 excludes line terminators from a URI. The
       // "permanently unexportable" argument that keeps `citation` multi-line does not reach here,
       // because no honest descriptor wraps (issue #4054).
       for (const [field, value] of [
@@ -1035,8 +1073,10 @@ export function renderFreezeRepo(snapshot: VerifiedBundleSnapshot): FreezeRepoTr
     // The freeze artifacts ARE the qualification graph. A bundle without one has none, and an
     // empty repository claiming to be a freeze would be worse than a refusal. The accepted list is
     // read from the support table, so this message cannot name a stale set (issue #3540).
+    // `validation`, not `conflict`: the bundle fails this operation's precondition, and nothing
+    // collides with anything (issue #4378).
     refuse(
-      "conflict",
+      "validation",
       "bundle.json.format",
       `a freeze repository requires a qualification bundle (${listAccepted(FREEZE_REPO_ACCEPTED_FORMATS)});`
         + ` this bundle is ${bundleFormat}`,

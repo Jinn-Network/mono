@@ -122,6 +122,31 @@ describe('release-readiness scaffolding', () => {
     expect(content).not.toContain('failed:null');
   });
 
+  // The prose branch required verdict AND evidence while the marker branch required only
+  // the verdict, so a verdict-without-evidence input printed "SKIPPED (... no verdict was
+  // supplied)" directly above `environment-suite=passed` (#4487). Prose now branches on the
+  // verdict alone and renders evidence as optional detail.
+  it('writeHandoffDoc renders a verdict without an evidence record instead of SKIPPED', async () => {
+    const outPath = path.join(tmpRoot, 'handoff.md');
+    await writeHandoffDoc(outPath, { ...baseInput(), environmentSuiteEvidence: null });
+    const content = await fs.readFile(outPath, 'utf-8');
+    expect(content).toContain('- Verdict: pass');
+    expect(content).toContain('- Evidence record: none supplied');
+    expect(content).toContain('environment-suite=passed');
+    expect(content).not.toContain('SKIPPED');
+    expect(content).not.toContain('no environment-suite verdict was supplied');
+    expect(content).not.toContain('verdictCode=');
+  });
+
+  it('writeHandoffDoc treats orphaned evidence without a verdict as SKIPPED', async () => {
+    const outPath = path.join(tmpRoot, 'handoff.md');
+    await writeHandoffDoc(outPath, { ...baseInput(), environmentSuiteVerdict: null });
+    const content = await fs.readFile(outPath, 'utf-8');
+    expect(content).toContain('SKIPPED (mode=human-invoked');
+    expect(content).toContain('environment-suite=skipped:no-verdict-supplied');
+    expect(content).not.toContain('- Verdict:');
+  });
+
   // The marker block is a line-oriented `key=value` list inside an HTML comment, so
   // free text reaching it unescaped could inject a forged marker line or close the
   // comment early. No untrusted-input path exists today; this pins the hardening.
