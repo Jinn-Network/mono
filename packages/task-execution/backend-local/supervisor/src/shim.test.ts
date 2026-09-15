@@ -138,6 +138,7 @@ describe("process-table probe failure (#4395)", () => {
 
   it.skipIf(!darwin)("S1: an unresolvable `ps` throws ProcessTableProbeError instead of reading as an empty group", () => {
     const emptyBin = mkdtempSync(join(tmpdir(), "jinn-empty-path-"));
+    tempDirs.push(emptyBin);
     const savedPath = process.env["PATH"];
     process.env["PATH"] = emptyBin;
     try {
@@ -145,7 +146,6 @@ describe("process-table probe failure (#4395)", () => {
       expect(() => listProcessGroupPids(process.pid)).toThrow(ProcessTableProbeError);
     } finally {
       process.env["PATH"] = savedPath;
-      rmSync(emptyBin, { recursive: true, force: true });
     }
   });
 
