@@ -241,14 +241,16 @@ const maxDirectoryCandidates = 64;
 // every child with `flatMap` and checking the length afterwards still materializes
 // N^K candidates for K nested variables of N values before a single cap returns, so a
 // 1.4 KB block of four nested `for` loops ran for seconds and a 5 KB one for hours —
-// the crash the cap was meant to prevent, converted into a hang. Two rules keep the
-// walk linear in the input: a level stops at the first candidate past the cap, and a
-// child that expands to nothing ends its parent at once — an overflowed inner level
-// therefore propagates up without a sibling being expanded. The second rule is also a
-// correctness fix on its own. A child that expands to nothing is underivable, and an
-// underivable child makes its parent underivable too: keeping the siblings turned
-// `for d in a \`x\`; do (cd $d && yarn install); done` into a confident `a/yarn.lock`
-// with the substituted directory silently dropped.
+// the crash the cap was meant to prevent, converted into a hang. What keeps the walk
+// linear in the input is that a child which expands to nothing ends its parent at
+// once — an overflowed inner level therefore propagates up without a sibling being
+// expanded. Stopping a level at the first candidate past the cap, rather than after
+// it is built, only trims the constant: a level is then never larger than the cap
+// plus one child. The empty-child rule is also a correctness fix on its own. A child
+// that expands to nothing is underivable, and an underivable child makes its parent
+// underivable too: keeping the siblings turned `for d in a \`x\`; do (cd $d && yarn
+// install); done` into a confident `a/yarn.lock` with the substituted directory
+// silently dropped.
 function expandEach(values, expandOne) {
   const expanded = [];
   for (const entry of values) {
@@ -651,13 +653,9 @@ function shellLoopValues(run) {
   const values = new Map();
   const loopPattern = /(?:^|\n)\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;\n]+);\s*do/gu;
   for (const match of commands.matchAll(loopPattern)) {
-    const entries = match[2].trim().split(/\s+/u).map(unquote).filter(Boolean);
-    // Leaving the variable unset makes expansion yield nothing, which the caller
-    // reports as "could not derive". A glob (`for d in packages/*`) is a directory
-    // set only the runner can enumerate, so emitting `packages/*/yarn.lock` as a
-    // required path would name something no workflow can ever satisfy.
-    if (entries.some((entry) => /[$*?[\]{}]/u.test(entry))) continue;
-    values.set(match[1], entries);
+    // A glob or variable among the values (`for d in packages/*`) is refused where
+    // the value is expanded, so nothing is filtered here.
+    values.set(match[1], match[2].trim().split(/\s+/u).map(unquote).filter(Boolean));
   }
   return values;
 }
@@ -1327,22 +1325,19 @@ jobs:
 
 test('guard rejects a cache dependency path that is a symlink rather than a lockfile', () => {
   withFixture(({ fixtureRoot, fixtureWorkflows }) => {
-    // `statSync` follows the link and reports the target file, which would satisfy
-    // the very containment check the path assertion above it exists to enforce.
-    const outside = mkdtempSync(join(tmpdir(), 'jinn-workflow-yarn-cache-outside-'));
-    try {
-      writeFileSync(join(outside, 'yarn.lock'), 'outside lockfile\n');
-      rmSync(join(fixtureRoot, 'app/yarn.lock'));
-      symlinkSync(join(outside, 'yarn.lock'), join(fixtureRoot, 'app/yarn.lock'));
-      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
-        '          node-version: 22\n          cache: yarn\n          cache-dependency-path: app/yarn.lock',
-      ));
-      assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
-        'fixture.yml job verify: cache dependency path is not an existing lockfile: app/yarn.lock',
-      ]);
-    } finally {
-      rmSync(outside, { recursive: true, force: true });
-    }
+    // The link's target is a real lockfile INSIDE the repository, so the realpath
+    // containment clause is satisfied and only `lstatSync` stands between the link and
+    // a pass: `statSync` follows the link and reports the target file.
+    mkdirSync(join(fixtureRoot, 'real'), { recursive: true });
+    writeFileSync(join(fixtureRoot, 'real/yarn.lock'), 'real lockfile\n');
+    rmSync(join(fixtureRoot, 'app/yarn.lock'));
+    symlinkSync(join(fixtureRoot, 'real/yarn.lock'), join(fixtureRoot, 'app/yarn.lock'));
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
+      '          node-version: 22\n          cache: yarn\n          cache-dependency-path: app/yarn.lock',
+    ));
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: cache dependency path is not an existing lockfile: app/yarn.lock',
+    ]);
   });
 });
 
@@ -1387,6 +1382,8 @@ for (const [label, run] of [
   ['cd "${GITHUB_WORKSPACE}"', 'cd b\n          cd "${GITHUB_WORKSPACE}"\n          yarn install --immutable'],
   ['cd "${{ github.workspace }}"', 'cd b\n          cd "${{ github.workspace }}"\n          yarn install --immutable'],
   ['yarn --cwd "$GITHUB_WORKSPACE"', 'cd b\n          yarn --cwd "$GITHUB_WORKSPACE" install --immutable'],
+  // `cd -` returns to the previous directory; read as a target it named `b/-/yarn.lock`.
+  ['cd -', 'cd b\n          cd -\n          yarn install --immutable'],
 ]) {
   test(`guard resets to the repository root on ${label}`, () => {
     withFixture(({ fixtureRoot, fixtureWorkflows }) => {
@@ -1763,6 +1760,11 @@ for (const [label, run] of [
   ['a sudo prefix with an option', 'cd app\n          sudo -E yarn install --immutable'],
   ['a nice prefix with a level', 'cd app\n          nice -n 10 yarn install --immutable'],
   ['a yarn invoked by path', 'cd app\n          ./node_modules/.bin/yarn install --immutable'],
+  ['a corepack prefix', 'cd app\n          corepack yarn install --immutable'],
+  ['an xvfb-run prefix', 'cd app\n          xvfb-run -a yarn install --immutable'],
+  // `builtin` in front of the `cd`: unlisted, it became the command name and the `cd`
+  // behind it never moved the walk, which then named the root lockfile.
+  ['a builtin prefix', 'builtin cd app; yarn install --immutable'],
 ]) {
   test(`guard resolves an install behind ${label}`, () => {
     withFixture(({ fixtureRoot, fixtureWorkflows }) => {
@@ -1790,7 +1792,9 @@ jobs:
 
 for (const [label, run] of [
   ['a conditional directory change', 'cd app\n          if [ -d other ]; then cd ../other; fi\n          yarn install --immutable'],
-  ['a while loop', 'ls | while read d; do cd $d; yarn install --immutable; done'],
+  // A literal `cd`, so the loop fails closed on the keyword itself and not on a loop
+  // variable the walk cannot expand.
+  ['a while loop', 'ls | while read d; do cd app; yarn install --immutable; done'],
   // Each of these once named a literal path no checkout can contain — `$/yarn.lock`,
   // `app*/yarn.lock` — while silently dropping the requirement on the directory the
   // install really runs in. A confident wrong answer is the one direction #4255 rules
