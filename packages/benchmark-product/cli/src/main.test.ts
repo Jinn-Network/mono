@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { QUALIFIED_HARNESS_LOGIN_ARTIFACTS } from "@colophon-claims/core";
 import { describe, expect, test } from "vitest";
 import { BUILD_METADATA_KIND, DEFAULT_QUALIFIED_TARGETS, type ColophonBuildMetadata } from "./build-metadata.js";
@@ -246,4 +247,31 @@ describe("local-publish answer", () => {
       + "Complete comparison; no comparative winner stated.\n",
     );
   });
+
+  // The spec's §5.2 sample is a literal transcription of these six lines, and nothing but this test
+  // compares the two (issue #4416; #4283 was the render moving while the transcription stood
+  // still). The renderer is the authority: a red here means the spec block needs re-transcribing.
+  test("the self-serve spec §5.2 sample is this answer", () => {
+    const spec = readFileSync(fileURLToPath(new URL(`../../../../${SELF_SERVE_SPEC}`, import.meta.url)), "utf8");
+    const expected = specSampleBlock(spec, "The last lines state what happened and what did not:")
+      .replaceAll("<absolute-path>", "/tmp/colophon-sample")
+      .replace("<bundle-id>", published.identity);
+    expect(
+      localPublishAnswer(published),
+      `${SELF_SERVE_SPEC} §5.2 sample block no longer matches localPublishAnswer; re-transcribe the block from the renderer`,
+    ).toBe(expected);
+  });
 });
+
+const SELF_SERVE_SPEC = "spec/2026-08-13-colophon-self-serve.md";
+
+/** The fenced ```text block that immediately follows `afterSentence` in `spec`, without its fences.
+ * Anchored on the sentence rather than a block ordinal so an edit elsewhere in the document cannot
+ * silently re-point the pin at a different sample (issue #4416). */
+function specSampleBlock(spec: string, afterSentence: string): string {
+  const start = spec.indexOf(`${afterSentence}\n`);
+  if (start === -1) throw new Error(`${SELF_SERVE_SPEC} no longer contains the sentence "${afterSentence}"`);
+  const fenced = /^```text\n([\s\S]*?)^```$/mu.exec(spec.slice(start));
+  if (fenced === null) throw new Error(`${SELF_SERVE_SPEC}: no \`\`\`text block follows "${afterSentence}"`);
+  return fenced[1] as string;
+}
