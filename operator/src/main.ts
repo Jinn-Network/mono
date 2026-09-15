@@ -60,6 +60,8 @@ import { startDegradedRecoveryLoops } from './daemon/degraded-recovery.js';
 import {
   setDaemonReadiness,
   getDaemonReadiness,
+  setDegradedRecoveryRunning,
+  getDegradedRecoveryRunning,
   buildLoopMetricsSnapshot,
 } from './daemon/loop-heartbeat.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
@@ -665,6 +667,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // on ApiServerConfig in server.ts.
       getDaemonReadiness,
       getLoopSnapshot: () => buildLoopMetricsSnapshot(sharedStore),
+      getDegradedRecoveryRunning,
       hermesDoctor: {
         hermesPath: config.hermesPath,
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
@@ -1117,6 +1120,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     bootstrapResult = await runBootstrapWithDegradeOpen({
       runBootstrap: () => runFleetBootstrap({ config, password: PASSWORD, network: NETWORK_CHAIN, emitProgress }),
       setReadiness: setDaemonReadiness,
+      setDegradedRecoveryRunning,
       // #2407 / spec §5: degrade-open boot. An economic-class halt (funding
       // shortfall, incomplete fleet, a recoverable on-chain error) must not
       // leave the daemon fully dark while the caller awaits the retry signal

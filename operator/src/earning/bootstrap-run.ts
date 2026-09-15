@@ -400,9 +400,12 @@ export type DegradedStartOutcome =
    * Economic halt; recovery loops did NOT start. Readiness still becomes
    * `'degraded'`: `degraded` is strictly safer than `ready` either way
    * (`ready-only` loops stay unadmitted, `accepting_work` is false), and the
-   * only externally visible difference is `/ready` answering 200 rather than
-   * 503 — i.e. "do not restart me", which is the correct supervisor
-   * instruction whether or not the loops came up.
+   * only difference in the restart decision is `/ready` answering 200 rather
+   * than 503 — i.e. "do not restart me", which is the correct supervisor
+   * instruction whether or not the loops came up. (`/ready`'s `reason` and
+   * `cause` fields and `/metrics`' `jinn_daemon_degraded` change too; none
+   * of them bears on that decision. `jinn_degraded_recovery_running` is what
+   * tells this outcome apart from `'started'`, #4311.)
    */
   | { readonly kind: 'start-failed' }
   /** Integrity-class halt; stay fail-closed, readiness unchanged. */
@@ -428,6 +431,15 @@ export interface RunBootstrapWithDegradeOpenDeps<TResult> {
    */
   startDegraded: (envelope: ErrorEnvelope) => DegradedStartOutcome;
   setReadiness: (readiness: 'bootstrapping' | 'ready' | 'degraded') => void;
+  /**
+   * Optional (#4311): mirrors whether a `'started'` outcome's recovery loops
+   * are up — `true` right after `startDegraded` reports `'started'`, `false`
+   * once its `stop()` has resolved. Backs the `jinn_degraded_recovery_running`
+   * gauge, which is how an alert tells a healthy degraded boot apart from
+   * #2425's loops-failed-to-start state (`jinn_daemon_degraded` reads 1 for
+   * both).
+   */
+  setDegradedRecoveryRunning?: (running: boolean) => void;
   /**
    * Waits for the retry signal (SPA click, or the funding auto-resume
    * poller) to fire for THIS halt. Resolves once the signal fires; the
@@ -464,6 +476,7 @@ export async function runBootstrapWithDegradeOpen<TResult>(
     } catch (err) {
       if (err instanceof SetupBootstrapHalted) {
         const outcome = deps.startDegraded(err.envelope);
+        deps.setDegradedRecoveryRunning?.(outcome.kind === 'started');
         // #2425: `'start-failed'` degrades too. Only an integrity-class halt
         // (`'fail-closed'`) keeps readiness at `'bootstrapping'`; a failed
         // recovery start on an economic halt must still answer `/ready` 200
@@ -477,6 +490,7 @@ export async function runBootstrapWithDegradeOpen<TResult>(
           if (outcome.kind === 'started') {
             await outcome.recovery.stop();
           }
+          deps.setDegradedRecoveryRunning?.(false);
           deps.setReadiness('bootstrapping');
         }
         continue;
@@ -512,12 +526,14 @@ export function resolveDegradedStart(
   try {
     economic = deps.isEconomic(envelope);
   } catch (classifyErr) {
-    // `isEconomicBootstrapHalt` is a `Set.has` today and cannot throw, but the
-    // caller's contract is that this function never throws: an escaping error
-    // here would unwind `runBootstrapWithDegradeOpen` and kill the daemon
-    // instead of parking it. An unclassifiable halt fails CLOSED — the safe
-    // direction, since it is exactly the case where we cannot show it is
-    // economic.
+    // `isEconomicBootstrapHalt` today is two `Set.has` checks, a
+    // `details.category` property read, a `String()` coercion, and a
+    // `console.warn` — none of which can throw for any realistic envelope —
+    // but the caller's contract is that this function never throws: an
+    // escaping error here would unwind `runBootstrapWithDegradeOpen` and kill
+    // the daemon instead of parking it. An unclassifiable halt fails CLOSED —
+    // the safe direction, since it is exactly the case where we cannot show
+    // it is economic.
     //
     // This is deliberately NOT the same call `bootstrap-halt-classification.ts`
     // makes for an *unrecognized category* (it degrades open, on the reasoning
