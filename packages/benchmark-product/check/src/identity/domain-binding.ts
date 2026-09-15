@@ -163,9 +163,12 @@ export function verifyDomainBinding(
   if (!verified) {
     refuse("record-integrity", path, "the domain binding's signature does not verify under its own key");
   }
+  // `validation`, not `conflict`: the binding does not apply to this bundle, and nothing collides
+  // with anything -- `conflict` names one name claimed twice, and a caller retrying under another
+  // name could never succeed. Public through `--json` as `identityBinding.code` (issue #4378).
   if (![...signerKeyIds].includes(statement.keyId)) {
     refuse(
-      "conflict",
+      "validation",
       path,
       "the domain binding names a key that did not sign this bundle",
     );

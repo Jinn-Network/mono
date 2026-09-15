@@ -1,7 +1,7 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.3
-- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-10)
+- **Version:** 1.4
+- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-15)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -18,7 +18,10 @@
 - **v1.2** (#3837): files §7's five presentation-rename units as issues (#3861–#3865) and
   records each number in §7. §7's closing note now says no *external* condition gates them,
   which is what "unblocked" meant before the tracker could see their order. No ruling changes.
-- **v1.3** (#4188): records the sanctioned exception to §2's contract classification of the
+- **v1.3** (#3918): records under §4.2 that the gloss column stops at `colophon-verify` and
+  does not reach the product CLI's `colophon bundle verify` line, with the reasons. No earlier
+  ruling changes.
+- **v1.4** (#4188): records the sanctioned exception to §2's contract classification of the
   package name and the command name. The checker is published as `@colophon-claims/check` with
   the binary `colophon-check`; `@colophon-claims/verify` and `colophon-verify` stay published
   permanently as a passthrough alias, so no sealed instruction stops resolving and no published
@@ -196,7 +199,7 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Independence clusters | rename + gloss | Groups that do not share a source | The counted quantity is kept; only the noun changes. |
 | Benchmark and configuration scope | rename | What was tested, and how each configuration was pinned | The `<h2>` at `assets.ts:827`; its `Arms and pinned configuration` sub-heading becomes **Each configuration, pinned**, following the `arm` → *Configuration* rename above. |
 | Evidence signpost (social card) | rename | Benchmark report | The v4 card's phrase; the current card already says "Benchmark report". Retire the older wording with the v4 assets. |
-| Colophon · verified qualification (v4 badge) | **deferred to #2982** | — | Contains the reserved word. Not ruled here. |
+| Colophon · verified qualification (v4 badge) | rename (held) | Colophon · binary qualification | Ruled in #4270: the reserved word is retired from the badge, social card, share text, index prose, and the report README's status line (`assets.ts:1096`) — the five sites the emission-site comment enumerates. A badge carries no room for the caveats the CLI prints under its verdict, so it names the scope instead. **Held pending a bundle-format allocation**, not yet applied: `verify.ts` byte-compares every presentation asset against the reader's own rebuild, and every qualifying format pins a published reader, so moving these bytes without an allocation makes each side refuse the other. The hold is recorded at the emission site (`verify/src/assets.ts`, above `buildBadge`), beside the #2980 and #2977 holds. |
 | No comparative winner stated | keep | — | Load-bearing and already plain. |
 
 #### Binary-qualification report surface (binary reports only)
@@ -294,6 +297,16 @@ the `--json` keys — which are ruled *keep* for that reason.
 | `Verification uses the exact platform bytes installed from npm.` | **deferred to #2982** | — | `cli.ts:191`, and the shortened form in the usage/error text at `cli.ts:45`. Carries the reserved noun; the rest of the sentence is already plain and stands. |
 | `Protocol identifiers name https://spec.jinn.network/…. That origin is not hosted yet.` | keep | — | `cli.ts:190`. Names a contract origin and its honest status; both halves are load-bearing. |
 | Usage text | rename where §4.1 renames | — | Follows the same glossary. Reaches the usage and error text in full, including `cli.ts:45`; the three closing-paragraph rows above are ruled explicitly so that reach is not left to inference. |
+
+The gloss column stops at `colophon-verify`. The product CLI's `colophon bundle verify` line
+(`renderBundleVerifyLine` in `core/src/cli/main.ts`) keeps printing bare check names, and that
+is a ruling rather than an omission (#3918). The line is outside §1's scope: it is one
+comma-joined sentence for the operator who just ran the product, not a cold reader's surface,
+and it has no column a gloss could sit in. The gloss map is also private to the reader's
+`cli.ts`, and the product consumes the reader at a pinned release, so glossing "from the same
+map" would wait on a reader export that does not exist, while a copy of the map in the product
+is exactly the drift `CHECK_SUBJECTS` exists to prevent (#3691). The glossed rendering is one
+command away: run the standalone reader on the same bundle, at the line its claim pins.
 
 ### 4.3 Docs
 
