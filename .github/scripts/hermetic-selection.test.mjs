@@ -13,7 +13,6 @@ const CANNOT_AFFECT = [
   'spec/2026-04-28-canonical-docs.md',
   'apps/website/src/app/page.tsx',
   'growth/README.md',
-  'legacy/jinn-cli-agents-reference/CLAUDE.md',
   '.agents/skills/example.md',
   '.claude/skills/eng-day/SKILL.md',
   '.codex/config.toml',

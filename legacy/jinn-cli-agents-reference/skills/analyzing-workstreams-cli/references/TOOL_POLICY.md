@@ -1,1 +1,0 @@
-../../../docs/reference/tool-policy.md
