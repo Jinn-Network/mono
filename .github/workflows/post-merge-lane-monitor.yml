@@ -67,9 +67,10 @@ jobs:
             const {
               MONITORED_LANES,
               classifyLane,
+              isAlertFor,
+              parseMarker,
               renderAlert,
               renderRecovery,
-              titlePrefixFor,
             } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/post-merge-lane-health.mjs`);
 
             const repo = context.repo;
@@ -85,25 +86,42 @@ jobs:
               if (error.status !== 422) throw error;
             }
 
-            const openAlertsFor = async (lane) => {
-              const prefix = titlePrefixFor(lane);
-              return (await github.paginate(
+            // Alerts are identified by the marker in their body, never by title: a title
+            // prefix is only unambiguous while no lane name extends another, and the
+            // listing also returns pull requests, which must never be treated as alerts.
+            const openAlertsFor = async (lane) =>
+              (await github.paginate(
                 github.rest.issues.listForRepo,
                 { ...repo, state: 'open', labels: label, per_page: 100 },
               ))
-                .filter((issue) => issue.title.startsWith(prefix))
+                .filter((issue) => isAlertFor(lane, issue))
                 .sort((a, b) => a.number - b.number);
+
+            // A closed alert of this lane whose marker names `runId`, if any. One page of
+            // the most recently updated closed alerts is enough: a closure that can defer a
+            // filing is by construction newer than the run it names.
+            const closedAlertFor = async (lane, runId) => {
+              const { data } = await github.rest.issues.listForRepo({
+                ...repo,
+                state: 'closed',
+                labels: label,
+                sort: 'updated',
+                direction: 'desc',
+                per_page: 100,
+              });
+              return data.find((issue) => isAlertFor(lane, issue) && parseMarker(issue.body).runId === runId);
             };
 
             const reconcileLane = async (lane) => {
               // A window, not the full history: the classification needs only the leading
-              // run streak and the newest success behind it.
+              // run streak and the newest success behind it. 100 is the most one request
+              // returns; the body says when the window did not reach a success.
               const { data } = await github.rest.actions.listWorkflowRuns({
                 ...repo,
                 workflow_id: lane.file,
                 branch: lane.branch,
                 event: 'push',
-                per_page: 50,
+                per_page: 100,
               });
               const verdict = classifyLane({ lane, runs: data.workflow_runs, now: Date.now() });
               const openAlerts = await openAlertsFor(lane);
@@ -114,9 +132,10 @@ jobs:
                   return;
                 }
                 // Only a proven recovery closes an alert. A `wait` verdict is a lane that is
-                // still red and merely not yet re-confirmed, which is not evidence of health.
-                if (verdict.state === 'wait') {
-                  core.info(`${lane.workflow}: still failing; leaving ${openAlerts.length} alert(s) open.`);
+                // still red and merely not yet re-confirmed, and an `unknown` verdict is a
+                // window with no decisive run in it; neither is evidence of health.
+                if (verdict.state !== 'healthy') {
+                  core.info(`${lane.workflow}: ${verdict.state}; leaving ${openAlerts.length} alert(s) open.`);
                   return;
                 }
                 for (const alert of openAlerts) {
@@ -137,20 +156,29 @@ jobs:
               }
 
               const { title, body } = renderAlert({ lane, verdict });
+              const marker = parseMarker(body);
               const [canonical, ...duplicates] = openAlerts;
               if (!canonical) {
+                // A hand-closed alert whose marker still names the current failing run has
+                // already been seen by a human: filing again now would only re-post it every
+                // tick. The next failing run changes the marker and files afresh.
+                const closed = await closedAlertFor(lane, marker.runId);
+                if (closed) {
+                  core.info(`${lane.workflow}: alert #${closed.number} was closed for run ${marker.runId}; deferring to the next failing run.`);
+                  return;
+                }
                 const created = await github.rest.issues.create({ ...repo, title, body, labels: [label] });
                 core.warning(`Opened ${lane.workflow} alert #${created.data.number}.`);
                 return;
               }
 
-              // The body is derived from run data alone, so an unchanged lane re-renders
-              // byte-identically. This comments on genuinely new failures only, never once
-              // per scheduled tick.
-              if (canonical.body !== body || canonical.title !== title) {
-                if (canonical.body !== body) {
-                  await github.rest.issues.createComment({ ...repo, issue_number: canonical.number, body });
-                }
+              // The marker names the latest failing run and the confidence, so it changes
+              // exactly when there is something new to say. Comparing it rather than the
+              // whole body means a scheduled tick never churns, and a note a human added to
+              // the body survives until the next failing run rewrites it.
+              const current = parseMarker(canonical.body);
+              if (current?.runId !== marker.runId || current?.confidence !== marker.confidence || canonical.title !== title) {
+                await github.rest.issues.createComment({ ...repo, issue_number: canonical.number, body });
                 await github.rest.issues.update({ ...repo, issue_number: canonical.number, title, body });
                 core.warning(`Updated ${lane.workflow} alert #${canonical.number}.`);
               } else {
