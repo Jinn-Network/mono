@@ -561,7 +561,7 @@ describe("mirror sync", () => {
 
     expect(spy.warn).toHaveBeenCalledWith("corpus.mirror.index-failed", {
       announcementId: "ann-1",
-      reason: expect.any(String),
+      reason: expect.stringContaining("record is unavailable"),
     });
   });
 
