@@ -1758,7 +1758,7 @@ async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMod
  * A deferred check is never printed as a bare check name: a metadata-first bundle carries its
  * artifact digests without their bytes (issue #2986).
  *
- * The check names print bare, without the glosses `colophon-verify` prints beside its own list;
+ * The check names print bare, without the glosses `colophon-check` prints beside its own list;
  * the reader-facing vocabulary spec records why under §4.2 (issue #3918).
  */
 export function renderBundleVerifyLine(value: PublicBundleVerificationResult): string {
