@@ -779,8 +779,8 @@ const LEGACY_COMMAND_MARKDOWN = ["PUBLIC-BUNDLE.md", "verify/README.md"] as cons
  *
  * `legacy-closures.ts` (both copies) holds the frozen per-format commands `profile/claim.ts`
  * compares an incoming bundle against; `demo1-export-public-bundle.mjs` seals its line into a
- * `benchmark-product-public-bundle/5` claim; `assets.ts` quotes, in prose, which line the classic
- * and anchored allocations pin.
+ * `benchmark-product-public-bundle/5` claim; `assets.ts` quotes, in prose, which reader lines the
+ * classic, anchored, and binary-asset allocations pin.
  */
 const SEALED_COMMAND_LITERALS: ReadonlyMap<string, readonly string[]> = new Map([
   [
@@ -808,7 +808,10 @@ const SEALED_COMMAND_LITERALS: ReadonlyMap<string, readonly string[]> = new Map(
     ],
   ],
   ["core/scripts/demo1-export-public-bundle.mjs", ["@colophon-claims/verify@0.1"]],
-  ["check/src/assets.ts", ["@colophon-claims/verify@0.1.0"]],
+  // Both prose: which reader line the classic and anchored allocations pin, and which line every
+  // format reaching the binary-asset branch pins (`@0.2.1` for public-bundle/7, /8 and prompted
+  // bundles -- the #4270 verdict-word hold explains why that pin freezes the rendered bytes).
+  ["check/src/assets.ts", ["@colophon-claims/verify@0.1.0", "@colophon-claims/verify@0.2.1"]],
   // Not a command and not a version pin: one rendered byte of the `colophon-freeze-repo/2` README,
   // hashed into `freeze.json` and byte-compared by `--freeze-repo`. Moving it with the rename would
   // have made every tree rendered before the rename report drift and exit 1 under an unchanged
