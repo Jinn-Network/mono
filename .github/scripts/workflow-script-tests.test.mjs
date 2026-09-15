@@ -37,7 +37,8 @@ export function listScriptTests(scriptsRoot = scriptsDir) {
 export function collectReferencedScriptTests(workflowsRoot = workflowsDir) {
   const referenced = new Set();
   for (const fileName of readdirSync(workflowsRoot).filter((name) => name.endsWith('.yml'))) {
-    const source = readFileSync(join(workflowsRoot, fileName), 'utf8');
+    // Whole-line comments are dropped first: a suite named only in prose is not wired (#4400).
+    const source = readFileSync(join(workflowsRoot, fileName), 'utf8').split('\n').map(withoutCommentLine).join('\n');
     for (const match of source.matchAll(/\.github\/scripts\/([A-Za-z0-9_.-]+\.test\.mjs)/gu)) {
       referenced.add(match[1]);
     }
@@ -283,12 +284,14 @@ export function collectLiveTreeFixtures(scriptsRoot = scriptsDir) {
 /**
  * `line`, or the empty string where the whole line is a YAML comment.
  *
- * Both reads below match over prose otherwise: the invocation test sees a comment that merely
- * mentions `node --test`, and the harvest takes every `*.test.mjs` the prose names. Together they
- * mint an invocation that does not exist, and a phantom naming a LIVE_TREE_MUTATING_TESTS member
- * reds the co-scheduling guard on nothing (#3149). Measured over the current workflows this drops
- * exactly one line — a comment in `platform-architecture-control.yml` — and changes no surviving
- * invocation's file list.
+ * Three reads match over prose otherwise. The two below: the invocation test sees a comment that
+ * merely mentions `node --test`, and the harvest takes every `*.test.mjs` the prose names. Together
+ * they mint an invocation that does not exist, and a phantom naming a LIVE_TREE_MUTATING_TESTS
+ * member reds the co-scheduling guard on nothing (#3149). Measured over the current workflows this
+ * drops exactly one line — a comment in `platform-architecture-control.yml` — and changes no
+ * surviving invocation's file list. The one above, `collectReferencedScriptTests`: a suite
+ * mentioned only in a comment satisfied the orphan gate, which is that gate's own fail-open
+ * direction (#4400). Measured over the current workflows the stripped harvest loses no reference.
  *
  * Whole-line comments only, deliberately, rather than a strip from the first whitespace-preceded
  * `#` to end of line. That wider strip is quoting-unaware in the fail-OPEN direction: a `#` inside
@@ -302,7 +305,10 @@ export function collectLiveTreeFixtures(scriptsRoot = scriptsDir) {
  * trailing-comment position rather than the whole-line one. Both over-report. Over-reporting can
  * only red a batch that is co-scheduled on paper and not in fact; under-reporting greens one that
  * is co-scheduled in fact. This gate takes the false red, which is why the narrower strip is the
- * right one even though it leaves this behind.
+ * right one even though it leaves this behind. For the orphan harvest the same residual runs
+ * fail-open — a suite named only in a trailing comment on a code line still counts as referenced —
+ * and is accepted because nothing in the tree writes that shape and a second, wider strip private
+ * to the harvest would be a second definition of "comment" for it (#4400).
  */
 function withoutCommentLine(line) {
   return /^\s*#/u.test(line) ? '' : line;
@@ -344,7 +350,10 @@ export function collectTestInvocations(workflowsRoot = workflowsDir) {
  * second YAML parser to keep honest for a shape that has never appeared (#3149).
  *
  * The body is every following line indented past the `run:` key itself, which is where both
- * `run: >-` and `- run: >-` put it.
+ * `run: >-` and `- run: >-` put it. The key may also be quoted, carry an anchor, or have its
+ * header alone on the following line (#4399); YAML folds every one of those to the same single
+ * command, so every one is refused. The key column is read from the matched prefix rather than
+ * `indexOf('run:')`, because a quoted key contains no `run:` substring.
  *
  * The header match takes an optional indentation indicator either side of the chomping indicator
  * and an optional trailing comment, because YAML writes all of `>2`, `>2-`, `>-2` and `>- # ...`.
@@ -360,9 +369,23 @@ export function foldedTestInvocations(workflowsRoot = workflowsDir) {
   for (const fileName of readdirSync(workflowsRoot).filter((name) => name.endsWith('.yml'))) {
     const lines = readFileSync(join(workflowsRoot, fileName), 'utf8').split('\n');
     for (let index = 0; index < lines.length; index += 1) {
-      if (!/^\s*(?:-\s+)?run:\s*>[-+]?\d*[-+]?\s*(?:#.*)?$/u.test(lines[index])) continue;
-      const keyColumn = lines[index].indexOf('run:');
-      for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const header = lines[index].match(/^(\s*(?:-\s+)?)(?:run|"run"|'run'):(?:\s*&\S+)?\s*(>[-+]?\d*[-+]?)?\s*(?:#.*)?$/u);
+      if (header === null) continue;
+      // The key column comes from the matched prefix, not `indexOf('run:')`: a quoted key has no
+      // `run:` substring, and a column of -1 never ends the body walk (#4399).
+      const keyColumn = header[1].length;
+      let cursor = index + 1;
+      if (header[2] === undefined) {
+        // A bare `run:` (or `run: &anchor`) is a folded header only if the indicator sits alone on
+        // the next non-blank line, indented past the key. `|` there is a literal scalar and a
+        // mapping key there is the `defaults.run:` block; neither is refused (#4399).
+        while (cursor < lines.length && lines[cursor].trim() === '') cursor += 1;
+        if (cursor >= lines.length) continue;
+        if (!/^\s*>[-+]?\d*[-+]?\s*(?:#.*)?$/u.test(lines[cursor])) continue;
+        if (lines[cursor].match(/^\s*/u)[0].length <= keyColumn) continue;
+        cursor += 1;
+      }
+      for (; cursor < lines.length; cursor += 1) {
         if (lines[cursor].trim() === '') continue;
         if (lines[cursor].match(/^\s*/u)[0].length <= keyColumn) break;
         if (/\bnode\s+--test\b/u.test(withoutCommentLine(lines[cursor]))) {
@@ -397,6 +420,32 @@ test('every .github/scripts/*.test.mjs is referenced by at least one workflow', 
 
 test('findOrphanedScriptTests detects a planted orphan', () => {
   assert.deepEqual(findOrphanedScriptTests(scriptsDir, workflowsDir), []);
+});
+
+// The harvest matched `*.test.mjs` over raw workflow source, comments included, so a suite named
+// only in a workflow's prose counted as referenced and the orphan gate greened on it — fail-open in
+// the gate's own direction. Whole-line comments are stripped before the harvest now (#4400); a
+// name in a trailing `# ...` comment on a code line still counts, the accepted residual documented
+// on `withoutCommentLine`.
+test('a suite named only in a workflow comment is still an orphan', () => {
+  const scriptsRoot = mkdtempSync(join(tmpdir(), 'jinn-orphan-scripts-'));
+  const workflowsRoot = mkdtempSync(join(tmpdir(), 'jinn-orphan-workflows-'));
+  try {
+    writeFileSync(join(scriptsRoot, 'planted.test.mjs'), '');
+    writeFileSync(join(scriptsRoot, 'live.test.mjs'), '');
+    writeFileSync(join(workflowsRoot, 'w.yml'), [
+      'jobs:',
+      '  verify:',
+      '    steps:',
+      '      # planted.test.mjs runs elsewhere',
+      '      - run: node --test .github/scripts/live.test.mjs',
+      '',
+    ].join('\n'));
+    assert.deepEqual(findOrphanedScriptTests(scriptsRoot, workflowsRoot), ['planted.test.mjs']);
+  } finally {
+    rmSync(scriptsRoot, { recursive: true, force: true });
+    rmSync(workflowsRoot, { recursive: true, force: true });
+  }
 });
 
 test('a suite that mutates the checked-out tree never shares a node --test invocation', () => {
@@ -508,6 +557,59 @@ test('a folded run scalar hiding node --test is detected, and shows why it must 
       assert.deepEqual(collectTestInvocations(fixture), [
         { workflow: 'folded.yml', files: ['x.test.mjs'] },
       ], header);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  }
+});
+
+// Three more places YAML lets the folded header sit, each of which the `run:`-line-anchored match
+// read as an ordinary scalar while `collectTestInvocations` still under-read the body as a one-file
+// batch: the header on the line after a bare `run:`, an anchor between key and header, and a quoted
+// key (#4399). Each fixture asserts the refusal and the under-read it exists for. The quoted key is
+// the load-bearing one: it contains no `run:` substring, so a key column taken by `indexOf` came
+// back -1 and the body walk never stopped — a `node --test` anywhere later in the file would have
+// reported as folded.
+test('a folded run scalar is refused with its header on the next line, behind an anchor, or under a quoted key', () => {
+  const shapes = [
+    { name: 'next-line header', header: ['      - run:', '          >-'], line: 6 },
+    { name: 'anchor before header', header: ['      - run: &cmd >-'], line: 5 },
+    { name: 'anchor, next-line header', header: ['      - run: &cmd', '          >-'], line: 6 },
+    { name: 'double-quoted key', header: ['      - "run": >-'], line: 5 },
+    { name: 'single-quoted key', header: ["      - 'run': >-"], line: 5 },
+  ];
+  for (const { name, header, line } of shapes) {
+    const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-placement-'));
+    try {
+      writeFileSync(join(fixture, 'folded.yml'), [
+        'jobs:',
+        '  verify:',
+        '    steps:',
+        ...header,
+        '          node --test x.test.mjs',
+        '          y.test.mjs',
+        '',
+      ].join('\n'));
+      assert.deepEqual(foldedTestInvocations(fixture), [{ workflow: 'folded.yml', line }], name);
+      assert.deepEqual(collectTestInvocations(fixture), [
+        { workflow: 'folded.yml', files: ['x.test.mjs'] },
+      ], name);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  }
+
+  // A bare `run:` is not a folded header by itself. Followed by a literal indicator it is a
+  // literal scalar, and followed by a mapping it is the `defaults.run:` block the tree writes ten
+  // times today; neither is refused.
+  for (const { name, lines } of [
+    { name: 'bare run: then literal', lines: ['      - run:', '          |', '          node --test x.test.mjs', '          y.test.mjs'] },
+    { name: 'defaults.run mapping', lines: ['defaults:', '  run:', '    shell: bash', 'jobs:', '  verify:', '    steps:', '      - run: node --test x.test.mjs y.test.mjs'] },
+  ]) {
+    const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-negative-'));
+    try {
+      writeFileSync(join(fixture, 'plain.yml'), [...lines, ''].join('\n'));
+      assert.deepEqual(foldedTestInvocations(fixture), [], name);
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
