@@ -271,7 +271,13 @@ const SELF_SERVE_SPEC = "spec/2026-08-13-colophon-self-serve.md";
 function specSampleBlock(spec: string, afterSentence: string): string {
   const start = spec.indexOf(`${afterSentence}\n`);
   if (start === -1) throw new Error(`${SELF_SERVE_SPEC} no longer contains the sentence "${afterSentence}"`);
-  const fenced = /^```text\n([\s\S]*?)^```$/mu.exec(spec.slice(start));
-  if (fenced === null) throw new Error(`${SELF_SERVE_SPEC}: no \`\`\`text block follows "${afterSentence}"`);
-  return fenced[1] as string;
+  // Adjacency is required, not just order: a later ```text block must not satisfy this pin.
+  const opening = `${afterSentence}\n\n\`\`\`text\n`;
+  if (!spec.startsWith(opening, start)) {
+    throw new Error(`${SELF_SERVE_SPEC}: no \`\`\`text block immediately follows "${afterSentence}"`);
+  }
+  const bodyStart = start + opening.length;
+  const end = spec.indexOf("\n```\n", bodyStart);
+  if (end === -1) throw new Error(`${SELF_SERVE_SPEC}: the \`\`\`text block after "${afterSentence}" is unterminated`);
+  return spec.slice(bodyStart, end + 1);
 }

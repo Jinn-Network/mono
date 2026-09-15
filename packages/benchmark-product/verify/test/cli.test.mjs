@@ -42,9 +42,13 @@ async function specSampleBlock(afterSentence) {
   const spec = await readFile(selfServeSpecPath, "utf8");
   const start = spec.indexOf(`${afterSentence}\n`);
   assert.notEqual(start, -1, `${SELF_SERVE_SPEC} no longer contains the sentence "${afterSentence}"`);
-  const fenced = /^```text\n([\s\S]*?)^```$/mu.exec(spec.slice(start));
-  assert.ok(fenced, `${SELF_SERVE_SPEC}: no \`\`\`text block follows "${afterSentence}"`);
-  return fenced[1];
+  // Adjacency is required, not just order: a later ```text block must not satisfy this pin.
+  const opening = `${afterSentence}\n\n\`\`\`text\n`;
+  assert.ok(spec.startsWith(opening, start), `${SELF_SERVE_SPEC}: no \`\`\`text block immediately follows "${afterSentence}"`);
+  const bodyStart = start + opening.length;
+  const end = spec.indexOf("\n```\n", bodyStart);
+  assert.notEqual(end, -1, `${SELF_SERVE_SPEC}: the \`\`\`text block after "${afterSentence}" is unterminated`);
+  return spec.slice(bodyStart, end + 1);
 }
 
 // ---------------------------------------------------------------------------
