@@ -321,6 +321,10 @@ function dedent(run) {
   return common > 0 && common !== Infinity ? lines.map((line) => line.slice(common)).join('\n') : run;
 }
 
+// Inside double quotes a backslash-newline is still a line continuation, so `"ya\
+// rn"` is the word `yarn`; inside single quotes it is two literal characters.
+const quotedContent = (quote, content) => (quote === '"' ? content.replace(/\\\n/gu, '') : content);
+
 // Shell text is not a regular language, and every regex this guard read it with had
 // the same failure mode: an unanticipated form resolved to the WRONG lockfile instead
 // of failing closed (#4255). Tokenize once instead. Quotes, escapes, comments, line
@@ -410,7 +414,8 @@ function shellTokens(indentedRun) {
         const inner = run[index];
         if (inner === '"' || inner === "'") {
           const close = run.indexOf(inner, index + 1);
-          delimiter += close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
+          const content = close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
+          delimiter += quotedContent(inner, content);
           index = close === -1 ? run.length : close + 1;
         } else if (inner === '\\' && run[index + 1] === '\n') {
           // A backslash-newline is a line continuation here as anywhere else. Recorded as
@@ -450,7 +455,8 @@ function shellTokens(indentedRun) {
         const inner = run[index];
         if (inner === '"' || inner === "'") {
           const close = run.indexOf(inner, index + 1);
-          word += close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
+          const content = close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
+          word += quotedContent(inner, content);
           index = close === -1 ? run.length : close + 1;
         } else if (inner === '\\' && run[index + 1] === '\n') {
           // `"yarn"\` continued onto the next line is `yarn` followed by that line, not a
@@ -491,7 +497,9 @@ const informationalYarnFlags = new Set(['--version', '-v', '--help', '-h']);
 // is a prefix whose argument is not option-shaped — `sudo -u runner -E yarn install`
 // leaves `runner` as the command name. In the WRONG direction: a wrapper that is a
 // separate process (`env cd app`, `timeout 300 cd app`) runs its `cd` in a child and
-// the shell stays put, while this walk follows it into `app` (#4570).
+// the shell stays put, while this walk follows it into `app` (#4570); and a verb-less
+// `yarn` behind an unlisted wrapper (`nohup yarn`) is indistinguishable from `which
+// yarn`, so it imposes nothing (#4567).
 const commandPrefixes = new Set([
   'do', '{', '!', 'time', 'env', 'sudo', 'command', 'exec', 'nice', 'npx',
   'timeout', 'corepack', 'builtin', 'xvfb-run',
@@ -601,8 +609,13 @@ function shellInstallDirectories(run, loopValues) {
       && (commandPrefixes.has(words[at]) || unmodeledKeywords.has(words[at])
         || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[at]))) {
       // `command -v yarn` only reports where `yarn` is; nothing runs. Stepped over as
-      // an option it left a verb-less `yarn` as the command name — an install.
-      if (words[at] === 'command' && /^-[pvV]*[vV]/u.test(words[at + 1] ?? '')) return;
+      // an option it left a verb-less `yarn` as the command name — an install. The
+      // options may be split (`command -p -v`), so every one of them is read.
+      if (words[at] === 'command') {
+        for (let option = at + 1; /^-[pvV]+$/u.test(words[option] ?? ''); option += 1) {
+          if (/[vV]/u.test(words[option])) return;
+        }
+      }
       if (unmodeledKeywords.has(words[at])) directories = null;
       at += 1;
       while (at < words.length && prefixArgumentPattern.test(words[at])) at += 1;
@@ -1559,6 +1572,8 @@ for (const run of [
   // as underivable: `command -v` is not a wrapper, and a verb-less `yarn` behind an
   // unlisted command is an argument, not the command.
   'command -v yarn >/dev/null || npm i -g yarn',
+  // The same, with the options split: only the word right after `command` was read.
+  'command -p -v yarn',
   'which yarn',
   'npm install -g yarn',
   'corepack enable yarn',
@@ -1585,6 +1600,28 @@ jobs:
     });
   });
 }
+
+// Inside single quotes a backslash-newline is two literal characters, so this word is
+// not `yarn` (compare the double-quoted spelling among the resolved installs below).
+test('guard does not mistake a word continued inside single quotes for yarn', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: |
+          cd app
+          'ya\\
+          rn' install --immutable
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), []);
+  });
+});
 
 // A redirected or argument-carrying install is still an install; missing one imposes
 // no cache requirement at all, which is the direction that costs a silent cache miss.
@@ -1819,6 +1856,8 @@ for (const [label, run] of [
   // A backslash-newline inside a word is a continuation, not part of the word: read
   // as `yarn\n`, the command was not `yarn` and the install was invisible.
   ['a continued yarn word', 'cd app\n          "yarn"\\\n            install --immutable'],
+  // Inside double quotes too: `"ya\<newline>rn"` is `yarn`, not a word with a newline.
+  ['a yarn word continued inside double quotes', 'cd app\n          "ya\\\n          rn" install --immutable'],
 ]) {
   test(`guard resolves an install behind ${label}`, () => {
     withFixture(({ fixtureRoot, fixtureWorkflows }) => {
@@ -1994,12 +2033,17 @@ jobs:
   });
 }
 
-test('guard reads a heredoc delimiter continued across a backslash-newline', () => {
-  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
-    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
-    // The delimiter is `EOF`. Recorded with the newline inside it, no line ever matched,
-    // the body ran to the end of the block and the install after it was invisible.
-    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+// The delimiter is `EOF` in both spellings. Recorded with the newline inside it, no
+// line ever matched, the body ran to the end of the block and the install after it was
+// invisible.
+for (const [label, opener] of [
+  ['unquoted', 'cat <<EO\\\n          F'],
+  ['inside double quotes', 'cat <<"EO\\\n          F"'],
+]) {
+  test(`guard reads a heredoc delimiter continued across a backslash-newline ${label}`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -2011,17 +2055,17 @@ jobs:
           cache: yarn
           cache-dependency-path: app/yarn.lock
       - run: |
-          cat <<EO\\
-          F
+          ${opener}
           cd app
           EOF
           yarn install --immutable
 `);
-    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
-      'fixture.yml job verify: setup-node must cache yarn.lock',
-    ]);
+      assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+        'fixture.yml job verify: setup-node must cache yarn.lock',
+      ]);
+    });
   });
-});
+}
 
 // What protects this is the empty-delimiter guard, not a branch of its own: the third
 // `<` stops the delimiter scan, so nothing is queued and the redirection branch consumes
