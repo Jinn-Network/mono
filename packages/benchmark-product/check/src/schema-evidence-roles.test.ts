@@ -4,8 +4,8 @@
  * Coverage for the two new evidence roles the screened-operator-sampled admission branch adds to
  * the three hand-synchronized role lists (judge-path program packet P6, spec
  * `docs/superpowers/specs/2026-08-19-judge-path-delta-contracts.md` §6.8a Group C, first bullet):
- * `verify/src/schema.ts`'s `BUNDLE_V4_EVIDENCE_ROLES` and its admission-only subset
- * `BUNDLE_V4_ADMISSION_EVIDENCE_ROLES`, and `verify/src/admission/verification.ts`'s verbatim
+ * `check/src/schema.ts`'s `BUNDLE_V4_EVIDENCE_ROLES` and its admission-only subset
+ * `BUNDLE_V4_ADMISSION_EVIDENCE_ROLES`, and `check/src/admission/verification.ts`'s verbatim
  * duplicate `BINARY_JUDGMENT_ADMISSION_RECORD_ROLES`.
  *
  * These lists' index order is a frozen ordering map (spec §1.5 rule 5 / §1.6 site 9): appending at

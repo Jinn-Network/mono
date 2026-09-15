@@ -27,7 +27,7 @@ export const BinaryJudgmentItemIdSchema = z.string().regex(
 /**
  * RFC 3339 instant SHAPE, seconds precision, no fractional part. This is a shape pin, not a
  * calendar evaluation: calendar strictness is enforced once, on the source-manifest row that this
- * value is copied from (`verify/src/admission/intake.ts`, via `isCalendarStrictRfc3339`), and is
+ * value is copied from (`check/src/admission/intake.ts`, via `isCalendarStrictRfc3339`), and is
  * re-checked at read by `resolveBenchmarkTaskProvenance`. Fractional seconds are excluded because
  * the value is a source publication instant and because a fraction-admitting pattern fails this
  * package's own safe-regex ReDoS pre-filter (`task-profile/payload-schema.ts`).

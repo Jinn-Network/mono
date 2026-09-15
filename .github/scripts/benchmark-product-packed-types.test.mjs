@@ -1,8 +1,9 @@
 // Local-registry cold-install proof for Colophon's public packages.
 //
 // This deliberately uses npm tarballs and a disposable in-process registry, rather than Yarn
-// portals. It proves that a consumer can resolve core, cli, and verify as independently packed
-// public packages while all Tier 1-3 dependencies retain their @jinn-network identity.
+// portals. It proves that a consumer can resolve core, cli, and check as independently packed
+// public packages while all Tier 1-3 dependencies retain their @jinn-network identity, and that the
+// retired @colophon-claims/verify name still reaches the same checker through its alias.
 
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -23,9 +24,16 @@ const oneShotRoot = join(temporaryRoot, 'one-shot');
 const runT1ColdLifecycle = process.argv.includes('--t1-cold-lifecycle');
 
 const PUBLIC_PACKAGES = [
-  ['verify', '@colophon-claims/verify'],
+  ['check', '@colophon-claims/check'],
   ['core', '@colophon-claims/core'],
   ['cli', '@colophon-claims/cli'],
+];
+// Packed and served like a public package, but never installed by the type consumer: the alias has
+// no types and no entrypoint of its own, it only re-exports the checker. It is its own list rather
+// than a PACKED_EXCLUDED row because it is genuinely packed -- excluding it would make the family
+// coverage assertion below stop naming it at all (issue #4188).
+const ALIAS_PACKAGES = [
+  ['verify', '@colophon-claims/verify'],
 ];
 const PACKED_EXCLUDED = [
   ['web', '@colophon-claims/web', 'private application with no public package entrypoint'],
@@ -80,7 +88,8 @@ function assertFamilyCoverage() {
     const { name } = JSON.parse(readFileSync(manifestPath, 'utf8'));
     return typeof name === 'string' && name.startsWith('@colophon-claims/') ? [[relative(familyRoot, dirname(manifestPath)), name]] : [];
   }).sort();
-  const registered = [...PUBLIC_PACKAGES, ...PACKED_EXCLUDED].map(([directory, name]) => [directory, name]).sort();
+  const registered = [...PUBLIC_PACKAGES, ...ALIAS_PACKAGES, ...PACKED_EXCLUDED]
+    .map(([directory, name]) => [directory, name]).sort();
   if (JSON.stringify(discovered) !== JSON.stringify(registered)) {
     throw new Error(`Colophon package coverage drifted: discovered ${JSON.stringify(discovered)}, registered ${JSON.stringify(registered)}`);
   }
@@ -259,9 +268,9 @@ async function addT1ThirdPartyClosure(records) {
       if (installed !== undefined) walkInstalledRuntime(installed);
     }
   }
-  walkInstalledRuntime(join(familyRoot, 'verify'));
+  walkInstalledRuntime(join(familyRoot, 'check'));
 
-  const queue = declaredFirstPartyClosure(records, ['@colophon-claims/verify'])
+  const queue = declaredFirstPartyClosure(records, ['@colophon-claims/check'])
     .flatMap((name) => Object.keys(records.get(name).manifest.dependencies ?? {}).filter((dependency) => !isFirstParty(dependency)));
   const seenVersions = new Set();
   while (queue.length > 0) {
@@ -352,7 +361,9 @@ try {
   await mkdir(archivesRoot);
   const archives = new Map();
   const records = new Map();
-  const packedPublicPackages = runT1ColdLifecycle ? [PUBLIC_PACKAGES[0]] : PUBLIC_PACKAGES;
+  const packedPublicPackages = runT1ColdLifecycle
+    ? [PUBLIC_PACKAGES[0]]
+    : [...PUBLIC_PACKAGES, ...ALIAS_PACKAGES];
   for (const [directory, name] of packedPublicPackages) archives.set(name, await packOne(join(familyRoot, directory), name));
   for (const [name, directory] of CROSS_TREE_PACKAGES) archives.set(name, await packOne(directory, name));
   if (!runT1ColdLifecycle) {
@@ -383,18 +394,18 @@ try {
         cwd: join(familyRoot, 'core'),
         env: { ...process.env, COLOPHON_T1_REGISTRY_URL: registry.baseUrl },
       });
-      for (const name of declaredPackageClosure(records, ['@colophon-claims/verify'])) {
+      for (const name of declaredPackageClosure(records, ['@colophon-claims/check'])) {
         if (!registry.requests.has(`metadata:${name}`) || !registry.requests.has(`tarball:${name}`)) {
           throw new Error(`focused T1 cold install did not fetch ${name} metadata and tarball through loopback: ${JSON.stringify([...registry.requests].sort())}`);
         }
       }
-      console.log('Materialized the 144-cell qualification, deleted its builder workspace, and replayed it with a cold-installed @colophon-claims/verify@0.2 binary.');
+      console.log('Materialized the 144-cell qualification, deleted its builder workspace, and replayed it with a cold-installed @colophon-claims/check@0.2 binary.');
     } else {
     // Prove the reader's *installed closure*, not just its direct manifest, stays
     // independent of the Colophon runner and task-execution runtime packages.
     await mkdir(readerRoot);
     await writeFile(join(readerRoot, 'package.json'), JSON.stringify({ private: true, dependencies: {
-      '@colophon-claims/verify': '0.2',
+      '@colophon-claims/check': '0.2',
     } }, null, 2));
     await writeFile(join(readerRoot, '.npmrc'), `@colophon-claims:registry=${registry.baseUrl}\n@jinn-network:registry=${registry.baseUrl}\n`);
     await run('npm', [
@@ -407,7 +418,7 @@ try {
     ], { cwd: readerRoot });
     const readerLock = await readFile(join(readerRoot, 'package-lock.json'), 'utf8');
     const installedReaderClosure = installedFirstPartyClosure(readerLock);
-    const declaredReaderClosure = declaredFirstPartyClosure(records, ['@colophon-claims/verify']);
+    const declaredReaderClosure = declaredFirstPartyClosure(records, ['@colophon-claims/check']);
     if (JSON.stringify(installedReaderClosure) !== JSON.stringify(declaredReaderClosure)) {
       throw new Error(`reader first-party closure differs from its recursively declared closure: installed ${JSON.stringify(installedReaderClosure)}, declared ${JSON.stringify(declaredReaderClosure)}`);
     }
@@ -429,7 +440,7 @@ try {
 
     await mkdir(consumerRoot);
     await writeFile(join(consumerRoot, 'package.json'), JSON.stringify({ private: true, type: 'module', dependencies: {
-      '@colophon-claims/core': '0.1', '@colophon-claims/cli': '0.1', '@colophon-claims/verify': '0.2',
+      '@colophon-claims/core': '0.1', '@colophon-claims/cli': '0.1', '@colophon-claims/check': '0.2',
       '@types/node': '^22.0.0', typescript: '^5.9.3',
     } }, null, 2));
     await writeFile(join(consumerRoot, '.npmrc'), `@colophon-claims:registry=${registry.baseUrl}\n@jinn-network:registry=${registry.baseUrl}\n`);
@@ -443,7 +454,7 @@ try {
     ], { cwd: consumerRoot });
     await writeFile(join(consumerRoot, 'consumer.ts'), `import { PRODUCT_BRANDING, verifyPublicBundle } from '@colophon-claims/core';
 import { USAGE, runColophonCli } from '@colophon-claims/cli';
-import { verifyPublicBundle as verifyBundle } from '@colophon-claims/verify';
+import { verifyPublicBundle as verifyBundle } from '@colophon-claims/check';
 export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBundle, USAGE, runColophonCli] as const;
 `);
     await writeFile(join(consumerRoot, 'tsconfig.json'), JSON.stringify({ compilerOptions: { module: 'NodeNext', moduleResolution: 'NodeNext', noEmit: true, strict: true, target: 'ES2022' }, include: ['consumer.ts'] }, null, 2));
@@ -515,16 +526,29 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     }
     const reader = JSON.parse(await run(
       npx,
-      ['--yes', '@colophon-claims/verify@0.2', demo.result.output.bundle, '--json'],
+      ['--yes', '@colophon-claims/check@0.2', demo.result.output.bundle, '--json'],
       { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: join(temporaryRoot, 'reader-one-shot-npm-cache') } },
     ));
     if (reader.ok !== true || reader.checks?.length !== 6 || reader.identity !== demo.result.digests.bundleIdentity) {
       throw new Error(`reader package did not independently verify the retained sample: ${JSON.stringify(reader)}`);
     }
+
+    // The retired name is a promise, not a redirect: every bundle sealed before the rename prints
+    // `npx @colophon-claims/verify@0.2`, so that command must still produce the checker's own
+    // output. Resolved cold from its own npm cache, through the alias's dependency on the checker.
+    const aliasReader = JSON.parse(await run(
+      npx,
+      ['--yes', '@colophon-claims/verify@0.2', demo.result.output.bundle, '--json'],
+      { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: join(temporaryRoot, 'alias-one-shot-npm-cache') } },
+    ));
+    if (JSON.stringify(aliasReader) !== JSON.stringify(reader)) {
+      throw new Error(`the @colophon-claims/verify alias did not produce byte-identical --json output: ${JSON.stringify(aliasReader)}`);
+    }
+
     await appendFile(join(demo.result.output.bundle, 'README.md'), '\ntampered after publication\n');
     const tamperedReader = await runExpectingExit(
       npx,
-      ['--yes', '@colophon-claims/verify@0.2', demo.result.output.bundle, '--json'],
+      ['--yes', '@colophon-claims/check@0.2', demo.result.output.bundle, '--json'],
       1,
       { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: join(temporaryRoot, 'reader-one-shot-npm-cache') } },
     );
@@ -534,8 +558,8 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     }
     }
     console.log(isQualifiedRuntime
-      ? `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages, ran the retained sample, served its verified loopback viewer, and reverified it with the reader package.`
-      : `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages and proved the public Core/CLI @0.1 and Verify @0.2 selectors; darwin/arm64 and linux/x64 CI complete sample execution, viewer, and reader reverification.`);
+      ? `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages, ran the retained sample, served its verified loopback viewer, and reverified it with the reader package under both its published names.`
+      : `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages and proved the public Core/CLI @0.1 and Check @0.2 selectors; darwin/arm64 and linux/x64 CI complete sample execution, viewer, and reader reverification.`);
     }
   } finally { await registry.close(); }
 } finally {

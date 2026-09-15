@@ -4,7 +4,7 @@ The public Tier 4 core package is the single trusted product boundary. It owns
 workspace and draft state, lifecycle transitions, authority checks, the audit
 journal, real local-venue composition, Report and claim production, and local
 public-bundle emission. Portable verification is owned by the smaller
-`@colophon-claims/verify` package and re-exported here. The CLI and private web app
+`@colophon-claims/check` package and re-exported here. The CLI and private web app
 are clients of these public operations; neither is a second implementation.
 The user-facing `colophon` executable is owned by `@colophon-claims/cli`; core
 retains the advanced command library used by that endpoint.
@@ -98,23 +98,24 @@ with an explicit shipped/deferred GUI disposition:
 | `exportDerivedBundle` | `colophon export` | Package the locked method's suite-named derived bundle, or refuse. |
 | `updateDraft` | `colophon draft update` | Apply a validated JSON draft patch. |
 
-The path-oriented portable verifier is intentionally outside workspace/GUI
-parity. A reader installs only the smaller verifier package. Use the exact
+The path-oriented portable checker is intentionally outside workspace/GUI
+parity. A reader installs only the smaller checker package. Use the exact
 version sealed into a report to reproduce publication, or its compatible major
-line to receive fixes without changing the bundle-format contract. The first
-public line, illustrated below, is the one the formats through public-bundle/6
-pin:
+line to receive fixes without changing the bundle-format contract. The current
+released line, illustrated below, reads every published bundle format:
 
 ```text
-npx @colophon-claims/verify@0.1.0 <dir>
-npx @colophon-claims/verify@0.1 <dir>
+npx @colophon-claims/check@0.2.1 <dir>
+npx @colophon-claims/check@0.2 <dir>
 ```
 
 Reader lines are not forward compatible, and a reader that is too old refuses
 with the same code an invalid bundle earns, so take the line from the bundle's
 own claim package `verification.command` rather than from this illustration.
 The per-format table in the [public-bundle guide](../PUBLIC-BUNDLE.md) covers
-the case where you have only `bundle.json`.
+the case where you have only `bundle.json`. Reports sealed before the rename
+pin `@colophon-claims/verify`, which stays published permanently as a
+passthrough alias onto `@colophon-claims/check`.
 
 It reads only the caller-selected immutable bundle, needs no workspace or
 principal, and returns the check list its format's closure defines, which that

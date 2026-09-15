@@ -4,7 +4,7 @@ import { z } from "zod";
 import { canonicalJsonBytes, recordDigest } from "@jinn-network/task-execution-profiles";
 import { refuse, refuseWithIssues } from "../errors.js";
 
-export * from "@colophon-claims/verify/admission";
+export * from "@colophon-claims/check/admission";
 
 function issues(error: z.ZodError) {
   return error.issues.map((issue) => ({

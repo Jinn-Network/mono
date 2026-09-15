@@ -876,7 +876,7 @@ describe("binary-instrument@1 lock-time composition", () => {
     // Today's closed judge-model set is a bijection (one accepted model per profile), so two
     // different models always carry two different generation shapes, and the sealed selection
     // manifest's own cross-arm "one identical generation block" refinement
-    // (`InspectBinaryJudgeSelectionManifestSchema`, `@colophon-claims/verify`) already refuses
+    // (`InspectBinaryJudgeSelectionManifestSchema`, `@colophon-claims/check`) already refuses
     // before the schema parse can even succeed. `validateRuntimeAndArms`'s own model-uniformity
     // refusal (spec §1.6, change 1 item 5) is therefore unreachable defense-in-depth through this
     // public surface today, and only becomes independently reachable once a profile admits more

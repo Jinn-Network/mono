@@ -215,7 +215,7 @@ domain binding is how a publisher offers a name a reader can act on. It is
 material you supply:
 
 ```bash
-npx @colophon-claims/verify <bundle-dir> --identity-binding ./binding.json
+npx @colophon-claims/check@0.2 <bundle-dir> --identity-binding ./binding.json
 ```
 
 The document is small and self-describing:
@@ -370,10 +370,10 @@ Expected output: nine `CHECK <name>: ok` lines (`manifest-files`,
 usage or environment failure. The script is ~150 lines of Python stdlib plus
 openssl subprocess calls — read it, or reimplement it; it holds no secrets.
 
-The reference verifier covers the remaining rows of the table:
+The reference checker covers the remaining rows of the table:
 
 ```bash
-npx @colophon-claims/verify@0.1 <bundle-dir>
+npx @colophon-claims/check@0.2 <bundle-dir>
 ```
 
 Exit 0 with `Recomputed: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
@@ -382,10 +382,14 @@ exit 1 invalid; exit 2 usage. It opens no network connection and uploads
 nothing. Every bundle names its own compatible command in
 `claim-package.json` `verification.compatibleCommand`.
 
+A bundle sealed before the checker was renamed names `@colophon-claims/verify`
+there. That name stays published permanently as a passthrough alias onto
+`@colophon-claims/check`, so the command the bundle itself pins keeps resolving.
+
 ## The conformance kit
 
 The kit is the self-test corpus for external implementations. It lives in the
-source repository at `packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/`;
+source repository at `packages/benchmark-product/check/fixtures/public-bundle-conformance-v1/`;
 it is deliberately not in the npm tarball, because it is roughly 10 MB of bundle
 bytes that a reader verifying one bundle does not need.
 

@@ -1,5 +1,5 @@
 import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type ReportRecord, type RunRecord } from "@jinn-network/benchmarking-records";
-import { firstDifference, type ClaimAnchor, type ClaimDisclosureSection } from "@colophon-claims/verify";
+import { firstDifference, type ClaimAnchor, type ClaimDisclosureSection } from "@colophon-claims/check";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
@@ -123,7 +123,7 @@ export function assertClaimConsistency(input: {
   // (coordinator ruling, packet #2837) -- mirrors `operations/report.ts`'s own method-conditional
   // exactly, so the cold rebuild here agrees with what `report` actually sealed. Computed from
   // `reportRecord.method.id` directly (like the portable verifier's own `binaryLimitations`,
-  // `verify/src/profile/claim-consistency.ts`) rather than threaded through
+  // `check/src/profile/claim-consistency.ts`) rather than threaded through
   // `input.additionalLimitations`, since it depends on WHICH method produced this Report, not on
   // venue/suite facts shared across every Report a run carries.
   const pairedEstimateLimitation =

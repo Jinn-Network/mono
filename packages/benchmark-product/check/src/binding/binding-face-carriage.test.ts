@@ -58,7 +58,7 @@ const memberRoots = memberDirectories
 
 /**
  * Each member's package name, read off its own manifest, so a cross-member import
- * (`@colophon-claims/verify`) resolves to a module path the same way a relative one does. Read
+ * (`@colophon-claims/check`) resolves to a module path the same way a relative one does. Read
  * rather than listed for the reason the roots are: a renamed or added member must not silently stop
  * resolving.
  */
@@ -90,10 +90,10 @@ const memberByPackageName = new Map<string, string>(
  * on someone editing a function with nothing to do with binding carriage.
  */
 const EMITTERS: ReadonlyArray<readonly [string, string, number]> = [
-  ["verify/src/profile/run-results.ts", "buildLocalVenueHonesty", 3],
-  ["verify/src/binding/report-face.ts", "runBoundVenueLimits", 1],
-  ["verify/src/binding/report-face.ts", "runBindingSentence", 0],
-  ["verify/src/binding/report-face.ts", "runBindingClass", 0],
+  ["check/src/profile/run-results.ts", "buildLocalVenueHonesty", 3],
+  ["check/src/binding/report-face.ts", "runBoundVenueLimits", 1],
+  ["check/src/binding/report-face.ts", "runBindingSentence", 0],
+  ["check/src/binding/report-face.ts", "runBindingClass", 0],
 ];
 
 /**
@@ -136,8 +136,8 @@ const EXPECTED_JUSTIFIED_SITES = [
   "core/src/operations/run-bind.ts:runBindingSentence",
   "core/src/operations/run-status.ts:runBindingClass",
   "core/src/operations/run-status.ts:runBindingSentence",
-  "verify/src/binding/report-face.ts:runBindingSentence",
-  "verify/src/profile/run-results.ts:runBoundVenueLimits",
+  "check/src/binding/report-face.ts:runBindingSentence",
+  "check/src/profile/run-results.ts:runBoundVenueLimits",
 ];
 
 const CONSTRAINT = [
@@ -232,7 +232,7 @@ function blankStringLiterals(text: string): string {
 /**
  * Import and re-export statements blanked the same way, so naming an emitter in one is not read as
  * using it (#3954). A module statement is where every legitimate mention of the name that is
- * neither a call nor a declaration lives -- `verify/src/index.ts` re-exports all three off the face
+ * neither a call nor a declaration lives -- `check/src/index.ts` re-exports all three off the face
  * -- and counting those would make the reference scan report the export list rather than any site.
  * Blanked after comments, and only where the statement starts a line, so an `export const` or an
  * ordinary object literal is untouched. A default clause before the brace
@@ -393,7 +393,7 @@ function moduleForSpecifier(specifier: string, fromFile: string): string | undef
 
 /**
  * The module that declares the `name` this file uses: followed from the statement that names it,
- * through re-exports (`@colophon-claims/verify` names the package entry, which re-exports the face
+ * through re-exports (`@colophon-claims/check` names the package entry, which re-exports the face
  * from `binding/report-face.ts`), until a module is reached that actually declares it.
  *
  * `undefined` means the origin could not be established, and the scan then treats the occurrence as
@@ -555,7 +555,7 @@ describe("the binding face is never emitted from an unchecked binding", () => {
     expect(emitterCallSites(`${IMPORTED}const emit = runBindingSentence;\n`, "fixture.ts")).toEqual(reference);
     const marked = `${IMPORTED}// binding-carriage: checked above.\nconst emit = runBindingSentence;\n`;
     expect(emitterCallSites(marked, "fixture.ts")[0]?.justified).toBe(true);
-    // The export list `verify/src/index.ts:206` writes, and the import a caller writes: naming the
+    // The export list `check/src/index.ts:206` writes, and the import a caller writes: naming the
     // face is how a module hands it over, not a site that emits it.
     expect(emitterCallSites('export { runBindingClass, runBindingSentence } from "./binding/report-face.js";\n', "fixture.ts"))
       .toEqual([]);
@@ -678,17 +678,17 @@ describe("the binding face is never emitted from an unchecked binding", () => {
   // is pointed anywhere (#3952) -- and proven against the real modules rather than a fixture, since
   // the two same-named functions are the fact being relied on.
   test("keys an emitter by its declaring module, so a same-named function elsewhere is not one", () => {
-    const emitterModule = "verify/src/profile/run-results.ts";
+    const emitterModule = "check/src/profile/run-results.ts";
     const otherModule = "core/src/operations/run-results.ts";
     const read = (path: string): [string, string] => [readFileSync(join(productRoot, path), "utf8"), join(productRoot, path)];
 
-    const [verifyCaller, verifyPath] = read("verify/src/profile/claim-consistency.ts");
+    const [verifyCaller, verifyPath] = read("check/src/profile/claim-consistency.ts");
     expect(resolveOrigin(verifyCaller, verifyPath, "buildLocalVenueHonesty")).toBe(emitterModule);
     const [coreCaller, corePath] = read("core/src/operations/report.ts");
     expect(resolveOrigin(coreCaller, corePath, "buildLocalVenueHonesty")).toBe(otherModule);
     // A package specifier resolves through the entry's re-export to the module that declares it.
     const [statusCaller, statusPath] = read("core/src/operations/run-status.ts");
-    expect(resolveOrigin(statusCaller, statusPath, "runBindingClass")).toBe("verify/src/binding/report-face.ts");
+    expect(resolveOrigin(statusCaller, statusPath, "runBindingClass")).toBe("check/src/binding/report-face.ts");
 
     // A commented-out import is not where the name comes from: resolving to it would drop the
     // file's real calls, which is the barrel hole in a different shape.
@@ -706,10 +706,10 @@ describe("the binding face is never emitted from an unchecked binding", () => {
 
     // A directory is not a module: a specifier naming one lands in the same unresolved lane an
     // extensionless specifier does, rather than walking the hop loop onto a directory read (#4018).
-    expect(moduleForSpecifier("../binding", join(productRoot, "verify/src/binding/report-face.ts")))
+    expect(moduleForSpecifier("../binding", join(productRoot, "check/src/binding/report-face.ts")))
       .toBeUndefined();
     const directoryImport = 'import { runBindingSentence } from "../binding";\n';
-    const directoryPlant = join(productRoot, "verify/src/binding/plant.ts");
+    const directoryPlant = join(productRoot, "check/src/binding/plant.ts");
     expect(resolveOrigin(directoryImport, directoryPlant, "runBindingSentence")).toBeUndefined();
     expect(emitterCallSites(`${directoryImport}export const s = runBindingSentence(forged);\n`, "plant.ts",
       new Map([["runBindingSentence", resolveOrigin(directoryImport, directoryPlant, "runBindingSentence")]]))[0]?.binding)

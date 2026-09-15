@@ -49,8 +49,8 @@ import {
   PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND,
   SELF_RUN_TRUST_ROOT,
   anchoredTrustRoot,
-} from "@colophon-claims/verify";
-import type { ClaimAnchor, ClaimDisclosureSection } from "@colophon-claims/verify";
+} from "@colophon-claims/check";
+import type { ClaimAnchor, ClaimDisclosureSection } from "@colophon-claims/check";
 import {
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
@@ -421,7 +421,7 @@ const ClaimPackageWireSchema = z.object({
     // because no released 0.1 reader understands the format. So both pairs are admitted here and
     // nothing else, and WHICH one a given bundle must carry is settled by `claim-consistency`,
     // which rebuilds the claim from the format the bundle's own manifest declares. Mirrors
-    // `@colophon-claims/verify`'s `profile/claim.ts` exactly; the two copies must agree.
+    // `@colophon-claims/check`'s `profile/claim.ts` exactly; the two copies must agree.
     const pinsV6 = claim.verification.command === PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
       && claim.verification.compatibleCommand === PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND;
     const pinsV10 = claim.verification.command === PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND
@@ -707,7 +707,7 @@ interface MethodProjection {
 const REPORT_SOURCE = "report.json";
 
 /*
- * Issue #3943: the mirror of the accounting block in `@colophon-claims/verify`'s
+ * Issue #3943: the mirror of the accounting block in `@colophon-claims/check`'s
  * `profile/claim.ts` (issue #3855). That file typed its ten projection-rebuild throws; core
  * reaches this `buildClaimPackage` from TWO paths. The reader path: `operations/verify.ts`
  * calls core's `assertClaimConsistency`, which calls this function against a sealed Report a
@@ -726,7 +726,7 @@ const REPORT_SOURCE = "report.json";
  * `record-integrity` (at source `"report"`) a few lines above this call when the produced records
  * fail the platform's own exactness checks, so the code is not foreign to that region, and one
  * code per condition regardless of entry point is the rule this block states. Nothing is
- * swallowed either way — the message names the exact condition. The verify-side mirror has no
+ * swallowed either way — the message names the exact condition. The check-side mirror has no
  * producer, so the two accounting blocks legitimately diverge on exactly this paragraph.
  *
  * WHAT REFUSES. This rebuild is the FIRST reader of the sealed Report's results and method
@@ -742,7 +742,7 @@ const REPORT_SOURCE = "report.json";
  * surfaced as `execution`, the code `toErrorEnvelope` carries an untyped throw as; they now
  * surface as `record-integrity` at `report.json`, which is what a reader already got for the
  * same bytes through the standalone verifier. Where that code reaches a reader through
- * `colophon-verify`'s exit mapping, this is the 2 ("the verifier broke") to 1 ("the bundle is
+ * `colophon-check`'s exit mapping, this is the 2 ("the verifier broke") to 1 ("the bundle is
  * bad") shift issue #3943 named, and it is the same shift issues #3741 and #3855 each stated for
  * their own conversions. `errors.ts` documents why the two "not supported" conditions live under
  * `record-integrity` rather than a compat code of their own (issue #3944).

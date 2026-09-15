@@ -86,8 +86,8 @@ try {
     archives.set(name, archive);
   }
 
-  const verifierArchive = join(temporaryRoot, "colophon-verify.tgz");
-  await run("yarn", ["pack", "--out", verifierArchive], { cwd: join(packageRoot, "..", "verify") });
+  const verifierArchive = join(temporaryRoot, "colophon-check.tgz");
+  await run("yarn", ["pack", "--out", verifierArchive], { cwd: join(packageRoot, "..", "check") });
 
   await run("yarn", ["build"], { cwd: packageRoot });
   const packJson = await run(
@@ -106,7 +106,7 @@ try {
       type: "module",
       dependencies: {
         ...Object.fromEntries([...archives].map(([name, archive]) => [name, `file:${archive}`])),
-        "@colophon-claims/verify": `file:${verifierArchive}`,
+        "@colophon-claims/check": `file:${verifierArchive}`,
         "@colophon-claims/core": `file:${productArchive}`,
       },
     }),

@@ -32,7 +32,7 @@ import {
   parseDisclosureSpecification,
 } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
-import { verifyPublicBundle } from "@colophon-claims/verify";
+import { verifyPublicBundle } from "@colophon-claims/check";
 import {
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
@@ -148,7 +148,7 @@ describe("disclosed bundle v8 — producer (T1)", () => {
     // The SET, not the order: `claim-package.json` is canonical JSON, so its object keys are sorted
     // lexicographically on disk regardless of the order the projection built them in. The frozen
     // six-variable order is a property of `deriveDisclosureSpecification`'s output object and is
-    // asserted there (`verify/src/profile/disclosure.test.ts`); what matters here is that all six
+    // asserted there (`check/src/profile/disclosure.test.ts`); what matters here is that all six
     // are present and no seventh is.
     expect(Object.keys(claim.disclosure.variables).sort()).toEqual([
       "answer-model", "answer-prompt", "ingestion-model", "judge-model", "judge-prompt", "retrieval-config",
