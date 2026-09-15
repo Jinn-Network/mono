@@ -16,7 +16,7 @@ await new Promise((resolve, reject) => {
   });
   child.once("error", reject);
   child.once("exit", (code) => {
-    if (code === 0) resolve();
+    if (code === 0) resolve(undefined);
     else reject(new Error(`TypeScript build exited with ${code}`));
   });
 });

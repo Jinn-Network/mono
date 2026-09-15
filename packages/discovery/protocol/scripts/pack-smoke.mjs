@@ -16,12 +16,17 @@ const archive = join(temporaryRoot, "record-discovery-protocol.tgz");
 const trustCoreArchive = join(temporaryRoot, "trust-core.tgz");
 const consumer = join(temporaryRoot, "consumer");
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import("node:child_process").SpawnOptions} [options]
+ */
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: "inherit", ...options });
     child.once("error", reject);
     child.once("exit", (code) => {
-      if (code === 0) resolve();
+      if (code === 0) resolve(undefined);
       else reject(new Error(`${command} exited with ${code}`));
     });
   });
