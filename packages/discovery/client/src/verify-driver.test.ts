@@ -115,6 +115,9 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
     const outcome = await driver.verifySource({
       source: { agent: "did:key:zAgentSourceOne", name: "feed" },
       head: parseSourceHead(input.head),
+      // Corpus envelopes are legible text; production accepts only the base64 wire
+      // form, so a raw fixture envelope fails at the parse step and this case would
+      // answer `unauthorized-signer` for the wrong reason (#4436).
       headSignature: vectorEnvelopeToWire(input.headSignature),
       entries: toAsyncIterable(
         input.entries.map((e) => ({ entry: parseAnnouncementEntry(e.entry), signature: vectorEnvelopeToWire(e.signature) })),
