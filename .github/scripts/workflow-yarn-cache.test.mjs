@@ -412,6 +412,11 @@ function shellTokens(indentedRun) {
           const close = run.indexOf(inner, index + 1);
           delimiter += close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
           index = close === -1 ? run.length : close + 1;
+        } else if (inner === '\\' && run[index + 1] === '\n') {
+          // A backslash-newline is a line continuation here as anywhere else. Recorded as
+          // a newline inside the delimiter, the terminator never matched and the "body"
+          // ran to the end of the block, hiding every install after it.
+          index += 2;
         } else if (inner === '\\' && index + 1 < run.length) {
           // `<<\EOF` is the POSIX spelling of `<<'EOF'`: the backslash quotes the next
           // character and is not part of the delimiter. Recording `\EOF` meant the real
@@ -447,6 +452,10 @@ function shellTokens(indentedRun) {
           const close = run.indexOf(inner, index + 1);
           word += close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
           index = close === -1 ? run.length : close + 1;
+        } else if (inner === '\\' && run[index + 1] === '\n') {
+          // `"yarn"\` continued onto the next line is `yarn` followed by that line, not a
+          // word with a newline in it — which no later step could read as `yarn`.
+          index += 2;
         } else if (inner === '\\' && index + 1 < run.length) {
           word += run[index + 1];
           index += 2;
@@ -489,7 +498,9 @@ const commandPrefixes = new Set([
 ]);
 const prefixArgumentPattern = /^(?:-|\d)/u;
 // Constructs whose branch this walk does not model. A `cd` under one of them may or may
-// not have run, so the directory becomes underivable rather than a guess.
+// not have run, so the directory becomes underivable rather than a guess. The words
+// after the keyword are still a command: `if ! yarn install; then` is an install, and
+// returning at the keyword hid it entirely — no requirement at all, the silent direction.
 //
 // Accepted limits, and unlike the `enablesCorepack` ones below these are NOT in the safe
 // direction — each can name a wrong lockfile — so they are recorded rather than excused.
@@ -509,6 +520,10 @@ const unmodeledKeywords = new Set([
   // `done` closes a loop whose last iteration decides where the shell ends up.
   'done',
 ]);
+
+// `corepack yarn@4 install` and `npx yarn@1 install` run Yarn by version spec; the
+// spec is still Yarn, and reading it as some other command hid the install entirely.
+const isYarn = (word) => /^yarn(?:@.*)?$/u.test(word.split('/').pop());
 
 // Read the words after `yarn`: whether they name an install, and any `--cwd` they pass.
 function yarnInvocation(rest) {
@@ -583,19 +598,17 @@ function shellInstallDirectories(run, loopValues) {
     command = [];
     let at = 0;
     while (at < words.length
-      && (commandPrefixes.has(words[at]) || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[at]))) {
+      && (commandPrefixes.has(words[at]) || unmodeledKeywords.has(words[at])
+        || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[at]))) {
       // `command -v yarn` only reports where `yarn` is; nothing runs. Stepped over as
       // an option it left a verb-less `yarn` as the command name — an install.
       if (words[at] === 'command' && /^-[pvV]*[vV]/u.test(words[at + 1] ?? '')) return;
+      if (unmodeledKeywords.has(words[at])) directories = null;
       at += 1;
       while (at < words.length && prefixArgumentPattern.test(words[at])) at += 1;
     }
     const [name, ...rest] = words.slice(at);
     if (name === undefined) return;
-    if (unmodeledKeywords.has(name)) {
-      directories = null;
-      return;
-    }
     if (name === 'cd' || name === 'pushd') {
       if (name === 'pushd') pushdStack.push(directories);
       const separated = rest[0] === '--';
@@ -610,13 +623,13 @@ function shellInstallDirectories(run, loopValues) {
       directories = pushdStack.length > 0 ? pushdStack.pop() : null;
       return;
     }
-    if (name.split('/').pop() !== 'yarn') {
+    if (!isYarn(name)) {
       // An unlisted wrapper around an install (see `commandPrefixes`). Only an
       // explicit install matters: `env -u TOKEN yarn test` leaves `TOKEN` as the name
       // and must impose nothing, exactly as a bare `yarn test` imposes nothing — and
       // `which yarn` names `yarn` without running it, so a verb-less `yarn` here is
       // an install only when `--cwd` says so.
-      const wrapped = rest.findIndex((word) => word.split('/').pop() === 'yarn');
+      const wrapped = rest.findIndex(isYarn);
       if (wrapped === -1) return;
       const invocation = yarnInvocation(rest.slice(wrapped + 1));
       if (invocation.isInstall && (!invocation.verbless || invocation.cwd !== null)) {
@@ -1792,6 +1805,13 @@ for (const [label, run] of [
   // `builtin` in front of the `cd`: unlisted, it became the command name and the `cd`
   // behind it never moved the walk, which then named the root lockfile.
   ['a builtin prefix', 'builtin cd app; yarn install --immutable'],
+  // A version spec is still Yarn. Read as some other command, the install was invisible.
+  ['a versioned corepack yarn', 'cd app\n          corepack yarn@4 install --immutable'],
+  ['a versioned npx yarn', 'cd app\n          npx yarn@1 install --immutable'],
+  ['a verb-less versioned yarn', 'cd app\n          corepack yarn@4.13.0'],
+  // A backslash-newline inside a word is a continuation, not part of the word: read
+  // as `yarn\n`, the command was not `yarn` and the install was invisible.
+  ['a continued yarn word', 'cd app\n          "yarn"\\\n            install --immutable'],
 ]) {
   test(`guard resolves an install behind ${label}`, () => {
     withFixture(({ fixtureRoot, fixtureWorkflows }) => {
@@ -1822,6 +1842,10 @@ for (const [label, run] of [
   // A literal `cd`, so the loop fails closed on the keyword itself and not on a loop
   // variable the walk cannot expand.
   ['a while loop', 'ls | while read d; do cd app; yarn install --immutable; done'],
+  // The keyword's own command is an install. Returning at the keyword hid it: no
+  // requirement at all, the silent direction.
+  ['an install as an if condition', 'if ! yarn install --immutable; then echo drift; exit 1; fi'],
+  ['an install as a while condition', 'while yarn install --immutable; do sleep 1; done'],
   // Each of these once named a literal path no checkout can contain — `$/yarn.lock`,
   // `app*/yarn.lock` — while silently dropping the requirement on the directory the
   // install really runs in. A confident wrong answer is the one direction #4255 rules
@@ -1835,6 +1859,7 @@ for (const [label, run] of [
   // no requirement at all — which is the silent direction; underivable is the loud one.
   ['an unlisted command wrapper', 'cd app\n          some-wrapper yarn install --immutable'],
   ['a wrapper of a yarn invoked by path', 'cd app\n          some-wrapper ./node_modules/.bin/yarn install'],
+  ['a wrapper of a versioned yarn', 'cd app\n          some-wrapper yarn@4 install'],
   // A verb-less `yarn` behind a wrapper is an install only when `--cwd` says so.
   ['a wrapper of a verb-less yarn with --cwd', 'some-wrapper yarn --cwd app'],
   // A loop value the walk cannot expand made only that sibling vanish: `a/yarn.lock`
@@ -1959,6 +1984,35 @@ jobs:
     });
   });
 }
+
+test('guard reads a heredoc delimiter continued across a backslash-newline', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    // The delimiter is `EOF`. Recorded with the newline inside it, no line ever matched,
+    // the body ran to the end of the block and the install after it was invisible.
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: app/yarn.lock
+      - run: |
+          cat <<EO\\
+          F
+          cd app
+          EOF
+          yarn install --immutable
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: setup-node must cache yarn.lock',
+    ]);
+  });
+});
 
 // What protects this is the empty-delimiter guard, not a branch of its own: the third
 // `<` stops the delimiter scan, so nothing is queued and the redirection branch consumes
