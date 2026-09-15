@@ -51,7 +51,7 @@ The tree corroborates it: `architecture/platform-packages.v1.json` carries no pi
 `pinned` marker, which DR-2026-09-03 §Consequences attaches to #3911, the pin-and-vendor
 follow-up that runs after `Jinn-Network/spec` issue 1's byte-identical import
 ([`log/decisions/2026-09-03-protocol-spec-repository.md:52`](../log/decisions/2026-09-03-protocol-spec-repository.md),
-`:54`). That absence is consistent with the import still being ahead rather than direct evidence
+`:53`, `:54`). That absence is consistent with the import still being ahead rather than direct evidence
 of it, which is why it is corroboration and not the argument.
 
 So issue #4172's first acceptance criterion — that the anchor-locator profile under
@@ -337,7 +337,7 @@ of them rather than step 5 alone is what makes §10's "unchecked, exactly as tod
 legacy anchor: were step 2 or the uniqueness rule left unconditional, a mixed-mode verifier built
 literally from this section would refuse an entire catalog over a `ceremony-anchor/v1` anchor
 whose referencing records collide — a shape that today opens and degrades only the affected key,
-because `uniqueBy` at `native-trust-catalog.ts:309` is over binding digests and the conflict
+because `uniqueBy` at `native-trust-catalog.ts:310` is over binding digests and the conflict
 surfaces per authorization at `:427-434`. That is one rule with a posture parameter, not two
 rules, and the profile document must publish it as one (§11 item 5).
 
@@ -870,7 +870,7 @@ one criterion this document can meet outright.
   `verifyOnchainAuthority` — a method on the object `openNativeTrustCatalog` returns
   (`operator/src/daemon/native-trust-catalog.ts:503`, declared at `:220`), run per settlement
   authorization at resolution time rather than on the catalog-open path — checks that resource
-  against the Safe the caller is asking about (`:552-566`) and then against the on-chain Safe
+  against the Safe the caller is asking about (`:553-566`) and then against the on-chain Safe
   owner (`:567-584`). That Safe address is a **parameter of the call**, not a field of the record:
   `KeyBinding` declares no settlement address (`packages/trust/core/src/key-binding.ts:55-74`), so
   there is no record field for a catalog-internal cross-check to read. The commitment the ratified
