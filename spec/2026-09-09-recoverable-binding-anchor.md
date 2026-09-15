@@ -195,8 +195,8 @@ stated as such. The rule alone therefore does not close the set; the enumeration
 
 - `relationship`, `strength`, and `ceremony.type` are **constants of the authoring path** —
   `authorRoleBinding` writes `"controls"`, `"strong"`, and `"eoa"` literally
-  (`packages/trust/authoring/src/binding.ts:107`, `:111`, `:110`) — so they can vary between no two
-  bindings anywhere. `voucher` is out by the same clause for a narrower reason: it is derived
+  (`packages/trust/authoring/src/binding.ts:107`, `:111`, `:110`) — so they can vary between no
+  two bindings anywhere. `voucher` is out by the same clause for a narrower reason: it is derived
   from the one ceremony account the act runs under (`binding.ts:102-106`), so it varies between
   acts but is constant across every element of one act's array.
 - `validFrom` and `ceremony.digest` are **not knowable before the anchor mines**: §6 law 2 makes
@@ -337,15 +337,14 @@ in which every anchor must recompute, and the posture is a parameter over **ever
 procedure introduces — step 2's both-classes refusal, the §3.3 ASCII refusal and the §3.2.2
 uniqueness refusal that step 4 invokes while building the preimage, and step 5's mismatch.
 None of the four runs today, so under mixed mode each substitutes classify-and-report and nothing
-else changes. Parametrizing all
-of them rather than step 5 alone is what makes §10's "unchecked, exactly as today" true of a
-legacy anchor: were step 2 or the uniqueness rule left unconditional, a mixed-mode verifier built
-literally from this section would refuse an entire catalog over a `ceremony-anchor/v1` anchor
-whose referencing records collide — the uniqueness limb; step 2's shape is an anchor referenced
-by both a binding and a revocation, and the conclusion is the same — a shape that today opens
-and degrades only the affected key, because `uniqueBy` at `native-trust-catalog.ts:310` is over
-binding digests and the conflict
-surfaces per authorization at `:427-434`. That is one rule with a posture parameter, not two
+else changes. Parametrizing all of them rather than step 5 alone is what makes §10's "unchecked,
+exactly as today" true of a legacy anchor: were step 2 or the uniqueness rule left unconditional,
+a mixed-mode verifier built literally from this section would refuse an entire catalog over a
+`ceremony-anchor/v1` anchor whose referencing records collide — the uniqueness limb; step 2's
+shape is an anchor referenced by both a binding and a revocation, and the conclusion is the same
+— a shape that today opens and degrades only the affected key, because `uniqueBy` at
+`native-trust-catalog.ts:310` is over binding digests and the conflict surfaces per authorization
+at `:427-434`. That is one rule with a posture parameter, not two
 rules, and the profile document must publish it as one (§11 item 5).
 
 The verifier's procedure, sited in `openNativeTrustCatalog` alongside the referential-integrity
@@ -394,7 +393,7 @@ expensive rather than free. §10 (f) writes that reachability condition as "a bo
 time"; the wider phrasing here is deliberate and is this document's, not §10 (f)'s, for the
 reason the second paragraph below gives. That chain is verified rather than accepted: the consent
 chain exits at `if (resolved.isGenesis) return { ok: true }`
-(`packages/trust/core/src/verify.ts:201`), genesis is decided by earliest effective start among
+(`packages/trust/core/src/verify.ts:216`), genesis is decided by earliest effective start among
 the agent's bindings (`isGenesisAmong`,
 `packages/trust/resolve/src/binding-resolver.ts:217-223`, applied at `:298`), and the effective
 start is `max(validFrom, earliest anchor time)` (`:127-135`). An earlier anchor time therefore
@@ -410,12 +409,12 @@ the cost of real gas and foresight of both the victim IRI and their own keys". T
 adversary who knows a victim's Agent IRI in advance mints their own keypair, computes the
 successor digest over `{victim agent, attacker keyId, scopes}`, and submits a **genuine** anchor
 transaction, which recomputes correctly under successor-required. Presented later, its earlier
-effective start makes it genesis, exits the consent chain at `verify.ts:201`, and leaves the
+effective start makes it genesis, exits the consent chain at `verify.ts:216`, and leaves the
 victim's own binding non-genesis. The attacker's earlier-effective binding *is* an in-window
 `controls` peer, so `findIncumbentControlVoucher` (`binding-resolver.ts:201-212`) does return a
-voucher — it is the attacker's, and it fails the equality test at `verify.ts:205-209`. With no
+voucher — it is the attacker's, and it fails the equality test at `verify.ts:220-224`. With no
 consent countersignature to fall back on, the victim's binding fails outright
-(`verify.ts:245-249`). No borrowing occurs anywhere in that chain. What recomputation removes is
+(`verify.ts:267-273`). No borrowing occurs anywhere in that chain. What recomputation removes is
 the *free* version — reaching for an anchor somebody else already mined. What it leaves, priced at
 gas plus foresight, is the version above, and a profile document must publish the bound rather
 than the stronger claim.
@@ -578,7 +577,7 @@ Two things the gap does *not* break, checked rather than assumed. Genesis surviv
 (`binding-resolver.ts:217-223`, over `listBindingsForAgent` at
 `operator/src/daemon/native-trust-catalog.ts:367`), so after a wholesale rewrite exactly one
 re-authored binding **per Agent IRI** is genesis again and the consent chain exits at
-`packages/trust/core/src/verify.ts:201` as before. Which one is not "the earliest": §6 law 2
+`packages/trust/core/src/verify.ts:216` as before. Which one is not "the earliest": §6 law 2
 gives every re-authored binding the same `validFrom`, so they share one `effectiveStart` and the
 digest tie-break picks the genesis (`binding-resolver.ts:221`). And live operation is unaffected:
 the new bindings are effective from the new anchor time, and the deployment restarts anyway (§6 law 5).
@@ -695,9 +694,9 @@ about, and this is not one. Each is a constraint the successor introduces, not a
 of an existing one.
 
 - **F1 — a catalog carrying a proper subset of an act's bindings is refused under
-  successor-required (classified and reported under mixed mode, §4).** Nothing in the
-  tree produces one today: `authorCatalog` and `appendOperator` write an operator's bindings
-  whole, and `authorRoleBinding` writes a single-element `anchors` array per binding
+  successor-required (classified and reported under mixed mode, §4).** Nothing in the tree
+  produces one today: `authorCatalog` and `appendOperator` write an operator's bindings whole,
+  and `authorRoleBinding` writes a single-element `anchors` array per binding
   (`packages/trust/authoring/src/binding.ts:112`). But the range rule forecloses any future
   partial-publication pattern — an operator publishing only their discovery binding to a peer,
   for instance. The escape is to author a smaller *act*, with its own anchor over its own
@@ -717,10 +716,9 @@ of an existing one.
 - **F4 — a scope widening now breaks two things instead of one.** Today a widening breaks
   `RoleIdentitySet.open` at boot. Under the successor it also breaks anchor recomputation at
   catalog-open — a refusal under successor-required, a classified report under mixed mode (§4).
-  The recovery is the same re-author either way, and the second refusal is what
-  makes §6's ruling structural — but a deployment sees two refusals rather than one, and the
-  second one's error message must say so plainly or an operator will chase it as a separate
-  defect.
+  The recovery is the same re-author either way, and the second refusal is what makes §6's
+  ruling structural — but a deployment sees two refusals rather than one, and the second one's
+  error message must say so plainly or an operator will chase it as a separate defect.
 - **F5 — one hostile record can deny the whole catalog.** The schema lets any binding reference
   any *declared* anchor digest, and the opener checks only that the referenced digest is declared
   (`operator/src/daemon/native-trust-catalog.ts:329-331`). So under successor-required, any party
@@ -939,9 +937,9 @@ two items are DR-2026-09-06 decision 9's, restated here in its own terms rather 
    classify-and-report, and nothing else changes. The parameter must be total, or §10's
    "unchecked, exactly as today" is false for a legacy anchor whose referencing records collide.
    Publish that as **one** rule with a posture parameter — not as an unconditional refusal here
-   and a reporting mode in item 11, which would
-   hand the reader two contradictory normative rules about one behavior. Step 5's refusal names the
-   records in `R(a)` as well as the anchor digest, for the reason item 10 gives.
+   and a reporting mode in item 11, which would hand the reader two contradictory normative rules
+   about one behavior. Step 5's refusal names the records in `R(a)` as well as the anchor digest,
+   for the reason item 10 gives.
 6. **The re-anchor trigger** as a three-limb disjunction, with what each limb inspects and by
    whom, and T2's stated asymmetry: §5.2. Both rejected trigger shapes, with reasons: §5.5,
    §5.6.
