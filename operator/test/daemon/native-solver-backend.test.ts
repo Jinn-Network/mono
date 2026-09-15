@@ -16,10 +16,11 @@
  * convention as `composition-root.ts` and `native-evaluator-assembly.ts`; `source` stays the
  * agent IRI; and the two are distinct, so construction with capture enabled succeeds.
  */
-import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { openAttemptJournal } from '@jinn-network/task-execution-supervisor';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildInfo } from '../../src/build-info.js';
 
@@ -74,6 +75,39 @@ describe('native solver backend evidence identities (#36 follow-up)', () => {
       expect(executor).toBe(`urn:jinn:operator-runtime:${buildInfo.implVersion}`);
       // `source` stays the operator's persistent agent IRI.
       expect(source).toBe(AGENT_IRI);
+    } finally {
+      await solver.close();
+    }
+  });
+});
+
+describe('native solver backend boot reconciliation (#4397)', () => {
+  it('converges a nonterminal attempt on disk that no coordinator tracks', async () => {
+    const stateRoot = await realpath(await mkdtemp(join(tmpdir(), 'jinn-native-solver-sweep-')));
+    roots.push(stateRoot);
+    // An attempt that was engaged and then abandoned before any spawn intent — nothing in the
+    // operator remembers it, so only boot-time reconciliation can ever terminal it.
+    const id = randomUUID();
+    const attempt = `urn:uuid:${id}` as const;
+    const meta = join(stateRoot, 'attempts', id, 'meta');
+    await mkdir(meta, { recursive: true });
+    await writeFile(join(meta, 'attempt.json'), JSON.stringify({
+      attempt,
+      task: `sha256:${'0'.repeat(64)}`,
+      submission: `urn:uuid:${randomUUID()}`,
+      effectiveDeadline: '2099-01-01T00:00:00.000Z',
+    }));
+    openAttemptJournal(meta).append({ attemptId: attempt, type: 'attempt-engaged', details: { attempt } });
+
+    const solver = await buildNativeSolverBackend({
+      roles: { agent: AGENT_IRI, get: () => ({ keyId: 'did:key:solver-delivery' }) } as never,
+      stateRoot,
+      evidence: {} as never,
+      nodeExecutableDigest: await actualRunningNodeDigest(),
+    });
+    try {
+      const { derived } = (await solver.backend.observe(attempt)).descriptor;
+      expect(derived).toMatchObject({ terminal: true, state: 'rejected' });
     } finally {
       await solver.close();
     }
