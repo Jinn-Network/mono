@@ -504,7 +504,7 @@ Two real test bounds at 5000ms were found. Classification per site:
 
 Every other `}, <=5000)` hit under `operator/test` is **not a test bound** and
 needs no re-derivation next time: `e2e/task-first-helpers.ts:1037` is a
-`setInterval` argument, `daemon/native-base-sepolia-infrastructure.test.ts:761`
+`setInterval` argument, `daemon/native-base-sepolia-infrastructure.test.ts:763`
 is a stream `setTimeout`, `helpers/multi-op-daemon.test.ts:36,56` sit inside a
 daemon source string, and the `{ timeout: 5_000 }` object-form hits are
 `execFileSync` options, `vi.waitFor` budgets, or product `timeout` fields, not
