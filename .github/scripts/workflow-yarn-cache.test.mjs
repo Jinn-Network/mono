@@ -611,11 +611,17 @@ function shellInstallDirectories(run, loopValues) {
     if (name === undefined) return;
     if (name === 'cd' || name === 'pushd') {
       if (name === 'pushd') pushdStack.push(directories);
-      const separated = rest[0] === '--';
-      const target = separated ? rest[1] : rest[0];
+      // `cd -P app` resolves symlinks physically; the option says how to get there, not
+      // where. Taken as the target it named `-P/yarn.lock`.
+      let targetAt = 0;
+      while (targetAt < rest.length && /^-[LPe@]+$/u.test(rest[targetAt])) targetAt += 1;
+      const separated = rest[targetAt] === '--';
+      const target = separated ? rest[targetAt + 1] : rest[targetAt];
       if (target === undefined) directories = null;
       else if (target === '-' && !separated) [directories, previous] = [previous, directories];
-      else if (target.startsWith('~')) directories = null;
+      // `~` belongs to the shell, and an absolute path is not under the directory the
+      // walk is in: joined onto it, `cd b; cd /abs` named `b/abs/yarn.lock`.
+      else if (target.startsWith('~') || target.startsWith('/')) directories = null;
       else move(target);
       return;
     }
@@ -1809,6 +1815,7 @@ for (const [label, run] of [
   ['a versioned corepack yarn', 'cd app\n          corepack yarn@4 install --immutable'],
   ['a versioned npx yarn', 'cd app\n          npx yarn@1 install --immutable'],
   ['a verb-less versioned yarn', 'cd app\n          corepack yarn@4.13.0'],
+  ['a cd with a -P option', 'cd -P app; yarn install --immutable'],
   // A backslash-newline inside a word is a continuation, not part of the word: read
   // as `yarn\n`, the command was not `yarn` and the install was invisible.
   ['a continued yarn word', 'cd app\n          "yarn"\\\n            install --immutable'],
@@ -1846,6 +1853,8 @@ for (const [label, run] of [
   // requirement at all, the silent direction.
   ['an install as an if condition', 'if ! yarn install --immutable; then echo drift; exit 1; fi'],
   ['an install as a while condition', 'while yarn install --immutable; do sleep 1; done'],
+  // An absolute target is not under the walk's directory: joined, it named `app/abs/yarn.lock`.
+  ['an absolute directory change', 'cd app\n          cd /abs\n          yarn install --immutable'],
   // Each of these once named a literal path no checkout can contain — `$/yarn.lock`,
   // `app*/yarn.lock` — while silently dropping the requirement on the directory the
   // install really runs in. A confident wrong answer is the one direction #4255 rules
