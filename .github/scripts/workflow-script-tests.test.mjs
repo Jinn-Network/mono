@@ -377,9 +377,10 @@ export function foldedTestInvocations(workflowsRoot = workflowsDir) {
       let cursor = index + 1;
       if (header[2] === undefined) {
         // A bare `run:` (or `run: &anchor`) is a folded header only if the indicator sits alone on
-        // the next non-blank line, indented past the key. `|` there is a literal scalar and a
-        // mapping key there is the `defaults.run:` block; neither is refused (#4399).
-        while (cursor < lines.length && lines[cursor].trim() === '') cursor += 1;
+        // the next non-blank, non-comment line, indented past the key — YAML skips a whole-line
+        // comment there exactly as it skips a blank. `|` there is a literal scalar and a mapping
+        // key there is the `defaults.run:` block; neither is refused (#4399).
+        while (cursor < lines.length && withoutCommentLine(lines[cursor]).trim() === '') cursor += 1;
         if (cursor >= lines.length) continue;
         if (!/^\s*>[-+]?\d*[-+]?\s*(?:#.*)?$/u.test(lines[cursor])) continue;
         if (lines[cursor].match(/^\s*/u)[0].length <= keyColumn) continue;
@@ -566,13 +567,16 @@ test('a folded run scalar hiding node --test is detected, and shows why it must 
 // Three more places YAML lets the folded header sit, each of which the `run:`-line-anchored match
 // read as an ordinary scalar while `collectTestInvocations` still under-read the body as a one-file
 // batch: the header on the line after a bare `run:`, an anchor between key and header, and a quoted
-// key (#4399). Each fixture asserts the refusal and the under-read it exists for. The quoted key is
-// the load-bearing one: it contains no `run:` substring, so a key column taken by `indexOf` came
-// back -1 and the body walk never stopped — a `node --test` anywhere later in the file would have
-// reported as folded.
+// key (#4399). Each fixture asserts the refusal and the under-read it exists for. The next-line
+// header may also sit behind a whole-line comment, which YAML skips exactly as it skips a blank
+// line. The quoted key is the load-bearing one: it contains no `run:` substring, so a key column
+// taken by `indexOf` came back -1 and the body walk never stopped — a `node --test` anywhere later
+// in the file would have reported as folded. The last negative below pins that: a quoted-key body
+// without `node --test` followed by a dedented step that has one must report nothing.
 test('a folded run scalar is refused with its header on the next line, behind an anchor, or under a quoted key', () => {
   const shapes = [
     { name: 'next-line header', header: ['      - run:', '          >-'], line: 6 },
+    { name: 'comment, next-line header', header: ['      - run:', '          # note', '          >-'], line: 7 },
     { name: 'anchor before header', header: ['      - run: &cmd >-'], line: 5 },
     { name: 'anchor, next-line header', header: ['      - run: &cmd', '          >-'], line: 6 },
     { name: 'double-quoted key', header: ['      - "run": >-'], line: 5 },
@@ -605,6 +609,7 @@ test('a folded run scalar is refused with its header on the next line, behind an
   for (const { name, lines } of [
     { name: 'bare run: then literal', lines: ['      - run:', '          |', '          node --test x.test.mjs', '          y.test.mjs'] },
     { name: 'defaults.run mapping', lines: ['defaults:', '  run:', '    shell: bash', 'jobs:', '  verify:', '    steps:', '      - run: node --test x.test.mjs y.test.mjs'] },
+    { name: 'quoted-key body ends before a dedented step', lines: ['jobs:', '  verify:', '    steps:', '      - "run": >-', '          echo hi', '      - run: node --test a.test.mjs'] },
   ]) {
     const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-negative-'));
     try {
