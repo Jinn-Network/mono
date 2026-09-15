@@ -473,9 +473,16 @@ const informationalYarnFlags = new Set(['--version', '-v', '--help', '-h']);
 // The set is not closed and cannot be: any wrapper it does not list makes whatever
 // follows the command name. Left there, a wrapped install was simply invisible —
 // `xvfb-run yarn install` imposed no cache requirement at all, the silent direction.
-// So an unknown command whose later words spell a Yarn install is read as underivable
-// in `finish()` below: the job goes red with "could not derive" rather than green.
-// Accepted limit, in the safe direction: `echo yarn install` is underivable too.
+// So an unknown command whose later words spell an explicit Yarn install is read as
+// underivable in `finish()` below: the job goes red with "could not derive" rather than
+// green. Explicit, because a bare `yarn` is only an install when it is the command:
+// `npm install -g yarn` and `corepack enable yarn` name `yarn` without running it.
+//
+// Accepted limits. In the safe direction: `echo yarn install` is underivable, and so
+// is a prefix whose argument is not option-shaped — `sudo -u runner -E yarn install`
+// leaves `runner` as the command name. In the WRONG direction: a wrapper that is a
+// separate process (`env cd app`, `timeout 300 cd app`) runs its `cd` in a child and
+// the shell stays put, while this walk follows it into `app` (#4570).
 const commandPrefixes = new Set([
   'do', '{', '!', 'time', 'env', 'sudo', 'command', 'exec', 'nice', 'npx',
   'timeout', 'corepack', 'builtin', 'xvfb-run',
@@ -527,7 +534,7 @@ function yarnInvocation(rest) {
   const isInstall = args.length === 0
     ? !flags.some((flag) => informationalYarnFlags.has(flag))
     : args[0] === 'install';
-  return { isInstall, cwd };
+  return { isInstall, cwd, verbless: args.length === 0 };
 }
 
 // Walk the tokens the way the shell walks them, tracking the working directory across
@@ -577,6 +584,9 @@ function shellInstallDirectories(run, loopValues) {
     let at = 0;
     while (at < words.length
       && (commandPrefixes.has(words[at]) || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[at]))) {
+      // `command -v yarn` only reports where `yarn` is; nothing runs. Stepped over as
+      // an option it left a verb-less `yarn` as the command name — an install.
+      if (words[at] === 'command' && /^-[pvV]*[vV]/u.test(words[at + 1] ?? '')) return;
       at += 1;
       while (at < words.length && prefixArgumentPattern.test(words[at])) at += 1;
     }
@@ -602,10 +612,16 @@ function shellInstallDirectories(run, loopValues) {
     }
     if (name.split('/').pop() !== 'yarn') {
       // An unlisted wrapper around an install (see `commandPrefixes`). Only an
-      // install matters: `env -u TOKEN yarn test` leaves `TOKEN` as the name and must
-      // impose nothing, exactly as a bare `yarn test` imposes nothing.
+      // explicit install matters: `env -u TOKEN yarn test` leaves `TOKEN` as the name
+      // and must impose nothing, exactly as a bare `yarn test` imposes nothing — and
+      // `which yarn` names `yarn` without running it, so a verb-less `yarn` here is
+      // an install only when `--cwd` says so.
       const wrapped = rest.findIndex((word) => word.split('/').pop() === 'yarn');
-      if (wrapped !== -1 && yarnInvocation(rest.slice(wrapped + 1)).isInstall) installs.push(null);
+      if (wrapped === -1) return;
+      const invocation = yarnInvocation(rest.slice(wrapped + 1));
+      if (invocation.isInstall && (!invocation.verbless || invocation.cwd !== null)) {
+        installs.push(null);
+      }
       return;
     }
 
@@ -1520,6 +1536,17 @@ for (const run of [
   // it imposes nothing, as the unwrapped command would.
   'env -u SOME_TOKEN yarn test',
   'some-wrapper yarn --version',
+  // `yarn` named without being run. Each of these once imposed a requirement or read
+  // as underivable: `command -v` is not a wrapper, and a verb-less `yarn` behind an
+  // unlisted command is an argument, not the command.
+  'command -v yarn >/dev/null || npm i -g yarn',
+  'which yarn',
+  'npm install -g yarn',
+  'corepack enable yarn',
+  // A version spec is Yarn (see `isYarn`), and this is the form every workflow here
+  // uses to activate it; the verb-less rule above is what keeps it from reading as an
+  // install.
+  'corepack prepare yarn@4.13.0 --activate',
 ]) {
   test(`guard does not mistake \`${run}\` for an install`, () => {
     withFixture(({ fixtureRoot, fixtureWorkflows }) => {
@@ -1808,6 +1835,8 @@ for (const [label, run] of [
   // no requirement at all — which is the silent direction; underivable is the loud one.
   ['an unlisted command wrapper', 'cd app\n          some-wrapper yarn install --immutable'],
   ['a wrapper of a yarn invoked by path', 'cd app\n          some-wrapper ./node_modules/.bin/yarn install'],
+  // A verb-less `yarn` behind a wrapper is an install only when `--cwd` says so.
+  ['a wrapper of a verb-less yarn with --cwd', 'some-wrapper yarn --cwd app'],
   // A loop value the walk cannot expand made only that sibling vanish: `a/yarn.lock`
   // was named, the substituted directory silently dropped.
   ['a loop value the walk cannot expand', 'for d in a `x`; do (cd $d && yarn install --immutable); done'],
