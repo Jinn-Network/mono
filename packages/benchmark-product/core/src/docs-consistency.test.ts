@@ -99,6 +99,15 @@ const readerLine = (command: string): string => {
   return token;
 };
 
+/** The body of every fenced block in a Markdown region, whatever its info string. Both the opener
+ * and the closer must sit at a line start, as a Markdown renderer reads an unindented fence (the
+ * only kind this guide writes): an inline ```` ```x``` ```` in prose is code, not a fence, and
+ * letting it open one would shift every later fence boundary so that a real fence's body fell
+ * outside any capture and its reader line went unchecked (#4509). */
+function fenceBodies(markdown: string): readonly string[] {
+  return [...markdown.matchAll(/^```[^\n]*\n(.*?)^```/gmsu)].map((fence) => fence[1]!);
+}
+
 const CHECK_COUNT_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight"];
 
 /** The guide states check counts in words, so a list length has to be rendered the same way. */
@@ -402,21 +411,53 @@ describe("product documentation consistency", () => {
       // does not use -- v7 contrasts against the `@0.1` line it cannot read, v4 explains which
       // line refuses it -- so a "no foreign line anywhere" rule would be false. What a section
       // must never do is instruct a reader to RUN a line the format does not pin.
-      const stated = [...section.matchAll(/```bash\n(.*?)```/gsu)]
-        .flatMap((fence) => [...fence[1]!.matchAll(/npx @colophon-claims\/verify\S*/gu)])
+      // Every fence, whatever its info string: the recipes are `bash` today, but a `sh` or bare
+      // fence is still an instruction to run, and scanning only ```bash would let one carry a line
+      // the format does not pin (#4011). Verified a no-op on the guide as it stands.
+      const stated = fenceBodies(section)
+        .flatMap((body) => [...body.matchAll(/npx @colophon-claims\/verify\S*/gu)])
         .map((command) => readerLine(command[0]));
       expect(stated.length, `${format} states no reader command`).toBeGreaterThan(0);
 
       const instruction = PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[format];
-      const pinned = new Set([
-        readerLine(instruction.command),
-        readerLine(instruction.compatibleCommand),
-        ...(format === BUNDLE_FORMAT || format === BUNDLE_V4_FORMAT ? promptedLines : []),
-      ]);
+      // `/5` pins its compatible line alone: claim-package/3 states one `command`, and the table's
+      // `/5.command` reproduces the producer rather than naming a line any `/5` bundle carries --
+      // the same asymmetry the table row above follows (#3941). Reading `command` here admitted the
+      // exact producer line to a section that must never instruct a reader to run it (#4011).
+      //
+      // `/2` and `/4` keep the union of `command` and `compatibleCommand` (plus the prompted lines)
+      // as a residual: each section legitimately states an unprompted line and a prompted one, and
+      // nothing in a fence says which it is, so the pin cannot narrow to one. For the other four
+      // the union is not vacuous -- `command` and `compatibleCommand` differ -- and every fence
+      // must still be one of those two.
+      const pinned = new Set(
+        format === BUNDLE_V5_FORMAT
+          ? [readerLine(instruction.compatibleCommand)]
+          : [
+              readerLine(instruction.command),
+              readerLine(instruction.compatibleCommand),
+              ...(format === BUNDLE_FORMAT || format === BUNDLE_V4_FORMAT ? promptedLines : []),
+            ],
+      );
       for (const line of stated) {
         expect(pinned.has(line), `${format} section runs ${line}, which it does not pin`).toBe(true);
       }
     }
+  });
+
+  it("does not let an inline triple-backtick in prose shift a fence boundary", () => {
+    // The unit-level probe for `fenceBodies` (#4509). The guide carries no inline ```` ```x``` ````
+    // today, so the section pin above cannot observe the hazard; this states it directly. Without
+    // the line-start anchors the inline span opens a phantom fence that closes at the real fence's
+    // opener, and the real body -- the one carrying the reader line -- is captured by nothing.
+    const prose = "Spell it ```like this``` in prose.\n";
+    const fence = "```bash\nnpx @colophon-claims/verify@0.2.1 verify .\n```\n";
+    expect(fenceBodies(prose + fence)).toEqual(["npx @colophon-claims/verify@0.2.1 verify .\n"]);
+    expect(fenceBodies(fence + prose)).toEqual(["npx @colophon-claims/verify@0.2.1 verify .\n"]);
+    // And the closer is anchored too: a fence body that mentions a triple backtick mid-line stays
+    // one body, exactly as a Markdown renderer reads it.
+    const withInlineInside = "```sh\necho ```not a closer```\nnpx @colophon-claims/verify@0.2.1 verify .\n```\n";
+    expect(fenceBodies(withInlineInside)).toEqual(["echo ```not a closer```\nnpx @colophon-claims/verify@0.2.1 verify .\n"]);
   });
 
   it("pins the too-old refusal sample to the formats the released 0.2.0 reader supports", () => {
@@ -492,6 +533,36 @@ describe("product documentation consistency", () => {
     expect(publication?.replace(/\s+/gu, " ")).toContain(
       `\`latest\` \`${readerLine(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND).slice(1)}\``,
     );
+  });
+
+  it("keeps the two format references silent about registry state", () => {
+    // Issue #4065. Every sentence in these two documents that said what npm serves -- which
+    // release is `latest`, what the `@0.2` range resolves to, which packages are still
+    // unpublished -- went stale on the next publish, and nothing pinned it (#3961 was the third
+    // sweep of the same prose). The format references describe pinned artifacts and immutable
+    // reader behavior; the product README's publication paragraph is the one home for registry
+    // state, and the test above pins it to the version this tree pins. A block that names the
+    // reader AND speaks in registry vocabulary is the defect. The co-occurrence is what keeps
+    // `publish` in its bundle-emission sense legal: "the bundle published on colophon.claims"
+    // names no reader, and "every v5 bundle published before this profile existed" carries no
+    // auxiliary verb.
+    const reader = /@colophon-claims\/(?:verify|cli|core)|`@?\d+\.\d+(?:\.\d+)?`/u;
+    const registryState =
+      /`latest`|\bregistry\b|\bunpublished\b|\b(?:is|are|was|were|been)\s+published\b|\bpublication\s+pending\b|\bpending\s+publication\b|\bnot\s+yet\s+published\b|\bsince\s+been\s+cut\b|\bresolves?\s+to\s+`\d/iu;
+    // The guard's own negative: a literal offending sentence must trip both halves, and an
+    // emission-sense sentence beside a version token must not, or an edit to either regex that
+    // matches nothing passes silently.
+    const offending = "`@colophon-claims/verify@0.2.1` is published as `latest`.";
+    expect(reader.test(offending) && registryState.test(offending)).toBe(true);
+    const emission = "a bundle published before `0.2.1` existed pins `@0.2.0`";
+    expect(reader.test(emission)).toBe(true);
+    expect(registryState.test(emission)).toBe(false);
+    for (const path of [bundleReadmePath, externalVerificationPath]) {
+      const blocks = read(path)
+        .split(/\n\s*\n/u)
+        .filter((block) => reader.test(block) && registryState.test(block));
+      expect(blocks, path).toEqual([]);
+    }
   });
 
   it("documents the exact private web configuration and package commands", () => {

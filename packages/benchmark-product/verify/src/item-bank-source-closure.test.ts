@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { BenchmarkProductError } from "./profile/errors.js";
+import { expectRefusal } from "./testing/expect-refusal.js";
 import {
   BINARY_ITEM_BANK_ENTRY_PROTOCOL,
   BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
@@ -58,16 +58,6 @@ function sourceRow(character: string) {
 
 const ITEM_ONE = "urn:uuid:40000000-0000-4000-8000-000000000001";
 const ITEM_TWO = "urn:uuid:40000000-0000-4000-8000-000000000002";
-
-function expectRefusal(run: () => unknown): BenchmarkProductError {
-  try {
-    run();
-    throw new Error("expected a refusal");
-  } catch (cause) {
-    expect(cause).toBeInstanceOf(BenchmarkProductError);
-    return cause as BenchmarkProductError;
-  }
-}
 
 describe("cold-verify item-bank/source-manifest closure", () => {
   test("accepts a bank whose cluster key is one of the item's own declared sources", () => {

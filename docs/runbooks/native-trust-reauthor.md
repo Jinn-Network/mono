@@ -111,8 +111,8 @@ anchor's block time, evidence signed inside that window de-attributes for **ever
 only the widened one. It resolves against neither the old bindings (replaced) nor the new ones
 (not yet effective).
 
-**A proposed rule would remove the judgment: mint fresh whenever the act's bindings change.** It
-is **proposed**, not adopted, in
+**A proposed rule would remove the judgment: mint fresh whenever a term of the successor preimage
+changes.** It is **proposed**, not adopted, in
 [`spec/2026-09-09-recoverable-binding-anchor.md`](../../spec/2026-09-09-recoverable-binding-anchor.md)
 §6, which argues it from non-retroactivity of authority and shows that under the successor
 preimage it stops being a judgment and becomes a mechanism. Until that document is adopted, the

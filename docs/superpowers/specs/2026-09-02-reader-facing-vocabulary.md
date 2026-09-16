@@ -1,7 +1,7 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.3
-- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-10)
+- **Version:** 1.4
+- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -18,18 +18,19 @@
 - **v1.2** (#3837): files §7's five presentation-rename units as issues (#3861–#3865) and
   records each number in §7. §7's closing note now says no *external* condition gates them,
   which is what "unblocked" meant before the tracker could see their order. No ruling changes.
-- **v1.3** (#4335): discharges the seven places that deferred to #2982, whose ruling has since
+- **v1.3** (#3918): records under §4.2 that the gloss column stops at `colophon-verify` and
+  does not reach the product CLI's `colophon bundle verify` line, with the reasons. No earlier
+  ruling changes.
+- **v1.4** (#4335): discharges the seven places that deferred to #2982, whose ruling has since
   shipped — the verdict line names the operation (`Recomputed: N of N checks passed`), and
   §4.1's *Recompute this yourself* and *What gets recomputed* and §5's glossary row take the
   same verb, as the verdict row's own binding text required of whatever verb #2982 picked.
   Rewrites, rather than re-points, the four §4.2 `cli.ts` rows whose quoted strings had
   themselves changed — under #2982, then #3675 and #3691, then #2981 — and anchors them to
   the `const` and function names that carry those strings instead of to line numbers that had
-  all rotted. Records the v4 qualification badge as **unruled**: #2982's scope reached the
-  verdict line and not that surface, so §6 now carries the badge as the open question in
-  place of the settled verdict verb. No v1.0, v1.1 or v1.2 disposition is reversed; the badge
-  row moves from *deferred* to *explicitly unruled*, which restates its status rather than
-  changing it.
+  all rotted. Leaves the v4 qualification badge to #4270, whose ruling (rename, held) landed
+  first, so §6 no longer lists the badge as an open question. No v1.0–v1.3 disposition is
+  reversed.
 
 ## 1. Scope
 
@@ -48,7 +49,7 @@ It is deliberately narrow at three boundaries:
   names the operation — `Recomputed: N of N checks passed` — never *verified* / *certified* /
   *validated* / *audited*, and its caveats render beneath the verdict block, unconditionally. This
   document states the rest of the tool's vocabulary around that ruling (§4.2). The one reader
-  surface #2982's scope did not reach — the v4 qualification badge — stays unruled; see §6.
+  surface #2982's scope did not reach — the v4 qualification badge — was ruled in #4270 (§4.1).
 - **#2983 owns identity rendering** (keys bound to domains). The signer-role names in §4.2 are
   ruled here; what a bound identity looks like is ruled there.
 
@@ -203,7 +204,7 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Independence clusters | rename + gloss | Groups that do not share a source | The counted quantity is kept; only the noun changes. |
 | Benchmark and configuration scope | rename | What was tested, and how each configuration was pinned | The `<h2>` at `assets.ts:827`; its `Arms and pinned configuration` sub-heading becomes **Each configuration, pinned**, following the `arm` → *Configuration* rename above. |
 | Evidence signpost (social card) | rename | Benchmark report | The v4 card's phrase; the current card already says "Benchmark report". Retire the older wording with the v4 assets. |
-| Colophon · verified qualification (v4 badge) | **unruled** | — | #2982 ruled the *verdict line* and established the reserved-word principle, but a qualification badge asserts a different act, so the ruled verb does not transfer to it. The surface is outside #2982's scope and outside this document's; §6 inventories its strings and names the decision still owed. |
+| Colophon · verified qualification (v4 badge) | rename (held) | Colophon · binary qualification | Ruled in #4270: the reserved word is retired from the badge, social card, share text, index prose, and the report README's status line (`assets.ts:1096`) — the five sites the emission-site comment enumerates. A badge carries no room for the caveats the CLI prints under its verdict, so it names the scope instead. **Held pending a bundle-format allocation**, not yet applied: `verify.ts` byte-compares every presentation asset against the reader's own rebuild, and every qualifying format pins a published reader, so moving these bytes without an allocation makes each side refuse the other. The hold is recorded at the emission site (`verify/src/assets.ts`, above `buildBadge`), beside the #2980 and #2977 holds. |
 | No comparative winner stated | keep | — | Load-bearing and already plain. |
 
 #### Binary-qualification report surface (binary reports only)
@@ -307,6 +308,16 @@ rows that needed it, not retrofitted across the document.
 | `Protocol identifiers are names, not addresses — this verifier fetches nothing from them.` | keep | — | `IDENTIFIER_DISCLOSURE`. A different claim from this row's earlier quotation, not a moved line: the old string named the `https://spec.jinn.network/…` origin and disclosed that it was not hosted; the current one declines to hand a reader an unresolvable origin at all and states the fetch-nothing property in its place. Ruling unchanged — keep; both halves load-bearing. This constant also carries the platform-bytes sentence in the row above, so those two rows now describe one merged string. |
 | Usage text | rename where §4.1 renames | — | Follows the same glossary. Reaches the usage and error text in full, `usage()` included; the three closing-paragraph rows above are ruled explicitly so that reach is not left to inference. |
 
+The gloss column stops at `colophon-verify`. The product CLI's `colophon bundle verify` line
+(`renderBundleVerifyLine` in `core/src/cli/main.ts`) keeps printing bare check names, and that
+is a ruling rather than an omission (#3918). The line is outside §1's scope: it is one
+comma-joined sentence for the operator who just ran the product, not a cold reader's surface,
+and it has no column a gloss could sit in. The gloss map is also private to the reader's
+`cli.ts`, and the product consumes the reader at a pinned release, so glossing "from the same
+map" would wait on a reader export that does not exist, while a copy of the map in the product
+is exactly the drift `CHECK_SUBJECTS` exists to prevent (#3691). The glossed rendering is one
+command away: run the standalone reader on the same bundle, at the line its claim pins.
+
 ### 4.3 Docs
 
 Docs prose is **presentation**; the contract spellings quoted inside it are not.
@@ -385,33 +396,6 @@ leaves by rename (§4.1: `CAS record` → *Evidence file*), not by hiding.
 
 ## 6. What this spec does not decide
 
-- The v4 qualification badge's verb. #2982 has ruled and its ruling has shipped: it ruled
-  the verdict *line* and established the reserved-word principle — never *verified* /
-  *certified* / *validated* / *audited* for an act the tool did not perform. A qualification
-  badge asserts a different act, so the ruled verb does not transfer to it and #2982's scope
-  never reached it. The decision is a separate one, not this document's, and it is owed under
-  the principle #2982 established. The strings it must reach, as they stand in `assets.ts`
-  (§4.1's row is the pointer; this is the inventory):
-  - The reserved word survives on the **binary branch only**, which is the whole of the
-    surface: `buildBadge`, `buildSocialCard` and `buildShareText` each emit it under
-    `reportFacts.kind === "binary"`, in three spellings — `Colophon · verified qualification`
-    in `buildBadge`'s visible text and in `buildShareText`'s line, `COLOPHON · VERIFIED
-    QUALIFICATION` in `buildSocialCard`'s visible text, and `Colophon verified qualification`,
-    separator dropped, in both SVG `<title>` elements — over a `<desc>` that opens
-    `Verified.` in the badge and the card.
-  - Both SVG builders also seal `verified=true` into `<metadata>`, so the assertion is
-    machine-readable and not only a caption; the decision has to reach that too.
-  - The wilson and paired branches carry no reserved word to rule, but they do not speak
-    with one voice either: `buildBadge` (in its `<title>`, with the disclaimer repeated
-    lowercase in its `data-field="neutral-status"` line) and `buildShareText` state
-    `Colophon · <run outcome>; no comparative winner stated`, while `buildSocialCard` splits
-    that in two — `Colophon · <run outcome>; neutral benchmark report` in its `<title>`, and
-    the disclaimer itself, uppercased, in its `data-field="neutral-status"` line as
-    `<run outcome> · NO COMPARATIVE WINNER STATED` — over a scope-line `<desc>`.
-  - A further reserved-word string sits in the same file — `pairedCompactFragment`'s
-    `Verified qualification signpost · full evidence at index.html` — but no surface carries
-    it: all three builders return on `binary` before reaching that call, so that branch is
-    unreachable, and it should be decided or deleted in the same pass.
 - How many of these terms survive above the fold (#2985).
 - How a signing identity is displayed (#2983).
 - Whether any contract spelling should *also* change at the next format revision. §7 queues the

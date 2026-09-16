@@ -658,6 +658,24 @@ describe("the corpus-sync capability", () => {
     await built.capability.stop!();
   });
 
+  test("a logger that throws on the skipped line is not recorded as the cycle's error (#4482)", async () => {
+    // The `skipped` debug runs inside the cycle's main try, so a throw there
+    // landed in the catch that stamps `error` on the cycle line: a cycle that
+    // observed nothing reported as though the sync itself had faulted.
+    const built = harness({ outcomes: [{ status: "skipped-locked", sources: [] }] });
+    built.log.debug.mockImplementationOnce(() => {
+      throw new Error("EPIPE: broken pipe");
+    });
+    await built.start();
+    await settle();
+    expect(built.syncCalls()).toBe(1);
+    expect(cycleLines(built)[0]![1]).not.toHaveProperty("error");
+
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    expect(built.syncCalls()).toBe(2);
+    await built.capability.stop!();
+  });
+
   test("the next cycle is still scheduled when the injected clock throws", async () => {
     // The same guard, through its other door: the clock is injected too, and
     // a cycle that cannot stamp its own record must still leave a successor.

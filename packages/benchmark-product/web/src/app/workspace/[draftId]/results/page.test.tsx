@@ -24,8 +24,14 @@ vi.mock("@/components/verification-form", () => ({
   VerificationForm: () => <form>Verify records</form>,
 }));
 
+import type { RunResultsReport } from "@colophon-claims/core";
 import ResultsPage from "./page";
 import { PRODUCT_BRANDING } from "@/lib/branding";
+
+/** One sealed Report per-subject disclosure (`PerSubjectDisclosureSchema`). The fixture's entries
+ * are bound to it so a field named against the wrong schema is a compile error rather than a
+ * silent `undefined` (issue #3958). */
+type ReportSubjectDisclosure = RunResultsReport["record"]["disclosures"]["perSubject"][number];
 
 const matrixSha256 = "a".repeat(64);
 const reportSha256 = "b".repeat(64);
@@ -35,6 +41,21 @@ const envelopeSha256 = "c".repeat(64);
  * Report per-subject disclosure carries again for that subject alone. */
 function armCounts(expected: number) {
   return { expected, judged: expected, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 0, replacements: 0 };
+}
+
+/** One subject's sealed disclosure with `baselineExpected` planned baseline slots. Only
+ * `subjectSha256` and `attrition.perArm[].expected` are read by the page; the rest is the sealed
+ * shape filled in consistently so the whole entry is one a real Report could carry. */
+function subjectDisclosure(subjectSha256: string, baselineExpected: number): ReportSubjectDisclosure {
+  const axis = { match: baselineExpected, mismatch: 0, unverifiable: 0 };
+  return {
+    subjectSha256,
+    integrityTiers: { "re-derivable": baselineExpected, "attested-only": 0 },
+    pinning: { harness: axis, model: axis, loadout: axis, isolation: axis },
+    independence: 0,
+    completeness: { expected: baselineExpected, judged: baselineExpected, floor: "1.0000", runOutcome: "complete" },
+    attrition: { perArm: { baseline: armCounts(baselineExpected) }, asymmetryFlags: [] },
+  };
 }
 
 function reportedView() {
@@ -111,7 +132,7 @@ function reportedView() {
                 },
               }],
             },
-            disclosures: { perSubject: [{ subjectSha256: matrixSha256, independence: 0, evidence: "report-disclosure-" + "y".repeat(256), attrition: { perArm: { baseline: armCounts(1) }, asymmetryFlags: [] } }] },
+            disclosures: { perSubject: [subjectDisclosure(matrixSha256, 1)] },
             limitations: ["Local self-run venue."],
           },
           claimPackage: {
@@ -417,12 +438,7 @@ describe("declared and all-slots denominators", () => {
       },
     });
     record.disclosures.perSubject[0]!.attrition.perArm.baseline = armCounts(2);
-    record.disclosures.perSubject.push({
-      subjectSha256: secondSubject,
-      independence: 0,
-      evidence: "report-disclosure-" + "z".repeat(256),
-      attrition: { perArm: { baseline: armCounts(9) }, asymmetryFlags: [] },
-    });
+    record.disclosures.perSubject.push(subjectDisclosure(secondSubject, 9));
     const markup = await render(view);
     const first = markup.indexOf(`Report subject ${matrixSha256}`);
     const second = markup.indexOf(`Report subject ${secondSubject}`);

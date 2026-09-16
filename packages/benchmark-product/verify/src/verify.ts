@@ -156,12 +156,16 @@ export type PublicBundleVerificationCheck =
   | "matrix-rederivation"
   | "report-verification"
   | "claim-consistency"
-  /** Always present for the anchored closures, `benchmark-product-public-bundle/6`, `/7`, and `/8`,
-   * never for any earlier one (anchor-evidence design §8, §12). */
+  /** Present exactly when the declared format's closure carries anchors — the `carriesAnchors`
+   * axis resolved beside the mandatory-member list (anchor-evidence design §8, §12) — and for no
+   * other format. Deliberately not an enumeration: the last one went stale when `/10` joined the
+   * anchored closures (#4406). */
   | "integrity-anchors"
-  /** Always present for `benchmark-product-public-bundle/8`, never for any earlier closure
-   * (disclosure-specification-record design §7, issue #2839). Runs last: the claim's `disclosure`
-   * section is among the things it depends on having already been byte-compared. */
+  /** Present exactly when the declared format's closure carries a disclosure record — today only
+   * `benchmark-product-public-bundle/8` (disclosure-specification-record design §7, issue #2839).
+   * Absence means the closure carries no disclosure record, not that the format is older: `/10` is
+   * numerically later than `/8` and carries none. Runs last: the claim's `disclosure` section is
+   * among the things it depends on having already been byte-compared. */
   | "disclosure-specification";
 
 export interface LegacyPublicBundleVerificationResult extends PublicBundleSignerDisclosure {
@@ -174,7 +178,8 @@ export interface LegacyPublicBundleVerificationResult extends PublicBundleSigner
   readonly reportSha256: string;
   readonly reportEnvelopeSha256: string;
   readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
-  /** Present exactly for the anchored closure: every carried anchor's own outcome plus each
+  /** Present exactly when the closure carries anchors (`carriesAnchors`, the same predicate that
+   * adds `integrity-anchors` to `checks`): every carried anchor's own outcome plus each
    * subject's context outcome (anchor-evidence design §8). Statuses are disclosed facts, not a
    * summary — nothing here is folded into a single verified badge. */
   readonly anchors?: IntegrityAnchorsReport;
