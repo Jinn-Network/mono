@@ -636,6 +636,29 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     return;
   }
 
+  // Issue #4202: a spec-file window that has already closed would post a task
+  // no one can claim. Refuse it before confirmation. A dry-run still previews
+  // (the shipped fixtures carry placeholder timestamps), and an open window
+  // that has already started stays claimable until endTs. The machine request
+  // path has its own freshness check.
+  const specWindow = specOverlay?.window as { startTs?: unknown; endTs?: unknown } | undefined;
+  const nowMs = Date.now();
+  if (!machineRequest && typeof specWindow?.endTs === 'number' && specWindow.endTs <= nowMs) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message:
+          `Task window has already ended: window.startTs=${String(specWindow.startTs)}, ` +
+          `window.endTs=${specWindow.endTs}, now=${nowMs} (epoch ms). ` +
+          'Set window.endTs in the spec file to a future time.',
+        exampleCli: 'jinn tasks submit --id my-1 --description "..." --spec-file <spec.json> --dry-run',
+        details: { field: 'window.endTs', expected: `epoch ms greater than ${nowMs}` },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
   if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
   if (machineRequest) {
     try {

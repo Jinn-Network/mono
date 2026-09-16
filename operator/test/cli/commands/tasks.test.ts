@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import tasksCommand from '@/cli/commands/tasks.js';
 import {
@@ -924,5 +925,88 @@ describe('tasks submit machine contract', () => {
     expect(secondPostTask).not.toHaveBeenCalled();
     secondStore.close();
     await secondAdapter.stop();
+  });
+});
+
+// Issue #4202: a spec-file submit whose window has already closed would post
+// a task no one can ever claim. Refuse it before confirmation or any post.
+describe('tasks submit spec-file window freshness', () => {
+  afterEach(() => {
+    createCliExecutionContext.mockReset();
+    gatherIntrospectionRaw.mockClear();
+  });
+
+  const fixturePath = fileURLToPath(new URL('../../../fixtures/prediction-v1-task.example.json', import.meta.url));
+
+  function specFileWithWindow(window: { startTs: number; endTs: number }) {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-window-'));
+    const file = join(dir, 'spec.json');
+    const config = join(dir, 'config.json');
+    const raw = JSON.parse(readFileSync(fixturePath, 'utf8')) as {
+      spec: { resolution: Record<string, unknown> };
+    };
+    // prediction.v1 requires the resolution time to follow the window.
+    raw.spec.resolution.expectedResolutionTime = new Date(window.endTs + 86_400_000).toISOString();
+    writeFileSync(file, JSON.stringify({ ...raw, window }));
+    writeFileSync(config, '{}');
+    return { file, config };
+  }
+
+  function submitArgv(file: string, config: string, mode: '--yes' | '--dry-run') {
+    return [
+      'submit', '--id', 'window-1', '--description', 'window test',
+      '--spec-file', file, '--manifest-cid', 'bafy-window', '--config', config,
+      mode, '--json',
+    ];
+  }
+
+  it('refuses a fully past window with invalid_invocation before posting', async () => {
+    const now = Date.now();
+    const window = { startTs: now - 7_200_000, endTs: now - 3_600_000 };
+    const { file, config } = specFileWithWindow(window);
+    const made = makeCommandCtx({ argv: submitArgv(file, config, '--yes') });
+
+    await tasksCommand.run(made.ctx);
+
+    const output = JSON.parse(made.writes.at(-1)!);
+    expect(output).toMatchObject({
+      code: 'invalid_invocation',
+      details: { field: 'window.endTs' },
+    });
+    expect(output.message).toContain(String(window.startTs));
+    expect(output.message).toContain(String(window.endTs));
+    expect(output.exampleCli).toContain('--spec-file');
+    expect(output.exampleCli).toContain('--dry-run');
+    expect(made.exits).toEqual([11]);
+    expect(createCliExecutionContext).not.toHaveBeenCalled();
+  });
+
+  it('does not refuse a window that is open but already started', async () => {
+    const now = Date.now();
+    const { file, config } = specFileWithWindow({ startTs: now - 3_600_000, endTs: now + 3_600_000 });
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: false,
+      envelope: { code: 'bootstrap_incomplete', message: 'stop after the guard' },
+    });
+    const made = makeCommandCtx({ argv: submitArgv(file, config, '--yes') });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(createCliExecutionContext).toHaveBeenCalledOnce();
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({ code: 'bootstrap_incomplete' });
+  });
+
+  it('still previews a past window on dry-run', async () => {
+    const now = Date.now();
+    const { file, config } = specFileWithWindow({ startTs: now - 7_200_000, endTs: now - 3_600_000 });
+    const made = makeCommandCtx({ argv: submitArgv(file, config, '--dry-run') });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+      dryRun: true,
+      verb: 'tasks submit',
+    });
+    expect(createCliExecutionContext).not.toHaveBeenCalled();
   });
 });
