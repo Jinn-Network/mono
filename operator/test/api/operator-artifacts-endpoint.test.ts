@@ -464,6 +464,50 @@ describe('POST /v1/operator/pricing', () => {
     expect(isRestartRequired()).toBe(false);
   });
 
+  // Issue #4242: neither early-return error path may flag a restart.
+  it('returns config_unreadable without flagging a restart when the config is not JSON', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, 'not json {');
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ defaultPriceUsdc: '0.001' }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('config_unreadable');
+    expect(isRestartRequired()).toBe(false);
+    expect(readFileSync(configPath, 'utf-8')).toBe('not json {');
+  });
+
+  it('returns invalid_body without flagging a restart when the body is not JSON', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, `${JSON.stringify({ network: 'testnet' }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not json {',
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('invalid_body');
+    expect(isRestartRequired()).toBe(false);
+  });
+
   it('rejects malformed price strings', async () => {
     const store = memoryStore();
     const app = new Hono();
