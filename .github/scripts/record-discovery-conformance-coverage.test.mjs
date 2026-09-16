@@ -274,16 +274,19 @@ const COVERAGE = [
   {
     label: 'Named checks in isolation',
     claim:
-      "`source-head-revalidation` outcomes (`ok` for a byte-identical head, `stale`, `refresh-by-ceiling`, `head-issued-ahead`, `unauthorized-signer`, `head-origin-mismatch` for a head naming a source other than the one followed, and `head-payload-mismatch`), each exercised against a seeded high-water mark, so the kit proves §10.5's *adopts nothing* property — a revalidated head leaves the stored mark's position unchanged, whatever the outcome",
+      "`source-head-revalidation` outcomes (`ok` for a byte-identical head, `stale`, `refresh-by-ceiling`, `head-issued-ahead`, `unauthorized-signer` both for a key that rotated out before the head was issued and for one that rotated out after, `head-origin-mismatch` for a head naming a source other than the one followed, and `head-payload-mismatch`), each exercised with the procedure handed the followed source's seeded high-water mark store, so the kit proves §10.5's *adopts nothing* property — a revalidated head leaves the stored mark unchanged, whatever the outcome",
     // Every `source-head` vector seeds the followed source's mark, and the harness
-    // (`runSourceHeadConformance`) asserts the stored mark is unchanged after every call, `ok`
-    // included, so each vector discharges the adopts-nothing half as well as its outcome.
+    // (`checkSourceHeadVector`) passes that same store to the procedure under test and asserts
+    // the stored mark is unchanged after every call, `ok` included, so each vector discharges
+    // the adopts-nothing half as well as its outcome. `source-head-conformance.test.ts` shows
+    // the check failing for a procedure that writes the store.
     vectors: [
       'source-head-revalidation-identical-head-ok',
       'source-head-revalidation-stale',
       'source-head-revalidation-refresh-by-ceiling',
       'source-head-revalidation-head-issued-ahead',
       'source-head-revalidation-unauthorized-signer',
+      'source-head-revalidation-signer-rotated-since-issue',
       'source-head-revalidation-head-origin-mismatch',
       'source-head-revalidation-head-payload-mismatch',
     ],

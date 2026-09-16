@@ -7,6 +7,7 @@ import {
 import type {
   DiscoveryQueryService,
   HighWaterMark,
+  HighWaterMarkStore,
   ItemOutcome,
   SourceChainOutcome,
   verifyItem,
@@ -141,34 +142,55 @@ export function runSourceChainConformance(verify: typeof verifySourceChain): voi
 // source-head-revalidation (§10.5)
 // ---------------------------------------------------------------------------
 
-export function runSourceHeadConformance(verify: typeof verifySourceHead): void {
+/**
+ * The procedure shape `runSourceHeadConformance` drives: `verifySourceHead`'s
+ * own options, with the followed source's high-water mark store added to the
+ * ports. `verifySourceHead` declares no store slot and still satisfies this
+ * type; the harness hands the store over anyway, so an implementation that
+ * does reach for it -- to advance or rewrite the mark -- is caught.
+ */
+export type SourceHeadVerify = (
+  opts: Parameters<typeof verifySourceHead>[0] & {
+    ports: Parameters<typeof verifySourceHead>[0]["ports"] & { hwm: HighWaterMarkStore };
+  },
+) => ReturnType<typeof verifySourceHead>;
+
+/**
+ * One `source-head` vector against `verify`; throws on any failed assertion.
+ * Split from `runSourceHeadConformance` so the harness's own checks can be
+ * shown to fail against a non-conforming procedure.
+ */
+export async function checkSourceHeadVector(verify: SourceHeadVerify, vector: Vector): Promise<void> {
+  const input = vector.input as SourceHeadVectorInput;
+  const ports = makeInMemoryPorts({
+    now: input.seed.now,
+    keys: input.seed.keys as never,
+    hwm: input.seed.hwm as never,
+  });
+  // The procedure adopts nothing (§10.5): it is handed the followed source's
+  // mark store, and whatever it answers, `ok` included, the stored mark must
+  // come out exactly as it went in -- neither advanced nor rewritten. Pinned
+  // to the seed so a fake that failed to seed cannot make this comparison
+  // vacuous.
+  const markBefore = await ports.hwm.get(input.source);
+  const seeded = input.seed.hwm as { cursor: HighWaterMark } | null;
+  expect(markBefore, `${vector.name}: seeded mark`).toEqual(seeded?.cursor);
+  const outcome = await verify({
+    source: input.source,
+    head: input.head,
+    headSignature: vectorEnvelopeToWire(input.headSignature),
+    ports: { keys: ports.keys, sigs: ports.sigs, fresh: ports.fresh, hwm: ports.hwm, now: ports.clock.now() },
+  });
+  expect(outcome.status, `${vector.name}: ${vector.description}`)
+    .toBe((vector.expect as { status: string }).status);
+  expect(await ports.hwm.get(input.source), `${vector.name}: revalidation must leave the stored mark unchanged`)
+    .toEqual(markBefore);
+}
+
+export function runSourceHeadConformance(verify: SourceHeadVerify): void {
   describe("source-head-revalidation (§10.5, §18 vectors)", () => {
     for (const vector of loadVectorsByKind("source-head")) {
-      const input = vector.input as SourceHeadVectorInput;
-      it(vector.name, async () => {
-        const ports = makeInMemoryPorts({
-          now: input.seed.now,
-          keys: input.seed.keys as never,
-          hwm: input.seed.hwm as never,
-        });
-        // The procedure adopts nothing (§10.5): whatever it answers, `ok`
-        // included, the followed source's stored mark must come out exactly as
-        // it went in -- neither advanced nor cleared. Pinned to the seed so a
-        // fake that failed to seed cannot make this comparison vacuous.
-        const markBefore = await ports.hwm.get(input.source);
-        const seeded = input.seed.hwm as { cursor: HighWaterMark } | null;
-        expect(markBefore, `${vector.name}: seeded mark`).toEqual(seeded?.cursor);
-        const outcome = await verify({
-          source: input.source,
-          head: input.head,
-          headSignature: vectorEnvelopeToWire(input.headSignature),
-          ports: { keys: ports.keys, sigs: ports.sigs, fresh: ports.fresh, now: ports.clock.now() },
-        });
-        expect(outcome.status, `${vector.name}: ${vector.description}`)
-          .toBe((vector.expect as { status: string }).status);
-        expect(await ports.hwm.get(input.source), `${vector.name}: revalidation must leave the stored mark unchanged`)
-          .toEqual(markBefore);
-      });
+      it(vector.name, () => checkSourceHeadVector(verify, vector));
     }
   });
 }

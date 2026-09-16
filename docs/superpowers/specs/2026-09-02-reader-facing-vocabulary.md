@@ -32,14 +32,17 @@
   all rotted. Leaves the v4 qualification badge to #4270, whose ruling (rename, held) landed
   first, so §6 no longer lists the badge as an open question. No v1.0–v1.3 disposition is
   reversed.
-- **v1.5** (#4594): the v4-badge row's inventory now lives in §4.1 rather than §6, and it
-  named two of its five sites without a greppable anchor. It now names both binary-branch
-  strings that carry the reserved word outside the SVG and share builders — `neutralClaimHtml`
-  on `index.html` and `buildReadme`'s `documentStatus` — replacing a rotted line pointer, and
-  says why `pairedCompactFragment`'s binary string is not a sixth site. The binary sub-table's
-  first row now says it reaches the claim line's trailing near-twin, and which row rules the
-  claim line's leading sentence. The `Benchmark and configuration scope` row is anchored to
-  `buildIndex` instead of a line number. No disposition changes.
+- **v1.5** (#4594): the v4-badge row's inventory, which lives in §4.1 (not §6 as #4510
+  assumed), named two of its five sites without a greppable anchor. It now names both
+  binary-branch strings that carry the reserved word outside the SVG and share builders —
+  `neutralClaimHtml` on `index.html` and `buildReadme`'s `documentStatus` — replacing a
+  rotted line pointer, and says why `pairedCompactFragment`'s binary string is not a sixth
+  site. The binary sub-table's first row now says it reaches the claim line's trailing
+  near-twin, and which row rules the claim line's leading sentence. The `Benchmark and
+  configuration scope` row's scope-heading pointer is anchored to `buildIndex` instead of
+  a line number; that is the only pointer re-anchored, and the spec's other
+  `assets.ts:<line>` pointers are unchanged and out of this change's scope. No disposition
+  changes.
 
 ## 1. Scope
 
