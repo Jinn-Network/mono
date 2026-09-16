@@ -285,10 +285,10 @@ already yields every entry oldest-first. Then:
    so. That sequence is therefore reported as an ordinary gap, byte-identical to one,
    and the unreadable marking on the announcing entry is the one place the archive can
    record that a gap adjacent to it may be a hosting fault rather than a missing
-   anchor. A missing record or a digest mismatch is a serving
-   fault, which "Verify it from another machine" step 4 diagnoses; bytes that hash
-   correctly and still do not parse as an `AnchorEvidence` record are a producer fault,
-   which it does not. Keep only subjects whose `subject.kind` is
+   anchor. A missing record or a digest mismatch is a serving fault, which "Verify it
+   from another machine" step 4 diagnoses; bytes that hash correctly and still do not
+   parse as an `AnchorEvidence` record are a producer fault, which it does not. Keep
+   only subjects whose `subject.kind` is
    `https://spec.jinn.network/records/announcement-entry/v1`: §4.2 minted that URI to
    make `subject.kind` normative, and a record covering anything else anchors no
    sequence on this chain — an entry announcing only such non-entry anchors is
@@ -308,15 +308,14 @@ already yields every entry oldest-first. Then:
    it, and the shape does not arise on this chain: once #4127 lands, this producer's
    anchor announcements all carry announcement-entry subjects. Which test governs is a
    §4.3 question and is not settled here. The rejoin is per-entry while this sweep is
-   per-announcement, so
-   carry each fetched subject's announcing entry along with it. Sweeping announcements
-   rather than anchor-announcing entries is deliberate: an anchor riding on a mixed
-   entry is still collected. No design section rules mixed entries out — §4.3 rules
-   which entries are anchored and §5.2 where an anchor is announced, and §7's sketch has
-   an anchor obtained but not yet announced ride on the next substantive append — so
-   what keeps them off this chain is only this producer's one-announcement-per-entry
-   writer. Step 3 therefore
-   revises step 2's provisional partition, and steps 4 through 6 read the revised one.
+   per-announcement, so carry each fetched subject's announcing entry along with it.
+   Sweeping announcements rather than anchor-announcing entries is deliberate: an anchor
+   riding on a mixed entry is still collected. No design section rules mixed entries
+   out — §4.3 rules which entries are anchored and §5.2 where an anchor is announced,
+   and §7's sketch has an anchor obtained but not yet announced ride on the next
+   substantive append — so what keeps them off this chain is only this producer's
+   one-announcement-per-entry writer. Step 3 therefore revises step 2's provisional
+   partition, and steps 4 through 6 read the revised one.
    Deduplicate by the subject digest in the normalized form step 4 requires — not by
    `subject.digest` as read, which is a digest set rather than a string, so comparing
    the values as read compares objects and deduplicates nothing — because several
