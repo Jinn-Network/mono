@@ -273,6 +273,23 @@ const COVERAGE = [
   },
   {
     label: 'Named checks in isolation',
+    claim:
+      "`source-head-revalidation` outcomes (`ok` for a byte-identical head, `stale`, `refresh-by-ceiling`, `head-issued-ahead`, `unauthorized-signer`, `head-origin-mismatch` for a head naming a source other than the one followed, and `head-payload-mismatch`), each exercised against a seeded high-water mark, so the kit proves §10.5's *adopts nothing* property — a revalidated head leaves the stored mark's position unchanged, whatever the outcome",
+    // Every `source-head` vector seeds the followed source's mark, and the harness
+    // (`runSourceHeadConformance`) asserts the stored mark is unchanged after every call, `ok`
+    // included, so each vector discharges the adopts-nothing half as well as its outcome.
+    vectors: [
+      'source-head-revalidation-identical-head-ok',
+      'source-head-revalidation-stale',
+      'source-head-revalidation-refresh-by-ceiling',
+      'source-head-revalidation-head-issued-ahead',
+      'source-head-revalidation-unauthorized-signer',
+      'source-head-revalidation-head-origin-mismatch',
+      'source-head-revalidation-head-payload-mismatch',
+    ],
+  },
+  {
+    label: 'Named checks in isolation',
     claim: '`facts-consistency` (all three outcomes), `derivation-consistency` (present, fabricated, reorged-away)',
     vectors: [
       'facts-consistency-consistent',
