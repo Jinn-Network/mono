@@ -75,8 +75,9 @@ function runBlocks(source = workflow) {
 
 const meta = step('Resolve release metadata');
 
-// Contexts whose value a caller controls. A trailing `.` makes the entry a
-// prefix (`github.event.*`); otherwise the entry is the whole context name.
+// Contexts whose value a caller controls. Each entry matches as a prefix, so a
+// trailing `.` covers a whole family (`github.event.*`), and `github.actor`
+// also catches `github.actor_id` — an over-match, which is the safe direction.
 const attackerContexts = [
   'github.event.',
   'inputs.',
