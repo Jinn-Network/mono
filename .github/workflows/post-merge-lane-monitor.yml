@@ -28,9 +28,9 @@ on:
   workflow_dispatch:
 
 # This trusted monitor never checks out or executes code from a monitored revision:
-# `workflow_run` and `schedule` both run this workflow from the default branch. That is
-# also why it stays inert until the Monday cut promotes `main` past this commit; validate
-# it with one `workflow_dispatch` run after that, per
+# `workflow_run` and `schedule` both run this workflow from the default branch, `next`.
+# A change here or in its module is therefore live on the next run after it merges to
+# `next`; validate one on demand with a `workflow_dispatch` run, per
 # docs/runbooks/post-merge-lane-monitor.md.
 permissions:
   actions: read

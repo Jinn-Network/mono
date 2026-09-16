@@ -64,11 +64,14 @@ then a green-but-not-publishing lane is not covered by this monitor.
 ## When it starts working
 
 GitHub runs `workflow_run`, `schedule`, and `workflow_dispatch` workflows from the
-**default branch only**. This repository promotes `main` from `next` at the Monday named
-cut, so the monitor is inert between merging to `next` and that promotion. After the first
-promotion that carries it, validate it with one `workflow_dispatch` run before trusting it
-— the same "enable after a manual run validates" discipline as `indexer-monitor.yml` and
+**default branch**, which in this repository is `next`. A change to the monitor or its
+module therefore takes effect on the monitor's next run after it merges to `next`; there is
+no wait for the Monday cut. To validate a change on demand, start one `workflow_dispatch`
+run — the same "a manual run validates" discipline as `indexer-monitor.yml` and
 `broadcast-bot.yml`. A dispatch against healthy lanes is a no-op that logs one line per lane.
+
+Alerts filed before the marker recorded the run attempt are still recognized; they count as
+attempt 1.
 
 ## Reading an alert
 

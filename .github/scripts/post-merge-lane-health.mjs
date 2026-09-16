@@ -113,7 +113,8 @@ export function titlePrefixFor(lane) {
   return `[post-merge-lane-failure] ${lane.workflow}`;
 }
 
-const MARKER = /<!-- post-merge-lane-monitor:(\S+) run:(\d+) attempt:(\d+) confidence:(\S+) -->/u;
+// `attempt:` is optional because alerts filed before it was recorded omit it; those mean attempt 1.
+const MARKER = /<!-- post-merge-lane-monitor:(\S+) run:(\d+) (?:attempt:(\d+) )?confidence:(\S+) -->/u;
 
 /**
  * Machine marker written into every alert body. Keyed on the lane's file, which is
@@ -128,7 +129,7 @@ export function renderMarker({ lane, latestRun, confidence }) {
 /** @returns {{file: string, runId: string, attempt: string, confidence: string} | null} */
 export function parseMarker(body) {
   const match = typeof body === 'string' ? body.match(MARKER) : null;
-  return match ? { file: match[1], runId: match[2], attempt: match[3], confidence: match[4] } : null;
+  return match ? { file: match[1], runId: match[2], attempt: match[3] ?? '1', confidence: match[4] } : null;
 }
 
 /** Whether two parsed markers name the same attempt of the same failing run. */

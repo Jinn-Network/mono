@@ -290,6 +290,32 @@ test('a re-run of the same failing run is a different failing run', () => {
   assert.ok(monitor.includes('sameFailingRun('), 'the monitor compares failing runs through the helper');
 });
 
+test('alerts filed before the attempt was recorded are still recognized as attempt 1', () => {
+  // Exact markers of alerts the monitor filed from `next` before it recorded the attempt.
+  // Unrecognized, each would be duplicated and never commented on or closed.
+  const lane = (file) => MONITORED_LANES.find((candidate) => candidate.file === file);
+  const stack = lane('stack-npm-publish.yml');
+  const sdk = lane('sdk-npm-publish.yml');
+  const stackBody = 'alert\n<!-- post-merge-lane-monitor:stack-npm-publish.yml run:35139002461 confidence:confirmed -->';
+  const sdkBody = 'alert\n<!-- post-merge-lane-monitor:sdk-npm-publish.yml run:35150354211 confidence:confirmed -->';
+  assert.deepEqual(parseMarker(stackBody), {
+    file: 'stack-npm-publish.yml',
+    runId: '35139002461',
+    attempt: '1',
+    confidence: 'confirmed',
+  });
+  assert.equal(parseMarker(sdkBody).attempt, '1');
+  assert.ok(isAlertFor(stack, { body: stackBody }));
+  assert.ok(isAlertFor(sdk, { body: sdkBody }));
+  assert.ok(!isAlertFor(sdk, { body: stackBody }), 'a legacy alert belongs to its own lane only');
+  assert.ok(!isAlertFor(stack, { body: sdkBody }));
+
+  const latest = { ...run({ conclusion: 'failure', hoursAgo: 1 }), id: 35139002461 };
+  const fresh = (latestRun) => parseMarker(renderMarker({ lane: stack, latestRun, confidence: 'confirmed' }));
+  assert.ok(sameFailingRun(parseMarker(stackBody), fresh(latest)), 'a still-latest legacy alert is not rewritten');
+  assert.ok(!sameFailingRun(parseMarker(stackBody), fresh({ ...latest, run_attempt: 2 })), 'a re-run is new');
+});
+
 test('an alert is selected by its marker, never by title prefix, and never a pull request', () => {
   const verdict = classify([run({ conclusion: 'failure', hoursAgo: 0.1 }), run({ conclusion: 'failure', hoursAgo: 1 })]);
   const { title, body } = renderAlert({ lane: LANE, verdict });
