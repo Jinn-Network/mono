@@ -4,7 +4,8 @@ Turns a silently red post-merge lane on `next` into an Issue. Implements #2812.
 
 ## What it watches
 
-A **post-merge-only lane** is a workflow that runs after merge to `next` and has no
+A **post-merge-only lane** is a workflow that runs after merge to `next` — a `push` trigger
+matching `next`, or a `workflow_run` trigger filtered to `next` — and has no
 `pull_request` or `merge_group` trigger, so no pull request can go red on its behalf.
 These lanes publish to mutable tags that consumers pull, which is what makes their
 silence expensive: a lane that stops publishing is indistinguishable from a lane with
@@ -83,9 +84,9 @@ never succeeded. Find the last successful run in the Actions tab in that case; t
 not page further back.
 
 The body is derived from run data only, never from the current time. The marker line at the
-bottom names the latest failing run, and the monitor rewrites the body (and posts the new body
+bottom names the latest failing run and its attempt, and the monitor rewrites the body (and posts the new body
 as a comment) only when that marker changes, so a scheduled re-evaluation never comments and
-**a new comment means a new failing run**. Put notes in comments, not the body: the body is
+**a new comment means a new failing run** (or a failing re-run of one). Put notes in comments, not the body: the body is
 rewritten on the next failing run, and an alert whose marker line is edited away is no longer
 recognised as the lane's alert.
 
@@ -93,9 +94,9 @@ Fix or re-run the lane. Only a later successful **`push` run on `next`** closes 
 new push, or a re-run of the failed push run. `workflow_dispatch` runs are not counted: on these
 lanes a dispatch is the stable-release path with its own inputs, not a canary publish, so a green
 dispatch says nothing about the push lane. Once closed, the alert stays closed; if the lane goes
-red again a **new issue** is opened. Closing an alert by hand while the lane is still red defers
-the next alert to the next failing run: the monitor remembers the failing run a closed alert
-named and does not re-file for that run.
+red again — including on a later re-run of the same run — a **new issue** is opened. Closing an
+alert by hand while the lane is still red defers the next alert to the next failing run or re-run:
+the monitor remembers the failing run attempt a closed alert named and does not re-file for it.
 
 ## The monitor's own health
 

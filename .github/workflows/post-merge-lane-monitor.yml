@@ -71,6 +71,7 @@ jobs:
               parseMarker,
               renderAlert,
               renderRecovery,
+              sameFailingRun,
             } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/post-merge-lane-health.mjs`);
 
             const repo = context.repo;
@@ -97,10 +98,10 @@ jobs:
                 .filter((issue) => isAlertFor(lane, issue))
                 .sort((a, b) => a.number - b.number);
 
-            // A closed alert of this lane whose marker names `runId`, if any. One page of
-            // the most recently updated closed alerts is enough: a closure that can defer a
-            // filing is by construction newer than the run it names.
-            const closedAlertFor = async (lane, runId) => {
+            // A closed alert of this lane whose marker names the same failing run attempt, if
+            // any. One page of the most recently updated closed alerts is enough: a closure
+            // that can defer a filing is by construction newer than the run it names.
+            const closedAlertFor = async (lane, marker) => {
               const { data } = await github.rest.issues.listForRepo({
                 ...repo,
                 state: 'closed',
@@ -109,7 +110,7 @@ jobs:
                 direction: 'desc',
                 per_page: 100,
               });
-              return data.find((issue) => isAlertFor(lane, issue) && parseMarker(issue.body).runId === runId);
+              return data.find((issue) => isAlertFor(lane, issue) && sameFailingRun(parseMarker(issue.body), marker));
             };
 
             const reconcileLane = async (lane) => {
@@ -159,12 +160,14 @@ jobs:
               const marker = parseMarker(body);
               const [canonical, ...duplicates] = openAlerts;
               if (!canonical) {
-                // A hand-closed alert whose marker still names the current failing run has
-                // already been seen by a human: filing again now would only re-post it every
-                // tick. The next failing run changes the marker and files afresh.
-                const closed = await closedAlertFor(lane, marker.runId);
+                // A hand-closed alert whose marker still names the current failing run attempt
+                // has already been seen by a human: filing again now would only re-post it every
+                // tick. The next failing run, or a failing re-run, changes the marker and files
+                // afresh. A recovery-closed alert can only match that way if the same attempt
+                // is failing again, which a re-run never is.
+                const closed = await closedAlertFor(lane, marker);
                 if (closed) {
-                  core.info(`${lane.workflow}: alert #${closed.number} was closed for run ${marker.runId}; deferring to the next failing run.`);
+                  core.info(`${lane.workflow}: alert #${closed.number} was closed for run ${marker.runId} attempt ${marker.attempt}; deferring to the next failing run.`);
                   return;
                 }
                 const created = await github.rest.issues.create({ ...repo, title, body, labels: [label] });
@@ -172,12 +175,12 @@ jobs:
                 return;
               }
 
-              // The marker names the latest failing run and the confidence, so it changes
+              // The marker names the latest failing run attempt and the confidence, so it changes
               // exactly when there is something new to say. Comparing it rather than the
               // whole body means a scheduled tick never churns, and a note a human added to
               // the body survives until the next failing run rewrites it.
               const current = parseMarker(canonical.body);
-              if (current?.runId !== marker.runId || current?.confidence !== marker.confidence || canonical.title !== title) {
+              if (!sameFailingRun(current, marker) || current.confidence !== marker.confidence || canonical.title !== title) {
                 await github.rest.issues.createComment({ ...repo, issue_number: canonical.number, body });
                 await github.rest.issues.update({ ...repo, issue_number: canonical.number, title, body });
                 core.warning(`Updated ${lane.workflow} alert #${canonical.number}.`);

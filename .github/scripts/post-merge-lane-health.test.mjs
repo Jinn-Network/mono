@@ -16,6 +16,7 @@ import {
   renderAlert,
   renderMarker,
   renderRecovery,
+  sameFailingRun,
   titlePrefixFor,
 } from './post-merge-lane-health.mjs';
 
@@ -30,12 +31,13 @@ const NOW = Date.parse('2026-08-18T12:00:00Z');
 let nextRunNumber = 1000;
 
 /** Newest-first run fixtures; `hoursAgo` places the run's completion time. */
-function run({ conclusion, hoursAgo, event = 'push', branch = 'next', status = 'completed', at }) {
+function run({ conclusion, hoursAgo, event = 'push', branch = 'next', status = 'completed', at, attempt = 1 }) {
   const number = (nextRunNumber -= 1);
   const stamp = at ?? new Date(NOW - hoursAgo * HOUR).toISOString();
   return {
     id: 90000 + number,
     run_number: number,
+    run_attempt: attempt,
     status,
     conclusion,
     event,
@@ -266,11 +268,26 @@ test('the marker round-trips the lane file, the latest failing run, and the conf
   assert.deepEqual(parseMarker(body), {
     file: LANE.file,
     runId: String(verdict.latestRun.id),
+    attempt: '1',
     confidence: 'confirmed',
   });
   assert.equal(parseMarker(`note\n${renderMarker({ lane: LANE, latestRun: verdict.latestRun, confidence: 'confirmed' })}`).runId, String(verdict.latestRun.id));
   assert.equal(parseMarker('no marker here'), null);
   assert.equal(parseMarker(null), null);
+});
+
+test('a re-run of the same failing run is a different failing run', () => {
+  // A re-run keeps the run id. Without the attempt, a lane that recovered on a re-run and then
+  // failed on the next re-run would match its own recovery-closed alert and never file again.
+  const failing = run({ conclusion: 'failure', hoursAgo: 30 });
+  const rerun = { ...failing, run_attempt: 3 };
+  const markerOf = (latestRun) => parseMarker(renderMarker({ lane: LANE, latestRun, confidence: 'unconfirmed' }));
+  assert.equal(markerOf(rerun).attempt, '3');
+  assert.ok(sameFailingRun(markerOf(failing), markerOf({ ...failing })));
+  assert.ok(!sameFailingRun(markerOf(failing), markerOf(rerun)), 'a later attempt is new');
+  assert.ok(!sameFailingRun(markerOf(failing), markerOf(run({ conclusion: 'failure', hoursAgo: 1 }))));
+  assert.ok(!sameFailingRun(null, markerOf(failing)), 'a missing marker never matches');
+  assert.ok(monitor.includes('sameFailingRun('), 'the monitor compares failing runs through the helper');
 });
 
 test('an alert is selected by its marker, never by title prefix, and never a pull request', () => {
@@ -313,17 +330,25 @@ function triggersOf(source) {
   return triggers;
 }
 
-/** Branches under `on.push.branches`, in flow (`[a, b]`) or block (`- a`) form. */
-function pushBranches(source) {
-  const push = triggersOf(source)?.push;
-  if (!push) return null;
+/**
+ * Branch patterns under `on.<key>.branches`, in flow (`[a, b]`) or block (`- a`) form; `null`
+ * when there is no such trigger. A trigger with no branch or tag filter runs on every branch,
+ * which reads as `['**']`; one filtered only by tags (or only by `branches-ignore`, which no
+ * workflow here uses) names no branch.
+ */
+function triggerBranches(source, key = 'push') {
+  const lines = triggersOf(source)?.[key];
+  if (!lines) return null;
   const branches = [];
   let inList = false;
-  for (const line of push) {
+  let filtered = false;
+  for (const line of lines) {
+    if (/^ {4}(branches-ignore|tags|tags-ignore):/u.test(line)) filtered = true;
     const flow = line.match(/^ {4}branches:\s*\[([^\]]*)\]/u);
     if (flow) return flow[1].split(',').map((entry) => entry.trim().replace(/^['"]|['"]$/gu, '')).filter(Boolean);
     if (/^ {4}branches:\s*$/u.test(line)) {
       inList = true;
+      filtered = true;
       continue;
     }
     if (inList) {
@@ -332,21 +357,40 @@ function pushBranches(source) {
       else if (!/^\s*(#|$)/u.test(line)) inList = false;
     }
   }
-  return branches;
+  return filtered ? branches : ['**'];
+}
+
+const pushBranches = (source) => triggerBranches(source, 'push');
+
+/** Whether a GitHub branch filter pattern (`*` within a segment, `**` across) matches `branch`. */
+function branchMatches(pattern, branch) {
+  const regex = pattern
+    .split('**')
+    .map((part) => part.split('*').map((text) => text.replace(/[.+?^${}()|[\]\\]/gu, '\\$&')).join('[^/]*'))
+    .join('.*');
+  return new RegExp(`^${regex}$`, 'u').test(branch);
 }
 
 const PRE_MERGE = ['pull_request', 'pull_request_target', 'merge_group'];
 
-/** Every workflow that pushes on `branch` and has no pre-merge trigger: the monitor's remit. */
+/**
+ * Every workflow that runs after merge to `branch` and has no pre-merge trigger: the monitor's
+ * remit. That is a push trigger matching the branch, or a `workflow_run` trigger whose branch
+ * filter names it (a chained lane such as npm-publish.yml). An unfiltered `workflow_run` takes
+ * its branch from the upstream workflow, which this reader cannot resolve, so it is not counted.
+ */
 function postMergeOnlyLanes(branch) {
   return readdirSync(workflowsDir)
     .filter((file) => /\.ya?ml$/u.test(file))
     .filter((file) => {
-      const triggers = triggersOf(readFileSync(path.join(workflowsDir, file), 'utf8'));
-      if (!triggers || !(pushBranches(readFileSync(path.join(workflowsDir, file), 'utf8')) ?? []).includes(branch)) {
-        return false;
-      }
-      return !PRE_MERGE.some((key) => key in triggers);
+      const source = readFileSync(path.join(workflowsDir, file), 'utf8');
+      const triggers = triggersOf(source);
+      if (!triggers || PRE_MERGE.some((key) => key in triggers)) return false;
+      const chained = triggerBranches(source, 'workflow_run') ?? [];
+      return (
+        (pushBranches(source) ?? []).some((pattern) => branchMatches(pattern, branch)) ||
+        (!chained.includes('**') && chained.some((pattern) => branchMatches(pattern, branch)))
+      );
     })
     .sort();
 }
@@ -355,7 +399,11 @@ test('the push-trigger reader anchors under the push key and accepts both branch
   assert.deepEqual(pushBranches('on:\n  push:\n    branches: [next]\n  workflow_dispatch:\n'), ['next']);
   assert.deepEqual(pushBranches('on:\n  schedule:\n    - cron: "0 8 * * *"\n  push:\n    branches:\n      - main\n      - next\n\npermissions:\n'), ['main', 'next']);
   assert.equal(pushBranches('on:\n  workflow_run:\n    workflows: [CI]\n    branches: [next]\n'), null, 'a branches list under another trigger is not a push trigger');
-  assert.deepEqual(pushBranches('on:\n  push:\n    paths:\n      - "x/**"\n'), [], 'a push trigger without branches names none');
+  assert.deepEqual(pushBranches('on:\n  push:\n    paths:\n      - "x/**"\n'), ['**'], 'a push trigger without a branch filter runs on every branch');
+  assert.deepEqual(pushBranches('on:\n  push:\n    tags: ["v*"]\n'), [], 'a tag-only push trigger names no branch');
+  assert.deepEqual(triggerBranches('on:\n  workflow_run:\n    workflows: [CI]\n    branches: [next]\n', 'workflow_run'), ['next']);
+  assert.ok(branchMatches('**', 'next') && branchMatches('ne*', 'next') && branchMatches('next', 'next'));
+  assert.ok(!branchMatches('main', 'next') && !branchMatches('release/*', 'next') && !branchMatches('nex', 'next'));
   assert.ok(!('pull_request' in triggersOf('on:\n  push:\n    branches: [next]\n')));
   assert.ok('merge_group' in triggersOf('on:\n  push:\n    branches: [next]\n  merge_group:\n'));
 });
@@ -377,7 +425,10 @@ test('every registered lane names a real workflow that is genuinely post-merge-o
     }
     const branches = pushBranches(source);
     assert.ok(branches, `${lane.file} must have a push trigger`);
-    assert.ok(branches.includes(lane.branch), `${lane.file} must push-trigger on ${lane.branch}, not ${JSON.stringify(branches)}`);
+    assert.ok(
+      branches.some((pattern) => branchMatches(pattern, lane.branch)),
+      `${lane.file} must push-trigger on ${lane.branch}, not ${JSON.stringify(branches)}`,
+    );
     assert.ok(lane.staleArtifact.length > 0, `${lane.file} must say what goes stale when it stops publishing`);
   }
 });
@@ -396,6 +447,7 @@ test('every post-merge-only lane on next is either registered or excluded on the
   }
   for (const lane of EXCLUDED_LANES) {
     assert.ok(existsSync(path.join(workflowsDir, lane.file)), `${lane.file} is excluded but does not exist`);
+    assert.ok(lanes.includes(lane.file), `${lane.file} is excluded but is not a post-merge-only lane on next`);
     assert.ok(lane.reason.length > 0, `${lane.file} is excluded without a reason`);
     assert.ok(!MONITORED_LANES.some((registered) => registered.workflow === lane.workflow));
   }

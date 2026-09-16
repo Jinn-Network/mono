@@ -113,21 +113,27 @@ export function titlePrefixFor(lane) {
   return `[post-merge-lane-failure] ${lane.workflow}`;
 }
 
-const MARKER = /<!-- post-merge-lane-monitor:(\S+) run:(\d+) confidence:(\S+) -->/u;
+const MARKER = /<!-- post-merge-lane-monitor:(\S+) run:(\d+) attempt:(\d+) confidence:(\S+) -->/u;
 
 /**
  * Machine marker written into every alert body. Keyed on the lane's file, which is
  * exact where a title prefix is only usually unambiguous, and naming the latest failing
- * run so a later tick can tell a genuinely new failure from a re-render.
+ * run and its attempt so a later tick can tell a genuinely new failure from a re-render.
+ * The attempt matters because a re-run keeps the run id.
  */
 export function renderMarker({ lane, latestRun, confidence }) {
-  return `<!-- post-merge-lane-monitor:${lane.file} run:${latestRun.id} confidence:${confidence} -->`;
+  return `<!-- post-merge-lane-monitor:${lane.file} run:${latestRun.id} attempt:${latestRun.run_attempt ?? 1} confidence:${confidence} -->`;
 }
 
-/** @returns {{file: string, runId: string, confidence: string} | null} */
+/** @returns {{file: string, runId: string, attempt: string, confidence: string} | null} */
 export function parseMarker(body) {
   const match = typeof body === 'string' ? body.match(MARKER) : null;
-  return match ? { file: match[1], runId: match[2], confidence: match[3] } : null;
+  return match ? { file: match[1], runId: match[2], attempt: match[3], confidence: match[4] } : null;
+}
+
+/** Whether two parsed markers name the same attempt of the same failing run. */
+export function sameFailingRun(a, b) {
+  return Boolean(a && b) && a.runId === b.runId && a.attempt === b.attempt;
 }
 
 /**
@@ -265,7 +271,7 @@ export function renderAlert({ lane, verdict }) {
     `Fix or re-run the lane. Only a later successful \`push\` run on \`${lane.branch}\` — a new push, or a`,
     're-run of a failed push run — closes this issue; `workflow_dispatch` runs are not counted.',
     'If the lane goes red again after that, a new issue is opened. Closing this by hand while the',
-    'lane is still red defers the next alert to the next failing run. Put notes in comments: the',
+    'lane is still red defers the next alert to the next failing run or re-run. Put notes in comments: the',
     'body is rewritten when a new failing run arrives, and the marker line below must stay.',
     '',
     renderMarker({ lane, latestRun, confidence }),
