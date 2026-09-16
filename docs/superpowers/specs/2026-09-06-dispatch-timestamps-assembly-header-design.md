@@ -755,7 +755,7 @@ The implementation bar is:
   assembly `/2` header, or a `/3` header without a non-empty array, is refused
   the same way. `dispatchBoundaries` is a key inside the
   `verification/assembly.jsonl` header, not a member path, so neither refusal
-  comes from the two-way file closure at `verify.ts:563-564`, and a test must
+  comes from the two-way file closure at `verify.ts:565-566`, and a test must
   not assert a non-allowlisted or missing-member refusal for either. The
   undeclared case is refused by the assembly grammar. The `/2` header parse
   drops the unknown key, and `requireCanonical` then rejects the header bytes
