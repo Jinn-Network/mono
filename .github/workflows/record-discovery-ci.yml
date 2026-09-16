@@ -92,6 +92,10 @@ jobs:
         run: node --test .github/scripts/record-discovery-package-inventory.test.mjs
       - name: Verify source boundaries and canaries
         run: node --test .github/scripts/record-discovery-source-boundaries.test.mjs
+      - name: Verify the §12 join-edge audit table
+        run: node --test .github/scripts/record-discovery-audit-table.test.mjs
+      - name: Verify §18 ↔ golden-vector correspondence
+        run: node --test .github/scripts/record-discovery-conformance-coverage.test.mjs
 
   packages:
     name: Record Discovery packages
