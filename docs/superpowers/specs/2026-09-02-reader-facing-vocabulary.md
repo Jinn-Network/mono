@@ -1,7 +1,8 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.4
-- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16)
+- **Version:** 1.5
+- **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16;
+  v1.5: 2026-09-17)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -31,6 +32,14 @@
   all rotted. Leaves the v4 qualification badge to #4270, whose ruling (rename, held) landed
   first, so §6 no longer lists the badge as an open question. No v1.0–v1.3 disposition is
   reversed.
+- **v1.5** (#4594): the v4-badge row's inventory now lives in §4.1 rather than §6, and it
+  named two of its five sites without a greppable anchor. It now names both binary-branch
+  strings that carry the reserved word outside the SVG and share builders — `neutralClaimHtml`
+  on `index.html` and `buildReadme`'s `documentStatus` — replacing a rotted line pointer, and
+  says why `pairedCompactFragment`'s binary string is not a sixth site. The binary sub-table's
+  first row now says it reaches the claim line's trailing near-twin, and which row rules the
+  claim line's leading sentence. The `Benchmark and configuration scope` row is anchored to
+  `buildIndex` instead of a line number. No disposition changes.
 
 ## 1. Scope
 
@@ -202,9 +211,9 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Interval withheld | rename | Range not reported | Withheld reasons kept verbatim. |
 | Confirmatory floor | rename | The minimum fixed in advance | Prose term inherited from the demo report; not a code string. |
 | Independence clusters | rename + gloss | Groups that do not share a source | The counted quantity is kept; only the noun changes. |
-| Benchmark and configuration scope | rename | What was tested, and how each configuration was pinned | The `<h2>` at `assets.ts:827`; its `Arms and pinned configuration` sub-heading becomes **Each configuration, pinned**, following the `arm` → *Configuration* rename above. |
+| Benchmark and configuration scope | rename | What was tested, and how each configuration was pinned | The `<h2 id="scope-heading">` in `buildIndex` (`assets.ts`); its `Arms and pinned configuration` sub-heading becomes **Each configuration, pinned**, following the `arm` → *Configuration* rename above. |
 | Evidence signpost (social card) | rename | Benchmark report | The v4 card's phrase; the current card already says "Benchmark report". Retire the older wording with the v4 assets. |
-| Colophon · verified qualification (v4 badge) | rename (held) | Colophon · binary qualification | Ruled in #4270: the reserved word is retired from the badge, social card, share text, index prose, and the report README's status line (`assets.ts:1096`) — the five sites the emission-site comment enumerates. A badge carries no room for the caveats the CLI prints under its verdict, so it names the scope instead. **Held pending a bundle-format allocation**, not yet applied: `verify.ts` byte-compares every presentation asset against the reader's own rebuild, and every qualifying format pins a published reader, so moving these bytes without an allocation makes each side refuse the other. The hold is recorded at the emission site (`verify/src/assets.ts`, above `buildBadge`), beside the #2980 and #2977 holds. |
+| Colophon · verified qualification (v4 badge) | rename (held) | Colophon · binary qualification | Ruled in #4270: the reserved word is retired from the badge, social card, share text, index prose, and the report README's status line — the five sites the emission-site comment enumerates. The two that are not SVG or share builders are named here because they are easy to miss: the index prose is `neutralClaimHtml`'s binary sentence, `Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.`, and the README status line is `buildReadme`'s `documentStatus`, `<run outcome>. Verified binary-instrument qualification.` (both `assets.ts`). A further string, `pairedCompactFragment`'s `Verified qualification signpost · full evidence at index.html`, is not a sixth site: the badge, card and share builders all return on `binary` before they call it, so no surface prints it, and the same allocation should delete or rename it. A badge carries no room for the caveats the CLI prints under its verdict, so it names the scope instead. **Held pending a bundle-format allocation**, not yet applied: `verify.ts` byte-compares every presentation asset against the reader's own rebuild, and every qualifying format pins a published reader, so moving these bytes without an allocation makes each side refuse the other. The hold is recorded at the emission site (`verify/src/assets.ts`, above `buildBadge`), beside the #2980 and #2977 holds. |
 | No comparative winner stated | keep | — | Load-bearing and already plain. |
 
 #### Binary-qualification report surface (binary reports only)
@@ -228,7 +237,7 @@ comprehension bug §5's law forbids, introduced by this spec's own rename.
 
 | Reader-visible term today | Ruling | Reader-facing name | Note |
 | --- | --- | --- | --- |
-| Qualification facts are presented per instrument without comparative conclusions. | rename | These facts are given per judge, with no comparison drawn. | Follows `Instrument` → *Judge* above. |
+| Qualification facts are presented per instrument without comparative conclusions. | rename | These facts are given per judge, with no comparison drawn. | Follows `Instrument` → *Judge* above. The claim line above this block (`neutralClaimHtml`) ends with a near-twin, `Facts are presented per instrument without comparative conclusions.`, and this ruling reaches that too. Its leading sentence, `Verified binary-instrument qualification.`, is ruled — and held — by the v4-badge row in the main table, not here. |
 | Registered configuration | rename | How the judges were qualified | Resolves the collision with the `arm` → *Configuration* rename; the word "configuration" leaves this heading entirely. `qualification.configuration` stays contract. |
 | `<h3>` per arm (bare `armId`) | keep | — | An identifier, not a label. |
 | Instrument `<fingerprint>` | rename | Judge `<fingerprint>` | `instrumentSha256` stays contract; the hex is relabeled per the digest → *Fingerprint* rule. |
