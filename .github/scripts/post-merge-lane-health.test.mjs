@@ -13,6 +13,7 @@ import {
   classifyLane,
   isAlertFor,
   parseMarker,
+  planAlertUpdate,
   renderAlert,
   renderMarker,
   renderRecovery,
@@ -244,6 +245,7 @@ test('the alert body states what closes it and what a hand-close does', () => {
   assert.ok(!/reopens/u.test(body));
   assert.ok(body.includes('defers the next alert to the next failing run'));
   assert.ok(body.includes('Put notes in comments'));
+  assert.ok(/rewritten, with a comment, when a new failing run arrives or the\s+confidence changes/u.test(body), 'the copy names both rewrite causes');
 });
 
 test('the recovery comment names the run that recovered the lane', () => {
@@ -329,6 +331,41 @@ test('an alert is selected by its marker, never by title prefix, and never a pul
   assert.ok(!isAlertFor(LANE, { title: 'unrelated', body: null }));
   assert.ok(!isAlertFor(LANE, { title, body, pull_request: { url: 'https://api.github.com/repos/o/r/pulls/1' } }));
   assert.ok(isAlertFor(LANE, { title: 'retitled by a human', body }), 'the title is display only');
+});
+
+test('an open alert is rewritten only for a new failing run or a changed confidence', () => {
+  // Fixtures created earlier carry higher run numbers, so the newer run is made first.
+  const newer = run({ conclusion: 'failure', hoursAgo: 0.05 });
+  const latest = run({ conclusion: 'failure', hoursAgo: 0.1 });
+  const confirmed = classify([latest, run({ conclusion: 'failure', hoursAgo: 1 })]);
+  const { title, body } = renderAlert({ lane: LANE, verdict: confirmed });
+  const plan = (issue, next = { title, body }) => planAlertUpdate({ issue, ...next });
+
+  assert.equal(plan({ title, body }), 'current', 'a scheduled tick with nothing new is a no-op');
+  assert.equal(
+    plan({ title, body: `A human note.\n\n${body}` }),
+    'current',
+    'a note added to the body survives while the marker is intact',
+  );
+  const legacyBody = `older copy\n<!-- post-merge-lane-monitor:${LANE.file} run:${latest.id} confidence:confirmed -->`;
+  assert.equal(plan({ title, body: legacyBody }), 'current', 'a legacy marker for the same attempt is current');
+
+  assert.equal(plan({ title: 'retitled by a human', body }), 'retitle', 'a retitle is repaired without a comment');
+
+  const newRun = renderAlert({ lane: LANE, verdict: classify([newer, latest]) });
+  assert.equal(plan({ title, body }, newRun), 'rewrite', 'a new failing run is news');
+  const rerun = renderAlert({
+    lane: LANE,
+    verdict: classify([{ ...latest, run_attempt: 2 }, run({ conclusion: 'failure', hoursAgo: 1 })]),
+  });
+  assert.equal(plan({ title, body }, rerun), 'rewrite', 'a failing re-run is news');
+  const downgraded = renderAlert({
+    lane: LANE,
+    verdict: classify([{ ...latest, updated_at: new Date(NOW - 30 * HOUR).toISOString() }]),
+  });
+  assert.equal(parseMarker(downgraded.body).runId, String(latest.id), 'same failing run, different confidence');
+  assert.equal(plan({ title, body }, downgraded), 'rewrite', 'a confidence change is news');
+  assert.equal(plan({ title: 'retitled', body }, newRun), 'rewrite', 'a rewrite also restores the title');
 });
 
 /**
@@ -508,6 +545,8 @@ test('the monitor selects alerts by marker, reads a full page, and closes only o
   assert.ok(monitor.includes('isAlertFor('), 'alerts are selected through the marker helper');
   assert.ok(!monitor.includes('startsWith('), 'no title-prefix selection remains');
   assert.ok(monitor.includes('parseMarker('), 'a hand-closed alert is recognised by its marker');
+  assert.ok(monitor.includes('planAlertUpdate('), 'an open alert is updated through the plan helper');
+  assert.ok(!monitor.includes('canonical.title !== title'), 'a title difference alone never reaches the comment path');
   assert.ok(/per_page: 100,\s*\n\s*\}\);\s*\n\s*const verdict = classifyLane/u.test(monitor), 'the run window is the full page one request allows');
   assert.ok(monitor.includes("verdict.state !== 'healthy'"), 'only a healthy verdict reaches the close loop');
 });

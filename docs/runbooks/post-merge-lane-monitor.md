@@ -87,17 +87,23 @@ never succeeded. Find the last successful run in the Actions tab in that case; t
 not page further back.
 
 The body is derived from run data only, never from the current time. The marker line at the
-bottom names the latest failing run and its attempt, and the monitor rewrites the body (and posts the new body
-as a comment) only when that marker changes, so a scheduled re-evaluation never comments and
-**a new comment means a new failing run** (or a failing re-run of one). Put notes in comments, not the body: the body is
-rewritten on the next failing run, and an alert whose marker line is edited away is no longer
-recognised as the lane's alert.
+bottom names the latest failing run, its attempt, and the alert's confidence, and the monitor
+rewrites the body (and posts the new body as a comment) only when that marker changes, so a
+scheduled re-evaluation never comments and **a new comment means a new failing run** (or a
+failing re-run of one) **or a change in the alert's confidence**. Confidence can change with no
+new failing run: if a re-run of an older failing run succeeds, the streak shrinks to one, and
+once its grace window elapses a confirmed alert becomes unconfirmed. A retitled alert gets its
+title restored with no comment and its body left alone. Put notes in comments, not the body: the
+body is rewritten when a new failing run arrives or the confidence changes, and an alert whose
+marker line is edited away is no longer recognised as the lane's alert.
 
 Fix or re-run the lane. Only a later successful **`push` run on `next`** closes the alert — a
 new push, or a re-run of the failed push run. `workflow_dispatch` runs are not counted: on these
 lanes a dispatch is the stable-release path with its own inputs, not a canary publish, so a green
 dispatch says nothing about the push lane. Once closed, the alert stays closed; if the lane goes
-red again — including on a later re-run of the same run — a **new issue** is opened. Closing an
+red again — including on a later re-run of the same run, as long as that run is still the newest
+decisive run — a **new issue** is opened. A failing re-run of a run older than the success that
+closed the alert files nothing: the newer success still decides. Closing an
 alert by hand while the lane is still red defers the next alert to the next failing run or re-run:
 the monitor remembers the failing run attempt a closed alert named and does not re-file for it.
 

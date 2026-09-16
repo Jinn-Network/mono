@@ -69,6 +69,7 @@ jobs:
               classifyLane,
               isAlertFor,
               parseMarker,
+              planAlertUpdate,
               renderAlert,
               renderRecovery,
               sameFailingRun,
@@ -99,8 +100,9 @@ jobs:
                 .sort((a, b) => a.number - b.number);
 
             // A closed alert of this lane whose marker names the same failing run attempt, if
-            // any. One page of the most recently updated closed alerts is enough: a closure
-            // that can defer a filing is by construction newer than the run it names.
+            // any. Only the 100 most recently updated closed alerts are read: if more than
+            // that were updated after the matching one, the deferral is missed and one extra
+            // alert is filed. That needs 100 alert updates within one failing run's life.
             const closedAlertFor = async (lane, marker) => {
               const { data } = await github.rest.issues.listForRepo({
                 ...repo,
@@ -163,8 +165,9 @@ jobs:
                 // A hand-closed alert whose marker still names the current failing run attempt
                 // has already been seen by a human: filing again now would only re-post it every
                 // tick. The next failing run, or a failing re-run, changes the marker and files
-                // afresh. A recovery-closed alert can only match that way if the same attempt
-                // is failing again, which a re-run never is.
+                // afresh. A recovery-closed alert matches only when the success that closed it
+                // no longer decides, e.g. its re-run is in progress or was cancelled; staying
+                // quiet then is right, because that success already published.
                 const closed = await closedAlertFor(lane, marker);
                 if (closed) {
                   core.info(`${lane.workflow}: alert #${closed.number} was closed for run ${marker.runId} attempt ${marker.attempt}; deferring to the next failing run.`);
@@ -175,15 +178,17 @@ jobs:
                 return;
               }
 
-              // The marker names the latest failing run attempt and the confidence, so it changes
-              // exactly when there is something new to say. Comparing it rather than the
-              // whole body means a scheduled tick never churns, and a note a human added to
-              // the body survives until the next failing run rewrites it.
-              const current = parseMarker(canonical.body);
-              if (!sameFailingRun(current, marker) || current.confidence !== marker.confidence || canonical.title !== title) {
+              // A comment is posted only when the latest failing run attempt or the confidence
+              // changed; a human retitle is repaired silently. A note a human added to the body
+              // survives until one of those changes rewrites it.
+              const plan = planAlertUpdate({ issue: canonical, title, body });
+              if (plan === 'rewrite') {
                 await github.rest.issues.createComment({ ...repo, issue_number: canonical.number, body });
                 await github.rest.issues.update({ ...repo, issue_number: canonical.number, title, body });
                 core.warning(`Updated ${lane.workflow} alert #${canonical.number}.`);
+              } else if (plan === 'retitle') {
+                await github.rest.issues.update({ ...repo, issue_number: canonical.number, title });
+                core.notice(`Restored the title of ${lane.workflow} alert #${canonical.number}.`);
               } else {
                 core.info(`${lane.workflow} alert #${canonical.number} is current.`);
               }

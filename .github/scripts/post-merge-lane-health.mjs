@@ -138,6 +138,21 @@ export function sameFailingRun(a, b) {
 }
 
 /**
+ * How to bring an open alert up to date with a freshly rendered one. The marker names the
+ * latest failing run attempt and the confidence, so a comment is posted (`rewrite`) only
+ * when one of those changed. A title that differs on its own is display drift, repaired
+ * without a comment and without touching the body (`retitle`). Anything else is `current`,
+ * so a scheduled tick never churns and a note a human added to the body survives.
+ * @returns {'current'|'retitle'|'rewrite'}
+ */
+export function planAlertUpdate({ issue, title, body }) {
+  const existing = parseMarker(issue.body);
+  const next = parseMarker(body);
+  if (!sameFailingRun(existing, next) || existing.confidence !== next.confidence) return 'rewrite';
+  return issue.title === title ? 'current' : 'retitle';
+}
+
+/**
  * Whether an issue from the alert-label listing is one of this lane's alerts. Matches on
  * the marker, never the title, and never a pull request: `issues.listForRepo` returns
  * both, and a pull request carrying the label must not be commented on or closed.
@@ -273,7 +288,8 @@ export function renderAlert({ lane, verdict }) {
     're-run of a failed push run — closes this issue; `workflow_dispatch` runs are not counted.',
     'If the lane goes red again after that, a new issue is opened. Closing this by hand while the',
     'lane is still red defers the next alert to the next failing run or re-run. Put notes in comments: the',
-    'body is rewritten when a new failing run arrives, and the marker line below must stay.',
+    'body is rewritten, with a comment, when a new failing run arrives or the confidence changes, and the',
+    'marker line below must stay.',
     '',
     renderMarker({ lane, latestRun, confidence }),
   ].join('\n');
