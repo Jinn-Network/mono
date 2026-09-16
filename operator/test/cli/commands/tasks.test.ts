@@ -939,7 +939,10 @@ describe('tasks submit spec-file window freshness', () => {
 
   const fixturePath = fileURLToPath(new URL('../../../fixtures/prediction-v1-task.example.json', import.meta.url));
 
-  function specFileWithWindow(window: { startTs: number; endTs: number }) {
+  function specFileWithWindow(
+    window: { startTs: number; endTs: number },
+    resolutionMs = window.endTs + 86_400_000,
+  ) {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-window-'));
     const file = join(dir, 'spec.json');
     const config = join(dir, 'config.json');
@@ -947,7 +950,7 @@ describe('tasks submit spec-file window freshness', () => {
       spec: { resolution: Record<string, unknown> };
     };
     // prediction.v1 requires the resolution time to follow the window.
-    raw.spec.resolution.expectedResolutionTime = new Date(window.endTs + 86_400_000).toISOString();
+    raw.spec.resolution.expectedResolutionTime = new Date(resolutionMs).toISOString();
     writeFileSync(file, JSON.stringify({ ...raw, window }));
     writeFileSync(config, '{}');
     return { file, config };
@@ -985,6 +988,53 @@ describe('tasks submit spec-file window freshness', () => {
   it('does not refuse a window that is open but already started', async () => {
     const now = Date.now();
     const { file, config } = specFileWithWindow({ startTs: now - 3_600_000, endTs: now + 3_600_000 });
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: false,
+      envelope: { code: 'bootstrap_incomplete', message: 'stop after the guard' },
+    });
+    const made = makeCommandCtx({ argv: submitArgv(file, config, '--yes') });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(createCliExecutionContext).toHaveBeenCalledOnce();
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({ code: 'bootstrap_incomplete' });
+  });
+
+  it('refuses a past window given in epoch seconds', async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const window = { startTs: nowSec - 7_200, endTs: nowSec - 3_600 };
+    const { file, config } = specFileWithWindow(window, (window.endTs + 86_400) * 1000);
+    const made = makeCommandCtx({ argv: submitArgv(file, config, '--yes') });
+
+    await tasksCommand.run(made.ctx);
+
+    const output = JSON.parse(made.writes.at(-1)!);
+    expect(output).toMatchObject({
+      code: 'invalid_invocation',
+      details: { field: 'window.endTs' },
+    });
+    expect(output.message).toContain(String(window.endTs * 1000));
+    expect(made.exits).toEqual([11]);
+    expect(createCliExecutionContext).not.toHaveBeenCalled();
+  });
+
+  it('does not refuse a session-derived.v1 spec, whose window is in epoch seconds', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-window-'));
+    const file = join(dir, 'spec.json');
+    const config = join(dir, 'config.json');
+    writeFileSync(file, JSON.stringify({
+      // session-derived.v1 parses the task from the top level of the file.
+      solverType: 'session-derived.v1',
+      schemaVersion: 'session-derived-task.v1',
+      sourceCaptureCid: 'bafy-capture',
+      problemStatement: 'Fix the flaky test.',
+      distillation: {
+        promptSha256: 'a'.repeat(64),
+        model: 'test-model',
+        distilledAt: new Date().toISOString(),
+      },
+    }));
+    writeFileSync(config, '{}');
     createCliExecutionContext.mockResolvedValueOnce({
       ok: false,
       envelope: { code: 'bootstrap_incomplete', message: 'stop after the guard' },
