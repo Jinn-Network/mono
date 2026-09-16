@@ -582,6 +582,7 @@ function shellInstallDirectories(run, loopValues) {
     const words = command;
     command = [];
     let at = 0;
+    let conditional = false;
     // A keyword's branch is not modeled, so it loses the directory — but the words after
     // it are still a command: `if ! yarn install; then` runs the install.
     for (;;) {
@@ -592,10 +593,21 @@ function shellInstallDirectories(run, loopValues) {
       }
       if (!unmodeledKeywords.has(words[at])) break;
       directories = null;
+      conditional = true;
       at += 1;
     }
     const [name, ...rest] = words.slice(at);
     if (name === undefined) return;
+    if (conditional && (name === 'cd' || name === 'pushd' || name === 'popd')) {
+      // A directory change that may or may not have run: `then popd` or `then cd -` must
+      // not restore a known directory, and whatever `cd -` or a later `popd` would return
+      // to now depends on the branch too.
+      directories = null;
+      previous = null;
+      pushdStack = pushdStack.map(() => null);
+      if (name === 'pushd') pushdStack.push(null);
+      return;
+    }
     if (name === 'cd' || name === 'pushd') {
       if (name === 'pushd') pushdStack.push(directories);
       const separated = rest[0] === '--';
@@ -610,13 +622,16 @@ function shellInstallDirectories(run, loopValues) {
       directories = pushdStack.length > 0 ? pushdStack.pop() : null;
       return;
     }
-    if (!isYarn(name)) {
+    const bareYarn = (word) => word.split('/').pop() === 'yarn';
+    // `npx -p yarn@4 yarn install`: the versioned word is the prefix's value, and the bare
+    // `yarn` after it is the command — so this is the wrapper case, not a Yarn call.
+    if (!isYarn(name) || (!bareYarn(name) && rest.some(bareYarn))) {
       // An unlisted wrapper around an install (see `commandPrefixes`). Only an
       // install matters: `env -u TOKEN yarn test` leaves `TOKEN` as the name and must
       // impose nothing, exactly as a bare `yarn test` imposes nothing.
       // Only a bare `yarn` counts here: `corepack prepare yarn@4.13.0 --activate` names
       // a version to fetch, not a command to run.
-      const wrapped = rest.findIndex((word) => word.split('/').pop() === 'yarn');
+      const wrapped = rest.findIndex(bareYarn);
       if (wrapped !== -1 && yarnInvocation(rest.slice(wrapped + 1)).isInstall) installs.push(null);
       return;
     }
@@ -2525,14 +2540,20 @@ jobs:
 
 // Each fixture declares a lockfile the install does not use, so a clean result would
 // mean the install was never seen — the silent direction these shapes used to take.
-for (const [label, script] of [
+for (const [label, script, declared = 'other/yarn.lock'] of [
   ['an install consumed by a leading if', 'if ! yarn install --immutable; then echo drift; exit 1; fi'],
   ['an install consumed by a leading while', 'while yarn install --immutable; do sleep 1; done'],
   ['a corepack-versioned Yarn spec', 'corepack yarn@4 install --immutable'],
   ['an npx-versioned Yarn spec', 'npx yarn@1 install'],
   ['a backslash-newline inside a word', 'ya\\\n          rn install --immutable'],
+  ['an npx -p versioned Yarn spec before the command', 'npx -p yarn@4 yarn install --immutable'],
+  ['an npx --package versioned Yarn spec before the command', 'npx --package yarn@4 yarn install --immutable'],
+  ['a popd inside a keyword branch', 'pushd other\n          if [ -n "$X" ]; then popd; fi\n          yarn install --immutable', 'yarn.lock'],
+  ['a cd - inside a keyword branch', 'cd other\n          if [ -n "$X" ]; then cd -; fi\n          yarn install --immutable', 'yarn.lock'],
   ['a backslash-newline inside a heredoc delimiter', 'cat <<E\\\n          OF\n          body\n          EOF\n          yarn install --immutable'],
 ]) {
+  // The keyword-branch fixtures declare the root lockfile: the install may run from
+  // `other/`, so accepting the root one alone is the wrong answer they pin.
   test(`guard sees ${label}`, () => {
     withFixture(({ fixtureRoot, fixtureWorkflows }) => {
       writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
@@ -2548,7 +2569,7 @@ jobs:
         with:
           node-version: 22
           cache: yarn
-          cache-dependency-path: other/yarn.lock
+          cache-dependency-path: ${declared}
       - run: |
           ${script}
 `);
