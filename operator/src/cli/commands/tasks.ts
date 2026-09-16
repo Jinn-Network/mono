@@ -18,7 +18,7 @@ import {
 import { isRecoverableTransactionError } from '../../tx-retry.js';
 import type { Task } from '../../types/task.js';
 import { parseTaskV1, type TaskV1 } from '../../types/task-document.js';
-import { SOLVER_TYPES, unknownSolverTypeMessage } from '../../solver-types/index.js';
+import { SOLVER_TYPES, knownSolverTypes, unknownSolverTypeMessage } from '../../solver-types/index.js';
 import { signTaskV1 } from '../../tasks/signing.js';
 import { TaskPostingService } from '../../tasks/posting-service.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
@@ -1358,7 +1358,7 @@ Options:
                       the per-evaluator cap is 1, so no claimer can take them
                       all. Use on shared/adversarial networks.
   --spec-file <path>  Path to a JSON file containing typed task fields (window, spec, eligibility).
-                      Supports registered SolverTypes: portfolio.v0, prediction.v1, prediction.apy.v0.
+                      Supports registered SolverTypes: ${knownSolverTypes().join(', ')}.
 
                       Sentinel resolved at post time, for prediction.apy.v0 only:
                         window.startTs: 0              → Date.now(); endTs + resolveTs follow

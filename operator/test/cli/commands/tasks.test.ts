@@ -9,6 +9,7 @@ import {
   parseMarketplaceTaskSubmitRequest,
 } from '@/tasks/submit-request.js';
 import { makeCommandCtx } from '@test/cli.js';
+import { knownSolverTypes } from '@/solver-types/index.js';
 import { LocalAdapter } from '@/adapters/local/adapter.js';
 import { Store } from '@/store/store.js';
 import { marketplaceTaskSelectionSidecarPath } from '@/tasks/submit-selection.js';
@@ -1008,5 +1009,18 @@ describe('tasks submit spec-file window freshness', () => {
       verb: 'tasks submit',
     });
     expect(createCliExecutionContext).not.toHaveBeenCalled();
+  });
+});
+
+// Issue #4203: the --spec-file help must list every registered SolverType.
+describe('tasks help', () => {
+  it('lists every registered SolverType for --spec-file', () => {
+    const line = tasksCommand.helpText
+      .split('\n')
+      .find((l) => l.includes('Supports registered SolverTypes:'));
+    expect(line).toBeDefined();
+    for (const solverType of knownSolverTypes()) {
+      expect(line).toContain(solverType);
+    }
   });
 });
