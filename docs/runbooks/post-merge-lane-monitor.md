@@ -91,8 +91,8 @@ bottom names the latest failing run, its attempt, and the alert's confidence, an
 rewrites the body (and posts the new body as a comment) only when that marker changes, so a
 scheduled re-evaluation never comments and **a new comment means a new failing run** (or a
 failing re-run of one) **or a change in the alert's confidence**. Confidence can change with no
-new failing run: if a re-run of an older failing run succeeds, the streak shrinks to one, and
-once its grace window elapses a confirmed alert becomes unconfirmed. A retitled alert gets its
+new failing run: if a successful re-run leaves only the latest run failing, a confirmed alert
+is left as it is until that run's grace window elapses, and only then becomes unconfirmed. A retitled alert gets its
 title restored with no comment and its body left alone. Put notes in comments, not the body: the
 body is rewritten when a new failing run arrives or the confidence changes, and an alert whose
 marker line is edited away is no longer recognised as the lane's alert.
