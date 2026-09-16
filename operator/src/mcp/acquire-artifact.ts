@@ -86,21 +86,34 @@ export async function handleAcquireArtifact(
       },
     };
   }
+  // network_artifacts is a cache, so a row that does not hash to its own key is
+  // a miss, not a refusal: falling through to the daemon lets the mirror below
+  // replace it. Refusing outright would strand the artifact permanently, since
+  // nothing on this path can delete the row.
   const cached = store.getNetworkArtifact(args.sha256);
   if (cached) {
-    store.touchNetworkArtifactUsage(args.sha256, new Date().toISOString());
-    return {
-      ok: true,
-      content: {
-        sha256: args.sha256,
-        bytes: cached.content,
-        artifactType: cached.artifactType,
-        source: 'cache',
-        paidAmountUsdc: '0',
-        fetchedAt: cached.fetchedAt,
-        sourceOperator: cached.sourceOperator ?? undefined,
-      },
-    };
+    // Verified before the usage bump: a row we are about to discard must not
+    // have its last_used_at refreshed.
+    const verifiedCache = verifyArtifactDigest(args.sha256, cached.content);
+    if (verifiedCache.ok) {
+      store.touchNetworkArtifactUsage(args.sha256, new Date().toISOString());
+      return {
+        ok: true,
+        content: {
+          sha256: args.sha256,
+          bytes: cached.content,
+          artifactType: cached.artifactType,
+          source: 'cache',
+          paidAmountUsdc: '0',
+          fetchedAt: cached.fetchedAt,
+          sourceOperator: cached.sourceOperator ?? undefined,
+        },
+      };
+    }
+    console.warn(
+      `[mcp] cached artifact ${args.sha256} hashed to ${verifiedCache.actualSha256}; `
+        + 'treating the row as a miss and proxying to the daemon',
+    );
   }
 
   if (!daemonApiUrl) {
@@ -184,9 +197,9 @@ export async function handleAcquireArtifact(
   const bytes = Buffer.from(contentB64, 'base64');
 
   // Verify BEFORE the mirror. The daemon verified these bytes too, but that is
-  // a claim about the other side of an HTTP hop, and the cache-read fast path
-  // above does not re-hash — so unverified bytes admitted here would be served
-  // to every later caller in this process (#4179).
+  // a claim about the other side of an HTTP hop, and this process is what
+  // admits them into the shared cache — so bytes that fail here must never
+  // reach the row, whatever the other side asserted (#4179).
   const verified = verifyArtifactDigest(args.sha256, bytes);
   if (!verified.ok) {
     return hashMismatch(args.sha256, verified.actualSha256, `daemon ${daemonApiUrl}`);
@@ -204,9 +217,18 @@ export async function handleAcquireArtifact(
     ? `ipfs://${ipfsSource.cid}`
     : args.access.endpoint;
 
-  // Best-effort cache mirror; errors here are non-fatal.
+  // Best-effort cache mirror; errors here are non-fatal. Guarded on the row
+  // still being *unusable*, not on its mere absence. The daemon opens this same
+  // SQLite file (main.ts hands the subprocess `config.dbPath`), so by now it has
+  // written a row naming how it really acquired the bytes — `route-resolver`,
+  // `self-store-mirror` — while `source`/`sourceEndpoint` here are only
+  // reconstructed from the request; search-records and corpus-knowledge hand
+  // that endpoint back to agents. Re-reading, rather than skipping whenever any
+  // row exists, is what still lets a digest-failing row be replaced instead of
+  // blocking its own repair forever.
   try {
-    if (!store.getNetworkArtifact(args.sha256)) {
+    const existing = store.getNetworkArtifact(args.sha256);
+    if (!existing || !verifyArtifactDigest(args.sha256, existing.content).ok) {
       store.saveNetworkArtifact({
         sha256: args.sha256,
         artifactType,

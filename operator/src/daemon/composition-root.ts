@@ -143,6 +143,7 @@ import {
   createRegistryPinPort,
   deriveMarketplaceAttemptUri,
   keccakEvidenceHash,
+  TASK_COORDINATOR_ABI,
 } from '@jinn-network/marketplace-binding';
 import {
   CLAIM_NOTHING,
@@ -791,115 +792,6 @@ export function buildLegacyDeliveryExtensions(input: {
 }
 
 // ── Projector wiring (CLOSED at C8 — see file header items 1, a, b, c, d) ────────────────────
-//
-// `TaskCoordinator.getRequestRef` / `getAttempt` — mirrors
-// `packages/marketplace/venue-base/src/writers/settlement.ts`'s (non-exported)
-// `readRouterDeliveryFacts` today-generation read exactly, per that module's own doc comment
-// directing a host-injected port to do this read rather than duplicate it inside the enrich
-// module itself.
-//
-// PRODUCER/VERIFIER PARITY (defect #47): the producing side registers a SOLUTION request and a
-// VERDICT request in two disjoint on-chain maps — `TaskCoordinator._requestRefs` (written by
-// `registerRequest`, read by `getRequestRef`) and `TaskCoordinator._verdictRequestRefs` (written
-// by `registerVerdictRequest`, read by `getVerdictRequestRef`, `TaskCoordinator.sol:359/458`).
-// A verifier that consults only `getRequestRef` therefore reports "no on-chain request reference"
-// for every verdict delivery that ever settled, and enrich drops the Mech `Deliver` that carries
-// the evaluator's verdict — the reason the round-28 verdict announcement never projected. The
-// verdict maps' own anchor is `VerdictRecord.verdictCidDigest` (`getVerdict`), the exact analogue
-// of `AttemptRecord.solutionCidDigest` for the solution leg.
-const REQUEST_REF_VIEW_ABI = [{
-  name: 'getRequestRef', type: 'function', stateMutability: 'view',
-  inputs: [{ name: 'requestId', type: 'bytes32' }],
-  outputs: [
-    { name: 'taskId', type: 'uint256' },
-    { name: 'attemptIndex', type: 'uint32' },
-    { name: 'exists', type: 'bool' },
-  ],
-}] as const;
-
-const GET_ATTEMPT_VIEW_ABI = [{
-  name: 'getAttempt', type: 'function', stateMutability: 'view',
-  inputs: [
-    { name: 'taskId', type: 'uint256' },
-    { name: 'attemptIndex', type: 'uint32' },
-  ],
-  outputs: [{
-    name: 'attempt', type: 'tuple',
-    components: [
-      { name: 'taskId', type: 'uint256' },
-      { name: 'attemptIndex', type: 'uint32' },
-      { name: 'operator', type: 'address' },
-      { name: 'requestId', type: 'bytes32' },
-      { name: 'solutionCidDigest', type: 'bytes32' },
-      { name: 'solutionWeight', type: 'uint256' },
-      { name: 'verdictCount', type: 'uint32' },
-      { name: 'status', type: 'uint8' },
-    ],
-  }],
-}] as const;
-
-const VERDICT_REQUEST_REF_VIEW_ABI = [{
-  name: 'getVerdictRequestRef', type: 'function', stateMutability: 'view',
-  inputs: [{ name: 'requestId', type: 'bytes32' }],
-  outputs: [
-    { name: 'taskId', type: 'uint256' },
-    { name: 'attemptIndex', type: 'uint32' },
-    { name: 'verdictIndex', type: 'uint32' },
-    { name: 'exists', type: 'bool' },
-  ],
-}] as const;
-
-/**
- * `TaskCoordinator.getVerdict` — `verdictCidDigest` is the exact digest argument the evaluator's
- * `claimVerdictDelivery(verdictRequestId, verdictDigest, verdictCode)` wrote through
- * `recordVerdict` (`TaskCoordinator.sol:403`), the verdict-leg counterpart of the solution leg's
- * `AttemptRecord.solutionCidDigest`.
- */
-const GET_VERDICT_VIEW_ABI = [{
-  name: 'getVerdict', type: 'function', stateMutability: 'view',
-  inputs: [
-    { name: 'taskId', type: 'uint256' },
-    { name: 'attemptIndex', type: 'uint32' },
-    { name: 'verdictIndex', type: 'uint32' },
-  ],
-  outputs: [{
-    name: 'verdict', type: 'tuple',
-    components: [
-      { name: 'taskId', type: 'uint256' },
-      { name: 'attemptIndex', type: 'uint32' },
-      { name: 'verdictIndex', type: 'uint32' },
-      { name: 'evaluator', type: 'address' },
-      { name: 'requestId', type: 'bytes32' },
-      { name: 'verdictCidDigest', type: 'bytes32' },
-      { name: 'verdictCode', type: 'uint8' },
-      { name: 'status', type: 'uint8' },
-    ],
-  }],
-}] as const;
-
-/**
- * `TaskCoordinator.getTask` — read directly off the coordinator this composition already holds,
- * not through `getTaskCidDigest`'s router→`taskCoordinator()`→`getTask` two-hop (that indirection
- * exists only for the legacy adapter, which is handed a router address).
- */
-const GET_TASK_VIEW_ABI = [{
-  name: 'getTask', type: 'function', stateMutability: 'view',
-  inputs: [{ name: 'taskId', type: 'uint256' }],
-  outputs: [{
-    name: 'task', type: 'tuple',
-    components: [
-      { name: 'creator', type: 'address' },
-      { name: 'taskCidDigest', type: 'bytes32' },
-      { name: 'manifestDigest', type: 'bytes32' },
-      { name: 'status', type: 'uint8' },
-      { name: 'policy', type: 'uint8' },
-      { name: 'claimCount', type: 'uint32' },
-      { name: 'submittedCount', type: 'uint32' },
-      { name: 'finalizedAttemptCount', type: 'uint32' },
-      { name: 'creatorCredited', type: 'bool' },
-    ],
-  }],
-}] as const;
 
 /**
  * Why a fetch produced no bytes. FAILURE IS NOT ABSENCE (#2647), applied to the IPFS leg (#3451):
@@ -997,17 +889,32 @@ export function buildReadTodayDeliveryFacts(
 ): ProjectorEnrichPorts['readTodayDeliveryFacts'] {
   return async (requestId) => {
     let solutionLegFailed = false;
+    // `TaskCoordinator.getRequestRef` / `getAttempt` — mirrors
+    // `packages/marketplace/venue-base/src/writers/settlement.ts`'s (non-exported)
+    // `readRouterDeliveryFacts` today-generation read exactly, per that module's own doc comment
+    // directing a host-injected port to do this read rather than duplicate it inside the enrich
+    // module itself.
+    //
+    // PRODUCER/VERIFIER PARITY (defect #47): the producing side registers a SOLUTION request and a
+    // VERDICT request in two disjoint on-chain maps — `TaskCoordinator._requestRefs` (written by
+    // `registerRequest`, read by `getRequestRef`) and `TaskCoordinator._verdictRequestRefs` (written
+    // by `registerVerdictRequest`, read by `getVerdictRequestRef`, `TaskCoordinator.sol:359/458`).
+    // A verifier that consults only `getRequestRef` therefore reports "no on-chain request reference"
+    // for every verdict delivery that ever settled, and enrich drops the Mech `Deliver` that carries
+    // the evaluator's verdict — the reason the round-28 verdict announcement never projected. The
+    // verdict maps' own anchor is `VerdictRecord.verdictCidDigest` (`getVerdict`), the exact analogue
+    // of `AttemptRecord.solutionCidDigest` for the solution leg.
     try {
       const [taskId, attemptIndex, exists] = await publicClient.readContract({
         address: taskCoordinator,
-        abi: REQUEST_REF_VIEW_ABI,
+        abi: TASK_COORDINATOR_ABI,
         functionName: 'getRequestRef',
         args: [requestId],
       });
       if (exists) {
         const attempt = await publicClient.readContract({
           address: taskCoordinator,
-          abi: GET_ATTEMPT_VIEW_ABI,
+          abi: TASK_COORDINATOR_ABI,
           functionName: 'getAttempt',
           args: [taskId, attemptIndex],
         });
@@ -1023,14 +930,18 @@ export function buildReadTodayDeliveryFacts(
     try {
       const [taskId, attemptIndex, verdictIndex, exists] = await publicClient.readContract({
         address: taskCoordinator,
-        abi: VERDICT_REQUEST_REF_VIEW_ABI,
+        abi: TASK_COORDINATOR_ABI,
         functionName: 'getVerdictRequestRef',
         args: [requestId],
       });
       if (!exists) return solutionLegFailed ? 'unavailable' : undefined;
+      // `getVerdict`'s `verdictCidDigest` is the exact digest argument the evaluator's
+      // `claimVerdictDelivery(verdictRequestId, verdictDigest, verdictCode)` wrote through
+      // `recordVerdict` (`TaskCoordinator.sol:403`), the verdict-leg counterpart of the solution
+      // leg's `AttemptRecord.solutionCidDigest`.
       const verdict = await publicClient.readContract({
         address: taskCoordinator,
-        abi: GET_VERDICT_VIEW_ABI,
+        abi: TASK_COORDINATOR_ABI,
         functionName: 'getVerdict',
         args: [taskId, attemptIndex, verdictIndex],
       });
@@ -1074,9 +985,12 @@ export function buildReadOnChainTaskDigest(
     if (memoized !== undefined) return memoized;
     let digest: `sha256:${string}` | undefined;
     try {
+      // `getTask` read directly off the coordinator this composition already holds, not through
+      // `getTaskCidDigest`'s router→`taskCoordinator()`→`getTask` two-hop (that indirection exists
+      // only for the legacy adapter, which is handed a router address).
       const task = await publicClient.readContract({
         address: taskCoordinator,
-        abi: GET_TASK_VIEW_ABI,
+        abi: TASK_COORDINATOR_ABI,
         functionName: 'getTask',
         args: [taskId],
       });

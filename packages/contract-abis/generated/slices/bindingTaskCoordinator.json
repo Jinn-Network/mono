@@ -172,6 +172,119 @@
           ]
         }
       ]
+    },
+    {
+      "type": "function",
+      "name": "getRequestRef",
+      "stateMutability": "view",
+      "inputs": [
+        {
+          "type": "bytes32",
+          "name": "requestId"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "uint256",
+          "name": "taskId"
+        },
+        {
+          "type": "uint32",
+          "name": "attemptIndex"
+        },
+        {
+          "type": "bool",
+          "name": "exists"
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "getVerdictRequestRef",
+      "stateMutability": "view",
+      "inputs": [
+        {
+          "type": "bytes32",
+          "name": "requestId"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "uint256",
+          "name": "taskId"
+        },
+        {
+          "type": "uint32",
+          "name": "attemptIndex"
+        },
+        {
+          "type": "uint32",
+          "name": "verdictIndex"
+        },
+        {
+          "type": "bool",
+          "name": "exists"
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "getVerdict",
+      "stateMutability": "view",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "taskId"
+        },
+        {
+          "type": "uint32",
+          "name": "attemptIndex"
+        },
+        {
+          "type": "uint32",
+          "name": "verdictIndex"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "tuple",
+          "name": "verdict",
+          "components": [
+            {
+              "type": "uint256",
+              "name": "taskId"
+            },
+            {
+              "type": "uint32",
+              "name": "attemptIndex"
+            },
+            {
+              "type": "uint32",
+              "name": "verdictIndex"
+            },
+            {
+              "type": "address",
+              "name": "evaluator"
+            },
+            {
+              "type": "bytes32",
+              "name": "requestId"
+            },
+            {
+              "type": "bytes32",
+              "name": "verdictCidDigest"
+            },
+            {
+              "type": "uint8",
+              "name": "verdictCode"
+            },
+            {
+              "type": "uint8",
+              "name": "status"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

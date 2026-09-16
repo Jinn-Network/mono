@@ -21,6 +21,15 @@ cd ../packages/contract-abis && yarn generate
 `generated/` and the TypeScript slices under `src/generated/slices/`. Stage
 both — `src/generated/slices/` is what consumers compile into `dist/`.
 
+## Manifest item forms
+
+Each entry in a slice's `items` array is one of:
+
+| Form | Example | Resolution |
+|---|---|---|
+| bare name | `"createTask"` | must match exactly one ABI item by `name`; two or more is a hard error |
+| canonical signature | `"claimTask(uint256,address)"` | matches by `name` plus the comma-joined canonical input type list; use it to select one overload |
+
 ## Drift check
 
 ```bash

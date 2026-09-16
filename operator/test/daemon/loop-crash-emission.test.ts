@@ -112,8 +112,12 @@ describe('#3110 — Daemon.start() wires every loop crash through emitLoopCrash'
     );
 
     await daemon.start();
-    // stop() awaits loopPromises, so the .catch handler is guaranteed to have
-    // run by the time it resolves — deterministic, no polling, no waitFor.
+    // Determinism comes from `mockRejectedValue`, not from `stop()`: the mock
+    // returns an already-rejected promise, so the `.catch` handler runs in the
+    // microtask turn right after `start()` attaches it — before `stop()` is
+    // even called. `Daemon.stop()` races `allSettled(loopPromises)` against a
+    // timeout and is NOT the guarantee; a loop that rejected asynchronously
+    // would need a real wait here (#4428).
     await daemon.stop();
     daemon = undefined;
 
@@ -156,6 +160,14 @@ describe('#3110 — Daemon.start() wires every loop crash through emitLoopCrash'
     // sites use the direct `.run().catch(` shape, and the behavioral test
     // above is the actual #3110 criterion; this pin covers the class, not
     // every possible spelling of it.
+    //
+    // Second boundary (#4428): the regex accepts only `err` / `error` as the
+    // arrow parameter. A correctly wired `.run().catch(e => emitLoopCrash(...))`
+    // is counted by the raw `.run().catch(` split but not by the regex, so one
+    // of the count assertions (the `>= 11` floor above for a renamed existing
+    // site, the equality below for an added one) goes red with a count
+    // mismatch, not a message about parameter naming. Rename the parameter or
+    // extend the regex.
     expect(source.split('.run().catch(').length - 1).toBe(sites.length);
   });
 });

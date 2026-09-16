@@ -164,6 +164,26 @@ describe("colophon import item-bank", () => {
       });
     }
 
+    // A licence whose parentheses nest deeply enough exhausted the export's recursive-descent
+    // parser, so the flag answered with a RangeError instead of a typed refusal (issue #3898).
+    const deepLicense = await runCli([
+      "import", "item-bank",
+      "--workspace", workspaceDir,
+      "--principal", "sponsor-1",
+      "--profile", "binary-judgment@2",
+      "--draft", "d1",
+      "--items", itemsPath,
+      "--sources", sourcesPath,
+      "--admissions", admissionsPath,
+      "--license", `${"(".repeat(10000)}MIT${")".repeat(10000)}`,
+      "--json",
+    ], { cwd: root, clock: () => "2026-08-15T11:01:20.000Z" });
+    expect(deepLicense.exitCode).toBe(2);
+    expect(JSON.parse(deepLicense.stdout)).toMatchObject({
+      ok: false,
+      error: { code: "invalid-invocation", detail: expect.stringContaining("nests parentheses") },
+    });
+
     writeFileSync(itemsPath, `\uFEFF${renderCanonicalJsonl([{
       protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL,
       item,

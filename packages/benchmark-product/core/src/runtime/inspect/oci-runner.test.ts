@@ -92,7 +92,7 @@ test("termination reaps the worker container before waiting out the docker clien
   expect(reapedAt - terminatedAt).toBeLessThan(2_500);
 
   await exited;
-}, 30_000);
+});
 
 /**
  * A stand-in for the `docker` CLI whose `run` writes one protocol frame to stdout and exits 0
@@ -145,7 +145,7 @@ test("the sandbox relay emits a final frame the worker did not newline-terminate
   });
 
   expect({ code, stdout }).toEqual({ code: 0, stdout: `${frame}\n` });
-}, 30_000);
+});
 
 /**
  * The companion to the test above. A trailing chunk that is not a whole frame cannot be relayed,
@@ -185,7 +185,7 @@ test("a final frame the relay cannot parse fails the runner instead of exiting 0
   // "OCI runtime ...", so a substring of the truncated `"runtime"` key would collide with them and
   // report an unrelated preflight failure as a leaked frame.
   expect(stderr).not.toContain(truncatedFrame);
-}, 30_000);
+});
 
 /**
  * A stand-in for the `docker` CLI whose `run` hands stdout to a detached grandchild that writes
@@ -265,7 +265,7 @@ test("a trailing sandbox request the client can no longer answer fails the runne
 
   expect({ code, stdout }).toEqual({ code: 1, stdout: "" });
   expect(stderr).toContain("could not relay a worker protocol frame");
-}, 30_000);
+});
 
 /**
  * #4026. The overflow guard SIGKILLs the client when the unparsed buffer passes 24 MiB, but left

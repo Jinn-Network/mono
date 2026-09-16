@@ -4,6 +4,7 @@ import { generateKeyPairSync, sign as edSign, type KeyObject } from "node:crypto
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
 import { BenchmarkProductError } from "../profile/errors.js";
+import { expectRefusal } from "../testing/expect-refusal.js";
 import {
   ed25519PublicKeyBytesFromDidKey,
   ed25519PublicKeyFromDidKey,
@@ -139,8 +140,12 @@ describe("verifyDomainBinding (issue #2983)", () => {
 
   test("refuses a binding whose key did not sign this bundle", () => {
     const { bytes } = mintBinding();
-    expect(() => verifyDomainBinding(bytes, ["did:key:zSomeoneElse"]))
-      .toThrow(/did not sign this bundle/);
+    const refusal = expectRefusal(() => verifyDomainBinding(bytes, ["did:key:zSomeoneElse"]));
+    expect(refusal.message).toMatch(/did not sign this bundle/);
+    // `validation`: the binding does not apply to this bundle, and nothing collides with anything,
+    // so `conflict` would send a caller branching on the code down a retry that cannot succeed
+    // (issue #4378).
+    expect(refusal.code).toBe("validation");
   });
 
   test("refuses a signature made by a different key than the one the binding names", () => {

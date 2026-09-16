@@ -384,6 +384,28 @@ describe("verifyEnvelopeBinding", () => {
     const resolver = new FakeBindingResolver().register({
       key: KEY_2,
       agent: AGENT,
+      resolved: resolvedBinding({ binding, isGenesis: false }),
+    });
+    const envelopeBytes = sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2);
+
+    const outcome = await verifyEnvelopeBinding(
+      { envelopeBytes, key: KEY_2, agent: AGENT, family: "deliveries", atTime: "2026-03-01T00:00:00Z" },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(outcome.reason).toBe("consent-chain-violation");
+    expect(outcome.detail).toMatch(/no incumbent controls voucher/);
+  });
+
+  test("(c) a non-genesis binding whose incumbent controls voucher belongs to a different identity and that carries no consent countersignature is rejected (§7.4a)", async () => {
+    const binding = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+    });
+    const resolver = new FakeBindingResolver().register({
+      key: KEY_2,
+      agent: AGENT,
       resolved: resolvedBinding({
         binding,
         isGenesis: false,
@@ -398,6 +420,8 @@ describe("verifyEnvelopeBinding", () => {
     );
     expect(outcome.ok).toBe(false);
     expect(outcome.reason).toBe("consent-chain-violation");
+    expect(outcome.detail).toContain(OTHER_VOUCHER_DID);
+    expect(outcome.detail).toContain(VOUCHER_DID);
   });
 
   test("self-extension succeeds when the binding's own voucher already holds the incumbent controls binding (§7.4a option 1)", async () => {

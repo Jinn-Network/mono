@@ -246,5 +246,74 @@ export const JINN_ROUTER_V4_ABI = [
       }
     ],
     "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "solutionReservations",
+    "stateMutability": "view",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": ""
+      },
+      {
+        "type": "uint32",
+        "name": ""
+      }
+    ],
+    "outputs": [
+      {
+        "type": "uint8",
+        "name": "kind"
+      },
+      {
+        "type": "uint256",
+        "name": "taskId"
+      },
+      {
+        "type": "uint32",
+        "name": "attemptIndex"
+      },
+      {
+        "type": "uint32",
+        "name": "verdictIndex"
+      },
+      {
+        "type": "address",
+        "name": "party"
+      },
+      {
+        "type": "address",
+        "name": "priorityMech"
+      },
+      {
+        "type": "uint256",
+        "name": "rate"
+      },
+      {
+        "type": "uint64",
+        "name": "deadline"
+      },
+      {
+        "type": "bool",
+        "name": "settled"
+      },
+      {
+        "type": "bool",
+        "name": "released"
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "tokenPaymentType",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "bytes32",
+        "name": ""
+      }
+    ]
   }
 ] as const;

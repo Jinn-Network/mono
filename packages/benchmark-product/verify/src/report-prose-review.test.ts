@@ -3,12 +3,19 @@
 /**
  * Issue #3016: the report page's prose review, and the ratchet that keeps it running.
  *
- * The first test set covers the rules themselves. The second runs the review over the published
- * page — the conformance kit's golden bundle is a complete, real report — and requires its
- * findings to be exactly `FROZEN_REPORT_PROSE_FINDINGS`. That is the criterion's "runs as part of
- * producing a report, not as a one-off cleanup": new prose that repeats a statement, narrates a
- * control, or reads as machine-written fails the build of the package that produces reports, and
- * a frozen finding cannot be quietly forgotten because a dead entry fails too.
+ * The first test set covers the rules themselves. The second runs the review over the page the
+ * product actually renders and requires its findings to be exactly
+ * `FROZEN_REPORT_PROSE_FINDINGS`. That is the criterion's "runs as part of producing a report,
+ * not as a one-off cleanup": new prose that repeats a statement, narrates a control, or reads as
+ * machine-written fails the build of the package that produces reports, and a frozen finding
+ * cannot be quietly forgotten because a dead entry fails too.
+ *
+ * That subject is the composed `/10` rendering, not the golden bundle's published `/2` bytes
+ * (issue #4191). The frozen list was never a waiver list: it recorded findings a byte-pinned page
+ * still carried together with the wording that replaces them, and `/10` renders the replacement.
+ * Reviewing `/2` from here would freeze the ratchet against a page no future revision can change.
+ * The proof that those published bytes did not move lives in `assets-report-prose.test.ts`, which
+ * builds its page from the same `goldenInput` helper so the two suites cannot pin different pages.
  *
  * Issue #4192 widens that from one profile to three. `buildIndex` renders a different prose
  * branch per method, and only wilson's was ever read -- so the binary branch's repetitions lived
@@ -23,14 +30,11 @@
  * corpus passes over them.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { BENCHMARKING_METHOD_IDS, parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import { buildPublicAssets, type PublicAssetInput } from "./assets.js";
 import type { PublicComparisonCell } from "./comparison.js";
-import { verifyPublicBundleSnapshot } from "./verify.js";
+import { BUNDLE_V10_FORMAT } from "./manifest.js";
 import {
   FROZEN_REPORT_PROSE_FINDINGS,
   REPORT_PROSE_RULES,
@@ -44,56 +48,23 @@ import {
   type FrozenReportProseFinding,
   type ReportPresentationProfile,
 } from "./report-prose-review.js";
-
-const GOLDEN_DIR = fileURLToPath(
-  new URL("../fixtures/public-bundle-conformance-v1/golden/", import.meta.url),
-);
-const publishedPage = readFileSync(join(GOLDEN_DIR, "index.html"), "utf8");
+import { goldenInput } from "./testing/golden-asset-input.js";
 
 /**
- * The golden bundle's own verified comparison projection. Read in place rather than into a copy:
- * nothing here mutates the fixture (unlike `assets-presentation-profile.test.ts`, which rewrites
- * assets to prove a refusal), so one snapshot verification serves the whole file.
+ * The golden bundle's own verified facts at the composed `/10` format, from the helper
+ * `assets-report-prose.test.ts` shares, so the two suites cannot pin different pages. That suite
+ * also proves the same facts rebuild the published `/2` page byte for byte, which is what anchors
+ * every substituted profile below to the real artifact.
  */
-const { comparison } = await verifyPublicBundleSnapshot(GOLDEN_DIR);
+const goldenAssetInput: PublicAssetInput = await goldenInput(BUNDLE_V10_FORMAT);
 
 /**
- * The cells every expectation below derives from. Named and asserted once: an empty list would
- * make the derived expectations pass against a page rendering no comparison section at all, which
- * is the one way those tests could go quiet without failing.
+ * The cells every expectation below derives from: the golden bundle's own verified comparison
+ * projection, as `goldenInput` takes it from `verifyPublicBundleSnapshot`. Named and asserted
+ * once: an empty list would make the derived expectations pass against a page rendering no
+ * comparison section at all, which is the one way those tests could go quiet without failing.
  */
-const comparisonCells = comparison?.cells ?? [];
-
-/**
- * The golden bundle's asset input, rebuilt from the bundle's own stored records exactly as
- * `assets-presentation-profile.test.ts` does, plus the verified `comparison` the published
- * profile carries. Every digest is read from the bundle, so nothing here is a hand-copied
- * constant that could drift from the fixture -- and the byte-identity test below proves the
- * rebuild is the published page before any substituted profile rests on it.
- */
-function goldenAssetInput(): PublicAssetInput {
-  const read = (name: string): Uint8Array => new Uint8Array(readFileSync(join(GOLDEN_DIR, name)));
-  const claim = JSON.parse(readFileSync(join(GOLDEN_DIR, "claim-package.json"), "utf8")) as PublicAssetInput["claim"] & {
-    readonly records: { readonly matrixSha256: string; readonly reportSha256: string };
-    readonly conflicted: { readonly cellKeys: readonly string[] };
-  };
-  const manifest = JSON.parse(readFileSync(join(GOLDEN_DIR, "bundle.json"), "utf8")) as {
-    readonly files: readonly { readonly path: string }[];
-  };
-  return {
-    claim,
-    matrix: parseMatrix(read("matrix.json")),
-    report: parseReport(read("report.json")),
-    reportSha256: claim.records.reportSha256,
-    matrixSha256: claim.records.matrixSha256,
-    recordSha256s: manifest.files.flatMap((file) => {
-      const match = /^records\/([a-f0-9]{64})\.bin$/u.exec(file.path);
-      return match === null ? [] : [match[1]!];
-    }),
-    dissentCellKeys: [...claim.conflicted.cellKeys],
-    comparison,
-  };
-}
+const comparisonCells = goldenAssetInput.comparison?.cells ?? [];
 
 /**
  * The same input with one method's facts substituted, the way `core/src/bundle/assets.test.ts`
@@ -110,7 +81,7 @@ function goldenAssetInput(): PublicAssetInput {
  * the values are synthetic, the prose is not.
  */
 function methodInput(methodId: string, results: unknown, extra: Partial<PublicAssetInput>): PublicAssetInput {
-  const base = goldenAssetInput();
+  const base = goldenAssetInput;
   const wrapped = { perSubject: [{ subjectSha256: base.matrixSha256, results }] };
   return {
     ...base,
@@ -162,7 +133,7 @@ function binaryQualificationResults(): Record<string, unknown> {
 }
 
 const profilePage: Record<ReportPresentationProfile, string> = {
-  wilson: new TextDecoder().decode(buildPublicAssets(goldenAssetInput())["index.html"]!),
+  wilson: new TextDecoder().decode(buildPublicAssets(goldenAssetInput)["index.html"]!),
   // Keeps `comparison`: a pairwise bundle is non-binary, so the producer derives one for it.
   pairwise: new TextDecoder().decode(buildPublicAssets(methodInput(
     BENCHMARKING_METHOD_IDS.pairwiseDisagreement,
@@ -296,39 +267,31 @@ describe("reviewReportProse", () => {
   });
 });
 
-describe("the published report page", () => {
-  test("carries exactly the findings the presentation revision retires", () => {
-    expect(reviewReportProse(publishedPage).map(({ rule, text }) => ({ rule, text })))
+describe("the wilson page this revision renders", () => {
+  test("carries exactly the findings the frozen list still records", () => {
+    expect(reviewReportProse(profilePage.wilson).map(({ rule, text }) => ({ rule, text })))
       .toEqual(FROZEN_REPORT_PROSE_FINDINGS.map(({ rule, text }) => ({ rule, text })));
   });
 
   test("every frozen finding names a rule that still exists", () => {
+    // Vacuous while the frozen list is empty (issue #4191 retired all four): the page this
+    // revision renders carries no finding, so this asserts nothing today. It is kept armed rather
+    // than deleted because the list is the mechanism, not a one-off -- the next presentation
+    // revision that defers a finding refills it, and this is the check that stops a deferral from
+    // naming a rule the review no longer runs.
     const ruleIds = new Set(REPORT_PROSE_RULES.map((rule) => rule.id));
     for (const frozen of FROZEN_REPORT_PROSE_FINDINGS) expect(ruleIds, frozen.text).toContain(frozen.rule);
   });
 
-  test("the derived wilson input rebuilds the published page byte for byte", () => {
-    expect(profilePage.wilson).toBe(publishedPage);
-  });
 });
 
 /**
  * The pairwise branch's own frozen list, in the same register as `FROZEN_REPORT_PROSE_FINDINGS`
- * and read off a real run of the review, not transcribed from a design. Four of the five restate
- * entries the published page already carries and cross-reference their rulings; the third is a
- * defect this review is the first thing to see.
+ * and read off a real run of the review, not transcribed from a design. The four findings it
+ * shared with the `/2` wilson page are retired on `/10` by the same rulings (issue #4191); what
+ * remains is a defect of this branch alone, which this review is the first thing to see.
  */
 const PAIRWISE_PROFILE_FINDINGS: readonly FrozenReportProseFinding[] = [
-  {
-    rule: "repeated-statement",
-    text: "no comparative winner is stated",
-    ruling: "As on the published page: the claim line in the header states it once.",
-  },
-  {
-    rule: "repeated-statement",
-    text: "values below are copied without reconciliation",
-    ruling: "As on the published page: stated once, on the first sealed-source section.",
-  },
   {
     rule: "repeated-statement",
     text: "exact pairwise-disagreement@1 values from the sealed report",
@@ -338,41 +301,15 @@ const PAIRWISE_PROFILE_FINDINGS: readonly FrozenReportProseFinding[] = [
       + "coming from the sealed Report. Threading the parameter through retires the repetition "
       + "and the false provenance label together.",
   },
-  {
-    rule: "repeated-statement",
-    text: "built on jinn",
-    ruling: "As on the published page: attribution renders once, in the footer imprint.",
-  },
-  {
-    rule: "narrated-control",
-    text: "Open a cell to inspect its evidence",
-    ruling: "As on the published page: cut.",
-  },
 ] as const;
 
 /**
- * The binary branch's frozen list. Two entries name this fixture's own arms, so they are built
- * from its constants rather than written down -- a fixture with different arms re-derives them.
+ * The binary branch's frozen list. Its page-level restatements (the header's no-comparison
+ * statement, the non-reconciliation disclosure, the attribution) are retired on `/10`; what
+ * remains is branch prose. Two entries name this fixture's own arms, so they are built from its
+ * constants rather than written down -- a fixture with different arms re-derives them.
  */
 const BINARY_PROFILE_FINDINGS: readonly FrozenReportProseFinding[] = [
-  {
-    rule: "repeated-statement",
-    text: "facts are presented per instrument without comparative conclusions",
-    ruling:
-      "Cut from `binaryFactsHtml`. It is a page-level statement `neutralClaimHtml` already makes "
-      + "in the header, so the section that repeats it with \"Qualification \" in front says "
-      + "nothing new -- and cutting it retires this entry and the twice-stated one below together.",
-  },
-  {
-    rule: "repeated-statement",
-    text: "values below are copied without reconciliation",
-    ruling: "As on the published page: stated once, on the first sealed-source section.",
-  },
-  {
-    rule: "repeated-statement",
-    text: "qualification facts are presented per instrument without comparative conclusions",
-    ruling: "Cut with the restatement above; see that entry's ruling.",
-  },
   {
     rule: "repeated-statement",
     text: `instrument ${binaryInstrumentSha256(0)}`,
@@ -393,11 +330,6 @@ const BINARY_PROFILE_FINDINGS: readonly FrozenReportProseFinding[] = [
     rule: "repeated-statement",
     text: `instrument ${binaryInstrumentSha256(1)}`,
     ruling: "As for the first arm's digest; the same move retires both.",
-  },
-  {
-    rule: "repeated-statement",
-    text: "built on jinn",
-    ruling: "As on the published page: attribution renders once, in the footer imprint.",
   },
 ] as const;
 

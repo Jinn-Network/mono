@@ -1580,7 +1580,7 @@ test('a guard on a function definition does not reach the deferred body (#4000)'
 });
 
 test('a glued trailing `|` or `&` still leaves the next word in command position (#4067)', () => {
-  // `shellTokens` keeps a single `|` or `&` inside the word it is glued to, so `cat f|`
+  // `shellTokens` kept a single `|` or `&` inside the word it is glued to, so `cat f|`
   // is one token and the `COMMAND_POSITION_WORDS` lookup — which tests the whole value —
   // missed it. The compound keyword after the pipe was demoted to an argument, the
   // compound never matched, and the `|| true` guarding it was lost.
@@ -1592,8 +1592,23 @@ test('a glued trailing `|` or `&` still leaves the next word in command position
     'true 2>&1| while read -r l; do producer | head -1; done || true',
     '{ echo a; }| while read -r l; do producer | head -1; done || true',
     'true& case "$x" in a) producer | head -1 ;; esac || true',
+    // The rule is wider than the shapes above: `until` and `select` are ordinary
+    // compound openers, `|&` is bash's `2>&1 |`, and `>f&` is a redirection followed
+    // by a background separator (#4213).
+    'cat f| until false; do producer | head -1; done || true',
+    'true |& while read -r l; do producer | head -1; done || true',
+    'echo x >f& while read -r l; do producer | head -1; done || true',
+    'true| select i in a; do producer | head -1; done || true',
   ]) {
     assert.deepEqual(severities(line, { shell: 'bash' }), [], line);
+  }
+  for (const line of [
+    'cat f| until false; do producer | head -1; done',
+    'true |& while read -r l; do producer | head -1; done',
+    'echo x >f& while read -r l; do producer | head -1; done',
+    'true| select i in a; do producer | head -1; done',
+  ]) {
+    assert.deepEqual(severities(line, { shell: 'bash' }), ['error:head'], line);
   }
 
   // The glue survives the logical-line join, so the trailing-pipe continuation style
@@ -1608,6 +1623,11 @@ test('a glued trailing `|` or `&` still leaves the next word in command position
 
   // A literal `|`/`&` ending a word is not shell syntax, so it does not open a command
   // position: the reserved word after it stays an argument, which is what #4015 fixed.
+  // The two backslash-escaped forms pin that the separator split honors the syntax
+  // mask. The two quoted forms pin something else — that quotes stay inside the word:
+  // the raw word `"a|"` ends in `"`, not `|`, so they are clean whether or not the mask
+  // is consulted, and a tokenizer that stripped quotes before splitting would put `case`
+  // in command position (#4213).
   for (const bare of ['echo a\\| case', 'echo a\\& case', 'echo "a|" case', "echo 'a|' case"]) {
     assert.deepEqual(
       severities(['(', `  ${bare}`, '  producer | head -1', ') || true'].join('\n'), { shell: 'bash' }),
@@ -1619,6 +1639,102 @@ test('a glued trailing `|` or `&` still leaves the next word in command position
   // A genuinely unguarded pipeline after a glued pipe still reports.
   assert.deepEqual(
     severities('cat f| while read -r l; do producer | head -1; done', { shell: 'bash' }),
+    ['error:head'],
+  );
+});
+
+test('a glued *leading* `|` or `&` still leaves the next word in command position (#4165)', () => {
+  // The mirror image of #4067: a `|`/`&` with no space *after* it glued to the following
+  // word, so the token was `|case` and the reserved word never existed on its own for
+  // `leadsStatement` to classify. `true&while` is the degenerate form — one word for the
+  // whole line. Emitting `|`, `&` and `|&` as separator tokens removes both directions.
+  for (const line of [
+    'true |case "$x" in a) producer | head -1 ;; esac || true',
+    'true |while read -r l; do producer | head -1; done || true',
+    'true |if true; then producer | head -1; fi || true',
+    'true&while read -r l; do producer | head -1; done || true',
+    'true|while read -r l; do producer | head -1; done || true',
+    'true|&case "$x" in a) producer | head -1 ;; esac || true',
+  ]) {
+    assert.deepEqual(severities(line, { shell: 'bash' }), [], line);
+  }
+
+  // A genuinely unguarded pipeline after a leading-glue separator still reports.
+  for (const line of [
+    'true |while read -r l; do producer | head -1; done',
+    'true&while read -r l; do producer | head -1; done',
+  ]) {
+    assert.deepEqual(severities(line, { shell: 'bash' }), ['error:head'], line);
+  }
+
+  // The spaced forms stay clean.
+  for (const line of [
+    'true | while read -r l; do producer | head -1; done || true',
+    'true & while read -r l; do producer | head -1; done || true',
+  ]) {
+    assert.deepEqual(severities(line, { shell: 'bash' }), [], line);
+  }
+
+  // Leading glue on a literal `|`/`&`: the escaped forms pin the mask (a split on an
+  // unmasked `|`/`&` would put `case` in command position and lose the subshell's
+  // guard), the quoted forms pin quote-preserving tokenization.
+  for (const bare of ['echo a\\|case', 'echo a\\&case', 'echo "a|case"', "echo 'a&case'"]) {
+    assert.deepEqual(
+      severities(['(', `  ${bare}`, '  producer | head -1', ') || true'].join('\n'), { shell: 'bash' }),
+      [],
+      bare,
+    );
+  }
+
+  // Redirections carry `|`/`&` that are not separators: `2>&1`, `&>`, `>|`.
+  assert.deepEqual(severities('producer 2>&1 | head -1 || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('producer 2>&1 | head -1', { shell: 'bash' }), ['error:head']);
+  assert.deepEqual(severities('producer &>log; producer | head -1', { shell: 'bash' }), ['error:head']);
+  assert.deepEqual(severities('producer | head -1 >| out || true', { shell: 'bash' }), []);
+});
+
+test('a definition whose opener line begins inside an enclosing compound is still a definition (#4016)', () => {
+  // `opensDefinition` rewound the prefix to the previous *operator*, so when the opener line began
+  // with a compound keyword the prefix was `{ f () ` rather than `f () `, the definition was not
+  // recognised, and the `|| true` on the enclosing closer reached into the deferred body. The stop
+  // rule is now the one `leadsStatement` already defines, so every spelling of "a statement begins
+  // here" is a boundary — not only `{`/`(`, but `then`, `do`, `else` and a `case` arm's `a)`.
+  for (const [opener, closer] of [
+    ['{ f () {', '}'],
+    ['( f () {', ')'],
+    ['if true; then f () {', 'fi'],
+    ['case x in a) f () {', ';; esac'],
+    ['{ function f {', '}'],
+    ['{ f () (', '}'],
+  ]) {
+    const body = [opener, '  producer | head -1', opener.endsWith('(') ? '  )' : '  }', `${closer} || true`, 'f'];
+    assert.deepEqual(severities(body.join('\n'), { shell: 'bash' }), ['error:head'], opener);
+  }
+
+  // A definition's parentheses written apart are the words `(` and `)`; the rewind must not take
+  // that `(` for a statement boundary and cut the prefix down to `) `, which un-recognised the
+  // definition and let the closer's guard reach into the body — at the top level and enclosed.
+  for (const body of [
+    ['f ( ) {', '  producer | head -1', '} || true', 'f'],
+    ['function f ( ) {', '  producer | head -1', '} || true', 'f'],
+    ['{ f ( ) {', '  producer | head -1', '  }', '} || true', 'f'],
+  ]) {
+    assert.deepEqual(severities(body.join('\n'), { shell: 'bash' }), ['error:head'], body[0]);
+  }
+
+  // A guard written inside the body still runs with the body, so it still counts.
+  assert.deepEqual(
+    severities(['{ f () {', '  producer | head -1 || true', '  }', '} || true', 'f'].join('\n'), { shell: 'bash' }),
+    [],
+  );
+
+  // The enclosing guard still covers everything in the group that is *not* deferred: one finding,
+  // for the body, and none for the sibling pipeline the `|| true` genuinely guards.
+  assert.deepEqual(
+    severities(
+      ['{ f () {', '  producer | head -1', '  }', '  git tag | head -1', '} || true', 'f'].join('\n'),
+      { shell: 'bash' },
+    ),
     ['error:head'],
   );
 });

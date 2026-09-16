@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ServeUnderTest } from "@jinn-network/record-discovery-testing";
-import { loadVectorsByKind, runSourceConformance } from "@jinn-network/record-discovery-testing";
+import { loadVectorsByKind, runSourceConformance, vectorEnvelopeToWire } from "@jinn-network/record-discovery-testing";
 import { parseAnnouncementEntry } from "@jinn-network/record-discovery-protocol";
 
 import type { BlobStore } from "./ports.js";
@@ -54,9 +54,17 @@ describe("source-conformance-correction-by-append-reorged, exercised against ser
     );
     expect(vector).toBeDefined();
     const input = vector!.input as { entries: Array<{ entry: unknown; signature?: DsseEnvelope }> };
+    // `writeArchivePages` stores the envelope without parsing it, so the
+    // corpus's legible form would round-trip here too -- but every direct
+    // consumer of a vector envelope goes through `vectorEnvelopeToWire`
+    // (#4436); the copy only satisfies serve's mutable `signatures` type.
+    const toWire = (envelope: DsseEnvelope): DsseEnvelope => {
+      const wire = vectorEnvelopeToWire(envelope);
+      return { ...wire, signatures: [...wire.signatures] };
+    };
     const signedEntries: SignedEntry[] = input.entries.map((e) => ({
       entry: parseAnnouncementEntry(e.entry),
-      ...(e.signature === undefined ? {} : { signature: e.signature }),
+      ...(e.signature === undefined ? {} : { signature: toWire(e.signature) }),
     }));
     expect(signedEntries.length).toBeGreaterThanOrEqual(2);
     expect(signedEntries[1]!.entry.announcements.some((a) => a.action === "withdrawn" && a.reason === "reorged")).toBe(true);
