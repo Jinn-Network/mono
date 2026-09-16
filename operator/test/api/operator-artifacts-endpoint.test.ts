@@ -335,6 +335,44 @@ describe('POST /v1/operator/pricing', () => {
     });
   });
 
+  // Issue #4241: `operator` also carries non-pricing keys (verticalMode,
+  // native). A pricing save must merge into the block, not replace it.
+  it('preserves non-pricing keys in the operator block', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    const native = { fleet: { workers: 2 }, sources: ['a', 'b'] };
+    writeFileSync(configPath, `${JSON.stringify({
+      network: 'testnet',
+      operator: {
+        verticalMode: 'native-v1',
+        native,
+        publicEndpoint: 'https://old.example.com',
+        defaultPriceUsdc: '0',
+      },
+    }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ defaultPriceUsdc: '0.002' }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      network: string;
+      operator: Record<string, unknown>;
+    };
+    expect(persisted.network).toBe('testnet');
+    expect(persisted.operator.verticalMode).toBe('native-v1');
+    expect(persisted.operator.native).toEqual(native);
+    expect(persisted.operator.publicEndpoint).toBe('https://old.example.com');
+    expect(persisted.operator.defaultPriceUsdc).toBe('0.002');
+  });
+
   it('persists donation settings without requiring publicEndpoint', async () => {
     const store = memoryStore();
     const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
