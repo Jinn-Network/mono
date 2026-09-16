@@ -104,6 +104,25 @@ export function getDaemonReadiness(): DaemonReadiness {
   return sharedDaemonReadiness;
 }
 
+// ── Degraded-recovery loops running (#4311) ─────────────────────────────────
+//
+// Whether the standalone degraded-recovery loops (`degraded-recovery.ts`) are
+// currently up. `degraded` readiness alone cannot distinguish a healthy
+// degraded boot from #2425's loops-failed-to-start state; this holder backs
+// the `jinn_degraded_recovery_running` gauge that can. Same module-level
+// shape as the readiness holder above, for the same construction-order
+// reason; set by `runBootstrapWithDegradeOpen` via main.ts. Defaults to
+// `false` — nothing is running until a `'started'` outcome says so.
+let sharedDegradedRecoveryRunning = false;
+
+export function setDegradedRecoveryRunning(running: boolean): void {
+  sharedDegradedRecoveryRunning = running;
+}
+
+export function getDegradedRecoveryRunning(): boolean {
+  return sharedDegradedRecoveryRunning;
+}
+
 /** The config-row key for a given loop's heartbeat. */
 export function loopHeartbeatKey(name: LoopName): string {
   return `${LOOP_HEARTBEAT_PREFIX}${name}`;
