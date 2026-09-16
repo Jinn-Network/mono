@@ -68,7 +68,7 @@ export async function setUpLockedDraft(
   expect(runLock(context, { draftId }).ok).toBe(true);
 }
 
-export function isEvaluationSubmission(submissionBytes: Uint8Array): boolean {
+function isEvaluationSubmission(submissionBytes: Uint8Array): boolean {
   try {
     const doc = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(submissionBytes)) as {
       readonly requirements?: { readonly harness?: { readonly id?: string } };
@@ -86,7 +86,7 @@ export function isEvaluationSubmission(submissionBytes: Uint8Array): boolean {
  * leaves is exactly the canary's — delivered, unjournaled. The caller abandons the drive there,
  * so no journal entry is ever written for that evaluation leg.
  */
-export function hangBeforeFirstVerdict(
+function hangBeforeFirstVerdict(
   backend: ProxiedBackend,
   armed: { value: boolean; resolveArmed?: () => void },
 ): ProxiedBackend {
