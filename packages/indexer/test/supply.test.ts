@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildCurrentSupply, completedSupplyWindow, resolveSupplyChainId } from '../src/api/supply.js';
+import { buildCurrentSupply, assembleCurrentSupply, completedSupplyWindow, resolveSupplyChainId } from '../src/api/supply.js';
 import { BASE_SEPOLIA_CHAIN_ID, indexedChainIds } from '../src/chain-config.js';
 
 const CHAIN_ID = 84532;
@@ -189,6 +189,21 @@ describe('buildCurrentSupply', () => {
   it('still preserves uncertainty when verdictCode is not a safe integer', () => {
     expect(build({ verdicts: [verdict({ verdictCode: 1.5 })] }).status).toBe('unknown');
     expect(build({ verdicts: [verdict({ verdictCode: Number.NaN })] }).status).toBe('unknown');
+  });
+
+  it('reports why a verdict without an attempt is unknown', () => {
+    const assembled = assembleCurrentSupply({
+      chainId: CHAIN_ID,
+      asOfMs: AS_OF,
+      manifestEvidenceComplete: true,
+      activityEvidenceComplete: true,
+      manifests: [manifest()],
+      tasks: [task()],
+      attempts: [attempt()],
+      verdicts: [verdict({ attemptIndex: 9 })],
+    });
+    expect(assembled.response.status).toBe('unknown');
+    expect(assembled.unknownBecause).toBe('verdict with no attempt');
   });
 
   it('skips an attempt whose task row is missing instead of blacking out a proven class', () => {
@@ -383,10 +398,9 @@ describe('GET /supply evidence reads', () => {
     // flags compare with `<=`, so a full page is read as truncation rather than
     // as a proven zero. Counting bare `.limit(` occurrences would not see
     // either half: dropping the `+ 1`, or flipping a `<=` to `<`, makes every
-    // completeness flag unconditionally true while keeping the count at 7.
+    // completeness flag unconditionally true while keeping the count at 5.
     expect(route.match(/\.limit\(SUPPLY_EVIDENCE_ROW_LIMIT \+ 1\)/gu)).toHaveLength(5);
-    expect(route.match(/\.limit\(1\)/gu)).toHaveLength(2);
-    expect(route.match(/\.limit\(/gu)).toHaveLength(7);
+    expect(route.match(/\.limit\(/gu)).toHaveLength(5);
     expect(route.match(/\.length <= SUPPLY_EVIDENCE_ROW_LIMIT/gu)).toHaveLength(5);
     // The attempts referenced by in-window verdicts are fetched WITHOUT the
     // window filter, so a long loop cannot look like a broken join.
@@ -395,6 +409,31 @@ describe('GET /supply evidence reads', () => {
     expect(route).toContain('attempt.createdAtTimestamp} < ${windowEnd}');
     expect(route).toContain('verdict.createdAtTimestamp} >= ${windowStart}');
     expect(route).toContain('verdict.createdAtTimestamp} < ${windowEnd}');
+  });
+
+  it('does not probe the whole chain for zero timestamps', () => {
+    const source = readFileSync(new URL('../src/api/index.ts', import.meta.url), 'utf8');
+    const route = source.slice(
+      source.indexOf('// ── GET /supply'),
+      source.indexOf('// ── Shared ebu7-schema probe'),
+    );
+    expect(route).not.toContain('missingAttemptTimes');
+    expect(route).not.toContain('missingVerdictTimes');
+    expect(route).not.toMatch(/createdAtTimestamp, 0n/);
+    expect(route.match(/\.limit\(1\)/gu)).toBeNull();
+  });
+
+  it('splits query failures from assembler failures and caches successful answers', () => {
+    const source = readFileSync(new URL('../src/api/index.ts', import.meta.url), 'utf8');
+    const route = source.slice(
+      source.indexOf('// ── GET /supply'),
+      source.indexOf('// ── Shared ebu7-schema probe'),
+    );
+    expect(route).toContain("detail: 'assembler failed'");
+    expect(route).toContain("c.header('Cache-Control', 'public, max-age=30, must-revalidate')");
+    expect(route).toContain('assembleCurrentSupply');
+    expect(route).toContain('unknownBecause');
+    expect(route).toContain('console.warn');
   });
 });
 
