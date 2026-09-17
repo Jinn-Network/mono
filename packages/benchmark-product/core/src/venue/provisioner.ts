@@ -506,17 +506,26 @@ async function removeDemo1Instructions(paths: WorkspacePaths): Promise<void> {
  * an interrupted teardown can leave the directory with its `.git` gone or pointing at a pruned
  * admin dir. The top level must be `work` itself because `git -C` searches parent directories, so a
  * checkout that lost its `.git` inside some enclosing repository would otherwise pass; `HEAD` must
- * resolve because extraction reads it. Any failure means unusable.
+ * resolve because extraction reads it. A git refusal means unusable; a failure to run git at all
+ * (a spawn error such as ENOENT) is an infrastructure fault and propagates, so it is never
+ * harvested as a declared omission.
  */
 async function isUsableCheckout(work: string): Promise<boolean> {
   if (!existsSync(work)) return false;
+  let output: string;
   try {
-    const [topLevel] = (await runGitOutput(["-C", work, "rev-parse", "--show-toplevel", "HEAD"], {
+    output = await runGitOutput(["-C", work, "rev-parse", "--show-toplevel", "HEAD"], {
       ...process.env,
       GIT_TERMINAL_PROMPT: "0",
       GIT_CONFIG_GLOBAL: "/dev/null",
       GIT_CONFIG_SYSTEM: "/dev/null",
-    })).split("\n");
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== undefined) throw error;
+    return false;
+  }
+  try {
+    const [topLevel] = output.split("\n");
     return topLevel !== undefined && realpathSync(topLevel) === realpathSync(work);
   } catch {
     return false;
