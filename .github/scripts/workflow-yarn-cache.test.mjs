@@ -1574,9 +1574,17 @@ for (const run of [
   'command -v yarn >/dev/null || npm i -g yarn',
   // The same, with the options split: only the word right after `command` was read.
   'command -p -v yarn',
+  // Clustered and uppercase option letters are still lookups, not wrappers.
+  'command -V yarn',
+  'command -pv yarn',
   'which yarn',
+  'type yarn',
+  'hash yarn',
   'npm install -g yarn',
+  'brew install yarn',
   'corepack enable yarn',
+  'rm -rf ~/.cache/yarn',
+  'echo yarn',
   // A version spec is Yarn (see `isYarn`), and this is the form every workflow here
   // uses to activate it; the verb-less rule above is what keeps it from reading as an
   // install.
@@ -1908,6 +1916,12 @@ for (const [label, run] of [
   ['an unlisted command wrapper', 'cd app\n          some-wrapper yarn install --immutable'],
   ['a wrapper of a yarn invoked by path', 'cd app\n          some-wrapper ./node_modules/.bin/yarn install'],
   ['a wrapper of a versioned yarn', 'cd app\n          some-wrapper yarn@4 install'],
+  // `echo yarn install` names an install without running it; underivable is the
+  // recorded safe-direction limit next to `commandPrefixes`.
+  ['echo of an install', 'echo yarn install --immutable'],
+  // A prefix whose argument is not option-shaped leaves that argument as the command
+  // name (`runner` here), so the install is underivable rather than silently dropped.
+  ['a sudo prefix with a non-option argument', 'sudo -u runner -E yarn install --immutable'],
   // A verb-less `yarn` behind a wrapper is an install only when `--cwd` says so.
   ['a wrapper of a verb-less yarn with --cwd', 'some-wrapper yarn --cwd app'],
   // A loop value the walk cannot expand made only that sibling vanish: `a/yarn.lock`
