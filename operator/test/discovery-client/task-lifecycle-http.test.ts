@@ -208,6 +208,29 @@ describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
       .toEqual(['bafy1']);
   });
 
+  it('does not attach a candidate whose requestId matches a spine attempt on another chain (#3160)', async () => {
+    // The candidate leg filters on requestId_in alone, so it can hand back a
+    // row for the spine's requestId from a different chain.
+    const fetchImpl = scriptedFetch([
+      TASK_PAGE,
+      page('attempts', [
+        { taskId: '7', chainId: 84532, attemptIndex: 0, requestId: hex32('b0'),
+          operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20' },
+      ]),
+      page('verdicts', []),
+      page('attemptEnvelopeMetas', [
+        { requestId: hex32('b0'), chainId: 84532, manifestCid: 'bafy1', publisherAgentId: '1',
+          manifestHash: hex32('01'), enrichedAtBlock: '25' },
+        { requestId: hex32('b0'), chainId: 8453, manifestCid: 'bafyOtherChain', publisherAgentId: '2',
+          manifestHash: hex32('02'), enrichedAtBlock: '26' },
+      ]),
+    ]);
+    const ev = (await readerWith(fetchImpl).getTaskLifecycleEvidence({ taskIds: ['7'] })).get('7')!;
+    expect(ev.authoritative.attempts).toHaveLength(1);
+    expect(ev.authoritative.attempts[0]!.attemptEnvelopeCandidates.map((c) => c.manifestCid))
+      .toEqual(['bafy1']);
+  });
+
   it('does not attach an attempt row from a different chain to the spine (AC3)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fetchImpl = scriptedFetch([
