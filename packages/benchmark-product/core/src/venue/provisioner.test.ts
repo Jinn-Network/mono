@@ -798,5 +798,76 @@ describe("createLocalProvisioner — repository-work cells", () => {
       expect(result.manifest.map((entry) => entry.path)).toEqual(["patch"]);
       expect(readFileSync(join(paths.out, "patch"), "utf8")).toContain("+first pass");
     });
+
+    // Issue #3655: an interrupted teardown can leave the directory standing with no usable git
+    // checkout inside it. That is the absent-checkout case, not an extraction failure.
+    it.each([
+      ["its .git entry removed", (work: string) => rmSync(join(work, ".git"), { recursive: true, force: true })],
+      ["a dangling gitdir", (work: string) => {
+        const adminDir = execFileSync("git", ["-C", work, "rev-parse", "--absolute-git-dir"], { encoding: "utf8" }).trim();
+        rmSync(adminDir, { recursive: true, force: true });
+      }],
+    ])("harvests out/ when the checkout directory remains with %s", async (_label, breakCheckout) => {
+      const upstream = makeUpstreamRepository();
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-half-removed-"));
+      const paths = workspacePathsUnder(root);
+      const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+      const task = repositoryWorkTask(upstream.uri, upstream.oid);
+      const requirements = {
+        harness: { id: "claude-code", version: "2.1.222", digest: "a".repeat(64) },
+        isolationPolicy: "unrestricted",
+      };
+
+      await provisionerFor(task, mirror, requirements)
+        .contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+      writeFileSync(join(paths.work, "README.md"), "upstream\nhalf removed\n");
+      // No out/patch, so harvest would otherwise try to extract one from the broken checkout.
+      writeFileSync(join(paths.out, "summary"), "collected\n");
+      breakCheckout(paths.work);
+      expect(existsSync(paths.work)).toBe(true);
+
+      const result = await provisionerFor(task, mirror, requirements).contract.harvest(paths, [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+        { name: "summary", mediaType: "text/markdown", required: false },
+      ] as never);
+
+      expect(result.manifest.map((entry) => entry.path)).toEqual(["summary"]);
+      expect(existsSync(join(paths.out, "patch"))).toBe(false);
+      expect(result.omissions).toEqual(["patch"]);
+    });
+
+    // Issue #3655: a checkout that git cannot even be started against is an infrastructure fault,
+    // never a declared omission.
+    it("propagates a failure to start git from the checkout probe", async () => {
+      const upstream = makeUpstreamRepository();
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-no-git-"));
+      const paths = workspacePathsUnder(root);
+      const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+      const task = repositoryWorkTask(upstream.uri, upstream.oid);
+      const requirements = {
+        harness: { id: "claude-code", version: "2.1.222", digest: "a".repeat(64) },
+        isolationPolicy: "unrestricted",
+      };
+      // The same instance that ran setup, so harvest reuses its binding and spawns no git before
+      // the probe.
+      const provisioner = provisionerFor(task, mirror, requirements);
+      await provisioner.contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+      const emptyPath = mkdtempSync(join(tmpdir(), "provisioner-empty-path-"));
+
+      const savedPath = process.env.PATH;
+      process.env.PATH = emptyPath;
+      let failure: unknown;
+      try {
+        failure = await provisioner.contract
+          .harvest(paths, [{ name: "patch", mediaType: "text/x-diff", required: true }] as never)
+          .catch((error: unknown) => error);
+      } finally {
+        process.env.PATH = savedPath;
+      }
+
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as NodeJS.ErrnoException).code).toBe("ENOENT");
+      expect((failure as Error).message).not.toMatch(/could not rebind its checkout/u);
+    });
   });
 });

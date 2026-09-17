@@ -15,6 +15,7 @@ import {
   BEACON_SOURCE_IDS,
   MAX_BEACON_ROUND,
   RunBindingError,
+  beaconIndexWord,
   beaconRoundInstant,
   computeBeaconOrder,
   requiredBeaconRound,
@@ -416,5 +417,21 @@ describe("verifyRunBinding sourceBasis", () => {
     expect(binding.sourceBasis).toBe("seal-declared");
     expect(binding.postSeal).toBe("attributive");
     expect(binding.roundBasis).toBe("operator-chosen");
+  });
+});
+
+describe("beaconIndexWord", () => {
+  test("names the index by each registered source's time basis", () => {
+    expect(beaconIndexWord("drand/quicknet")).toBe("round");
+    expect(beaconIndexWord("drand/default")).toBe("round");
+    expect(beaconIndexWord("bitcoin/mainnet")).toBe("height");
+  });
+
+  test("covers every registered source", () => {
+    for (const id of BEACON_SOURCE_IDS) {
+      expect(beaconIndexWord(id)).toBe(
+        BEACON_SOURCES[id].timeBasis === "attributive-height" ? "height" : "round",
+      );
+    }
   });
 });

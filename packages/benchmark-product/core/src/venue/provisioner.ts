@@ -17,7 +17,7 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseCellKey } from "@jinn-network/benchmarking-records";
@@ -501,6 +501,37 @@ async function removeDemo1Instructions(paths: WorkspacePaths): Promise<void> {
   ]);
 }
 
+/**
+ * Whether `work` is a git checkout harvest can extract from (issue #3655). Existence is not enough:
+ * an interrupted teardown can leave the directory with its `.git` gone or pointing at a pruned
+ * admin dir. The top level must be `work` itself because `git -C` searches parent directories, so a
+ * checkout that lost its `.git` inside some enclosing repository would otherwise pass; `HEAD` must
+ * resolve because extraction reads it. A git refusal means unusable; a failure to run git at all
+ * (a spawn error such as ENOENT) is an infrastructure fault and propagates, so it is never
+ * harvested as a declared omission.
+ */
+async function isUsableCheckout(work: string): Promise<boolean> {
+  if (!existsSync(work)) return false;
+  let output: string;
+  try {
+    output = await runGitOutput(["-C", work, "rev-parse", "--show-toplevel", "HEAD"], {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_SYSTEM: "/dev/null",
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== undefined) throw error;
+    return false;
+  }
+  try {
+    const [topLevel] = output.split("\n");
+    return topLevel !== undefined && realpathSync(topLevel) === realpathSync(work);
+  } catch {
+    return false;
+  }
+}
+
 /** Extracts repository changes without touching the real index. */
 async function extractRepositoryPatch(paths: WorkspacePaths, excludeDemo1Instructions: boolean): Promise<void> {
   const indexPath = join(paths.meta, "demo1-patch.index");
@@ -695,8 +726,10 @@ function repositoryWorkProvisionerContract(
         // down. `out/` survives that teardown, so the patch extraction is skipped rather than
         // allowed to fail on a missing checkout: whatever the interrupted run collected is
         // harvested, and a genuinely absent required slot becomes a declared omission -- a
-        // categorized outcome -- instead of an infrastructure throw.
-        const checkoutPresent = existsSync(paths.work);
+        // categorized outcome -- instead of an infrastructure throw. Presence is judged by a usable
+        // worktree, not by the directory existing: a half-removed checkout (issue #3655) takes the
+        // same path.
+        const checkoutPresent = await isUsableCheckout(paths.work);
         if (demo1Claude) {
           await removeDemo1Instructions(paths);
           if (checkoutPresent) await extractRepositoryPatch(paths, true);
