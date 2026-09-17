@@ -112,20 +112,61 @@ function withoutHumanIdentifiers(message: string): string {
  * Refusals that embed a publisher-chosen name, which the schema constrains to a non-empty string
  * and nothing more, so the name is aliased by the fixed wording around it. Tied to `verify.ts`:
  * `publicKey`'s two messages for `trust.evaluators.<name>`, the two admission reviewer refusals,
- * and the evaluator keyId refusal. `s` lets a name carrying a line break still match.
+ * and the evaluator keyId refusal. A name may hold any character, line breaks included.
  */
 const PUBLISHER_NAMED = [
-  /(\bevaluator )(.+?)( keyId is not derived from its SPKI)/gsu,
-  /(\breviewer )(.+?)( has no signer key id| uses more than one key)/gsu,
-  /(\btrust\.evaluators\.)(.+?)( is not a valid SPKI public key| is not an Ed25519 public key)/gsu,
+  { prefix: "evaluator ", suffixes: [" keyId is not derived from its SPKI"] },
+  { prefix: "reviewer ", suffixes: [" has no signer key id", " uses more than one key"] },
+  { prefix: "trust.evaluators.", suffixes: [" is not a valid SPKI public key", " is not an Ed25519 public key"] },
 ] as const;
+
+const WORD_CHARACTER = /\w/u;
+
+/**
+ * Replaces each name between `prefix` (at a word boundary) and the nearest following suffix. A
+ * lazy regex does the same, but rescans the rest of the text from every prefix a hostile name
+ * repeats, which is quadratic; this scan caches each suffix's next position and stays linear.
+ */
+function aliasPublisherNames(text: string, prefix: string, suffixes: readonly string[]): string {
+  const nextSuffix = suffixes.map(() => -2);
+  let result = "";
+  let copied = 0;
+  let search = 0;
+  for (;;) {
+    let start = text.indexOf(prefix, search);
+    while (start > 0 && WORD_CHARACTER.test(text[start - 1]!)) start = text.indexOf(prefix, start + 1);
+    if (start < 0) break;
+    const nameStart = start + prefix.length;
+    let end = -1;
+    let suffixLength = 0;
+    for (const [index, suffix] of suffixes.entries()) {
+      // -1 is final: a suffix absent after one name is absent after every later one.
+      if (nextSuffix[index]! !== -1 && nextSuffix[index]! <= nameStart) {
+        nextSuffix[index] = text.indexOf(suffix, nameStart + 1);
+      }
+      const at = nextSuffix[index]!;
+      if (at >= 0 && (end < 0 || at < end)) {
+        end = at;
+        suffixLength = suffix.length;
+      }
+    }
+    if (end < 0) break;
+    result += `${text.slice(copied, nameStart)}${IDENTIFIER_ALIAS}`;
+    copied = end;
+    search = end + suffixLength;
+  }
+  return result + text.slice(copied);
+}
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/gu;
 
 /** One refusal, one stderr line: aliases identifiers, then escapes every control character (line
  * feeds included), so a publisher-chosen string cannot forge a line of its own. */
 function humanRefusalDetail(message: string): string {
-  const named = PUBLISHER_NAMED.reduce((text, pattern) => text.replace(pattern, `$1${IDENTIFIER_ALIAS}$3`), message);
+  const named = PUBLISHER_NAMED.reduce(
+    (text, { prefix, suffixes }) => aliasPublisherNames(text, prefix, suffixes),
+    message,
+  );
   return withoutHumanIdentifiers(named)
     .replace(CONTROL_CHARACTER, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }

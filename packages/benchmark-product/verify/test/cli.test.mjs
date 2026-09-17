@@ -724,6 +724,30 @@ test("publisher-named reviewers and trust entries are aliased on the human surfa
   }
 });
 
+// A name that repeats another template's prefix, with no suffix after it, made a lazy-regex scan
+// quadratic: about six seconds for this megabyte on a laptop. A linear scan takes milliseconds.
+test("aliasing a hostile publisher name stays linear in its length", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  for (const [message, expected] of [
+    [
+      `reviewer ${"evaluator ".repeat(100_000)}has no signer key id`,
+      "reviewer <identifier: see --json> has no signer key id",
+    ],
+    [
+      `trust.evaluators.${"reviewer ".repeat(110_000)}is not an Ed25519 public key`,
+      "trust.evaluators.<identifier: see --json> is not an Ed25519 public key",
+    ],
+  ]) {
+    const started = performance.now();
+    const result = await runVerifierCli(["bundle"], {
+      verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
+    });
+    const elapsed = performance.now() - started;
+    assert.equal(result.stderr, `colophon-verify: ${expected}\n`);
+    assert.ok(elapsed < 1_500, `aliasing took ${Math.round(elapsed)}ms`);
+  }
+});
+
 test("control characters in an unrecognized refusal are escaped, not emitted", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const result = await runVerifierCli(["bundle"], {
