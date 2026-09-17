@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   missingPortalManifestCopies,
+  portalEntries,
   reachablePortalEdges,
 } from '../../../test-support/dockerfile-portals/portal-closure.mjs';
 
@@ -198,6 +199,21 @@ describe('client Docker build context', () => {
         `${name} sources must be copied before client yarn build`,
       ).toContain(`${repoPath}/src/`);
     }
+  });
+
+  it('follows the resolutions portal target when a dependency field names a different one', () => {
+    // Yarn links the `resolutions` target, so the walk must validate that one.
+    // Same package name, different portal targets in each field (#4464).
+    const portals = portalEntries({
+      dependencies: { '@jinn-network/example': 'portal:../packages/from-dependencies' },
+      devDependencies: { '@jinn-network/example': 'portal:../packages/from-dev-dependencies' },
+      optionalDependencies: {
+        '@jinn-network/example': 'portal:../packages/from-optional-dependencies',
+      },
+      resolutions: { '@jinn-network/example': 'portal:../packages/from-resolutions' },
+    });
+
+    expect(portals.get('@jinn-network/example')).toBe('../packages/from-resolutions');
   });
 
   it('copies every transitively reachable portal manifest before install', () => {

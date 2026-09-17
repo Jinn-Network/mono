@@ -16,7 +16,7 @@
  * here (out of this change's scope).
  */
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { resolveDefaultStateDir } from '../state-dir.js';
 
@@ -138,11 +138,16 @@ function persistDaemonApiToken(
     return 'skipped';
   }
   if (readDaemonApiToken(path) === token) return 'unchanged';
+  const tmp = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   try {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    writeFileSync(path, token + '\n', { mode: 0o600 });
+    // A fresh file renamed into place: `mode` then always applies (it is ignored for an existing
+    // file), and a concurrent reader sees the old token or the new one, never a truncated file.
+    writeFileSync(tmp, token + '\n', { mode: 0o600, flag: 'wx' });
+    renameSync(tmp, path);
     return 'written';
   } catch (err) {
+    try { rmSync(tmp, { force: true }); } catch { /* the parent may not be a directory */ }
     emit(
       `Failed to persist DAEMON_API_TOKEN to ${path}: ${err instanceof Error ? err.message : String(err)}. ` +
       'The daemon is using the environment token, but an externally-installed stop-hook resolving this ' +

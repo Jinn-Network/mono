@@ -705,8 +705,10 @@ describe('native record transport refusal diagnostics and bounds (#3704)', () =>
   // #3458.1: the timeout was cleared when the RESPONSE HEADERS arrived, so a peer that answers 200
   // and then trickles held the caller past the 30s fleet worker lease TTL — the same `loop 'work'
   // stale` symptom the #30 bound exists to prevent, reached through the body instead of the
-  // headers. Mutation check: clear the timer at the headers again and this hangs to the vitest
-  // timeout rather than rejecting.
+  // headers. Mutation check: clear the timer at the headers again and this hangs to the suite's
+  // 30s `testTimeout` rather than rejecting. It used to carry its own 5s bound so that hang went
+  // red sooner; a hang detector is a deadline either way, and 5s of wall clock on a ~30ms test is
+  // the starvation exposure #3289 is about, so it inherits the suite bound (#4390).
   it('bounds the response body read, not only time-to-headers (#3458)', async () => {
     const transport = createBaseSepoliaRecordTransport({
       ipfsApiUrl: 'https://ipfs.example.invalid',
@@ -721,7 +723,7 @@ describe('native record transport refusal diagnostics and bounds (#3704)', () =>
     });
 
     await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toThrow(/timed out/u);
-  }, 5_000);
+  });
 
   // #3458.2: a chunked response omits `content-length`, and the cap was applied only AFTER
   // `arrayBuffer()` had already buffered the whole body.

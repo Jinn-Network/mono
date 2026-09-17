@@ -990,6 +990,14 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-conformance-published-profile/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-conformance-refreshby-bound/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-conformance-unpublished-profile/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-head-revalidation-head-issued-ahead/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-head-revalidation-head-origin-mismatch/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-head-revalidation-head-payload-mismatch/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-head-revalidation-identical-head-ok/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-head-revalidation-refresh-by-ceiling/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-head-revalidation-signer-rotated-since-issue/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-head-revalidation-stale/vector.json | — | — | — |
+| fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/source-head-revalidation-unauthorized-signer/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/stale-head-seeded-mark/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/stale-head/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/subscribe-announcement-dedupe-key/vector.json | — | — | — |

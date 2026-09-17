@@ -355,6 +355,39 @@ describe('direct Safe broadcaster rejects a mined-but-reverted execTransaction (
     expect(error?.message).toContain('verdict:openVerdictAttempt');
   });
 
+  it('does not re-simulate a DELEGATECALL as a plain call (#3905)', async () => {
+    // MultiSend called directly reverts on its own "only via delegatecall" guard: an
+    // Error(string), which would otherwise be reported as a terminal inner revert.
+    const guardRevert = encodeErrorResult({
+      abi: parseAbi(['error Error(string)']),
+      errorName: 'Error',
+      args: ['MultiSend should only be called via delegatecall'],
+    });
+    const { publicClient, walletClient } = revertingClients({ rejectWith: { data: guardRevert } });
+    vi.useFakeTimers();
+
+    const pending = createDirectSafeBroadcaster(
+      publicClient as never,
+      walletClient as never,
+      SAFE,
+    ).execute({
+      to: ROUTER,
+      value: 0n,
+      data: '0xdeadbeef',
+      operation: 1,
+      logicalTx: 'settlement:multisend',
+    }).then(() => null, (e: unknown) => e as Error);
+    await vi.runAllTimersAsync();
+    const error = await pending;
+    vi.useRealTimers();
+
+    expect(publicClient.call).not.toHaveBeenCalled();
+    expect(error).toBeInstanceOf(SafeExecutionRevertedError);
+    expect(error?.message).toContain(SAFE_STALE_NONCE_ERROR_TOKEN);
+    expect(walletClient.writeContract).toHaveBeenCalledTimes(TX_RETRY_DEFAULTS.maxAttempts);
+    expect(walletClient.writeContract.mock.calls[0]![0].args[3]).toBe(1);
+  });
+
   it('lets the retry closure re-read the nonce and re-sign, since that race self-heals', () => {
     // The message carries the retry policy's marker for this exact receipt path, so the
     // broadcaster does not have to reach into the classifier to say "retry me".

@@ -22,7 +22,7 @@ import {
 } from "./assets.js";
 import { BUNDLE_FORMAT } from "./legacy-closures.js";
 import { BUNDLE_V10_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
-import { REPORT_PROSE_WORD_CEILING, reportProseWordCount, reviewReportProse } from "./report-prose-review.js";
+import { REPORT_PROSE_WORD_CEILINGS, reportProseWordCount, reviewReportProse } from "./report-prose-review.js";
 import { GOLDEN_PUBLISHED_PAGE, goldenInput } from "./testing/golden-asset-input.js";
 
 const decoder = new TextDecoder();
@@ -114,7 +114,7 @@ describe("the composed page's prose review", () => {
     expect(reviewReportProse(await page(BUNDLE_V10_FORMAT))).toEqual([]);
   });
 
-  test("measures the count REPORT_PROSE_WORD_CEILING is re-pinned to", async () => {
+  test("measures the count the wilson prose ceiling is re-pinned to", async () => {
     // The exact number, not merely "fewer than before": the ceiling is a ratchet, and a ratchet
     // pinned to an approximation ratchets nothing.
     const measured = reportProseWordCount(await page(BUNDLE_V10_FORMAT));
@@ -124,7 +124,7 @@ describe("the composed page's prose review", () => {
     // asserts the page stays at or under the ceiling, which a raised ceiling would also satisfy;
     // issue #3016 acceptance criterion 3 requires the ceiling to be re-pinned to the count the
     // revision actually measured, so raising it without shipping prose has to fail somewhere.
-    expect(REPORT_PROSE_WORD_CEILING).toBe(measured);
+    expect(REPORT_PROSE_WORD_CEILINGS.wilson).toBe(measured);
   });
 });
 
@@ -210,5 +210,31 @@ describe("no disclosure is lost under a method whose claim line does not carry i
   test("wilson@1 states it once, from the header, where the published page stated it twice", async () => {
     expect((await page(BUNDLE_V10_FORMAT)).split(WINNER).length - 1).toBe(1);
     expect(GOLDEN_PUBLISHED_PAGE.split(WINNER).length - 1).toBe(2);
+  });
+
+  const PAIRWISE_DISAGREEMENT = {
+    id: "jinn.benchmarking.method/pairwise-disagreement",
+    parameters: { alpha: "0.05" },
+  };
+
+  const pairwiseDisagreementResults = {
+    pairs: [{
+      armA: "baseline",
+      armB: "sample-uniform",
+      n: 3,
+      disagreements: 1,
+      rate: "0.333333",
+      interval: { lower: "0.017084", upper: "0.794613", alpha: "0.05" },
+    }],
+    conflicted: { count: 0, cellKeys: [] },
+  };
+
+  test("pairwise-disagreement@1 states it once, from the header, like wilson@1", async () => {
+    // The second `true` branch of `neutralClaimStatesNoWinner` (#4407): its header claim line
+    // carries the statement, so the comparison sites drop theirs. Narrowing the predicate to
+    // `wilson` alone would render it twice here.
+    const composed = await methodPage(PAIRWISE_DISAGREEMENT, pairwiseDisagreementResults);
+    expect(composed).toContain(WINNER + "; pairwise-disagreement@1");
+    expect(composed.split(WINNER).length - 1).toBe(1);
   });
 });

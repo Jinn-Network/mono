@@ -1,5 +1,5 @@
 /**
- * T1.3 — read-contract conformance (spec/2026-08-04-headless-operator-rederivation-design.md
+ * T1.3 — read-contract conformance (docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md
  * §8 artifact 4 "contract conformance test in the release tiers").
  *
  * Boot-less by design: unlike T1.1 (Anvil fork) and T1.2 (spawned daemon), this scenario

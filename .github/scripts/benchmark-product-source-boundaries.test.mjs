@@ -289,6 +289,24 @@ test('method-identifier scanner does not read a quote inside a regex literal as 
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+// The scanner's refusal carries a line but never a path; the catch above attaches the file name.
+// That attachment was unpinned: a bare `throw error;` in its place left the suite green while the
+// message named no file (#4401). The fixture is shipped-shaped (not `*.test.*`, not under
+// `testing/`) so the test-source filter does not skip it before the scanner runs.
+test('an unterminated template literal is reported with the file name and line', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'colophon-method-id-unterminated-'));
+  try {
+    mkdirSync(join(fixture, 'src'));
+    const broken = join(fixture, 'src', 'broken.ts');
+    writeFileSync(broken, 'export const x = 1;\nconst s = `never closed\n');
+    const path = relative(root, broken).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.throws(
+      () => hardcodedMethodIds(files(join(fixture, 'src'))),
+      { message: new RegExp(`^${path}:2: backtick pairing`) },
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('shipped product source cites a §9.2 method identifier only through the records constant', () => {
   const ids = registeredMethodIds();
   assert.ok(ids.includes(`${REGISTERED_METHOD_NAMESPACE}paired-delta`), 'the identifier from issue #2973 is no longer registered');

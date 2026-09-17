@@ -351,7 +351,9 @@ export function discoverLanes(root) {
           workflow,
           dialect: 'shell-ere',
           arrayName: SHELL_ARRAY_NAME,
-          required: (workspace) => `'^${workspace}/'`,
+          // Inverse of erePrefix's `\.` unescape. `.` is the only ERE metacharacter in the
+          // segment class erePrefix admits; escaping anything else would emit an entry it refuses.
+          required: (workspace) => `'^${workspace.replaceAll('.', '\\.')}/'`,
         }),
       );
       continue;
