@@ -1738,3 +1738,81 @@ test('a definition whose opener line begins inside an enclosing compound is stil
     ['error:head'],
   );
 });
+
+test('a glued `|` in a case-arm pattern is not a command separator (#4546)', () => {
+  // `separatorAt` treated every unquoted `|` as a command separator, so `done|skipped)`
+  // put `done` in command position. `leadsStatement(undefined)` then promoted it to a
+  // `while` closer, the real `done || true` had nothing to retract, and a guarded arm
+  // pipeline reddened. The spaced `done | skipped)` already reported on the pre-#4446
+  // module; this pins the glued form catching up. Unguarded arms still report.
+  const guardedCase = [
+    'while read -r s; do',
+    '  case "$s" in',
+    '    done|skipped) echo ok ;;',
+    '    *) producer | head -1 ;;',
+    '  esac',
+    'done || true',
+  ].join('\n');
+  assert.deepEqual(severities(guardedCase, { shell: 'bash' }), []);
+  assert.deepEqual(
+    severities(
+      [
+        'while read -r s; do',
+        '  case "$s" in',
+        '    done|skipped) echo ok ;;',
+        '    *) producer | head -1 ;;',
+        '  esac',
+        'done',
+      ].join('\n'),
+      { shell: 'bash' },
+    ),
+    ['error:head'],
+  );
+  for (const pattern of ['if|then)', 'fi|other)', 'a|esac|b)']) {
+    assert.deepEqual(
+      severities(
+        [
+          'while true; do',
+          '  case "$s" in',
+          `    ${pattern} echo ok ;;`,
+          '    *) producer | head -1 ;;',
+          '  esac',
+          'done || true',
+        ].join('\n'),
+        { shell: 'bash' },
+      ),
+      [],
+      pattern,
+    );
+  }
+});
+
+test('a `|` or `&` inside `${…}` is not a command separator (#4546)', () => {
+  // `{ echo ${x:-|}; producer | head -1; } || true` split on the expansion's `|`, so the
+  // trailing `}` of `${…}` became a brace closer and the real `}` an unmatched closer.
+  // The body of `${…}` is not shell syntax; a real pipeline next to the expansion still
+  // reports when unguarded.
+  assert.deepEqual(severities('{ echo ${x:-|}; producer | head -1; } || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('{ echo ${x:-|}; producer | head -1; }', { shell: 'bash' }), ['error:head']);
+  assert.deepEqual(severities('{ echo ${x:-&}; producer | head -1; } || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('{ echo ${x:-&}; producer | head -1; }', { shell: 'bash' }), ['error:head']);
+});
+
+test('a guard on a pipeline does not cover a definition in the pipeline head (#4566)', () => {
+  // `{ f () { producer | head -1; }; } || true` unwraps, sees `deferred`, and reports.
+  // `{ f () { producer | head -1; }; } | cat || true` does not end on the closer, so
+  // `compoundBody` never unwraps and `unitGuarded` suppresses the deferred body. The
+  // `|| true` guards `{ … } | cat`, which does not run the function. Spaced and glued
+  // tails both report; the sibling without the pipeline tail still reports.
+  for (const body of [
+    ['{ f () { producer | head -1; }; } | cat || true', 'f'],
+    ['{ f () { producer | head -1; }; }| cat || true', 'f'],
+    ['{ f () { producer | head -1; }; } || true', 'f'],
+  ]) {
+    assert.deepEqual(severities(body.join('\n'), { shell: 'bash' }), ['error:head'], body[0]);
+  }
+  // A pipeline whose head is a group *without* a definition is still guarded.
+  assert.deepEqual(severities('{ producer | head -1; } | cat || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('{ producer | head -1; } | cat', { shell: 'bash' }), ['error:head']);
+});
+
