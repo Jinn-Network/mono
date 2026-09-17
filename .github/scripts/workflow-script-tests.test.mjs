@@ -235,9 +235,10 @@ function checkoutSegments(normalized) {
  *
  * Accepted shapes, each with an optional `export`: `const x = resolve(<here>, ...)` and
  * `const x = join(<here>, ...)`, with or without `path.`, and a bare `const x = <here>;`, where
- * `<here>` is either spelling of this file's directory. The arguments after `<here>` must each be
- * one plain string literal; anything else, an absolute literal, or a result that escapes the
- * checkout binds the name to null, which every call through it reports.
+ * `<here>` is either spelling of this file's directory. `<here>` must be the whole first argument,
+ * and the arguments after it must each be one plain string literal; anything else (such as
+ * `<here> + '/sub'`), an absolute literal, or a result that escapes the checkout binds the name to
+ * null, which every call through it reports.
  *
  * This used to accept only `resolve(<here>, ...)` climbing to the repository root. That made the
  * gate skip every suite that binds a checkout directory some other way -- `const scriptsDir =
@@ -253,10 +254,12 @@ export function findCheckoutBindings(source) {
     String.raw`^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:path\.)?(?:resolve|join)\(\s*${THIS_DIRECTORY}`,
     'gmu',
   );
+  const wholeDirectory = new RegExp(String.raw`^\s*${THIS_DIRECTORY}\s*$`, 'u');
   for (const match of masked.matchAll(derived)) {
     const open = masked.indexOf('(', match.index + match[0].indexOf('='));
     const maskedArguments = callArgumentText(masked, open);
     const rawArguments = callArgumentText(source, open);
+    const here = wholeDirectory.test(argumentAt(maskedArguments, rawArguments, 0).masked);
     const rest = [];
     for (let index = 1; index <= argumentBoundaries(maskedArguments).length; index += 1) {
       rest.push(argumentAt(maskedArguments, rawArguments, index).raw.trim());
@@ -266,7 +269,7 @@ export function findCheckoutBindings(source) {
     const resolvable = rest.every((argument) => literal.test(argument) && !argument.slice(1).startsWith('/'));
     bindings.set(
       match[1],
-      resolvable
+      here && resolvable
         ? checkoutSegments(posix.join(SCANNED_SUITE_DIR, ...rest.map((argument) => argument.slice(1, -1))))
         : null,
     );
@@ -286,8 +289,11 @@ export function findCheckoutBindings(source) {
  * follow a path through a function parameter or a template literal, reads only the calls in
  * FIXTURE_CREATING_CALLS, and sees only the module-level checkout bindings findCheckoutBindings
  * accepts. A directory reference used inline in a call rather than bound at module scope, a
- * `new URL(..., import.meta.url)`, a function-local binding, or a root imported from another
- * module binds nothing, and a suite with none of the accepted bindings is skipped. A new
+ * `new URL(..., import.meta.url)`, a function-local binding, a root imported from another
+ * module, or a spelling of this file's directory other than the two THIS_DIRECTORY names (such as
+ * `dirname(import.meta.filename)`, `` `${import.meta.dirname}/x` ``, or
+ * `import.meta.dirname ?? ...`) binds nothing, and a suite with none of the accepted bindings is
+ * skipped. A new
  * in-checkout fixture built in a shape outside those bounds is invisible to this gate, which is
  * why the rule is documented at the fixture site as well.
  */
@@ -885,6 +891,13 @@ test('a checkout binding that escapes the root or is not literal fails closed', 
     "mkdirSync(join(root, '..', 'outside'));",
   ].join('\n');
   assert.deepEqual(findInCheckoutFixtureCalls(outside), [{ call: 'mkdirSync', segments: null }]);
+
+  // The directory must be the whole first argument; a concatenated suffix is not dropped.
+  const concatenated = [
+    "const x = resolve(import.meta.dirname + '/sub');",
+    "mkdirSync(join(x, 'tmp-a-'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(concatenated), [{ call: 'mkdirSync', segments: null }]);
 
   // A directory reference with no literal of its own still names nothing checkable.
   const unnamed = [
