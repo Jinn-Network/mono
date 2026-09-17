@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createSupplyCommand } from '@/cli/commands/supply.js';
+import { DiscoveryUnavailableError } from '@/discovery-client/types.js';
 import { runCommand } from '@test/cli.js';
 
 const WINDOW = {
@@ -186,5 +187,42 @@ describe('jinn supply', () => {
   it('keeps the command dependency boundary config-and-HTTP only', () => {
     const source = readFileSync(new URL('../../../src/cli/commands/supply.ts', import.meta.url), 'utf8');
     expect(source).not.toMatch(/(?:wallet|daemon|mcp|store|chain-client|viem)/iu);
+  });
+
+  it('maps invalid_request to invalid_invocation (exit 11)', async () => {
+    const loadConfig = vi.fn(() => ({
+      network: 'testnet',
+      discovery: { mode: 'http', url: 'https://indexer.example' },
+    }));
+    const command = createSupplyCommand({
+      loadConfig: loadConfig as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({
+        getCurrentSupply: async () => {
+          throw new DiscoveryUnavailableError('bad chain', undefined, 'invalid_request');
+        },
+      }),
+    });
+    const { envelopes, exits } = await runCommand(command);
+    expect(exits).toEqual([11]);
+    expect(envelopes[0]).toMatchObject({ code: 'invalid_invocation', exitCode: 11 });
+  });
+
+  it('maps untagged discovery failures to transient_error (exit 40)', async () => {
+    const command = createSupplyCommand({
+      loadConfig: (() => ({
+        network: 'testnet',
+        discovery: { mode: 'http', url: 'https://indexer.example' },
+      })) as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({
+        getCurrentSupply: async () => {
+          throw new DiscoveryUnavailableError('indexer down');
+        },
+      }),
+    });
+    const { envelopes, exits } = await runCommand(command);
+    expect(exits).toEqual([40]);
+    expect(envelopes[0]).toMatchObject({ code: 'transient_error', exitCode: 40 });
   });
 });

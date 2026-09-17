@@ -682,15 +682,29 @@ export function createHttpDiscoveryClient(
 
   async function getCurrentSupply(args: { chainId: number }): Promise<CurrentSupplyResponse> {
     if (!Number.isSafeInteger(args.chainId) || args.chainId <= 0) {
-      throw new DiscoveryUnavailableError('Supply lookup requires a positive integer chainId');
+      throw new DiscoveryUnavailableError(
+        'Supply lookup requires a positive integer chainId',
+        undefined,
+        'invalid_request',
+      );
     }
     await ensureReady();
 
+    let requestUrl: URL;
+    try {
+      requestUrl = new URL(supplyUrl);
+      requestUrl.searchParams.set('chainId', String(args.chainId));
+    } catch (error) {
+      throw new DiscoveryUnavailableError(
+        `Supply lookup has a malformed discovery.url: ${String(error)}`,
+        error,
+        'invalid_request',
+      );
+    }
+
     let response: Response;
     try {
-      const url = new URL(supplyUrl);
-      url.searchParams.set('chainId', String(args.chainId));
-      response = await fetchImpl(url, { method: 'GET' });
+      response = await fetchImpl(requestUrl, { method: 'GET' });
     } catch (error) {
       throw new DiscoveryUnavailableError(`Supply endpoint network error: ${String(error)}`, error);
     }
@@ -705,8 +719,11 @@ export function createHttpDiscoveryClient(
       } catch {
         detail = '';
       }
+      const code = response.status >= 400 && response.status < 500 ? 'invalid_request' : undefined;
       throw new DiscoveryUnavailableError(
         `Supply endpoint HTTP ${response.status} ${response.statusText}${detail}`,
+        undefined,
+        code,
       );
     }
 
@@ -721,7 +738,11 @@ export function createHttpDiscoveryClient(
       const detail = parsed.success
         ? `response chainId ${parsed.data.chainId} does not match ${args.chainId}`
         : z.prettifyError(parsed.error);
-      throw new DiscoveryUnavailableError(`Supply endpoint returned invalid evidence: ${detail}`);
+      throw new DiscoveryUnavailableError(
+        `Supply endpoint returned invalid evidence: ${detail}`,
+        undefined,
+        'invalid_request',
+      );
     }
     return parsed.data as CurrentSupplyResponse;
   }

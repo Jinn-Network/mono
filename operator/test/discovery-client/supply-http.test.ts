@@ -148,13 +148,15 @@ describe('DiscoveryClient.getCurrentSupply', () => {
       .rejects.toBeInstanceOf(DiscoveryUnavailableError);
   });
 
-  it('carries the indexer\'s own refusal through so an unserved chain is actionable', async () => {
+  it('tags indexer 4xx as invalid_request and keeps the served-chain detail', async () => {
     const { client } = clientFor(
       { error: 'unsupported chainId', detail: 'this indexer serves 84532; it has no evidence about 8453' },
       400,
     );
-    await expect(client.getCurrentSupply({ chainId: 8453 }))
-      .rejects.toThrow(/no evidence about 8453/u);
+    await expect(client.getCurrentSupply({ chainId: 8453 })).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+    await expect(client.getCurrentSupply({ chainId: 8453 })).rejects.toThrow(/serves 84532.*8453/u);
   });
 
   it('rejects an unavailable route instead of falling back to GraphQL or chain reads', async () => {
@@ -162,5 +164,51 @@ describe('DiscoveryClient.getCurrentSupply', () => {
     await expect(client.getCurrentSupply({ chainId: 84532 }))
       .rejects.toBeInstanceOf(DiscoveryUnavailableError);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('tags a non-positive chainId as invalid_request', async () => {
+    const { client } = clientFor(available);
+    await expect(client.getCurrentSupply({ chainId: 0 })).rejects.toMatchObject({
+      name: 'DiscoveryUnavailableError',
+      code: 'invalid_request',
+    });
+  });
+
+  it('tags a Zod decoder rejection as invalid_request', async () => {
+    await expect(
+      clientFor({ ...available, schemaVersion: 0 }).client.getCurrentSupply({ chainId: 84532 }),
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+  });
+
+  it('tags a malformed discovery.url as invalid_request', async () => {
+    const fetchImpl = vi.fn(async () => new Response('ok', { status: 200 }));
+    const client = createHttpDiscoveryClient({
+      url: 'not a url',
+      fetchImpl: fetchImpl as typeof fetch,
+      retryDelaysMs: [],
+    });
+    await expect(client.getCurrentSupply({ chainId: 84532 })).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+  });
+
+  it('leaves 5xx and transport failures untagged so they stay transient', async () => {
+    await expect(
+      clientFor({ error: 'unavailable' }, 503).client.getCurrentSupply({ chainId: 84532 }),
+    ).rejects.toMatchObject({ code: undefined });
+
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/ready')) return new Response('ok', { status: 200 });
+      throw new TypeError('network down');
+    });
+    const client = createHttpDiscoveryClient({
+      url: 'https://indexer.example/graphql',
+      fetchImpl: fetchImpl as typeof fetch,
+      retryDelaysMs: [],
+    });
+    await expect(client.getCurrentSupply({ chainId: 84532 })).rejects.toMatchObject({
+      code: undefined,
+    });
   });
 });

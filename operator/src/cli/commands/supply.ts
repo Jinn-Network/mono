@@ -10,7 +10,11 @@ import {
   createHttpDiscoveryClient,
   type HttpDiscoveryClientOptions,
 } from '../../discovery-client/http.js';
-import type { CurrentSupplyResponse, DiscoveryClient } from '../../discovery-client/types.js';
+import {
+  DiscoveryUnavailableError,
+  type CurrentSupplyResponse,
+  type DiscoveryClient,
+} from '../../discovery-client/types.js';
 
 const CHAIN_ID_BY_NETWORK = { testnet: 84532, mainnet: 8453 } as const;
 
@@ -141,11 +145,14 @@ Examples:
         result = await deps.createDiscoveryClient({ url: config.discovery.url })
           .getCurrentSupply({ chainId });
       } catch (error) {
+        const invalid = error instanceof DiscoveryUnavailableError && error.code === 'invalid_request';
         emitEnvelope(
           {
-            code: 'transient_error',
+            code: invalid ? 'invalid_invocation' : 'transient_error',
             message: `Supply lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-            hint: 'Retry when the configured discovery indexer is reachable and current.',
+            hint: invalid
+              ? 'Fix discovery.url or the requested chain; this indexer will not answer that request.'
+              : 'Retry when the configured discovery indexer is reachable and current.',
             exampleCli: 'jinn supply',
             details: { chainId },
           },

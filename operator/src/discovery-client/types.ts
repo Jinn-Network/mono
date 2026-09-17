@@ -61,16 +61,19 @@ export interface SolverNetManifestSummary {
  * one branch callers act on distinctly: it means the configured RPC endpoint
  * returned a 429 (or otherwise rate-limited the daemon), which — on the shared
  * default RPC — is an operator-actionable condition ("add your own key"), not
- * an indexer outage. Any other transport failure is left untyped (`undefined`).
+ * an indexer outage. `invalid_request` is a caller/config/4xx/decode problem
+ * (malformed discovery.url, non-positive chainId, indexer 4xx, Zod rejection).
+ * Any other transport failure is left untyped (`undefined`).
  */
-export type DiscoveryUnavailableCode = 'rpc_rate_limited';
+export type DiscoveryUnavailableCode = 'rpc_rate_limited' | 'invalid_request';
 
 export class DiscoveryUnavailableError extends Error {
   override readonly cause?: unknown;
   /**
-   * Typed reason, when one can be classified — currently only
-   * `rpc_rate_limited`, surfaced end-to-end so the operator UI can render a
-   * distinct "your RPC is throttled" message instead of a generic failure.
+   * Typed reason, when one can be classified — currently `rpc_rate_limited`
+   * (RPC 429) or `invalid_request` (caller/config/4xx/decode). Untyped
+   * transport and 5xx failures stay `undefined` so the CLI can treat them as
+   * transient.
    */
   readonly code?: DiscoveryUnavailableCode;
 
