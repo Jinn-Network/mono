@@ -139,6 +139,7 @@ async function fixture(input: { readonly agent?: string } = {}) {
   const backend = {
     shutdown: async () => undefined,
     getDeliverySignature: () => undefined,
+    reconcileNonterminal: async () => [],
   } as unknown as LocalTaskExecutionBackend;
   const evidence = {
     repository: {
