@@ -41,6 +41,7 @@ import {
   REPORT_PROSE_WORD_CEILINGS,
   authoredReportProse,
   authoredReportProseBlocks,
+  isReportProseStatementBlock,
   reportProseStatements,
   reportProseWordCount,
   reviewReportProse,
@@ -354,26 +355,46 @@ describe.each([
 });
 
 /**
- * The cost `reviewReportProse` names for counting repetition over paragraphs and captions only:
+ * The cost `reviewReportProse` names for counting repetition over every block but headings:
  * "a fact a heading genuinely does restate goes unreported here", true so long as no heading
  * carries the text of a paragraph or caption. That is a claim about the rendered pages, not about
  * the rule, so nothing in the rule can hold it -- this does, on every profile the review gates.
  * A revision that moves a paragraph's sentence into a heading fails here instead of going quiet.
+ *
+ * Both corpora are split with `isReportProseStatementBlock`, the predicate the rule itself uses,
+ * and both are guarded non-empty: with no headings the assertion would pass on zero inputs.
  */
+function headingCorpus(html: string): { readonly stated: ReadonlySet<string>; readonly headings: readonly string[] } {
+  const blocks = authoredReportProseBlocks(html);
+  return {
+    stated: new Set(blocks.filter(isReportProseStatementBlock).flatMap(({ text }) => reportProseStatements(text))),
+    headings: blocks.filter((block) => !isReportProseStatementBlock(block))
+      .flatMap(({ text }) => reportProseStatements(text)),
+  };
+}
+
+function restatedByHeadings(html: string): readonly string[] {
+  const { stated, headings } = headingCorpus(html);
+  return headings.filter((statement) => stated.has(statement));
+}
+
 describe.each(
   Object.keys(REPORT_PROSE_WORD_CEILINGS) as readonly ReportPresentationProfile[],
 )("%s headings", (profile) => {
   test("restate no paragraph or caption statement", () => {
-    const blocks = authoredReportProseBlocks(profilePage[profile]);
-    const stated = new Set(
-      blocks.filter(({ tag }) => tag === "p" || tag === "caption")
-        .flatMap(({ text }) => reportProseStatements(text)),
-    );
+    const { stated, headings } = headingCorpus(profilePage[profile]);
     expect(stated.size).toBeGreaterThan(0);
-    const restated = blocks.filter(({ tag }) => /^h[1-4]$/u.test(tag))
-      .flatMap(({ text }) => reportProseStatements(text))
-      .filter((statement) => stated.has(statement));
-    expect(restated).toEqual([]);
+    expect(headings.length).toBeGreaterThan(0);
+    expect(restatedByHeadings(profilePage[profile])).toEqual([]);
+  });
+
+  // The kill-check, kept as a test: the page with one paragraph statement copied into a heading
+  // must be caught, so the assertion above is shown to read the heading corpus rather than to
+  // pass on it by construction.
+  test("would report a paragraph statement copied into a heading", () => {
+    const [statement] = headingCorpus(profilePage[profile]).stated;
+    const html = profilePage[profile].replace("</body>", `<h2>${statement}</h2></body>`);
+    expect(restatedByHeadings(html)).toEqual([statement]);
   });
 });
 
@@ -453,16 +474,48 @@ describe("unreviewedReportProse", () => {
       .toEqual([{ reason: "nested-in-data-bearing", text: "Authored inside a cell." }]);
   });
 
-  // The summary text is deliberately narration-shaped: it is the exact prose the `narrated-control`
-  // rule fails on the published page. Reporting it produces no finding, which is what pins that
-  // this function reports rather than reviews.
+  // Both texts are chosen to fail a rule if they were ever reviewed -- the summary opens with an
+  // imperative, so `narrated-control` fires on it; the hidden paragraph opens with a formulaic
+  // transition, so `signs-of-ai-writing` fires on it. The first assertion proves that premise, so
+  // rewording either text into something no rule catches fails here rather than leaving the last
+  // assertion vacuous. Reporting both produces no finding, which is what pins that this function
+  // reports rather than reviews.
   test("reports a disclosure summary and the blocks it hides, without reviewing either", () => {
-    const html = page("<details><summary>Open the evidence</summary><p>x</p></details>");
+    const summary = "Open the evidence";
+    const hidden = "Moreover, the venue is self-run.";
+    for (const text of [summary, hidden]) expect(reviewReportProse(page(`<p>${text}</p>`)), text).toHaveLength(1);
+
+    const html = page(`<details><summary>${summary}</summary><p>${hidden}</p></details>`);
     expect(authoredReportProse(html)).toEqual([]);
     expect(unreviewedReportProse(html)).toEqual([
-      { reason: "disclosure-summary", text: "Open the evidence" },
-      { reason: "nested-in-data-bearing", text: "x" },
+      { reason: "disclosure-summary", text: summary },
+      { reason: "nested-in-data-bearing", text: hidden },
     ]);
     expect(reviewReportProse(html)).toEqual([]);
+  });
+
+  test("reports a block of every reviewed tag nested in a data-bearing element", () => {
+    const html = page("<ul><li><h5>Fifth.</h5><h6>Sixth.</h6><figcaption>Figure.</figcaption>"
+      + "<blockquote>Quoted.</blockquote></li></ul>");
+    expect(unreviewedReportProse(html).map(({ text }) => text))
+      .toEqual(["Fifth.", "Sixth.", "Figure.", "Quoted."]);
+  });
+});
+
+// Issue #4291: the reviewed corpus is every authored text block HTML has, not the subset the page
+// renders today, so one more heading level or a pulled quote cannot put prose past the rules.
+describe("authored blocks beyond the tags the page renders today", () => {
+  test.each(["h5", "h6", "figcaption", "blockquote"])("reviews a <%s>", (tag) => {
+    const html = page(`<${tag}>Click to expand the evidence</${tag}>`);
+    expect(authoredReportProseBlocks(html)).toEqual([{ tag, text: "Click to expand the evidence" }]);
+    expect(reviewReportProse(html).map(({ rule }) => rule)).toEqual(["narrated-control"]);
+  });
+
+  test("counts a figure caption or a quotation toward repetition, and a fifth-level heading not", () => {
+    expect(reviewReportProse(page("<figcaption>Built on Jinn.</figcaption><blockquote>Built on Jinn.</blockquote>")))
+      .toEqual([
+        { rule: "repeated-statement", text: "built on jinn", detail: "stated 2 times; issue #3016 requires each fact to appear once" },
+      ]);
+    expect(reviewReportProse(page("<h5>Built on Jinn.</h5><p>Built on Jinn.</p>"))).toEqual([]);
   });
 });

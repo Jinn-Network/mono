@@ -85,8 +85,9 @@ const NARRATED_CONTROL_SIGNS: readonly { readonly label: string; readonly patter
  *
  * `details` carries its always-visible `summary` with it, which needs its own reason -- a label a
  * reader sees before opening anything is not hidden by being inside a closed control. The reason
- * is what that label is: the product renders exactly one `<summary>`, in `assets.ts`'s
- * `comparisonCellDetailsHtml`, from record values -- arm id, task digest prefix, replicate,
+ * is what that label is: on the published bundle page `buildPublicAssets` renders as `index.html`
+ * -- the only page this module reads -- every `<summary>` comes from one call site, `assets.ts`'s
+ * `comparisonCellDetailsHtml`, and is built from record values -- arm id, task digest prefix, replicate,
  * primary score, or `cellScore`'s `No primary score` where a cell has none. It is the disclosure
  * row's label, the same content class as the `<td>` it stands in for, and
  * `report-prose-review.test.ts` rebuilds every one of them from the verified comparison to hold
@@ -100,9 +101,15 @@ const NARRATED_CONTROL_SIGNS: readonly { readonly label: string; readonly patter
  */
 const DATA_BEARING = /<(li|dd|dt|td|th|details)\b[^>]*>[\s\S]*?<\/\1>/giu;
 const VERBATIM = /<(style|script|pre|code)\b[^>]*>[\s\S]*?<\/\1>/giu;
-const AUTHORED = /<(p|h1|h2|h3|h4|caption)\b[^>]*>([\s\S]*?)<\/\1>/giu;
+/**
+ * Every HTML element whose content is a block of text a page author writes, not only the ones the
+ * page renders today: a tag missing here would be in neither corpus -- not reviewed, and not
+ * reported by `unreviewedReportProse` either -- so one more heading level would walk prose past
+ * every rule without a trace (issue #4291).
+ */
+const AUTHORED = /<(p|h[1-6]|caption|figcaption|blockquote)\b[^>]*>([\s\S]*?)<\/\1>/giu;
 /** `AUTHORED`'s tags plus `summary`, so a stripped span reports both kinds it can hide. */
-const AUTHORED_OR_SUMMARY = /<(p|h1|h2|h3|h4|caption|summary)\b[^>]*>([\s\S]*?)<\/\1>/giu;
+const AUTHORED_OR_SUMMARY = /<(p|h[1-6]|caption|figcaption|blockquote|summary)\b[^>]*>([\s\S]*?)<\/\1>/giu;
 
 function decodeEntities(text: string): string {
   return text
@@ -121,9 +128,18 @@ function blockText(inner: string): string {
 
 /** One authored block, with the tag that carried it, so a rule can pick its own corpus. */
 export interface AuthoredProseBlock {
-  /** Lowercased tag name: `p`, `h1`-`h4`, or `caption`. */
+  /** Lowercased tag name: `p`, `h1`-`h6`, `caption`, `figcaption`, or `blockquote`. */
   readonly tag: string;
   readonly text: string;
+}
+
+/**
+ * Whether the repetition rule counts this block's statements: every authored block except a
+ * heading (see `reviewReportProse` for why). Exported so a test holding that restriction to its
+ * stated cost splits the corpus exactly where the rule does.
+ */
+export function isReportProseStatementBlock(block: AuthoredProseBlock): boolean {
+  return !/^h[1-6]$/u.test(block.tag);
 }
 
 /**
@@ -220,7 +236,8 @@ export function reviewReportProse(html: string): readonly ReportProseFinding[] {
 
   const occurrences = new Map<string, number>();
   const order: string[] = [];
-  // Statements are counted over paragraphs and table captions only. A heading labels the block
+  // Statements are counted over every block except headings -- paragraphs, table and figure
+  // captions, and quotations (`isReportProseStatementBlock`). A heading labels the block
   // beneath it rather than stating a fact, and `binaryFactsHtml` emits one heading per arm per
   // source section -- so counting headings would report the page's structure ("arm-a",
   // "Registered configuration", "Every candidate-class bucket") as repeated facts. The cost is
@@ -228,7 +245,7 @@ export function reviewReportProse(html: string): readonly ReportProseFinding[] {
   // rule back its signal, and no heading on any reviewed profile currently carries the text of a
   // paragraph or caption. The other two rules still read every block, so an imperative heading is
   // still narration.
-  for (const block of blocks.filter(({ tag }) => tag === "p" || tag === "caption")) {
+  for (const block of blocks.filter(isReportProseStatementBlock)) {
     // Counted per occurrence rather than per block: a paragraph that makes the same statement
     // twice is the defect, not an exemption from it.
     for (const statement of reportProseStatements(block.text)) {
