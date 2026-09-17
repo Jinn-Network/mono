@@ -370,6 +370,31 @@ describe("product documentation consistency", () => {
     }
   });
 
+  it("pins the claim-package/1, /2, /4 reader-line paragraph to the reader's constants", () => {
+    // Issue #3329: the table above is pinned, but the prose stating which line a prompted
+    // claim-package/1 or /2 stamps was not, and it had already drifted once.
+    const block = read(bundleReadmePath)
+      .split(/\n\s*\n/u)
+      .find((candidate) => candidate.startsWith("Claim-package/1, claim-package/2, and claim-package/4"));
+    expect(block, "paragraph present").toBeDefined();
+    // The same block goes on to claim-package/3, /5, and /6, which also name `@0.2.1`; cut there so
+    // those sentences cannot satisfy the pins for this one.
+    const end = block!.indexOf("\nClaim-package/3,");
+    expect(end, "claim-package/3 sentence present").toBeGreaterThan(-1);
+    const paragraph = block!.slice(0, end);
+    const legacy = PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[BUNDLE_FORMAT];
+    for (const command of [
+      PUBLIC_BUNDLE_VERIFICATION_COMMAND,
+      legacy.compatibleCommand,
+      PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+      PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+      LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+    ]) {
+      expect(paragraph, command).toContain(`\`${readerLine(command)}\``);
+    }
+    expect(paragraph).toContain("`promptedScreeningProfile`");
+  });
+
   it("pins every format section's reader commands to the lines that format pins", () => {
     // Issue #3940, the third statement site #3519 named. The table above and the too-old refusal
     // sample are pinned; the per-format sections that restate the same mapping were not, so a
