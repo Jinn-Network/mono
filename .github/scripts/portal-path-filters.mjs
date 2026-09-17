@@ -348,7 +348,8 @@ export const PUSH_ONLY_EXEMPT = Object.freeze({
     'under its own paths, as its paths: comment records.',
   'sdk-npm-publish.yml':
     'publishes @jinn-network/sdk canaries on push to next; widening its trigger changes what ' +
-    'publishes and how often, so the SDK canary can lag a change confined to a portal target.',
+    "publishes and how often. Its filter selects operator/** without that tree's portal closure, " +
+    'but packages/sdk portals nothing, so no canary content lags a portal-target change.',
 });
 
 /**
