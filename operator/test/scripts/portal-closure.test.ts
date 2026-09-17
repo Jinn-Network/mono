@@ -98,6 +98,24 @@ describe('shared portal-closure walk', () => {
     expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([]);
   });
 
+  it('names a portal missing from any one stage that installs the consumer', () => {
+    const second = ['FROM node:22-slim AS other', 'COPY app/package.json ./app/', 'RUN yarn install'];
+    const dockerfile = [GOOD, ...second].join('\n');
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      "@x/lib (lib): not copied before app's install in its build stage",
+    ]);
+    expect(missingPortalManifestCopies([...second, GOOD].join('\n'), EDGES)).toEqual([
+      "@x/lib (lib): not copied before app's install in its build stage",
+    ]);
+  });
+
+  it('names a consumer whose manifest is never copied', () => {
+    const dockerfile = GOOD.replace('COPY app/package.json app/yarn.lock ./app/', 'COPY app/yarn.lock ./app/');
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      'app/package.json is never copied',
+    ]);
+  });
+
   it('names a consumer whose manifest COPY no install follows', () => {
     const dockerfile = GOOD.replace('RUN corepack enable && yarn install --immutable', 'RUN true');
     expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([

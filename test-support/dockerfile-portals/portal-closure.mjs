@@ -88,8 +88,8 @@ function contextCopySources(args) {
 
 /**
  * Every edge whose target manifest is not copied from the build context, IN THE SAME BUILD STAGE,
- * before the install that resolves it -- the first `yarn install` after the consumer's own
- * manifest COPY. Comparing whole-file offsets would let a COPY in another stage satisfy the
+ * before each install that resolves it -- the first `yarn install` after any COPY of the
+ * consumer's own manifest. Comparing whole-file offsets would let a COPY in another stage satisfy the
  * check while the image breaks (#4465).
  */
 export function missingPortalManifestCopies(dockerfile, edges) {
@@ -114,19 +114,21 @@ export function missingPortalManifestCopies(dockerfile, edges) {
 
   const missing = [];
   for (const { name, consumer, target } of edges) {
-    // A consumer manifest may be copied in more than one stage; the one that matters is any copy
-    // an install follows.
-    const installs = copies(consumer)
-      .map(installAfter)
-      .filter((install) => install >= 0);
-    if (installs.length === 0) {
+    // A consumer manifest may be copied in more than one stage; every copy an install follows
+    // must have the target copied ahead of that install.
+    const consumerCopies = copies(consumer);
+    const installs = consumerCopies.map(installAfter).filter((install) => install >= 0);
+    if (consumerCopies.length === 0) {
+      missing.push(`${consumer}/package.json is never copied`);
+    } else if (installs.length === 0) {
       missing.push(`${consumer}: no yarn install follows a COPY of its manifest`);
-    } else if (!installs.some((install) => copies(target, install, instructions[install].stage).length > 0)) {
+    } else if (!installs.every((install) => copies(target, install, instructions[install].stage).length > 0)) {
       missing.push(`${name} (${target}): not copied before ${consumer}'s install in its build stage`);
     }
   }
   return [...new Set(missing)];
 }
+
 /** Every `watched` context path lacking its `<prefix><path>/**` entry in railway.toml's `watchPatterns`. */
 export function missingWatchPatterns(railwayConfig, watched, prefix) {
   const block = /watchPatterns\s*=\s*\[([^\]]*)\]/u.exec(railwayConfig);
