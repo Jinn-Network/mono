@@ -26,6 +26,8 @@ describe('shared portal-closure walk', () => {
   it('gives resolutions precedence over the dependency fields', () => {
     const portals = portalEntries({
       dependencies: { '@x/lib': 'portal:../declared' },
+      devDependencies: { '@x/lib': 'portal:../from-dev' },
+      optionalDependencies: { '@x/lib': 'portal:../from-optional' },
       resolutions: { '@x/lib': 'portal:../resolved' },
     });
     expect(portals.get('@x/lib')).toBe('../resolved');
