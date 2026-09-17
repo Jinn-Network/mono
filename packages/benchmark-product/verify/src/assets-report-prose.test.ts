@@ -22,7 +22,7 @@ import {
 } from "./assets.js";
 import { BUNDLE_FORMAT } from "./legacy-closures.js";
 import { BUNDLE_V10_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
-import { REPORT_PROSE_WORD_CEILING, reportProseWordCount, reviewReportProse } from "./report-prose-review.js";
+import { REPORT_PROSE_WORD_CEILINGS, reportProseWordCount, reviewReportProse } from "./report-prose-review.js";
 import { GOLDEN_PUBLISHED_PAGE, goldenInput } from "./testing/golden-asset-input.js";
 
 const decoder = new TextDecoder();
@@ -114,7 +114,7 @@ describe("the composed page's prose review", () => {
     expect(reviewReportProse(await page(BUNDLE_V10_FORMAT))).toEqual([]);
   });
 
-  test("measures the count REPORT_PROSE_WORD_CEILING is re-pinned to", async () => {
+  test("measures the count the wilson prose ceiling is re-pinned to", async () => {
     // The exact number, not merely "fewer than before": the ceiling is a ratchet, and a ratchet
     // pinned to an approximation ratchets nothing.
     const measured = reportProseWordCount(await page(BUNDLE_V10_FORMAT));
@@ -124,7 +124,7 @@ describe("the composed page's prose review", () => {
     // asserts the page stays at or under the ceiling, which a raised ceiling would also satisfy;
     // issue #3016 acceptance criterion 3 requires the ceiling to be re-pinned to the count the
     // revision actually measured, so raising it without shipping prose has to fail somewhere.
-    expect(REPORT_PROSE_WORD_CEILING).toBe(measured);
+    expect(REPORT_PROSE_WORD_CEILINGS.wilson).toBe(measured);
   });
 });
 
