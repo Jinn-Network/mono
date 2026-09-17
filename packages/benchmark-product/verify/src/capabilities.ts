@@ -364,6 +364,43 @@ export function composeClosure(
   };
 }
 
+/** What the two-way member closure is computed over: a composed closure, or a frozen legacy cell
+ * stated in the same two terms. */
+export interface MemberClosure {
+  readonly mandatoryFiles: readonly string[];
+  readonly memberPatterns: readonly CapabilityMemberPattern[];
+}
+
+/**
+ * The two-way member closure (design §6 step 3): every expected path is present, and every
+ * manifest path is expected. The mechanism the pre-composition closures always ran, computed over
+ * whichever sets the bundle's declared shape derives rather than over a per-format constant.
+ *
+ * `graphPaths` are the members the base graph derives from the bundle's own content -- the
+ * `records/<sha256>.bin` its evidence catalog names, the cancel marker, native Inspect logs.
+ *
+ * Because the allowlist is built only from DECLARED shapes, an `anchors/...` member in a bundle
+ * that did not declare `anchoring` is a non-allowlisted file (P3). Because the mandatory list is
+ * built from declared capabilities, a declared capability whose members were stripped fails as a
+ * missing member (P2), with `mayBeEmpty` the one explicit exception.
+ */
+export function assertMemberClosure(
+  closure: MemberClosure,
+  manifestPaths: ReadonlySet<string>,
+  graphPaths: Iterable<string>,
+): void {
+  const expectedPaths = new Set<string>([...closure.mandatoryFiles, ...graphPaths]);
+  for (const { pattern, mayBeEmpty } of closure.memberPatterns) {
+    const members = [...manifestPaths].filter((path) => pattern.test(path));
+    if (members.length === 0 && !mayBeEmpty) {
+      refuse("record-integrity", "bundle.manifest.files", `public bundle closure is missing every member of the shape ${String(pattern)}`);
+    }
+    for (const path of members) expectedPaths.add(path);
+  }
+  for (const path of manifestPaths) if (!expectedPaths.has(path)) refuse("record-integrity", path, `public bundle contains non-allowlisted file "${path}"`);
+  for (const path of expectedPaths) if (!manifestPaths.has(path)) refuse("record-integrity", path, `public bundle closure is missing "${path}"`);
+}
+
 /** The check list a bundle declaring `vector` runs, in order. The one denominator every reader
  * surface shows, and the list a claim pins. */
 export function expectedChecks(vector: readonly string[]): readonly PublicBundleVerificationCheck[] {
