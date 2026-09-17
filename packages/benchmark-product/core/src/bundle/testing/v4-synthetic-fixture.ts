@@ -968,6 +968,12 @@ export async function createSyntheticV4BundleFixture(input: {
    * third-party prompt, dataset row, annotation, or audit-derived text appears in it.
    */
   readonly declareDisclosure?: true;
+  /**
+   * Asks `report` for the composed generation (issue #3403), so the run publishes on
+   * `benchmark-product-public-bundle/10` with a derived capability vector. OPTIONS-ONLY and
+   * defaults off, so every existing caller's bundle bytes and closure version are unchanged.
+   */
+  readonly composedFormat?: true;
 }): Promise<SyntheticV4BundleFixture> {
   const scenario = input.scenario ?? "minimal";
   const withEvidence = input.withEvidence ?? false;
@@ -1198,7 +1204,10 @@ export async function createSyntheticV4BundleFixture(input: {
       "disclosure declare",
     );
   }
-  const reported = requireOk(await runReport(context, { draftId: DRAFT_ID }), "report");
+  const reported = requireOk(
+    await runReport(context, { draftId: DRAFT_ID, ...(input.composedFormat === true ? { composedFormat: true } : {}) }),
+    "report",
+  );
   const runState = readRunState(input.workspaceDir, DRAFT_ID);
   if (runState === undefined) throw new Error("reported synthetic run has no RunState");
   const bundle = materializePublicBundle({

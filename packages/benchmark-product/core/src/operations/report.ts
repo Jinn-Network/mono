@@ -66,6 +66,7 @@ import {
   DISCLOSURE_SPECIFICATION_EXTENSION,
   DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
 } from "@jinn-network/benchmarking-records";
+import { DISCLOSURE_SPECIFICATION_CAPABILITY, activeCapabilityVector } from "@colophon-claims/verify";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
@@ -108,6 +109,20 @@ import { artifactsDir } from "../workspace/layout.js";
 
 export interface RunReportInput {
   readonly draftId: string;
+  /**
+   * Asks for the composed generation (bundle-capability-composition design §10 step 2, issue
+   * #3403): every claim this invocation seals is the composed `claim-package/7`, and `publish`
+   * then emits `benchmark-product-public-bundle/10` with the capability vector the registry's
+   * activation predicates derive. **Off by default, and the legacy path is the default**: omitted,
+   * this operation seals exactly the claims it always did, byte for byte.
+   *
+   * An operation input and deliberately not a CLI switch. A composed claim pins a released reader
+   * that predates the format and refuses it at manifest parse, so a composed bundle exists to prove
+   * the two paths equivalent before the default moves, not to be published. The choice is made
+   * here, at `report`, because this is where the claim is sealed; `publish` reads it back from the
+   * sealed claim rather than being told a second time.
+   */
+  readonly composedFormat?: boolean;
 }
 
 /** One additional non-canonical Report this invocation sealed (packet P5, spec §8.3 option 5) —
@@ -381,9 +396,23 @@ export function runReport(
         // claim section have to agree: G0 refuses a Report carrying the extension on any closure
         // other than `/8`, and `/8` is the anchored binary-qualification cell. A run's sibling
         // analyses project no qualification, so their Reports carry neither.
-        const entryIsDisclosed = disclosureCarriage !== undefined
-          && carriage.anchoredClosure
-          && entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument;
+        //
+        // The composed generation (issue #3403) replaces that one enumerated cell with the
+        // registry's own rule: the record rides the binary-qualification analysis, anchored or not.
+        // The vector is never chosen here. It is what the activation predicates derive from the
+        // run's own facts, and each section below is supplied exactly when the vector declares it.
+        const composedCapabilities = input.composedFormat === true
+          ? activeCapabilityVector({
+            anchoredClosure: carriage.anchoredClosure,
+            projectsBinaryQualification: entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument,
+            declaresDisclosure: disclosureCarriage !== undefined,
+          })
+          : undefined;
+        const entryIsDisclosed = composedCapabilities !== undefined
+          ? composedCapabilities.includes(DISCLOSURE_SPECIFICATION_CAPABILITY)
+          : disclosureCarriage !== undefined
+            && carriage.anchoredClosure
+            && entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument;
         let produced: ProducedReport;
         try {
           produced = await produceReport(
@@ -451,6 +480,7 @@ export function runReport(
           },
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
           ...(entryIsDisclosed ? { disclosure: disclosureCarriage!.disclosure } : {}),
+          ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
           ...(previewLog !== undefined && previewLog.count > 0
             ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }
             : {}),
@@ -486,7 +516,19 @@ export function runReport(
       if (disclosureCarriage !== undefined) {
         const carriedBy = [primarySelected, ...additionalSelected].filter((entry) =>
           entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument);
-        if (carriedBy.length === 0 || !carriage.anchoredClosure) {
+        // The composed generation carries the record on the qualification analysis whether or not
+        // the run is anchored, so there only a missing analysis loses the declaration.
+        if (input.composedFormat === true && carriedBy.length === 0) {
+          refuse(
+            "conflict",
+            "disclosure",
+            "this run carries a sealed disclosure declaration that no report it is about to produce"
+            + " could carry: a disclosure record rides the binary-qualification analysis, and this run"
+            + " has none. Give it a binary-instrument analysis, or remove the declaration before"
+            + " reporting; a declaration made now could never enter any sealed claim.",
+          );
+        }
+        if (input.composedFormat !== true && (carriedBy.length === 0 || !carriage.anchoredClosure)) {
           refuse(
             "conflict",
             "disclosure",
