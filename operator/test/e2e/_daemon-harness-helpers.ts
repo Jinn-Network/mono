@@ -903,9 +903,9 @@ export async function startMockIpfsServer(): Promise<MockIpfsServer> {
 // ── Daemon startup ─────────────────────────────────────────────────────────────
 
 /**
- * Resolve swe-rebench-v2 substrate dir for daemon e2e harness construction.
- * Production `main.ts` threads `config.sweRebenchV2StateDir`; T2.4 and peers
- * set `JINN_SWE_REBENCH_V2_STATE_DIR` before `startDaemon` (#2097).
+ * Resolve the swe-rebench-v2 substrate dir from `JINN_SWE_REBENCH_V2_STATE_DIR` (#2097).
+ * `startDaemon` no longer consumes it: it fed only the removed `restorationEngine`
+ * config, so the env var has no effect on this rig (#3866).
  */
 export function sweRebenchV2StateDirFromEnv(
   env: NodeJS.ProcessEnv = process.env,
@@ -938,8 +938,6 @@ export interface RunningDaemon {
  *   - peers: empty (no peer discovery in the test).
  *   - subgraphUrl: omitted (no-subgraph mode is supported).
  *   - rewardClaim / balanceTopup: omitted (interval 0 → loops not started).
- *   - packagingDeps / envelopeDeps / deliveryDeps: omitted → pack() falls back
- *     to NotImplementedError (Task 4+ will wire delivery deps as needed).
  *   - identityPublisher / reputationFeedback: omitted (no ERC-8004 in test).
  *
  * @param ipfsGatewayUrl - Override the IPFS gateway URL (default: env var or Autonolas
@@ -1028,42 +1026,12 @@ export async function startDaemon(
   /**
    * Currently inert, like `solverNetRegistry` and `extraHarnesses` below: all three fed a
    * `restorationEngine` config that `DaemonConfig` does not have, so nothing reads them (#3866).
-   *
-   * Extra SolverType→harness-name dispatch entries merged into
-   * `solverTypeHarnesses` on top of the prediction.v1 mapping derived from
-   * `harnessSelector`. Used by the jinn-repo loop driver to force
-   * `jinn-repo.v1` restoration onto the claude-code learner. Honored only when
-   * the named harness `supports(ctx)` (see HarnessRegistry.findFor) — so an
-   * entry mapping jinn-repo.v1 → claude-code does NOT capture the evaluation
-   * leg (claude-code returns false for evaluation), which still first-matches
-   * the JinnRepoEvaluatorHarness. Defaults to `{}` → no behavioural change for
-   * the prediction consumer.
+   * Accepted for signature compatibility only.
    */
   extraSolverTypeHarnesses?: Record<string, string>,
-  /**
-   * Optional SolverNetRegistry-like object passed straight through to the
-   * TaskEngine. The engine consults it to (a) gate claims on an enabled
-   * SolverNet for the task's solverType and (b) resolve the SolverNet's
-   * runtime plugins so the solver harness loads the SolverType's bundled
-   * runtime SKILL (e.g. jinn-repo-runtime → checkout-mono-at-base_commit).
-   *
-   * MUST stay undefined for the prediction consumer (daemon-harness-cycle.ts):
-   * when set, the engine REJECTS any task whose solverType has no enabled net,
-   * which would break the prediction flow that relies on the no-registry path.
-   * Defaults to undefined → no behavioural change.
-   */
+  /** Currently inert (#3866): accepted for signature compatibility only; nothing reads it. */
   solverNetRegistry?: SolverNetRegistry,
-  /**
-   * Extra raw Harness instances registered directly into the HarnessRegistry
-   * alongside `harnessList` (in addition to, not instead of, the named
-   * harnesses `buildHarnesses` constructs). Used by the jinn-repo live-issue
-   * loop driver to inject a deterministic, no-LLM synthetic restoration
-   * harness for `jinn-repo.v1` (mirrors `PredictionV1BaselineImpl`'s
-   * zero-credential pattern) — the mechanical evaluator under test needs a
-   * candidate patch delivered on-chain through the real claim → execute →
-   * deliver pipeline, not an actual solve leg. Defaults to `[]` → no
-   * behavioural change for existing consumers.
-   */
+  /** Currently inert (#3866): accepted for signature compatibility only; nothing reads it. */
   extraHarnesses?: Harness[],
 ): Promise<RunningDaemon> {
   const rpcUrl = fixture.anvil.rpcUrl;

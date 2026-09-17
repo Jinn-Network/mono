@@ -311,7 +311,7 @@ describe('first-party Base Sepolia public record transport', () => {
       'http://0x7f000001/records/x',
       'http://2130706433/records/x',
       // A scheme-less locator (#3853).
-      'records/abc',
+      'records/abc', // pins only that no fetch occurs; the scheme-less case below pins the named refusal
     ] as const;
 
     it.each(hostile)('never fetches %s', async (locator) => {
