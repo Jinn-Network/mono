@@ -84,7 +84,8 @@ const TRUST_FAILURE_REASONS: Readonly<Record<VerificationFailureReason | "unknow
   unknown: true,
 };
 
-/** Keeps a trailing `:<reason>` a urn-shaped signer swallowed, so the failure stays legible. */
+/** Keeps a trailing `:<reason>` a urn-shaped signer swallowed, so the failure stays legible. The
+ * reason is kept on any urn, trust failure or not; only the closed set of reason words survives. */
 function aliasIdentifier(match: string): string {
   const dot = match.endsWith(".") ? "." : "";
   const body = dot === "" ? match : match.slice(0, -1);
@@ -112,7 +113,8 @@ function withoutHumanIdentifiers(message: string): string {
  * Refusals that embed a publisher-chosen name, which the schema constrains to a non-empty string
  * and nothing more, so the name is aliased by the fixed wording around it. Tied to `verify.ts`:
  * `publicKey`'s two messages for `trust.evaluators.<name>`, the two admission reviewer refusals,
- * and the evaluator keyId refusal. A name may hold any character, line breaks included.
+ * and the evaluator keyId refusal. A name may hold any character, line breaks and suffix text
+ * included, so it runs from the first prefix to the LAST suffix after it.
  */
 const PUBLISHER_NAMED = [
   { prefix: "evaluator ", suffixes: [" keyId is not derived from its SPKI"] },
@@ -123,39 +125,19 @@ const PUBLISHER_NAMED = [
 const WORD_CHARACTER = /\w/u;
 
 /**
- * Replaces each name between `prefix` (at a word boundary) and the nearest following suffix. A
- * lazy regex does the same, but rescans the rest of the text from every prefix a hostile name
- * repeats, which is quadratic; this scan caches each suffix's next position and stays linear.
+ * Replaces everything between the first `prefix` at a word boundary and the last following suffix.
+ * `refuse` throws one message per refusal, so a message holds at most one instance of a template;
+ * ending at the last suffix over-redacts at worst, never leaks. Each search is one linear scan.
  */
 function aliasPublisherNames(text: string, prefix: string, suffixes: readonly string[]): string {
-  const nextSuffix = suffixes.map(() => -2);
-  let result = "";
-  let copied = 0;
-  let search = 0;
-  for (;;) {
-    let start = text.indexOf(prefix, search);
-    while (start > 0 && WORD_CHARACTER.test(text[start - 1]!)) start = text.indexOf(prefix, start + 1);
-    if (start < 0) break;
-    const nameStart = start + prefix.length;
-    let end = -1;
-    let suffixLength = 0;
-    for (const [index, suffix] of suffixes.entries()) {
-      // -1 is final: a suffix absent after one name is absent after every later one.
-      if (nextSuffix[index]! !== -1 && nextSuffix[index]! <= nameStart) {
-        nextSuffix[index] = text.indexOf(suffix, nameStart + 1);
-      }
-      const at = nextSuffix[index]!;
-      if (at >= 0 && (end < 0 || at < end)) {
-        end = at;
-        suffixLength = suffix.length;
-      }
-    }
-    if (end < 0) break;
-    result += `${text.slice(copied, nameStart)}${IDENTIFIER_ALIAS}`;
-    copied = end;
-    search = end + suffixLength;
-  }
-  return result + text.slice(copied);
+  let start = text.indexOf(prefix);
+  while (start > 0 && WORD_CHARACTER.test(text[start - 1]!)) start = text.indexOf(prefix, start + 1);
+  if (start < 0) return text;
+  const nameStart = start + prefix.length;
+  const end = Math.max(...suffixes.map((suffix) => text.lastIndexOf(suffix)));
+  // A suffix that starts at `nameStart` would leave the name empty, which the schema rules out.
+  if (end <= nameStart) return text;
+  return `${text.slice(0, nameStart)}${IDENTIFIER_ALIAS}${text.slice(end)}`;
 }
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/gu;

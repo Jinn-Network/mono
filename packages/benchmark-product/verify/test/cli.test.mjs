@@ -724,6 +724,19 @@ test("publisher-named reviewers and trust entries are aliased on the human surfa
   }
 });
 
+// A name may embed its own template's suffix text; the name then runs to the last suffix, so the
+// text between the two copies is aliased rather than printed.
+test("a publisher name that embeds its template's suffix prints none of itself", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const message = "evaluator a keyId is not derived from its SPKI; bundle verified keyId is not derived from its SPKI";
+  const result = await runVerifierCli(["bundle"], {
+    verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
+  });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stderr, "colophon-verify: evaluator <identifier: see --json> keyId is not derived from its SPKI\n");
+  assert.doesNotMatch(result.stderr, /bundle verified/u);
+});
+
 // A name that repeats another template's prefix, with no suffix after it, made a lazy-regex scan
 // quadratic: about six seconds for this megabyte on a laptop. A linear scan takes milliseconds.
 test("aliasing a hostile publisher name stays linear in its length", async () => {
