@@ -28,7 +28,8 @@ step 7 unfinished.
       selects each suite from the diff, and both gates report success when their
       suite job is `skipped`, so a green `operator-ci-gate` / `hermetic-gate`
       over a `skipped` suite job does not satisfy this item. Confirm a
-      non-skipped suite job for that SHA: `ci.yml` does not run on push to
+      non-skipped suite job (`check` in `ci.yml`, `hermetic` in
+      `hermetic-gate.yml`) for that SHA: `ci.yml` does not run on push to
       `next`, and the `hermetic-gate` push run skips its suite when the merge
       queue already ran it, so look at the `merge_group` (queue) run for the
       train SHA, or any run whose suite job is non-skipped.
