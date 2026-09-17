@@ -567,24 +567,30 @@ export async function verifyPublicBundleSnapshot(
   // check list from the declaration (bundle-capability-composition design §6, issue #3403). The
   // vector was resolved when the manifest was authenticated, so an unknown token never reaches
   // here. What each axis MEANS is unchanged and stays below: the registry moves carriage only.
-  const manifest = checked.manifest;
-  const composed = manifest.format === BUNDLE_V10_FORMAT ? composeClosure(manifest.capabilities) : undefined;
+  const composed = checked.manifest.format === BUNDLE_V10_FORMAT
+    ? composeClosure(checked.manifest.capabilities)
+    : undefined;
   const carriesDisclosure = declaresDisclosureRecord;
-  const { carriesQualification, carriesAnchors, mandatoryFiles } = manifest.format === BUNDLE_V10_FORMAT
+  const { carriesQualification, carriesAnchors, mandatoryFiles } = checked.manifest.format === BUNDLE_V10_FORMAT
     ? {
-      carriesQualification: manifest.capabilities.includes(BINARY_QUALIFICATION_CAPABILITY),
-      carriesAnchors: manifest.capabilities.includes(ANCHORING_CAPABILITY),
+      carriesQualification: checked.manifest.capabilities.includes(BINARY_QUALIFICATION_CAPABILITY),
+      carriesAnchors: checked.manifest.capabilities.includes(ANCHORING_CAPABILITY),
       mandatoryFiles: composed!.mandatoryFiles,
     }
-    : manifest.format === BUNDLE_V8_FORMAT
+    : checked.manifest.format === BUNDLE_V8_FORMAT
       ? { carriesQualification: true, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_V4_FILES }
-      : legacyClosure(manifest.format);
+      : legacyClosure(checked.manifest.format);
+  // Grammars are the base's, with each refined member's replaced by its single declared refiner's
+  // (design §6 step 2). A pre-composition cell states the same thing as its qualification axis.
+  const refinedByQualification = (member: string): boolean => composed === undefined
+    ? carriesQualification
+    : composed.refinedMembers.get(member) === BINARY_QUALIFICATION_CAPABILITY;
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
 
   const evidenceBytes = read("evidence.json");
-  const evidence = carriesQualification
+  const evidence = refinedByQualification("evidence.json")
     ? parseJson(evidenceBytes, BundleV4EvidenceCatalogSchema, "evidence.json")
     : parseJson(evidenceBytes, BundleEvidenceCatalogSchema, "evidence.json");
   requireCanonical(evidenceBytes, evidence, "evidence.json");
@@ -621,7 +627,7 @@ export async function verifyPublicBundleSnapshot(
   }
 
   const trustBytes = read("trust/public-keys.json");
-  const trust = carriesQualification
+  const trust = refinedByQualification("trust/public-keys.json")
     ? parseJson(trustBytes, BundleV4TrustSchema, "trust/public-keys.json")
     : parseJson(trustBytes, BundleTrustSchema, "trust/public-keys.json");
   requireCanonical(trustBytes, trust, "trust/public-keys.json");
@@ -2103,9 +2109,9 @@ export async function verifyPublicBundleSnapshot(
     );
   return {
     verification: {
-      ...(manifest.format === BUNDLE_V10_FORMAT
-        ? { format: manifest.format, capabilities: manifest.capabilities }
-        : { format: manifest.format }),
+      ...(checked.manifest.format === BUNDLE_V10_FORMAT
+        ? { format: checked.manifest.format, capabilities: checked.manifest.capabilities }
+        : { format: checked.manifest.format }),
       identity: checked.identity,
       checks,
       signers: legacyBundleSigners(trust, new Set(verdictCatalog.verdicts.map((verdict) => verdict.evaluator))),

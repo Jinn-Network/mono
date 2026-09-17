@@ -1115,7 +1115,9 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     ...readerInstructions(input.composedCapabilities),
   };
   if (composed !== undefined) {
-    const supplied: Readonly<Record<string, boolean>> = {
+    // Total over the registry's sections: a capability registered without stating here how its
+    // section is supplied is a compile error, not a composed claim that can no longer be built.
+    const supplied: Readonly<Record<(typeof CAPABILITY_REGISTRY)[number]["claimSection"], boolean>> = {
       qualification: projection.qualification !== undefined,
       anchors: anchored,
       disclosure: disclosure !== undefined,

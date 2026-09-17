@@ -262,6 +262,8 @@ export function buildBundleManifest(
       return { path, sha256: sha256(bytes), bytes: bytes.length };
     })
     .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+  // Both ends read one registry: a vector this build could not verify is not one it will seal.
+  if ("capabilities" in options) composeClosure(options.capabilities);
   const manifest = BundleManifestSchema.parse({
     format: options.format ?? BUNDLE_FORMAT,
     ...("capabilities" in options ? { capabilities: options.capabilities } : {}),

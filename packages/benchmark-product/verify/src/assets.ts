@@ -661,8 +661,8 @@ function binaryFactsHtml(facts: BinaryFacts, capabilities: ReadonlySet<Presentat
   // Ruling 1's second half: this opening sentence is the tail of the claim line `neutralClaimHtml`
   // already rendered above it, so the composed page drops it. Written while `/10` was `/6`'s
   // closure and no `/10` bundle could render a binary page, because the ruling binds it ("drops it
-  // in the same revision"). Live since `/10` became the capability generation (issue #3403): a
-  // `/10` bundle declaring `binary-qualification` renders this page, with no further code change.
+  // in the same revision"). Reachable since `/10` became the capability generation (issue #3403):
+  // a `/10` bundle declaring `binary-qualification` renders this page, with no further code change.
   const opening = capabilities.has("report-prose-singularity")
     ? ""
     : '<p class="neutral">Qualification facts are presented per instrument without comparative conclusions.</p>';

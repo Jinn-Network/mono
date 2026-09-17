@@ -119,6 +119,16 @@ describe("building a composed manifest", () => {
     expect(anchored.identity).not.toBe(bare.identity);
   });
 
+  test("a vector this build could not verify is not one it will seal", () => {
+    // Both ends read one registry. A producer able to seal an unknown token, or a combination the
+    // registry does not admit, would mint a bundle identity no reader can ever accept.
+    const root = bundleWith({ format: BUNDLE_FORMAT, files: [MEMBER_ENTRY] });
+    for (const capabilities of [["zz-unknown"], ["disclosure-specification"], ["binary-qualification", "anchoring"]]) {
+      const refusal = expectRefusal(() => buildBundleManifest(root, [MEMBER], { format: BUNDLE_V10_FORMAT, capabilities }));
+      expect(refusal.issues[0]!.path, JSON.stringify(capabilities)).toBe("bundle.manifest.capabilities");
+    }
+  });
+
   test("a legacy format still builds byte-identically, with no vector", () => {
     const root = bundleWith({ format: BUNDLE_FORMAT, files: [MEMBER_ENTRY] });
     expect(buildBundleManifest(root, [MEMBER]).manifest).toEqual({ format: BUNDLE_FORMAT, files: [MEMBER_ENTRY] });
