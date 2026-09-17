@@ -6,6 +6,7 @@ import {
   parseSourceHead,
   parseWireDsseEnvelope,
 } from "@jinn-network/record-discovery-protocol";
+import type { SourceHeadOutcome } from "@jinn-network/record-discovery-protocol";
 import type { DsseEnvelope } from "@jinn-network/trust-core";
 
 import { vectorEnvelopeToWire } from "./harness.js";
@@ -136,6 +137,36 @@ describe("source-chain vectors parse under protocol schemas where applicable", (
   }
 });
 
+// Every `SourceHeadOutcome` status, tied to the protocol type in both
+// directions: `satisfies` rejects a status the type does not have, and
+// `AllSourceHeadStatusesListed` fails to compile if the type gains one this
+// list does not name.
+const SOURCE_HEAD_STATUSES = [
+  "ok",
+  "stale",
+  "refresh-by-ceiling",
+  "head-issued-ahead",
+  "unauthorized-signer",
+  "head-origin-mismatch",
+  "head-payload-mismatch",
+  "invalid-head-envelope",
+] as const satisfies readonly SourceHeadOutcome["status"][];
+type AllSourceHeadStatusesListed =
+  Exclude<SourceHeadOutcome["status"], (typeof SOURCE_HEAD_STATUSES)[number]> extends never ? true : never;
+const allSourceHeadStatusesListed: AllSourceHeadStatusesListed = true;
+
+describe("source-head vectors parse under protocol schemas and expect a SourceHeadOutcome status", () => {
+  for (const vector of loadVectorsByKind("source-head")) {
+    it(`"${vector.name}" -- head and signed payload parse; status is a recognized outcome`, () => {
+      const input = vector.input as { head: unknown; headSignature: { payload: string } };
+      expect(() => parseSourceHead(input.head)).not.toThrow();
+      expect(() => parseSourceHead(JSON.parse(input.headSignature.payload))).not.toThrow();
+      expect(allSourceHeadStatusesListed).toBe(true);
+      expect(SOURCE_HEAD_STATUSES).toContain((vector.expect as { status: string }).status);
+    });
+  }
+});
+
 describe("facts-consistency vectors carry a well-formed `facts` expectation", () => {
   for (const vector of loadVectorsByKind("facts-consistency")) {
     it(`"${vector.name}" expects a recognized FactsConsistency value`, () => {
@@ -171,6 +202,13 @@ describe("named checks in isolation are represented (design §18)", () => {
         .filter((status): status is string => status !== undefined),
     );
     for (const required of ["ok", "stale", "forked", "broken-chain", "unauthorized-signer"]) {
+      expect(statuses).toContain(required);
+    }
+  });
+
+  it("source-head-revalidation vectors cover ok and head-origin-mismatch", () => {
+    const statuses = new Set(loadVectorsByKind("source-head").map((vector) => (vector.expect as { status: string }).status));
+    for (const required of ["ok", "head-origin-mismatch"]) {
       expect(statuses).toContain(required);
     }
   });

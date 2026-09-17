@@ -22,11 +22,21 @@ const factsDir = join(root, 'packages', 'discovery', 'facts');
 
 const TABLE_HEADER_PREFIX = '| Record kind | Leaf | Set | v1 declared |';
 
-/** Backticked tokens of one markdown cell. `_none_` is §12's empty marker. */
+/**
+ * Backticked tokens of one markdown cell. `_none_` is §12's empty marker, and it is the only
+ * way to write an empty cell: a cell with no backticked token that is not exactly `_none_`
+ * (bare prose, or nothing) is refused rather than read as `[]`, which would otherwise pass
+ * for a declared-empty set.
+ */
 function cellTokens(cell) {
   const trimmed = cell.trim();
   if (trimmed === '_none_') return [];
-  return [...trimmed.matchAll(/`([^`]+)`/gu)].map((match) => match[1]);
+  const tokens = [...trimmed.matchAll(/`([^`]+)`/gu)].map((match) => match[1]);
+  assert.ok(
+    tokens.length > 0,
+    `§12 audit-table cell "${trimmed}" names no backticked token. Write an empty cell as _none_.`,
+  );
+  return tokens;
 }
 
 export function parseAuditTable(markdown = readFileSync(specPath, 'utf8')) {
@@ -98,8 +108,9 @@ export function readProfiles(profilesRoot = factsDir) {
       const version = Number.parseInt(versionSegment.slice(1), 10);
       // `fields` is a flat array whose `name`s are already dotted paths
       // (`runtime.image.manifestDigest`), so a filter reaches every declared path; there
-      // is no nesting to walk. This is what `referenceBearingFields()` does in each
-      // leaf's own `profiles.test.ts`.
+      // is no nesting to walk. This is what `referenceBearingFields()` does; it is defined
+      // in `packages/discovery/protocol/src/facts-profile.ts`, and each leaf's own
+      // `profiles.test.ts` imports it to pin its profiles.
       const referenceBearing = (document.fields ?? [])
         .filter((field) => field.referenceBearing === true)
         .map((field) => field.name);
@@ -205,3 +216,22 @@ function orderedGroup(row) {
   );
   return group;
 }
+
+/** A one-row §12 audit table with the given *Set* and *v1 declared* cells. */
+function syntheticTable(setCell, v1Cell) {
+  return [
+    `${TABLE_HEADER_PREFIX} Revision |`,
+    '| --- | --- | --- | --- | --- |',
+    `| \`benchmark/v1\` | \`benchmarking\` | ${setCell} | ${v1Cell} | prose |`,
+    '',
+  ].join('\n');
+}
+
+test('a *Set* or *v1 declared* cell must be `_none_` or carry at least one backticked token', () => {
+  assert.deepEqual(parseAuditTable(syntheticTable('_none_', '`benchmarkDigest`'))[0].set, []);
+  assert.deepEqual(parseAuditTable(syntheticTable('`a`, `b`', '_none_'))[0].set, ['a', 'b']);
+  // Bare prose used to parse as `[]` and so silently pass for an empty declared set.
+  assert.throws(() => parseAuditTable(syntheticTable('none declared', '_none_')), /_none_/u);
+  assert.throws(() => parseAuditTable(syntheticTable('_none_', 'same as Set')), /_none_/u);
+  assert.throws(() => parseAuditTable(syntheticTable('', '_none_')), /_none_/u);
+});

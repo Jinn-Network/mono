@@ -8840,6 +8840,78 @@
         "kind": "fixtures",
         "package": "@jinn-network/record-discovery-testing",
         "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-head-issued-ahead/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-head-issued-ahead/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-head-origin-mismatch/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-head-origin-mismatch/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-head-payload-mismatch/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-head-payload-mismatch/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-identical-head-ok/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-identical-head-ok/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-refresh-by-ceiling/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-refresh-by-ceiling/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-signer-rotated-since-issue/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-signer-rotated-since-issue/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-stale/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-stale/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-unauthorized-signer/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-unauthorized-signer/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/stale-head-seeded-mark/vector.json",
         "relativeSource": "fixtures/vectors/stale-head-seeded-mark/vector.json"
       },

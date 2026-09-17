@@ -273,6 +273,26 @@ const COVERAGE = [
   },
   {
     label: 'Named checks in isolation',
+    claim:
+      "`source-head-revalidation` outcomes (`ok` for a byte-identical head, `stale`, `refresh-by-ceiling`, `head-issued-ahead`, `unauthorized-signer` both for a key that rotated out before the head was issued and for one that rotated out after, `head-origin-mismatch` for a head naming a source other than the one followed, and `head-payload-mismatch`), each exercised with the procedure handed the followed source's seeded high-water mark store, so the kit proves §10.5's *adopts nothing* property — a revalidated head leaves the stored mark unchanged, whatever the outcome",
+    // Every `source-head` vector seeds the followed source's mark, and the harness
+    // (`checkSourceHeadVector`) passes that same store to the procedure under test and asserts
+    // the stored mark is unchanged after every call, `ok` included, so each vector discharges
+    // the adopts-nothing half as well as its outcome. `source-head-conformance.test.ts` shows
+    // the check failing for a procedure that writes the store.
+    vectors: [
+      'source-head-revalidation-identical-head-ok',
+      'source-head-revalidation-stale',
+      'source-head-revalidation-refresh-by-ceiling',
+      'source-head-revalidation-head-issued-ahead',
+      'source-head-revalidation-unauthorized-signer',
+      'source-head-revalidation-signer-rotated-since-issue',
+      'source-head-revalidation-head-origin-mismatch',
+      'source-head-revalidation-head-payload-mismatch',
+    ],
+  },
+  {
+    label: 'Named checks in isolation',
     claim: '`facts-consistency` (all three outcomes), `derivation-consistency` (present, fabricated, reorged-away)',
     vectors: [
       'facts-consistency-consistent',
@@ -297,19 +317,23 @@ const COVERAGE = [
 ];
 
 /**
- * Splits on `"; "` at parenthesis depth zero. Depth-awareness is load-bearing, not
- * decorative: two §18 claims carry a parenthetical that contains a semicolon of its own,
- * and a flat split cuts one of them into three.
+ * Splits on `"; "` at parenthesis depth zero and outside code spans. Depth-awareness is
+ * load-bearing, not decorative: two §18 claims carry a parenthetical that contains a
+ * semicolon of its own, and a flat split cuts one of them into three. Code spans are
+ * opaque for the same reason — a backticked `; ` is text, not a separator — and a
+ * parenthesis inside one is text too, so it moves no depth.
  */
 function splitClaims(body) {
   const claims = [];
   let depth = 0;
+  let inCode = false;
   let current = '';
   for (let index = 0; index < body.length; index += 1) {
     const character = body[index];
-    if (character === '(') depth += 1;
-    else if (character === ')') depth -= 1;
-    if (character === ';' && depth === 0 && body[index + 1] === ' ') {
+    if (character === '`') inCode = !inCode;
+    else if (!inCode && character === '(') depth += 1;
+    else if (!inCode && character === ')') depth -= 1;
+    if (character === ';' && !inCode && depth === 0 && body[index + 1] === ' ') {
       claims.push(current.trim());
       current = '';
       index += 1;
@@ -328,12 +352,17 @@ export function deriveConformanceClaims(markdown = readFileSync(specPath, 'utf8'
   const end = markdown.indexOf('\n## 19.', start);
   assert.notEqual(end, -1, 'the design document has no "## 19." section closing §18.');
 
-  // Unwrap soft line breaks into the bullet they continue.
+  // Unwrap soft line breaks into the bullet they continue. A blank line ends the bullet, so
+  // a paragraph after §18's last bullet is not read as part of its last claim.
   const bullets = [];
+  let continuing = false;
   for (const raw of markdown.slice(start, end).split('\n')) {
     const line = raw.trim();
-    if (line.startsWith('- ')) bullets.push(line.slice(2));
-    else if (bullets.length > 0 && line !== '') bullets[bullets.length - 1] += ` ${line}`;
+    if (line.startsWith('- ')) {
+      bullets.push(line.slice(2));
+      continuing = true;
+    } else if (line === '') continuing = false;
+    else if (continuing) bullets[bullets.length - 1] += ` ${line}`;
   }
   assert.ok(bullets.length > 0, '§18 has no bullets.');
 
@@ -421,4 +450,29 @@ test('C. every vector in the loaded corpus is named by at least one §18 claim',
       `vector "${name}" is in the corpus but no §18 claim names it. Either add the claim it discharges to §18 and map it here, or say why the corpus carries a vector the conformance list does not require.`,
     );
   }
+});
+
+/** A minimal §18 with the given body between its heading and §19. */
+function syntheticSpec(body) {
+  return `# Spec\n\n## 18. Conformance\n\nIntro.\n\n${body}\n\n## 19. Declared impact\n`;
+}
+
+test('§18 derivation: a paragraph after the last bullet is not appended to its last claim', () => {
+  const derived = deriveConformanceClaims(
+    syntheticSpec('- **Golden vectors:** alpha; beta\n  continued.\n\nA closing paragraph; not a claim.'),
+  );
+  assert.deepEqual(derived, [
+    { label: 'Golden vectors', claim: 'alpha' },
+    { label: 'Golden vectors', claim: 'beta continued' },
+  ]);
+});
+
+test('§18 derivation: "; " inside a code span does not split a claim', () => {
+  const derived = deriveConformanceClaims(
+    syntheticSpec('- **Named checks:** `a; b` stays whole (and `c)` too); next'),
+  );
+  assert.deepEqual(derived, [
+    { label: 'Named checks', claim: '`a; b` stays whole (and `c)` too)' },
+    { label: 'Named checks', claim: 'next' },
+  ]);
 });
