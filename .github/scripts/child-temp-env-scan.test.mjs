@@ -115,6 +115,16 @@ test('treats a class declaration as a definition boundary', () => {
   assert.equal(unhandledSites(source).length, 1);
 });
 
+// #3849: `$` is legal in an identifier and is a pattern anchor, so a helper name carrying one has
+// to be escaped before it is looked up, or its definition reads as missing.
+test('a helper whose name carries $ is still read as its definition (#3849)', () => {
+  const site = 'const built = build$Env(d);\nspawn(exe, args, { env: { ...built, HOME: home } });\n';
+  const carrier = 'function build$Env(d) { return { ...scopedTempEnv(d) }; }\n';
+  const bare = 'function build$Env(d) { return { PATH: "" }; }\n';
+  assert.deepEqual(unhandledSites(carrier + site), []);
+  assert.equal(unhandledSites(bare + site).length, 1);
+});
+
 // #3099: the marker gathered the comment lines within 8 lines above the site without requiring them
 // to be contiguous with it, so a marker written about one thing exempted anything just below it.
 test('accepts a temp-env: marker only when it is contiguous with the site', () => {
