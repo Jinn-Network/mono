@@ -540,10 +540,10 @@ describe("binary qualification public assets", () => {
     // Design §6 H (issue #4191). `binaryFactsHtml` opens with the tail of the sentence
     // `neutralClaimHtml` renders in the header, which is exactly the repetition ruling 1 retires.
     //
-    // Written while `/10` was `/6`'s closure and no `/10` bundle could render a binary page. Live
-    // since `/10` became the capability generation (issue #3403): a `/10` bundle declaring
-    // `binary-qualification` renders this page. Driven by a direct call, and driven HERE, because
-    // this is where the binary fixture lives.
+    // Written while `/10` was `/6`'s closure and no `/10` bundle could render a binary page.
+    // Reachable since `/10` became the capability generation (issue #3403): a `/10` bundle
+    // declaring `binary-qualification` renders this page. Driven by a direct call, and driven
+    // HERE, because this is where the binary fixture lives.
     const opening = "Qualification facts are presented per instrument without comparative conclusions.";
     const binary = binaryAssetFixture();
     const published = text(buildPublicAssets(binary)["index.html"]);

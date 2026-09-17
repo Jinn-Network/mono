@@ -103,7 +103,12 @@ describe("portable bundle manifest", () => {
     // canonical re-encoding then differs from the bytes on disk.
     expect(refusalOf({ format: BUNDLE_V6_FORMAT, capabilities: ["anchoring"], files })).toMatch(/canonical manifest encoding/u);
 
-    expect(() => buildBundleManifest(bundleDir, paths, { format: BUNDLE_V10_FORMAT, capabilities: ["Anchoring"] })).toThrow();
+    // The producer end reads the same registry: a vector this build could not verify is not one
+    // it will seal, so no bundle identity is ever minted that no reader could accept.
+    for (const capabilities of [["Anchoring"], ["zz-unknown"], ["disclosure-specification"]]) {
+      expect(() => buildBundleManifest(bundleDir, paths, { format: BUNDLE_V10_FORMAT, capabilities }), JSON.stringify(capabilities))
+        .toThrow(BenchmarkProductError);
+    }
   });
 
   test.each(["", ".", "../escape", "/absolute", "records/../escape", "bundle.json"])(

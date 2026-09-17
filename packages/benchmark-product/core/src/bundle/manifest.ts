@@ -117,6 +117,20 @@ export type BuildBundleManifestOptions =
   /** The composed generation states its vector; there is no default, because `[]` is a statement. */
   | { readonly format: typeof BUNDLE_V10_FORMAT; readonly capabilities: readonly string[] };
 
+/**
+ * Resolve, or refuse (design §6 step 1). Every token is must-understand, so a vector naming
+ * anything this build does not implement -- or a combination the registry does not admit -- is
+ * refused whole. Re-raised as this package's own typed refusal: the registry lives in the reader
+ * package, and a core caller branches on core's error class.
+ */
+function resolveCapabilities(capabilities: readonly string[]): void {
+  try {
+    composeClosure(capabilities);
+  } catch (cause) {
+    refuse("record-integrity", "bundle.manifest.capabilities", cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -241,6 +255,8 @@ export function buildBundleManifest(
       return { path, sha256: sha256(bytes), bytes: bytes.length };
     })
     .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+  // Both ends read one registry: a vector this build could not verify is not one it will seal.
+  if ("capabilities" in options) resolveCapabilities(options.capabilities);
   const manifest = BundleManifestSchema.parse({
     format: options.format ?? BUNDLE_FORMAT,
     ...("capabilities" in options ? { capabilities: options.capabilities } : {}),
@@ -292,17 +308,8 @@ export function verifyBundleSnapshot(
   if (!equalBytes(bytes, canonical)) {
     refuse("record-integrity", BUNDLE_MANIFEST_FILENAME, "bundle.json bytes are not the exact canonical manifest encoding");
   }
-  // Resolve, or refuse (design §6 step 1). Every token is must-understand, so a vector naming
-  // anything this build does not implement refuses the bundle whole, before any member is read.
-  // Re-raised as this package's own typed refusal: the registry lives in the reader package, and a
-  // core caller branches on core's error class.
-  if (parsed.data.format === BUNDLE_V10_FORMAT) {
-    try {
-      composeClosure(parsed.data.capabilities);
-    } catch (cause) {
-      refuse("record-integrity", "bundle.manifest.capabilities", cause instanceof Error ? cause.message : String(cause));
-    }
-  }
+  // Before any member is read.
+  if (parsed.data.format === BUNDLE_V10_FORMAT) resolveCapabilities(parsed.data.capabilities);
 
   const seen = new Set<string>();
   let previous = "";
