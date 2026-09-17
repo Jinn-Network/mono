@@ -39,9 +39,6 @@ import {
   UnterminatedTemplateError,
 } from './js-source-scanner.mjs';
 
-/** Re-exported so this guard's own scanner cases keep naming it where they always did. */
-export { stripComments };
-
 const root = resolve(import.meta.dirname, '../..');
 
 /** Directories that never hold a first-party suite this gate governs. */
