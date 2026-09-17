@@ -741,7 +741,7 @@ function repositoryWorkProvisionerContract(
       } finally {
         if (mirrorDir === undefined) {
           // No mirror was bound, so there is no worktree registration to remove here; a stale one
-          // is cleared by the next mirror-bound harvest's prune.
+          // is cleared by the next `worktree prune` run against that mirror.
           await rm(paths.work, { recursive: true, force: true });
         } else {
           // Copies `solverProvisioner`'s teardown in the model referenced above, verbatim in shape:
