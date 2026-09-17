@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { VerificationFailureReason } from "@jinn-network/trust-core";
 import { SUPPORTED_BUNDLE_FORMATS, type VerifiedBundleSnapshot } from "./manifest.js";
 import {
   bundleIdentityLabel,
@@ -69,8 +70,29 @@ const INTERNAL_PROTOCOL_URL =
 const RAW_IDENTIFIER = /urn:[^\s,;)"']+|did:key:z[1-9A-HJ-NP-Za-km-z]+/gu;
 const IDENTIFIER_ALIAS = "<identifier: see --json>";
 
+/** Reasons a trust failure appends to its signer (`<key>:<reason>`); `unknown` is aggregate's
+ * fallback. Typed as a total record so a new trust-core reason is a compile error here. */
+const TRUST_FAILURE_REASONS: Readonly<Record<VerificationFailureReason | "unknown", true>> = {
+  "envelope-signature-invalid": true,
+  "binding-not-resolved": true,
+  "ceremony-verification-failed": true,
+  "window-violation": true,
+  "scope-violation": true,
+  "consent-chain-violation": true,
+  revoked: true,
+  "policy-rejected": true,
+  unknown: true,
+};
+
+/** Keeps a trailing `:<reason>` a urn-shaped signer swallowed, so the failure stays legible. */
 function aliasIdentifier(match: string): string {
-  return match.endsWith(".") ? `${IDENTIFIER_ALIAS}.` : IDENTIFIER_ALIAS;
+  const dot = match.endsWith(".") ? "." : "";
+  const body = dot === "" ? match : match.slice(0, -1);
+  const colon = body.lastIndexOf(":");
+  const reason = body.slice(colon + 1);
+  return colon > 0 && Object.hasOwn(TRUST_FAILURE_REASONS, reason)
+    ? `${IDENTIFIER_ALIAS}:${reason}${dot}`
+    : `${IDENTIFIER_ALIAS}${dot}`;
 }
 
 /** Removes only Jinn's unresolvable protocol namespaces, preserving actionable outside URLs. */
@@ -84,6 +106,28 @@ function withoutInternalProtocolIdentifiers(message: string): string {
 /** Refusal details keep raw identifiers in `--json`; the human error surface aliases them. */
 function withoutHumanIdentifiers(message: string): string {
   return withoutInternalProtocolIdentifiers(message).replace(RAW_IDENTIFIER, aliasIdentifier);
+}
+
+/**
+ * Refusals that embed a publisher-chosen name, which the schema constrains to a non-empty string
+ * and nothing more, so the name is aliased by the fixed wording around it. Tied to `verify.ts`:
+ * `publicKey`'s two messages for `trust.evaluators.<name>`, the two admission reviewer refusals,
+ * and the evaluator keyId refusal. `s` lets a name carrying a line break still match.
+ */
+const PUBLISHER_NAMED = [
+  /(\bevaluator )(.+?)( keyId is not derived from its SPKI)/gsu,
+  /(\breviewer )(.+?)( has no signer key id| uses more than one key)/gsu,
+  /(\btrust\.evaluators\.)(.+?)( is not a valid SPKI public key| is not an Ed25519 public key)/gsu,
+] as const;
+
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/gu;
+
+/** One refusal, one stderr line: aliases identifiers, then escapes every control character (line
+ * feeds included), so a publisher-chosen string cannot forge a line of its own. */
+function humanRefusalDetail(message: string): string {
+  const named = PUBLISHER_NAMED.reduce((text, pattern) => text.replace(pattern, `$1${IDENTIFIER_ALIAS}$3`), message);
+  return withoutHumanIdentifiers(named)
+    .replace(CONTROL_CHARACTER, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
 /**
@@ -526,9 +570,7 @@ export async function runVerifierCli(
     return {
       exitCode: 2,
       stdout: "",
-      stderr: withoutHumanIdentifiers(
-        `colophon-verify: ${cause instanceof Error ? cause.message : String(cause)}\n`,
-      ),
+      stderr: `colophon-verify: ${humanRefusalDetail(cause instanceof Error ? cause.message : String(cause))}\n`,
     };
   }
 
@@ -545,7 +587,7 @@ export async function runVerifierCli(
     const stdout = parsed.json
       ? `${JSON.stringify({ ok: false, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, code, message: error.message })}\n`
       : "";
-    const stderr = parsed.json ? "" : `colophon-verify: ${withoutHumanIdentifiers(error.message)}\n`;
+    const stderr = parsed.json ? "" : `colophon-verify: ${humanRefusalDetail(error.message)}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
 
@@ -632,7 +674,7 @@ export async function runVerifierCli(
     : [
       ...(freezeRepoFailure === undefined ? [] : [`freeze repository not checked: ${freezeRepoFailure.message}`]),
       ...(identityFailure === undefined ? [] : [`domain binding not applied: ${identityFailure.message}`]),
-    ].map((note) => withoutHumanIdentifiers(`colophon-verify: ${note}\n`)).join("");
+    ].map((note) => `colophon-verify: ${humanRefusalDetail(note)}\n`).join("");
   // A drifted freeze repository is a verdict about the artifact and takes precedence: exit 1 is
   // what the usage text promises for it, and an operational failure on a different flag must not
   // silently re-code that verdict as 2.
