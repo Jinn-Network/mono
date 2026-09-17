@@ -87,9 +87,9 @@ const NARRATED_CONTROL_SIGNS: readonly { readonly label: string; readonly patter
  * reader sees before opening anything is not hidden by being inside a closed control. The reason
  * is what that label is: on the published bundle page `buildPublicAssets` renders as `index.html`
  * -- the only page this module reads -- every `<summary>` comes from one call site, `assets.ts`'s
- * `comparisonCellDetailsHtml`, and is built from record values -- arm id, task digest prefix, replicate,
- * primary score, or `cellScore`'s `No primary score` where a cell has none. It is the disclosure
- * row's label, the same content class as the `<td>` it stands in for, and
+ * `comparisonCellDetailsHtml`, and is built from record values -- arm id, task digest prefix,
+ * replicate, primary score, or `cellScore`'s `No primary score` where a cell has none. It is the
+ * disclosure row's label, the same content class as the `<td>` it stands in for, and
  * `report-prose-review.test.ts` rebuilds every one of them from the verified comparison to hold
  * it to that.
  *
@@ -144,7 +144,7 @@ export function isReportProseStatementBlock(block: AuthoredProseBlock): boolean 
 
 /**
  * The authored blocks with the tag that carried them. Exported for the same reason
- * `authoredReportProse` is: the repetition rule reads paragraphs and captions only, and a test
+ * `authoredReportProse` is: the repetition rule reads every block but headings, and a test
  * that wants to hold that restriction to its stated cost needs the corpus the rule reads rather
  * than a second approximation of it.
  */
@@ -243,7 +243,7 @@ export function reviewReportProse(html: string): readonly ReportProseFinding[] {
   // "Registered configuration", "Every candidate-class bucket") as repeated facts. The cost is
   // real and one-sided: a fact a heading genuinely does restate goes unreported here. It buys the
   // rule back its signal, and no heading on any reviewed profile currently carries the text of a
-  // paragraph or caption. The other two rules still read every block, so an imperative heading is
+  // non-heading block. The other two rules still read every block, so an imperative heading is
   // still narration.
   for (const block of blocks.filter(isReportProseStatementBlock)) {
     // Counted per occurrence rather than per block: a paragraph that makes the same statement

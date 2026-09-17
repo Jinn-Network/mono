@@ -357,7 +357,7 @@ describe.each([
 /**
  * The cost `reviewReportProse` names for counting repetition over every block but headings:
  * "a fact a heading genuinely does restate goes unreported here", true so long as no heading
- * carries the text of a paragraph or caption. That is a claim about the rendered pages, not about
+ * carries the text of a non-heading block. That is a claim about the rendered pages, not about
  * the rule, so nothing in the rule can hold it -- this does, on every profile the review gates.
  * A revision that moves a paragraph's sentence into a heading fails here instead of going quiet.
  *
@@ -381,7 +381,7 @@ function restatedByHeadings(html: string): readonly string[] {
 describe.each(
   Object.keys(REPORT_PROSE_WORD_CEILINGS) as readonly ReportPresentationProfile[],
 )("%s headings", (profile) => {
-  test("restate no paragraph or caption statement", () => {
+  test("restate no statement a non-heading block makes", () => {
     const { stated, headings } = headingCorpus(profilePage[profile]);
     expect(stated.size).toBeGreaterThan(0);
     expect(headings.length).toBeGreaterThan(0);
