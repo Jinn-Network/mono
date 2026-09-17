@@ -125,6 +125,70 @@ describe('shared portal-closure walk', () => {
     ]);
   });
 
+  it('treats a bare yarn RUN as the consumer install', () => {
+    const dockerfile = GOOD.replace(
+      'RUN corepack enable && yarn install --immutable',
+      'RUN corepack enable && yarn',
+    );
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([]);
+  });
+
+  it('names a portal copied after a bare yarn RUN even when a later yarn install exists', () => {
+    const dockerfile = GOOD.replace('COPY lib/package.json ./lib/\n', '').replace(
+      'yarn install --immutable\n',
+      'yarn\nCOPY lib/package.json ./lib/\nRUN yarn install --immutable\n',
+    );
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      "@x/lib (lib): not copied before app's install in its build stage",
+    ]);
+  });
+
+  it('treats yarn --immutable as the consumer install', () => {
+    const dockerfile = GOOD.replace(
+      'RUN corepack enable && yarn install --immutable',
+      'RUN corepack enable && yarn --immutable',
+    );
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([]);
+  });
+
+  it('names a portal copied after yarn --immutable even when a later yarn install exists', () => {
+    const dockerfile = GOOD.replace('COPY lib/package.json ./lib/\n', '').replace(
+      'yarn install --immutable\n',
+      'yarn --immutable\nCOPY lib/package.json ./lib/\nRUN yarn install --immutable\n',
+    );
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      "@x/lib (lib): not copied before app's install in its build stage",
+    ]);
+  });
+
+  it('treats yarn --cwd <dir> install as the consumer install', () => {
+    const dockerfile = GOOD.replace(
+      'RUN corepack enable && yarn install --immutable',
+      'RUN corepack enable && yarn --cwd ./app install --immutable',
+    );
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([]);
+  });
+
+  it('names a portal copied after yarn --cwd <dir> install even when a later yarn install exists', () => {
+    const dockerfile = GOOD.replace('COPY lib/package.json ./lib/\n', '').replace(
+      'yarn install --immutable\n',
+      'yarn --cwd ./app install --immutable\nCOPY lib/package.json ./lib/\nRUN yarn install --immutable\n',
+    );
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      "@x/lib (lib): not copied before app's install in its build stage",
+    ]);
+  });
+
+  it('does not treat yarn test as an install', () => {
+    const dockerfile = GOOD.replace(
+      'RUN corepack enable && yarn install --immutable',
+      'RUN yarn test',
+    );
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      'app: no yarn install follows a COPY of its manifest',
+    ]);
+  });
+
   it('keeps a continued instruction whole across a comment line', () => {
     const dockerfile = GOOD.replace(
       'COPY lib/package.json ./lib/',
