@@ -634,6 +634,25 @@ test('a `run:` written inside a block scalar mints no run block', () => {
   );
 });
 
+test('a dashed block-scalar key masks only its own body, not its sibling keys (#3844)', () => {
+  // Measuring the `- if: |` key by its indent alone, without the dash, would stretch the
+  // mask over the sibling `shell:` and `run:` keys and hide the real finding on line 7.
+  const source = [
+    'jobs:',
+    '  sample:',
+    '    steps:',
+    '      - if: |',
+    '          always()',
+    '        shell: bash',
+    '        run: producer | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => `${finding.severity}:${finding.line}`),
+    ['error:7'],
+  );
+});
+
 test('a phantom scope hides a real error as readily as it invents one', () => {
   // The escalation direction is the one the issue reported, but the same phantom read
   // the other way round is worse: the embedded `shell: sh` shadowed the real
