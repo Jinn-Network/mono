@@ -62,13 +62,7 @@ import { MechAdapter } from '../../src/adapters/mech/adapter.js';
 import { createDirectSafeBroadcaster } from '../../src/adapters/mech/direct-safe-broadcaster.js';
 import { getMechDeliveryRate, getTimeoutBounds } from '../../src/adapters/mech/contracts.js';
 import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
-import { buildHarnesses } from '../../src/harnesses/impls/index.js';
 import { Store } from '../../src/store/store.js';
-import {
-  HarnessRegistry,
-  DEFAULT_HARNESS,
-  DEFAULT_DISABLED_HARNESSES,
-} from '../../src/harnesses/engine/registry.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { startApiServer } from '../../src/api/server.js';
 import type { SolverNetRegistry } from '../../src/solver-nets/registry.js';
@@ -947,10 +941,6 @@ export interface RunningDaemon {
  *   - packagingDeps / envelopeDeps / deliveryDeps: omitted → pack() falls back
  *     to NotImplementedError (Task 4+ will wire delivery deps as needed).
  *   - identityPublisher / reputationFeedback: omitted (no ERC-8004 in test).
- *   - operatorConfig: minimal synthetic value (no donation, no price).
- *   - harnessMode: 'train' (default learning mode, same as production default).
- *   - taskSources: empty (no creator-side tasks; daemon waits for on-chain claims).
- *   - creatorSafeAddress: set from operator.safeAddress so CreatorLoop scopes correctly.
  *
  * @param ipfsGatewayUrl - Override the IPFS gateway URL (default: env var or Autonolas
  *   gateway). Pass the `baseUrl` of a `MockIpfsServer` so the daemon's task-fetch
@@ -978,11 +968,8 @@ export async function startDaemon(
    * deterministic, offline market-resolution source rather than the live
    * Polymarket Gamma API.
    *
-   * - `polymarketGammaBaseUrl` — base URL of a Polymarket Gamma API mirror.
-   *   `buildHarnesses` forwards it into `PredictionV1Evaluator`, whose
-   *   `getResolution` call then hits the mock server instead of
-   *   `gamma-api.polymarket.com`. Point it at a `MockPolymarketGammaServer`
-   *   so the evaluator/verdict leg is deterministic and needs no network.
+   * - `polymarketGammaBaseUrl` — currently inert: it fed a harness registry the `Daemon`
+   *   never read (`DaemonConfig` has no `restorationEngine`), so nothing consumes it (#3866).
    * - `enableComposition` (Task 18) — build a real `OperatorComposition` via
    *   `buildOperatorComposition` and pass it on `DaemonConfig.composition`, exactly like
    *   `main.ts`'s testnet branch. Requires `v3Env` (the composition's `MarketplaceChainConfig`
@@ -991,8 +978,8 @@ export async function startDaemon(
    *   against). Defaults to `false` because it needs `v3Env`, not because of any process-wide
    *   collision risk: as of finding E16 / the C2 ruling, `buildOperatorComposition` returns its
    *   broadcaster on `OperatorComposition.broadcaster` instead of installing a process-global
-   *   singleton, and `startDaemon` threads that instance to `mechAdapter` / `deliveryDeps` itself
-   *   (see step 6.5/7 below) — two `startDaemon` calls in one process (T2.2's op-a + op-b) each
+   *   singleton, and `startDaemon` threads that instance to `mechAdapter` itself
+   *   (see step 6.5 below) — two `startDaemon` calls in one process (T2.2's op-a + op-b) each
    *   get their own broadcaster bound to their own Safe and no longer race. `jinn-repo-loop.ts` /
    *   `jinn-repo-live-loop.ts` still don't pass this flag today (unrelated to this fix — see their
    *   own callers), but nothing about the broadcaster design blocks them from doing so.
@@ -1039,6 +1026,9 @@ export async function startDaemon(
     extraLaunchers?: readonly { readonly launcher: LauncherContract; readonly command: string }[];
   },
   /**
+   * Currently inert, like `solverNetRegistry` and `extraHarnesses` below: all three fed a
+   * `restorationEngine` config that `DaemonConfig` does not have, so nothing reads them (#3866).
+   *
    * Extra SolverType→harness-name dispatch entries merged into
    * `solverTypeHarnesses` on top of the prediction.v1 mapping derived from
    * `harnessSelector`. Used by the jinn-repo loop driver to force
@@ -1081,20 +1071,13 @@ export async function startDaemon(
 
   // 1. SQLite store (Daemon owns this instance; stop() will close it).
   //    Multi-operator scenarios (T2.2) start two daemons against one fixture;
-  //    `instanceLabel` keeps their SQLite files and impl-state dirs distinct so
-  //    they do not collide on a shared `implStateRoot`.
+  //    `instanceLabel` keeps their SQLite files distinct so they do not collide
+  //    on a shared `implStateRoot`.
   const label = opts?.instanceLabel ?? 'daemon';
   const storePath = join(fixture.implStateRoot, `${label}-jinn.db`);
   const store = new Store(storePath);
 
-  // 2. Fix for the Task 3 latent daemonApiUrl: 0 bug.
-  //
-  //    The root cause: subprocess-based harnesses (hermes-agent, claude-code,
-  //    codex) bake `daemonApiUrl` at construction time inside `buildHarnesses`.
-  //    If we call `buildHarnesses` before `daemon.start()`, the URL contains
-  //    port 0 and every harness subprocess gets `DAEMON_API_URL=http://127.0.0.1:0`.
-  //
-  //    Fix chosen: **option (b) — pre-start the API server** via `startApiServer`
+  // 2. Pre-start the API server via `startApiServer`
   //    before constructing the daemon. `startApiServer({ port: 0 })` lets the OS
   //    assign a free port and returns the real bound port. We then pass this
   //    already-started server to `Daemon` via `config.apiServer` so the daemon
@@ -1105,21 +1088,14 @@ export async function startDaemon(
   //      ✓ No TOCTOU race (OS-assigned port stays bound until daemon adopts it)
   //      ✓ No production code changes needed (DaemonConfig.apiServer is the
   //        established injection mechanism used by main.ts setup-mode)
-  //      ✓ Harnesses receive the real URL at construction time
   const preStartedApiServer = await startApiServer({
     port: 0,      // OS assigns a free port — actual port read from .port below
     store,
     apiToken: 'test-token-daemon-harness', // test-only; cost-mutating routes not exercised
   });
-  const daemonApiUrl = `http://127.0.0.1:${preStartedApiServer.port}`;
   console.log(`[startDaemon] pre-started API server on port ${preStartedApiServer.port}`);
 
-  // 3. Build harnesses with the real daemonApiUrl. Mirror the HarnessEnv shape
-  //    from main.ts §1614. All subprocess-harness URL fields are populated so
-  //    hermes-agent / claude-code / codex subprocesses get a working API URL.
-  //    - runner: omitted → LegacyClaudeImpl is not constructed
-  //    - storePath: wired so harnesses can hand off artifacts through SQLite
-  //    - implStateDirRoot: use fixture.implStateRoot so harness state is isolated
+  // 3. Harness binaries and model for the composition's execution wiring (step 6.5).
   const claudePath = process.env['JINN_CLAUDE_PATH'] ?? 'claude';
   const claudeModel = process.env['JINN_CLAUDE_MODEL'] ?? 'claude-haiku-4-5-20251001';
 
@@ -1127,74 +1103,8 @@ export async function startDaemon(
     ?? process.env['JINN_IPFS_REGISTRY_URL']
     ?? 'https://registry.autonolas.tech';
 
-  const sweRebenchV2StateDir = sweRebenchV2StateDirFromEnv();
-
-  const harnessList = buildHarnesses({
-    rpcUrl,
-    claudePath,
-    claudeModel,
-    pk: operator.agentPrivateKey,
-    safe: operator.safeAddress,
-    // runner omitted → no LegacyClaudeImpl
-    storePath,
-    daemonApiUrl,
-    // daemonApiToken omitted → harnesses will handle missing token gracefully
-    // Label-scoped so two daemons (T2.2) do not share an impl-state dir.
-    implStateDirRoot: join(fixture.implStateRoot, `${label}-impl-state`),
-    // ipfsRegistryUrl wired so harnesses that upload artifacts use the mock
-    ipfsRegistryUrl: resolvedIpfsRegistryUrl,
-    // Codex subprocess env defaults
-    codexPath: process.env['JINN_CODEX_PATH'] ?? 'codex',
-    codexModel: process.env['JINN_CODEX_MODEL'] ?? 'gpt-4.1-mini',
-    // Hermes subprocess env defaults
-    hermesPath: process.env['JINN_HERMES_PATH'] ?? 'hermes',
-    hermesModel: process.env['JINN_HERMES_MODEL'] ?? 'google/gemini-2.5-flash',
-    hermesProvider: process.env['JINN_HERMES_PROVIDER'] ?? 'openrouter',
-    // externalImpls omitted — no operator-supplied harnesses
-    // disabledNames omitted — use production defaults
-    // polymarketGammaBaseUrl: when set, the PredictionV1Evaluator resolves
-    // markets against this mirror instead of the live Gamma API. T2.2 points
-    // it at a MockPolymarketGammaServer so the verdict leg is deterministic.
-    ...(opts?.polymarketGammaBaseUrl
-      ? { polymarketGammaBaseUrl: opts.polymarketGammaBaseUrl }
-      : {}),
-    ...(sweRebenchV2StateDir ? { sweRebenchV2StateDir } : {}),
-  });
-
-  // 4. Wire the selected harness into HarnessRegistry dispatch.
-  //
-  //    HermesHarness.supports() now returns true for any restoration role,
-  //    but PredictionV1BaselineImpl is registered BEFORE hermes-agent in
-  //    buildHarnesses(), so prediction.v1 falls to the baseline by first-match.
-  //    LearnerHarness.supports() explicitly returns false for 'prediction.v1'
-  //    (because prediction.v1 has a first-party typed harness). So for
-  //    hermes-agent / claude-code / codex to handle prediction.v1 tasks we
-  //    must override dispatch via solverTypeHarnesses rather than first-match.
-  //
-  //    PredictionV1BaselineImpl.supports() returns true for prediction.v1, so
-  //    that stays as first-match (no solverTypeHarnesses entry needed for it).
-  //
-  //    The selected harness name is the canonical name from names.ts —
-  //    see `selectorToHarnessName` above.
+  // 4. The selected harness's canonical name from names.ts — see `selectorToHarnessName` above.
   const selectedHarnessName = selectorToHarnessName(harnessSelector);
-  const solverTypeHarnesses: Record<string, string> = {
-    ...(harnessSelector === 'prediction-v1-baseline'
-      ? {}
-      : { 'prediction.v1': selectedHarnessName }),
-    ...(extraSolverTypeHarnesses ?? {}),
-  };
-
-  const implRegistry = new HarnessRegistry({
-    default: DEFAULT_HARNESS,
-    disabled: [...DEFAULT_DISABLED_HARNESSES],
-    solverTypeHarnesses,
-  });
-  for (const impl of harnessList) {
-    implRegistry.register(impl);
-  }
-  for (const impl of extraHarnesses ?? []) {
-    implRegistry.register(impl);
-  }
 
   // 5. Build MechAdapter. Translation of main.ts §1469.
   //    - routerClaimDeliveryVariant: 'v3' when v3Env is provided (local stack);
@@ -1396,44 +1306,8 @@ export async function startDaemon(
   );
   mechAdapter.setBroadcaster(broadcaster);
 
-  // 7. Wire packagingDeps, envelopeDeps, deliveryDeps (Task 5).
-  //    - packagingDeps: operatorEndpoint + pricing config for artifact serving.
-  //      No artifact donation in tests; donation.enabled = false.
-  //    - envelopeDeps: agent EOA private key + IPFS registry URL for envelope upload.
-  //    - deliveryDeps: viem clients + contract addresses for on-chain delivery.
-  //    The safeAddress in envelopeDeps matches the operator Safe so the
-  //    envelope's participant.safeAddress is correct.
-  const packagingDeps = {
-    operatorEndpoint: daemonApiUrl,
-    defaultPriceUsdc: '0',
-    perArtifactTypePrice: {} as Record<string, string>,
-    donation: {
-      enabled: false,
-      ipfsRegistryUrl: resolvedIpfsRegistryUrl,
-    },
-  };
-
-  const envelopeDeps = {
-    ipfsRegistryUrl: resolvedIpfsRegistryUrl,
-    agentEoaPrivateKey: operator.agentPrivateKey,
-    safeAddress: operator.safeAddress,
-  };
-
-  const deliveryDeps = {
-    publicClient: agentClients.publicClient,
-    walletClient: agentClients.walletClient as unknown as WalletClient,
-    safeAddress: operator.safeAddress as Address,
-    mechContractAddress: (v3Env ? v3Env.mockMechAddress : operator.mechAddress) as Address,
-    routerAddress: (v3Env ? v3Env.routerAddress : routerAddress) as Address,
-    claimDeliveryVariant: routerClaimDeliveryVariant as 'v1' | 'v2' | 'v3',
-    // evictionRecovery: omitted — no master wallet in test
-    // Finding E16 / the C2 ruling: the SAME host-owned broadcaster instance used by mechAdapter.
-    broadcaster,
-  };
-
-  // 8. Construct Daemon. Translation of main.ts §2046.
+  // 7. Construct Daemon. Translation of main.ts §2046.
   //    - store: injected so Daemon does NOT own it (our stop() closes it explicitly)
-  //    - taskSources: omitted (no creator-side tasks in Task 5+)
   //    - peers / subgraphUrl / nodeEndpoint: omitted (test environment)
   //    - rewardClaim / balanceTopup: omitted (interval 0 → no loops)
   //    - status: omitted (GET /v1/status not exercised here)
@@ -1442,15 +1316,13 @@ export async function startDaemon(
   //      (ownsApiServer=false) so our stop() must close it explicitly.
   const daemon = new Daemon({
     adapter: mechAdapter,
-    // runner omitted — DaemonConfig.runner is optional and only consumed by
-    // LegacyClaudeImpl, which we didn't include in buildHarnesses.
+    // runner omitted — DaemonConfig.runner is optional.
     store,        // Daemon adopts (ownsStore=false); our stop() handles close
     dbPath: storePath, // used only when store is absent; kept for completeness
     pollIntervalMs: 300,  // shortened from production 5000ms for test cadence
     apiServer: preStartedApiServer, // inject pre-started server (ownsApiServer=false)
     // apiToken: not passed because we injected apiServer with its own token above
     peers: [],
-    creatorSafeAddress: operator.safeAddress,
     // Step 6.5's composition (Task 18, opt-in via opts.enableComposition). Finding E36 (ruled
     // "build it"): `DaemonConfig.work` is now set alongside `composition` — `composition.archive`
     // is the real `ArchiveSubscription` over the projector's durable observation stream
@@ -1479,60 +1351,9 @@ export async function startDaemon(
       : {}),
     // subgraphUrl / nodeEndpoint / signer: omitted
     // rewardClaim / balanceTopup: omitted → those loops don't start
-    restorationEngine: {
-      paths: {
-        // Default consumer (daemon-harness-cycle.ts) calls startDaemon with no
-        // opts → label === 'daemon'; keep its working dir at the fixture root
-        // exactly as before. Multi-operator scenarios (T2.2) pass a distinct
-        // instanceLabel and get a per-label subdir so two daemons don't collide.
-        workingDirRoot:
-          label === 'daemon'
-            ? fixture.workingDirRoot
-            : join(fixture.workingDirRoot, label),
-        implStateDirRoot: join(fixture.implStateRoot, `${label}-impl-state`),
-      },
-      implRegistry,
-      // The daemon's own Safe, so the synthetic-task claim guard
-      // (`syntheticClaimBlocked`, `solver-types/_swe-rebench-v2-synthetic-claim.ts`)
-      // can compare `task.eligibility.syntheticProvenance` against it. The TaskEngine
-      // that enforced this at claim time is gone with Wave-4 D1 (production no longer
-      // wires it at all); the guard's surviving live consumer is
-      // `LearnerHarness.canAttempt` (`harnesses/impls/learner/harness.ts`). Setting it
-      // unconditionally is safe for existing consumers: the guard is a no-op unless a
-      // task carries `syntheticProvenance` (only task-creator-marketplace.ts does).
-      operatorSafeAddress: operator.safeAddress,
-      // Optional registry: undefined for the prediction consumer (no change);
-      // the jinn-repo driver passes one so the engine resolves the
-      // jinn-repo-runtime bundled plugin into solverPluginRoots and the solver
-      // agent receives the checkout-mono SKILL.
-      ...(solverNetRegistry ? { solverNetRegistry } : {}),
-      packagingDeps,
-      envelopeDeps,
-      deliveryDeps,
-      // #1827: mirrors main.ts's blockTimestamp wiring so this rig covers
-      // envelope.task.createdAt resolution against the Anvil fork.
-      blockTimestamp: {
-        getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
-          const block = await agentClients.publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
-          return Number(block.timestamp);
-        },
-        configuredRpcUrls: [rpcUrl],
-      },
-      // joinedSolverNets: omitted — engine falls back to legacy solverType gate.
-      // Harness dispatch for non-baseline selectors is driven by
-      // implRegistry.config.solverTypeHarnesses (wired in step 4 above).
-      // manifestResolver / identityPublisher / reputationFeedback: omitted
-      operatorConfig: {
-        publicEndpoint: daemonApiUrl,
-        defaultPriceUsdc: '0',
-        perArtifactTypePrice: {},
-        donation: { enabled: false },
-      },
-      harnessMode: 'train',
-    },
   });
 
-  // 9. Start the daemon (kicks off all configured loops).
+  // 8. Start the daemon (kicks off all configured loops).
   await daemon.start();
 
   let stopped = false;
