@@ -54,6 +54,15 @@ const TASK_ROW = {
 };
 const TASK_PAGE = page('tasks', [TASK_ROW]);
 
+/** `n` SOLVE attempts on task 7, each with a distinct 66-char requestId. */
+function solveAttemptRows(n: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    taskId: '7', chainId: 84532, attemptIndex: i,
+    requestId: `0x${String(i).padStart(64, '0')}`,
+    operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20',
+  }));
+}
+
 describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
   it('short-circuits an empty task list with no network I/O', async () => {
     const fetchImpl = vi.fn();
@@ -577,14 +586,9 @@ describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
   it('batches an oversized requestId_in filter on the candidate legs', async () => {
     // 501 attempts on one task means 501 distinct 66-char SOLVE requestIds —
     // ~34 KB of ids per 500, and unbatched the whole set rode in one variable.
-    const attemptRows = Array.from({ length: 501 }, (_, i) => ({
-      taskId: '7', chainId: 84532, attemptIndex: i,
-      requestId: `0x${String(i).padStart(64, '0')}`,
-      operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20',
-    }));
     const fetchImpl = scriptedFetch([
       TASK_PAGE,
-      page('attempts', attemptRows),
+      page('attempts', solveAttemptRows(501)),
       page('verdicts', []),
       page('attemptEnvelopeMetas', []),
       page('attemptEnvelopeMetas', []),
@@ -602,14 +606,9 @@ describe('createTaskLifecycleReader.getTaskLifecycleEvidence (#2044)', () => {
     // hole in that leg — handing back the batches that did drain would present
     // a truncated candidate set as the complete one.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const attemptRows = Array.from({ length: 501 }, (_, i) => ({
-      taskId: '7', chainId: 84532, attemptIndex: i,
-      requestId: `0x${String(i).padStart(64, '0')}`,
-      operator: addr('b0'), priorityMech: addr('c0'), deliveryRate: '1', createdAtBlock: '20',
-    }));
     const fetchImpl = scriptedFetch([
       TASK_PAGE,
-      page('attempts', attemptRows),
+      page('attempts', solveAttemptRows(501)),
       page('verdicts', []),
       page('attemptEnvelopeMetas', [
         { requestId: `0x${'0'.repeat(64)}`, chainId: 84532, manifestCid: 'bafy1',
