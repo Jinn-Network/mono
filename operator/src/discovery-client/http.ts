@@ -688,8 +688,11 @@ export function createHttpDiscoveryClient(
         'invalid_request',
       );
     }
-    await ensureReady();
 
+    // Construct the request URL before the /ready probe. A malformed
+    // discovery.url makes fetch throw an untagged TypeError on `/ready`,
+    // which the CLI would map to a retryable outage. Fail closed here so
+    // the operator sees invalid_invocation instead.
     let requestUrl: URL;
     try {
       requestUrl = new URL(supplyUrl);
@@ -701,6 +704,8 @@ export function createHttpDiscoveryClient(
         'invalid_request',
       );
     }
+
+    await ensureReady();
 
     let response: Response;
     try {

@@ -181,15 +181,22 @@ describe('DiscoveryClient.getCurrentSupply', () => {
   });
 
   it('tags a malformed discovery.url as invalid_request', async () => {
-    const fetchImpl = vi.fn(async () => new Response('ok', { status: 200 }));
+    // Real fetch throws TypeError on an unparseable URL. A stub that returns
+    // 200 for any string lets /ready succeed and hides the misclassification.
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      void new URL(String(input));
+      return new Response('ok', { status: 200 });
+    });
     const client = createHttpDiscoveryClient({
       url: 'not a url',
       fetchImpl: fetchImpl as typeof fetch,
       retryDelaysMs: [],
     });
     await expect(client.getCurrentSupply({ chainId: 84532 })).rejects.toMatchObject({
+      name: 'DiscoveryUnavailableError',
       code: 'invalid_request',
     });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('leaves 5xx and transport failures untagged so they stay transient', async () => {
