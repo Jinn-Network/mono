@@ -96,12 +96,99 @@ function dsseRecord(keyId: string): Uint8Array {
   });
 }
 
-function evidenceRef(family: "result-evaluation", bytes: Uint8Array) {
+function evidenceRef(family: "result-evaluation" | "execution-evidence", bytes: Uint8Array) {
   const sha256 = documentDigest(bytes).slice(7);
   return {
     family,
     record: { name: `${sha256}.bin`, digest: { sha256 } },
   } as const;
+}
+
+function oneMemberCohort(
+  execution: EvidenceRecordReference,
+  evaluations: { considered: EvidenceRecordReference[]; admitted: EvidenceRecordReference[]; excluded: [] },
+) {
+  return sealEvidenceCohort({
+    protocol: BENCHMARKING_PROTOCOL_V2,
+    manifest: { name: "manifest", digest: { sha256: "a".repeat(64) } },
+    boundary: {
+      sources: [{
+        source: {
+          recordKind: EXECUTION_BATCH_CAPTURE_RECORD_KIND,
+          record: { name: "capture", digest: { sha256: "b".repeat(64) } },
+        },
+      }],
+      resolvedAt: "2026-08-16T10:00:01Z",
+    },
+    members: [{
+      memberKey: "memory/0001/0",
+      execution,
+      taskDigest: `sha256:${"1".repeat(64)}`,
+      resultDigests: [`sha256:${"3".repeat(64)}`],
+      groupId: "memory",
+      slotId: "0001",
+      replicate: 0,
+      correlationKey: "harbor/job-1/trial-1",
+      evaluations,
+      verifications: { considered: [], admitted: [], excluded: [] },
+      labelResolutions: { considered: [], admitted: [], excluded: [] },
+      assurance: {
+        origin: "native-direct",
+        timing: "prospective-native-observed",
+        closure: "complete-relative-to-sealed-source",
+        availability: "public-exact",
+        limitations: [],
+      },
+    }],
+    excludedExecutions: [],
+    closure: {
+      status: "complete-relative-to-sealed-source",
+      candidateCount: 1,
+      admittedCount: 1,
+      excludedCount: 0,
+      unavailableCount: 0,
+      limitations: [],
+    },
+  });
+}
+
+function claimPackage(input: {
+  evidence: EvidenceRecordReference[];
+  signers: readonly {
+    keyId: string;
+    identity: string;
+    purpose: "report" | "automated-evaluator" | "human-reviewer" | "label-admission";
+  }[];
+  admittedCount: number;
+}) {
+  const digest = { name: "record", digest: { sha256: "b".repeat(64) }, mediaType: "application/octet-stream" };
+  return sealEvidenceNativeClaimPackageV3({
+    claimSchema: "benchmark-product.claim-package/3",
+    profile: "https://spec.jinn.network/profiles/claim-package/3",
+    records: {
+      benchmark: digest, manifest: digest, cohort: digest, matrix: digest,
+      reportPayload: digest, reportEnvelope: digest, evidence: input.evidence, artifacts: [],
+    },
+    method: { id: "m", version: "1", parameters: {} },
+    results: {},
+    closure: {
+      status: "complete-relative-to-sealed-source",
+      candidateCount: input.admittedCount,
+      admittedCount: input.admittedCount,
+      excludedCount: 0,
+      unavailableCount: 0,
+      limitations: [],
+    },
+    trust: {
+      signers: input.signers.map((signer) => ({ ...signer, publicKey: digest, algorithm: "ed25519" as const })),
+      signatureValidityIsNotAuthorization: true,
+    },
+    verification: {
+      checks: ["manifest", "evidence-closure", "artifact-integrity", "signature-validity", "matrix-rederivation", "report-verification", "claim-consistency"],
+      command: "colophon-verify",
+    },
+    issuedAt: "2026-08-18T11:41:56.880Z",
+  });
 }
 
 function byEvidenceKey(left: EvidenceRecordReference, right: EvidenceRecordReference): number {
@@ -149,6 +236,10 @@ describe("evidence-native bundle signers", () => {
       { role: "publisher", identity: "urn:report:1", keyId: "k1", custody: "undeclared" },
     ]);
     expect(evidenceNativeBundleSigners(claim.bytes, [], cohort.bytes, records)).toEqual([]);
+    // Missing `cohort.json` is wired as empty bytes: same reader-facing set, never a throw.
+    expect(evidenceNativeBundleSigners(claim.bytes, ["k1", "k2", "k3", "k4"], new Uint8Array(), records)).toEqual([
+      { role: "publisher", identity: "urn:report:1", keyId: "k1", custody: "undeclared" },
+    ]);
   });
 
   test("a surplus signed record is verified but not disclosed unless the cohort references it (#3283)", () => {
@@ -228,9 +319,11 @@ describe("evidence-native bundle signers", () => {
       },
       issuedAt: "2026-08-18T11:41:56.880Z",
     });
+    const executionBytes = dsseRecord("k-surplus");
     const records = new Map<string, Uint8Array>([
       [`records/${referenced.record.digest.sha256}.bin`, referencedBytes],
       [`records/${surplus.record.digest.sha256}.bin`, surplusBytes],
+      [`records/${execution.record.digest.sha256}.bin`, executionBytes],
     ]);
     const signers = evidenceNativeBundleSigners(
       claim.bytes,
@@ -245,6 +338,66 @@ describe("evidence-native bundle signers", () => {
     expect(signers).not.toContainEqual({
       role: "human-reviewer", identity: "urn:evaluator:surplus", keyId: "k-surplus", custody: "undeclared",
     });
+  });
+
+  test("an execution-evidence DSSE keyid is verified-but-not-disclosed (#3283)", () => {
+    const executionBytes = dsseRecord("k-exec");
+    const execution = evidenceRef("execution-evidence", executionBytes);
+    const cohort = oneMemberCohort(execution, { considered: [], admitted: [], excluded: [] });
+    const claim = claimPackage({
+      evidence: [execution],
+      admittedCount: 1,
+      signers: [
+        { keyId: "k-exec", identity: "urn:evaluator:exec", purpose: "automated-evaluator" },
+        { keyId: "k-report", identity: "urn:report:1", purpose: "report" },
+      ],
+    });
+    const records = new Map<string, Uint8Array>([
+      [`records/${execution.record.digest.sha256}.bin`, executionBytes],
+    ]);
+    expect(evidenceNativeBundleSigners(
+      claim.bytes,
+      ["k-exec", "k-report"],
+      cohort.bytes,
+      records,
+    )).toEqual([
+      { role: "publisher", identity: "urn:report:1", keyId: "k-report", custody: "undeclared" },
+    ]);
+  });
+
+  test("a non-DSSE cohort-referenced record does not throw or disclose (#3283)", () => {
+    const garbage = new TextEncoder().encode("{not-dsse}");
+    const referenced = evidenceRef("result-evaluation", garbage);
+    const execution = {
+      family: "execution-evidence",
+      record: { name: "execution.bin", digest: { sha256: "c".repeat(64) } },
+    } as const;
+    const cohort = oneMemberCohort(execution, { considered: [referenced], admitted: [referenced], excluded: [] });
+    const claim = claimPackage({
+      evidence: [referenced],
+      admittedCount: 1,
+      signers: [
+        { keyId: "k-ref", identity: "urn:evaluator:ref", purpose: "automated-evaluator" },
+        { keyId: "k-report", identity: "urn:report:1", purpose: "report" },
+      ],
+    });
+    const records = new Map<string, Uint8Array>([
+      [`records/${referenced.record.digest.sha256}.bin`, garbage],
+    ]);
+    expect(() => evidenceNativeBundleSigners(
+      claim.bytes,
+      ["k-ref", "k-report"],
+      cohort.bytes,
+      records,
+    )).not.toThrow();
+    expect(evidenceNativeBundleSigners(
+      claim.bytes,
+      ["k-ref", "k-report"],
+      cohort.bytes,
+      records,
+    )).toEqual([
+      { role: "publisher", identity: "urn:report:1", keyId: "k-report", custody: "undeclared" },
+    ]);
   });
 });
 
