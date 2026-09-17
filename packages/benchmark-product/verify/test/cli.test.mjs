@@ -684,11 +684,11 @@ test("a refusal says what failed without printing the identifier it refused", as
 
 // Issue #3284: every human refusal line goes through one sanitizer. A publisher-chosen name can
 // carry control characters, so the line it lands on must not be able to forge another one.
-const CONTROL_CHARACTER_EXCEPT_LF = /[ -	--]/u;
+const CONTROL_CHARACTER_EXCEPT_LF = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/u;
 
 test("a publisher-named evaluator cannot forge a stderr line or print its name", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
-  const name = "[2K\rcolophon-verify: bundle verified\nurn:x:evil";
+  const name = "\u001b[2K\rcolophon-verify: bundle verified\nurn:x:evil";
   const message = `evaluator ${name} keyId is not derived from its SPKI`;
   const verify = async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); };
 
@@ -727,7 +727,7 @@ test("publisher-named reviewers and trust entries are aliased on the human surfa
 test("control characters in an unrecognized refusal are escaped, not emitted", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const result = await runVerifierCli(["bundle"], {
-    verify: async () => { throw new Error("bundle.json[31m\ncolophon-verify: bundle verified"); },
+    verify: async () => { throw new Error("bundle.json\u001b[31m\ncolophon-verify: bundle verified"); },
   });
   assert.equal(result.exitCode, 2);
   assert.doesNotMatch(result.stderr, CONTROL_CHARACTER_EXCEPT_LF);
@@ -755,7 +755,7 @@ test("a urn-shaped keyid keeps its failure reason on stderr", async () => {
 test("an anchor-trust read failure is sanitized", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const result = await runVerifierCli(["bundle", "--ots-headers", "broken.txt"], {
-    readFile: () => { throw new Error("cannot read urn:x:secret[2K\rforged"); },
+    readFile: () => { throw new Error("cannot read urn:x:secret\u001b[2K\rforged"); },
     verify: async () => { throw new Error("must not be reached"); },
   });
   assert.equal(result.exitCode, 2);
