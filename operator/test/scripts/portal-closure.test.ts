@@ -9,7 +9,7 @@ import {
   missingWatchPatterns,
   portalEntries,
   reachablePortalEdges,
-} from '../../../test-support/dockerfile-portals/portal-closure.js';
+} from '../../../test-support/dockerfile-portals/portal-closure.mjs';
 
 const EDGES = [{ name: '@x/lib', consumer: 'app', target: 'lib' }];
 

@@ -7,24 +7,17 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { relative, resolve, sep } from 'node:path';
 
-export interface PortalEdge {
-  name: string;
-  /** Consumer package directory, relative to the image's build context. */
-  consumer: string;
-  /** Portal target directory, relative to the image's build context. */
-  target: string;
-}
-
 /**
  * Every `portal:` entry in a manifest, keyed by package name. `resolutions` is read LAST because
  * a later `set` wins here and Yarn gives `resolutions` precedence over the dependency fields: when
  * a package names the same portal in both with different targets, the guard must check the one
  * the install actually links (#4464).
  */
-export function portalEntries(manifest: Record<string, unknown>): Map<string, string> {
-  const portals = new Map<string, string>();
+/** @param {Record<string, unknown>} manifest @returns {Map<string, string>} */
+export function portalEntries(manifest) {
+  const portals = new Map();
   for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'resolutions']) {
-    const group = manifest[field] as Record<string, string> | undefined;
+    const group = /** @type {Record<string, string> | undefined} */ (manifest[field]);
     for (const [name, version] of Object.entries(group ?? {})) {
       if (version.startsWith('portal:')) portals.set(name, version.slice('portal:'.length));
     }
@@ -37,15 +30,15 @@ export function portalEntries(manifest: Record<string, unknown>): Map<string, st
  * resolves that package's OWN portal entries, which the image package never names, so a depth-1
  * sweep cannot see them (#2809).
  */
-export function reachablePortalEdges(packageRoot: string, contextRoot: string): PortalEdge[] {
-  const contextRelative = (path: string) => relative(contextRoot, path).split(sep).join('/');
-  const edges: PortalEdge[] = [];
-  const walked = new Set<string>();
+export function reachablePortalEdges(packageRoot, contextRoot) {
+  const contextRelative = (path) => relative(contextRoot, path).split(sep).join('/');
+  const edges = [];
+  const walked = new Set();
 
-  const walk = (consumerRoot: string): void => {
+  const walk = (consumerRoot) => {
     const manifestPath = resolve(consumerRoot, 'package.json');
     if (!existsSync(manifestPath)) return;
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
     for (const [name, target] of portalEntries(manifest)) {
       const targetRoot = resolve(consumerRoot, target);
       edges.push({ name, consumer: contextRelative(consumerRoot), target: contextRelative(targetRoot) });
@@ -59,15 +52,9 @@ export function reachablePortalEdges(packageRoot: string, contextRoot: string): 
   return edges;
 }
 
-interface Instruction {
-  /** Index of the build stage (`FROM`) the instruction belongs to. */
-  stage: number;
-  keyword: string;
-  args: string;
-}
-
-function dockerInstructions(dockerfile: string): Instruction[] {
-  const instructions: Instruction[] = [];
+/** Instructions with continuations joined, each tagged with its build stage (`FROM`) index. */
+function dockerInstructions(dockerfile) {
+  const instructions = [];
   let stage = -1;
   let continued = '';
 
@@ -87,14 +74,14 @@ function dockerInstructions(dockerfile: string): Instruction[] {
 }
 
 /** Build-context sources of a `COPY` instruction; `COPY --from` copies from a stage, not the context. */
-function contextCopySources(args: string): string[] {
+function contextCopySources(args) {
   let rest = args;
   while (rest.startsWith('--')) {
-    const option = /^--\S+\s*/u.exec(rest)![0];
+    const option = /^--\S+\s*/u.exec(rest)[0];
     if (option.startsWith('--from=')) return [];
     rest = rest.slice(option.length);
   }
-  if (rest.startsWith('[')) return (JSON.parse(rest) as string[]).slice(0, -1);
+  if (rest.startsWith('[')) return JSON.parse(rest).slice(0, -1);
   return rest.split(/\s+/u).slice(0, -1);
 }
 
@@ -104,22 +91,22 @@ function contextCopySources(args: string): string[] {
  * manifest COPY. Comparing whole-file offsets would let a COPY in another stage satisfy the
  * check while the image breaks (#4465).
  */
-export function missingPortalManifestCopies(dockerfile: string, edges: PortalEdge[]): string[] {
+export function missingPortalManifestCopies(dockerfile, edges) {
   const instructions = dockerInstructions(dockerfile);
-  const copyOf = (contextPath: string) =>
+  const copyOf = (contextPath) =>
     instructions.findIndex(
       ({ keyword, args }) =>
         keyword === 'COPY' && contextCopySources(args).includes(`${contextPath}/package.json`),
     );
 
-  const missing: string[] = [];
+  const missing = [];
   for (const { name, consumer, target } of edges) {
     const consumerCopy = copyOf(consumer);
     if (consumerCopy < 0) {
       missing.push(`${consumer}/package.json is never copied`);
       continue;
     }
-    const { stage } = instructions[consumerCopy]!;
+    const { stage } = instructions[consumerCopy];
     const install = instructions.findIndex(
       (instruction, index) =>
         index > consumerCopy &&
@@ -146,14 +133,10 @@ export function missingPortalManifestCopies(dockerfile: string, edges: PortalEdg
 }
 
 /** Every `watched` context path lacking its `<prefix><path>/**` entry in railway.toml's `watchPatterns`. */
-export function missingWatchPatterns(
-  railwayConfig: string,
-  watched: string[],
-  prefix: string,
-): string[] {
+export function missingWatchPatterns(railwayConfig, watched, prefix) {
   const block = /watchPatterns\s*=\s*\[([^\]]*)\]/u.exec(railwayConfig);
   if (block === null) return ['railway.toml declares no watchPatterns'];
-  const patterns = new Set([...block[1]!.matchAll(/"([^"]*)"/gu)].map((match) => match[1]!));
+  const patterns = new Set([...block[1].matchAll(/"([^"]*)"/gu)].map((match) => match[1]));
   return [...new Set(watched)]
     .map((contextPath) => `${prefix}${contextPath}/**`)
     .filter((pattern) => !patterns.has(pattern));

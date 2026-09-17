@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   missingPortalManifestCopies,
   reachablePortalEdges,
-} from '../../../test-support/dockerfile-portals/portal-closure.js';
+} from '../../../test-support/dockerfile-portals/portal-closure.mjs';
 
 const clientRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const repoRoot = resolve(clientRoot, '..');

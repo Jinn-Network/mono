@@ -8,7 +8,7 @@ import {
   missingPortalManifestCopies,
   missingWatchPatterns,
   reachablePortalEdges,
-} from '../../../test-support/dockerfile-portals/portal-closure.js';
+} from '../../../test-support/dockerfile-portals/portal-closure.mjs';
 
 // The image's build context root is packages/ (the Dockerfile COPYs the
 // enrichment tree, the indexer it reads through, and their portal siblings,
