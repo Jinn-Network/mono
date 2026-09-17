@@ -69,6 +69,13 @@ const LANES = [
 
 const OPPOSITE = { success: 'skipped', skipped: 'success' };
 
+// An `if:` value as the expression it denotes. GitHub reads `if: ${{ X }}` as `X`,
+// so the wrapper is stripped rather than handed to the evaluator.
+function ifExpression(value) {
+  const wrapped = value.match(/^\$\{\{(.*)\}\}$/su);
+  return wrapped === null ? value : wrapped[1].trim();
+}
+
 // The job-level `if:` expression of the named job, with a folded (`>-`) scalar
 // joined onto one line.
 function jobIf(workflow, jobId) {
@@ -82,14 +89,14 @@ function jobIf(workflow, jobId) {
   const at = lines.findIndex((line) => /^ {4}if: /u.test(line));
   assert.notEqual(at, -1, `${workflow}: job ${jobId} has no if:`);
   const value = lines[at].slice('    if: '.length).trim();
-  if (value !== '>-' && value !== '>') return value;
+  if (value !== '>-' && value !== '>') return ifExpression(value);
   const folded = [];
   for (const line of lines.slice(at + 1)) {
     if (!line.startsWith('      ')) break;
     folded.push(line.trim());
   }
   assert.ok(folded.length > 0, `${workflow}: job ${jobId} has an empty folded if:`);
-  return folded.join(' ');
+  return ifExpression(folded.join(' '));
 }
 
 // The `if:` of the step whose opener is `- if:` and whose next line is the given
@@ -100,7 +107,7 @@ function stepIf(workflow, runLine) {
   assert.notEqual(at, -1, `${workflow}: no step running ${runLine}`);
   const opener = lines[at - 1].match(/^ {6}- if: (.*)$/u);
   assert.ok(opener, `${workflow}: the step running ${runLine} must open with its if:`);
-  return opener[1];
+  return ifExpression(opener[1]);
 }
 
 // The subset of GitHub's expression syntax the heavy-lane `if:`s use: string
@@ -184,6 +191,21 @@ function laneContext(lane) {
     'github.head_ref': lane.env.HEAD_REF,
     'needs.changes.outputs.run': 'true',
   };
+}
+
+// The source lines that mention `github.head_ref`, less comment lines and the
+// shell mirrors' env lines, whose whole value is exactly `${{ github.head_ref }}`
+// (the mirrors are executed above). Any other `${{ ... }}` line is counted, so an
+// `if: ${{ ... }}` cannot slip past.
+function headRefSensitiveLines(source) {
+  return source
+    .split('\n')
+    .filter(
+      (line) =>
+        !/^\s*#/u.test(line) &&
+        line.includes('github.head_ref') &&
+        !/^\s*[A-Z_]+: \$\{\{ github\.head_ref \}\}$/u.test(line),
+    ).length;
 }
 
 // Every `if:` that spells the lane rule. The jinn-agent cold-stock job is not one
@@ -283,16 +305,30 @@ test('the heavy jobs’ if: expressions encode the same lane rule as their mirro
   }
 });
 
+test('a ${{ }}-wrapped if: is read as its expression and counted as head_ref-sensitive', () => {
+  const wrapped = "${{ github.event_name != 'pull_request' || (github.base_ref == 'main' && github.head_ref != 'next') }}";
+  const bare = "github.event_name != 'pull_request' || (github.base_ref == 'main' && github.head_ref != 'next')";
+  assert.equal(ifExpression(wrapped), bare);
+  assert.equal(ifExpression(bare), bare);
+  const source = [
+    '  new-heavy-job:',
+    `    if: ${wrapped}`,
+    '    steps:',
+    '      - env:',
+    '          HEAD_REF: ${{ github.head_ref }}',
+    '        # a comment naming github.head_ref',
+    '        run: echo "head_ref=${HEAD_REF}"',
+  ].join('\n');
+  assert.equal(headRefSensitiveLines(source), 1);
+});
+
 test('every head_ref-sensitive if: expression is pinned', () => {
   // A new heavy job that carries the release-review clause must join
-  // HEAVY_IF_SITES. `${{ github.head_ref }}` lines feed the shell mirrors, which
-  // are executed above; platform-architecture-control.yml spells the rule in
-  // shell, which architecture-control-workflow.test.mjs executes.
+  // HEAVY_IF_SITES. platform-architecture-control.yml spells the rule in shell,
+  // which architecture-control-workflow.test.mjs executes.
   const counts = {};
   for (const workflow of ['ci.yml', 'layer-ci.yml', 'jinn-agent-ci.yml']) {
-    counts[workflow] = readFileSync(join(workflowsRoot, workflow), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/u.test(line) && line.includes('github.head_ref') && !line.includes('${{')).length;
+    counts[workflow] = headRefSensitiveLines(readFileSync(join(workflowsRoot, workflow), 'utf8'));
   }
   assert.deepEqual(counts, { 'ci.yml': 4, 'layer-ci.yml': 1, 'jinn-agent-ci.yml': 1 });
 });
