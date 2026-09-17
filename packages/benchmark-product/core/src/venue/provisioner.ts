@@ -673,9 +673,10 @@ function repositoryWorkProvisionerContract(
       // contract minted fresh by `createLocalProvisioner`, whose `setup` recovery never runs.
       // Reading the closure state that `setup` would have assigned therefore threw on exactly the
       // rows recovery exists to complete, turning repository edits the harness had already written
-      // into a permanent `blame: infrastructure` loss. Everything `setup` assigned is re-derivable from the sealed
-      // Task and the Submission requirements that `reconstructRecoveryContext` replays verbatim,
-      // so recovery rebuilds it; when `setup` did run, the closure values are reused unchanged.
+      // into a permanent `blame: infrastructure` loss. Everything `setup` assigned is re-derivable
+      // from the sealed Task and the Submission requirements that `reconstructRecoveryContext`
+      // replays verbatim, so recovery rebuilds it; when `setup` did run, the closure values are
+      // reused unchanged.
       let bound: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
       try {
         bound = resolved ?? (existsSync(paths.work) ? await bind() : undefined);
