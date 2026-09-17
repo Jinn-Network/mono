@@ -810,9 +810,16 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
         )
         || isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)
       ) {
-        mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
-        writeFileSync(pwFilePath, parsed.data.next + '\n', { mode: 0o600 });
-        passwordFileUpdated = true;
+        // The keystore is already rotated: a password file we cannot write
+        // (e.g. one `passwordFileIsStale` could not even read) must not turn
+        // this into a `change_failed` response.
+        try {
+          mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
+          writeFileSync(pwFilePath, parsed.data.next + '\n', { mode: 0o600 });
+          passwordFileUpdated = true;
+        } catch (err) {
+          warn(`[warn] Could not update ${pwFilePath} (${errorMessage(err)}); leaving it in place.`);
+        }
       }
 
       // Mirror into env so the running daemon's in-memory PASSWORD stays valid
