@@ -835,5 +835,39 @@ describe("createLocalProvisioner — repository-work cells", () => {
       expect(existsSync(join(paths.out, "patch"))).toBe(false);
       expect(result.omissions).toEqual(["patch"]);
     });
+
+    // Issue #3655: a checkout that git cannot even be started against is an infrastructure fault,
+    // never a declared omission.
+    it("propagates a failure to start git from the checkout probe", async () => {
+      const upstream = makeUpstreamRepository();
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-no-git-"));
+      const paths = workspacePathsUnder(root);
+      const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+      const task = repositoryWorkTask(upstream.uri, upstream.oid);
+      const requirements = {
+        harness: { id: "claude-code", version: "2.1.222", digest: "a".repeat(64) },
+        isolationPolicy: "unrestricted",
+      };
+      // The same instance that ran setup, so harvest reuses its binding and spawns no git before
+      // the probe.
+      const provisioner = provisionerFor(task, mirror, requirements);
+      await provisioner.contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+      const emptyPath = mkdtempSync(join(tmpdir(), "provisioner-empty-path-"));
+
+      const savedPath = process.env.PATH;
+      process.env.PATH = emptyPath;
+      let failure: unknown;
+      try {
+        failure = await provisioner.contract
+          .harvest(paths, [{ name: "patch", mediaType: "text/x-diff", required: true }] as never)
+          .catch((error: unknown) => error);
+      } finally {
+        process.env.PATH = savedPath;
+      }
+
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as NodeJS.ErrnoException).code).toBe("ENOENT");
+      expect((failure as Error).message).not.toMatch(/could not rebind its checkout/u);
+    });
   });
 });
