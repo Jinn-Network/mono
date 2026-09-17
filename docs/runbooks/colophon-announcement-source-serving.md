@@ -278,14 +278,15 @@ already yields every entry oldest-first. Then:
    substantive with no record needed, and a readable anchor announcement over an
    announcement-entry subject settles it on the anchor-announcing side, which the
    unreadable one cannot change. Neither shape arises here — this producer's writer
-   refuses an entry with more than one announcement — so for the one shape it emits
-   the condition always holds. What the unreadable record withheld is its *subject*,
-   the earlier sequence that anchor covered, and the archive cannot recover it: §5.2
-   places the subject at the announcing entry's predecessor, but only the record says
-   so. That sequence is therefore reported as an ordinary gap, byte-identical to one,
+   writes exactly one announcement per entry — so for the one shape it emits the
+   condition always holds. What the unreadable record withheld is its *subject*, the
+   earlier sequence that anchor covered, and the archive cannot recover it: in §5.2's
+   ordinary case that is the announcing entry's predecessor, but a late anchor or an
+   upgrade (§4.4) can name any earlier sequence, and only the record says which. That
+   sequence is therefore reported exactly as it would be without this announcement —
+   as a gap, byte-identical to any other, unless another readable anchor covers it —
    and the unreadable marking on the announcing entry is the one place the archive can
-   record that a gap adjacent to it may be a hosting fault rather than a missing
-   anchor. A missing record or a digest mismatch is a serving fault, which "Verify it
+   record that an earlier gap may be a hosting fault rather than a missing anchor. A missing record or a digest mismatch is a serving fault, which "Verify it
    from another machine" step 4 diagnoses; bytes that hash correctly and still do not
    parse as an `AnchorEvidence` record are a producer fault, which it does not. Keep
    only subjects whose `subject.kind` is
