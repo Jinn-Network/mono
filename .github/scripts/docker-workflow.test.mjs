@@ -78,13 +78,46 @@ const meta = step('Resolve release metadata');
 // Contexts whose value a caller controls. Each entry matches as a prefix, so a
 // trailing `.` covers a whole family (`github.event.*`), and `github.actor`
 // also catches `github.actor_id` — an over-match, which is the safe direction.
+// `github.triggering_actor` is caller-controlled on a re-run (#4587).
 const attackerContexts = [
   'github.event.',
   'inputs.',
   'github.ref_name',
   'github.head_ref',
   'github.actor',
+  'github.triggering_actor',
 ];
+
+/**
+ * The attacker contexts interpolated anywhere in `block`, one entry per hit.
+ *
+ * A context counts wherever it appears inside a `${{ }}` expression, not only
+ * as its first token, and bracket notation with a quoted key is normalized to
+ * dot notation first (#4587): anchoring on `${{\s*<context>` let
+ * `${{ github['event'].x }}` and `${{ format('{0}', github.ref_name) }}`
+ * through. A context is only a hit when no `[\w.]` precedes it, so
+ * `steps.x.github.actor` is a property path, not `github.actor`.
+ *
+ * Accepted residual: a dynamically computed index such as
+ * `github[format('{0}', 'event')]` is not normalized, and so not seen.
+ */
+function attackerInterpolations(block) {
+  const found = [];
+  for (const [, expression] of block.matchAll(/\$\{\{([\s\S]*?)\}\}/gu)) {
+    const normalized = expression.replace(/\[\s*(['"])([^'"]*)\1\s*\]/gu, '.$2');
+    for (const context of attackerContexts) {
+      // A family entry (`github.event.`) also matches the whole object
+      // (`toJSON(github.event)`), but not a sibling name (`github.event_name`).
+      const escaped = context.endsWith('.')
+        ? `${context.slice(0, -1).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?!\\w)`
+        : context.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+      if (new RegExp(String.raw`(?<![\w.])${escaped}`, 'u').test(normalized)) {
+        found.push(context);
+      }
+    }
+  }
+  return found;
+}
 
 test('a manual publish may only run from a release tag', () => {
   // Without this allowlist a dispatch from `next` publishes that branch's HEAD
@@ -154,13 +187,11 @@ test('attacker-shaped values reach the shell through env, never interpolation', 
   // and are constrained values (`steps.meta.outputs.version` is pinned as bare
   // semver by the test above).
   for (const block of runBlocks()) {
-    for (const context of attackerContexts) {
-      assert.doesNotMatch(
-        block,
-        new RegExp(String.raw`\$\{\{\s*${context.replaceAll('.', String.raw`\.`)}`),
-        `no run block may interpolate \${{ ${context.endsWith('.') ? `${context}*` : context} }}`,
-      );
-    }
+    assert.deepEqual(
+      attackerInterpolations(block),
+      [],
+      'no run block may interpolate a caller-controlled context',
+    );
   }
 
   assert.match(meta, /VERSION_INPUT: \$\{\{ inputs\.version \}\}/);
@@ -190,4 +221,26 @@ test('runBlocks collects a step written without a name', () => {
   assert.match(blocks[0], /github\.event\.release\.tag_name/);
   assert.match(blocks[1], /inputs\.version/);
   assert.match(blocks[2], /one-liner/);
+});
+
+test('attackerInterpolations sees through bracket notation and function calls', () => {
+  // #4587: the matcher used to anchor each context directly after `${{`, so
+  // property-bracket notation and a function-call wrap both slipped past it.
+  assert.deepEqual(attackerInterpolations("echo ${{ github['event'].release.tag_name }}"), ['github.event.']);
+  assert.deepEqual(attackerInterpolations('echo ${{ github[ "event" ][\'inputs\'].x }}'), ['github.event.']);
+  assert.deepEqual(attackerInterpolations("echo ${{ format('{0}', github.ref_name) }}"), ['github.ref_name']);
+  assert.deepEqual(attackerInterpolations('echo ${{ (github.head_ref) }}'), ['github.head_ref']);
+  assert.deepEqual(attackerInterpolations('echo ${{ github.triggering_actor }}'), ['github.triggering_actor']);
+  assert.deepEqual(attackerInterpolations('echo ${{ github.actor_id }}'), ['github.actor']);
+  assert.deepEqual(attackerInterpolations('echo ${{ toJSON(github.event) }}'), ['github.event.']);
+  assert.deepEqual(attackerInterpolations("echo ${{ toJSON(github['event']) }}"), ['github.event.']);
+  assert.deepEqual(attackerInterpolations('echo ${{ toJSON(inputs) }}'), ['inputs.']);
+  assert.deepEqual(attackerInterpolations('echo ${{ github.event_name }}'), []);
+
+  // Constrained values stay allowed, and a context name that only appears as
+  // the tail of another property path is not the context itself.
+  assert.deepEqual(attackerInterpolations('echo ${{ github.sha }}'), []);
+  assert.deepEqual(attackerInterpolations('echo ${{ steps.meta.outputs.version }}'), []);
+  assert.deepEqual(attackerInterpolations('echo ${{ steps.x.github.actor }}'), []);
+  assert.deepEqual(attackerInterpolations('echo github.actor is plain text'), []);
 });

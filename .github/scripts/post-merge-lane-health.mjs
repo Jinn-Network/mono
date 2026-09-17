@@ -18,8 +18,11 @@
 // deliberately not publishing rather than failing. Resolving jobs per run, the way
 // npm-publish-monitor.yml does for one lane, is a separate decision (#4257).
 //
-// This module is pure so the classification and the issue body are unit-testable
-// without GitHub; .github/workflows/post-merge-lane-monitor.yml is a thin driver.
+// This module is pure so the classification, the issue body, and every
+// open/update/close decision are unit-testable without GitHub.
+// .github/workflows/post-merge-lane-monitor.yml is a thin driver: it fetches runs
+// and alerts, asks `planLaneReconcile` what to do, and performs those API calls in
+// order without deciding anything itself (#4260).
 
 /** Label carried by every alert this monitor opens. */
 export const ALERT_LABEL = 'automated:post-merge-lane-failure';
@@ -303,4 +306,106 @@ export function renderRecovery({ lane, verdict }) {
     throw new Error(`renderRecovery called for a ${verdict.state} lane: ${lane.workflow}`);
   }
   return `${lane.workflow} recovered on \`${lane.branch}\` in ${verdict.lastSuccess.html_url}. Closing.`;
+}
+
+const log = (level, message) => ({ kind: 'log', level, message });
+
+/**
+ * Every action one lane's reconciliation takes, in the order the driver must perform them
+ * (#4260). The driver executes each and decides nothing:
+ *
+ * - `{ kind: 'log', level: 'info'|'notice'|'warning', message }`
+ * - `{ kind: 'comment', issue, body }`
+ * - `{ kind: 'close', issue, reason: 'completed'|'not_planned' }`
+ * - `{ kind: 'update', issue, fields: { title?, body? } }`
+ * - `{ kind: 'create', title, body }` — the driver adds the alert label and logs the new number.
+ *
+ * `openAlerts` is the full open listing for the alert label and `closedAlerts` the most recently
+ * updated closed page, both raw: alerts are identified here by their marker, never by title,
+ * because a title prefix is only unambiguous while no lane name extends another, and the listing
+ * also returns pull requests, which must never be treated as alerts. The lowest-numbered open
+ * alert is canonical; any others are duplicates.
+ *
+ * @param {{lane: object, verdict: object, openAlerts: ReadonlyArray<object>,
+ *   closedAlerts: ReadonlyArray<object>}} input
+ * @returns {Array<object>}
+ */
+export function planLaneReconcile({ lane, verdict, openAlerts, closedAlerts }) {
+  const open = openAlerts.filter((issue) => isAlertFor(lane, issue)).sort((a, b) => a.number - b.number);
+
+  if (verdict.state !== 'alert') {
+    if (open.length === 0) return [log('info', `${lane.workflow}: ${verdict.state}.`)];
+    // Only a proven recovery closes an alert. A `wait` verdict is a lane that is still red
+    // and merely not yet re-confirmed, and an `unknown` verdict is a window with no decisive
+    // run in it; neither is evidence of health.
+    if (verdict.state !== 'healthy') {
+      return [log('info', `${lane.workflow}: ${verdict.state}; leaving ${open.length} alert(s) open.`)];
+    }
+    return open.flatMap((alert) => [
+      { kind: 'comment', issue: alert.number, body: renderRecovery({ lane, verdict }) },
+      { kind: 'close', issue: alert.number, reason: 'completed' },
+      log('notice', `Closed ${lane.workflow} alert #${alert.number}.`),
+    ]);
+  }
+
+  const { title, body } = renderAlert({ lane, verdict });
+  const marker = parseMarker(body);
+  const [canonical, ...duplicates] = open;
+  if (!canonical) {
+    // A hand-closed alert whose marker still names the current failing run attempt has
+    // already been seen by a human: filing again now would only re-post it every tick. The
+    // next failing run, or a failing re-run, changes the marker and files afresh. A
+    // recovery-closed alert matches only when the success that closed it no longer decides,
+    // e.g. its re-run is in progress or was cancelled; staying quiet then is right, because
+    // that success already published.
+    //
+    // Only the page of closed alerts the driver read is searched: if more than that were
+    // updated after the matching one, the deferral is missed and one extra alert is filed.
+    // With a 100-issue page that needs 100 alert updates within one failing run's life.
+    const closed = closedAlerts.find(
+      (issue) => isAlertFor(lane, issue) && sameFailingRun(parseMarker(issue.body), marker),
+    );
+    if (closed) {
+      return [
+        log(
+          'info',
+          `${lane.workflow}: alert #${closed.number} was closed for run ${marker.runId} attempt ${marker.attempt}; deferring to the next failing run.`,
+        ),
+      ];
+    }
+    return [{ kind: 'create', title, body }];
+  }
+
+  // A comment is posted only when the latest failing run attempt or the confidence changed;
+  // a human retitle is repaired silently. A note a human added to the body survives until
+  // one of those changes rewrites it.
+  const actions = [];
+  const update = planAlertUpdate({ issue: canonical, title, body });
+  if (update === 'rewrite') {
+    actions.push(
+      { kind: 'comment', issue: canonical.number, body },
+      { kind: 'update', issue: canonical.number, fields: { title, body } },
+      log('warning', `Updated ${lane.workflow} alert #${canonical.number}.`),
+    );
+  } else if (update === 'retitle') {
+    actions.push(
+      { kind: 'update', issue: canonical.number, fields: { title } },
+      log('notice', `Restored the title of ${lane.workflow} alert #${canonical.number}.`),
+    );
+  } else {
+    actions.push(log('info', `${lane.workflow} alert #${canonical.number} is current.`));
+  }
+
+  for (const duplicate of duplicates) {
+    actions.push(
+      {
+        kind: 'comment',
+        issue: duplicate.number,
+        body: `Duplicate ${lane.workflow} alert; consolidated into #${canonical.number}.`,
+      },
+      { kind: 'close', issue: duplicate.number, reason: 'not_planned' },
+      log('notice', `Closed duplicate ${lane.workflow} alert #${duplicate.number}.`),
+    );
+  }
+  return actions;
 }
