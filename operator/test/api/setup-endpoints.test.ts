@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addSetupRoutes } from '../../src/api/setup-endpoints.js';
@@ -543,6 +543,49 @@ describe('POST /v1/setup/change-password', () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
       expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
+    } finally {
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  // `writeFileSync`'s `mode` applies only on creation, so a hand-made 0644 file
+  // that drifted would otherwise receive the new password world-readable.
+  it('tightens a loose drifted password file to 0600 when rewriting it', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'some-other-value\n');
+    chmodSync(pwFilePath, 0o644);
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
+      expect(statSync(pwFilePath).mode & 0o777).toBe(0o600);
     } finally {
       if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
       else process.env['JINN_EARNING_DIR'] = oldEnv;

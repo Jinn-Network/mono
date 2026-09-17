@@ -17,7 +17,7 @@
  * is `claude auth login` on the CLI (harness `isReady` nextStep.cli).
  */
 import type { Hono } from 'hono';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod/v3';
@@ -817,6 +817,9 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
           mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
           writeFileSync(pwFilePath, parsed.data.next + '\n', { mode: 0o600 });
           passwordFileUpdated = true;
+          // `mode` applies only when the file is created; tighten an existing
+          // one too, since it now holds the live password.
+          chmodSync(pwFilePath, 0o600);
         } catch (err) {
           warn(`[warn] Could not update ${pwFilePath} (${errorMessage(err)}); leaving it in place.`);
         }
