@@ -17,9 +17,9 @@
  * is `claude auth login` on the CLI (harness `isReady` nextStep.cli).
  */
 import type { Hono } from 'hono';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { z } from 'zod/v3';
 import { stage1MinMasterEth } from '../earning/bootstrap.js';
 import { getChainConfig } from '../earning/contracts.js';
@@ -51,7 +51,12 @@ import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { markRestartRequired } from './restart-required-state.js';
 import { resolveDefaultStateDir } from '../state-dir.js';
-import { isDefaultOperatorKeystore, writePrimaryKeystorePassword, legacyKeystorePasswordPath } from '../earning/password-file.js';
+import {
+  isDefaultOperatorKeystore,
+  writeKeystorePasswordFile,
+  writePrimaryKeystorePassword,
+  legacyKeystorePasswordPath,
+} from '../earning/password-file.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -791,15 +796,21 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       const defaultEarningDir = join(stateDir, 'earning');
       const legacyPath = legacyKeystorePasswordPath({ home, env: process.env });
       const warn = (message: string): void => { console.warn(message); };
-      writePrimaryKeystorePassword(earningDir, parsed.data.next);
-      const passwordFileUpdated = true;
-      if (
-        isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)
-        && existsSync(legacyPath)
-        && readFileSync(legacyPath, 'utf-8').trim() === parsed.data.current
-      ) {
-        mkdirSync(dirname(legacyPath), { recursive: true, mode: 0o700 });
-        writeFileSync(legacyPath, parsed.data.next + '\n', { mode: 0o600 });
+      // Keystore is already rotated: a password file we cannot write must not
+      // turn this into `change_failed`.
+      let passwordFileUpdated = false;
+      try {
+        writePrimaryKeystorePassword(earningDir, parsed.data.next);
+        passwordFileUpdated = true;
+        if (
+          isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)
+          && existsSync(legacyPath)
+          && readFileSync(legacyPath, 'utf-8').trim() === parsed.data.current
+        ) {
+          writeKeystorePasswordFile(legacyPath, parsed.data.next);
+        }
+      } catch (err) {
+        warn(`[warn] Could not update a keystore-password file (${errorMessage(err)}); leaving it in place.`);
       }
 
       // Mirror into env so the running daemon's in-memory PASSWORD stays valid

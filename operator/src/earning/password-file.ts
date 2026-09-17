@@ -6,9 +6,9 @@
  * for existing single-operator installs. New auto-generation never writes the
  * legacy file. Rotation may mutate legacy only for the default operator.
  */
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { resolveDefaultStateDir } from '../state-dir.js';
 import { mnemonicKeystorePath } from './store.js';
 
@@ -47,10 +47,20 @@ export function readKeystorePasswordFile(
   return undefined;
 }
 
+/**
+ * Persist a keystore password at `path`. `writeFileSync`'s `mode` applies only
+ * on create, so an existing file is chmod'd to 0600 *before* it receives the
+ * live secret.
+ */
+export function writeKeystorePasswordFile(path: string, password: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  if (existsSync(path)) chmodSync(path, 0o600);
+  writeFileSync(path, password + '\n', { mode: 0o600 });
+}
+
 export function writePrimaryKeystorePassword(earningDir: string, password: string): string {
   const path = primaryKeystorePasswordPath(earningDir);
-  mkdirSync(earningDir, { recursive: true, mode: 0o700 });
-  writeFileSync(path, password + '\n', { mode: 0o600 });
+  writeKeystorePasswordFile(path, password);
   return path;
 }
 
