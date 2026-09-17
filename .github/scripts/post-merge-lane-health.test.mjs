@@ -372,10 +372,23 @@ test('an open alert is rewritten only for a new failing run or a changed confide
  * The `on:` block of a workflow, as `{ key: [lines under it] }` for each trigger at
  * two-space indent. A tiny line-based reader rather than a YAML dependency: this test runs
  * with bare `node --test` both pre-merge and as the monitor's first step.
+ *
+ * The single-line forms `on: push` and `on: [push, workflow_dispatch]` read as triggers with
+ * no lines under them (#4604). Any other shape — a flow mapping, a quoted key, no `on:` at
+ * all — is `null`, which the enumeration below refuses rather than skips.
  */
 function triggersOf(source) {
   const lines = source.split('\n');
-  const start = lines.findIndex((line) => /^on:\s*$/u.test(line));
+  for (const line of lines) {
+    const inline = line.match(/^on:[ \t]+([^\s#{][^#]*?)\s*(?:#.*)?$/u);
+    if (!inline) continue;
+    const flow = inline[1].match(/^\[([^\]]*)\]$/u);
+    const keys = flow ? flow[1].split(',') : [inline[1]];
+    const names = keys.map((key) => key.trim().replace(/^(['"])(.*)\1$/u, '$2')).filter(Boolean);
+    if (!names.every((name) => /^[A-Za-z_]+$/u.test(name))) return null;
+    return Object.fromEntries(names.map((name) => [name, []]));
+  }
+  const start = lines.findIndex((line) => /^on:\s*(?:#.*)?$/u.test(line));
   if (start === -1) return null;
   const triggers = {};
   let current = null;
@@ -445,17 +458,24 @@ const PRE_MERGE = ['pull_request', 'pull_request_target', 'merge_group'];
 function postMergeOnlyLanes(branch) {
   return readdirSync(workflowsDir)
     .filter((file) => /\.ya?ml$/u.test(file))
-    .filter((file) => {
-      const source = readFileSync(path.join(workflowsDir, file), 'utf8');
-      const triggers = triggersOf(source);
-      if (!triggers || PRE_MERGE.some((key) => key in triggers)) return false;
-      const chained = triggerBranches(source, 'workflow_run') ?? [];
-      return (
-        (pushBranches(source) ?? []).some((pattern) => branchMatches(pattern, branch)) ||
-        (!chained.includes('**') && chained.some((pattern) => branchMatches(pattern, branch)))
-      );
-    })
+    .filter((file) => laneFromSource(file, readFileSync(path.join(workflowsDir, file), 'utf8'), branch))
     .sort();
+}
+
+/**
+ * Whether one workflow source is a post-merge-only lane on `branch`. A workflow whose `on:`
+ * this reader cannot parse throws rather than reading as "not a lane": skipping it would let a
+ * new lane slip past the registry test unnoticed, the blind spot that test exists for (#4604).
+ */
+function laneFromSource(file, source, branch) {
+  const triggers = triggersOf(source);
+  assert.ok(triggers, `${file}: the trigger reader cannot parse its on: block; teach triggersOf the shape`);
+  if (PRE_MERGE.some((key) => key in triggers)) return false;
+  const chained = triggerBranches(source, 'workflow_run') ?? [];
+  return (
+    (pushBranches(source) ?? []).some((pattern) => branchMatches(pattern, branch)) ||
+    (!chained.includes('**') && chained.some((pattern) => branchMatches(pattern, branch)))
+  );
 }
 
 test('the push-trigger reader anchors under the push key and accepts both branches forms', () => {
@@ -469,6 +489,21 @@ test('the push-trigger reader anchors under the push key and accepts both branch
   assert.ok(!branchMatches('main', 'next') && !branchMatches('release/*', 'next') && !branchMatches('nex', 'next'));
   assert.ok(!('pull_request' in triggersOf('on:\n  push:\n    branches: [next]\n')));
   assert.ok('merge_group' in triggersOf('on:\n  push:\n    branches: [next]\n  merge_group:\n'));
+});
+
+test('the trigger reader accepts single-line on: forms and returns null for any other shape', () => {
+  // #4604: a scalar or flow-sequence `on:` read as null, and the enumeration skipped the file.
+  assert.deepEqual(triggersOf('on: push\n'), { push: [] });
+  assert.deepEqual(triggersOf('on: [push, workflow_dispatch]\n'), { push: [], workflow_dispatch: [] });
+  assert.deepEqual(triggersOf('on:  # triggers\n  push:\n    branches: [next]\n'), { push: ['    branches: [next]'] });
+  assert.deepEqual(pushBranches('on: push\n'), ['**']);
+  assert.deepEqual(pushBranches("on: ['push']\n"), ['**']);
+  assert.ok('pull_request' in triggersOf('on: [push, pull_request]\n'));
+  // Shapes this reader does not parse must fail the enumeration, never drop the file from it.
+  assert.equal(triggersOf('on: {push: {}}\n'), null);
+  assert.equal(triggersOf('"on":\n  push:\n'), null);
+  assert.equal(triggersOf('name: no triggers\n'), null);
+  assert.throws(() => laneFromSource('flow.yml', 'on: {push: {}}\n', 'next'), /flow\.yml/u);
 });
 
 test('every registered lane names a real workflow that is genuinely post-merge-only', () => {
