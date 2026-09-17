@@ -214,8 +214,9 @@ Projection must not:
 The `/3` grammar is narrower than its source. The run journal admits any
 integer `replicate`
 ([`journal.ts:122`](../../../packages/benchmark-product/core/src/run/journal.ts))
-and only a syntactic `at`, while §3.2 requires a positive `replicate` and a
-calendar-strict `at`. A producer that meets a capture entry unable to satisfy
+and only a syntactic `at`, and makes each publication receipt field
+independently optional. §3.2 requires a positive `replicate`, a
+calendar-strict `at`, and the two receipt fields together or not at all. A producer that meets a capture entry unable to satisfy
 the narrowed grammar withholds the `dispatch-boundaries` declaration, as §5.2
 already requires for a legacy timestamp. It never drops, repairs, or
 normalizes the entry, because a projection that silently omitted it would no
@@ -758,18 +759,20 @@ The implementation bar is:
   `record-integrity`. For every satisfiable vector that declares it, an
   assembly `/2` header, or a `/3` header without a non-empty array, is refused
   the same way. `dispatchBoundaries` is a key inside the
-  `verification/assembly.jsonl` header, not a member path, so neither refusal
+  `verification/assembly.jsonl` header, at `graph.dispatchBoundaries` (§3.1),
+  not a member path, so neither refusal
   comes from the two-way file closure at `verify.ts:565-566`, and a test must
   not assert a non-allowlisted or missing-member refusal for either. The
   undeclared case is refused by the assembly grammar. The `/2` header parse
-  drops the unknown key, and `requireCanonical` then rejects the header bytes
+  drops the unknown key (`graph` is also a non-strict object), and `requireCanonical` then rejects the header bytes
   as not the canonical encoding
   ([`verify.ts:299-300`](../../../packages/benchmark-product/verify/src/verify.ts)).
   The declared case is refused because the vector selects the `/3` grammar,
   which requires `format` `/3` and a non-empty array;
 - the role derivation is gated per declaration. For every satisfiable vector
-  that omits `dispatch-boundaries`, a bundle carrying a referenced record with
-  no accepted graph edge is still refused as unreachable by
+  that omits `dispatch-boundaries`, a bundle cataloging a Submission record as
+  `solve-submission` or `evaluation-submission` with no accepted graph edge
+  is still refused as unreachable by
   `evidence-closure`'s size compare. The contribution must derive nothing unless
   the token is declared, following the `disclosure-specification` precedent
   ([`schema.ts:70-73`](../../../packages/benchmark-product/verify/src/schema.ts));

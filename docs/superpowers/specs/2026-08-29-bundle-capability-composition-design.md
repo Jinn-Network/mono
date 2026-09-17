@@ -277,7 +277,9 @@ kinds exist.
   exists. Any two additive capabilities compose unconditionally.
   A role derivation is additive, not a refinement. It widens the set of
   authenticated facts that can confer an existing role name, and it replaces no
-  grammar. It is therefore never a `refines` target.
+  grammar. It is therefore never a `refines` target. A capability of either
+  kind may carry role derivations, and carrying one never changes its
+  classification: `dispatch-boundaries` is refining and also contributes one.
 - **Refining** (`binary-qualification`): replace an existing member's grammar
   with a narrower one, and extend the mandatory member list.
 
@@ -412,14 +414,18 @@ that certainty without reproducing that labor.
   a record reachable only through the contribution verifies; undeclared, the
   same record is refused as unreachable by `evidence-closure`. A capability
   whose record needs a derivation but whose entry omits it fails the first half
-  at a named case, not at an unrelated base-check refusal in a later fixture. That is
-  2^n generated cases for n capabilities, and it covers the cells nobody
+  at a named case, not at an unrelated base-check refusal in a later fixture.
+  A refining capability that adds no member path has no member to plant; its
+  undeclared-case refusal is the refined grammar's own, as the
+  dispatch-timestamps design's §11 states for its entry. That is 2^n generated
+  cases for n capabilities, and it covers the cells nobody
   hand-wrote fixtures for, which is precisely where the enumeration model was
   weakest: `/7` needed a new fixture family before its combination could be
   tested at all.
 - **Registry invariants** run in the same suite: unique tokens, total `order`,
-  at most one refiner per target across every capability's `refines` set (§5.2), `requires` closure acyclic, every
-  `minimumReaderRelease` a real published release.
+  at most one refiner per target across every capability's `refines` set
+  (§5.2), `requires` closure acyclic, every `minimumReaderRelease` a real
+  published release.
 - **Legacy pinning** stays: the existing conformance kit under
   `verify/fixtures/public-bundle-conformance-v1/` and every tampered variant
   continue to run against the legacy path unchanged, and the golden `/2`, `/4`,
