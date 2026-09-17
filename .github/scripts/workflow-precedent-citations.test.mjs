@@ -120,6 +120,28 @@ test('a workflow named outside a Precedent line is prose, not a citation', () =>
   assert.deepEqual(citedPrecedents(source, 'self-ci.yml'), ['plugin-tree-ci.yml']);
 });
 
+// The per-workflow guards name the restore step they protect. A marker on a
+// different download-artifact step of the same workflow must not satisfy them
+// (#3512), while an unscoped lookup still reads the whole workflow.
+test('a step-scoped lookup reads only the named restore step’s marker', () => {
+  const source = [
+    '      - name: Restore first',
+    '        uses: actions/download-artifact@v8',
+    '        with:',
+    '          name: first-dist',
+    '      # Precedent: plugin-tree-ci.yml.',
+    '      - name: Restore second',
+    '        uses: actions/download-artifact@v8',
+    '        with:',
+    '          name: second-dist',
+    '',
+  ].join('\n');
+
+  assert.deepEqual(citedPrecedents(source, 'self-ci.yml', 'Restore first'), []);
+  assert.deepEqual(citedPrecedents(source, 'self-ci.yml', 'Restore second'), ['plugin-tree-ci.yml']);
+  assert.deepEqual(citedPrecedents(source, 'self-ci.yml'), ['plugin-tree-ci.yml']);
+});
+
 // A workflows directory holding exactly the given files, so a citation can be
 // pointed at a real neighbor without depending on the repository's own
 // workflows. The tests below assert on `findBrokenCitations` itself: asserting
