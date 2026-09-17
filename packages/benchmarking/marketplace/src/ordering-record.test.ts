@@ -157,6 +157,28 @@ describe("parseMarketplaceOrderingRecord", () => {
     }))).toThrow(/not sorted/);
   });
 
+  test("allows identical byte material under two identities", () => {
+    const parsed = parseMarketplaceOrderingRecord(validRecord({
+      submissions: [
+        {
+          submission: "urn:uuid:11111111-1111-4111-8111-111111111111",
+          task: TASK,
+          sha256: DIGEST_B,
+          path: `ordering/submissions/${DIGEST_B}.bin`,
+        },
+        {
+          submission: "urn:uuid:22222222-2222-4222-8222-222222222222",
+          task: TASK,
+          sha256: DIGEST_B,
+          path: `ordering/submissions/${DIGEST_B}.bin`,
+        },
+      ],
+    }));
+    expect(parsed.submissions).toHaveLength(2);
+    expect(parsed.submissions[0]?.sha256).toBe(DIGEST_B);
+    expect(parsed.submissions[1]?.sha256).toBe(DIGEST_B);
+  });
+
   test("rejects conflicting Submission identities", () => {
     expect(() => parseMarketplaceOrderingRecord(validRecord({
       submissions: [

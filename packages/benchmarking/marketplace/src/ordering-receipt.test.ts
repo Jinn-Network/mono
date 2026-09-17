@@ -6,8 +6,13 @@ import { BENCHMARKING_CELL_EXTENSION } from "./cell-authority.js";
 import { deriveAuthorityProjection } from "./authority-projection.js";
 import {
   MARKETPLACE_ORDERING_SCHEMA_ID,
+  compareSubmissionEntries,
+  eventMemberPath,
+  memberSha256Hex,
   serializeMarketplaceOrderingRecord,
+  submissionMemberPath,
 } from "./ordering-record.js";
+import { serializeMarketplaceEvent } from "./ordering-event-json.js";
 import {
   buildMarketplaceOrderingReceipt,
   evaluateOrderingBytes,
@@ -17,19 +22,23 @@ const RUN_DIGEST = `sha256:${"a".repeat(64)}` as const;
 const OTHER_RUN = `sha256:${"e".repeat(64)}` as const;
 const COORDINATOR = "0x1111111111111111111111111111111111111111" as Address;
 const TASK_DIGEST = "7777777777777777777777777777777777777777777777777777777777777777";
-const SUBMISSION_URN = "urn:uuid:11111111-1111-4111-8111-111111111111";
+const SUBMISSION_URN = "urn:uuid:11111111-1111-4111-8111-111111111111" as const;
 const ANCHOR = {
   chain: "eip155:84532",
   blockNumber: 105,
   blockHash: "0x1515151515151515151515151515151515151515151515151515151515151515" as Hex,
 };
 
-function projectionShell(timestamp: string): ObservationMarketplaceEvent["projection"] {
+function projectionShell(
+  timestamp: string,
+  submission: `urn:uuid:${string}` = SUBMISSION_URN,
+  taskDigest: string = TASK_DIGEST,
+): ObservationMarketplaceEvent["projection"] {
   return {
     taskCoordinator: COORDINATOR,
     timestamp,
-    submission: SUBMISSION_URN,
-    taskDigest: `sha256:${TASK_DIGEST}`,
+    submission,
+    taskDigest: `sha256:${taskDigest}`,
     effectiveDeadline: "2026-08-04T00:00:00Z",
     dispatchContext: {
       uri: "urn:jinn:marketplace:dispatch-context:42:0",
@@ -38,26 +47,36 @@ function projectionShell(timestamp: string): ObservationMarketplaceEvent["projec
   };
 }
 
-function taskCreated(timestamp: string): ObservationMarketplaceEvent {
+function taskCreated(
+  timestamp: string,
+  overrides: {
+    submission?: `urn:uuid:${string}`;
+    taskDigest?: string;
+    taskId?: bigint;
+    blockNumber?: number;
+    txHash?: Hex;
+  } = {},
+): ObservationMarketplaceEvent {
+  const taskDigest = overrides.taskDigest ?? TASK_DIGEST;
   return {
     event: "TaskCreated",
     derivation: {
       chainId: 84532,
       contract: COORDINATOR,
       event: "TaskCreated",
-      blockNumber: 99,
+      blockNumber: overrides.blockNumber ?? 99,
       blockHash: `0x${"6".repeat(64)}`,
-      txHash: `0x${"1".repeat(64)}`,
+      txHash: overrides.txHash ?? `0x${"1".repeat(64)}`,
       logIndex: 0,
       finalityTier: "finalized",
       contractGeneration: "revised",
     },
-    projection: projectionShell(timestamp),
+    projection: projectionShell(timestamp, overrides.submission ?? SUBMISSION_URN, taskDigest),
     facts: {
       creator: "0x2222222222222222222222222222222222222222",
-      taskCidDigest: `0x${TASK_DIGEST}`,
+      taskCidDigest: `0x${taskDigest}`,
       submissionDigest: `0x${"8".repeat(64)}`,
-      taskId: 42n,
+      taskId: overrides.taskId ?? 42n,
       maxTotal: 2,
       maxConcurrent: 2,
       submissionDeadline: 1_800_000_000n,
@@ -302,6 +321,92 @@ describe("buildMarketplaceOrderingReceipt + evaluateOrderingBytes", () => {
       members: receipt.members,
     });
     expect(evaluation.status).toBe("invalid");
+  });
+
+  test("identity-blind material does not catalog a foreign TaskCreated against this Run's blob", async () => {
+    const foreignUrn = "urn:uuid:22222222-2222-4222-8222-222222222222" as const;
+    const foreignTask = "9999999999999999999999999999999999999999999999999999999999999999";
+    const events = [
+      taskCreated("2026-08-03T08:00:00Z", {
+        submission: foreignUrn,
+        taskDigest: foreignTask,
+        taskId: 41n,
+        blockNumber: 90,
+        txHash: `0x${"2".repeat(64)}`,
+      }),
+      ...PASSING_EVENTS,
+    ];
+    const receipt = await buildMarketplaceOrderingReceipt({
+      events,
+      closeAnchor: ANCHOR,
+      runDigest: RUN_DIGEST,
+      material: materialFor(sealedSubmissionBytes()),
+      transcript: {
+        runDigestAnchorAt: "2026-08-03T09:00:00Z",
+        earliestCellPostAt: "2026-08-03T09:00:01Z",
+      },
+    });
+    expect(receipt.record.submissions).toEqual([
+      expect.objectContaining({
+        submission: SUBMISSION_URN,
+        task: `sha256:${TASK_DIGEST}`,
+      }),
+    ]);
+  });
+
+  test("two identities sharing one blob with an earlier foreign TaskCreated is invalid", async () => {
+    const honestBytes = sealedSubmissionBytes();
+    const sha256 = memberSha256Hex(honestBytes);
+    const path = submissionMemberPath(sha256);
+    const foreignUrn = "urn:uuid:22222222-2222-4222-8222-222222222222" as const;
+    const foreignTask = "9999999999999999999999999999999999999999999999999999999999999999";
+    const events = [
+      taskCreated("2026-08-03T08:00:00Z", {
+        submission: foreignUrn,
+        taskDigest: foreignTask,
+        taskId: 41n,
+        blockNumber: 90,
+        txHash: `0x${"2".repeat(64)}`,
+      }),
+      ...PASSING_EVENTS,
+    ];
+    const members = new Map<string, Uint8Array>();
+    const eventEntries = events.map((event, ordinal) => {
+      const bytes = serializeMarketplaceEvent(event);
+      const digest = memberSha256Hex(bytes);
+      const eventPath = eventMemberPath(ordinal, digest);
+      members.set(eventPath, bytes);
+      return { ordinal, sha256: digest, path: eventPath };
+    });
+    members.set(path, honestBytes);
+    const submissions = [
+      {
+        submission: SUBMISSION_URN,
+        task: `sha256:${TASK_DIGEST}` as const,
+        sha256,
+        path,
+      },
+      {
+        submission: foreignUrn,
+        task: `sha256:${foreignTask}` as const,
+        sha256,
+        path,
+      },
+    ].sort(compareSubmissionEntries);
+    const recordBytes = serializeMarketplaceOrderingRecord({
+      schema: MARKETPLACE_ORDERING_SCHEMA_ID,
+      runDigest: RUN_DIGEST,
+      closeAnchor: ANCHOR,
+      events: eventEntries,
+      submissions,
+      transcript: {
+        runDigestAnchorAt: "2026-08-03T08:00:00Z",
+        earliestCellPostAt: "2026-08-03T09:00:01Z",
+      },
+    });
+    const evaluation = await evaluateOrderingBytes({ recordBytes, members });
+    expect(evaluation.status).toBe("invalid");
+    expect(evaluation.detail).toMatch(/identity does not match sealed document/);
   });
 
   test("reordered projector input is a different replay", async () => {

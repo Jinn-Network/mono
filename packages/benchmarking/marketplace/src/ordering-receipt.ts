@@ -10,6 +10,7 @@ import { deriveAuthorityProjection } from "./authority-projection.js";
 import {
   bytesMatchCanonicalSeal,
   decodeUtf8Json,
+  sealedSubmissionMatchesIdentity,
 } from "./canonical-bytes.js";
 import {
   BENCHMARKING_CELL_EXTENSION,
@@ -130,6 +131,7 @@ async function collectCommittedSubmissions(input: {
     if (parsed === undefined || !isRecord(parsed)) return;
     const validation = validateSubmission(parsed);
     if (!bytesMatchCanonicalSeal(bytes, parsed, sealSubmission, validation)) return;
+    if (!sealedSubmissionMatchesIdentity(parsed, submissionUrn, taskDigest)) return;
     const extension = parsed[BENCHMARKING_CELL_EXTENSION];
     if (!isRecord(extension) || extension.run !== input.runDigest) return;
     const sha256 = memberSha256Hex(bytes);
@@ -284,6 +286,9 @@ export async function evaluateOrderingBytes(input: {
     const validation = validateSubmission(parsed);
     if (!bytesMatchCanonicalSeal(bytes, parsed, sealSubmission, validation)) {
       return fail("non-canonical Submission bytes");
+    }
+    if (!sealedSubmissionMatchesIdentity(parsed, entry.submission, entry.task)) {
+      return fail("Submission identity does not match sealed document");
     }
     submissionBytes.set(entry.path, bytes);
   }

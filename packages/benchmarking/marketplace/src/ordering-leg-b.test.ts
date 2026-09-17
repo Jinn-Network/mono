@@ -178,6 +178,37 @@ describe("enforceAnchoredOrderingGate", () => {
 });
 
 describe("deriveRunDigestAnchorAt / deriveEarliestCellPostAt", () => {
+  test("does not take runDigestAnchorAt from a foreign identity sharing this Run's bytes", async () => {
+    const { projection, material } = projectionWithMaterialTimes({
+      runAnchorTime: "2026-08-03T09:00:00Z",
+      cellPostTime: "2026-08-03T09:00:01Z",
+    });
+    const foreignUrn = "urn:uuid:22222222-2222-4222-8222-222222222222" as const;
+    const foreignTask = "9999999999999999999999999999999999999999999999999999999999999999";
+    const accepted = projection.observations[0]!;
+    const mixed: AuthorityProjection = {
+      ...projection,
+      observations: [
+        {
+          ...accepted,
+          id: "foreign-submission-accepted",
+          subject: foreignUrn,
+          time: "2026-08-03T08:00:00Z",
+          data: {
+            submission: foreignUrn,
+            task: `sha256:${foreignTask}`,
+          },
+        } as AuthorityProjection["observations"][number],
+        ...projection.observations,
+      ],
+    };
+    expect(await deriveRunDigestAnchorAt({
+      projection: mixed,
+      runDigest: RUN_DIGEST,
+      material,
+    })).toBe("2026-08-03T09:00:00Z");
+  });
+
   test("ignore observations for other Run digests", async () => {
     const { projection, material } = projectionWithMaterialTimes({
       runAnchorTime: "2026-08-03T09:00:01Z",

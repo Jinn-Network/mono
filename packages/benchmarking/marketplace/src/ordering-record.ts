@@ -232,6 +232,8 @@ export function parseMarketplaceOrderingRecord(value: unknown): MarketplaceOrder
     if (previous !== undefined && previous !== entry.sha256) {
       throw new MarketplaceOrderingParseError("conflicting Submission identities");
     }
+    // Identical byte material may be referenced more than once. Identity is
+    // (submission, task); the sealed document must still bind to that identity.
     identities.set(identity, entry.sha256);
   }
   return {

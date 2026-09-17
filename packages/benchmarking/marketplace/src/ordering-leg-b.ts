@@ -13,6 +13,7 @@ import {
 import {
   bytesMatchCanonicalSeal,
   decodeUtf8Json,
+  sealedSubmissionMatchesIdentity,
 } from "./canonical-bytes.js";
 import { sealSubmission, validateSubmission } from "@jinn-network/task-execution-protocol";
 
@@ -57,6 +58,9 @@ async function resolveCanonicalSubmission(input: {
   if (parsed === undefined || !isRecord(parsed)) return undefined;
   const validation = validateSubmission(parsed);
   if (!bytesMatchCanonicalSeal(bytes, parsed, sealSubmission, validation)) return undefined;
+  if (!sealedSubmissionMatchesIdentity(parsed, input.submissionUrn, input.taskDigest)) {
+    return undefined;
+  }
   return { doc: parsed, time: "" };
 }
 
