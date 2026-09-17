@@ -66,7 +66,8 @@ async function buildCliSignerContext(
   willBroadcast = true,
 ): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
   const env = opts.env ?? process.env;
-  const pw = resolveCliPassword(opts.argv, env);
+  const config = loadConfig(mergeArgvForConfig(opts.argv));
+  const pw = resolveCliPassword(opts.argv, env, { earningDir: config.earningDir });
   if (!pw.ok) {
     return {
       ok: false,
@@ -79,8 +80,6 @@ async function buildCliSignerContext(
       },
     };
   }
-
-  const config = loadConfig(mergeArgvForConfig(opts.argv));
 
   // D0a P3 (#525/#562/#897): every context built from this shared function
   // hands the caller live signer key material (`masterWallet`, and

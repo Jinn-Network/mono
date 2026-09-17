@@ -24,20 +24,6 @@ export async function revokeHandler(
   opts: RevokeOptions,
   deps: SolverPluginsDeps,
 ): Promise<void> {
-  const passwordResult = deps.resolveCliPassword(ctx.argv, ctx.env);
-  if (!passwordResult.ok) {
-    writeJson(ctx, {
-      error: {
-        code: 'keystore_missing',
-        message:
-          'Could not resolve password. Set JINN_PASSWORD, write ~/.jinn-client/keystore-password, or pass --password-fd.',
-      },
-    });
-    ctx.exit(1);
-    return;
-  }
-  const password = passwordResult.password;
-
   let config;
   try {
     config = deps.loadConfig(opts.configPath);
@@ -48,6 +34,20 @@ export async function revokeHandler(
     ctx.exit(1);
     return;
   }
+
+  const passwordResult = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
+  if (!passwordResult.ok) {
+    writeJson(ctx, {
+      error: {
+        code: 'keystore_missing',
+        message:
+          'Could not resolve password. Set JINN_PASSWORD, write <earningDir>/keystore-password, or pass --password-fd.',
+      },
+    });
+    ctx.exit(1);
+    return;
+  }
+  const password = passwordResult.password;
 
   try {
     const bootstrapper = deps.bootstrapperFactory(config);

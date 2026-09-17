@@ -369,9 +369,10 @@ describe('POST /v1/setup/change-password', () => {
       });
 
       expect(res.status).toBe(200);
-      // Operator A's password file — and their keystore — are untouched.
+      // Operator A's host-wide file — and their keystore — are untouched.
       expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('old-password');
-      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: false });
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(readFileSync(join(secondEarningDir, 'keystore-password'), 'utf-8').trim()).toBe('new-password-99');
       expect(
         await decryptMnemonic(
           await new FleetStateStore(defaultEarningDir).loadMnemonicKeystore(),
@@ -420,6 +421,7 @@ describe('POST /v1/setup/change-password', () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
       expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
+      expect(readFileSync(join(earningDir, 'keystore-password'), 'utf-8').trim()).toBe('new-password-99');
       expect(process.env['JINN_PASSWORD']).toBe('new-password-99');
     } finally {
       if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
@@ -457,7 +459,8 @@ describe('POST /v1/setup/change-password', () => {
       });
 
       expect(res.status).toBe(200);
-      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
+      expect(readFileSync(join(earningDir, 'keystore-password'), 'utf-8').trim()).toBe('new-password-99');
+      expect(existsSync(pwFilePath)).toBe(false);
       expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
     } finally {
       if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
@@ -469,7 +472,7 @@ describe('POST /v1/setup/change-password', () => {
     }
   }, 30000);
 
-  it('does not create a password file when rotating a second operator', async () => {
+  it('does not rewrite the host-wide legacy file when rotating a second operator', async () => {
     const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
     const stateDir = join(home, '.jinn-operator');
     const defaultEarningDir = join(stateDir, 'earning');
@@ -484,6 +487,7 @@ describe('POST /v1/setup/change-password', () => {
       await encryptMnemonic(mnemonic, 'old-password'),
     );
     const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'a-password\n', { mode: 0o600 });
 
     const oldEnv = process.env['JINN_EARNING_DIR'];
     const oldHome = process.env['HOME'];
@@ -500,8 +504,9 @@ describe('POST /v1/setup/change-password', () => {
       });
 
       expect(res.status).toBe(200);
-      expect(existsSync(pwFilePath)).toBe(false);
-      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: false });
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('a-password');
+      expect(readFileSync(join(secondEarningDir, 'keystore-password'), 'utf-8').trim()).toBe('new-password-99');
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
     } finally {
       if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
       else process.env['JINN_EARNING_DIR'] = oldEnv;

@@ -7,9 +7,12 @@ import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { FleetStateStore } from '../../earning/store.js';
-import { passwordFileIsStale } from '../../earning/password-file.js';
+import {
+  isDefaultOperatorKeystore,
+  primaryKeystorePasswordPath,
+} from '../../earning/password-file.js';
 import { decryptMnemonic, encryptMnemonic } from '../../earning/wallet.js';
-import { resolveCliPassword, resolveNewPassword } from '../password.js';
+import { resolveCliPassword, resolveNewPassword, type ResolvedCliPassword } from '../password.js';
 import { defaultConfigPath, resolveDefaultStateDir } from '../../state-dir.js';
 import { loadConfig } from '../../config.js';
 
@@ -18,12 +21,6 @@ interface EarningTarget {
   earningDir: string;
   /** `<default state dir>/earning` — what the daemon opens when nothing overrides it. */
   defaultEarningDir: string;
-  /**
-   * `<default state dir>/keystore-password`. This path is NOT earning-dir relative:
-   * `main.ts` and `resolveCliPassword` read exactly this one file whatever
-   * `earningDir` resolves to, so it is host-wide state, not per-operator state.
-   */
-  passwordFilePath: string;
 }
 
 /**
@@ -70,9 +67,40 @@ function resolveEarningTarget(
     target: {
       earningDir,
       defaultEarningDir,
-      passwordFilePath: join(defaultStateDir, 'keystore-password'),
     },
   };
+}
+
+function fileStillHolds(path: string, password: string): boolean {
+  if (!existsSync(path)) return false;
+  try {
+    return readFileSync(path, 'utf-8').trim() === password;
+  } catch {
+    return false;
+  }
+}
+
+function deleteRotatedPasswordFile(
+  current: Extract<ResolvedCliPassword, { ok: true }>,
+  defaultEarningDir: string,
+  earningDir: string,
+  newPassword: string,
+  warn: (message: string) => void,
+): boolean {
+  if (current.password === newPassword) return false;
+  if (current.source === 'primary') {
+    const path = current.filePath ?? primaryKeystorePasswordPath(earningDir);
+    if (!fileStillHolds(path, current.password)) return false;
+    unlinkSync(path);
+    return true;
+  }
+  if (current.source === 'legacy' && current.filePath) {
+    if (!isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)) return false;
+    if (!fileStillHolds(current.filePath, current.password)) return false;
+    unlinkSync(current.filePath);
+    return true;
+  }
+  return false;
 }
 
 async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
@@ -114,20 +142,6 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
     );
     return;
   }
-  const resolved = resolveCliPassword(rest, ctx.env);
-  if (!resolved.ok) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: resolved.message,
-        exampleCli: 'JINN_PASSWORD=... jinn keys backup --output /tmp/mnemonic.txt',
-        details: { field: 'keystore password', expected: 'non-empty string via env, fd, or auto-generated file' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-
   const target = resolveEarningTarget(ctx, parsed.values.config as string | undefined);
   if (!target.ok) {
     emitEnvelope(
@@ -141,6 +155,20 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
     );
     return;
   }
+  const resolved = resolveCliPassword(rest, ctx.env, { earningDir: target.target.earningDir });
+  if (!resolved.ok) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: resolved.message,
+        exampleCli: 'JINN_PASSWORD=... jinn keys backup --output /tmp/mnemonic.txt',
+        details: { field: 'keystore password', expected: 'non-empty string via env, fd, or auto-generated file' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
   const { earningDir } = target.target;
   const store = new FleetStateStore(earningDir);
   const keystore = await store.loadMnemonicKeystore();
@@ -207,7 +235,7 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
     );
     return;
   }
-  const { earningDir, defaultEarningDir, passwordFilePath } = target.target;
+  const { earningDir, defaultEarningDir } = target.target;
   const store = new FleetStateStore(earningDir);
 
   // 2. Check keystore exists
@@ -225,7 +253,7 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
   }
 
   // 3. Resolve current password
-  const current = resolveCliPassword(ctx.argv, ctx.env);
+  const current = resolveCliPassword(ctx.argv, ctx.env, { earningDir });
   if (!current.ok) {
     emitEnvelope(
       {
@@ -291,15 +319,10 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
   // 8. Save new keystore
   await store.saveMnemonicKeystore(newKeystore);
 
-  // 9. Delete only a password proven stale by this rotation (#2515).
+  // 9. Delete only the file that actually supplied the old secret.
   let passwordFileDeleted = false;
-  if (
-    passwordFileIsStale(
-      passwordFilePath, defaultEarningDir, earningDir, current.password, newPass.password,
-      (m) => { process.stderr.write(`${m}\n`); },
-    )
-  ) {
-    unlinkSync(passwordFilePath);
+  const warn = (m: string): void => { process.stderr.write(`${m}\n`); };
+  if (deleteRotatedPasswordFile(current, defaultEarningDir, earningDir, newPass.password, warn)) {
     passwordFileDeleted = true;
   }
 
@@ -381,14 +404,13 @@ backup:
 
 change-password:
   Decrypts the keystore with the current password (resolved from
-  --password-fd, JINN_PASSWORD, or the auto-generated
-  ~/.jinn-operator/keystore-password file, in that order) and
-  re-encrypts it with JINN_NEW_PASSWORD (min 8 characters).
-  The auto-generated password file is deleted only if it contains the
-  authenticated old password and the default keystore is the rotated
-  file or absent. Rotating another operator preserves an existing
-  default operator's password file, even if its keystore is damaged.
-  After a deletion, set JINN_PASSWORD yourself for subsequent commands.
+  --password-fd, JINN_PASSWORD, <earningDir>/keystore-password, or the
+  legacy host-wide ~/.jinn-operator/keystore-password file, in that
+  order) and re-encrypts it with JINN_NEW_PASSWORD (min 8 characters).
+  The file that supplied the old password is deleted: the primary file
+  always, the legacy file only for a default-operator rotation. Env and
+  --password-fd sources delete nothing. After a deletion, set
+  JINN_PASSWORD yourself for subsequent commands.
 
 Examples:
   JINN_PASSWORD=secret jinn keys backup --output ~/backup/jinn.txt

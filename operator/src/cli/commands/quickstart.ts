@@ -1,6 +1,5 @@
 import { randomBytes as defaultRandomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
@@ -21,8 +20,6 @@ import {
   apiPortFailureMessage as defaultApiPortFailureMessage,
   checkApiPortAvailable as defaultCheckApiPortAvailable,
 } from '../../preflight/api-port.js';
-import { resolveDefaultStateDir } from '../../state-dir.js';
-
 // ── Structured progress envelope ─────────────────────────────────────────────
 
 /**
@@ -151,7 +148,8 @@ Password handling:
   is written. This is the recommended approach for CI and advanced use.
 
   Otherwise quickstart auto-generates a random password and writes it to
-  ~/.jinn-client/keystore-password (mode 0600). This file sits next to the
+  <earningDir>/keystore-password (mode 0600; typically
+  ~/.jinn-operator/earning/keystore-password). This file sits next to the
   encrypted keystore, so anyone with shell access to this machine can
   decrypt the wallet. Keep funds to the gas + rewards minimum.
 
@@ -171,7 +169,7 @@ Agent/script mode (--json / --no-daemon / --json-progress):
       "status": "ready",
       "masterAddress": "0x...",
       "dashboardUrl": "http://127.0.0.1:7331",
-      "passwordFile": "~/.jinn-client/keystore-password"  // omitted if JINN_PASSWORD was used
+      "passwordFile": "<earningDir>/keystore-password"  // omitted if JINN_PASSWORD was used
     }
 
   Operational verbs emit JSON on stdout by default. Use --human for
@@ -227,9 +225,6 @@ Examples:
         typeof parsed.values.config === 'string' && parsed.values.config.length > 0
           ? parsed.values.config
           : undefined;
-      const jinnDir = resolveDefaultStateDir({ home: ctx.env['HOME'] ?? homedir(), env: ctx.env });
-      const passwordFilePath = join(jinnDir, 'keystore-password');
-      const keystoreFilePath = join(jinnDir, 'earning', 'master_keystore.json');
       const bootstrapArgv = ['--json', ...(configPath ? ['--config', configPath] : [])];
 
       // ── Preflight (no secret state yet) ──
@@ -237,6 +232,8 @@ Examples:
       // BEFORE we generate or write any plaintext password material. If any
       // blocking preflight fails we exit with no orphan secrets on disk.
       const config = deps.loadConfig(configPath);
+      const passwordFilePath = join(config.earningDir, 'keystore-password');
+      const keystoreFilePath = join(config.earningDir, 'master_keystore.json');
 
       // Track whether we touched the password file so error paths can report
       // accurate cleanup state in the structured envelope.
@@ -376,7 +373,7 @@ Examples:
         console.error('[quickstart] Using existing auto-generated password.');
       } else {
         password = deps.randomBytesFn(32).toString('hex');
-        deps.passwordFileIO.ensureDir(jinnDir);
+        deps.passwordFileIO.ensureDir(config.earningDir);
         deps.passwordFileIO.write(passwordFilePath, password + '\n');
         passwordGenerated = true;
         console.error('[quickstart] Generated keystore password.');

@@ -100,7 +100,8 @@ export function createBootstrapCommand(deps: BootstrapDeps = PRODUCTION_DEPS): C
       return;
     }
 
-    const password = deps.resolveCliPassword(ctx.argv, ctx.env);
+    const config = deps.loadConfig(configPath);
+    const password = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
     if (!password.ok) {
       emitEnvelope(
         {
@@ -114,8 +115,6 @@ export function createBootstrapCommand(deps: BootstrapDeps = PRODUCTION_DEPS): C
       );
       return;
     }
-
-    const config = deps.loadConfig(configPath);
     const rpcPreflight = await deps.checkRpcNetwork(config);
     if (!rpcPreflight.ok) {
       emitEnvelope(

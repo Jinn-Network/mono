@@ -36,20 +36,6 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const password = resolveCliPassword(ctx.argv, ctx.env);
-  if (!password.ok) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: password.message,
-        exampleCli: 'JINN_PASSWORD=... jinn init',
-        details: { field: 'keystore password', expected: 'non-empty string via environment or fd' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-
   const configPath =
     getConfigPathFromArgs(ctx.argv) ?? getConfigPathFromArgs(process.argv.slice(2));
   let configEarningDir: string | undefined;
@@ -67,6 +53,21 @@ async function run(ctx: CommandContext): Promise<void> {
     ctx.env['JINN_EARNING_DIR'] ??
     configEarningDir ??
     join(resolveDefaultStateDir(), 'earning');
+
+  const password = resolveCliPassword(ctx.argv, ctx.env, { earningDir });
+  if (!password.ok) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: password.message,
+        exampleCli: 'JINN_PASSWORD=... jinn init',
+        details: { field: 'keystore password', expected: 'non-empty string via environment or fd' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
   const store = new FleetStateStore(earningDir);
 
   if (!store.hasMnemonicKeystore() && store.hasLegacyKeystore()) {

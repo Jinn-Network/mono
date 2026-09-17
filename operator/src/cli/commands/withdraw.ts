@@ -175,7 +175,11 @@ Examples:
 
       if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
 
-      const pw = deps.resolveCliPassword(ctx.argv, ctx.env);
+      const configPath =
+        deps.getConfigPathFromArgs(ctx.argv ?? []) ?? deps.getConfigPathFromArgs(process.argv.slice(2));
+      const config = deps.loadConfig(configPath);
+
+      const pw = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
       if (!pw.ok) {
         emitEnvelope(
           {
@@ -188,10 +192,6 @@ Examples:
         );
         return;
       }
-
-      const configPath =
-        deps.getConfigPathFromArgs(ctx.argv ?? []) ?? deps.getConfigPathFromArgs(process.argv.slice(2));
-      const config = deps.loadConfig(configPath);
 
       // D0a P3 (#525/#562/#897): below, `runWithdrawPlan` sweeps the master
       // EOA and every agent EOA with no cross-process lock against a

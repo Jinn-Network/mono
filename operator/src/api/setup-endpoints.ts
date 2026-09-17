@@ -51,7 +51,7 @@ import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { markRestartRequired } from './restart-required-state.js';
 import { resolveDefaultStateDir } from '../state-dir.js';
-import { isDefaultOperatorKeystore, passwordFileIsStale } from '../earning/password-file.js';
+import { isDefaultOperatorKeystore, writePrimaryKeystorePassword, legacyKeystorePasswordPath } from '../earning/password-file.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -783,36 +783,23 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       const reencrypted = await encryptMnemonic(mnemonic, parsed.data.next);
       await store.saveMnemonicKeystore(reencrypted);
 
-      // Update the persisted password file so subsequent `jinn run` invocations
-      // pick up the new password seamlessly — but only when that host-wide file
-      // is provably ours. It is not earning-dir relative, so rewriting it
-      // unconditionally replaced another operator's password with a value that
-      // does not open their keystore (#4086). An existing file must be the one
-      // this rotation just invalidated (the same proof the CLI uses to decide
-      // whether to delete it); an absent one is created only for a
-      // default-operator rotation. Otherwise we leave it alone and say so in
-      // the response.
+      // Always write this daemon's primary password file. Mutate the host-wide
+      // legacy file only when this is the default operator and that file still
+      // holds the authenticated old password.
       const home = process.env['HOME'] ?? homedir();
       const stateDir = resolveDefaultStateDir({ home });
       const defaultEarningDir = join(stateDir, 'earning');
-      const pwFilePath = join(stateDir, 'keystore-password');
+      const legacyPath = legacyKeystorePasswordPath({ home, env: process.env });
       const warn = (message: string): void => { console.warn(message); };
-      let passwordFileUpdated = false;
+      writePrimaryKeystorePassword(earningDir, parsed.data.next);
+      const passwordFileUpdated = true;
       if (
-        existsSync(pwFilePath)
-          ? passwordFileIsStale(
-              pwFilePath,
-              defaultEarningDir,
-              earningDir,
-              parsed.data.current,
-              parsed.data.next,
-              warn,
-            )
-          : isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)
+        isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)
+        && existsSync(legacyPath)
+        && readFileSync(legacyPath, 'utf-8').trim() === parsed.data.current
       ) {
-        mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
-        writeFileSync(pwFilePath, parsed.data.next + '\n', { mode: 0o600 });
-        passwordFileUpdated = true;
+        mkdirSync(dirname(legacyPath), { recursive: true, mode: 0o700 });
+        writeFileSync(legacyPath, parsed.data.next + '\n', { mode: 0o600 });
       }
 
       // Mirror into env so the running daemon's in-memory PASSWORD stays valid

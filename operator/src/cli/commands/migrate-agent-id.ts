@@ -96,7 +96,8 @@ export function createMigrateAgentIdCommand(
       return;
     }
 
-    const password = deps.resolveCliPassword(ctx.argv, ctx.env);
+    const config = deps.loadConfig(configPath);
+    const password = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
     if (!password.ok) {
       emitEnvelope(
         {
@@ -114,7 +115,6 @@ export function createMigrateAgentIdCommand(
       return;
     }
 
-    const config = deps.loadConfig(configPath);
     const network = config.network === 'testnet' ? 'base-sepolia' : 'base';
 
     let result: MigrateAgentIdsResult;

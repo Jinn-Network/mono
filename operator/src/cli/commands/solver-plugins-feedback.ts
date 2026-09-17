@@ -7,8 +7,8 @@
  * `manifestHash = keccak256(manifestRef)`.
  *
  * The pipeline mirrors `publishHandler`'s shape:
- *   1. resolveCliPassword (env > keystore-password file > prompt-fd)
- *   2. loadConfig
+ *   1. loadConfig, then resolveCliPassword (env > primary/legacy file > prompt-fd)
+ *   2. discovery row → builderAgentId
  *   3. pluginReaderFactory(config).listPluginPublications → builderAgentId
  *   4. bootstrapper.ensureStage1(password) — lazy Stage 1 ensure
  *   5. reputationClientFactory(...).giveFeedback(...) / .respondToFeedback(...)
@@ -76,7 +76,7 @@ export interface FeedbackPipelineCtx {
 
 /**
  * Shared prologue for every write verb (endorse / warn / review / respond /
- * block): password → config → discovery row → Stage 1 ensure. Returns the
+ * block): config → password → discovery row → Stage 1 ensure. Returns the
  * materialised ids needed for the on-chain write, or null after writing an
  * error envelope and calling ctx.exit.
  */
@@ -86,20 +86,6 @@ export async function preparePipeline(
   configPath: string | undefined,
   deps: SolverPluginsDeps,
 ): Promise<FeedbackPipelineCtx | null> {
-  const passwordResult = deps.resolveCliPassword(ctx.argv, ctx.env);
-  if (!passwordResult.ok) {
-    writeJson(ctx, {
-      error: {
-        code: 'keystore_missing',
-        message:
-          'Could not resolve password. Set JINN_PASSWORD, write ~/.jinn-client/keystore-password, or pass --password-fd.',
-      },
-    });
-    ctx.exit(1);
-    return null;
-  }
-  const password = passwordResult.password;
-
   let config: ReturnType<typeof deps.loadConfig>;
   try {
     config = deps.loadConfig(configPath);
@@ -110,6 +96,20 @@ export async function preparePipeline(
     ctx.exit(1);
     return null;
   }
+
+  const passwordResult = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
+  if (!passwordResult.ok) {
+    writeJson(ctx, {
+      error: {
+        code: 'keystore_missing',
+        message:
+          'Could not resolve password. Set JINN_PASSWORD, write <earningDir>/keystore-password, or pass --password-fd.',
+      },
+    });
+    ctx.exit(1);
+    return null;
+  }
+  const password = passwordResult.password;
 
   // Resolve builderAgentId via discovery first — cheaper to fail here than
   // after Stage 1.
