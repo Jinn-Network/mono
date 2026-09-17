@@ -21,6 +21,7 @@
  */
 
 import { z } from "zod";
+import { uriContainsDisallowedControls } from "@jinn-network/trust-core";
 import { ANCHOR_INTENT_EXTENSION } from "./identifiers.js";
 
 /**
@@ -31,7 +32,12 @@ import { ANCHOR_INTENT_EXTENSION } from "./identifiers.js";
 export const ANCHOR_PROFILE_NAMESPACE = "https://spec.jinn.network/trust/anchor-profiles/";
 
 const AnchorProfileUriSchema = z.string().refine(
-  (value) => value.startsWith(ANCHOR_PROFILE_NAMESPACE) && value.length > ANCHOR_PROFILE_NAMESPACE.length,
+  (value) => {
+    if (!value.startsWith(ANCHOR_PROFILE_NAMESPACE) || value.length <= ANCHOR_PROFILE_NAMESPACE.length) {
+      return false;
+    }
+    return !uriContainsDisallowedControls(value.slice(ANCHOR_PROFILE_NAMESPACE.length));
+  },
   `must be an anchor-provider profile URI under ${ANCHOR_PROFILE_NAMESPACE}`,
 );
 

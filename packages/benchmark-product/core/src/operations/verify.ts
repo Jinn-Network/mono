@@ -124,7 +124,9 @@ export interface RunVerifyResult {
   /** The shared portable-verifier result for every stored anchor and declared subject. Absent for
    * legacy runs that neither carry anchor evidence nor declare anchoring intent. */
   readonly anchors?: IntegrityAnchorsReport;
-  /** Present only while at least one pending proof has no completed successor. */
+  /** Present while at least one pending proof has no completed successor, and only before
+   * `report`. After `report`, `assertNotReported` in `run-anchor.ts` refuses further acquisition,
+   * so the hint would be false; the reported return omits the field for that reason. */
   readonly anchoringWindow?: {
     readonly closingOperation: "report";
   };
@@ -263,7 +265,7 @@ export async function verifyRunWorkspace(
       // above so closed runs receive the same pre-report surface.
       let sharedContext: {
         readonly previewLog: ReturnType<typeof readPreviewLog>;
-        readonly carriage: ReturnType<typeof readRunAnchorCarriage>;
+        readonly anchorCarriage: ReturnType<typeof readRunAnchorCarriage>;
         /** issue #2839: the disclosure section re-derived from the sealed record's own bytes, so
          * this workspace-side rebuild compares the same projection the portable reader does. */
         readonly disclosureCarriage: ReturnType<typeof readRunDisclosureCarriage>;
@@ -332,7 +334,6 @@ export async function verifyRunWorkspace(
           // anchor, and an anchored claim whose section drifted from its own records, both fail
           // below. Computed once — the anchors are a property of the Run/Matrix, not of any one
           // Report.
-          const carriage = anchorCarriage;
           const disclosureCarriage = readRunDisclosureCarriage(context.workspaceDir, runState);
           const inspectAdditional = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
             && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
@@ -402,7 +403,7 @@ export async function verifyRunWorkspace(
                   : undefined;
           sharedContext = {
             previewLog,
-            carriage,
+            anchorCarriage,
             disclosureCarriage,
             additionalLimitations: [
               ...inspectAdditional,
@@ -417,7 +418,7 @@ export async function verifyRunWorkspace(
             }),
           };
         }
-        const { previewLog, carriage, disclosureCarriage, additionalLimitations, suiteComparability } = sharedContext;
+        const { previewLog, disclosureCarriage, additionalLimitations, suiteComparability } = sharedContext;
 
         assertClaimConsistency({
           claim,
@@ -436,13 +437,13 @@ export async function verifyRunWorkspace(
           assurancePreset: document.spec.assurance.preset,
           ...(additionalLimitations.length > 0 ? { additionalLimitations } : {}),
           ...(suiteComparability === undefined ? {} : { suiteComparability }),
-          ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
+          ...(anchorCarriage.anchoredClosure ? { anchors: anchorCarriage.anchors } : {}),
           // Scoped exactly as `report` scopes it (issue #2839): only the anchored
           // binary-qualification entry carries the section, because `/8` is the one disclosed cell.
           // A run's sibling analyses project no qualification, so rebuilding THEIR claim with a
           // disclosure would be rebuilding a claim no closure could have published.
           ...(disclosureCarriage === undefined
-            || !carriage.anchoredClosure
+            || !anchorCarriage.anchoredClosure
             || reportRecord.method.id !== BENCHMARKING_METHOD_IDS.binaryInstrument
             ? {}
             : { disclosure: disclosureCarriage.disclosure }),
@@ -476,7 +477,7 @@ export async function verifyRunWorkspace(
 
       checks.push("report-verification");
       checks.push("claim-consistency");
-      if (sharedContext!.carriage.anchoredClosure) checks.push("integrity-anchors");
+      if (sharedContext!.anchorCarriage.anchoredClosure) checks.push("integrity-anchors");
       if (sharedContext!.disclosureCarriage !== undefined) checks.push("disclosure-specification");
 
       return {

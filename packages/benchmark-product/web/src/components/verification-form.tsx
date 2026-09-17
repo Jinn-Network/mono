@@ -9,10 +9,27 @@ interface VerificationFormProps {
   readonly draftId: string;
 }
 
+interface VerificationAnchor {
+  readonly recordSha256: string;
+  readonly status: string;
+  readonly subject?: string;
+}
+
+interface VerificationSubject {
+  readonly subject: string;
+  readonly outcome: string;
+  readonly declaredProfiles?: readonly string[];
+}
+
 interface VerificationResult {
   readonly checks: readonly string[];
   readonly matrixSha256: string;
   readonly reportEnvelopeSha256?: string;
+  readonly anchors?: {
+    readonly anchors: readonly VerificationAnchor[];
+    readonly subjects: readonly VerificationSubject[];
+  };
+  readonly anchoringWindow?: { readonly closingOperation: "report" };
 }
 
 function isVerificationResult(value: unknown): value is VerificationResult {
@@ -48,6 +65,21 @@ export function VerificationForm({ action, draftId }: VerificationFormProps) {
         </dl>
         <p className="mt-3 font-medium">Named checks</p>
         <ul className="list-disc pl-5">{result.checks.map((check) => <li key={check}>{check}</li>)}</ul>
+        {result.anchors !== undefined ? <>
+          <p className="mt-3 font-medium">Anchors</p>
+          {result.anchors.anchors.length === 0
+            ? <p>no anchor records carried</p>
+            : <ul className="list-disc pl-5">{result.anchors.anchors.map((anchor) => (
+              <li key={anchor.recordSha256}>{anchor.subject ?? "unresolved"} · {anchor.status} · {anchor.recordSha256}</li>
+            ))}</ul>}
+          <p className="mt-3 font-medium">Anchor subjects</p>
+          <ul className="list-disc pl-5">{result.anchors.subjects.map((subject) => (
+            <li key={subject.subject}>{subject.subject}: {subject.outcome}{subject.declaredProfiles !== undefined ? ` (${subject.declaredProfiles.join(", ")})` : ""}</li>
+          ))}</ul>
+        </> : null}
+        {result.anchoringWindow !== undefined
+          ? <p className="mt-3">unresolved pending anchor evidence exists and `report` closes the anchoring window.</p>
+          : null}
       </div> : null}
     </div>
   </form>;

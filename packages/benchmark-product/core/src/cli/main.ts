@@ -86,6 +86,7 @@ import {
   type ImportBinaryItemBankInput,
   type SignHumanReviewResponseInput,
 } from "../operations/index.js";
+import { renderWorkspaceVerifyHuman } from "./verify-human.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
 import { dirname } from "node:path";
 import { expectedCellSet, parseBenchmark, parseRun } from "@jinn-network/benchmarking-records";
@@ -1719,20 +1720,7 @@ async function handleVerify(args: ParsedArgs, context: CliContext, jsonMode: boo
   const draftId = required(args, "draft");
 
   const result = await runVerify(opContext, { draftId });
-  return renderResult(result, jsonMode, (value) => {
-    const lines = [`verified draft ${value.draftId}: ${value.checks.join(", ")}`];
-    for (const anchor of value.anchors?.anchors ?? []) {
-      const basis = [anchor.provider, anchor.timeBasis].filter((part) => part !== undefined).join(", ");
-      lines.push(
-        `anchor ${anchor.subject ?? "unknown"}: ${basis.length === 0 ? "unknown provider/time basis" : basis}, `
-        + `${anchor.status}, record ${anchor.recordSha256}`,
-      );
-    }
-    if (value.anchoringWindow !== undefined) {
-      lines.push("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
-    }
-    return `${lines.join("\n")}\n`;
-  });
+  return renderResult(result, jsonMode, renderWorkspaceVerifyHuman);
 }
 
 async function handlePublish(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {

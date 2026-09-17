@@ -20,6 +20,7 @@ import {
   KIT_CALENDAR_URI,
   KIT_SECOND_CALENDAR_URI,
   buildLinearOtsProof,
+  buildOtsCalendarNodeBody,
   createOpenTimestampsKitFixtures,
   encodeVaruint as kitEncodeVaruint,
   otsBranch,
@@ -309,11 +310,10 @@ function buildNode(
 }
 
 /** A bare timestamp node, as a calendar returns one — the kit's full-proof serializer minus its
- * 36-byte header, so the framing under test is still the reference's. */
+ * detached-file header, so the framing under test is still the reference's. */
 function calendarBody(
   operations: readonly OtsOperation[],
   attestations: readonly OtsAttestation[],
 ): Uint8Array {
-  const full = buildLinearOtsProof({ fileDigest, operations, attestations });
-  return full.subarray(31 + 1 + 1 + 32);
+  return buildOtsCalendarNodeBody({ fileDigest, operations, attestations });
 }
