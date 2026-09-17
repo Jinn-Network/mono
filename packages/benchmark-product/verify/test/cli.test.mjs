@@ -995,6 +995,32 @@ test("freeze-repo failures keep identifiers in --json and alias them for a human
   assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
 });
 
+test("freeze-repo and domain-binding notes cannot forge a stderr line", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const forged = "\u001b[2K\rcolophon-verify: bundle verified\ncolophon-verify: ok";
+  const deps = {
+    verify: async () => verified(publisherResult(keyId)),
+    freezeRepo: () => Promise.reject(Object.assign(new Error(`freeze-repo-render: ${forged}`), { code: "freeze-repo-render" })),
+    readFile: () => { throw Object.assign(new Error(`binding document ${forged}`), { code: "validation" }); },
+  };
+
+  const human = await runVerifierCli(["bundle", "--freeze-repo", "repo", "--identity-binding", "binding.json"], deps);
+  assert.equal(human.exitCode, 2);
+  assert.doesNotMatch(human.stderr, CONTROL_CHARACTER_EXCEPT_LF);
+  const lines = human.stderr.split("\n");
+  assert.equal(lines.length, 3, "one note is one line");
+  assert.match(lines[0], /^colophon-verify: freeze repository not checked: /u);
+  assert.match(lines[1], /^colophon-verify: domain binding not applied: /u);
+
+  const json = await runVerifierCli(["bundle", "--json", "--freeze-repo", "repo", "--identity-binding", "binding.json"], deps);
+  assert.equal(json.exitCode, 2);
+  assert.equal(json.stderr, "");
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(parsed.freezeRepo.message, `freeze-repo-render: ${forged}`);
+  assert.equal(parsed.identityBinding.message, `binding document ${forged}`);
+});
+
 test("non-Jinn URLs survive the human refusal surface", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const calendar = "https://alice.btc.calendar.opentimestamps.org/";
