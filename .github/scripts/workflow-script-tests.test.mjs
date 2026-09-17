@@ -218,11 +218,11 @@ const SCANNED_SUITE_DIR = '.github/scripts';
 const THIS_DIRECTORY = String.raw`(?:import\.meta\.dirname|(?:path\.)?dirname\(\s*fileURLToPath\(\s*import\.meta\.url\s*\)\s*\))`;
 
 /**
- * `relative`, repo-root-relative, as normalized segments; null when it leaves the checkout.
- * Normalizing keeps `join(scriptsDir, '..', 'x')` comparable with the declared `.github/x`.
+ * A repo-root-relative path as segments; null when it leaves the checkout. Callers pass the
+ * output of `posix.join`, which normalizes: that is what keeps `join(scriptsDir, '..', 'x')`
+ * comparable with the declared `.github/x`.
  */
-function checkoutSegments(relative) {
-  const normalized = posix.normalize(relative);
+function checkoutSegments(normalized) {
   if (normalized === '..' || normalized.startsWith('../') || normalized.startsWith('/')) return null;
   return normalized.split('/').filter((segment) => segment !== '' && segment !== '.');
 }
