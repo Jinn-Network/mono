@@ -12,6 +12,7 @@ import { decryptMnemonic, encryptMnemonic, generateMnemonic } from '../../src/ea
 // Passthrough, except `chmodSync` on one chosen path fails, so a test can pin
 // what the password-file rewrite does when tightening is refused.
 const fsFaults = vi.hoisted(() => ({ chmodFailPath: undefined as string | undefined }));
+// MOCK_JUSTIFICATION: chmodSync is a leaf syscall the route calls directly; a refused chmod cannot be staged on a real file owned by the test user.
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
   return {
