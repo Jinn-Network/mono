@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -120,11 +120,10 @@ const cli = (stdin, script = resolve(import.meta.dirname, 'platform-verification
 };
 
 // #4144: the entry guard compared the raw `argv[1]` with a percent-encoded URL
-// pathname, so from a checkout path containing a space the CLI printed nothing.
-test('the CLI runs from a checkout path containing a space (#4144)', () => {
-  // Resolved first: on macOS the temp root is a symlink, and `import.meta.url` is
-  // the resolved path, so an unresolved one would fail for a reason other than the space.
-  const dir = mkdtempSync(join(realpathSync(tmpdir()), 'jinn selector space-'));
+// pathname, so from a checkout path containing a space the CLI printed nothing, and
+// comparing unresolved paths printed nothing through a symlinked directory.
+test('the CLI runs from a checkout path containing a space or reached through a symlink (#4144)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'jinn selector space-'));
   for (const file of [
     'platform-verification-selection.mjs',
     'platform-catalog.mjs',
@@ -133,9 +132,11 @@ test('the CLI runs from a checkout path containing a space (#4144)', () => {
   ]) {
     copyFileSync(resolve(import.meta.dirname, file), join(dir, file));
   }
+  symlinkSync(dir, join(dir, 'via link'));
   try {
-    const result = cli('docs/engineering/handbook.md\n', join(dir, 'platform-verification-selection.mjs'));
-    assert.equal(typeof result.run, 'boolean');
+    for (const script of [join(dir, 'platform-verification-selection.mjs'), join(dir, 'via link', 'platform-verification-selection.mjs')]) {
+      assert.equal(typeof cli('docs/engineering/handbook.md\n', script).run, 'boolean', script);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
