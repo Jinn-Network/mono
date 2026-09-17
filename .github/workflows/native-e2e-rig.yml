@@ -18,7 +18,7 @@ name: native-e2e-rig
 # fixture identity/trust boot leg. This workflow proves the on-chain,
 # finality-gated legs a live fork can provide, as advisory evidence only.
 #
-# Operator-run, non-CI live-fork cutover evidence and the required deploy-PR
+# Operator-run, non-gating live-fork cutover evidence and the required deploy-PR
 # record are defined in docs/runbooks/cutover-one-swap-drain.md. This workflow is
 # supplemental and does not replace those runs. The LIVE G-loop/G-archive gate
 # on real Base Sepolia with two funded operators remains DEPLOY-TIME per that
