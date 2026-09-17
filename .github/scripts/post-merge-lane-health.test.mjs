@@ -14,6 +14,7 @@ import {
   isAlertFor,
   parseMarker,
   planAlertUpdate,
+  planLaneReconcile,
   renderAlert,
   renderMarker,
   renderRecovery,
@@ -289,7 +290,13 @@ test('a re-run of the same failing run is a different failing run', () => {
   assert.ok(!sameFailingRun(markerOf(failing), markerOf(rerun)), 'a later attempt is new');
   assert.ok(!sameFailingRun(markerOf(failing), markerOf(run({ conclusion: 'failure', hoursAgo: 1 }))));
   assert.ok(!sameFailingRun(null, markerOf(failing)), 'a missing marker never matches');
-  assert.ok(monitor.includes('sameFailingRun('), 'the monitor compares failing runs through the helper');
+  // The deferral decision compares through the helper: a closed alert for the first attempt
+  // defers that attempt and files for the re-run.
+  const closedAlerts = [{ number: 1, ...renderAlert({ lane: LANE, verdict: classify([failing]) }) }];
+  const reconcile = (latestRun) =>
+    planLaneReconcile({ lane: LANE, verdict: classify([latestRun]), openAlerts: [], closedAlerts })[0].kind;
+  assert.equal(reconcile(failing), 'log', 'the same attempt defers to its closed alert');
+  assert.equal(reconcile(rerun), 'create', 'a failing re-run files afresh');
 });
 
 test('alerts filed before the attempt was recorded are still recognized as attempt 1', () => {
@@ -366,6 +373,114 @@ test('an open alert is rewritten only for a new failing run or a changed confide
   assert.equal(parseMarker(downgraded.body).runId, String(latest.id), 'same failing run, different confidence');
   assert.equal(plan({ title, body }, downgraded), 'rewrite', 'a confidence change is news');
   assert.equal(plan({ title: 'retitled', body }, newRun), 'rewrite', 'a rewrite also restores the title');
+});
+
+// planLaneReconcile (#4260): every open/update/close decision the monitor makes, as data.
+function reconcileFixtures() {
+  // Fixtures created earlier carry higher run numbers, so the newest run is made first.
+  const recovered = run({ conclusion: 'success', hoursAgo: 0.01 });
+  const newer = run({ conclusion: 'failure', hoursAgo: 0.05 });
+  const latest = run({ conclusion: 'failure', hoursAgo: 0.1 });
+  const older = run({ conclusion: 'failure', hoursAgo: 1 });
+  const alert = classify([latest, older]);
+  const rendered = renderAlert({ lane: LANE, verdict: alert });
+  const newRun = classify([newer, latest]);
+  const healthy = classify([recovered, latest]);
+  return { alert, rendered, newRun, healthy };
+}
+
+const plan = (input) => planLaneReconcile({ lane: LANE, openAlerts: [], closedAlerts: [], ...input });
+
+test('reconcile: an alert verdict with no open or matching closed alert creates one', () => {
+  const { alert, rendered } = reconcileFixtures();
+  const otherLane = { number: 5, ...renderAlert({ lane: MONITORED_LANES[1], verdict: alert }) };
+  assert.deepEqual(plan({ verdict: alert, openAlerts: [otherLane], closedAlerts: [otherLane] }), [
+    { kind: 'create', title: rendered.title, body: rendered.body },
+  ]);
+});
+
+test('reconcile: a closed alert naming the same failing run defers instead of filing', () => {
+  const { alert, rendered, newRun } = reconcileFixtures();
+  const marker = parseMarker(rendered.body);
+  const closed = { number: 7, ...rendered };
+  assert.deepEqual(plan({ verdict: alert, closedAlerts: [closed] }), [
+    {
+      kind: 'log',
+      level: 'info',
+      message: `${LANE.workflow}: alert #7 was closed for run ${marker.runId} attempt ${marker.attempt}; deferring to the next failing run.`,
+    },
+  ]);
+  assert.equal(plan({ verdict: newRun, closedAlerts: [closed] })[0].kind, 'create', 'a new failing run files afresh');
+});
+
+test('reconcile: a current alert only logs, a stale one is rewritten, a retitled one is repaired', () => {
+  const { alert, rendered, newRun } = reconcileFixtures();
+  const open = { number: 9, ...rendered };
+  assert.deepEqual(plan({ verdict: alert, openAlerts: [open] }), [
+    { kind: 'log', level: 'info', message: `${LANE.workflow} alert #9 is current.` },
+  ]);
+
+  const fresh = renderAlert({ lane: LANE, verdict: newRun });
+  assert.deepEqual(plan({ verdict: newRun, openAlerts: [open] }), [
+    { kind: 'comment', issue: 9, body: fresh.body },
+    { kind: 'update', issue: 9, fields: { title: fresh.title, body: fresh.body } },
+    { kind: 'log', level: 'warning', message: `Updated ${LANE.workflow} alert #9.` },
+  ]);
+
+  assert.deepEqual(plan({ verdict: alert, openAlerts: [{ ...open, title: 'retitled' }] }), [
+    { kind: 'update', issue: 9, fields: { title: rendered.title } },
+    { kind: 'log', level: 'notice', message: `Restored the title of ${LANE.workflow} alert #9.` },
+  ]);
+});
+
+test('reconcile: duplicates are consolidated into the lowest-numbered alert', () => {
+  const { alert, rendered } = reconcileFixtures();
+  const actions = plan({
+    verdict: alert,
+    openAlerts: [{ number: 30, ...rendered }, { number: 12, ...rendered }, { number: 20, ...rendered }],
+  });
+  assert.deepEqual(actions, [
+    { kind: 'log', level: 'info', message: `${LANE.workflow} alert #12 is current.` },
+    ...[20, 30].flatMap((issue) => [
+      { kind: 'comment', issue, body: `Duplicate ${LANE.workflow} alert; consolidated into #12.` },
+      { kind: 'close', issue, reason: 'not_planned' },
+      { kind: 'log', level: 'notice', message: `Closed duplicate ${LANE.workflow} alert #${issue}.` },
+    ]),
+  ]);
+});
+
+test('reconcile: only a healthy verdict closes open alerts', () => {
+  const { rendered, healthy } = reconcileFixtures();
+  const openAlerts = [{ number: 4, ...rendered }, { number: 3, ...rendered }];
+  assert.deepEqual(plan({ verdict: healthy, openAlerts }), [3, 4].flatMap((issue) => [
+    { kind: 'comment', issue, body: renderRecovery({ lane: LANE, verdict: healthy }) },
+    { kind: 'close', issue, reason: 'completed' },
+    { kind: 'log', level: 'notice', message: `Closed ${LANE.workflow} alert #${issue}.` },
+  ]));
+
+  const wait = classify([run({ conclusion: 'failure', hoursAgo: 2 }), run({ conclusion: 'success', hoursAgo: 9 })]);
+  for (const verdict of [wait, classify([])]) {
+    assert.deepEqual(plan({ verdict, openAlerts }), [
+      { kind: 'log', level: 'info', message: `${LANE.workflow}: ${verdict.state}; leaving 2 alert(s) open.` },
+    ]);
+    assert.deepEqual(plan({ verdict }), [
+      { kind: 'log', level: 'info', message: `${LANE.workflow}: ${verdict.state}.` },
+    ]);
+  }
+  assert.deepEqual(plan({ verdict: healthy }), [
+    { kind: 'log', level: 'info', message: `${LANE.workflow}: healthy.` },
+  ]);
+});
+
+test('reconcile: a pull request carrying the label is never acted on', () => {
+  const { alert, rendered, healthy } = reconcileFixtures();
+  const pr = { number: 2, ...rendered, pull_request: { url: 'https://api.github.com/repos/o/r/pulls/2' } };
+  assert.deepEqual(plan({ verdict: healthy, openAlerts: [pr] }), [
+    { kind: 'log', level: 'info', message: `${LANE.workflow}: healthy.` },
+  ]);
+  assert.deepEqual(plan({ verdict: alert, openAlerts: [pr], closedAlerts: [pr] }), [
+    { kind: 'create', title: rendered.title, body: rendered.body },
+  ]);
 });
 
 /**
@@ -576,14 +691,14 @@ test('the monitor runs on a schedule and holds only read-plus-issues authority',
   assert.ok(monitor.includes('post-merge-lane-health.test.mjs'), 'the monitor verifies its own decision logic');
 });
 
-test('the monitor selects alerts by marker, reads a full page, and closes only on health', () => {
-  assert.ok(monitor.includes('isAlertFor('), 'alerts are selected through the marker helper');
-  assert.ok(!monitor.includes('startsWith('), 'no title-prefix selection remains');
-  assert.ok(monitor.includes('parseMarker('), 'a hand-closed alert is recognised by its marker');
-  assert.ok(monitor.includes('planAlertUpdate('), 'an open alert is updated through the plan helper');
-  assert.ok(!monitor.includes('canonical.title !== title'), 'a title difference alone never reaches the comment path');
+test('the monitor delegates every decision to planLaneReconcile and reads a full page', () => {
+  // The driver performs API calls only (#4260); the decisions above are unit-tested here.
+  assert.ok(monitor.includes('planLaneReconcile('), 'the driver executes the planned actions');
+  for (const decision of ['isAlertFor(', 'parseMarker(', 'planAlertUpdate(', 'sameFailingRun(', 'verdict.state', 'startsWith(']) {
+    assert.ok(!monitor.includes(decision), `the driver makes no lifecycle decision of its own (${decision})`);
+  }
+  assert.ok(/switch \(action\.kind\)/u.test(monitor), 'the driver dispatches on the action kind');
   assert.ok(/per_page: 100,\s*\n\s*\}\);\s*\n\s*const verdict = classifyLane/u.test(monitor), 'the run window is the full page one request allows');
-  assert.ok(monitor.includes("verdict.state !== 'healthy'"), 'only a healthy verdict reaches the close loop');
 });
 
 test('lanes that already have a dedicated monitor are excluded on the record', () => {

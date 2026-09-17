@@ -35,7 +35,10 @@ have the same silence problem and need their own answer.
 [`.github/workflows/post-merge-lane-monitor.yml`](../../.github/workflows/post-merge-lane-monitor.yml)
 runs when a watched lane completes, every six hours, and on demand. It reads Actions
 metadata only — it never executes code from a monitored revision — and maintains at most
-one open Issue per lane, labelled `automated:post-merge-lane-failure`.
+one open Issue per lane, labelled `automated:post-merge-lane-failure`. Every decision — which
+Issue belongs to a lane, and whether to open, update, defer, or close one — is made by
+`planLaneReconcile` in the module, where it is unit-tested; the workflow only performs the API
+calls that function returns (#4260).
 
 It reads the newest 100 `push` runs of the lane on `next`. Runs that decide nothing are
 discarded first: `cancelled` (concurrency superseded it) and `skipped` (a path filter declined
