@@ -59,9 +59,9 @@ const SupplyWindowSchema = z.object({
   });
 });
 const SupplyClassSchema = z.object({
-  workClass: z.string().min(1),
-  contractId: z.string().min(1),
-  contractVersion: z.string().min(1),
+  workClass: z.string().min(1).max(128),
+  contractId: z.string().min(1).max(128),
+  contractVersion: z.string().min(1).max(128),
   acceptingSolverNets: SafeCountSchema.positive(),
   claimingOperators: SafeCountSchema.positive(),
   verdictDeliveries: SafeCountSchema.positive(),

@@ -83,6 +83,38 @@ describe('DiscoveryClient.getCurrentSupply', () => {
     ).rejects.toThrow(DiscoveryUnavailableError);
   });
 
+  it('rejects a class identifier longer than 128 characters', async () => {
+    const contractId = 'c'.repeat(129);
+    await expect(
+      clientFor({
+        ...available,
+        classes: [{
+          ...available.classes[0],
+          contractId,
+          workClass: `${contractId}.v1`,
+        }],
+      }).client.getCurrentSupply({ chainId: 84532 }),
+    ).rejects.toThrow(DiscoveryUnavailableError);
+  });
+
+  it('accepts a 128-character class identifier', async () => {
+    // workClass is `${contractId}.${contractVersion}`, so a 128-char workClass
+    // is the longest identifier the schema can accept while keeping the tuple
+    // identity check.
+    const contractId = 'c'.repeat(125);
+    const contractVersion = 'v1';
+    const body = {
+      ...available,
+      classes: [{
+        ...available.classes[0],
+        contractId,
+        contractVersion,
+        workClass: `${contractId}.${contractVersion}`,
+      }],
+    };
+    await expect(clientFor(body).client.getCurrentSupply({ chainId: 84532 })).resolves.toEqual(body);
+  });
+
   it('preserves a server unknown response', async () => {
     const unknown = {
       ...available,

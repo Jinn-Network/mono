@@ -130,6 +130,31 @@ describe('jinn supply', () => {
     expect(raw.join('')).not.toContain('no matching task');
   });
 
+  it('strips C0, DEL, and C1 from human class lines and leaves JSON untouched', async () => {
+    const workClass = 'pred\u0007iction\u007F.\u009Bv1';
+    const response = {
+      schemaVersion: 1, status: 'available', chainId: 84532,
+      generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
+      classes: [{
+        workClass, contractId: 'pred\u0007iction', contractVersion: '\u009Bv1',
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
+        latestAttemptAt: '2026-09-06T10:00:00.000Z',
+        latestVerdictAt: '2026-09-06T11:00:00.000Z',
+      }],
+    };
+    const human = commandWith(response);
+    const { raw } = await runCommand(human.command, { argv: ['--human'] });
+    const text = raw.join('');
+    expect(text).toContain('prediction.v1:');
+    const classLine = text.split('\n').find((line) => line.includes('prediction.v1:'));
+    expect(classLine).toBeDefined();
+    expect(classLine).not.toMatch(/[\u0000-\u001F\u007F-\u009F]/u);
+
+    const json = commandWith(response);
+    const { envelopes } = await runCommand(json.command);
+    expect(envelopes[0]).toMatchObject({ classes: [{ workClass }] });
+  });
+
   it('renders unknown without calling it zero', async () => {
     const deps = commandWith({
       schemaVersion: 1, status: 'unknown', reason: 'incomplete_indexer_evidence',

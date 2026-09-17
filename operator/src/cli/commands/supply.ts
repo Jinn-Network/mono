@@ -26,6 +26,10 @@ const PRODUCTION_DEPS: SupplyCommandDeps = {
   createDiscoveryClient: createHttpDiscoveryClient,
 };
 
+function sanitizeHumanIdentifier(value: string): string {
+  return value.replace(/[\u0000-\u001F\u007F-\u009F]/gu, '');
+}
+
 function humanSupply(result: CurrentSupplyResponse): string {
   const window = `${result.window.start} to ${result.window.end}`;
   if (result.status === 'unknown') {
@@ -61,7 +65,7 @@ function humanSupply(result: CurrentSupplyResponse): string {
   }
   for (const entry of result.classes) {
     lines.push(
-      `${entry.workClass}: ${entry.acceptingSolverNets} accepting SolverNet(s), `
+      `${sanitizeHumanIdentifier(entry.workClass)}: ${entry.acceptingSolverNets} accepting SolverNet(s), `
       + `${entry.claimingOperators} recent operator(s), `
       + `${entry.verdictDeliveries} recent verdict delivery(ies)`,
     );
