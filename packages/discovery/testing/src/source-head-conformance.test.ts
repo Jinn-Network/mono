@@ -46,6 +46,19 @@ describe("checkSourceHeadVector rejects a procedure that touches the stored mark
     await expect(checkSourceHeadVector(rewriteOnOk, okVector!)).rejects.toThrow(/leave the stored mark unchanged/);
   });
 
+  it("an in-place edit of the stored mark fails a seeded vector", async () => {
+    const seededVector = vectors.find((vector) => (vector.input as { seed: { hwm: unknown } }).seed.hwm !== null);
+    const editInPlace: SourceHeadVerify = async (opts) => {
+      const outcome = await verifySourceHead(opts);
+      const mark = await opts.ports.hwm.get(opts.source);
+      if (mark) (mark as { issuedAt: string }).issuedAt = "2099-01-01T00:00:00.000Z";
+      return outcome;
+    };
+    await expect(checkSourceHeadVector(editInPlace, structuredClone(seededVector!))).rejects.toThrow(
+      /leave the stored mark unchanged/,
+    );
+  });
+
   it("the reference procedure passes every vector", async () => {
     for (const vector of vectors) await checkSourceHeadVector(verifySourceHead, vector);
   });

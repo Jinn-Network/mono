@@ -171,8 +171,9 @@ export async function checkSourceHeadVector(verify: SourceHeadVerify, vector: Ve
   // mark store, and whatever it answers, `ok` included, the stored mark must
   // come out exactly as it went in -- neither advanced nor rewritten. Pinned
   // to the seed so a fake that failed to seed cannot make this comparison
-  // vacuous.
-  const markBefore = await ports.hwm.get(input.source);
+  // vacuous. Compared as a copy: the store hands back the seeded object
+  // itself, so an in-place edit would otherwise move both sides together.
+  const markBefore = structuredClone(await ports.hwm.get(input.source));
   const seeded = input.seed.hwm as { cursor: HighWaterMark } | null;
   expect(markBefore, `${vector.name}: seeded mark`).toEqual(seeded?.cursor);
   const outcome = await verify({
