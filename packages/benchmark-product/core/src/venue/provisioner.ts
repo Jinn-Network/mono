@@ -24,6 +24,7 @@ import { parseCellKey } from "@jinn-network/benchmarking-records";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import {
   harvest as workspaceHarvest,
+  makeDirProvisioner,
   makeWorktreeProvisioner,
   canonicalLoadoutPath,
   canonicalLoadoutPin,
@@ -592,6 +593,7 @@ function repositoryWorkProvisionerContract(
 ): ProvisionerContract {
   let resolved: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
   let roles: { readonly demo1Claude: boolean; readonly repositoryEditingHarness: boolean } | undefined;
+  const runtime = { assertHarnessGroupEmpty: () => undefined, ensureMetaReserve: () => undefined };
 
   /**
    * Resolves the mirror and builds the platform base provisioner. Called by `setup` before the
@@ -620,7 +622,7 @@ function repositoryWorkProvisionerContract(
       dispatchContextBytes: options.dispatchContextBytes,
       referenceRepository: mirrorDir,
       oid,
-      runtime: { assertHarnessGroupEmpty: () => undefined, ensureMetaReserve: () => undefined },
+      runtime,
       fetchInput: async (descriptor) => {
         // The Task's "repository-state" input has no bytes of its own to materialize verbatim
         // -- it is a pointer to the mirror-resolved checkout. The checkout itself lands at
@@ -674,9 +676,9 @@ function repositoryWorkProvisionerContract(
       // `blame: infrastructure` loss. Everything `setup` assigned is re-derivable from the sealed
       // Task and the Submission requirements that `reconstructRecoveryContext` replays verbatim,
       // so recovery rebuilds it; when `setup` did run, the closure values are reused unchanged.
-      let bound: { readonly base: ProvisionerContract; readonly mirrorDir: string };
+      let bound: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
       try {
-        bound = resolved ?? await bind();
+        bound = resolved ?? (existsSync(paths.work) ? await bind() : undefined);
       } catch (error) {
         // `bind` raises `ProvisioningRejectedError`, whose `neverExecuted` is true by
         // construction -- correct at setup, false here: harvest runs only after the harness has
@@ -687,7 +689,17 @@ function repositoryWorkProvisionerContract(
           { cause: error },
         );
       }
-      const { base, mirrorDir } = bound;
+      // With no checkout, nothing downstream needs the mirror (#3654): patch extraction is skipped
+      // below, and the delegated harvest is `makeDirProvisioner`'s -- the same one
+      // `makeWorktreeProvisioner` inherits (`{ ...makeDirProvisioner(options), ... }`) -- which
+      // reads only the workspace, never `referenceRepository` or `oid`. The dir provisioner
+      // therefore stands in without resolving a mirror that may be unreachable.
+      const base = bound?.base ?? makeDirProvisioner({
+        sealedTaskBytes: options.sealedTaskBytes,
+        dispatchContextBytes: options.dispatchContextBytes,
+        runtime,
+      });
+      const mirrorDir = bound?.mirrorDir;
       const { demo1Claude, repositoryEditingHarness } = roles
         ?? repositoryWorkHarnessRoles({ effectiveRequirements: options.requirements }, options.demo1Instructions);
       try {
@@ -727,11 +739,17 @@ function repositoryWorkProvisionerContract(
         const manifest = result.manifest.filter((entry) => declared.has(entry.path));
         return { manifest, omissions: result.omissions, integrityViolations: result.integrityViolations };
       } finally {
-        // Copies `solverProvisioner`'s teardown in the model referenced above, verbatim in shape:
-        // deregister the worktree, falling back to a forced directory removal, then prune.
-        await runGit(["-C", mirrorDir, "worktree", "remove", "--force", paths.work])
-          .catch(() => rm(paths.work, { recursive: true, force: true }));
-        await runGit(["-C", mirrorDir, "worktree", "prune"]).catch(() => undefined);
+        if (mirrorDir === undefined) {
+          // No mirror was bound, so there is no worktree registration to remove here; a stale one
+          // is cleared by the next mirror-bound harvest's prune.
+          await rm(paths.work, { recursive: true, force: true });
+        } else {
+          // Copies `solverProvisioner`'s teardown in the model referenced above, verbatim in shape:
+          // deregister the worktree, falling back to a forced directory removal, then prune.
+          await runGit(["-C", mirrorDir, "worktree", "remove", "--force", paths.work])
+            .catch(() => rm(paths.work, { recursive: true, force: true }));
+          await runGit(["-C", mirrorDir, "worktree", "prune"]).catch(() => undefined);
+        }
       }
     },
   };
