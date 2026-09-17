@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   BUNDLE_V8_FORMAT,
+  BUNDLE_V10_FORMAT,
   SUPPORTED_BUNDLE_FORMATS,
   type SupportedBundleFormat,
   type VerifiedBundleSnapshot,
@@ -48,6 +49,10 @@ function canonical(value: unknown): Uint8Array {
 }
 
 const SOURCE_BYTES = encoder.encode("the licensed upstream source document\n");
+/** Every format whose meaning to the projection is a table row. The composed generation's is a
+ * function of the vector a bundle declares, so it has none. */
+const ENUMERATED_FORMATS = Object.keys(FREEZE_REPO_BUNDLE_SUPPORT) as (keyof typeof FREEZE_REPO_BUNDLE_SUPPORT)[];
+
 const SOURCE_DIGEST = sha256Hex(SOURCE_BYTES);
 
 const SECOND_SOURCE_DIGEST = sha256Hex(encoder.encode("a second licensed source\n"));
@@ -77,6 +82,8 @@ const SAMPLING_SCRIPT_BYTES = encoder.encode("#!/usr/bin/env python3\nprint('sam
 interface SnapshotOverrides {
   readonly benchmark?: Record<string, unknown>;
   readonly format?: SupportedBundleFormat;
+  /** The vector a composed (`/10`) snapshot declares. */
+  readonly capabilities?: readonly string[];
   readonly records?: readonly { readonly bytes: Uint8Array; readonly roles: readonly string[] }[];
 }
 
@@ -112,9 +119,10 @@ function snapshotOf(overrides: SnapshotOverrides = {}): VerifiedBundleSnapshot {
     ["qualification.json", canonical({ format: "benchmark-product-binary-qualification/1" })],
     ["bundle.json", canonical({ format: overrides.format ?? BUNDLE_V4_FORMAT, files: [] })],
   ]);
+  const vector = overrides.capabilities === undefined ? {} : { capabilities: overrides.capabilities };
   for (const record of records) fileBytes.set(`records/${sha256Hex(record.bytes)}.bin`, record.bytes);
   return {
-    manifest: { format: overrides.format ?? BUNDLE_V4_FORMAT, files: [] } as VerifiedBundleSnapshot["manifest"],
+    manifest: { format: overrides.format ?? BUNDLE_V4_FORMAT, ...vector, files: [] } as VerifiedBundleSnapshot["manifest"],
     bytes: fileBytes.get("bundle.json")!,
     identity: "a".repeat(64),
     fileBytes,
@@ -254,7 +262,8 @@ describe("freeze repository rendering", () => {
   test("names every accepted format when it refuses one that is not accepted", () => {
     // A hand-written list in the message is how this refusal came to name a stale accept set
     // (issue #3540). It is generated from the support table, so it cannot go stale again.
-    const accepted = SUPPORTED_BUNDLE_FORMATS.filter((format) => FREEZE_REPO_BUNDLE_SUPPORT[format].qualification);
+    const accepted: string[] = ENUMERATED_FORMATS.filter((format) => FREEZE_REPO_BUNDLE_SUPPORT[format].qualification);
+    accepted.push(`${BUNDLE_V10_FORMAT} declaring "binary-qualification"`);
     expect(accepted.length).toBeGreaterThan(1);
     let message: string | undefined;
     try {
@@ -299,6 +308,35 @@ describe("freeze repository rendering", () => {
       const readme = decoder.decode(renderFreezeRepo(snapshotOf({ format })).files.get("README.md")!);
       expect(readme, format).not.toContain("disclosure-specification record");
     }
+  });
+
+  test("a composed bundle answers from the vector it declares, not from its format number", () => {
+    // `/10` encodes nothing in its number. Declaring `binary-qualification` is what carries the
+    // qualification graph, so that -- and only that -- is what the export accepts.
+    const qualified = ["anchoring", "binary-qualification"];
+    const v7 = renderFreezeRepo(snapshotOf({ format: BUNDLE_V7_FORMAT }));
+    const composed = renderFreezeRepo(snapshotOf({ format: BUNDLE_V10_FORMAT, capabilities: qualified }));
+    expect(readManifest(composed)["bundle"]).toEqual({ identity: "a".repeat(64), format: BUNDLE_V10_FORMAT });
+    // The same freeze artifacts as the pre-composition cell the vector composes to.
+    for (const [path, bytes] of v7.files) {
+      if (path.startsWith("artifacts/")) expect(composed.files.get(path), path).toEqual(bytes);
+    }
+    expect([...composed.files.keys()].sort()).toEqual([...v7.files.keys()].sort());
+
+    for (const capabilities of [[], ["anchoring"]]) {
+      const refusal = expectRefusal(() => renderFreezeRepo(snapshotOf({ format: BUNDLE_V10_FORMAT, capabilities })));
+      expect(refusal.code).toBe("validation");
+      expect(refusal.message).toMatch(/requires a qualification bundle/);
+      expect(refusal.message).toContain(`${BUNDLE_V10_FORMAT} declaring "binary-qualification"`);
+      expect(refusal.message).toContain(`with capabilities ${JSON.stringify(capabilities)}`);
+    }
+  });
+
+  test("a composed bundle declaring a disclosure record is told where it is, like the disclosed closure", () => {
+    const readme = (capabilities: readonly string[]) =>
+      decoder.decode(renderFreezeRepo(snapshotOf({ format: BUNDLE_V10_FORMAT, capabilities })).files.get("README.md")!);
+    expect(readme(["binary-qualification", "disclosure-specification"])).toContain("disclosure-specification record");
+    expect(readme(["binary-qualification"])).not.toContain("disclosure-specification record");
   });
 
   test("refuses when the Benchmark record declares no licence", () => {
@@ -354,20 +392,24 @@ describe("freeze repository bundle-format support table", () => {
     // and be refused for its version alone (issue #3540). The table is keyed by the supported
     // union, so a new format is a type error until someone writes its row; this is the same
     // check at runtime, for a build that widens the union without widening the type.
-    for (const format of SUPPORTED_BUNDLE_FORMATS) {
+    for (const format of ENUMERATED_FORMATS) {
       expect(FREEZE_REPO_BUNDLE_SUPPORT[format], format).toBeDefined();
       expect(typeof FREEZE_REPO_BUNDLE_SUPPORT[format].qualification, format).toBe("boolean");
       expect(typeof FREEZE_REPO_BUNDLE_SUPPORT[format].disclosure, format).toBe("boolean");
     }
-    expect(Object.keys(FREEZE_REPO_BUNDLE_SUPPORT).sort()).toEqual([...SUPPORTED_BUNDLE_FORMATS].sort());
+    // The composed generation is the one format with no row: its answer is a function of the
+    // vector a bundle declares, so a row could only be wrong for some bundle of that format.
+    expect(Object.keys(FREEZE_REPO_BUNDLE_SUPPORT).sort()).toEqual([...ENUMERATED_FORMATS].sort());
+    expect(SUPPORTED_BUNDLE_FORMATS.filter((format) => !(ENUMERATED_FORMATS as readonly string[]).includes(format)))
+      .toEqual([BUNDLE_V10_FORMAT]);
   });
 
   test("accepts exactly the qualification-carrying closures", () => {
-    expect(SUPPORTED_BUNDLE_FORMATS.filter((format) => FREEZE_REPO_BUNDLE_SUPPORT[format].qualification))
+    expect(ENUMERATED_FORMATS.filter((format) => FREEZE_REPO_BUNDLE_SUPPORT[format].qualification))
       .toEqual([BUNDLE_V4_FORMAT, BUNDLE_V7_FORMAT, BUNDLE_V8_FORMAT]);
     // A disclosure record is claim-side; carrying one never makes a bundle a freeze subject on
     // its own, and every format that carries one must also carry the qualification graph.
-    for (const format of SUPPORTED_BUNDLE_FORMATS) {
+    for (const format of ENUMERATED_FORMATS) {
       if (FREEZE_REPO_BUNDLE_SUPPORT[format].disclosure) {
         expect(FREEZE_REPO_BUNDLE_SUPPORT[format].qualification, format).toBe(true);
       }
@@ -387,12 +429,16 @@ describe("the verifier README's accepted-format list", () => {
     const rest = readme.indexOf("\n## ", start + 1);
     const section = readme.slice(start, rest === -1 ? undefined : rest);
 
-    for (const format of SUPPORTED_BUNDLE_FORMATS) {
+    for (const format of ENUMERATED_FORMATS) {
       // The section speaks in short names (`v8`), not whole format strings.
       const shortName = `v${format.slice(format.lastIndexOf("/") + 1)}`;
       const accepted = FREEZE_REPO_BUNDLE_SUPPORT[format].qualification;
       expect(section.includes(shortName), `${format} accepted=${accepted}`).toBe(accepted);
     }
+    // A composed bundle is accepted exactly when it declares the capability, so the section names
+    // both the format and the token that decides it.
+    expect(section).toContain("v10");
+    expect(section).toContain("`binary-qualification`");
   });
 });
 
