@@ -107,14 +107,13 @@ async function main(): Promise<void> {
     return;
   }
 
-  const pw = resolveCliPassword(process.argv.slice(2));
+  const config = loadConfig(getConfigPathFromArgs(process.argv.slice(2)));
+  const pw = resolveCliPassword(process.argv.slice(2), process.env, { earningDir: config.earningDir });
   if (!pw.ok) {
     console.error(`[withdraw] Fatal: ${pw.message}`);
     process.exitCode = 1;
     return;
   }
-
-  const config = loadConfig(getConfigPathFromArgs(process.argv.slice(2)));
   const networkChain = config.network === 'testnet' ? 'base-sepolia' : 'base';
   const publicClient = createJinnPublicClient(config.rpcUrl, networkChain);
   const store = new FleetStateStore(config.earningDir);

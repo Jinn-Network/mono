@@ -20,6 +20,10 @@ import {
   apiPortFailureMessage as defaultApiPortFailureMessage,
   checkApiPortAvailable as defaultCheckApiPortAvailable,
 } from '../../preflight/api-port.js';
+import {
+  legacyKeystorePasswordPath,
+  primaryKeystorePasswordPath,
+} from '../../earning/password-file.js';
 // ── Structured progress envelope ─────────────────────────────────────────────
 
 /**
@@ -232,15 +236,26 @@ Examples:
       // BEFORE we generate or write any plaintext password material. If any
       // blocking preflight fails we exit with no orphan secrets on disk.
       const config = deps.loadConfig(configPath);
-      const passwordFilePath = join(config.earningDir, 'keystore-password');
+      const passwordFilePath = primaryKeystorePasswordPath(config.earningDir);
       const keystoreFilePath = join(config.earningDir, 'master_keystore.json');
+      const readExistingPassword = (path: string): string | undefined => {
+        if (!deps.passwordFileIO.exists(path)) return undefined;
+        const value = deps.passwordFileIO.read(path).trim();
+        return value.length > 0 ? value : undefined;
+      };
+      // Same order as `jinn run`: primary earning-dir file, then host-wide legacy.
+      // Generating while only the legacy file exists would write a new primary
+      // that then outranks the password that still opens the keystore.
+      const existingFilePassword =
+        readExistingPassword(passwordFilePath)
+        ?? readExistingPassword(legacyKeystorePasswordPath({ env: ctx.env }));
 
       // Track whether we touched the password file so error paths can report
       // accurate cleanup state in the structured envelope.
       let passwordGenerated = false;
-      // `passwordFilePreexisted` records whether the on-disk password file
-      // existed *before* this quickstart invocation. We must never delete a
-      // file the user already had — only one we just wrote.
+      // `passwordFilePreexisted` records whether the primary file existed
+      // *before* this quickstart invocation. We must never delete a file the
+      // user already had — only one we just wrote.
       const passwordFilePreexisted = deps.passwordFileIO.exists(passwordFilePath);
 
       const cleanupGeneratedPasswordIfOrphaned = (): { removed: boolean; reason: string } => {
@@ -310,7 +325,8 @@ Examples:
       }
       console.error('[quickstart] Running preflight checks...');
       const doctorTransientPassword = ctx.env['JINN_PASSWORD']
-        ?? (passwordFilePreexisted ? deps.passwordFileIO.read(passwordFilePath).trim() : 'preflight-only');
+        ?? existingFilePassword
+        ?? 'preflight-only';
       const doctorWriter = new StringWriter();
       await deps.doctorRun({
         argv: ['--json', ...(configPath ? ['--config', configPath] : [])],
@@ -368,8 +384,8 @@ Examples:
       if (ctx.env['JINN_PASSWORD']) {
         password = ctx.env['JINN_PASSWORD'];
         console.error('[quickstart] Using password from JINN_PASSWORD environment variable.');
-      } else if (passwordFilePreexisted) {
-        password = deps.passwordFileIO.read(passwordFilePath).trim();
+      } else if (existingFilePassword) {
+        password = existingFilePassword;
         console.error('[quickstart] Using existing auto-generated password.');
       } else {
         password = deps.randomBytesFn(32).toString('hex');

@@ -63,7 +63,11 @@ import {
 } from '../../config/write-native-identity.js';
 import { ROLE_SETS, orderedRolesForSet, type RoleSetName } from './native-requester.js';
 import { resolveDefaultStateDir } from '../../state-dir.js';
-import { primaryKeystorePasswordPath } from '../../earning/password-file.js';
+import {
+  legacyKeystorePasswordPath,
+  primaryKeystorePasswordPath,
+  readKeystorePasswordFile,
+} from '../../earning/password-file.js';
 
 const OPTIONS = {
   ...COMMON_FLAGS,
@@ -449,19 +453,11 @@ export function resolveCeremonyPassword(input: {
   readonly dir: string;
   readonly env: NodeJS.ProcessEnv;
 }): CeremonyPasswordResolution | { readonly refusal: string; readonly hint: string } {
-  const home = input.env.HOME ?? homedir();
-  const defaultDir = resolveDefaultStateDir({ home, env: input.env });
   const primaryPath = primaryKeystorePasswordPath(join(input.dir, 'earning'));
-  const legacyPath = join(defaultDir, 'keystore-password');
-  const readTrimmed = (path: string): string | undefined => {
-    if (!existsSync(path)) return undefined;
-    const value = readFileSync(path, 'utf-8').trim();
-    return value.length > 0 ? value : undefined;
-  };
-  const primary = readTrimmed(primaryPath);
-  const legacy = readTrimmed(legacyPath);
-  const filePassword = primary ?? legacy;
-  const filePath = primary !== undefined ? primaryPath : legacy !== undefined ? legacyPath : undefined;
+  const legacyPath = legacyKeystorePasswordPath({ env: input.env });
+  const fromFile = readKeystorePasswordFile(join(input.dir, 'earning'), input.env);
+  const filePassword = fromFile?.password;
+  const filePath = fromFile?.path;
 
   const envPassword = input.env.JINN_PASSWORD;
   if (typeof envPassword === 'string' && envPassword.length > 0) {

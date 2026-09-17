@@ -45,7 +45,7 @@ export async function deriveOperatorIdentity(
     );
   }
 
-  const password = resolveCliPassword(Array.from(argv), env);
+  const password = resolveCliPassword(Array.from(argv), env, { earningDir });
   if (!password.ok) {
     throw new Error(password.message);
   }
