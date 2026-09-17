@@ -41,8 +41,9 @@ export class NativeDiscoverySourceResolutionError extends Error {
    *   introduce this identity (or has no introduction document at all) aborts the whole poll, the
    *   hard refusal this class has always been; an answer naming a destination outside the serving
    *   root wraps a `ContainedOriginError`, which `native-discovery.ts` isolates to this one source
-   *   and reports in the poll's `degraded` list as `refused-destination` (#3433). That source yields nothing
-   *   for the poll, where an `unreachable` one is expected to yield once its peer is up.
+   *   and reports in the poll's `degraded` list as `refused-destination` (#3433). That source
+   *   yields nothing for the poll, where an `unreachable` one is expected to yield once its peer
+   *   is up.
    */
   readonly kind: 'unreachable' | 'unintroduced';
 
