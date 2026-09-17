@@ -270,8 +270,12 @@ describe("product documentation consistency", () => {
     // Issue #3328: the external guide read as if it covered every format, while its table,
     // walkthrough, and script only read public-bundle/2, and v5 had no split at all.
     const doc = read(externalVerificationPath);
-    expect(doc).toContain(`\`${BUNDLE_FORMAT}\``);
-    expect(doc).toContain(`\`${BUNDLE_V5_FORMAT}\``);
+    // The scope statement sits in the preamble, before the first section; `/2` is named all over
+    // the rest of the guide, so only the preamble can prove the scope is stated.
+    const preamble = doc.slice(0, doc.indexOf("\n## "));
+    expect(preamble).toContain(`\`${BUNDLE_FORMAT}\``);
+    expect(preamble).toContain(`\`${BUNDLE_V5_FORMAT}\``);
+    expect(preamble).toContain("`external-verify.py`");
     const start = doc.indexOf("\n## Evidence-native bundle v5\n");
     expect(start, "v5 section present").toBeGreaterThan(-1);
     const next = doc.indexOf("\n## ", start + 1);
@@ -284,15 +288,15 @@ describe("product documentation consistency", () => {
     expect(section).toContain("`benchmark-product.claim-package/3`");
     expect(section).toContain("metadata-first");
     expect(section).toContain("not fetched");
-    const allowed = new Set([
-      readerLine(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND),
-      readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
-    ]);
-    const lines = fenceBodies(section)
+    // No metadata-first command constant exists (PUBLIC-BUNDLE.md says so); the metadata-first
+    // reader is the `@0.2.1` release, which is the prompted-screening exact line.
+    const fullEvidence = readerLine(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND);
+    const metadataFirst = readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND);
+    const stated = fenceBodies(section)
       .flatMap((body) => body.split("\n"))
-      .filter((line) => line.includes("npx "));
-    expect(lines.length).toBeGreaterThan(0);
-    for (const line of lines) expect(allowed, line).toContain(readerLine(line));
+      .filter((line) => line.includes("npx "))
+      .map(readerLine);
+    expect([...new Set(stated)].sort()).toEqual([fullEvidence, metadataFirst].sort());
   });
 
   it("pins the per-format reader table to the reader's own constants", () => {

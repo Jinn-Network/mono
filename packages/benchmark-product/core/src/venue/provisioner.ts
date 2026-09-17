@@ -669,11 +669,11 @@ function repositoryWorkProvisionerContract(
       // The backend's recovery path (`recoverRef` -> `completeAttempt` in
       // `@jinn-network/task-execution-backend-local`) re-enters harvest for every
       // completion-capable row that carries no journaled `harvested` event -- `harvesting-resume`,
-      // `matching-late`, `corrected` -- and it does so with a contract minted fresh by
-      // `createLocalProvisioner`, whose `setup` recovery never runs. Reading the closure state
-      // that `setup` would have assigned therefore threw on exactly the rows recovery exists to
-      // complete, turning repository edits the harness had already written into a permanent
-      // `blame: infrastructure` loss. Everything `setup` assigned is re-derivable from the sealed
+      // `matching-late`, `corrected`, and a live-shim `matching` row -- and it does so with a
+      // contract minted fresh by `createLocalProvisioner`, whose `setup` recovery never runs.
+      // Reading the closure state that `setup` would have assigned therefore threw on exactly the
+      // rows recovery exists to complete, turning repository edits the harness had already written
+      // into a permanent `blame: infrastructure` loss. Everything `setup` assigned is re-derivable from the sealed
       // Task and the Submission requirements that `reconstructRecoveryContext` replays verbatim,
       // so recovery rebuilds it; when `setup` did run, the closure values are reused unchanged.
       let bound: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
