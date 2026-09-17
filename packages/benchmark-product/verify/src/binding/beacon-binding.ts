@@ -124,6 +124,15 @@ export type BeaconSourceId = keyof typeof BEACON_SOURCES;
 export const BEACON_SOURCE_IDS = Object.keys(BEACON_SOURCES).sort() as readonly BeaconSourceId[];
 
 /**
+ * The word a reader surface uses for a beacon's index (issue #3429, #3871): `attributive-height`
+ * sources index by block height, every other admitted source by round. One decision, shared by
+ * the report face and the publisher CLI's `bind` line.
+ */
+export function beaconIndexWord(source: BeaconSourceId): "round" | "height" {
+  return BEACON_SOURCES[source].timeBasis === "attributive-height" ? "height" : "round";
+}
+
+/**
  * A schema-level sanity ceiling on a round index. Not a beacon limit, and deliberately not the
  * representability guarantee either: the ceiling that matters is per-source, because it falls out
  * of each source's own period, and one shared number cannot be sound for all of them. Quicknet's
