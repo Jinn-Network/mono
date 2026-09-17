@@ -930,6 +930,12 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
 });
 
 describe("portable public bundle", () => {
+  /** Digest-named bundle directories for a draft; none when the parent was never created. */
+  function digestNamedBundleDirs(draftId = "draft-1"): string[] {
+    const dir = publicBundlesDir(workspaceDir, draftId);
+    return existsSync(dir) ? readdirSync(dir).filter((name) => /^[a-f0-9]{64}$/u.test(name)) : [];
+  }
+
   test("publishes only from reported, writes bundle identity before transitioning, and is idempotently readable", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);
@@ -998,9 +1004,7 @@ describe("portable public bundle", () => {
       afterRename: () => { throw new Error("fault between rename and return"); },
     });
     expect(refused.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
@@ -1016,9 +1020,7 @@ describe("portable public bundle", () => {
       beforeRename: () => { throw new Error("fault before rename"); },
     });
     expect(failed.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
   });
@@ -1034,9 +1036,7 @@ describe("portable public bundle", () => {
       beforeRunState: () => { throw new Error("refused after materialization"); },
     });
     expect(refused.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
@@ -1075,16 +1075,18 @@ describe("portable public bundle", () => {
       beforeRunState: () => { throw new Error("refused after materialization"); },
     });
     expect(refused.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+    expect(readRunState(workspaceDir, "draft-1")?.additionalBundles).toBeUndefined();
 
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(retry.ok, JSON.stringify(retry)).toBe(true);
     if (!retry.ok) return;
     expect(retry.result.additionalBundles).toHaveLength(1);
+    const identities = [retry.result.bundleIdentity, ...retry.result.additionalBundles!.map((entry) => entry.bundleIdentity)];
+    // Two distinct directories, or the "removes both" assertion above could pass on one.
+    expect(new Set(identities).size).toBe(2);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
   }, 60_000);
 
@@ -1130,9 +1132,7 @@ describe("portable public bundle", () => {
     const refused = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(refused.error.issues?.[0]?.path).toBe("claim-consistency");
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
   });
 
