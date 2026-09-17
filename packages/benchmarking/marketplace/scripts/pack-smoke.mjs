@@ -87,6 +87,11 @@ const expected = [
   "enforceAnchoredOrderingGate",
   "AnchoredOrderingViolationError",
   "validateMarketplaceBudget",
+  "parseMarketplaceOrderingRecord",
+  "serializeMarketplaceOrderingRecord",
+  "buildMarketplaceOrderingReceipt",
+  "evaluateOrderingBytes",
+  "memoizeSealedRecordMaterial",
 ];
 for (const name of expected) {
   if (typeof marketplace[name] !== "function") {

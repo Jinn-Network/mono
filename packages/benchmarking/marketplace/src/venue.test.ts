@@ -47,6 +47,8 @@ import {
   BENCHMARKING_CELL_EXTENSION,
   type ProjectorCellJoinCandidate,
 } from "./cell-authority.js";
+import { evaluateOrderingBytes } from "./ordering-receipt.js";
+import { MARKETPLACE_ORDERING_SCHEMA_ID } from "./ordering-record.js";
 import {
   AnchoredOrderingViolationError,
   MarketplaceCompositionValidationError,
@@ -480,11 +482,12 @@ describe("runOnMarketplace", () => {
       accounted: 1,
     };
 
+    const eventsThroughAnchor = vi.fn(() => enriched);
     const result = await runOnMarketplace(bench, run, executionBackend, {
       runDigest,
       closeBoundary: closePorts(),
       projector: {
-        eventsThroughAnchor: () => enriched,
+        eventsThroughAnchor,
         generation: "revised",
         join: {
           cellsFromObservations: () => [joinCandidate],
@@ -511,6 +514,18 @@ describe("runOnMarketplace", () => {
     expect(result.coherentClose.boundary.at).toBe(CLOSE_AT);
     expect(result.matrix.record.closeBoundary.at).toBe(CLOSE_AT);
     expect(result.anchoredOrdering.check.ok).toBe(true);
+    expect(eventsThroughAnchor).toHaveBeenCalledTimes(1);
+    expect(result.orderingReceipt.record.schema).toBe(MARKETPLACE_ORDERING_SCHEMA_ID);
+    expect(result.orderingReceipt.record.events).toHaveLength(enriched.length);
+    expect(result.orderingReceipt.record.transcript).toEqual({
+      runDigestAnchorAt: result.anchoredOrdering.runDigestAnchorAt,
+      earliestCellPostAt: result.anchoredOrdering.earliestCellPostAt,
+    });
+    const evaluation = await evaluateOrderingBytes({
+      recordBytes: result.orderingReceipt.recordBytes,
+      members: result.orderingReceipt.members,
+    });
+    expect(evaluation.status).toBe("present");
 
     const cell = result.matrix.record.cells[0]!;
     expect(cell.attempt).toBe(attempt);
