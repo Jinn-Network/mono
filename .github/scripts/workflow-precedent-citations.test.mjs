@@ -401,10 +401,6 @@ function testSelectors(source) {
     .flatMap(({ text }) => [...text.matchAll(/[\w.*-]+\.test\.mjs/g)].map((match) => match[0]));
 }
 
-// A nested importer reaches the module through `../`, so the specifier is matched
-// with any run of relative segments rather than as the literal `./` spelling.
-const IMPORTS_SHARED_MODULE = /from\s+['"](?:\.\.?\/)+workflow-artifact-steps\.mjs['"]/;
-
 function selects(selector, fileName) {
   const pattern = selector.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*');
   return new RegExp(`^${pattern}$`).test(fileName);
@@ -416,7 +412,7 @@ export function lanesMissingSharedModule(workflowsRoot = workflowsDir, scriptsRo
   // walk keeps the two scans from disagreeing about which files exist.
   const importers = scriptModules(scriptsRoot)
     .filter((name) => name.endsWith('.test.mjs'))
-    .filter((name) => IMPORTS_SHARED_MODULE.test(readFileSync(join(scriptsRoot, name), 'utf8')))
+    .filter((name) => readFileSync(join(scriptsRoot, name), 'utf8').includes('./workflow-artifact-steps.mjs'))
     .map((name) => basename(name));
 
   const missing = [];

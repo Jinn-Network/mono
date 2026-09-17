@@ -124,16 +124,16 @@ const cli = (stdin, script = resolve(import.meta.dirname, 'platform-verification
 // comparing unresolved paths printed nothing through a symlinked directory.
 test('the CLI runs from a checkout path containing a space or reached through a symlink (#4144)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'jinn selector space-'));
-  for (const file of [
-    'platform-verification-selection.mjs',
-    'platform-catalog.mjs',
-    'public-surface-assets.mjs',
-    'repository-candidates.mjs',
-  ]) {
-    copyFileSync(resolve(import.meta.dirname, file), join(dir, file));
-  }
-  symlinkSync(dir, join(dir, 'via link'));
   try {
+    for (const file of [
+      'platform-verification-selection.mjs',
+      'platform-catalog.mjs',
+      'public-surface-assets.mjs',
+      'repository-candidates.mjs',
+    ]) {
+      copyFileSync(resolve(import.meta.dirname, file), join(dir, file));
+    }
+    symlinkSync(dir, join(dir, 'via link'));
     for (const script of [join(dir, 'platform-verification-selection.mjs'), join(dir, 'via link', 'platform-verification-selection.mjs')]) {
       assert.equal(typeof cli('docs/engineering/handbook.md\n', script).run, 'boolean', script);
     }

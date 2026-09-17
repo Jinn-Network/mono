@@ -100,9 +100,9 @@ test('an unknown event defaults to running the suite', () => {
 // comparing unresolved paths printed nothing through a symlinked directory.
 test('the CLI runs from a checkout path containing a space or reached through a symlink (#4144)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'jinn hermetic space-'));
-  copyFileSync(resolve(import.meta.dirname, 'hermetic-selection.mjs'), join(dir, 'hermetic-selection.mjs'));
-  symlinkSync(dir, join(dir, 'via link'));
   try {
+    copyFileSync(resolve(import.meta.dirname, 'hermetic-selection.mjs'), join(dir, 'hermetic-selection.mjs'));
+    symlinkSync(dir, join(dir, 'via link'));
     for (const script of [join(dir, 'hermetic-selection.mjs'), join(dir, 'via link', 'hermetic-selection.mjs')]) {
       const result = spawnSync(process.execPath, [script], {
         input: 'operator/src/index.ts\n',
