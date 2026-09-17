@@ -93,6 +93,26 @@ describe('shared portal-closure walk', () => {
     ]);
   });
 
+  it('checks the stage that installs a consumer copied in more than one stage', () => {
+    const dockerfile = ['FROM node:22-slim AS manifests', 'COPY app/package.json ./app/', GOOD].join('\n');
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([]);
+  });
+
+  it('names a consumer whose manifest COPY no install follows', () => {
+    const dockerfile = GOOD.replace('RUN corepack enable && yarn install --immutable', 'RUN true');
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      'app: no yarn install follows a COPY of its manifest',
+    ]);
+  });
+
+  it('keeps a continued instruction whole across a comment line', () => {
+    const dockerfile = GOOD.replace(
+      'COPY lib/package.json ./lib/',
+      'COPY \\\n  # portal manifest\n  lib/package.json ./lib/',
+    );
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([]);
+  });
+
   it('names a missing watchPatterns entry', () => {
     const railway = 'watchPatterns = [\n  "packages/app/**",\n]\n';
     expect(missingWatchPatterns(railway, ['app', 'lib'], 'packages/')).toEqual([

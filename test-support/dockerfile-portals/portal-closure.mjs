@@ -60,7 +60,8 @@ function dockerInstructions(dockerfile) {
 
   for (const rawLine of dockerfile.split('\n')) {
     const line = rawLine.trim();
-    if (continued === '' && (line === '' || line.startsWith('#'))) continue;
+    // Docker drops blank and comment lines even inside a continued instruction.
+    if (line === '' || line.startsWith('#')) continue;
     const hasContinuation = line.endsWith('\\');
     continued += `${continued === '' ? '' : ' '}${hasContinuation ? line.slice(0, -1).trimEnd() : line}`;
     if (hasContinuation) continue;
@@ -93,45 +94,39 @@ function contextCopySources(args) {
  */
 export function missingPortalManifestCopies(dockerfile, edges) {
   const instructions = dockerInstructions(dockerfile);
-  const copyOf = (contextPath) =>
+  const copies = (contextPath, before = instructions.length, stage = undefined) =>
+    instructions.flatMap((instruction, index) =>
+      index < before &&
+      (stage === undefined || instruction.stage === stage) &&
+      instruction.keyword === 'COPY' &&
+      contextCopySources(instruction.args).includes(`${contextPath}/package.json`)
+        ? [index]
+        : [],
+    );
+  const installAfter = (index) =>
     instructions.findIndex(
-      ({ keyword, args }) =>
-        keyword === 'COPY' && contextCopySources(args).includes(`${contextPath}/package.json`),
+      (instruction, candidate) =>
+        candidate > index &&
+        instruction.stage === instructions[index].stage &&
+        instruction.keyword === 'RUN' &&
+        /\byarn\s+install\b/u.test(instruction.args),
     );
 
   const missing = [];
   for (const { name, consumer, target } of edges) {
-    const consumerCopy = copyOf(consumer);
-    if (consumerCopy < 0) {
-      missing.push(`${consumer}/package.json is never copied`);
-      continue;
-    }
-    const { stage } = instructions[consumerCopy];
-    const install = instructions.findIndex(
-      (instruction, index) =>
-        index > consumerCopy &&
-        instruction.stage === stage &&
-        instruction.keyword === 'RUN' &&
-        /\byarn\s+install\b/u.test(instruction.args),
-    );
-    if (install < 0) {
-      missing.push(`${consumer}: no yarn install follows its manifest COPY`);
-      continue;
-    }
-    const targetCopy = instructions.findIndex(
-      ({ keyword, args, stage: copyStage }, index) =>
-        index < install &&
-        copyStage === stage &&
-        keyword === 'COPY' &&
-        contextCopySources(args).includes(`${target}/package.json`),
-    );
-    if (targetCopy < 0) {
+    // A consumer manifest may be copied in more than one stage; the one that matters is any copy
+    // an install follows.
+    const installs = copies(consumer)
+      .map(installAfter)
+      .filter((install) => install >= 0);
+    if (installs.length === 0) {
+      missing.push(`${consumer}: no yarn install follows a COPY of its manifest`);
+    } else if (!installs.some((install) => copies(target, install, instructions[install].stage).length > 0)) {
       missing.push(`${name} (${target}): not copied before ${consumer}'s install in its build stage`);
     }
   }
   return [...new Set(missing)];
 }
-
 /** Every `watched` context path lacking its `<prefix><path>/**` entry in railway.toml's `watchPatterns`. */
 export function missingWatchPatterns(railwayConfig, watched, prefix) {
   const block = /watchPatterns\s*=\s*\[([^\]]*)\]/u.exec(railwayConfig);
