@@ -105,8 +105,8 @@ function stepIf(workflow, runLine) {
 
 // The subset of GitHub's expression syntax the heavy-lane `if:`s use: string
 // literals, dotted context names, `==`/`!=`, `&&`/`||`, and parentheses. Anything
-// else throws, so a new construct cannot be silently misread. Both operands of
-// `&&`/`||` are always evaluated, so an unknown name throws wherever it sits.
+// else throws, so a new construct cannot be silently misread. Every context name
+// is resolved while lexing, so an unknown name throws wherever it sits.
 // GitHub compares strings case-insensitively; every value here is lowercase, so
 // strict equality is faithful.
 function evaluateIf(expression, context) {
@@ -296,4 +296,3 @@ test('every head_ref-sensitive if: expression is pinned', () => {
   }
   assert.deepEqual(counts, { 'ci.yml': 4, 'layer-ci.yml': 1, 'jinn-agent-ci.yml': 1 });
 });
-
