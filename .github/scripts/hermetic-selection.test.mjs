@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import { selectHermetic } from './hermetic-selection.mjs';
@@ -89,4 +93,25 @@ test('push always runs the suite, including a docs-only land', () => {
 test('an unknown event defaults to running the suite', () => {
   const result = selectHermetic({ eventName: 'workflow_dispatch', changedFiles: ['docs/engineering/handbook.md'] });
   assert.equal(result.run, true);
+});
+
+// #4144: the entry guard compared the raw `argv[1]` with a percent-encoded URL
+// pathname, so from a checkout path containing a space the CLI printed nothing.
+test('the CLI runs from a checkout path containing a space (#4144)', () => {
+  // Resolved first: on macOS the temp root is a symlink, and `import.meta.url` is
+  // the resolved path, so an unresolved one would fail for a reason other than the space.
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), 'jinn hermetic space-'));
+  const script = join(dir, 'hermetic-selection.mjs');
+  copyFileSync(resolve(import.meta.dirname, 'hermetic-selection.mjs'), script);
+  try {
+    const result = spawnSync(process.execPath, [script], {
+      input: 'operator/src/index.ts\n',
+      encoding: 'utf8',
+      env: { ...process.env, EVENT_NAME: 'pull_request' },
+    });
+    assert.equal(result.status, 0, `selector exited ${result.status}: ${result.stderr}`);
+    assert.equal(typeof JSON.parse(result.stdout).run, 'boolean');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

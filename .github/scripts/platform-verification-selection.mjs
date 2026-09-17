@@ -15,6 +15,7 @@
 // is not explicitly ignorable selects every lane.
 
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { loadCatalogPackages, loadPlatformCatalog, RUNTIME_DEPENDENCY_SECTIONS, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
 
 export const GATE_DOMAINS = new Map([
@@ -222,7 +223,7 @@ function parseArgs(argv) {
   return parsed;
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { repoRoot, changedFiles } = parseArgs(process.argv.slice(2));
   // stdin is the normal path: `git diff --name-only base...head | node this-script.mjs`
   const stdinFiles = process.stdin.isTTY

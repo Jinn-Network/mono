@@ -10,6 +10,8 @@
 // `push` always selects on: that run is the SHA-bound evidence the publish
 // guard queries.
 
+import { pathToFileURL } from 'node:url';
+
 export const IGNORABLE_PREFIXES = Object.freeze([
   'docs/',
   'log/',
@@ -94,7 +96,7 @@ function parseArgs(argv) {
   return parsed;
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { changedFiles } = parseArgs(process.argv.slice(2));
   const stdinFiles = process.stdin.isTTY
     ? []
