@@ -106,7 +106,11 @@ function attackerInterpolations(block) {
   for (const [, expression] of block.matchAll(/\$\{\{([\s\S]*?)\}\}/gu)) {
     const normalized = expression.replace(/\[\s*(['"])([^'"]*)\1\s*\]/gu, '.$2');
     for (const context of attackerContexts) {
-      const escaped = context.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+      // A family entry (`github.event.`) also matches the whole object
+      // (`toJSON(github.event)`), but not a sibling name (`github.event_name`).
+      const escaped = context.endsWith('.')
+        ? `${context.slice(0, -1).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?!\\w)`
+        : context.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
       if (new RegExp(String.raw`(?<![\w.])${escaped}`, 'u').test(normalized)) {
         found.push(context);
       }
@@ -228,6 +232,10 @@ test('attackerInterpolations sees through bracket notation and function calls', 
   assert.deepEqual(attackerInterpolations('echo ${{ (github.head_ref) }}'), ['github.head_ref']);
   assert.deepEqual(attackerInterpolations('echo ${{ github.triggering_actor }}'), ['github.triggering_actor']);
   assert.deepEqual(attackerInterpolations('echo ${{ github.actor_id }}'), ['github.actor']);
+  assert.deepEqual(attackerInterpolations('echo ${{ toJSON(github.event) }}'), ['github.event.']);
+  assert.deepEqual(attackerInterpolations("echo ${{ toJSON(github['event']) }}"), ['github.event.']);
+  assert.deepEqual(attackerInterpolations('echo ${{ toJSON(inputs) }}'), ['inputs.']);
+  assert.deepEqual(attackerInterpolations('echo ${{ github.event_name }}'), []);
 
   // Constrained values stay allowed, and a context name that only appears as
   // the tail of another property path is not the context itself.
