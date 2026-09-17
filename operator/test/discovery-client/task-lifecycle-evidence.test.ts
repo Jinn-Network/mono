@@ -352,7 +352,7 @@ describe('assembleTaskLifecycleEvidence (#2044)', () => {
     expect(unplaceable).not.toBe(duplicate);
   });
 
-  it('still accepts the same index on different tasks and chains', () => {
+  it('still accepts the same index on different tasks', () => {
     // The guard keys on the table's real primary key, so these are distinct
     // rows and must survive it.
     const map = assembleTaskLifecycleEvidence({

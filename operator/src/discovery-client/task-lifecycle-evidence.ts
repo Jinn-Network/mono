@@ -128,6 +128,10 @@ export type RawTaskRow = AuthoritativeTaskRow;
 export type RawAttemptRow = Omit<AuthoritativeAttemptRow, 'verdicts' | 'attemptEnvelopeCandidates'>;
 export type RawVerdictRow = Omit<AuthoritativeVerdictRow, 'verdictEnvelopeCandidates'>;
 
+// The chainId part of `attemptKey` and `verdictKey` mirrors the indexer primary
+// key but never tells two keys apart: an attempt whose chainId differs from its
+// task's is withdrawn before it is keyed, so each taskId carries one chainId.
+// `reqKey`'s chainId part does matter, because a requestId is not task-scoped.
 function attemptKey(taskId: string, attemptIndex: number, chainId: number): string {
   return `${taskId}|${attemptIndex}|${chainId}`;
 }
