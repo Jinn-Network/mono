@@ -410,6 +410,9 @@ function shellTokens(indentedRun) {
           const close = run.indexOf(inner, index + 1);
           delimiter += close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
           index = close === -1 ? run.length : close + 1;
+        } else if (inner === '\\' && run[index + 1] === '\n') {
+          // A line continuation joins the delimiter across lines rather than adding to it.
+          index += 2;
         } else if (inner === '\\' && index + 1 < run.length) {
           // `<<\EOF` is the POSIX spelling of `<<'EOF'`: the backslash quotes the next
           // character and is not part of the delimiter. Recording `\EOF` meant the real
@@ -445,6 +448,9 @@ function shellTokens(indentedRun) {
           const close = run.indexOf(inner, index + 1);
           word += close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
           index = close === -1 ? run.length : close + 1;
+        } else if (inner === '\\' && run[index + 1] === '\n') {
+          // A line continuation, not a quoted newline: `ya\<newline>rn` is `yarn`.
+          index += 2;
         } else if (inner === '\\' && index + 1 < run.length) {
           word += run[index + 1];
           index += 2;
@@ -500,6 +506,9 @@ const unmodeledKeywords = new Set([
   // `done` closes a loop whose last iteration decides where the shell ends up.
   'done',
 ]);
+
+// `yarn@4` (as `corepack yarn@4` or `npx yarn@1` spell it) is still Yarn.
+const isYarn = (word) => /^yarn(?:@[^/]*)?$/u.test(word.split('/').pop());
 
 // Read the words after `yarn`: whether they name an install, and any `--cwd` they pass.
 function yarnInvocation(rest) {
@@ -573,15 +582,30 @@ function shellInstallDirectories(run, loopValues) {
     const words = command;
     command = [];
     let at = 0;
-    while (at < words.length
-      && (commandPrefixes.has(words[at]) || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[at]))) {
+    let conditional = false;
+    // A keyword's branch is not modeled, so it loses the directory — but the words after
+    // it are still a command: `if ! yarn install; then` runs the install.
+    for (;;) {
+      while (at < words.length
+        && (commandPrefixes.has(words[at]) || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[at]))) {
+        at += 1;
+        while (at < words.length && prefixArgumentPattern.test(words[at])) at += 1;
+      }
+      if (!unmodeledKeywords.has(words[at])) break;
+      directories = null;
+      conditional = true;
       at += 1;
-      while (at < words.length && prefixArgumentPattern.test(words[at])) at += 1;
     }
     const [name, ...rest] = words.slice(at);
     if (name === undefined) return;
-    if (unmodeledKeywords.has(name)) {
+    if (conditional && (name === 'cd' || name === 'pushd' || name === 'popd')) {
+      // A directory change that may or may not have run: `then popd` or `then cd -` must
+      // not restore a known directory, and whatever `cd -` or a later `popd` would return
+      // to now depends on the branch too.
       directories = null;
+      previous = null;
+      pushdStack = pushdStack.map(() => null);
+      if (name === 'pushd') pushdStack.push(null);
       return;
     }
     if (name === 'cd' || name === 'pushd') {
@@ -598,11 +622,16 @@ function shellInstallDirectories(run, loopValues) {
       directories = pushdStack.length > 0 ? pushdStack.pop() : null;
       return;
     }
-    if (name.split('/').pop() !== 'yarn') {
+    const bareYarn = (word) => word.split('/').pop() === 'yarn';
+    // `npx -p yarn@4 yarn install`: the versioned word is the prefix's value, and the bare
+    // `yarn` after it is the command — so this is the wrapper case, not a Yarn call.
+    if (!isYarn(name) || (!bareYarn(name) && rest.some(bareYarn))) {
       // An unlisted wrapper around an install (see `commandPrefixes`). Only an
       // install matters: `env -u TOKEN yarn test` leaves `TOKEN` as the name and must
       // impose nothing, exactly as a bare `yarn test` imposes nothing.
-      const wrapped = rest.findIndex((word) => word.split('/').pop() === 'yarn');
+      // Only a bare `yarn` counts here: `corepack prepare yarn@4.13.0 --activate` names
+      // a version to fetch, not a command to run.
+      const wrapped = rest.findIndex(bareYarn);
       if (wrapped !== -1 && yarnInvocation(rest.slice(wrapped + 1)).isInstall) installs.push(null);
       return;
     }
@@ -2508,3 +2537,43 @@ jobs:
     ]);
   });
 });
+
+// Each fixture declares a lockfile the install does not use, so a clean result would
+// mean the install was never seen — the silent direction these shapes used to take.
+for (const [label, script, declared = 'other/yarn.lock'] of [
+  ['an install consumed by a leading if', 'if ! yarn install --immutable; then echo drift; exit 1; fi'],
+  ['an install consumed by a leading while', 'while yarn install --immutable; do sleep 1; done'],
+  ['a corepack-versioned Yarn spec', 'corepack yarn@4 install --immutable'],
+  ['an npx-versioned Yarn spec', 'npx yarn@1 install'],
+  ['a backslash-newline inside a word', 'ya\\\n          rn install --immutable'],
+  ['an npx -p versioned Yarn spec before the command', 'npx -p yarn@4 yarn install --immutable'],
+  ['an npx --package versioned Yarn spec before the command', 'npx --package yarn@4 yarn install --immutable'],
+  ['a popd inside a keyword branch', 'pushd other\n          if [ -n "$X" ]; then popd; fi\n          yarn install --immutable', 'yarn.lock'],
+  ['a cd - inside a keyword branch', 'cd other\n          if [ -n "$X" ]; then cd -; fi\n          yarn install --immutable', 'yarn.lock'],
+  ['a backslash-newline inside a heredoc delimiter', 'cat <<E\\\n          OF\n          body\n          EOF\n          yarn install --immutable'],
+]) {
+  // The keyword-branch fixtures declare the root lockfile: the install may run from
+  // `other/`, so accepting the root one alone is the wrong answer they pin.
+  test(`guard sees ${label}`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+      mkdirSync(join(fixtureRoot, 'other'));
+      writeFileSync(join(fixtureRoot, 'other', 'yarn.lock'), 'other lockfile\n');
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: ${declared}
+      - run: |
+          ${script}
+`);
+      assert.notDeepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), []);
+    });
+  });
+}
