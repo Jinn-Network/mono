@@ -103,6 +103,12 @@ describe("the generated lattice", () => {
         expect(closure.checks).toEqual([...PUBLIC_BUNDLE_VERIFICATION_CHECKS, ...byOrder.flatMap((entry) => entry.checks)]);
         expect(closure.claimSections).toEqual(byOrder.map((entry) => entry.claimSection));
         expect([...closure.refinedMembers.keys()].sort()).toEqual(byOrder.flatMap((entry) => entry.refines).sort());
+        // Role derivations compose like everything else: the declared capabilities' and no others.
+        // Both halves of what that buys -- a record reachable only through a declared contribution
+        // verifies, and the same record under a vector that omits it is refused as unreachable by
+        // `evidence-closure` -- need a signed qualification graph, so they run against real bundles
+        // in the product core's `v10-materialize.test.ts`.
+        expect(closure.roleDerivations).toEqual(byOrder.flatMap((entry) => entry.roleDerivations));
         const releases = [COMPOSED_FORMAT_MINIMUM_READER_RELEASE, ...subset.map((entry) => entry.minimumReaderRelease)];
         expect(closure.minimumReaderRelease).toBe(releases.sort(compareReaderReleases).at(-1));
       });
@@ -182,6 +188,7 @@ describe("a shape that may not be empty", () => {
     mandatoryFiles: [],
     memberPatterns: [{ pattern: /^strict\/[a-f0-9]{64}\.bin$/u, mayBeEmpty: false }],
     refines: [],
+    roleDerivations: [],
     claimSection: "strict",
     checks: [],
     minimumReaderRelease: "0.2.1",

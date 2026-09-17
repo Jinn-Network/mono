@@ -832,13 +832,20 @@ export async function verifyPublicBundleSnapshot(
   // ── The disclosed closure's one graph edge (issue #2839, design §6.2 / §10.2) ───────────────
   //
   // The Report extension IS the edge: it is the only thing that derives the
-  // `disclosure-specification` role for any record. Adding it here — and only on `/8` — is what
-  // makes the two refusals in §6.5.2 fire on every other format without a bespoke guard. A
-  // standalone disclosure record on a `/7` bundle makes `declaredRoles` exceed `expectedRoles` and
-  // trips the size compare; the role appended to an existing graph record's array leaves the sizes
-  // equal and trips the per-digest compare instead. Both refusals already existed and cannot be
-  // forgotten.
-  if (disclosureExtensionDigest !== undefined) {
+  // `disclosure-specification` role for any record. Adding it here — and only on a closure that
+  // carries a disclosure record — is what makes the two refusals in §6.5.2 fire on every other
+  // closure without a bespoke guard. A standalone disclosure record on a `/7` bundle makes
+  // `declaredRoles` exceed `expectedRoles` and trips the size compare; the role appended to an
+  // existing graph record's array leaves the sizes equal and trips the per-digest compare instead.
+  // Both refusals already existed and cannot be forgotten.
+  //
+  // On a composed bundle the derivations are the base graph's plus each DECLARED capability's
+  // (bundle-capability-composition design §6 step 2), so the edge is applied exactly when the
+  // declared vector contributes it. A registry entry that carried the record but omitted the
+  // derivation leaves its own declared record unreachable, here, rather than somewhere later.
+  const derivesDisclosureRole = composed === undefined
+    || composed.roleDerivations.some(({ role }) => role === DISCLOSURE_SPECIFICATION_BUNDLE_ROLE);
+  if (disclosureExtensionDigest !== undefined && derivesDisclosureRole) {
     addRole(expectedRoles, disclosureExtensionDigest, DISCLOSURE_SPECIFICATION_BUNDLE_ROLE);
   }
   const evaluationSpecs = new Map<string, ReturnType<typeof parseEvaluationSpec>>();
