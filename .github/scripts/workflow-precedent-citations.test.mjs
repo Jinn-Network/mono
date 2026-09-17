@@ -388,9 +388,9 @@ const SHARED_MODULE = '.github/scripts/workflow-artifact-steps.mjs';
 
 // Every test file a lane runs, literally or by glob. Selectors come from the
 // lane's `run:` command text, not from anything it merely mentions: a test named
-// only in `paths:` or a comment is never executed there (#3873). Matching an
-// importer's literal spelling alone skipped a lane that selects its tests by glob and never
-// writes the importing file's name anywhere in its YAML — such a lane could run
+// only in `paths:` or a YAML comment is never executed there (#3873). Matching an
+// importer's literal spelling alone skipped a lane that selects its tests by glob
+// and never writes the importing file's name anywhere in its YAML — such a lane could run
 // a shared-walk importer while its `paths:` filter never named the module, and
 // the gate stayed green (#3538). A selector is a bare basename here because the
 // directory prefix a lane writes (`.github/scripts/…`, or `mono/.github/…` in a
