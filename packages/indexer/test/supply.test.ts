@@ -469,9 +469,10 @@ describe('served chain set', () => {
   it.each([undefined, '', '   ', 'abc', '0', '-1', '1.5', 'Infinity', '9007199254740993'])(
     'refuses %o as a chain id before touching the database',
     (raw) => {
-      expect(resolveSupplyChainId(raw, [BASE_SEPOLIA_CHAIN_ID])).toMatchObject({
+      expect(resolveSupplyChainId(raw, [BASE_SEPOLIA_CHAIN_ID])).toEqual({
         ok: false,
         error: 'invalid chainId',
+        detail: 'provide a positive integer ?chainId=; this indexer serves 84532',
       });
     },
   );

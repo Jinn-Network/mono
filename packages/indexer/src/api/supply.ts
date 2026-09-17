@@ -138,7 +138,11 @@ export function resolveSupplyChainId(
 ): SupplyChainIdResolution {
   const chainId = Number(raw);
   if (raw === undefined || raw.trim() === '' || !Number.isSafeInteger(chainId) || chainId <= 0) {
-    return { ok: false, error: 'invalid chainId', detail: 'provide a positive integer ?chainId=' };
+    return {
+      ok: false,
+      error: 'invalid chainId',
+      detail: `provide a positive integer ?chainId=; this indexer serves ${servedChainIds.join(', ')}`,
+    };
   }
   if (!servedChainIds.includes(chainId)) {
     return {
