@@ -286,10 +286,11 @@ already yields every entry oldest-first. Then:
    sequence is therefore reported exactly as it would be without this announcement —
    as a gap, byte-identical to any other, unless another readable anchor covers it —
    and the unreadable marking on the announcing entry is the one place the archive can
-   record that an earlier gap may be a hosting fault rather than a missing anchor. A missing record or a digest mismatch is a serving fault, which "Verify it
-   from another machine" step 4 diagnoses; bytes that hash correctly and still do not
-   parse as an `AnchorEvidence` record are a producer fault, which it does not. Keep
-   only subjects whose `subject.kind` is
+   record that an earlier gap may be a hosting fault rather than a missing anchor. A
+   missing record or a digest mismatch is a serving fault, which "Verify it from
+   another machine" step 4 diagnoses; bytes that hash correctly and still do not parse
+   as an `AnchorEvidence` record are a producer fault, which it does not. Keep only
+   subjects whose `subject.kind` is
    `https://spec.jinn.network/records/announcement-entry/v1`: §4.2 minted that URI to
    make `subject.kind` normative, and a record covering anything else anchors no
    sequence on this chain — an entry announcing only such non-entry anchors is
