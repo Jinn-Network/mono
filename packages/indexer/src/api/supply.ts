@@ -326,8 +326,6 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
       || !Number.isSafeInteger(row.verdictIndex)
       || row.verdictIndex < 0
       || !Number.isSafeInteger(row.verdictCode)
-      || row.verdictCode < 0
-      || row.verdictCode > 4
     ) return unknown(input);
     if (row.createdAtTimestamp < windowStart || row.createdAtTimestamp >= windowEnd) continue;
     // The attempt must exist — a verdict with no attempt row is a broken join

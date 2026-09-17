@@ -174,6 +174,23 @@ describe('buildCurrentSupply', () => {
     expect(build({ verdicts: [verdict({ attemptIndex: 9 })] }).status).toBe('unknown');
   });
 
+  it('counts a verdict code outside 0-4 as loop closure', () => {
+    const result = build({ verdicts: [verdict({ verdictCode: 5 })] });
+    expect(result.status).toBe('available');
+    expect(result.classes[0]?.verdictDeliveries).toBe(1);
+  });
+
+  it('counts a negative safe-integer verdict code as loop closure', () => {
+    const result = build({ verdicts: [verdict({ verdictCode: -1 })] });
+    expect(result.status).toBe('available');
+    expect(result.classes[0]?.verdictDeliveries).toBe(1);
+  });
+
+  it('still preserves uncertainty when verdictCode is not a safe integer', () => {
+    expect(build({ verdicts: [verdict({ verdictCode: 1.5 })] }).status).toBe('unknown');
+    expect(build({ verdicts: [verdict({ verdictCode: Number.NaN })] }).status).toBe('unknown');
+  });
+
   it('skips an attempt whose task row is missing instead of blacking out a proven class', () => {
     const result = build({
       attempts: [attempt(), attempt({ taskId: '404', attemptIndex: 1 })],
