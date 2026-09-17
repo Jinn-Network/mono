@@ -911,6 +911,28 @@ describe('sanitizeErrorText (#642)', () => {
     expect(sanitized).not.toContain(SECRET);
   });
 
+  // #3109: the wss:// dialect (#3035) is pinned on maskUrlsInMessage only; the cause walk and the
+  // structured leaf reach it by construction today, so pin that inheritance here too. A plain
+  // Error cause, not viem's WebSocketRequestError: viem 2.55 strips userinfo from the URL it
+  // composes into the message, which would let the library do the masking this test pins on the walk.
+  it('masks a wss:// URL carrying a credential reached through the Error.cause walk (#3109)', () => {
+    const err = new Error('subscription failed');
+    err.cause = new Error('socket wss://operator:SECRETKEY123@rpc.example/v2/SECRETKEY123 closed');
+
+    const sanitized = sanitizeErrorText(err);
+    expect(sanitized).toBe('subscription failed caused by: socket rpc.example closed');
+  });
+
+  it('sanitizeStructuredValue masks a wss:// URL on a nested Error.cause inside a payload (#3109)', () => {
+    const err = new Error('subscription failed');
+    err.cause = new Error('socket wss://operator:SECRETKEY123@rpc.example/v2/SECRETKEY123 closed');
+
+    expect(sanitizeStructuredValue({ details: { err }, tries: 2 })).toEqual({
+      details: { err: 'subscription failed caused by: socket rpc.example closed' },
+      tries: 2,
+    });
+  });
+
   it('sanitizePersistedText and sanitizeStructuredValue reuse the host-only dialect', () => {
     const url = 'https://user:SECRETKEY123@rpc.example/v2/SECRETKEY123?k=SECRETKEY123#f=SECRETKEY123';
     expect(sanitizePersistedText(url)).toBe('rpc.example');

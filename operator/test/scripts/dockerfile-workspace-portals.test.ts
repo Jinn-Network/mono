@@ -41,11 +41,16 @@ const externalPortalPackages = Object.entries({
 
 function portalEntries(manifest: Record<string, unknown>): Map<string, string> {
   const portals = new Map<string, string>();
+  // `resolutions` is applied LAST because a later `set` wins here and Yarn gives
+  // `resolutions` precedence over the dependency fields. A package can name the
+  // same portal in both (packages/indexer does, for @jinn-network/contract-abis);
+  // if the two targets ever diverge, the guard must check the one the install
+  // will actually resolve, not the one that happens to be read second.
   for (const field of [
-    'resolutions',
     'dependencies',
     'devDependencies',
     'optionalDependencies',
+    'resolutions',
   ]) {
     const group = manifest[field] as Record<string, string> | undefined;
     for (const [name, version] of Object.entries(group ?? {})) {
@@ -234,6 +239,21 @@ describe('client Docker build context', () => {
         `${name} sources must be copied before client yarn build`,
       ).toContain(`${repoPath}/src/`);
     }
+  });
+
+  it('follows the resolutions portal target when a dependency field names a different one', () => {
+    // Yarn links the `resolutions` target, so the walk must validate that one.
+    // Same package name, different portal targets in each field (#4464).
+    const portals = portalEntries({
+      dependencies: { '@jinn-network/example': 'portal:../packages/from-dependencies' },
+      devDependencies: { '@jinn-network/example': 'portal:../packages/from-dev-dependencies' },
+      optionalDependencies: {
+        '@jinn-network/example': 'portal:../packages/from-optional-dependencies',
+      },
+      resolutions: { '@jinn-network/example': 'portal:../packages/from-resolutions' },
+    });
+
+    expect(portals.get('@jinn-network/example')).toBe('../packages/from-resolutions');
   });
 
   it('copies every transitively reachable portal manifest before install', () => {

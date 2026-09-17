@@ -15,6 +15,7 @@ import {
   NATIVE_DISCOVERY_POISON_QUARANTINE_EVENT,
   clearPoisonFailures,
   isPoisonQuarantined,
+  preparePoisonProbes,
   recordPoisonFailure,
 } from '../../src/daemon/native-discovery-quarantine.js';
 
@@ -131,5 +132,30 @@ describe('native discovery poison quarantine', () => {
       entryDigest: `sha256:${'d'.repeat(64)}`,
       announcementId: 'announcement-1',
     })).toBe(false);
+  });
+});
+
+// #4294: the hoisted probes a poll pass uses must answer exactly as the free functions do.
+describe('preparePoisonProbes', () => {
+  const key = {
+    scope: 'announcement' as const, source: SOURCE, entryDigest: ENTRY_DIGEST, announcementId: 'announcement-1',
+  };
+
+  it('matches isPoisonQuarantined and clearPoisonFailures', () => {
+    const probes = preparePoisonProbes(store);
+    expect(probes.isQuarantined(key)).toBe(false);
+
+    failure();
+    probes.clear(key);
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM native_discovery_quarantine').get()).toEqual({ n: 0 });
+
+    for (let attempt = 1; attempt <= NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD; attempt += 1) failure();
+    expect(probes.isQuarantined(key)).toBe(true);
+    expect(isPoisonQuarantined({ store, ...key })).toBe(true);
+    probes.clear(key);
+    expect(probes.isQuarantined(key)).toBe(true);
+    clearPoisonFailures({ store, ...key });
+    expect(isPoisonQuarantined({ store, ...key })).toBe(true);
+    expect(probes.isQuarantined({ ...key, announcementId: 'announcement-2' })).toBe(false);
   });
 });

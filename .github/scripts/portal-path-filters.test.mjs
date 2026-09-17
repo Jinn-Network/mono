@@ -163,6 +163,26 @@ test('erePrefix accepts an anchored directory prefix and rejects a file pattern'
   assert.equal(erePrefix('^\\.github/workflows/ci\\.yml$'), null);
 });
 
+test('the shell-ERE remediation escapes the dot so the pasted entry is what erePrefix reads back (#3662)', () => {
+  // Use the real discovered lane so this pin cannot drift from the production `required`.
+  const lane = discoverLanes(repoRoot).find(({ dialect }) => dialect === 'shell-ere');
+  assert.ok(lane, 'ci.yml shell-ere lane is discovered');
+  const workspace = '.github/fixtures/native-vertical-roles/a.b';
+  const emitted = lane.required(workspace);
+  // Exact form is the red assertion: a bare round trip passes today because erePrefix's class
+  // admits an unescaped `.`, which is exactly the any-char the hand-written entries escape.
+  assert.equal(emitted, "'^\\.github/fixtures/native-vertical-roles/a\\.b/'");
+  const unquoted = emitted.slice(1, -1);
+  // The defect itself: an unescaped dot would also match a lookalike path.
+  assert.equal(new RegExp(unquoted).test('xgithub/fixtures/native-vertical-roles/a.b/file'), false);
+  assert.equal(new RegExp(unquoted).test('.github/fixtures/native-vertical-roles/a.b/file'), true);
+  assert.equal(erePrefix(unquoted), workspace);
+  // The workflow-paths dialect is a GitHub glob where `.` is literal; nothing to escape there.
+  const glob = discoverLanes(repoRoot).find(({ dialect }) => dialect === 'workflow-paths');
+  assert.equal(glob.required('a.b'), '"a.b/**"');
+  assert.equal(globPrefix('a.b/**'), 'a.b');
+});
+
 test('parsePathsBlocks reads a flow sequence', () => {
   const source = ['on:', '  pull_request:', "    paths: ['contracts/**']", '  push:', '    paths: ["a/**", \'b/**\']'].join('\n');
   assert.deepEqual(
