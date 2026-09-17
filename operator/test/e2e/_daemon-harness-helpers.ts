@@ -1346,19 +1346,14 @@ export async function startDaemon(
 }
 
 /**
- * Start a producer/solver daemon whose `swe-rebench-v2.v1` solve leg is served
- * by the hermetic env-gated StubHarness (returns the canned known-good patch;
- * never calls an LLM). Sets JINN_HARNESS_STUB_INSTANCE + JINN_TEST_MODE +
- * JINN_HARNESS_STUB_FIXTURES_DIR before `startDaemon` (which builds harnesses
- * in-process via `buildHarnesses`, registering the stub by `solverType`
- * first-match) and restores the prior env once `startDaemon` returns so a
- * sibling evaluator daemon started afterwards does not pick the stub up. The
- * evaluation role is never handled by the stub (StubHarness.supports() returns
- * false for role === 'evaluation').
+ * Start a producer/solver daemon for `swe-rebench-v2.v1` tasks. With `opts.composition`, the
+ * solve leg is served by the launcher-shaped canned-patch stub (never calls an LLM) through
+ * the composition `WorkLoop` — see that option's own JSDoc below. Without it, nothing serves
+ * the solve leg.
  *
- * That describes callers omitting `opts.composition` only. A caller that passes it is served
- * by the launcher-shaped canned-patch stub through the composition `WorkLoop` instead — see
- * that option's own JSDoc below.
+ * It still sets JINN_HARNESS_STUB_INSTANCE + JINN_TEST_MODE + JINN_HARNESS_STUB_FIXTURES_DIR
+ * around `startDaemon` and restores the prior env once it returns, but `startDaemon` never
+ * builds the env-gated `StubHarness`, so those variables have no effect on this path (#3866).
  */
 export async function startSweRebenchSolverDaemon(
   fixture: DaemonHarnessFixture,
@@ -1372,9 +1367,8 @@ export async function startSweRebenchSolverDaemon(
     instanceMatcher: string;
     /**
      * Post-Wave-4 D1 the composition `WorkLoop` is the only claim path, and it dispatches
-     * through `LauncherContract`s rather than the `HarnessRegistry` the env-gated `StubHarness`
-     * below registers into — so a caller that needs its swe-rebench-v2 tasks actually claimed
-     * and delivered must pass this. It enables the composition, adds an `executionWiring` entry
+     * through `LauncherContract`s — so a caller that needs its swe-rebench-v2 tasks actually
+     * claimed and delivered must pass this. It enables the composition, adds an `executionWiring` entry
      * anchored on the on-chain manifest digest of `manifestCid` (what the claim predicate
      * matches against), and injects the launcher-shaped canned-patch stub reading the same
      * `fixturesDir`.
@@ -1447,21 +1441,11 @@ export async function startSweRebenchSolverDaemon(
             }
           : {}),
       },
-      // HarnessRegistry.findFor() checks the configured `default` (claude-code,
-      // DEFAULT_HARNESS) BEFORE falling through to first-match-by-supports() —
-      // and LearnerHarness.supports() returns true for every solverType except
-      // prediction.v1/prediction.apy.v0, so without this override the daemon
-      // would dispatch swe-rebench-v2.v1 restoration to a real `claude` CLI
-      // subprocess instead of the env-gated StubHarness, defeating the whole
-      // point of this helper. `harness:stub` is StubHarness.name (stub.ts) —
-      // its own supports() hardcodes solverType === 'swe-rebench-v2.v1', so
-      // this mapping is unconditionally correct for every caller.
+      // Fills the inert `extraSolverTypeHarnesses` parameter (#3866).
       { 'swe-rebench-v2.v1': 'harness:stub' },
     );
   } finally {
-    // The stub harness is captured inside buildHarnesses synchronously during
-    // startDaemon; once startDaemon returns it is safe to restore the env so a
-    // sibling evaluator daemon started afterwards does not pick the stub up.
+    // Restore the stub env vars for hygiene; nothing on this path reads them (#3866).
     restore();
   }
   return daemon;
@@ -1731,7 +1715,8 @@ export async function postPredictionV1Task(
  * The task's `spec` carries the SweRebenchV2TaskSchema fields for the
  * known-solvable instance `sympy__sympy-27510` (fixtures/known-instance.ts) —
  * the same field set T3.1 writes (T3.1-producer-evaluator-real.ts:648-663). The
- * producer daemon's StubHarness injects the canned patch for the solve leg.
+ * producer daemon's canned-patch stub launcher (`startSweRebenchSolverDaemon` with
+ * `composition`) serves the solve leg.
  */
 export async function postSweRebenchV2Task(
   fixture: DaemonHarnessFixture,
