@@ -98,6 +98,38 @@ describe('jinn supply', () => {
     expect(raw.join('')).not.toContain('incomplete indexer evidence');
   });
 
+  it('warns that the class list is short when the indexer skipped activity rows', async () => {
+    const deps = commandWith({
+      schemaVersion: 1, status: 'available', chainId: 84532,
+      generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
+      incompleteActivityRows: 3,
+      classes: [{
+        workClass: 'prediction.v1', contractId: 'prediction', contractVersion: 'v1',
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
+        latestAttemptAt: '2026-09-06T10:00:00.000Z',
+        latestVerdictAt: '2026-09-06T11:00:00.000Z',
+      }],
+    });
+    const { raw } = await runCommand(deps.command, { argv: ['--human'] });
+    expect(raw.join('')).toContain('3 activity row(s) had no matching task');
+    expect(raw.join('')).toContain('unproven, not absent');
+  });
+
+  it('says nothing about skipped activity when the indexer skipped none', async () => {
+    const deps = commandWith({
+      schemaVersion: 1, status: 'available', chainId: 84532,
+      generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
+      classes: [{
+        workClass: 'prediction.v1', contractId: 'prediction', contractVersion: 'v1',
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
+        latestAttemptAt: '2026-09-06T10:00:00.000Z',
+        latestVerdictAt: '2026-09-06T11:00:00.000Z',
+      }],
+    });
+    const { raw } = await runCommand(deps.command, { argv: ['--human'] });
+    expect(raw.join('')).not.toContain('no matching task');
+  });
+
   it('renders unknown without calling it zero', async () => {
     const deps = commandWith({
       schemaVersion: 1, status: 'unknown', reason: 'incomplete_indexer_evidence',

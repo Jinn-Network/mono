@@ -72,6 +72,17 @@ describe('DiscoveryClient.getCurrentSupply', () => {
     ).rejects.toThrow(DiscoveryUnavailableError);
   });
 
+  it('carries the incomplete-activity marker through decoding', async () => {
+    const body = { ...available, incompleteActivityRows: 3 };
+    await expect(clientFor(body).client.getCurrentSupply({ chainId: 84532 })).resolves.toEqual(body);
+  });
+
+  it('rejects a non-positive incomplete-activity marker', async () => {
+    await expect(
+      clientFor({ ...available, incompleteActivityRows: 0 }).client.getCurrentSupply({ chainId: 84532 }),
+    ).rejects.toThrow(DiscoveryUnavailableError);
+  });
+
   it('preserves a server unknown response', async () => {
     const unknown = {
       ...available,

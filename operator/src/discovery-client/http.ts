@@ -86,6 +86,7 @@ const CurrentSupplyResponseSchema = z.discriminatedUnion('status', [
     // Optional so an indexer that excluded nothing may omit it entirely; the
     // count is only ever positive when present.
     incompleteManifestRows: SafeCountSchema.positive().optional(),
+    incompleteActivityRows: SafeCountSchema.positive().optional(),
   }).strict(),
   z.object({
     ...SupplyBaseShape,

@@ -229,6 +229,13 @@ export type CurrentSupplyResponse =
        * failed cannot subtract from a class whose own evidence is complete.
        */
       incompleteManifestRows?: number;
+      /**
+       * How many attempt or verdict rows the indexer skipped because no matching
+       * task joined. Absent when none were. Same monotone-short-list reading as
+       * `incompleteManifestRows`: listed classes remain proven; a class's
+       * ABSENCE is "no evidence", not "no supply".
+       */
+      incompleteActivityRows?: number;
     }
   | {
       schemaVersion: 1;

@@ -53,6 +53,12 @@ function humanSupply(result: CurrentSupplyResponse): string {
       + 'evidence and are not represented below. A class missing here is unproven, not absent.',
     );
   }
+  if (result.incompleteActivityRows !== undefined) {
+    lines.push(
+      `Note: ${result.incompleteActivityRows} activity row(s) had no matching task `
+      + 'and are not represented below. A class missing here is unproven, not absent.',
+    );
+  }
   for (const entry of result.classes) {
     lines.push(
       `${entry.workClass}: ${entry.acceptingSolverNets} accepting SolverNet(s), `
