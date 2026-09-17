@@ -58,6 +58,19 @@ export interface CurrentSupplyResponse {
    * as "no supply"; the classes that ARE listed are still proven.
    */
   incompleteManifestRows?: number;
+  /**
+   * How many attempt or verdict rows on this chain had no matching task and
+   * were therefore excluded from `classes`. Absent when every activity row
+   * joined, and never present unless `status` is `available` — an incomplete
+   * row can only ever downgrade a would-be zero to `unknown` (see
+   * `buildCurrentSupply`), so it has nothing to mark on the other two.
+   *
+   * Present, it means `classes` is known-possibly-SHORT: a class whose only
+   * activity rows were the excluded ones is missing entirely. A requester must
+   * therefore read a class's ABSENCE from this response as "no evidence", not
+   * as "no supply"; the classes that ARE listed are still proven.
+   */
+  incompleteActivityRows?: number;
 }
 
 export interface SupplyManifestRow {
@@ -280,6 +293,7 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
     taskById.set(row.id, row);
   }
 
+  let incompleteActivityRows = 0;
   const attemptByKey = new Map<string, SupplyAttemptRow>();
   for (const row of input.attempts) {
     if (row.chainId !== input.chainId) continue;
@@ -287,7 +301,10 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
       return unknown(input);
     }
     const task = taskById.get(row.taskId);
-    if (!task) return unknown(input);
+    if (!task) {
+      incompleteActivityRows += 1;
+      continue;
+    }
     const key = activityKey(row.chainId, row.taskId, row.attemptIndex);
     const prior = attemptByKey.get(key);
     if (prior && prior.operator.toLowerCase() !== row.operator.toLowerCase()) return unknown(input);
@@ -319,10 +336,17 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
     // not corruption. Callers therefore supply the attempts referenced by
     // in-window verdicts regardless of when those attempts were created, and an
     // out-of-window attempt still never counts toward `operators` below.
+    // A missing task is narrower: skip the row (do not insert it as live
+    // activity) and refuse only an unproven zero, same monotone rule as
+    // incomplete manifests. Skip the task join BEFORE the attempt lookup so a
+    // skipped attempt cannot black out the chain through the verdict join.
+    const task = taskById.get(row.taskId);
+    if (!task) {
+      incompleteActivityRows += 1;
+      continue;
+    }
     const attempt = attemptByKey.get(activityKey(row.chainId, row.taskId, row.attemptIndex));
     if (!attempt) return unknown(input);
-    const task = taskById.get(row.taskId);
-    if (!task) return unknown(input);
     const workClass = classByDigest.get(task.manifestDigest.toLowerCase());
     if (!workClass) continue;
     const aggregate = classRows.get(workClass)!;
@@ -347,7 +371,7 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
   if (classes.length === 0) {
     // Same monotone rule at the activity layer: an excluded row could have
     // carried the class that IS live, so the zero stays unproven.
-    if (incompleteManifestRows > 0) return unknown(input);
+    if (incompleteManifestRows > 0 || incompleteActivityRows > 0) return unknown(input);
     return { ...base, status: 'zero_supply', reason: 'no_recent_completed_loops', classes: [] };
   }
   return {
@@ -355,5 +379,6 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
     status: 'available',
     classes,
     ...(incompleteManifestRows > 0 ? { incompleteManifestRows } : {}),
+    ...(incompleteActivityRows > 0 ? { incompleteActivityRows } : {}),
   };
 }

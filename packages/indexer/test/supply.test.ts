@@ -174,6 +174,50 @@ describe('buildCurrentSupply', () => {
     expect(build({ verdicts: [verdict({ attemptIndex: 9 })] }).status).toBe('unknown');
   });
 
+  it('skips an attempt whose task row is missing instead of blacking out a proven class', () => {
+    const result = build({
+      attempts: [attempt(), attempt({ taskId: '404', attemptIndex: 1 })],
+      verdicts: [verdict()],
+    });
+    expect(result.status).toBe('available');
+    expect(result.classes).toHaveLength(1);
+    expect(result.classes[0]).toMatchObject({
+      workClass: 'prediction.v1',
+      claimingOperators: 1,
+      verdictDeliveries: 1,
+    });
+    expect(result.incompleteActivityRows).toBe(1);
+  });
+
+  it('skips a verdict whose task row is missing instead of blacking out a proven class', () => {
+    const result = build({
+      attempts: [attempt(), attempt({ taskId: '404', operator: `0x${'bb'.repeat(20)}` })],
+      verdicts: [verdict(), verdict({ taskId: '404' })],
+    });
+    expect(result.status).toBe('available');
+    expect(result.classes[0]?.verdictDeliveries).toBe(1);
+    expect(result.incompleteActivityRows).toBe(2);
+  });
+
+  it('omits incompleteActivityRows when every activity row joined', () => {
+    expect(build()).not.toHaveProperty('incompleteActivityRows');
+  });
+
+  it('refuses to prove a zero when skipped activity could have been the live class', () => {
+    expect(build({
+      attempts: [attempt({ taskId: '404' })],
+      verdicts: [],
+    })).toMatchObject({
+      status: 'unknown',
+      reason: 'incomplete_indexer_evidence',
+      classes: [],
+    });
+    expect(build({
+      attempts: [attempt({ taskId: '404' })],
+      verdicts: [],
+    })).not.toHaveProperty('incompleteActivityRows');
+  });
+
   it('reports a healthy class even when another launched manifest is degraded', () => {
     // The guard must be MONOTONE. One row whose IPFS enrichment failed — a
     // permanent state with no retry path — cannot subtract from a class whose
