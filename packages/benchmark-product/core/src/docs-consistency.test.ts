@@ -266,6 +266,35 @@ describe("product documentation consistency", () => {
     expect(guide).toContain("`source/`");
   });
 
+  it("scopes the external guide to /2 and states the evidence-native v5 split", () => {
+    // Issue #3328: the external guide read as if it covered every format, while its table,
+    // walkthrough, and script only read public-bundle/2, and v5 had no split at all.
+    const doc = read(externalVerificationPath);
+    expect(doc).toContain(`\`${BUNDLE_FORMAT}\``);
+    expect(doc).toContain(`\`${BUNDLE_V5_FORMAT}\``);
+    const start = doc.indexOf("\n## Evidence-native bundle v5\n");
+    expect(start, "v5 section present").toBeGreaterThan(-1);
+    const next = doc.indexOf("\n## ", start + 1);
+    const section = doc.slice(start, next === -1 ? undefined : next);
+    const rows = section
+      .split("\n")
+      .filter((line) => /^\| `[a-z-]+` \|/u.test(line))
+      .map((line) => /^\| `([a-z-]+)` \|/u.exec(line)![1]);
+    expect(rows).toEqual([...EVIDENCE_NATIVE_BUNDLE_V5_CHECKS]);
+    expect(section).toContain("`benchmark-product.claim-package/3`");
+    expect(section).toContain("metadata-first");
+    expect(section).toContain("not fetched");
+    const allowed = new Set([
+      readerLine(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND),
+      readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+    ]);
+    const lines = fenceBodies(section)
+      .flatMap((body) => body.split("\n"))
+      .filter((line) => line.includes("npx "));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(allowed, line).toContain(readerLine(line));
+  });
+
   it("pins the per-format reader table to the reader's own constants", () => {
     // Issue #3519: the format-to-reader-line mapping is stated in each format section, in this
     // table, and again in the too-old subsection. Nothing pinned any of them, so a ninth format or
