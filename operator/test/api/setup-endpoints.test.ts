@@ -9,6 +9,20 @@ import { getChainConfig } from '../../src/earning/contracts.js';
 import { FleetStateStore } from '../../src/earning/store.js';
 import { decryptMnemonic, encryptMnemonic, generateMnemonic } from '../../src/earning/wallet.js';
 
+// Passthrough, except `chmodSync` on one chosen path fails, so a test can pin
+// what the password-file rewrite does when tightening is refused.
+const fsFaults = vi.hoisted(() => ({ chmodFailPath: undefined as string | undefined }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    chmodSync: (path: Parameters<typeof actual.chmodSync>[0], mode: Parameters<typeof actual.chmodSync>[1]) => {
+      if (path === fsFaults.chmodFailPath) throw new Error('EPERM: operation not permitted, chmod');
+      actual.chmodSync(path, mode);
+    },
+  };
+});
+
 describe('GET /v1/auth/claude', () => {
   it('returns binary status and skips auth probe when claude is missing', async () => {
     const app = new Hono();
@@ -587,6 +601,50 @@ describe('POST /v1/setup/change-password', () => {
       expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
       expect(statSync(pwFilePath).mode & 0o777).toBe(0o600);
     } finally {
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  // Tightening happens before the write, so a refused chmod leaves the loose
+  // file holding its old value rather than the new password.
+  it('leaves a loose password file untouched when it cannot be tightened', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'some-other-value\n');
+    chmodSync(pwFilePath, 0o644);
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    fsFaults.chmodFailPath = pwFilePath;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: false });
+      expect(readFileSync(pwFilePath, 'utf-8')).toBe('some-other-value\n');
+    } finally {
+      fsFaults.chmodFailPath = undefined;
       if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
       else process.env['JINN_EARNING_DIR'] = oldEnv;
       if (oldHome === undefined) delete process.env['HOME'];
