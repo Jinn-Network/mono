@@ -133,8 +133,12 @@ function valueMayBeginAfter(source, back) {
  *
  * Whatever this still misreads consumes at most one line, because `regexLiteralEnd` and
  * `quotedSpanEnd` both stop at a newline. What that line costs is bounded separately by each
- * caller: `stripComments` can emit the tail of a mis-read line verbatim, and `projectEntryRanges`
- * drops the one `projects` entry whose braces that line took, not the array.
+ * caller: `stripComments` can emit the tail of a mis-read line verbatim; `projectEntryRanges`
+ * drops the one `projects` entry whose braces that line took, not the array; and `balancedEnd`
+ * finds no close when that line carries the enclosing literal's own closing bracket, so
+ * `enclosedLiterals` drops the whole literal — for `projects: [`, every entry range at once,
+ * which is the no-ranges fallback `projectEntryRanges` describes. No config in the tree writes
+ * that shape.
  */
 export function regexStartsAt(source, index) {
   return valueMayBeginAfter(source, previousSignificant(source, index - 1));

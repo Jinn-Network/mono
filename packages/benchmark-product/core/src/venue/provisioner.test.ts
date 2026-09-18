@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -605,6 +605,9 @@ describe("createLocalProvisioner — repository-work cells", () => {
 
     it("reports a recovery-time rebind failure as an executed-attempt failure, not neverExecuted", async () => {
       const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-nomirror-"));
+      const paths = workspacePathsUnder(root);
+      // A checkout directory is present, so the harvest must rebind.
+      mkdirSync(paths.work, { recursive: true });
       const selected = createLocalProvisioner({
         registry: createEvaluationCellRegistry(),
         evaluators: [],
@@ -617,7 +620,7 @@ describe("createLocalProvisioner — repository-work cells", () => {
       } as never);
 
       const failure = await selected.contract
-        .harvest(workspacePathsUnder(root), [
+        .harvest(paths, [
           { name: "patch", mediaType: "text/x-diff", required: true },
         ] as never)
         .catch((error: unknown) => error);
@@ -627,6 +630,36 @@ describe("createLocalProvisioner — repository-work cells", () => {
       expect(failure).not.toBeInstanceOf(ProvisioningRejectedError);
       expect((failure as Error).message).toMatch(/could not rebind its checkout/u);
       expect((failure as Error).message).toMatch(/no repository mirror is configured/u);
+    });
+
+    it.each([
+      ["no mirror is configured", undefined],
+      ["the mirror is unreachable", { ensure: async () => { throw new Error("mirror offline"); } }],
+    ] as const)("collects out/ without resolving the mirror when the checkout is gone and %s", async (_label, mirror) => {
+      // Issue #3654: with no checkout there is nothing to extract and nothing to deregister, so a
+      // recovered harvest must not depend on a mirror it has no use for.
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-nocheckout-"));
+      const paths = workspacePathsUnder(root);
+      mkdirSync(paths.out, { recursive: true });
+      writeFileSync(join(paths.out, "patch"), "diff --git a/x b/x\n");
+      const selected = createLocalProvisioner({
+        registry: createEvaluationCellRegistry(),
+        evaluators: [],
+        ...(mirror === undefined ? {} : { repositoryMirror: mirror }),
+      })({
+        task: repositoryWorkTask("file:///upstream", "a".repeat(40)),
+        sealedTaskBytes: new TextEncoder().encode("{}"),
+        dispatchContextBytes: new TextEncoder().encode("{}"),
+        submission: { requirements: {} },
+        attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+      } as never);
+
+      const result = await selected.contract.harvest(paths, [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+      ] as never);
+
+      expect(result.manifest.map((entry) => entry.path)).toEqual(["patch"]);
+      expect(existsSync(paths.work)).toBe(false);
     });
 
     it("harvests what out/ holds when a predecessor's teardown already removed the checkout", async () => {

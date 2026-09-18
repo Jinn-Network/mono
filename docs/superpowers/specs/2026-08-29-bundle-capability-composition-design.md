@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.2 |
-| **Date** | 2026-08-29 (v0.2 2026-09-16 settles two registry-shape questions raised by the review of PR #4109) |
+| **Version** | 0.3 |
+| **Date** | 2026-08-29 (v0.2 2026-09-16 settles two registry-shape questions raised by the review of PR #4109; v0.3 2026-09-18 re-pins §6's two-way-closure citation) |
 | **Author** | Autopilot design session (Claude Opus 5); seam citations read against the attempt base of `autopilot/2889` |
 | **Shape** | `design`. Output is this spec; implementation lands as a separate packet (§13) |
 | **Status** | proposed — needs operator decision on D1–D4 (§14) |
@@ -12,6 +12,7 @@
 | **Pairs with** | [#2869](https://github.com/Jinn-Network/mono/issues/2869) (neutral freeze-announcement surface / anchored lock registry) — that design adds a capability; this one decides how capabilities are carried |
 | **Does not do** | It defines no new evidence record, no new check semantics, and no new claim content. Every capability named here already exists or is already designed elsewhere; this design changes only how a bundle *declares* which of them it carries and how a verifier *derives* what to check |
 | **v0.2 changes** | Settles two registry-shape questions the review of PR #4109 raised while the dispatch-timestamps design registered an entry. (1) `refines` arity. §4 said "zero or one" target while §4.1 gave `binary-qualification` two (the evidence-catalog grammar and the trust grammar). The field is now a set of targets, and §5.2's invariant stays keyed per target, so `binary-qualification` is expressible as written. (2) Role-derivation contributions. `disclosure-specification` adds an evidence-catalog role that only a derivation can confer, but §4 had no field for it. §4 gains `roleDerivations`, §5.1 classifies a contribution as additive, and §6 and §9 gain the matching closure step and tests. No D1–D4 decision (§14) and no capability's semantics move. |
+| **v0.3 changes** | §6 step 3's two-way file-closure citation named `verify.ts:464-465`, which at that pin was a disclosure-format comment. The loops are the non-allowlisted-file and missing-expected-path refusals in `verifyPublicBundleSnapshot` (`verify/src/verify.ts:578-579` on this change). No contract, allowlist, denylist, or §13-ruled item moves. |
 
 ## 0. Decision in plain language
 
@@ -335,7 +336,8 @@ Each step names the property it preserves.
    only an undeclared capability can derive is refused as unreachable.
 3. **Two-way closure (P2, P3).** Every expected path must be present; every
    manifest path must be expected. This is today's rule at
-   `verify/src/verify.ts:464-465`, unchanged in mechanism and computed over the
+   `verify/src/verify.ts:578-579` (`verifyPublicBundleSnapshot`'s non-allowlisted-file
+   and missing-expected-path loops), unchanged in mechanism and computed over the
    composed sets rather than a per-format constant. Because the allowlist is
    built only from *declared* capabilities, an `anchors/…` member in a bundle
    that did not declare `anchoring` is non-allowlisted — P3, preserved exactly.
