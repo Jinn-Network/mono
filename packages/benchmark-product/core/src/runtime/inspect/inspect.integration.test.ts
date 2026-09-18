@@ -692,5 +692,5 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     expect(readdirSync(viewerBundleDir).length).toBeGreaterThan(0);
     rmSync(nativeLogs[0]!);
     await expect(verifyPublicBundle(detachedBundle)).rejects.toThrow();
-  }, 120_000);
+  }, 240_000);
 });

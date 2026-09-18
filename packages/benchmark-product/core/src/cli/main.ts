@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 42 parity operations over the operations facade, plus the path-oriented
+ * 41 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -67,7 +67,6 @@ import {
   sampleInit,
   selectMethod,
   exportDerivedBundle,
-  migrateTerminalBenchLegacyTask,
   updateDraft,
   type ArmWarning,
   type AnchorSubject,
@@ -76,7 +75,6 @@ import {
   type QuotePresentation,
   type RunBindResult,
   type RunLaunchDeps,
-  type MigrateTerminalBenchLegacyTaskInput,
 } from "../operations/index.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
 import { dirname } from "node:path";
@@ -122,7 +120,6 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--name <name>] [--description <text>] [--version <ver>]
                    [--provenance-timestamp <rfc3339>]
                    (homemade instance rows, not official SWE-bench Verified)
-  runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
                    [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
                    (catalog id or method-document file; omit ref to list)
@@ -245,7 +242,6 @@ const IMPORT_SWEBENCH_FLAGS = [
 const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "n", "host"] as const;
 const METHOD_LIST_FLAGS = ["json"] as const;
 const EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
-const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -636,16 +632,14 @@ async function handleMethodBind(
   return renderResult(
     result,
     jsonMode,
-    (value) => `bound ${value.official ? "official" : "custom"} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`,
+    (value) => {
+      const kind = value.official ? "official" : "custom";
+      if (value.selectionManifestSha256 === undefined) {
+        return `bound ${kind} ${value.catalogId ?? value.documentKind} catalog identity for draft ${draftId}\n`;
+      }
+      return `bound ${kind} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`;
+    },
   );
-}
-
-async function handleTerminalBenchMigration(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as MigrateTerminalBenchLegacyTaskInput;
-  const result = await migrateTerminalBenchLegacyTask(opContext, configuration);
-  return renderResult(result, jsonMode, (value) => `migrated legacy Terminal-Bench task as ${value.manifestSha256}\n`);
 }
 
 function handleDerivedExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -1687,7 +1681,6 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["import swebench", handleImportSweBench],
   ["method", handleMethodBind],
   ["export", handleDerivedExport],
-  ["runtime terminal-bench migrate", handleTerminalBenchMigration],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],

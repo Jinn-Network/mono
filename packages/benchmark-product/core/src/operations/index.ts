@@ -41,11 +41,6 @@ export { sampleInit, type SampleInitInput, type SampleInitResult, type SampleIni
 export { importSweBenchRows, type ImportSweBenchRowsInput, type ImportSweBenchRowsResult } from "./import.js";
 
 export {
-  migrateTerminalBenchLegacyTask,
-  type MigrateTerminalBenchLegacyTaskInput,
-  type MigrateTerminalBenchLegacyTaskResult,
-} from "./terminal-bench-2.js";
-export {
   selectMethod,
   exportDerivedBundle,
   type SelectMethodInput,

@@ -193,16 +193,6 @@
       }
     },
     {
-      "operation": "migrateTerminalBenchLegacyTask",
-      "cliVerb": "runtime terminal-bench migrate",
-      "authorityGated": false,
-      "description": "Transforms a legacy Terminal-Bench task through the pinned Harbor mapper and seals both byte histories.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured migration input paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
       "operation": "publicationAccounting",
       "cliVerb": "publication accounting",
       "authorityGated": true,

@@ -23,8 +23,8 @@ import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
 import { requireRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
-import { selectTerminalBench21Runtime } from "./terminal-bench-2-1.js";
-import { selectTerminalBench30Runtime } from "./terminal-bench-3-0.js";
+import { prepareTerminalBench21Draft } from "../runtime/testing/terminal-bench-2-1-draft.js";
+import { prepareTerminalBench30Draft } from "../runtime/testing/terminal-bench-3-0-draft.js";
 import {
   decideHarborHubExportMode,
   exportHarborHubPackage,
@@ -264,7 +264,7 @@ describe("Harbor Hub export", () => {
 
   test("named-slice export is inspection-only and keeps the native job directory", async () => {
     const context = await prepareDraft("one");
-    expectOk("selectTerminalBench21Runtime", await selectTerminalBench21Runtime(context, { draftId: "one", ...request("one_task") }));
+    expectOk("prepareTerminalBench21Draft", await prepareTerminalBench21Draft(context, { draftId: "one", ...request("one_task") }));
     expectOk("runQuote", await runQuote(context, { draftId: "one" }));
     expectOk("runLock", runLock(context, { draftId: "one" }));
     const jobDir = stubArmJob("one", "one");
@@ -308,7 +308,7 @@ describe("Harbor Hub export", () => {
 
   test("custom coverage and missing jobs refuse suite-named Hub export", async () => {
     const context = await prepareDraft("custom");
-    expectOk("selectTerminalBench21Runtime", await selectTerminalBench21Runtime(context, { draftId: "custom", ...request(undefined, ["t11"]) }));
+    expectOk("prepareTerminalBench21Draft", await prepareTerminalBench21Draft(context, { draftId: "custom", ...request(undefined, ["t11"]) }));
     expectOk("runQuote", await runQuote(context, { draftId: "custom" }));
     expectOk("runLock", runLock(context, { draftId: "custom" }));
     stubArmJob("custom", "one");
@@ -321,7 +321,7 @@ describe("Harbor Hub export", () => {
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
     const missing = await prepareDraft("missing");
-    expectOk("selectTerminalBench21Runtime", await selectTerminalBench21Runtime(missing, { draftId: "missing", ...request("one_task") }));
+    expectOk("prepareTerminalBench21Draft", await prepareTerminalBench21Draft(missing, { draftId: "missing", ...request("one_task") }));
     expectOk("runQuote", await runQuote(missing, { draftId: "missing" }));
     expectOk("runLock", runLock(missing, { draftId: "missing" }));
     const absent = exportHarborHubPackage(missing, { draftId: "missing", armId: "one" });
@@ -332,7 +332,7 @@ describe("Harbor Hub export", () => {
 
   test("full coverage plus stubbed result.json without collect is inspection-upload", async () => {
     const context = await prepareDraft("full");
-    expectOk("selectTerminalBench21Runtime", await selectTerminalBench21Runtime(context, { draftId: "full", ...request("full") }));
+    expectOk("prepareTerminalBench21Draft", await prepareTerminalBench21Draft(context, { draftId: "full", ...request("full") }));
     expectOk("runQuote", await runQuote(context, { draftId: "full" }));
     expectOk("runLock", runLock(context, { draftId: "full" }));
     stubArmJob("full", "two");
@@ -357,7 +357,7 @@ describe("Harbor Hub export", () => {
     }));
     executable = writeBatchedFakeHarbor();
     const context = await prepareDraft("ready");
-    expectOk("selectTerminalBench21Runtime", await selectTerminalBench21Runtime(context, { draftId: "ready", ...request("full") }));
+    expectOk("prepareTerminalBench21Draft", await prepareTerminalBench21Draft(context, { draftId: "ready", ...request("full") }));
     expectOk("runQuote", await runQuote(context, { draftId: "ready" }));
     expect(requireRunState(workspaceDir, "ready").suiteQuote).toMatchObject({
       coverage: "full",
@@ -424,7 +424,7 @@ describe("Terminal-Bench 3.0 Hub export", () => {
 
   test("named-slice export is inspection-only without the 2.1 closed-submissions sentence", async () => {
     const context = await prepareDraft("one");
-    expectOk("selectTerminalBench30Runtime", await selectTerminalBench30Runtime(context, { draftId: "one", ...tb30Request("one_task") }));
+    expectOk("prepareTerminalBench30Draft", await prepareTerminalBench30Draft(context, { draftId: "one", ...tb30Request("one_task") }));
     expectOk("runQuote", await runQuote(context, { draftId: "one" }));
     expectOk("runLock", runLock(context, { draftId: "one" }));
     stubArmJob("one", "one");
@@ -441,7 +441,7 @@ describe("Terminal-Bench 3.0 Hub export", () => {
 
   test("custom coverage refuses the Terminal-Bench 3.0 Hub suite name", async () => {
     const context = await prepareDraft("custom");
-    expectOk("selectTerminalBench30Runtime", await selectTerminalBench30Runtime(context, { draftId: "custom", ...tb30Request(undefined, ["t11"]) }));
+    expectOk("prepareTerminalBench30Draft", await prepareTerminalBench30Draft(context, { draftId: "custom", ...tb30Request(undefined, ["t11"]) }));
     expectOk("runQuote", await runQuote(context, { draftId: "custom" }));
     expectOk("runLock", runLock(context, { draftId: "custom" }));
     stubArmJob("custom", "one");

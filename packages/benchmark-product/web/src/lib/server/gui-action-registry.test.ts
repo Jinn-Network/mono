@@ -18,8 +18,6 @@ import { GUI_SERVER_ACTIONS } from "./gui-action-registry";
 const EXPECTED_UNAVAILABLE_REASONS = {
   importRunRecords:
     "reads a local run dump and every evidence file it names by relative path; browser upload of a path-rooted evidence tree is intentionally unavailable",
-  migrateTerminalBenchLegacyTask:
-    "requires server-configured migration input paths; browser-supplied paths are forbidden",
   exportDerivedBundle:
     "copies a machine-local job or log directory; browser path-based export is forbidden",
   identityBind:
