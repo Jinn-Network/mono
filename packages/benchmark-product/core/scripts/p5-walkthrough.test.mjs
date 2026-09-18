@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -18,6 +19,19 @@ import {
 } from "./p5-walkthrough.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const walkthroughScript = fileURLToPath(new URL("./p5-walkthrough.mjs", import.meta.url));
+
+test("live walkthrough refuses instead of calling deleted Demo-1 hub APIs", () => {
+  const source = readFileSync(walkthroughScript, "utf8");
+  assert.doesNotMatch(source, /generateDemo1InstructionArtifacts/u);
+  assert.doesNotMatch(source, /createDemo1ClaudeRuntimeBinding/u);
+  assert.doesNotMatch(source, /demo1ClaudeArmRequirements/u);
+  assert.doesNotMatch(source, /demo1ClaudeRuntime/u);
+  const result = spawnSync(process.execPath, ["--preserve-symlinks", walkthroughScript], { encoding: "utf8" });
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stderr}\n${result.stdout}`, /P5 walkthrough: the Demo-1 Claude walkthrough path is retired/u);
+  assert.doesNotMatch(`${result.stderr}\n${result.stdout}`, /is not a function/u);
+});
 
 test("walkthrough rebuilds through the package entrypoint that copies runtime assets", () => {
   const buildEntrypoint = p5BuildEntrypoint();
