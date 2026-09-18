@@ -198,6 +198,7 @@ jobs:
           yarn typecheck
           yarn test
           yarn build
+          yarn check:fixtures
           yarn pack:smoke
       - name: Verify Information World
         working-directory: packages/environments/information-world

@@ -192,6 +192,7 @@ jobs:
           yarn typecheck
           yarn test
           yarn build
+          yarn fixtures:check
           yarn pack:smoke
       - name: Verify Task Derivation
         working-directory: packages/task-supply/derivation
