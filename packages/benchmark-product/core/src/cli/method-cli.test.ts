@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { runCli } from "./main.js";
+import { CLI_VERB_NAMES, runCli, USAGE } from "./main.js";
 import type { CliContext } from "./result.js";
+import { STANDALONE_CLI_VERBS } from "./parity-map.js";
 
 function context(): CliContext {
   return { cwd: "/tmp", clock: () => "2026-08-18T00:00:00.000Z" };
@@ -37,6 +38,7 @@ describe("retired per-suite verbs", () => {
     ["apex-agents", "export"],
     ["apex-swe", "export"],
     ["deepswe", "export"],
+    ["demo1", "prereg", "verify"],
   ])("unknown command %s", async (...words) => {
     const result = await runCli([...words, "--json"], context());
     expect(result.exitCode).toBe(2);
@@ -44,6 +46,19 @@ describe("retired per-suite verbs", () => {
     expect(body.ok).toBe(false);
     expect(body.error?.code).toBe("invalid-invocation");
     expect(body.error?.detail).toBe(`unknown command "${words.join(" ")}"`);
+  });
+});
+
+describe("Demo-1 / SkillsBench method removal", () => {
+  test("USAGE says the method is gone", () => {
+    expect(USAGE).toContain(
+      "The Demo-1 / SkillsBench method is gone, including demo1 prereg verify. Colophon creates no benchmarks.",
+    );
+  });
+
+  test("the verb is not in the dispatch table or standalone map", () => {
+    expect(CLI_VERB_NAMES).not.toContain("demo1 prereg verify");
+    expect(STANDALONE_CLI_VERBS).not.toHaveProperty("demo1 prereg verify");
   });
 });
 

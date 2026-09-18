@@ -158,10 +158,6 @@ import {
 } from "./sample-repository-work.js";
 import { makeSampleUniformLauncher, SAMPLE_UNIFORM_HARNESS_VERSION, SAMPLE_UNIFORM_LAUNCHER_ID } from "./sample-uniform.js";
 import { createVerdictDsseSigner, loadOrCreateEvaluatorSigningKeys } from "./signing.js";
-import {
-  makeDemo1ClaudeLauncher,
-  type Demo1ClaudeRuntimeBinding,
-} from "./demo1-claude.js";
 
 /** The Submission requirement key naming the evaluator IRI for an evaluation attempt (BP-21).
  * Homed in `./provisioner.ts` to avoid a module cycle; this is its public re-export. */
@@ -217,9 +213,6 @@ export interface LocalVenueOptions {
   /** TEST-ONLY: blocks each solve launcher's real `node -e` subprocess before its normal runner
    * starts, allowing cancellation tests to observe and kill a genuinely live process. */
   readonly solveStartDelayMsForTesting?: number;
-  /** Explicit product-owned Claude Code runtime. Absent means the venue advertises no real
-   * Claude arm; no executable path or credential is inferred from ambient environment state. */
-  readonly demo1ClaudeRuntime?: Demo1ClaudeRuntimeBinding;
   /** Host-owned real-agent bindings. These paths/handles never enter the sealed benchmark plan. */
   readonly agentRuntimes?: readonly AgentRuntimeBinding[];
   /** Sealed arm requirements selected for this venue instance; no host profile is loaded without one. */
@@ -739,9 +732,6 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     }
     agentAdapters.add(binding.profile.adapter);
   }
-  if (options.demo1ClaudeRuntime !== undefined && agentAdapters.has("claude-code")) {
-    refuse("venue-unavailable", "agentRuntimes", "Demo-1 and a configured Claude Code profile would select the same launcher; choose one qualified binding");
-  }
   if (sweRebenchGrader.dockerPath !== undefined
     && (sweRebenchGrader.dockerPath.length === 0 || !isAbsolute(sweRebenchGrader.dockerPath))) {
     refuse("validation", "sweRebenchGrader.dockerPath", "grader runtime path must be absolute");
@@ -774,9 +764,6 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     registry,
     evaluators: evaluators.map(({ id, signer }) => ({ id, signer })),
     repositoryMirror: createGitRepositoryMirror(join(workspaceDir, "venue", "repositories")),
-    ...(options.demo1ClaudeRuntime === undefined
-      ? {}
-      : { demo1Instructions: options.demo1ClaudeRuntime.artifacts }),
     ...(options.evaluationContextVariationForTesting === undefined
       ? {}
       : { evaluationContextVariationForTesting: options.evaluationContextVariationForTesting }),
@@ -844,9 +831,6 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     makeSampleRepositoryWorkLauncher(),
     options.solveStartDelayMsForTesting,
   );
-  const demo1ClaudeLauncher = options.demo1ClaudeRuntime === undefined
-    ? undefined
-    : makeDemo1ClaudeLauncher(options.demo1ClaudeRuntime);
   const profiledAgentLaunchers = agentRuntimes.map((binding) =>
     makeProfiledAgentLauncher(binding, options.agentVersionCommand));
   const inspectLauncher = inspectSelection === undefined || inspectHost === undefined
@@ -1094,13 +1078,6 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       },
     },
   };
-  if (demo1ClaudeLauncher !== undefined && options.demo1ClaudeRuntime !== undefined) {
-    const runtime = options.demo1ClaudeRuntime;
-    launcherDeployments[demo1ClaudeLauncher.id] = {
-      executable: runtime.executable,
-      probe: () => runtime.probe(),
-    };
-  }
   for (const binding of agentRuntimes) {
     const launcher = profiledAgentLaunchers.find((candidate) => candidate.id === binding.profile.adapter)!;
     launcherDeployments[launcher.id] = {
@@ -1255,7 +1232,6 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       baselineLauncher,
       sampleLauncher,
       repositoryWorkLauncher,
-      ...(demo1ClaudeLauncher === undefined ? [] : [demo1ClaudeLauncher]),
       ...profiledAgentLaunchers,
       evaluationLauncher,
       ...(inspectLauncher === undefined ? [] : [inspectLauncher]),
@@ -1287,16 +1263,6 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     }),
     provisioner,
     provisionerCapabilities,
-    ...(options.demo1ClaudeRuntime?.credential === undefined
-      ? {}
-      : {
-        capabilityGrants: (grants: Readonly<Record<string, unknown>>) =>
-          Object.entries(grants).map(([key, descriptor]) => ({ key, descriptor })),
-        secretForwardResolver: {
-          resolve: (input: { readonly grantKey: string; readonly descriptor: unknown }) =>
-            options.demo1ClaudeRuntime!.credential!.resolve(input),
-        },
-      }),
     now: options.now,
   });
 
@@ -1516,9 +1482,6 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
 
   return {
     backend,
-    ...(options.demo1ClaudeRuntime?.credential === undefined
-      ? {}
-      : { solveCapabilityGrants: options.demo1ClaudeRuntime.credential.capabilityGrants }),
     assertRunOwnership() {
       backend.assertStateRootOwnership();
     },
