@@ -313,7 +313,9 @@ try {
     // Node's fetch rejects it client-side (`bad port`) and no socket is ever
     // opened; the check lands as `ok: false`. doctor exits 0 by contract even
     // when checks fail, so the run still proves the subcommand and envelope
-    // without depending on the network.
+    // without depending on the network. The check must have failed against
+    // the pinned host: a probe that reached any other host means the pin did
+    // not take effect and the lane is network-dependent again (#4548).
     const doctor = spawnSync('npm', ['exec', '--', 'jinn', 'doctor', '--json'], {
       cwd: smokeDir,
       encoding: 'utf8',
@@ -327,8 +329,18 @@ try {
     }
     const doctorPayload = parseJsonOrExit(doctor.stdout, 'packed jinn doctor');
     const checks = Array.isArray(doctorPayload?.checks) ? doctorPayload.checks : [];
-    if (!checks.some((check) => check?.name === 'rpc_network')) {
+    const rpcNetwork = checks.find((check) => check?.name === 'rpc_network');
+    if (!rpcNetwork) {
       console.error('smoke-test-pack: packed jinn doctor envelope has no rpc_network check');
+      console.error(doctor.stdout);
+      process.exit(1);
+    }
+    if (
+      rpcNetwork?.ok !== false
+      || typeof rpcNetwork.detail !== 'string'
+      || !rpcNetwork.detail.includes('via 127.0.0.1:9:')
+    ) {
+      console.error('smoke-test-pack: packed jinn doctor rpc_network probe did not fail against the pinned 127.0.0.1:9');
       console.error(doctor.stdout);
       process.exit(1);
     }
