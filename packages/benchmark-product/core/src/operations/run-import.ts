@@ -74,6 +74,11 @@ export interface RunImportInput {
   readonly source: ExternalRunImportSource;
   /** Directory a relative `evidence[].path` resolves against; normally the dump's own directory. */
   readonly evidenceRoot: string;
+  /**
+   * Set only by `run import --from inspect` after `readInspectRunImport`. A generic `--file`
+   * dump must not open an Inspect-bound draft by labeling `source.harness` "inspect".
+   */
+  readonly namedReader?: "inspect";
 }
 
 export interface RunImportResult {
@@ -119,8 +124,9 @@ export function importRunRecords(
       const adapterId = document.spec.evaluationRuntime?.adapterId;
       if (adapterId !== undefined && isInspectRuntimeAdapterId(adapterId)) {
         // `--from inspect` brings native EvalLogs and projects sealed scorers; it does not
-        // synthesize inspect-summary. Generic dumps and the binary-judgment adapter still refuse.
-        if (adapterId !== "inspect" || input.source.harness !== "inspect") {
+        // synthesize inspect-summary. Generic dumps — including `--file` with
+        // `--source inspect` — and the binary-judgment adapter still refuse.
+        if (adapterId !== "inspect" || input.namedReader !== "inspect") {
           refuse(
             "conflict",
             `drafts.${input.draftId}.evaluationRuntime`,

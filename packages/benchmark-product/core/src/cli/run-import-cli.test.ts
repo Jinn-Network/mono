@@ -469,4 +469,25 @@ describe("run import --from inspect", () => {
     );
     expect(missingDir.exitCode).toBe(2);
   }, 60_000);
+
+  test("refuses --file --source inspect on an Inspect-bound draft; only --from inspect opens it", async () => {
+    await lockedInspectDraft();
+    const dump = join(dumpDir, "records.jsonl");
+    writeFileSync(dump, `${JSON.stringify({
+      cellKey: "0".repeat(64) + "/arm/1",
+      outcome: "unrun",
+      reason: "placeholder",
+    })}\n`);
+    const labeled = await runCli(
+      ["run", "import", "--file", dump, "--source", "inspect",
+        "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1", "--json"],
+      cliContext(),
+    );
+    expect(labeled.exitCode).toBe(1);
+    expect(JSON.parse(labeled.stdout)).toMatchObject({
+      ok: false,
+      error: { code: "conflict", detail: expect.stringContaining("run import --from inspect") },
+    });
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+  }, 60_000);
 });

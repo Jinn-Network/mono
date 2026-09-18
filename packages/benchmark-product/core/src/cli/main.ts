@@ -1614,6 +1614,7 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
       records: dump.records,
       source: dump.source,
       evidenceRoot: dump.evidenceRoot,
+      namedReader: "inspect",
     });
     return renderResult(
       imported,
