@@ -1,73 +1,73 @@
-/** Audited product operations for APEX-Agents official-suite selection. */
+/** Test fixture (launch/export setup). Not a claimant operation. Former SWE-bench Verified official-suite selection. */
 import { BENCHMARK_RECORD_KIND, BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
-import { isDraftMutable } from "../domain/lifecycle.js";
-import { parseDraftSpec, type DraftDocument } from "../domain/draft.js";
-import { refuse } from "../errors.js";
-import { atomicWriteFileSync } from "../fs/atomic.js";
-import { buildApexAgentsTasks } from "../intake/apex-agents.js";
-import { deriveWorkspaceAuthoredBenchmark, deriveWorkspaceAuthoredTask } from "../intake/workspace-authored.js";
-import { attachBenchmarkToDraft } from "./attach.js";
+import { isDraftMutable } from "../../domain/lifecycle.js";
+import { parseDraftSpec, type DraftDocument } from "../../domain/draft.js";
+import { refuse } from "../../errors.js";
+import { atomicWriteFileSync } from "../../fs/atomic.js";
+import { buildSwebenchVerifiedTasks } from "../../intake/swe-bench-verified.js";
+import { deriveWorkspaceAuthoredBenchmark, deriveWorkspaceAuthoredTask } from "../../intake/workspace-authored.js";
+import { attachBenchmarkToDraft } from "../../operations/attach.js";
 import {
-  APEX_AGENTS_DATASET_ID,
-  APEX_AGENTS_SELECTION_SCHEMA,
-  ARCHIPELAGO_ADAPTER_ID,
-  ApexAgentsSelectionManifestSchema,
-  apexAgentsSelectionBytes,
-} from "../runtime/apex-agents/manifest.js";
+  SWE_BENCH_HARNESS_ADAPTER_ID,
+  SWE_BENCH_VERIFIED_DATASET_ID,
+  SWE_BENCH_VERIFIED_SELECTION_SCHEMA,
+  SwebenchVerifiedSelectionManifestSchema,
+  swebenchVerifiedSelectionBytes,
+} from "../swe-bench-verified/manifest.js";
 import {
-  resolveApexAgentsSelection,
-  sealApexAgentsSelectionDependencies,
-  writeApexAgentsHostBinding,
-  type ApexAgentsSelectionRequest,
-} from "../runtime/apex-agents/host.js";
-import { SuiteProtocolSelectionSchema, suiteProtocolSelectionBytes } from "../runtime/suite-protocol/manifest.js";
-import { loadOrCreateReportSigningKey } from "../report/signing.js";
-import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
-import { draftPath } from "../workspace/layout.js";
-import { putSealedBytes } from "../workspace/sealed-store.js";
-import type { OperationContext } from "./context.js";
-import { readDraftDocument } from "./drafts.js";
-import { operateAsync } from "./operate-async.js";
-import type { OperationResult } from "./result.js";
+  resolveSwebenchVerifiedSelection,
+  sealSwebenchVerifiedSelectionDependencies,
+  writeSwebenchVerifiedHostBinding,
+  type SwebenchVerifiedSelectionRequest,
+} from "../swe-bench-verified/host.js";
+import { SuiteProtocolSelectionSchema, suiteProtocolSelectionBytes } from "../suite-protocol/manifest.js";
+import { loadOrCreateReportSigningKey } from "../../report/signing.js";
+import { recordWorkspaceAuthorship } from "../../run/publication-authority.js";
+import { draftPath } from "../../workspace/layout.js";
+import { putSealedBytes } from "../../workspace/sealed-store.js";
+import type { OperationContext } from "../../operations/context.js";
+import { readDraftDocument } from "../../operations/drafts.js";
+import { operateAsync } from "../../operations/operate-async.js";
+import type { OperationResult } from "../../operations/result.js";
 
-export type SelectApexAgentsRuntimeInput = { readonly draftId: string } & ApexAgentsSelectionRequest;
-export interface SelectApexAgentsRuntimeResult {
+export type SelectSwebenchVerifiedRuntimeInput = { readonly draftId: string } & SwebenchVerifiedSelectionRequest;
+export interface SelectSwebenchVerifiedRuntimeResult {
   readonly draft: DraftDocument;
   readonly selectionManifestSha256: string;
   readonly suiteProtocolSha256: string;
   readonly benchmarkSha256: string;
 }
 
-export function selectApexAgentsRuntime(
+export function prepareSwebenchVerifiedDraft(
   context: OperationContext,
-  input: SelectApexAgentsRuntimeInput,
-): Promise<OperationResult<SelectApexAgentsRuntimeResult>> {
+  input: SelectSwebenchVerifiedRuntimeInput,
+): Promise<OperationResult<SelectSwebenchVerifiedRuntimeResult>> {
   const at = context.clock();
   const clocked = { ...context, clock: () => at };
   return operateAsync({
     context: clocked,
-    action: "runtime.apex-agents.select",
+    action: "test.fixture.prepare-official-suite-draft",
     subject: input.draftId,
     inputs: input,
-    run: () => executeSelectApexAgentsRuntime(clocked, input),
+    run: () => executeSelectSwebenchVerifiedRuntime(clocked, input),
   });
 }
 
-export async function executeSelectApexAgentsRuntime(
+async function executeSelectSwebenchVerifiedRuntime(
   context: OperationContext,
-  input: SelectApexAgentsRuntimeInput,
-): Promise<SelectApexAgentsRuntimeResult> {
+  input: SelectSwebenchVerifiedRuntimeInput,
+): Promise<SelectSwebenchVerifiedRuntimeResult> {
   const at = context.clock();
   const current = readDraftDocument(context.workspaceDir, input.draftId);
-      if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse APEX-Agents selection");
+      if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse SWE-bench Verified selection");
       if (current.spec.analysis?.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
-        refuse("validation", `drafts.${input.draftId}.spec.analysis`, "APEX-Agents official suite refuses binary-instrument majority-k; use wilson@1 over judged cells");
+        refuse("validation", `drafts.${input.draftId}.spec.analysis`, "SWE-bench Verified official suite refuses binary-instrument majority-k; use wilson@1 over judged cells");
       }
-      const selected = resolveApexAgentsSelection(context.workspaceDir, input);
+      const selected = resolveSwebenchVerifiedSelection(context.workspaceDir, input);
       putSealedBytes(context.workspaceDir, sealTaskProfile(buildPredictionForecastProfile()).bytes);
-      const built = await buildApexAgentsTasks(selected.selectedTaskIds);
+      const built = await buildSwebenchVerifiedTasks(selected.selectedInstanceIds);
       void built.evaluationSpec.sha256;
       const author = loadOrCreateReportSigningKey(context.workspaceDir).keyId;
       const authoredTasks: Array<{ taskName: string; taskSha256: string; bytes: Uint8Array }> = [];
@@ -77,7 +77,7 @@ export async function executeSelectApexAgentsRuntime(
         const authored = deriveWorkspaceAuthoredTask({
           sourceBytes: task.bytes,
           author,
-          sourceKind: "apex-agents",
+          sourceKind: "swe-bench-verified",
           sourceReceiptSha256,
         });
         const taskSha256 = putSealedBytes(context.workspaceDir, authored.bytes);
@@ -104,30 +104,30 @@ export async function executeSelectApexAgentsRuntime(
       });
       const suite = SuiteProtocolSelectionSchema.parse({
         schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
-        protocol: "apex-agents",
+        protocol: "swe-bench-verified",
         coverage: selected.coverage,
-        datasetId: APEX_AGENTS_DATASET_ID,
+        datasetId: SWE_BENCH_VERIFIED_DATASET_ID,
         datasetRevision: selected.dataset.revision,
-        selectedTaskNames: [...selected.selectedTaskIds],
-        datasetTaskCount: selected.dataset.taskCount,
+        selectedTaskNames: [...selected.selectedInstanceIds],
+        datasetTaskCount: selected.dataset.instanceCount,
         replicates: 1,
         atifRequired: false,
         items: authoredTasks.map((task) => ({ taskName: task.taskName, taskSha256: task.taskSha256 })),
       });
       const suiteBytes = suiteProtocolSelectionBytes(suite);
       const suiteProtocolSha256 = putSealedBytes(context.workspaceDir, suiteBytes);
-      const profile = ApexAgentsSelectionManifestSchema.parse({
-        schema: APEX_AGENTS_SELECTION_SCHEMA,
+      const profile = SwebenchVerifiedSelectionManifestSchema.parse({
+        schema: SWE_BENCH_VERIFIED_SELECTION_SCHEMA,
         dataset: selected.dataset,
         coverage: selected.coverage,
-        selectedTasks: selected.selectedTaskIds.map((taskId) => ({ taskId })),
-        archipelago: selected.archipelago,
+        selectedInstances: selected.selectedInstanceIds.map((instanceId) => ({ instanceId })),
+        harness: selected.harness,
         suite,
       });
-      const bytes = apexAgentsSelectionBytes(profile);
+      const bytes = swebenchVerifiedSelectionBytes(profile);
       const selectionManifestSha256 = putSealedBytes(context.workspaceDir, bytes);
-      sealApexAgentsSelectionDependencies(context.workspaceDir, selected);
-      writeApexAgentsHostBinding(context.workspaceDir, selectionManifestSha256, selected.binding);
+      sealSwebenchVerifiedSelectionDependencies(context.workspaceDir, selected);
+      writeSwebenchVerifiedHostBinding(context.workspaceDir, selectionManifestSha256, selected.binding);
       attachBenchmarkToDraft(context.workspaceDir, input.draftId, benchmarkSha256, at);
       const attached = readDraftDocument(context.workspaceDir, input.draftId);
       const draft: DraftDocument = {
@@ -139,19 +139,19 @@ export async function executeSelectApexAgentsRuntime(
           arms: attached.spec.arms.map((arm) => {
             const mapped = input.arms.find((candidate) => candidate.armId === arm.armId);
             if (mapped === undefined) {
-              refuse("validation", `spec.arms.${arm.armId}`, "APEX-Agents selection has no model mapping for this Run arm");
+              refuse("validation", `spec.arms.${arm.armId}`, "SWE-bench Verified selection has no model mapping for this Run arm");
             }
             return {
               ...arm,
               pinning: {
                 ...arm.pinning,
-                harness: { id: ARCHIPELAGO_ADAPTER_ID, version: selected.archipelago.commit },
-                model: { id: mapped.modelId },
+                harness: { id: SWE_BENCH_HARNESS_ADAPTER_ID, version: selected.harness.version },
+                model: { id: mapped.modelNameOrPath },
               },
             };
           }),
           evaluationRuntime: {
-            adapterId: ARCHIPELAGO_ADAPTER_ID,
+            adapterId: SWE_BENCH_HARNESS_ADAPTER_ID,
             selectionManifestSha256,
             isolationPolicy: "unrestricted",
           },

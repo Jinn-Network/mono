@@ -1,8 +1,6 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { parseBenchmark } from "@jinn-network/benchmarking-records";
 import { armAdd } from "../../operations/arms.js";
@@ -10,7 +8,7 @@ import { createDraft, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectDeepSweV11Runtime } from "../../operations/deep-swe-v1.1.js";
+import { prepareDeepSweV11Draft } from "../testing/deep-swe-v1.1-draft.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { draftPath } from "../../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../../workspace/sealed-store.js";
@@ -173,7 +171,7 @@ describe("DeepSWE v1.1 official-suite intake", () => {
 
   test("select seals replicates=4 and one Task per selected name; quote shows 1 × 2 × 4 and two-axis bits", async () => {
     const context = await prepareDraft("one");
-    const selected = await selectDeepSweV11Runtime(context, { draftId: "one", ...request("one_task") });
+    const selected = await prepareDeepSweV11Draft(context, { draftId: "one", ...request("one_task") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(selected.result.draft.spec.replicates).toBe(4);
@@ -202,7 +200,7 @@ describe("DeepSWE v1.1 official-suite intake", () => {
 
   test("ten_task and full slices seal the named membership; custom cannot be leaderboard-ready", async () => {
     const tenContext = await prepareDraft("ten");
-    const ten = await selectDeepSweV11Runtime(tenContext, { draftId: "ten", ...request("ten_task") });
+    const ten = await prepareDeepSweV11Draft(tenContext, { draftId: "ten", ...request("ten_task") });
     expect(ten.ok, JSON.stringify(ten)).toBe(true);
     if (!ten.ok) return;
     expect(parseBenchmark(getSealedBytes(workspaceDir, ten.result.benchmarkSha256)).items).toHaveLength(10);
@@ -214,7 +212,7 @@ describe("DeepSWE v1.1 official-suite intake", () => {
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
     const customContext = await prepareDraft("custom");
-    const custom = await selectDeepSweV11Runtime(customContext, { draftId: "custom", ...request(undefined, ["t11"]) });
+    const custom = await prepareDeepSweV11Draft(customContext, { draftId: "custom", ...request(undefined, ["t11"]) });
     expect(custom.ok, JSON.stringify(custom)).toBe(true);
     if (!custom.ok) return;
     const customQuoted = await runQuote(customContext, { draftId: "custom" });
@@ -225,14 +223,14 @@ describe("DeepSWE v1.1 official-suite intake", () => {
 
   test("a 12-task tree cannot buy full coverage or method eligibility; lock without quote bits refuses", async () => {
     const context = await prepareDraft("full");
-    const selected = await selectDeepSweV11Runtime(context, { draftId: "full", ...request("full") });
+    const selected = await prepareDeepSweV11Draft(context, { draftId: "full", ...request("full") });
     expect(selected.ok).toBe(false);
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/113-task tree/u);
     expect(selected.error.detail).toContain(DEEP_SWE_V11_TASKS_TREE_SHA);
 
     // The widest slice this material can wear is ten_task, which is never method-eligible.
-    const ten = await selectDeepSweV11Runtime(context, { draftId: "full", ...request("ten_task") });
+    const ten = await prepareDeepSweV11Draft(context, { draftId: "full", ...request("ten_task") });
     expect(ten.ok, JSON.stringify(ten)).toBe(true);
     if (!ten.ok) return;
     expect(parseBenchmark(getSealedBytes(workspaceDir, ten.result.benchmarkSha256)).items).toHaveLength(10);
@@ -253,7 +251,7 @@ describe("DeepSWE v1.1 official-suite intake", () => {
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
     const refuseContext = await prepareDraft("full-refuse");
-    const refuseSelected = await selectDeepSweV11Runtime(refuseContext, { draftId: "full-refuse", ...request("ten_task") });
+    const refuseSelected = await prepareDeepSweV11Draft(refuseContext, { draftId: "full-refuse", ...request("ten_task") });
     expect(refuseSelected.ok, JSON.stringify(refuseSelected)).toBe(true);
     if (!refuseSelected.ok) return;
     // Select can no longer produce full coverage off a 12-task tree, so the lock gate for a real
@@ -277,7 +275,7 @@ describe("DeepSWE v1.1 official-suite intake", () => {
       draftId: "small-budget",
       patch: { policy: { completenessFloor: "1", cellWindowMs: 3_600_000, closeAfterMs: 86_400_000, replacement: { allowed: true, maxPerCell: 1 } } },
     }).ok).toBe(true);
-    const selected = await selectDeepSweV11Runtime(context, { draftId: "small-budget", ...request("one_task") });
+    const selected = await prepareDeepSweV11Draft(context, { draftId: "small-budget", ...request("one_task") });
     expect(selected.ok).toBe(false);
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/maxPerCell of at least 3/u);
@@ -289,16 +287,9 @@ describe("DeepSWE v1.1 official-suite intake", () => {
       draftId: "binary",
       patch: { analysis: { method: "jinn.benchmarking.method/binary-instrument", version: "1" } },
     }).ok).toBe(true);
-    const selected = await selectDeepSweV11Runtime(context, { draftId: "binary", ...request("one_task") });
+    const selected = await prepareDeepSweV11Draft(context, { draftId: "binary", ...request("one_task") });
     expect(selected.ok).toBe(false);
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/binary-instrument/u);
-  });
-
-  test("one-task qualify refuses unless COLOPHON_DEEPSWE_ONE_TASK_QUALIFY=1", () => {
-    const script = join(dirname(fileURLToPath(import.meta.url)), "../../../scripts/deepswe-v1.1-one-task-qualify.mjs");
-    const result = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, COLOPHON_DEEPSWE_ONE_TASK_QUALIFY: "" } });
-    expect(result.status).toBe(2);
-    expect(result.stderr).toMatch(/never downloads DeepSWE v1\.1/u);
   });
 });

@@ -1,25 +1,25 @@
-/** Audited product operations for Terminal-Bench 2 selection and legacy migration. */
-import { isDraftMutable } from "../domain/lifecycle.js";
-import { parseDraftSpec, type DraftDocument } from "../domain/draft.js";
-import { refuse } from "../errors.js";
-import { atomicWriteFileSync } from "../fs/atomic.js";
-import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
-import { harborSelectionManifestBytes, harborSelectionManifestSha256 } from "../runtime/harbor/manifest.js";
-import { sealHarborSelectionDependencies, writeHarborHostBinding } from "../runtime/harbor/host.js";
+/** Test fixture (launch/export setup). Not a claimant operation. Former Terminal-Bench 2 selection and legacy migration. */
+import { isDraftMutable } from "../../domain/lifecycle.js";
+import { parseDraftSpec, type DraftDocument } from "../../domain/draft.js";
+import { refuse } from "../../errors.js";
+import { atomicWriteFileSync } from "../../fs/atomic.js";
+import { createDefaultBenchmarkRuntimeHost } from "../host-port.js";
+import { harborSelectionManifestBytes, harborSelectionManifestSha256 } from "../harbor/manifest.js";
+import { sealHarborSelectionDependencies, writeHarborHostBinding } from "../harbor/host.js";
 import {
   migrateTerminalBenchLegacyMaterial,
   resolveTerminalBench2Selection,
   type TerminalBench2SelectionRequest,
   type TerminalBenchMigrationRequest,
   type TerminalBenchMigrationResolution,
-} from "../runtime/terminal-bench-2/host.js";
-import { TERMINAL_BENCH_2_PROFILE, TerminalBench2SelectionManifestSchema, TerminalBenchMigrationManifestSchema, terminalBench2SelectionBytes } from "../runtime/terminal-bench-2/manifest.js";
-import { draftPath } from "../workspace/layout.js";
-import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
-import type { OperationContext } from "./context.js";
-import { readDraftDocument } from "./drafts.js";
-import { operateAsync } from "./operate-async.js";
-import type { OperationResult } from "./result.js";
+} from "../terminal-bench-2/host.js";
+import { TERMINAL_BENCH_2_PROFILE, TerminalBench2SelectionManifestSchema, TerminalBenchMigrationManifestSchema, terminalBench2SelectionBytes } from "../terminal-bench-2/manifest.js";
+import { draftPath } from "../../workspace/layout.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
+import type { OperationContext } from "../../operations/context.js";
+import { readDraftDocument } from "../../operations/drafts.js";
+import { operateAsync } from "../../operations/operate-async.js";
+import type { OperationResult } from "../../operations/result.js";
 
 export type SelectTerminalBench2RuntimeInput = { readonly draftId: string } & TerminalBench2SelectionRequest;
 export interface SelectTerminalBench2RuntimeResult {
@@ -28,13 +28,13 @@ export interface SelectTerminalBench2RuntimeResult {
   readonly terminalBench2ProfileSha256: string;
 }
 
-export function selectTerminalBench2Runtime(context: OperationContext, input: SelectTerminalBench2RuntimeInput): Promise<OperationResult<SelectTerminalBench2RuntimeResult>> {
+export function prepareTerminalBench2Draft(context: OperationContext, input: SelectTerminalBench2RuntimeInput): Promise<OperationResult<SelectTerminalBench2RuntimeResult>> {
   const at = context.clock();
   const clocked = { ...context, clock: () => at };
-  return operateAsync({ context: clocked, action: "runtime.terminal-bench-2.select", subject: input.draftId, inputs: input, run: () => executeSelectTerminalBench2Runtime(clocked, input) });
+  return operateAsync({ context: clocked, action: "test.fixture.prepare-official-suite-draft", subject: input.draftId, inputs: input, run: () => executeSelectTerminalBench2Runtime(clocked, input) });
 }
 
-export async function executeSelectTerminalBench2Runtime(context: OperationContext, input: SelectTerminalBench2RuntimeInput): Promise<SelectTerminalBench2RuntimeResult> {
+async function executeSelectTerminalBench2Runtime(context: OperationContext, input: SelectTerminalBench2RuntimeInput): Promise<SelectTerminalBench2RuntimeResult> {
   const at = context.clock();
   const current = readDraftDocument(context.workspaceDir, input.draftId);
     if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse Terminal-Bench 2 selection");
@@ -83,11 +83,11 @@ export async function executeSelectTerminalBench2Runtime(context: OperationConte
 export type MigrateTerminalBenchLegacyTaskInput = TerminalBenchMigrationRequest;
 export type MigrateTerminalBenchLegacyTaskResult = TerminalBenchMigrationResolution;
 
-export function migrateTerminalBenchLegacyTask(context: OperationContext, input: MigrateTerminalBenchLegacyTaskInput): Promise<OperationResult<MigrateTerminalBenchLegacyTaskResult>> {
+export function prepareTerminalBenchLegacyMigration(context: OperationContext, input: MigrateTerminalBenchLegacyTaskInput): Promise<OperationResult<MigrateTerminalBenchLegacyTaskResult>> {
   const at = context.clock();
   return operateAsync({
     context: { ...context, clock: () => at },
-    action: "runtime.terminal-bench.migrate",
+    action: "test.fixture.prepare-terminal-bench-migrate",
     subject: "workspace",
     inputs: input,
     run: () => migrateTerminalBenchLegacyMaterial(context.workspaceDir, input),

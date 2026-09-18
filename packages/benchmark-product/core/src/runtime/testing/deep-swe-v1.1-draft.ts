@@ -1,41 +1,41 @@
-/** Audited product operations for DeepSWE v1.1 official-suite selection. */
+/** Test fixture (launch/export setup). Not a claimant operation. Former DeepSWE v1.1 official-suite selection. */
 import { BENCHMARK_RECORD_KIND, BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
-import { isDraftMutable } from "../domain/lifecycle.js";
-import { parseDraftSpec, type DraftDocument } from "../domain/draft.js";
-import { refuse } from "../errors.js";
-import { atomicWriteFileSync } from "../fs/atomic.js";
-import { buildDeepSweV11Tasks } from "../intake/deep-swe-v1.1.js";
-import { deriveWorkspaceAuthoredBenchmark, deriveWorkspaceAuthoredTask } from "../intake/workspace-authored.js";
-import { attachBenchmarkToDraft } from "./attach.js";
-import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
-import { harborSelectionManifestBytes, harborSelectionManifestSha256, PIER_ADAPTER_ID } from "../runtime/harbor/manifest.js";
-import { sealHarborSelectionDependencies, writeHarborHostBinding } from "../runtime/harbor/host.js";
+import { isDraftMutable } from "../../domain/lifecycle.js";
+import { parseDraftSpec, type DraftDocument } from "../../domain/draft.js";
+import { refuse } from "../../errors.js";
+import { atomicWriteFileSync } from "../../fs/atomic.js";
+import { buildDeepSweV11Tasks } from "../../intake/deep-swe-v1.1.js";
+import { deriveWorkspaceAuthoredBenchmark, deriveWorkspaceAuthoredTask } from "../../intake/workspace-authored.js";
+import { attachBenchmarkToDraft } from "../../operations/attach.js";
+import { createDefaultBenchmarkRuntimeHost } from "../host-port.js";
+import { harborSelectionManifestBytes, harborSelectionManifestSha256, PIER_ADAPTER_ID } from "../harbor/manifest.js";
+import { sealHarborSelectionDependencies, writeHarborHostBinding } from "../harbor/host.js";
 import {
   SUITE_PROTOCOL_PROFILE,
   SuiteProtocolSelectionSchema,
   suiteProtocolSelectionBytes,
-} from "../runtime/suite-protocol/manifest.js";
+} from "../suite-protocol/manifest.js";
 import {
   resolveDeepSweV11Selection,
   type DeepSweV11SelectionRequest,
-} from "../runtime/deep-swe-v1.1/host.js";
+} from "../deep-swe-v1.1/host.js";
 import {
   DEEP_SWE_V11_DATASET_ID,
   DEEP_SWE_V11_GIT_SHA,
   DEEP_SWE_V11_PROFILE,
   DeepSweV11SelectionManifestSchema,
   deepSweV11SelectionBytes,
-} from "../runtime/deep-swe-v1.1/manifest.js";
-import { loadOrCreateReportSigningKey } from "../report/signing.js";
-import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
-import { draftPath } from "../workspace/layout.js";
-import { putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
-import type { OperationContext } from "./context.js";
-import { readDraftDocument } from "./drafts.js";
-import { operateAsync } from "./operate-async.js";
-import type { OperationResult } from "./result.js";
+} from "../deep-swe-v1.1/manifest.js";
+import { loadOrCreateReportSigningKey } from "../../report/signing.js";
+import { recordWorkspaceAuthorship } from "../../run/publication-authority.js";
+import { draftPath } from "../../workspace/layout.js";
+import { putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
+import type { OperationContext } from "../../operations/context.js";
+import { readDraftDocument } from "../../operations/drafts.js";
+import { operateAsync } from "../../operations/operate-async.js";
+import type { OperationResult } from "../../operations/result.js";
 
 export type SelectDeepSweV11RuntimeInput = { readonly draftId: string } & DeepSweV11SelectionRequest;
 export interface SelectDeepSweV11RuntimeResult {
@@ -46,10 +46,10 @@ export interface SelectDeepSweV11RuntimeResult {
   readonly benchmarkSha256: string;
 }
 
-export function selectDeepSweV11Runtime(context: OperationContext, input: SelectDeepSweV11RuntimeInput): Promise<OperationResult<SelectDeepSweV11RuntimeResult>> {
+export function prepareDeepSweV11Draft(context: OperationContext, input: SelectDeepSweV11RuntimeInput): Promise<OperationResult<SelectDeepSweV11RuntimeResult>> {
   const at = context.clock();
   const clocked = { ...context, clock: () => at };
-  return operateAsync({ context: clocked, action: "runtime.deep-swe-v1.1.select", subject: input.draftId, inputs: input, run: async () => {
+  return operateAsync({ context: clocked, action: "test.fixture.prepare-official-suite-draft", subject: input.draftId, inputs: input, run: async () => {
     const current = readDraftDocument(context.workspaceDir, input.draftId);
     if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse DeepSWE v1.1 selection");
     if (current.spec.analysis?.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {

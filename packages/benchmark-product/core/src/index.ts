@@ -438,7 +438,6 @@ export {
   sampleInit,
   selectMethod,
   exportDerivedBundle,
-  migrateTerminalBenchLegacyTask,
   updateDraft,
 } from "./operations/index.js";
 export type {
@@ -470,8 +469,6 @@ export type {
   SignHumanReviewResponseResult,
   OperationContext,
   OperationResult,
-  MigrateTerminalBenchLegacyTaskInput,
-  MigrateTerminalBenchLegacyTaskResult,
   PreviewArtifact,
   PublicationAccountingInput,
   PublicationAccountingResult,
