@@ -367,17 +367,21 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
       async get(origin: string) { return holds.get(origin); },
       async put(hold: { origin: string } & Record<string, unknown>) { holds.set(hold.origin, hold); },
     };
-    const driverFor = () => createVerifyDriver({
-      trust,
-      hwm: createInMemoryHighWaterMarkStore(),
-      factsProfiles: { get: () => undefined },
-      factsRecompute: { get: () => undefined },
-      records: { "fetch": async () => sealJson({ kind: "delivery" }).bytes },
-      entries: { "fetch": async () => sealJson(entry).bytes },
-      holds: holdStore as never,
-      now: () => now,
+    const driverFor = (hwm = createInMemoryHighWaterMarkStore()) => ({
+      hwm,
+      driver: createVerifyDriver({
+        trust,
+        hwm,
+        factsProfiles: { get: () => undefined },
+        factsRecompute: { get: () => undefined },
+        records: { "fetch": async () => sealJson({ kind: "delivery" }).bytes },
+        entries: { "fetch": async () => sealJson(entry).bytes },
+        holds: holdStore as never,
+        now: () => now,
+      }),
     });
-    const driver = driverFor();
+    const { driver, hwm } = driverFor();
+    const source = { agent: "did:key:zProjector", name: "marketplace" };
     const head: SourceHead = {
       protocol: "https://spec.jinn.network/record-discovery/v1",
       origin: "did:key:zProjector/marketplace",
@@ -392,7 +396,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
       signatures: [{ keyid: "key-1", sig: Buffer.from("any").toString("base64") }],
     });
     const sourceOpts = {
-      source: { agent: "did:key:zProjector", name: "marketplace" },
+      source,
       head,
       headSignature: fakeEnvelope("application/vnd.jinn.record-discovery.head.v1+json", sealJson(head).bytes) as never,
       entries: toAsyncIterable([
@@ -407,6 +411,40 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
       },
     };
     expect((await driver.verifySource(sourceOpts)).status).toBe("ok");
+    expect(await hwm.get(source)).toMatchObject({ sequence: "0000000000000001", entry: entryDigest });
+
+    const next = parseAnnouncementEntry({
+      protocol: "https://spec.jinn.network/record-discovery/v1",
+      source,
+      sequence: "0000000000000002",
+      previous: entryDigest,
+      timestamp: "2026-07-28T12:01:00.000Z",
+      announcements: [
+        {
+          announcementId: "ann-2",
+          action: "available",
+          record: { kind: "https://spec.jinn.network/records/delivery/v1", digest: sealJson({ kind: "later" }).digest },
+        },
+      ],
+    });
+    const nextDigest = sealJson(next).digest;
+    const nextHead: SourceHead = {
+      ...head,
+      sequence: "0000000000000002",
+      entry: nextDigest,
+      issuedAt: "2026-07-28T12:01:00.000Z",
+    };
+    const resumed = await driver.verifySource({
+      source,
+      head: nextHead,
+      headSignature: fakeEnvelope("application/vnd.jinn.record-discovery.head.v1+json", sealJson(nextHead).bytes) as never,
+      entries: toAsyncIterable([
+        { entry: next, signature: fakeEnvelope("application/vnd.jinn.record-discovery.entry.v1+json", sealJson(next).bytes) as never },
+      ]),
+      firstAdoption: false,
+    });
+    expect(resumed.status).toBe("ok");
+    expect(await hwm.get(source)).toMatchObject({ sequence: "0000000000000002", entry: nextDigest });
 
     const rewritten = parseAnnouncementEntry({
       ...entry,
@@ -417,9 +455,14 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
       }],
     });
     const rewrittenDigest = sealJson(rewritten).digest;
-    const rewrittenHead: SourceHead = { ...head, entry: rewrittenDigest };
-    const truncated = await driverFor().verifySource({
-      source: sourceOpts.source,
+    const rewrittenHead: SourceHead = {
+      ...head,
+      entry: rewrittenDigest,
+      issuedAt: "2026-07-28T12:02:00.000Z",
+    };
+    const rewriteStore = driverFor();
+    const truncated = await rewriteStore.driver.verifySource({
+      source,
       head: rewrittenHead,
       headSignature: fakeEnvelope("application/vnd.jinn.record-discovery.head.v1+json", sealJson(rewrittenHead).bytes) as never,
       entries: toAsyncIterable([
@@ -428,5 +471,6 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
       firstAdoption: true,
     });
     expect(truncated.status).toBe("missing-held-entry");
+    expect(await rewriteStore.hwm.get(source)).toBeUndefined();
   });
 });

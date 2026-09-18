@@ -69,6 +69,56 @@ describe("verifyAnchoredEntryHold", () => {
     expect(truncated.status).toBe("missing-held-entry");
   });
 
+  it("treats an HWM-covered held sequence as present when the suffix omits it", async () => {
+    const holds = holdStore();
+    await verifyAnchoredEntryHold({
+      origin: ORIGIN,
+      entries: [{ sequence: "0000000000000001", digest: ENTRY }],
+      ports: { holds },
+      observed: {
+        sequence: "0000000000000001",
+        entryDigest: ENTRY,
+        anchorRecordDigest: ANCHOR,
+        anchoredTime: "2026-09-18T00:00:00.000Z",
+      },
+    });
+
+    await expect(verifyAnchoredEntryHold({
+      origin: ORIGIN,
+      entries: [{ sequence: "0000000000000003", digest: `sha256:${"c".repeat(64)}` }],
+      ports: { holds },
+      coveredThrough: { sequence: "0000000000000002" },
+    })).resolves.toMatchObject({ status: "ok" });
+
+    await expect(verifyAnchoredEntryHold({
+      origin: ORIGIN,
+      entries: [{ sequence: "0000000000000003", digest: `sha256:${"c".repeat(64)}` }],
+      ports: { holds },
+    })).resolves.toMatchObject({ status: "missing-held-entry" });
+  });
+
+  it("still refuses a fed digest mismatch at the held sequence even when HWM covers it", async () => {
+    const holds = holdStore();
+    await verifyAnchoredEntryHold({
+      origin: ORIGIN,
+      entries: [{ sequence: "0000000000000001", digest: ENTRY }],
+      ports: { holds },
+      observed: {
+        sequence: "0000000000000001",
+        entryDigest: ENTRY,
+        anchorRecordDigest: ANCHOR,
+        anchoredTime: "2026-09-18T00:00:00.000Z",
+      },
+    });
+
+    await expect(verifyAnchoredEntryHold({
+      origin: ORIGIN,
+      entries: [{ sequence: "0000000000000001", digest: `sha256:${"d".repeat(64)}` }],
+      ports: { holds },
+      coveredThrough: { sequence: "0000000000000002" },
+    })).resolves.toMatchObject({ status: "missing-held-entry" });
+  });
+
   it("does not invent a hold when none has been recorded", async () => {
     const holds = holdStore();
     await expect(verifyAnchoredEntryHold({

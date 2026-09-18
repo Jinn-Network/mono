@@ -14,6 +14,7 @@ import type {
   AnchoredEntryHoldStore,
   EntryFetcher,
   FactsRecompute,
+  HighWaterMark,
   HighWaterMarkStore,
   ItemOutcome,
   RecordFetcher,
@@ -122,6 +123,20 @@ export function createVerifyDriver(deps: VerifyDriverDeps): VerifyDriver {
       }
     }
 
+    // When a hold store is injected, intercept step 7's `hwm.put` so a
+    // refused hold never persists the new high-water mark. `get` still
+    // reads the prior mark (the HWM-covered prefix for the hold check).
+    let deferredMark: HighWaterMark | undefined;
+    const hwm: HighWaterMarkStore =
+      deps.holds === undefined
+        ? deps.hwm
+        : {
+            get: (source) => deps.hwm.get(source),
+            put: async (_source, mark) => {
+              deferredMark = mark;
+            },
+          };
+
     const outcome = await verifySourceChain({
       head: opts.head,
       headSignature: opts.headSignature,
@@ -130,26 +145,31 @@ export function createVerifyDriver(deps: VerifyDriverDeps): VerifyDriver {
         keys: deps.trust.keys,
         sigs: deps.trust.sigs,
         fresh: deps.trust.fresh,
-        hwm: deps.hwm,
+        hwm,
         now: deps.now(),
         firstAdoption: opts.firstAdoption,
       },
     });
 
+    if (outcome.status === "ok" && deps.holds !== undefined) {
+      const priorHwm = await deps.hwm.get(opts.source);
+      const hold = await verifyAnchoredEntryHold({
+        origin: formatOrigin(opts.source.agent, opts.source.name),
+        entries: walked.map((entry) => ({
+          sequence: entry.sequence,
+          digest: sealJson(entry).digest as `sha256:${string}`,
+        })),
+        ports: { holds: deps.holds },
+        coveredThrough: priorHwm === undefined ? undefined : { sequence: priorHwm.sequence },
+        observed: opts.observedAnchoredEntry,
+      });
+      if (hold.status === "missing-held-entry") return hold;
+    }
+
+    if (deferredMark !== undefined) await deps.hwm.put(opts.source, deferredMark);
+
     if (outcome.status === "ok") {
       for (const entry of walked) markVerified(opts.source, sealJson(entry).digest);
-      if (deps.holds !== undefined) {
-        const hold = await verifyAnchoredEntryHold({
-          origin: formatOrigin(opts.source.agent, opts.source.name),
-          entries: walked.map((entry) => ({
-            sequence: entry.sequence,
-            digest: sealJson(entry).digest as `sha256:${string}`,
-          })),
-          ports: { holds: deps.holds },
-          ...(opts.observedAnchoredEntry === undefined ? {} : { observed: opts.observedAnchoredEntry }),
-        });
-        if (hold.status === "missing-held-entry") return hold;
-      }
     }
     return outcome;
   }
