@@ -8,15 +8,19 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
+const { HOST, SECRET, LEAKY_URL } = vi.hoisted(() => {
+  const HOST = 'rpc.example';
+  const SECRET = 'SECRETKEYSECRETKEY01';
+  return { HOST, SECRET, LEAKY_URL: `https://u:pw@${HOST}/v2/${SECRET}` };
+});
+
 vi.mock('viem', async (importOriginal) => {
   const actual = await importOriginal<typeof import('viem')>();
   return {
     ...actual,
     createPublicClient: vi.fn(() => ({
       readContract: async () => {
-        throw new Error(
-          'HTTP request failed. URL: https://u:pw@host/v2/SECRETKEYSECRETKEY01',
-        );
+        throw new Error(`HTTP request failed. URL: ${LEAKY_URL}`);
       },
     })),
   };
@@ -34,9 +38,9 @@ describe('checkDistributorReachable', () => {
     expect(result).not.toBeNull();
     expect(result!.name).toBe('distributor_reachable');
     expect(result!.ok).toBe(true);
-    expect(result!.detail).toContain('host');
-    expect(result!.detail).not.toContain('SECRETKEYSECRETKEY01');
+    expect(result!.detail).toBe(`distributor probe failed: HTTP request failed. URL: ${HOST}`);
+    expect(result!.detail).not.toContain(SECRET);
     expect(result!.detail).not.toContain('u:pw');
-    expect(result!.detail).not.toContain('https://u:pw@host/v2/SECRETKEYSECRETKEY01');
+    expect(result!.detail).not.toContain(LEAKY_URL);
   });
 });
