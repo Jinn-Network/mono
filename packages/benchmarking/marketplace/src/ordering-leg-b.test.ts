@@ -2,7 +2,7 @@ import { BENCHMARKING_CELL_EXTENSION } from "./cell-authority.js";
 import { describeOrderingConformance } from "@jinn-network/benchmarking-testing";
 import { deriveMarketplaceAttemptUri } from "@jinn-network/marketplace-binding";
 import { createMarketplaceProjectionState } from "@jinn-network/marketplace-projector";
-import { sealSubmission } from "@jinn-network/task-execution-protocol";
+import { documentDigest, sealSubmission } from "@jinn-network/task-execution-protocol";
 import { describe, expect, test } from "vitest";
 import type { AuthorityProjection } from "./authority-projection.js";
 import {
@@ -11,6 +11,7 @@ import {
   deriveEarliestCellPostAt,
   deriveRunDigestAnchorAt,
   enforceAnchoredOrderingGate,
+  sealedSubmissionBytesMatchProjectionAnchor,
 } from "./ordering-leg-b.js";
 
 const RUN_DIGEST = `sha256:${"a".repeat(64)}` as const;
@@ -24,23 +25,56 @@ const ATTEMPT = deriveMarketplaceAttemptUri({
 const TASK_DIGEST = "7777777777777777777777777777777777777777777777777777777777777777";
 const SUBMISSION_URN = "urn:uuid:11111111-1111-4111-8111-111111111111";
 
-function sealedSubmissionBytes() {
-  const doc = {
+function sealedSubmissionBytes({
+  submission = SUBMISSION_URN,
+  taskDigest = TASK_DIGEST,
+  runDigest = RUN_DIGEST,
+  nonce = "ordering-test",
+}: {
+  submission?: string;
+  taskDigest?: string;
+  runDigest?: string;
+  nonce?: string;
+} = {}) {
+  return sealSubmission({
     protocol: "https://spec.jinn.network/profiles/task-execution/v1",
-    submission: SUBMISSION_URN,
-    task: { digest: { sha256: TASK_DIGEST } },
+    submission,
+    task: { digest: { sha256: taskDigest } },
     requester: "urn:uuid:20000000-0000-5000-8000-000000000002",
-    nonce: "ordering-test",
+    nonce,
     idempotencyKey: "ordering/test/1",
     deadline: "2026-08-04T00:00:00Z",
     requirements: { isolationPolicy: "fixture" },
     [BENCHMARKING_CELL_EXTENSION]: {
-      run: RUN_DIGEST,
-      cellKey: `${TASK_DIGEST}/armA/1`,
+      run: runDigest,
+      cellKey: `${taskDigest}/armA/1`,
       armId: "armA",
     },
+  });
+}
+
+function withSubmissionAnchor(
+  projection: AuthorityProjection,
+  observation: AuthorityProjection["observations"][number],
+  bytes: Uint8Array,
+  taskId: bigint,
+): AuthorityProjection {
+  const state = createMarketplaceProjectionState();
+  state.tasks = {
+    ...projection.state.tasks,
+    [`84532:${COORDINATOR}:${taskId}`]: {
+      maxTotal: 2,
+      liveAttemptIndices: {},
+      seenAttemptIndices: {},
+      highestAttemptIndex: -1,
+      availability: "open",
+      submissionAnchor: {
+        digest: documentDigest(bytes),
+        derivation: observation.derivation,
+      },
+    },
   };
-  return sealSubmission(doc);
+  return { ...projection, state };
 }
 
 function projectionWithMaterialTimes(input: {
@@ -118,7 +152,7 @@ function projectionWithMaterialTimes(input: {
     state: createMarketplaceProjectionState(),
   };
   return {
-    projection,
+    projection: withSubmissionAnchor(projection, projection.observations[0]!, bytes, 42n),
     material: {
       sealedSubmissionBytes: () => bytes,
     },
@@ -178,6 +212,163 @@ describe("enforceAnchoredOrderingGate", () => {
 });
 
 describe("deriveRunDigestAnchorAt / deriveEarliestCellPostAt", () => {
+  test("does not take runDigestAnchorAt from a foreign identity sharing this Run's bytes", async () => {
+    const { projection, material } = projectionWithMaterialTimes({
+      runAnchorTime: "2026-08-03T09:00:00Z",
+      cellPostTime: "2026-08-03T09:00:01Z",
+    });
+    const foreignUrn = "urn:uuid:22222222-2222-4222-8222-222222222222" as const;
+    const foreignTask = "9999999999999999999999999999999999999999999999999999999999999999";
+    const accepted = projection.observations[0]!;
+    const mixed: AuthorityProjection = {
+      ...projection,
+      observations: [
+        {
+          ...accepted,
+          id: "foreign-submission-accepted",
+          subject: foreignUrn,
+          time: "2026-08-03T08:00:00Z",
+          data: {
+            submission: foreignUrn,
+            task: `sha256:${foreignTask}`,
+          },
+        } as AuthorityProjection["observations"][number],
+        ...projection.observations,
+      ],
+    };
+    expect(await deriveRunDigestAnchorAt({
+      projection: mixed,
+      runDigest: RUN_DIGEST,
+      material,
+    })).toBe("2026-08-03T09:00:00Z");
+  });
+
+  test("does not take runDigestAnchorAt from a second blob claiming a foreign TaskCreated", async () => {
+    const { projection } = projectionWithMaterialTimes({
+      runAnchorTime: "2026-08-03T09:00:00Z",
+      cellPostTime: "2026-08-03T09:00:01Z",
+    });
+    const honestBytes = sealedSubmissionBytes();
+    const foreignUrn = "urn:uuid:22222222-2222-4222-8222-222222222222";
+    const foreignTask = "9999999999999999999999999999999999999999999999999999999999999999";
+    const accepted = projection.observations[0]!;
+    const foreignAccepted = {
+      ...accepted,
+      id: "foreign-submission-accepted",
+      subject: foreignUrn,
+      time: "2026-08-03T08:00:00Z",
+      data: {
+        submission: foreignUrn,
+        task: `sha256:${foreignTask}`,
+      },
+      derivation: {
+        ...accepted.derivation,
+        txHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        logIndex: 2,
+        blockNumber: 90,
+      },
+    } as AuthorityProjection["observations"][number];
+    const mixed = withSubmissionAnchor(
+      { ...projection, observations: [foreignAccepted, ...projection.observations] },
+      foreignAccepted,
+      sealedSubmissionBytes({
+        submission: foreignUrn,
+        taskDigest: foreignTask,
+        runDigest: `sha256:${"b".repeat(64)}`,
+        nonce: "foreign-honest",
+      }),
+      41n,
+    );
+    const material = {
+      sealedSubmissionBytes({ submissionUrn }: { submissionUrn: string }) {
+        return submissionUrn === foreignUrn
+          ? sealedSubmissionBytes({
+              submission: foreignUrn,
+              taskDigest: foreignTask,
+              nonce: "foreign-fake",
+            })
+          : honestBytes;
+      },
+    };
+    expect(await deriveRunDigestAnchorAt({
+      projection: mixed,
+      runDigest: RUN_DIGEST,
+      material,
+    })).toBe("2026-08-03T09:00:00Z");
+    expect(await deriveEarliestCellPostAt({
+      projection: mixed,
+      runDigest: RUN_DIGEST,
+      material,
+    })).toBe("2026-08-03T09:00:01Z");
+  });
+
+  test("does not take runDigestAnchorAt from a rewritten blob on a today TaskCreated without submissionAnchor", async () => {
+    const { projection } = projectionWithMaterialTimes({
+      runAnchorTime: "2026-08-03T09:00:00Z",
+      cellPostTime: "2026-08-03T09:00:01Z",
+    });
+    const honestBytes = sealedSubmissionBytes();
+    const foreignUrn = "urn:uuid:22222222-2222-4222-8222-222222222222";
+    const foreignTask = "9999999999999999999999999999999999999999999999999999999999999999";
+    const accepted = projection.observations[0]!;
+    const foreignAccepted = {
+      ...accepted,
+      id: "foreign-today-submission-accepted",
+      subject: foreignUrn,
+      time: "2026-08-03T08:00:00Z",
+      data: {
+        submission: foreignUrn,
+        task: `sha256:${foreignTask}`,
+      },
+      derivation: {
+        ...accepted.derivation,
+        txHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        logIndex: 2,
+        blockNumber: 90,
+        contractGeneration: "today" as const,
+      },
+    } as AuthorityProjection["observations"][number];
+    const mixed: AuthorityProjection = {
+      ...projection,
+      observations: [foreignAccepted, ...projection.observations],
+      state: {
+        ...projection.state,
+        tasks: {
+          ...projection.state.tasks,
+          [`84532:${COORDINATOR}:41`]: {
+            maxTotal: 2,
+            liveAttemptIndices: {},
+            seenAttemptIndices: {},
+            highestAttemptIndex: -1,
+            availability: "open",
+          },
+        },
+      },
+    };
+    const rewritten = sealedSubmissionBytes({
+      submission: foreignUrn,
+      taskDigest: foreignTask,
+      nonce: "foreign-today-fake",
+    });
+    expect(sealedSubmissionBytesMatchProjectionAnchor({
+      bytes: rewritten,
+      submissionUrn: foreignUrn,
+      taskDigest: foreignTask,
+      projection: mixed,
+      accepted: foreignAccepted,
+    })).toBe(false);
+    const material = {
+      sealedSubmissionBytes({ submissionUrn }: { submissionUrn: string }) {
+        return submissionUrn === foreignUrn ? rewritten : honestBytes;
+      },
+    };
+    expect(await deriveRunDigestAnchorAt({
+      projection: mixed,
+      runDigest: RUN_DIGEST,
+      material,
+    })).toBe("2026-08-03T09:00:00Z");
+  });
+
   test("ignore observations for other Run digests", async () => {
     const { projection, material } = projectionWithMaterialTimes({
       runAnchorTime: "2026-08-03T09:00:01Z",

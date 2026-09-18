@@ -36,6 +36,11 @@ import {
   enforceAnchoredOrderingGate,
   type AnchoredOrderingTranscript,
 } from "./ordering-leg-b.js";
+import {
+  buildMarketplaceOrderingReceipt,
+  memoizeSealedRecordMaterial,
+  type MarketplaceOrderingReceipt,
+} from "./ordering-receipt.js";
 
 export { MarketplaceCompositionValidationError } from "./budget-validation.js";
 export { AnchoredOrderingViolationError } from "./ordering-leg-b.js";
@@ -89,6 +94,8 @@ export interface RunOnMarketplaceResult {
   readonly matrix: AssembledMatrix;
   readonly anchoredOrdering: AnchoredOrderingTranscript;
   readonly coherentClose: CoherentCloseAuthority;
+  /** Frozen-snapshot publication receipt. Built after the leg-(b) gate with no second projector read. */
+  readonly orderingReceipt: MarketplaceOrderingReceipt;
 }
 
 async function collectEventsOnce(
@@ -136,11 +143,14 @@ export async function runOnMarketplace(
     opts.projector.eventsThroughAnchor(coherent.anchor),
   );
   const projection = deriveAuthorityProjection(cachedEvents, coherent.anchor, orphaned);
+  const material = opts.projector.sealedRecordMaterial === undefined
+    ? undefined
+    : memoizeSealedRecordMaterial(opts.projector.sealedRecordMaterial);
 
   const orderingGate = await enforceAnchoredOrderingGate({
     projection,
     runDigest,
-    material: opts.projector.sealedRecordMaterial,
+    material,
   });
 
   const authorityProjection = freezeAuthorityProjection(projection);
@@ -153,7 +163,7 @@ export async function runOnMarketplace(
       orphanedBlockHashes: orphaned,
       runCancelled,
       join: opts.projector.join,
-      sealedRecordMaterial: opts.projector.sealedRecordMaterial,
+      sealedRecordMaterial: material,
     },
     cost: {
       generation: opts.projector.generation,
@@ -163,11 +173,21 @@ export async function runOnMarketplace(
   });
 
   const matrix = await assembleMatrix(bench, run, assemblyPorts);
+  const anchoredOrdering = buildAnchoredOrderingTranscript(orderingGate);
+  const orderingReceipt = await buildMarketplaceOrderingReceipt({
+    events: cachedEvents,
+    closeAnchor: coherent.anchor,
+    orphanedBlockHashes: orphaned,
+    runDigest,
+    material,
+    transcript: anchoredOrdering,
+  });
 
   return {
     statusEvents,
     matrix,
-    anchoredOrdering: buildAnchoredOrderingTranscript(orderingGate),
+    anchoredOrdering,
     coherentClose: coherent,
+    orderingReceipt,
   };
 }

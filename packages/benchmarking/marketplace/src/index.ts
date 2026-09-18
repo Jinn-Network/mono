@@ -37,6 +37,41 @@ export type {
 } from "./venue.js";
 
 export {
+  EVENT_ORDINAL_PAD_WIDTH,
+  MARKETPLACE_ORDERING_SCHEMA_ID,
+  MarketplaceOrderingParseError,
+  compareSubmissionEntries,
+  eventMemberPath,
+  marketplaceOrderingRecordDigest,
+  memberSha256Hex,
+  parseMarketplaceOrderingRecord,
+  serializeMarketplaceOrderingRecord,
+  submissionMemberPath,
+} from "./ordering-record.js";
+export type {
+  MarketplaceOrderingEventEntry,
+  MarketplaceOrderingRecord,
+  MarketplaceOrderingSubmissionEntry,
+  MarketplaceOrderingTranscript,
+} from "./ordering-record.js";
+
+export {
+  parseMarketplaceEventBytes,
+  serializeMarketplaceEvent,
+} from "./ordering-event-json.js";
+
+export {
+  buildMarketplaceOrderingReceipt,
+  evaluateOrderingBytes,
+  memoizeSealedRecordMaterial,
+} from "./ordering-receipt.js";
+export type {
+  MarketplaceOrderingReceipt,
+  OrderingByteEvaluation,
+  OrderingByteStatus,
+} from "./ordering-receipt.js";
+
+export {
   projectorInputScope,
   deriveEligibleObservations,
   deriveEligibleProjection,

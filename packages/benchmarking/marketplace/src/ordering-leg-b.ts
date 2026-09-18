@@ -5,6 +5,10 @@ import {
   submissionExtensionBlock,
 } from "@jinn-network/benchmarking-records";
 import { checkPreregistrationAnchoredOrder } from "@jinn-network/benchmarking-run";
+import type {
+  MarketplaceProjectionState,
+  MarketplaceProtocolObservation,
+} from "@jinn-network/marketplace-projector";
 import type { AuthorityProjection } from "./authority-projection.js";
 import {
   BENCHMARKING_CELL_EXTENSION,
@@ -13,8 +17,13 @@ import {
 import {
   bytesMatchCanonicalSeal,
   decodeUtf8Json,
+  sealedSubmissionMatchesIdentity,
 } from "./canonical-bytes.js";
-import { sealSubmission, validateSubmission } from "@jinn-network/task-execution-protocol";
+import {
+  documentDigest,
+  sealSubmission,
+  validateSubmission,
+} from "@jinn-network/task-execution-protocol";
 
 export class AnchoredOrderingViolationError extends Error {
   readonly check = "preregistration-precedes-dispatch" as const;
@@ -39,25 +48,98 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function taskDigestRef(taskDigest: string): `sha256:${string}` {
+  return (taskDigest.startsWith("sha256:") ? taskDigest : `sha256:${taskDigest}`) as `sha256:${string}`;
+}
+
+function submissionAcceptedFor(
+  observations: readonly MarketplaceProtocolObservation[],
+  submissionUrn: string,
+  taskDigest: string,
+): MarketplaceProtocolObservation | undefined {
+  const taskRef = taskDigestRef(taskDigest);
+  return observations.find((observation) => {
+    if (observation.type !== "network.jinn.task-execution.submission-accepted.v1") return false;
+    if (observation.subject !== submissionUrn) return false;
+    const data = observation.data;
+    return isRecord(data) && data.task === taskRef;
+  });
+}
+
+/** Same bind as cell-authority `anchoredDigestForObservation`: derivation of the accepted TaskCreated. */
+function anchoredDigestForObservation(
+  observation: MarketplaceProtocolObservation,
+  state: MarketplaceProjectionState,
+): `sha256:${string}` | undefined {
+  for (const task of Object.values(state.tasks)) {
+    if (task.admission === "rejected") continue;
+    const anchor = task.submissionAnchor;
+    if (anchor === undefined) continue;
+    if (
+      anchor.derivation.txHash === observation.derivation.txHash
+      && anchor.derivation.logIndex === observation.derivation.logIndex
+    ) {
+      return anchor.digest;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Spec §4.1 step 5: catalog bytes must be the Submission the observation named.
+ * Missing chain digest → skip for every generation; present + mismatch → skip.
+ * Today TaskCreated never writes `submissionAnchor`, so a missing-anchor match
+ * would let any identity-matching blob steal `runDigestAnchorAt`.
+ */
+export function sealedSubmissionBytesMatchProjectionAnchor(input: {
+  bytes: Uint8Array;
+  submissionUrn: string;
+  taskDigest: string;
+  projection: AuthorityProjection;
+  accepted?: MarketplaceProtocolObservation;
+}): boolean {
+  const accepted = input.accepted ?? submissionAcceptedFor(
+    input.projection.observations,
+    input.submissionUrn,
+    input.taskDigest,
+  );
+  if (accepted === undefined) return false;
+  const anchoredDigest = anchoredDigestForObservation(accepted, input.projection.state);
+  if (anchoredDigest === undefined) return false;
+  return anchoredDigest === documentDigest(input.bytes);
+}
+
 async function resolveCanonicalSubmission(input: {
   submissionUrn: string;
   taskDigest: string;
+  projection: AuthorityProjection;
+  accepted?: MarketplaceProtocolObservation;
   material?: SealedRecordMaterialPort;
-}): Promise<{ doc: Record<string, unknown>; time: string } | undefined> {
+}): Promise<{ doc: Record<string, unknown> } | undefined> {
   if (input.material === undefined) return undefined;
-  const taskRef = input.taskDigest.startsWith("sha256:")
-    ? input.taskDigest
-    : `sha256:${input.taskDigest}`;
+  const taskRef = taskDigestRef(input.taskDigest);
   const bytes = await input.material.sealedSubmissionBytes({
     submissionUrn: input.submissionUrn,
-    taskDigest: taskRef as `sha256:${string}`,
+    taskDigest: taskRef,
   });
   if (bytes === undefined) return undefined;
   const parsed = decodeUtf8Json(bytes);
   if (parsed === undefined || !isRecord(parsed)) return undefined;
   const validation = validateSubmission(parsed);
   if (!bytesMatchCanonicalSeal(bytes, parsed, sealSubmission, validation)) return undefined;
-  return { doc: parsed, time: "" };
+  if (!sealedSubmissionMatchesIdentity(parsed, input.submissionUrn, input.taskDigest)) {
+    return undefined;
+  }
+  if (!sealedSubmissionBytesMatchProjectionAnchor({
+    bytes,
+    submissionUrn: input.submissionUrn,
+    taskDigest: input.taskDigest,
+    projection: input.projection,
+    accepted: input.accepted,
+  })) {
+    return undefined;
+  }
+  return { doc: parsed };
 }
 
 function extensionCommitsToRun(
@@ -97,6 +179,8 @@ export async function deriveRunDigestAnchorAt(input: {
     const resolved = await resolveCanonicalSubmission({
       submissionUrn,
       taskDigest: taskHex,
+      projection: input.projection,
+      accepted: observation,
       material: input.material,
     });
     if (resolved === undefined) continue;
@@ -150,6 +234,7 @@ export async function deriveEarliestCellPostAt(input: {
     const resolved = await resolveCanonicalSubmission({
       submissionUrn,
       taskDigest: taskHex,
+      projection: input.projection,
       material: input.material,
     });
     if (resolved === undefined) continue;

@@ -36,3 +36,29 @@ export function decodeUtf8Json(bytes: Uint8Array): unknown | undefined {
 export function isValidBlockHash(value: unknown): value is `0x${string}` {
   return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
 }
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asSha256Ref(value: string): string {
+  return value.startsWith("sha256:") ? value : `sha256:${value}`;
+}
+
+/**
+ * Bind a sealed Submission document to the catalog or observation identity that
+ * named it. Digest-equal sharing of one blob is allowed; a different identity
+ * pointing at this document is not.
+ */
+export function sealedSubmissionMatchesIdentity(
+  parsed: unknown,
+  submissionUrn: string,
+  taskDigest: string,
+): boolean {
+  if (!isPlainRecord(parsed) || parsed.submission !== submissionUrn) return false;
+  const task = parsed.task;
+  if (!isPlainRecord(task)) return false;
+  const digest = task.digest;
+  if (!isPlainRecord(digest) || typeof digest.sha256 !== "string") return false;
+  return asSha256Ref(digest.sha256) === asSha256Ref(taskDigest);
+}
