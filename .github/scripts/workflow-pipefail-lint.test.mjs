@@ -1816,3 +1816,28 @@ test('a guard on a pipeline does not cover a definition in the pipeline head (#4
   assert.deepEqual(severities('{ producer | head -1; } | cat', { shell: 'bash' }), ['error:head']);
 });
 
+test('unwrapping a pipeline-head compound still walks substitutions in the tail', () => {
+  // The #4566 path unwraps `{ … }` when it leads a pipeline, then used to `continue`
+  // before `substitutionSpans`. Unguarded `$(producer | head)` in the tail must still
+  // report, matching a substitution that is the whole statement.
+  assert.deepEqual(severities('{ echo hi; } | echo $(producer | head -1)', { shell: 'bash' }), [
+    'error:head',
+  ]);
+  assert.deepEqual(severities('{ echo hi; } | echo "$(producer | head -1)"', { shell: 'bash' }), [
+    'error:head',
+  ]);
+  assert.deepEqual(severities('X="$(producer | head -1)"', { shell: 'bash' }), ['error:head']);
+  // A mixed tail still reports every consumer. Substitutions are walked first, matching
+  // the remainder path, so the inner `grep -q` precedes the outer `head`.
+  assert.deepEqual(severities('{ echo hi; } | head -1 $(producer | grep -q x)', { shell: 'bash' }), [
+    'error:grep -q',
+    'error:head',
+  ]);
+  // Substitution in the unwrapped head was already seen; keep that, and do not treat a
+  // trailing `|| true` as covering a substitution the old `unitGuarded` skip also missed.
+  assert.deepEqual(severities('{ echo $(producer | head -1); } | cat', { shell: 'bash' }), [
+    'error:head',
+  ]);
+  assert.deepEqual(severities('{ echo hi; } | echo $(producer | head -1) || true', { shell: 'bash' }), []);
+});
+

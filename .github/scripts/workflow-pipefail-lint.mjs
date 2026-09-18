@@ -1166,6 +1166,32 @@ function guardFlags(units) {
   return guarded;
 }
 
+function scanStatementRemainder(statement, fragment, offset, context, skipHead) {
+  // A command substitution is its own list: `$( … )` runs in a subshell, so a guard
+  // written inside one covers the inside only, and a `||` written inside one is not a
+  // separator of the statement that holds it. Walking the interior separately keeps
+  // both true while the finding still names the whole statement a reader sees.
+  // skipHead is true for a full statement (first segment is the producer) and false
+  // for a pipeline tail whose producer was already unwrapped.
+  const trimmed = statement.trim();
+  const spans = substitutionSpans(fragment);
+  const report = (consumer) => context.report(trimmed, consumer, offset);
+  for (const span of spans) {
+    scanStatements(
+      fragment.slice(span.start, span.end),
+      false,
+      { ...context, report: (_inner, consumer) => report(consumer) },
+      'sealed',
+    );
+  }
+  const segments = splitUnquoted(blankSpans(fragment, spans), ['|&', '|']);
+  const rest = skipHead ? segments.slice(1) : segments;
+  for (const segment of rest) {
+    const consumer = earlyExitConsumer(segment);
+    if (consumer !== null) report(consumer);
+  }
+}
+
 /**
  * Walk one logical line's statements, honouring nesting: a `||` guard written after a
  * compound guards everything inside it. A compound is unwrapped and re-walked so the
@@ -1225,38 +1251,19 @@ function scanStatements(text, guarded, context, scope = 'top', base = 0) {
         nestedScope,
         offset + pipes[0].offset + headCompound.offset,
       );
-      if (!unitGuarded) {
-        for (const segment of pipes.slice(1)) {
-          const consumer = earlyExitConsumer(segment.text);
-          if (consumer !== null) context.report(statement.trim(), consumer, offset);
-        }
-      }
-      continue;
     }
     if (unitGuarded) continue;
-
-    // A command substitution is its own list: `$( … )` runs in a subshell, so a guard
-    // written inside one covers the inside only, and a `||` written inside one is not a
-    // separator of the statement that holds it. Walking the interior separately keeps
-    // both true while the finding still names the whole statement a reader sees.
-    const spans = substitutionSpans(statement);
-    for (const span of spans) {
-      const interior = statement.slice(span.start, span.end);
-      scanStatements(
-        interior,
-        false,
-        {
-          ...context,
-          report: (_inner, consumer) => context.report(statement.trim(), consumer, offset),
-        },
-        'sealed',
-      );
-    }
-
-    for (const segment of splitUnquoted(blankSpans(statement, spans), ['|&', '|']).slice(1)) {
-      const consumer = earlyExitConsumer(segment);
-      if (consumer !== null) context.report(statement.trim(), consumer, offset);
-    }
+    // The head is unwrapped so a `||` on the pipeline cannot cover a deferred body
+    // (#4566). The rest of the statement is still a list: `continue` without walking
+    // it dropped `$(producer | head)` in the tail. skipHead is false for that tail
+    // (producer already unwrapped) and true for a full statement.
+    scanStatementRemainder(
+      statement,
+      headCompound !== null ? statement.slice(pipes[1].offset) : statement,
+      offset,
+      context,
+      headCompound === null,
+    );
   }
 }
 
