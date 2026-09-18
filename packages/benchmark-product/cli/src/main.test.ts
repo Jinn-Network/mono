@@ -86,6 +86,9 @@ describe("Colophon install surface", () => {
     const answer = await runColophonCli(["--help"], context);
     expect(answer.exitCode).toBe(0);
     expect(answer.stdout).toContain("colophon demo");
+    expect(answer.stdout).toContain("Published claimant verbs:");
+    expect(answer.stdout).toContain("method, arm add, lock, anchor, run import, collect, report, publish, results, status");
+    expect(answer.stdout).toContain("service's machinery");
     expect(answer.stdout).not.toContain("terminal-bench-2.1");
   });
 

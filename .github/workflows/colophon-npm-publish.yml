@@ -1,14 +1,24 @@
 name: Colophon npm Publish
 
-# Demand-gated Increment 1 publisher for @colophon-claims/verify.
+# Demand-gated publisher for @colophon-claims/{verify,core,cli}.
 # The npm trusted-publisher workflow field is this filename. Do not rename it.
 # Do not run this on push. Do not add a registry token.
+# Publish core before cli: cli depends on the published core version.
+# Claim-pin guard is verifier-only; core and cli do not ship a reader pin.
 
 on:
   workflow_dispatch:
     inputs:
+      package:
+        description: 'Package to publish (core before cli)'
+        required: true
+        type: choice
+        options:
+          - verify
+          - core
+          - cli
       confirm:
-        description: 'Type publish-verify to publish @colophon-claims/verify Increment 1'
+        description: 'Type publish-<package> (publish-verify, publish-core, or publish-cli)'
         required: true
         type: string
 
@@ -20,8 +30,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish-verify:
-    name: publish-verify
+  publish-colophon:
+    name: publish-colophon
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: npm-publish
@@ -30,9 +40,9 @@ jobs:
       id-token: write
     steps:
       - name: Require explicit confirmation
-        if: ${{ github.event.inputs.confirm != 'publish-verify' }}
+        if: ${{ github.event.inputs.confirm != format('publish-{0}', github.event.inputs.package) }}
         run: |
-          echo "Refusing to publish. Type publish-verify to continue."
+          echo "Refusing to publish. Type publish-${{ github.event.inputs.package }} to continue."
           exit 1
 
       - uses: actions/checkout@v7
@@ -47,13 +57,14 @@ jobs:
         run: npm install -g npm@11.19.0
 
       - name: Refuse a publish the in-tree claim pins do not name
+        if: ${{ github.event.inputs.package == 'verify' }}
         run: node .github/scripts/colophon-publish-manifest.mjs --check-claim-pins packages/benchmark-product/verify/package.json
 
       - name: Pin platform dependencies to the recorded product-release receipt
-        run: node .github/scripts/colophon-publish-manifest.mjs --apply packages/benchmark-product/verify/package.json
+        run: node .github/scripts/colophon-publish-manifest.mjs --apply packages/benchmark-product/${{ github.event.inputs.package }}/package.json
 
       - name: Install, build, and publish from the public registry
-        working-directory: packages/benchmark-product/verify
+        working-directory: packages/benchmark-product/${{ github.event.inputs.package }}
         run: |
           unset NODE_AUTH_TOKEN
           npm install

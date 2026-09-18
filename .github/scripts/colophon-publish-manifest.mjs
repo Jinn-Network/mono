@@ -43,21 +43,6 @@ export const READER_INSTRUCTION_DOCS = [
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
 const EXACT_CANARY_PIN = /^0\.1\.0-canary\.sha\.[0-9a-f]{40}$/u;
-const VERIFY_RELEASES = {
-  '0.2.0': {
-    decision: 'DR-2026-08-22-a',
-    platformSourceSha: 'e00b2fc47fc5635b007eb349fb1e41aa81bb3c50',
-    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/32544891098/attempts/2',
-    receiptSha256: '8c6749c2e6c303b17ceccbc12712e1210e275dcdbcb37fd495a14a15cbb4474e',
-  },
-  '0.2.1': {
-    decision: 'operator-authorization-2026-08-26',
-    platformSourceSha: '0533a224cf99f06d7facf0c23455f2781a5b9e62',
-    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/33517790412/attempts/2',
-    receiptSha256: '2f2aa7e82f75c2775bd8de8673d3286caf8c6b9a92133a5a93f1766f942b1797',
-  },
-};
-const VERIFY_RELEASE_VERSIONS = Object.keys(VERIFY_RELEASES);
 const PRODUCT_RELEASE_PINS_KEYS = ['schemaVersion', 'receipts'];
 const VERIFY_020_RECEIPT_KEYS = [
   'decision',
@@ -88,6 +73,70 @@ const VERIFY_020_PLATFORM_CLOSURE = [
   '@jinn-network/trust-resolve',
   '@jinn-network/trust-testing',
 ];
+const CORE_010_PLATFORM_CLOSURE = [
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/benchmarking-evaluation',
+  '@jinn-network/benchmarking-evidence',
+  '@jinn-network/benchmarking-interop',
+  '@jinn-network/benchmarking-local',
+  '@jinn-network/benchmarking-native-capture',
+  '@jinn-network/benchmarking-protocol',
+  '@jinn-network/benchmarking-publication',
+  '@jinn-network/benchmarking-records',
+  '@jinn-network/benchmarking-run',
+  '@jinn-network/record-discovery-protocol',
+  '@jinn-network/record-discovery-serve',
+  '@jinn-network/record-discovery-transport-http',
+  '@jinn-network/record-publication',
+  '@jinn-network/task-admission',
+  '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-evaluation-harness',
+  '@jinn-network/task-execution-evaluator-adapters',
+  '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-oci-grader',
+  '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-supervisor',
+  '@jinn-network/task-execution-workspace',
+  '@jinn-network/trust-core',
+];
+const CLI_010_PLATFORM_CLOSURE = [];
+const PRODUCT_RELEASES = {
+  '@colophon-claims/verify@0.2.0': {
+    decision: 'DR-2026-08-22-a',
+    platformSourceSha: 'e00b2fc47fc5635b007eb349fb1e41aa81bb3c50',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/32544891098/attempts/2',
+    receiptSha256: '8c6749c2e6c303b17ceccbc12712e1210e275dcdbcb37fd495a14a15cbb4474e',
+    closure: VERIFY_020_PLATFORM_CLOSURE,
+  },
+  '@colophon-claims/verify@0.2.1': {
+    decision: 'operator-authorization-2026-08-26',
+    platformSourceSha: '0533a224cf99f06d7facf0c23455f2781a5b9e62',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/33517790412/attempts/2',
+    receiptSha256: '2f2aa7e82f75c2775bd8de8673d3286caf8c6b9a92133a5a93f1766f942b1797',
+    closure: VERIFY_020_PLATFORM_CLOSURE,
+  },
+  '@colophon-claims/core@0.1.0': {
+    decision: 'DR-2026-08-22-a',
+    platformSourceSha: '0533a224cf99f06d7facf0c23455f2781a5b9e62',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/33517790412/attempts/2',
+    receiptSha256: '03c9de23b12274417087c7884dae1e112a0e4cc14b4d1fd2cfc9a84588193e90',
+    closure: CORE_010_PLATFORM_CLOSURE,
+  },
+  '@colophon-claims/cli@0.1.0': {
+    decision: 'DR-2026-08-22-a',
+    platformSourceSha: '0533a224cf99f06d7facf0c23455f2781a5b9e62',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/33517790412/attempts/2',
+    receiptSha256: 'a68ee374b0dc7382df32f5d999584bc0ca6af37b3ebbed3f221d39452004f3ee',
+    closure: CLI_010_PLATFORM_CLOSURE,
+  },
+};
+const PRODUCT_RELEASE_IDS = Object.keys(PRODUCT_RELEASES);
+const VERIFY_RELEASE_VERSIONS = PRODUCT_RELEASE_IDS
+  .filter((id) => id.startsWith('@colophon-claims/verify@'))
+  .map((id) => id.slice('@colophon-claims/verify@'.length));
 
 function isFloatingCanarySpecifier(value) {
   if (typeof value !== 'string') return false;
@@ -167,17 +216,17 @@ export function validateProductReleasePlatformPin(pin, manifest) {
   if (!hasExactKeys(pin, VERIFY_020_RECEIPT_KEYS) || !hasExactKeys(pin.product, VERIFY_020_PRODUCT_KEYS)) {
     throw new Error('product-release pin must retain the immutable verifier 0.2 receipt shape');
   }
-  const release = VERIFY_RELEASES[pin.product.version];
+  const releaseId = `${pin.product.packageName}@${pin.product.version}`;
+  const release = PRODUCT_RELEASES[releaseId];
   if (
     release === undefined
     || pin?.decision !== release.decision
-    || pin?.product?.packageName !== '@colophon-claims/verify'
     || pin.platformSourceSha !== release.platformSourceSha
     || pin.platformVersion !== `0.1.0-canary.sha.${release.platformSourceSha}`
     || manifest.name !== pin.product.packageName
     || manifest.version !== pin.product.version
   ) {
-    throw new Error('only a registered @colophon-claims/verify 0.2 patch release may use its exact canary receipt');
+    throw new Error(`only a registered product release may use its exact canary receipt (${releaseId})`);
   }
   refuseFloatingCanary(pin.platformVersion, 'product-release pin platformVersion');
   if (!COMMIT_SHA.test(String(pin.platformSourceSha))) {
@@ -196,12 +245,12 @@ export function validateProductReleasePlatformPin(pin, manifest) {
   const directNames = Object.keys(manifest.dependencies ?? {})
     .filter((name) => name.startsWith('@jinn-network/'));
   const packages = pin.platformPackages;
-  if (!Array.isArray(packages) || packages.length !== VERIFY_020_PLATFORM_CLOSURE.length) {
-    throw new Error('product-release pin must record the complete verifier 0.2 Jinn closure');
+  if (!Array.isArray(packages) || packages.length !== release.closure.length) {
+    throw new Error(`product-release pin must record the complete ${releaseId} Jinn closure`);
   }
   const names = packages.map((pkg) => pkg?.name);
-  if (JSON.stringify(names) !== JSON.stringify(VERIFY_020_PLATFORM_CLOSURE)) {
-    throw new Error('product-release pin Jinn package names must be the sorted verifier 0.2 closure');
+  if (JSON.stringify(names) !== JSON.stringify(release.closure)) {
+    throw new Error(`product-release pin Jinn package names must be the sorted ${releaseId} closure`);
   }
   if (directNames.some((name) => !names.includes(name))) {
     throw new Error('product-release pin must include every direct Jinn dependency');
@@ -221,7 +270,7 @@ export function validateProductReleasePlatformPin(pin, manifest) {
     }
   }
   if (sha256CanonicalJson(pin) !== release.receiptSha256) {
-    throw new Error(`product-release pin must retain the immutable verifier ${pin.product.version} receipt values`);
+    throw new Error(`product-release pin must retain the immutable ${releaseId} receipt values`);
   }
   return pin;
 }
@@ -231,18 +280,19 @@ export function validateProductReleasePlatformPins(pins, manifest) {
     !hasExactKeys(pins, PRODUCT_RELEASE_PINS_KEYS)
     || pins.schemaVersion !== 1
     || !Array.isArray(pins.receipts)
-    || JSON.stringify(pins.receipts.map((pin) => pin?.product?.version)) !== JSON.stringify(VERIFY_RELEASE_VERSIONS)
+    || JSON.stringify(pins.receipts.map((pin) => `${pin?.product?.packageName}@${pin?.product?.version}`)) !== JSON.stringify(PRODUCT_RELEASE_IDS)
   ) {
-    throw new Error('product-release platform pins must contain the exact ordered immutable verifier 0.2 receipts');
+    throw new Error('product-release platform pins must contain the exact ordered immutable product-release receipts');
   }
   for (const pin of pins.receipts) {
     validateProductReleasePlatformPin(pin, {
-      ...manifest,
-      name: '@colophon-claims/verify',
+      name: pin.product.packageName,
       version: pin.product.version,
     });
   }
-  const selected = pins.receipts.find((pin) => pin.product.version === manifest.version);
+  const selected = pins.receipts.find(
+    (pin) => pin.product.packageName === manifest.name && pin.product.version === manifest.version,
+  );
   if (selected === undefined) {
     throw new Error(`no immutable platform receipt is registered for ${manifest.name}@${manifest.version}`);
   }

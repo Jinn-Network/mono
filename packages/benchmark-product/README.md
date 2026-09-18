@@ -39,9 +39,10 @@ lines below therefore run straight from the registry; nothing has to be checked
 out to verify a received bundle.
 
 `@colophon-claims/cli` and `@colophon-claims/core` are implemented but not
-published. Registry publication of those two remains held until the exact Jinn
-dependency set is available from npm; `@colophon-claims/web` is private
-source/build input by design and is not for registry release.
+published. Demand-gated registry publication is recorded in DR-2026-08-22-a
+and `colophon-npm-publish.yml`; this tree does not publish them on push.
+`@colophon-claims/web` is private source/build input by design and is not for
+registry release.
 
 There is no hosted service, account, telemetry, billing, or remote publication.
 Product `publish` means local immutable bundle emission only.
