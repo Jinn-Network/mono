@@ -798,10 +798,13 @@ async function handleMethodBind(
     jsonMode,
     (value) => {
       const kind = value.official ? "official" : "custom";
-      if (value.selectionManifestSha256 === undefined) {
-        return `bound ${kind} ${value.catalogId ?? value.documentKind} catalog identity for draft ${draftId}\n`;
+      if (value.selectionManifestSha256 !== undefined) {
+        return `bound ${kind} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`;
       }
-      return `bound ${kind} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`;
+      if (value.benchmarkSha256 !== undefined) {
+        return `bound ${kind} ${value.documentKind} method ${value.benchmarkSha256} for draft ${draftId}\n`;
+      }
+      return `bound ${kind} ${value.catalogId ?? value.documentKind} catalog identity for draft ${draftId}\n`;
     },
   );
 }

@@ -3,7 +3,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { parseBenchmark } from "@jinn-network/benchmarking-records";
 import { readAuditEntries } from "../audit/journal.js";
+import {
+  TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION,
+  officialTerminalBench21TaskNames,
+  terminalBench21SlateDigest,
+} from "../intake/terminal-bench-2-1.js";
+import { TERMINAL_BENCH_21_UPSTREAM_COMMIT } from "../intake/terminal-bench-2-1-slate.js";
+import { getSealedBytes } from "../workspace/sealed-store.js";
 import { armAdd } from "./arms.js";
 import type { OperationContext } from "./context.js";
 import { createDraft } from "./drafts.js";
@@ -83,17 +91,18 @@ describe("selectMethod", () => {
     const context = await prepareDraft("one");
     const selected = await selectMethod(context, {
       draftId: "one",
-      ref: "terminal-bench-2.1",
+      ref: "swe-bench-verified",
       cwd: root,
       slice: "1",
       hostPath,
     });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
-    expect(selected.result.catalogId).toBe("terminal-bench-2.1");
-    expect(selected.result.documentKind).toBe("terminal-bench-2.1");
+    expect(selected.result.catalogId).toBe("swe-bench-verified");
+    expect(selected.result.documentKind).toBe("swe-bench-verified");
     expect(selected.result.official).toBe(true);
     expect(selected.result.selectionManifestSha256).toBeUndefined();
+    expect(selected.result.benchmarkSha256).toBeUndefined();
     expect(selected.result.suiteProtocolSha256).toBeUndefined();
     expect(selected.result.draft.spec.evaluationRuntime).toBeUndefined();
     expect(selected.result.draft.spec.arms.map((arm) => arm.pinning)).toEqual([
@@ -103,7 +112,84 @@ describe("selectMethod", () => {
     expect(existsSync(runtimeHostsDir(workspaceDir)) ? readdirSync(runtimeHostsDir(workspaceDir)) : []).toEqual([]);
     const actions = readAuditEntries(workspaceDir).map((entry) => entry.action);
     expect(actions).toContain("method.bind");
+    expect(actions).not.toContain("runtime.swe-bench-verified.select");
+  });
+
+  test("catalog terminal-bench-2.1 bind seals the official slate without Harbor select", async () => {
+    const hostPath = join(root, "host.json");
+    writeFileSync(hostPath, "{}");
+    const context = await prepareDraft("one");
+    const selected = await selectMethod(context, {
+      draftId: "one",
+      ref: "terminal-bench-2.1",
+      cwd: root,
+      slice: "1",
+      hostPath,
+    });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    expect(selected.result.catalogId).toBe("terminal-bench-2.1");
+    expect(selected.result.official).toBe(true);
+    expect(selected.result.selectionManifestSha256).toBeUndefined();
+    expect(selected.result.suiteProtocolSha256).toBeUndefined();
+    expect(selected.result.draft.spec.evaluationRuntime).toBeUndefined();
+    expect(selected.result.draft.spec.taskSet).toEqual({
+      kind: "benchmark",
+      benchmarkSha256: selected.result.benchmarkSha256,
+    });
+    const benchmark = parseBenchmark(getSealedBytes(workspaceDir, selected.result.benchmarkSha256!));
+    expect(benchmark.items).toHaveLength(1);
+    expect(benchmark.name).toBe("terminal-bench-2.1");
+    const slate = benchmark[TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION] as {
+      coverage: string;
+      selectedTaskNames: string[];
+      upstreamCommit: string;
+      slateDigest: string;
+      datasetTaskCount: number;
+    };
+    expect(slate).toMatchObject({
+      coverage: "one_task",
+      selectedTaskNames: [officialTerminalBench21TaskNames()[0]],
+      upstreamCommit: TERMINAL_BENCH_21_UPSTREAM_COMMIT,
+      slateDigest: terminalBench21SlateDigest(),
+      datasetTaskCount: 89,
+    });
+    const actions = readAuditEntries(workspaceDir).map((entry) => entry.action);
+    expect(actions).toContain("method.bind");
     expect(actions).not.toContain("runtime.terminal-bench-2-1.select");
+  });
+
+  test("catalog terminal-bench-2.1 --slice all is byte-stable official 89 and ignores host contents", async () => {
+    const hostPath = join(root, "host.json");
+    writeFileSync(hostPath, JSON.stringify({ executable: "/not-a-harbor" }));
+    const firstContext = await prepareDraft("all");
+    const first = await selectMethod(firstContext, {
+      draftId: "all",
+      ref: "terminal-bench-2.1",
+      cwd: root,
+      slice: "all",
+      hostPath,
+    });
+    expect(first.ok, JSON.stringify(first)).toBe(true);
+    if (!first.ok) return;
+    const firstBenchmark = parseBenchmark(getSealedBytes(workspaceDir, first.result.benchmarkSha256!));
+    expect(firstBenchmark.items).toHaveLength(89);
+    expect(first.result.draft.spec.evaluationRuntime).toBeUndefined();
+    const firstDigest = first.result.benchmarkSha256;
+
+    rmSync(workspaceDir, { recursive: true, force: true });
+    mkdirSync(workspaceDir);
+    const secondContext = await prepareDraft("again");
+    const second = await selectMethod(secondContext, {
+      draftId: "again",
+      ref: "terminal-bench-2.1",
+      cwd: root,
+      slice: "all",
+      hostPath,
+    });
+    expect(second.ok, JSON.stringify(second)).toBe(true);
+    if (!second.ok) return;
+    expect(second.result.benchmarkSha256).toBe(firstDigest);
   });
 
   test("custom Inspect file does not wear a suite id; derived export refuses a suite-named bundle", async () => {

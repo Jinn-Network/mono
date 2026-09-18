@@ -14,6 +14,7 @@ import {
   INSPECT_BINARY_JUDGE_BINDING_REQUEST_SCHEMA,
   type InspectBinaryJudgeBindingRequest,
 } from "../runtime/inspect/binary-judge-manifest.js";
+import type { SuiteCoverage } from "../runtime/suite-protocol/comparability.js";
 import type { OperationContext } from "./context.js";
 import { operate } from "./operate.js";
 import { operateAsync } from "./operate-async.js";
@@ -21,6 +22,9 @@ import type { OperationResult } from "./result.js";
 import { executeSelectInspectEvaluation } from "./inspect-runtime.js";
 import { executeBindInspectBinaryJudge } from "./inspect-binary-judge.js";
 import { executeSelectHarborRuntime } from "./harbor-runtime.js";
+import { attachBenchmarkToDraft } from "./attach.js";
+import { buildTerminalBench21Tasks } from "../intake/terminal-bench-2-1.js";
+import { putSealedBytes } from "../workspace/sealed-store.js";
 import {
   executeExportHarborHubPackage,
   type ExportHarborHubPackageResult,
@@ -58,6 +62,7 @@ export interface SelectMethodInput extends ResolveMethodOperandInput {
 export interface SelectMethodResult {
   readonly draft: DraftDocument;
   readonly selectionManifestSha256?: string;
+  readonly benchmarkSha256?: string;
   readonly documentKind: MethodDocumentKind;
   readonly official: boolean;
   readonly catalogId?: MethodCatalogId;
@@ -76,8 +81,17 @@ export type ExportDerivedBundleResult =
   | (ExportApexSwePackageResult & { readonly shape: "apex-swe-package" })
   | (ExportInspectViewBundleResult & { readonly shape: "inspect-view" });
 
+function namedCoverage(coverage: SuiteCoverage): Exclude<SuiteCoverage, "custom"> | undefined {
+  return coverage === "custom" ? undefined : coverage;
+}
+
 function finish(
-  inner: { readonly draft: DraftDocument; readonly selectionManifestSha256?: string; readonly suiteProtocolSha256?: string },
+  inner: {
+    readonly draft: DraftDocument;
+    readonly selectionManifestSha256?: string;
+    readonly suiteProtocolSha256?: string;
+    readonly benchmarkSha256?: string;
+  },
   documentKind: MethodDocumentKind,
   official: boolean,
 ): SelectMethodResult {
@@ -86,8 +100,52 @@ function finish(
     documentKind,
     official,
     ...(inner.selectionManifestSha256 === undefined ? {} : { selectionManifestSha256: inner.selectionManifestSha256 }),
+    ...(inner.benchmarkSha256 === undefined ? {} : { benchmarkSha256: inner.benchmarkSha256 }),
     ...(official && isMethodCatalogId(documentKind) ? { catalogId: documentKind } : {}),
     ...(inner.suiteProtocolSha256 === undefined ? {} : { suiteProtocolSha256: inner.suiteProtocolSha256 }),
+  };
+}
+
+function slateInputFromTerminalBench21File(document: Record<string, unknown>): {
+  readonly coverage?: Exclude<SuiteCoverage, "custom">;
+  readonly taskNames?: readonly string[];
+} {
+  const taskNames = document.taskNames;
+  const coverage = document.coverage;
+  const named = coverage === "one_task" || coverage === "ten_task" || coverage === "full" ? coverage : undefined;
+  if (Array.isArray(taskNames) && taskNames.every((name) => typeof name === "string")) {
+    return {
+      taskNames: taskNames as string[],
+      ...(named === undefined ? {} : { coverage: named }),
+    };
+  }
+  return { coverage: named ?? "full" };
+}
+
+function attachOfficialTerminalBench21Slate(
+  context: OperationContext,
+  draftId: string,
+  input: {
+    readonly coverage?: Exclude<SuiteCoverage, "custom">;
+    readonly taskNames?: readonly string[];
+  },
+): { readonly draft: DraftDocument; readonly benchmarkSha256: string } {
+  const built = buildTerminalBench21Tasks(input);
+  putSealedBytes(context.workspaceDir, built.profile.bytes);
+  for (const task of built.tasks) {
+    putSealedBytes(context.workspaceDir, task.bytes);
+  }
+  const stored = putSealedBytes(context.workspaceDir, built.benchmark.bytes);
+  if (stored !== built.benchmark.sha256) {
+    refuse(
+      "record-integrity",
+      "terminal-bench-2.1.benchmark",
+      "official Terminal-Bench 2.1 Benchmark bytes changed while storing",
+    );
+  }
+  return {
+    draft: attachBenchmarkToDraft(context.workspaceDir, draftId, built.benchmark.sha256, context.clock()),
+    benchmarkSha256: built.benchmark.sha256,
   };
 }
 
@@ -102,6 +160,17 @@ function bindNamedSuiteIdentity(
     refuse("illegal-transition", `drafts.${draftId}.state`, "locked drafts refuse method bind");
   }
   return finish({ draft: current }, documentKind, official);
+}
+
+function bindOfficialTerminalBench21(
+  context: OperationContext,
+  draftId: string,
+  input: {
+    readonly coverage?: Exclude<SuiteCoverage, "custom">;
+    readonly taskNames?: readonly string[];
+  },
+): SelectMethodResult {
+  return finish(attachOfficialTerminalBench21Slate(context, draftId, input), "terminal-bench-2.1", true);
 }
 
 async function bindFile(
@@ -132,6 +201,8 @@ async function bindFile(
         "harbor",
         resolved.official,
       );
+    case "terminal-bench-2.1":
+      return bindOfficialTerminalBench21(context, draftId, slateInputFromTerminalBench21File(document));
     default:
       return bindNamedSuiteIdentity(context, draftId, resolved.documentKind, resolved.official);
   }
@@ -142,6 +213,14 @@ function bindCatalog(
   draftId: string,
   resolved: Extract<ResolvedMethod, { kind: "catalog" }>,
 ): SelectMethodResult {
+  if (resolved.catalogId === "terminal-bench-2.1") {
+    const coverage = namedCoverage(resolved.coverage);
+    const ids = resolved.selectedIds;
+    return bindOfficialTerminalBench21(context, draftId, {
+      ...(coverage === undefined ? {} : { coverage }),
+      ...(ids === undefined ? {} : { taskNames: ids }),
+    });
+  }
   return bindNamedSuiteIdentity(context, draftId, resolved.catalogId, true);
 }
 

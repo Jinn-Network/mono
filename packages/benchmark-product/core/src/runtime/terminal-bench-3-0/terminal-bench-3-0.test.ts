@@ -20,6 +20,7 @@ import { HarborSelectionManifestSchema } from "../harbor/manifest.js";
 import { resolveTerminalBench30Selection } from "./host.js";
 import { TERMINAL_BENCH_3_0_DATASET_ID, TERMINAL_BENCH_3_0_DATASET_REF, TERMINAL_BENCH_3_0_HUB_VERSION } from "./manifest.js";
 import { TERMINAL_BENCH_2_1_DATASET_ID, TERMINAL_BENCH_2_1_DATASET_REF } from "../terminal-bench-2-1/manifest.js";
+import { officialTerminalBench21TaskNames } from "../../intake/terminal-bench-2-1.js";
 import { createLocalVenue } from "../../venue/venue.js";
 import { INSPECT_ADAPTER_ID } from "../inspect/manifest.js";
 
@@ -31,6 +32,12 @@ const arms: HarborSelectionManifest["arms"] = [
 ];
 const outputs: HarborSelectionManifest["outputs"] = [{
   name: "prediction",
+  mediaType: "application/json",
+  artifact: { source: "/logs/artifacts/prediction.json", destination: "prediction.json" },
+  nativePath: "artifacts/prediction.json",
+}];
+const tb21Outputs: HarborSelectionManifest["outputs"] = [{
+  name: "result",
   mediaType: "application/json",
   artifact: { source: "/logs/artifacts/prediction.json", destination: "prediction.json" },
   nativePath: "artifacts/prediction.json",
@@ -58,9 +65,10 @@ function writeFixture(
   datasetId: string = TERMINAL_BENCH_3_0_DATASET_ID,
   datasetRevision: string = TERMINAL_BENCH_3_0_DATASET_REF,
   hubVersion: string | null = TERMINAL_BENCH_3_0_HUB_VERSION,
+  taskNames: readonly string[] = names,
 ): void {
   mkdirSync(materialPath, { recursive: true });
-  for (const name of names) {
+  for (const name of taskNames) {
     mkdirSync(join(materialPath, name), { recursive: true });
     writeFileSync(join(materialPath, name, "task.toml"), `[task]\nname = "${name}"\n[environment]\ndocker_image = "${image}"\n`);
     writeFileSync(join(materialPath, name, "instruction.md"), `solve ${name}\n`);
@@ -69,7 +77,7 @@ function writeFixture(
     name: datasetId,
     ...(hubVersion === null ? {} : { version: hubVersion }),
     dataset_version_content_hash: datasetRevision,
-    task_ids: names.map((name) => ({
+    task_ids: taskNames.map((name) => ({
       org: "terminal-bench",
       name,
       ref: `sha256:${computeHarbor021TaskContentHash(join(materialPath, name)).contentHash}`,
@@ -101,7 +109,7 @@ function tb21Request(coverage: "one_task" = "one_task") {
     nConcurrent: 1,
     arms,
     environment: { type: "docker" as const, image, configuration: {} },
-    outputs,
+    outputs: tb21Outputs,
     coverage,
   };
 }
@@ -260,7 +268,7 @@ describe("Terminal-Bench 3.0 official-suite intake", () => {
 
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
-    writeFixture(TERMINAL_BENCH_2_1_DATASET_ID, TERMINAL_BENCH_2_1_DATASET_REF);
+    writeFixture(TERMINAL_BENCH_2_1_DATASET_ID, TERMINAL_BENCH_2_1_DATASET_REF, null, officialTerminalBench21TaskNames().slice(0, 12));
     const tb21Context = await prepareDraft("tb21");
     const tb21 = await prepareTerminalBench21Draft(tb21Context, { draftId: "tb21", ...tb21Request() });
     expect(tb21.ok, JSON.stringify(tb21)).toBe(true);
