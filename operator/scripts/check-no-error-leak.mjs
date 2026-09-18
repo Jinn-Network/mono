@@ -41,8 +41,8 @@
  * guard extends to it automatically (no allowlist edit needed) because the
  * check is import/usage-driven, not a file list.
  */
-import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -74,12 +74,11 @@ const MASKED_CALL_MARKERS = ['maskUrlsInMessage', 'sanitizeErrorText', 'sanitize
  * type/module names are the import-site spelling, which is what survives a
  * revert of the masking call.
  *
- * This is an enumeration, not a derivation: a new token-gated route reaching
- * the chain through some *other* injected reader is not covered until its seam
- * is added here. If you introduce one, extend this list in the same change.
- * The structural alternative is import-graph reachability (does anything this
- * file imports transitively import viem?), which would need no list at all —
- * tracked as a follow-up rather than built here.
+ * This list is the injected-port / fixture path: a type-only port often does
+ * not import `viem`, so a graph walk cannot replace these names without
+ * going green on a masking revert (issue #2416 / #4246). The live-tree
+ * completeness check below is the staleness net for a *new* api file that
+ * statically reaches `viem` through some other relative import.
  */
 const INDIRECT_RPC_PATTERN =
   /PluginPublicationReader|ArchiveReads|gather-status\.js|intents\/claim-rewards\.js/;
@@ -94,8 +93,141 @@ const DIRECT_RPC_PATTERN = new RegExp(
 );
 
 /** A file is in scope when it reaches an RPC client directly or through a seam. */
-function isRpcAdjacent(text) {
+export function isRpcAdjacent(text) {
   return DIRECT_RPC_PATTERN.test(text) || INDIRECT_RPC_PATTERN.test(text);
+}
+
+const RELATIVE_IMPORT_RE = /(?:from|import)\s+['"](\.\.?\/[^'"]+)['"]/g;
+const VIEM_IMPORT_RE = /from\s+['"]viem(\/[\w.-]+)?['"]/;
+
+/** Relative `from './x.js'` / `import './x.js'` specs; package names are ignored. */
+export function parseRelativeImportSpecs(text) {
+  const specs = [];
+  const re = new RegExp(RELATIVE_IMPORT_RE.source, 'g');
+  let match;
+  while ((match = re.exec(text)) !== null) {
+    specs.push(match[1]);
+  }
+  return specs;
+}
+
+function pathStaysUnderRoot(candidate, srcRoot) {
+  const root = resolve(srcRoot);
+  const resolved = resolve(candidate);
+  return resolved === root || resolved.startsWith(`${root}/`);
+}
+
+function resolveRelativeModule(fromFile, spec, srcRoot) {
+  const abs = resolve(dirname(fromFile), spec.split('?')[0]);
+  const candidates = [];
+  if (abs.endsWith('.js')) candidates.push(`${abs.slice(0, -3)}.ts`, abs);
+  else {
+    candidates.push(abs);
+    if (!abs.endsWith('.ts')) {
+      candidates.push(`${abs}.ts`, `${abs}.js`, join(abs, 'index.ts'));
+    }
+  }
+  for (const candidate of candidates) {
+    if (!pathStaysUnderRoot(candidate, srcRoot)) continue;
+    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+  }
+  return null;
+}
+
+function isUnderApiRoot(absPath, srcRoot) {
+  const apiRoot = resolve(srcRoot, 'api');
+  const resolved = resolve(absPath);
+  return resolved === apiRoot || resolved.startsWith(`${apiRoot}/`);
+}
+
+function fileImportsViem(text) {
+  return VIEM_IMPORT_RE.test(text);
+}
+
+/**
+ * One-hop destinations outside `api/` count only when they import the viem
+ * *package root* (or an RPC client type/factory). `viem/accounts` is signing
+ * material, not an RPC client — treating it as adjacency would pull
+ * filesystem-only helpers such as `portfolio-v0-doctor.ts` into the leak net.
+ */
+const ONE_HOP_RPC_VIEM_RE =
+  /from\s+['"]viem['"]|createJinnPublicClient|\bPublicClient\b/;
+
+function fileImportsRpcViem(text) {
+  return ONE_HOP_RPC_VIEM_RE.test(text);
+}
+
+/**
+ * True when this file imports `viem`, a relative import *inside `srcRoot/api`*
+ * does, or a *one-hop* import outside `api/` does.
+ *
+ * Recursing through `store.ts` / daemon modules would mark every Store-using
+ * route as graph-adjacent (those trees eventually reach viem). Injected-port
+ * files that never import viem stay out of this net on purpose —
+ * `INDIRECT_RPC_PATTERN` covers them. Cycles are not a hit.
+ */
+export function moduleTouchesViem(
+  absPath,
+  srcRoot,
+  cache = new Map(),
+  visiting = new Set(),
+) {
+  if (cache.has(absPath)) return cache.get(absPath);
+  if (visiting.has(absPath)) return false;
+  visiting.add(absPath);
+  let text;
+  try {
+    text = readFileSync(absPath, 'utf8');
+  } catch {
+    cache.set(absPath, false);
+    return false;
+  }
+  if (fileImportsViem(text)) {
+    cache.set(absPath, true);
+    return true;
+  }
+  for (const spec of parseRelativeImportSpecs(text)) {
+    const dest = resolveRelativeModule(absPath, spec, srcRoot);
+    if (!dest) continue;
+    if (isUnderApiRoot(dest, srcRoot)) {
+      if (moduleTouchesViem(dest, srcRoot, cache, visiting)) {
+        cache.set(absPath, true);
+        return true;
+      }
+      continue;
+    }
+    // One hop outside api/: the destination file itself, not its imports.
+    let destText;
+    try {
+      destText = readFileSync(dest, 'utf8');
+    } catch {
+      continue;
+    }
+    if (fileImportsRpcViem(destText)) {
+      cache.set(absPath, true);
+      return true;
+    }
+  }
+  cache.set(absPath, false);
+  return false;
+}
+
+/**
+ * Live-tree staleness net: every api file that transitively imports `viem`
+ * must already be `isRpcAdjacent`. Injected-port files that never import
+ * `viem` are out of this net on purpose — `INDIRECT_RPC_PATTERN` covers them.
+ */
+export function findGraphCompletenessGaps(apiDir, srcRoot) {
+  const gaps = [];
+  const cache = new Map();
+  for (const file of walk(apiDir)) {
+    if (!moduleTouchesViem(file, srcRoot, cache)) continue;
+    const text = readFileSync(file, 'utf8');
+    if (isRpcAdjacent(text)) continue;
+    const rel = relative(srcRoot, file).split('\\').join('/');
+    gaps.push(`operator/src/${rel}`);
+  }
+  return gaps;
 }
 
 const RAW_MESSAGE_PATTERN = /\.message\b|String\(\s*(e|err|error)\w*\s*\)/;
@@ -161,6 +293,15 @@ function invokedDirectly() {
 if (invokedDirectly()) main();
 
 function main() {
+  const gaps = findGraphCompletenessGaps(API_DIR, SRC_ROOT);
+  if (gaps.length > 0) {
+    console.error('✗ Graph-adjacent api/ files are not isRpcAdjacent (issue #4246).');
+    console.error('  A new route that statically reaches viem needs a masking helper');
+    console.error('  or an INDIRECT_RPC_PATTERN seam in the same change.\n');
+    for (const file of gaps) console.error(`    ${file}`);
+    process.exit(1);
+  }
+
   const violations = findErrorLeaks(API_DIR, SRC_ROOT);
 
   if (violations.length === 0) {

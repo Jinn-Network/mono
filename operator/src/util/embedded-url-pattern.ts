@@ -27,3 +27,6 @@
  * doc comment for why.
  */
 export const EMBEDDED_URL_RE = /(?:https?|wss?):\/\/[^\s"'<>]+/gi;
+
+/** Scheme set the free-text scanner and the legacy-detail SQL LIKE must share. */
+export const EMBEDDED_URL_SCHEMES = ['http', 'https', 'ws', 'wss'] as const;

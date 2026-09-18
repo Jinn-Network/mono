@@ -20,9 +20,11 @@ import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import { addDiscoveryRoutes } from '../../src/api/discovery-endpoint.js';
 import { addRewardsRoutes } from '../../src/api/rewards-endpoint.js';
-import { addAdminRoutes } from '../../src/api/admin-endpoint.js';
+import { addAdminRoutes, type ClaimRewardsRouteContext } from '../../src/api/admin-endpoint.js';
+import type { RewardsRoutesDeps } from '../../src/api/rewards-endpoint.js';
 import type { ArchiveReads } from '../../src/archive/reads.js';
 import type { PluginPublicationReader } from '../../src/plugin-registry/publication-reader.js';
+import type { Store } from '../../src/store/store.js';
 
 vi.mock('../../src/intents/claim-rewards.js', () => ({
   claimRewardsIntent: vi.fn(),
@@ -100,9 +102,9 @@ describe('#2416 — RPC-derived errors are masked on token-gated surfaces', () =
   it.each(SHAPES)('rewards-endpoint masks a %s RPC-URL leak', async (shape) => {
     const a = new Hono();
     addRewardsRoutes(a, {
-      store: {} as never,
+      store: {} as unknown as Store,
       getStatus: () => undefined,
-      gatherRaw: vi.fn().mockRejectedValue(rpcFailure(shape)) as never,
+      gatherRaw: vi.fn<NonNullable<RewardsRoutesDeps['gatherRaw']>>().mockRejectedValue(rpcFailure(shape)),
     });
     const res = await a.request('/v1/rewards');
     expect(res.status).toBe(500);
@@ -115,7 +117,7 @@ describe('#2416 — RPC-derived errors are masked on token-gated surfaces', () =
     addAdminRoutes(a, {
       onRestartRequested: () => {},
       onStopRequested: () => {},
-      claimRewards: { holder: { current: {} as never } },
+      claimRewards: { holder: { current: {} as unknown as ClaimRewardsRouteContext } },
     });
     const res = await a.request('/api/admin/claim-rewards', { method: 'POST' });
     expect(res.status).toBe(500);

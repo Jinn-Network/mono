@@ -92,6 +92,24 @@ describe('legacy activity_events.detail masking (#2416)', () => {
   });
 
   /**
+   * A LIKE-matching detail can mask to itself (`http://` with nothing for
+   * the URL regex to consume). The constructor must still return — advancing
+   * the page cursor only on updated rows would re-select this forever.
+   */
+  it('does not hang on a LIKE-matching detail that masks to itself', { timeout: 2000 }, () => {
+    const path = dbFile();
+    new Store(path).close();
+    seedLegacyRow(path, 'claim reverted: see http://');
+
+    const store = new Store(path);
+    expect(store).toBeInstanceOf(Store);
+    expect(store.getConfigValue(MIGRATION_KEY)).toBe('true');
+    store.close();
+
+    expect(readRawDetails(path)[0]).toBe('claim reverted: see http://');
+  });
+
+  /**
    * The accepted residual, pinned so it stays a decision rather than a
    * surprise: the scrub is a config-keyed one-shot, so a row written raw AFTER
    * the key is set (only reachable by downgrading to a pre-#642 daemon) stays
