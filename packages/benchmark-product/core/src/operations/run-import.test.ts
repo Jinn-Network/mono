@@ -483,6 +483,30 @@ describe("run.import — refusals", () => {
     expect(outcome.error.detail).toMatch(/Inspect/u);
   });
 
+  test("allows an Inspect-bound draft when the named inspect reader is the source", async () => {
+    const clock = makeClock();
+    const { cellKeys } = await lockedRun(clock);
+    const { readDraftDocument: read } = await import("./drafts.js");
+    const { atomicWriteFileSync } = await import("../fs/atomic.js");
+    const { draftPath } = await import("../workspace/layout.js");
+    const document = read(workspaceDir, "draft-1");
+    atomicWriteFileSync(draftPath(workspaceDir, "draft-1"), JSON.stringify({
+      ...document,
+      spec: {
+        ...document.spec,
+        evaluationRuntime: { adapterId: "inspect", selectionManifestSha256: "0".repeat(64) },
+      },
+    }, null, 2));
+
+    const outcome = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1",
+      records: mixedRows(cellKeys),
+      source: { harness: "inspect", version: "0.3.255" },
+      evidenceRoot,
+    });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+  });
+
   test("refuses minVerdicts > 1 rather than fanning one result across evaluator legs", async () => {
     const clock = makeClock();
     initWorkspace(contextFor(clock));

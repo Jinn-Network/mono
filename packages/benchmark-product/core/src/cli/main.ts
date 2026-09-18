@@ -94,6 +94,7 @@ import {
   readExternalRunRecords,
   type ExternalRunRecordFormat,
 } from "../intake/external-run-records.js";
+import { readInspectRunImport } from "../intake/inspect-run-records.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
 import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/verify";
@@ -192,6 +193,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   run import       --workspace <dir> --principal <id> --draft <draftId>
                    --file <records.jsonl|records.csv> --source <harness>
                    [--format jsonl|csv]
+                   --from inspect <eval-log-or-dir> instead of --file reads
+                   Inspect read_eval_log JSON (.eval / EvalLog dump)
                    --template instead of --file/--source prints the sealed
                    slate as a skeleton to fill in
   launch           --workspace <dir> --principal <id> --draft <draftId>
@@ -309,7 +312,7 @@ const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as 
 const PUBLICATION_SERVE_FLAGS = ["workspace", "principal", "json", "source", "host", "port"] as const;
 const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const RUN_IMPORT_FLAGS = ["workspace", "principal", "json", "draft", "file", "format", "source", "template"] as const;
+const RUN_IMPORT_FLAGS = ["workspace", "principal", "json", "draft", "file", "format", "source", "template", "from"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const RESUME_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const CANCEL_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -1564,14 +1567,14 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
   assertKnownFlags(args, RUN_IMPORT_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
-  const format = importFormat(args);
 
   if (present(args, "template")) {
-    for (const flag of ["file", "source"] as const) {
+    for (const flag of ["file", "source", "from"] as const) {
       if (optional(args, flag) !== undefined) {
         refuse("invalid-invocation", flag, `run import --template prints a skeleton and reads nothing; --${flag} is not accepted with it`);
       }
     }
+    const format = importFormat(args);
     const rendered = renderImportTemplate(opContext.workspaceDir, draftId, format);
     if (jsonMode) {
       return {
@@ -1583,6 +1586,47 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
     return { exitCode: 0, stdout: rendered.template, stderr: "" };
   }
 
+  if (present(args, "from")) {
+    const reader = required(args, "from");
+    // Harbor's `--from harbor` (#3991 / PR #4684) is unmerged on origin/next. This branch only
+    // adds inspect. Do not merge or restack that PR; the two CLI switches will conflict.
+    if (reader !== "inspect") {
+      refuse("invalid-invocation", "from", `--from must be "inspect", got "${reader}"`);
+    }
+    for (const flag of ["file", "format", "source"] as const) {
+      if (optional(args, flag) !== undefined) {
+        refuse("invalid-invocation", flag, `run import --from inspect reads an eval log or directory; --${flag} is not accepted with it`);
+      }
+    }
+    const extra = args.words.slice(2);
+    const evalWord = extra[0];
+    if (extra.length !== 1 || evalWord === undefined || evalWord === "") {
+      refuse("invalid-invocation", "from", "run import --from inspect requires <eval-log-or-dir>");
+    }
+    const evalLogOrDir = pathFrom(context.cwd, evalWord);
+    const dump = readInspectRunImport({
+      workspaceDir: opContext.workspaceDir,
+      draftId,
+      evalLogOrDir,
+    });
+    const imported = await importRunRecords(opContext, {
+      draftId,
+      records: dump.records,
+      source: dump.source,
+      evidenceRoot: dump.evidenceRoot,
+    });
+    return renderResult(
+      imported,
+      jsonMode,
+      (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
+        + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `
+        + `${value.written.notDelivered} not delivered\n`
+        + "note: publication of an imported run is refused pending issue #3417 — collect and report "
+        + "work, publish does not (see EXTERNAL-RUN-IMPORT.md)\n",
+    );
+  }
+
+  const format = importFormat(args);
   // Relative `evidence[].path` entries resolve against the dump's own directory, so a dump and the
   // artifacts it names move together as one tree.
   const file = pathFrom(context.cwd, required(args, "file"));
