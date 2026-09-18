@@ -532,7 +532,7 @@ export { LOCAL_VENUE_LIMITS } from "./operations/index.js";
 export { anchorAfterLockIfConfigured } from "./operations/run-anchor.js";
 export type { AnchorAfterLockOutcome } from "./operations/run-anchor.js";
 
-// Method catalog listing is CLI/GUI discovery, not a facade operation (DR-2026-08-19; parity stays 42).
+// Method catalog listing is CLI/GUI discovery, not a facade operation (DR-2026-08-19; parity stays 41).
 export { METHOD_CATALOG, isMethodCatalogId, listMethodCatalog } from "./operations/method-catalog.js";
 
 
