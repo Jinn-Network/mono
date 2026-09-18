@@ -1817,7 +1817,7 @@ test('a guard on a pipeline does not cover a definition in the pipeline head (#4
 });
 
 test('unwrapping a pipeline-head compound still walks substitutions in the tail', () => {
-  // The #4566 path unwraps `{ … }` when it leads a pipeline, then used to `continue`
+  // Review finding #4653: the #4566 path unwraps `{ … }` when it leads a pipeline, then
   // before `substitutionSpans`. Unguarded `$(producer | head)` in the tail must still
   // report, matching a substitution that is the whole statement.
   assert.deepEqual(severities('{ echo hi; } | echo $(producer | head -1)', { shell: 'bash' }), [
