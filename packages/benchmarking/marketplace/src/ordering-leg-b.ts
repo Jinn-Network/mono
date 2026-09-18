@@ -87,7 +87,9 @@ function anchoredDigestForObservation(
 
 /**
  * Spec §4.1 step 5: catalog bytes must be the Submission the observation named.
- * revised + missing anchor → skip; present + mismatch → skip.
+ * Missing chain digest → skip for every generation; present + mismatch → skip.
+ * Today TaskCreated never writes `submissionAnchor`, so a missing-anchor match
+ * would let any identity-matching blob steal `runDigestAnchorAt`.
  */
 export function sealedSubmissionBytesMatchProjectionAnchor(input: {
   bytes: Uint8Array;
@@ -103,9 +105,7 @@ export function sealedSubmissionBytesMatchProjectionAnchor(input: {
   );
   if (accepted === undefined) return false;
   const anchoredDigest = anchoredDigestForObservation(accepted, input.projection.state);
-  if (anchoredDigest === undefined) {
-    return accepted.derivation.contractGeneration !== "revised";
-  }
+  if (anchoredDigest === undefined) return false;
   return anchoredDigest === documentDigest(input.bytes);
 }
 

@@ -47,6 +47,43 @@ function projectionShell(
   };
 }
 
+function todayTaskCreated(
+  timestamp: string,
+  overrides: {
+    submission?: `urn:uuid:${string}`;
+    taskDigest?: string;
+    taskId?: bigint;
+    blockNumber?: number;
+    txHash?: Hex;
+  } = {},
+): ObservationMarketplaceEvent {
+  const taskDigest = overrides.taskDigest ?? TASK_DIGEST;
+  return {
+    event: "TaskCreated",
+    derivation: {
+      chainId: 84532,
+      contract: COORDINATOR,
+      event: "TaskCreated",
+      blockNumber: overrides.blockNumber ?? 99,
+      blockHash: `0x${"6".repeat(64)}`,
+      txHash: overrides.txHash ?? `0x${"1".repeat(64)}`,
+      logIndex: 0,
+      finalityTier: "finalized",
+      contractGeneration: "today",
+    },
+    projection: projectionShell(timestamp, overrides.submission ?? SUBMISSION_URN, taskDigest),
+    facts: {
+      creator: "0x2222222222222222222222222222222222222222",
+      taskId: overrides.taskId ?? 42n,
+      manifestDigest: `0x${"0".repeat(64)}`,
+      taskCidDigest: `0x${taskDigest}`,
+      maxClaims: 2,
+      solutionBudget: 100n,
+      verdictBudget: 20n,
+    },
+  } as ObservationMarketplaceEvent;
+}
+
 function taskCreated(
   timestamp: string,
   overrides: {
@@ -488,6 +525,68 @@ describe("buildMarketplaceOrderingReceipt + evaluateOrderingBytes", () => {
     });
     const evaluation = await evaluateOrderingBytes({ recordBytes, members });
     expect(evaluation.status).toBe("invalid");
+  });
+
+  test("today TaskCreated without submissionDigest cannot steal runDigestAnchorAt via a rewritten catalog blob", async () => {
+    const honestSha = memberSha256Hex(HONEST_SUBMISSION_BYTES);
+    const honestPath = submissionMemberPath(honestSha);
+    const foreignUrn = "urn:uuid:22222222-2222-4222-8222-222222222222" as const;
+    const foreignTask = "9999999999999999999999999999999999999999999999999999999999999999";
+    const fakeBytes = sealedSubmissionBytes({
+      submission: foreignUrn,
+      taskDigest: foreignTask,
+      nonce: "foreign-today-fake",
+    });
+    const fakeSha = memberSha256Hex(fakeBytes);
+    const fakePath = submissionMemberPath(fakeSha);
+    const events = [
+      todayTaskCreated("2026-08-03T08:00:00Z", {
+        submission: foreignUrn,
+        taskDigest: foreignTask,
+        taskId: 41n,
+        blockNumber: 90,
+        txHash: `0x${"2".repeat(64)}`,
+      }),
+      ...PASSING_EVENTS,
+    ];
+    const members = new Map<string, Uint8Array>();
+    const eventEntries = events.map((event, ordinal) => {
+      const bytes = serializeMarketplaceEvent(event);
+      const digest = memberSha256Hex(bytes);
+      const eventPath = eventMemberPath(ordinal, digest);
+      members.set(eventPath, bytes);
+      return { ordinal, sha256: digest, path: eventPath };
+    });
+    members.set(honestPath, HONEST_SUBMISSION_BYTES);
+    members.set(fakePath, fakeBytes);
+    const submissions = [
+      {
+        submission: SUBMISSION_URN,
+        task: `sha256:${TASK_DIGEST}` as const,
+        sha256: honestSha,
+        path: honestPath,
+      },
+      {
+        submission: foreignUrn,
+        task: `sha256:${foreignTask}` as const,
+        sha256: fakeSha,
+        path: fakePath,
+      },
+    ].sort(compareSubmissionEntries);
+    const recordBytes = serializeMarketplaceOrderingRecord({
+      schema: MARKETPLACE_ORDERING_SCHEMA_ID,
+      runDigest: RUN_DIGEST,
+      closeAnchor: ANCHOR,
+      events: eventEntries,
+      submissions,
+      transcript: {
+        runDigestAnchorAt: "2026-08-03T08:00:00Z",
+        earliestCellPostAt: "2026-08-03T09:00:01Z",
+      },
+    });
+    const evaluation = await evaluateOrderingBytes({ recordBytes, members });
+    expect(evaluation.status).toBe("invalid");
+    expect(evaluation.detail).toMatch(/transcript timestamps do not match rederived pair/);
   });
 
   test("reordered projector input is a different replay", async () => {
