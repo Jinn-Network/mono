@@ -2382,8 +2382,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "never",
-      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "independent",
+      "releaseGroup": "colophon-claims-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmark-product-ci"
@@ -2449,8 +2449,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "never",
-      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "independent",
+      "releaseGroup": "colophon-claims-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmark-product-ci"
@@ -16015,7 +16015,7 @@
         "name": "@colophon-claims/cli",
         "path": "packages/benchmark-product/cli",
         "profiles": [],
-        "releaseGroup": "transitional-or-private",
+        "releaseGroup": "colophon-claims-v1",
         "schemas": []
       },
       {
@@ -16024,7 +16024,7 @@
         "name": "@colophon-claims/core",
         "path": "packages/benchmark-product/core",
         "profiles": [],
-        "releaseGroup": "transitional-or-private",
+        "releaseGroup": "colophon-claims-v1",
         "schemas": []
       },
       {
@@ -18611,8 +18611,10 @@
         "sealed-platform-v1"
       ],
       "canary": false,
-      "expectedPackageCount": 1,
+      "expectedPackageCount": 3,
       "packages": [
+        "@colophon-claims/cli",
+        "@colophon-claims/core",
         "@colophon-claims/verify"
       ],
       "publishPolicies": [
@@ -18883,10 +18885,8 @@
         "transitional-or-private"
       ],
       "canary": false,
-      "expectedPackageCount": 12,
+      "expectedPackageCount": 10,
       "packages": [
-        "@colophon-claims/cli",
-        "@colophon-claims/core",
         "@colophon-claims/web",
         "@jinn-network/broadcast-bot",
         "@jinn-network/chain-only-gate-harness",

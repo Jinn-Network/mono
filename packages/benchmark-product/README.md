@@ -38,10 +38,11 @@ The self-serve source is now split into Colophon-owned Tier 4 packages:
 lines below therefore run straight from the registry; nothing has to be checked
 out to verify a received bundle.
 
-`@colophon-claims/cli` and `@colophon-claims/core` are implemented but not
-published. Registry publication of those two remains held until the exact Jinn
-dependency set is available from npm; `@colophon-claims/web` is private
-source/build input by design and is not for registry release.
+`@colophon-claims/cli` and `@colophon-claims/core` are on the same demand-gated
+independent product line as `@colophon-claims/verify`. Registry publication is
+manual (`colophon-npm-publish.yml`); this tree does not publish them on push.
+`@colophon-claims/web` is private source/build input by design and is not for
+registry release.
 
 There is no hosted service, account, telemetry, billing, or remote publication.
 Product `publish` means local immutable bundle emission only.
@@ -55,8 +56,9 @@ npx @colophon-claims/cli@0.1
 ```
 
 It runs the bundled zero-credential comparison, retains its copied bundle and
-receipt, verifies the copy, and opens a verified loopback viewer. It is not yet
-a registry command because `@colophon-claims/cli` has not been published.
+receipt, verifies the copy, and opens a verified loopback viewer. Demand-gated
+registry publication of this command is recorded in DR-2026-08-22-a; this tree
+does not publish on push.
 
 For a received bundle, the smaller reader surface is:
 

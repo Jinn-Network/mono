@@ -15,7 +15,7 @@ Start at the [product overview](../README.md); see the
 [threat model](../SECURITY.md), and
 [Demo-1 E4 adapter runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
 
-This package is public-shaped, not yet published, and requires Node 22. The complete
+This package is the operations library the published CLI depends on, and requires Node 22. The complete
 portal dependency graph must be built from source before core. The exact
 dependency order is maintained in
 [Benchmark Product CI](../../../.github/workflows/benchmark-product-ci.yml);
@@ -259,3 +259,13 @@ See `docs/runbooks/colophon-announcement-source-serving.md`.
 For staged publication, `publicBaseUrl` is the exact archive mount, not merely an origin. For
 example, `https://example.test/publication` resolves records beneath
 `https://example.test/publication/records/...`; an origin-root mount remains supported.
+
+For this release, `@jinn-network/*` is pinned to the exact
+`0.1.0-canary.sha.0533a224cf99f06d7facf0c23455f2781a5b9e62` receipt.
+It is not a floating `@canary` dependency and is not a stable stack release.
+
+## What this does not yet prove
+
+Protocol identifiers in the installed platform packages are names, not addresses.
+This package fetches nothing from them. Checks run against the exact
+`@jinn-network/*` platform bytes installed from npm.

@@ -89,6 +89,47 @@ test('the shipped README states the pin the selected receipt actually applies', 
   assert.doesNotMatch(readme, /e00b2fc47fc5635b007eb349fb1e41aa81bb3c50/u);
 });
 
+test('core 0.1.0 and cli 0.1.0 select the attested 0.2.1 stack-canary receipt, not a new pin scheme', () => {
+  const core = JSON.parse(readFileSync(join(repoRoot, 'packages/benchmark-product/core/package.json'), 'utf8'));
+  const cli = JSON.parse(readFileSync(join(repoRoot, 'packages/benchmark-product/cli/package.json'), 'utf8'));
+  const corePin = loadProductReleasePlatformPin(repoRoot, core);
+  assert.equal(corePin.decision, 'DR-2026-08-22-a');
+  assert.equal(corePin.product.packageName, '@colophon-claims/core');
+  assert.equal(corePin.product.version, '0.1.0');
+  assert.equal(corePin.platformSourceSha, V21_PIN_SHA);
+  assert.equal(corePin.platformVersion, V21_PIN_VERSION);
+  assert.equal(corePin.platformPackages.length, 27);
+  const patchedCore = transformColophonManifestForPublish(core, corePin);
+  const coreJinn = Object.entries(patchedCore.dependencies).filter(([name]) => name.startsWith('@jinn-network/'));
+  assert.equal(coreJinn.length, 27);
+  for (const [name, version] of coreJinn) {
+    assert.equal(version, V21_PIN_VERSION, name);
+  }
+  const cliPin = loadProductReleasePlatformPin(repoRoot, cli);
+  assert.equal(cliPin.decision, 'DR-2026-08-22-a');
+  assert.equal(cliPin.product.packageName, '@colophon-claims/cli');
+  assert.equal(cliPin.product.version, '0.1.0');
+  assert.equal(cliPin.platformSourceSha, V21_PIN_SHA);
+  assert.equal(cliPin.platformPackages.length, 0);
+  const patchedCli = transformColophonManifestForPublish(cli, cliPin);
+  assert.equal(patchedCli.dependencies['@colophon-claims/core'], '0.1.0');
+  assert.equal(patchedCli.dependencies['@colophon-claims/verify'], '0.2.1');
+  assert.doesNotMatch(JSON.stringify(patchedCli), /portal:/u);
+});
+
+test('the published CLI README names the claimant verbs and documents launch as the service\'s', () => {
+  const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/cli/README.md'), 'utf8');
+  for (const verb of ['method', 'arm add', 'lock', 'anchor', 'run import', 'collect', 'report', 'publish', 'results', 'status']) {
+    assert.match(readme, new RegExp(verb, 'u'), verb);
+  }
+  assert.match(readme, /launch/u);
+  assert.match(readme, /service/u);
+  assert.match(readme, new RegExp(V21_PIN_VERSION, 'u'));
+  assert.match(readme, /Protocol identifiers[\s\S]{0,64}are names, not addresses/u);
+  assert.match(readme, /What this does not yet prove/u);
+  assert.doesNotMatch(readme, /spec\.jinn\.network/u);
+});
+
 test('the verifier 0.2 exception cannot become an implicit product or version exception', () => {
   const manifest = verifyManifest();
   assert.throws(
@@ -96,8 +137,8 @@ test('the verifier 0.2 exception cannot become an implicit product or version ex
     /no immutable platform receipt/u,
   );
   assert.throws(
-    () => loadProductReleasePlatformPin(repoRoot, { ...manifest, name: '@colophon-claims/core' }),
-    /registered @colophon-claims\/verify 0\.2 patch release/u,
+    () => loadProductReleasePlatformPin(repoRoot, { ...manifest, name: '@colophon-claims/web', version: '0.1.0' }),
+    /no immutable platform receipt/u,
   );
 });
 
@@ -119,19 +160,19 @@ test('the one-time receipt rejects hostile coherent rewrites and malformed regis
         row.provenanceUrl = `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(row.name)}@${copy.platformVersion}`;
       }
     }), manifest),
-    /registered @colophon-claims\/verify 0\.2 patch release|immutable verifier 0\.2\.1/u,
+    /registered product release|immutable @colophon-claims\/verify@0\.2\.1/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPin(mutate((copy) => {
       copy.platformPackages[0].integrity = 'sha512-not-a-registry-integrity';
     }), manifest),
-    /immutable verifier 0\.2\.1/u,
+    /immutable @colophon-claims\/verify@0\.2\.1/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPin(mutate((copy) => {
       copy.platformPackages.reverse();
     }), manifest),
-    /sorted verifier 0\.2 closure/u,
+    /sorted @colophon-claims\/verify@0\.2\.1 closure/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPin(mutate((copy) => {
@@ -147,21 +188,21 @@ test('the receipt collection refuses added or duplicate rows and root-key drift'
   const receipts = JSON.parse(readFileSync(join(repoRoot, PRODUCT_RELEASE_PLATFORM_PINS_PATH), 'utf8')).receipts;
   assert.throws(
     () => validateProductReleasePlatformPins({ schemaVersion: 1, receipts: [...receipts, structuredClone(pin)] }, manifest),
-    /exact ordered immutable verifier 0\.2 receipts/u,
+    /exact ordered immutable product-release receipts/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPins({ receipts: [pin], schemaVersion: 1 }, manifest),
-    /exact ordered immutable verifier 0\.2 receipts/u,
+    /exact ordered immutable product-release receipts/u,
   );
   assert.throws(
     () => validateProductReleasePlatformPins({ schemaVersion: 1, receipts: [...receipts].reverse() }, manifest),
-    /exact ordered immutable verifier 0\.2 receipts/u,
+    /exact ordered immutable product-release receipts/u,
   );
   const duplicate = structuredClone(pin);
   duplicate.platformPackages[1] = structuredClone(duplicate.platformPackages[0]);
   assert.throws(
     () => validateProductReleasePlatformPin(duplicate, manifest),
-    /sorted verifier 0\.2 closure/u,
+    /sorted @colophon-claims\/verify@0\.2\.1 closure/u,
   );
 });
 
@@ -204,7 +245,7 @@ test('publish transform refuses a floating canary dist-tag in the pin or source 
   );
 });
 
-test('Increment 1 moves only verify onto a demand-gated independent product line', () => {
+test('Increment 2 moves cli and core onto the demand-gated independent product line; web stays private', () => {
   const catalog = loadPlatformCatalog(repoRoot);
   const verify = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/verify');
   const core = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/core');
@@ -212,17 +253,19 @@ test('Increment 1 moves only verify onto a demand-gated independent product line
   const web = catalog.packages.find((pkg) => pkg.name === '@colophon-claims/web');
   assert.equal(verify.releaseGroup, 'colophon-claims-v1');
   assert.equal(verify.publishPolicy, 'independent');
-  assert.equal(core.releaseGroup, 'transitional-or-private');
-  assert.equal(core.publishPolicy, 'never');
-  assert.equal(cli.publishPolicy, 'never');
+  assert.equal(core.releaseGroup, 'colophon-claims-v1');
+  assert.equal(core.publishPolicy, 'independent');
+  assert.equal(cli.releaseGroup, 'colophon-claims-v1');
+  assert.equal(cli.publishPolicy, 'independent');
+  assert.equal(web.releaseGroup, 'transitional-or-private');
   assert.equal(web.publishPolicy, 'never');
   const group = catalog.releaseGroups['colophon-claims-v1'];
-  assert.equal(group.expectedPackageCount, 1);
+  assert.equal(group.expectedPackageCount, 3);
   assert.deepEqual(group.publishPolicies, ['independent']);
   assert.equal(group.stackPublished, false);
   assert.equal(group.canary, false);
   assert.equal(group.stable, false);
-  assert.equal(catalog.releaseGroups['transitional-or-private'].expectedPackageCount, 12);
+  assert.equal(catalog.releaseGroups['transitional-or-private'].expectedPackageCount, 10);
 });
 
 test('Colophon trusted publishing is a separate workflow and never joins the stack 77', () => {
@@ -285,9 +328,12 @@ test('the publish guard refuses both orderings that seal an unrunnable command i
 test('the publish workflow runs the claim-pin guard before it applies the manifest', () => {
   const workflow = readFileSync(join(repoRoot, '.github/workflows', COLOPHON_PUBLISH_WORKFLOW), 'utf8');
   const guard = workflow.indexOf('--check-claim-pins packages/benchmark-product/verify/package.json');
-  const apply = workflow.indexOf('--apply packages/benchmark-product/verify/package.json');
+  const apply = workflow.indexOf('--apply packages/benchmark-product/${{ github.event.inputs.package }}/package.json');
   assert.ok(guard > 0, 'the workflow must run the claim-pin guard');
+  assert.ok(apply > 0, 'the workflow must apply the selected package manifest');
   assert.ok(guard < apply, 'the guard must refuse before the manifest is rewritten for publish');
+  assert.match(workflow, /github\.event\.inputs\.package == 'verify'/u);
+  assert.match(workflow, /options:\n(?:[^\n]*\n)*? {10}- verify\n {10}- core\n {10}- cli/u);
 });
 
 test('the guard reads what npm actually serves, and fails closed when it cannot', async () => {
