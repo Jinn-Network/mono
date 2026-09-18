@@ -1,4 +1,7 @@
-import { describe, expect, test } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { CLI_VERB_NAMES, runCli, USAGE } from "./main.js";
 import type { CliContext } from "./result.js";
 import { STANDALONE_CLI_VERBS } from "./parity-map.js";
@@ -9,12 +12,24 @@ function context(): CliContext {
 
 function parseJson(stdout: string): {
   ok: boolean;
-  result?: { catalog?: ReadonlyArray<{ id: string }> };
+  result?: {
+    catalog?: ReadonlyArray<{ id: string }>;
+    catalogId?: string;
+    official?: boolean;
+    selectionManifestSha256?: string;
+    draft?: { draftId: string };
+  };
   error?: { code: string; detail: string };
 } {
   return JSON.parse(stdout) as {
     ok: boolean;
-    result?: { catalog?: ReadonlyArray<{ id: string }> };
+    result?: {
+      catalog?: ReadonlyArray<{ id: string }>;
+      catalogId?: string;
+      official?: boolean;
+      selectionManifestSha256?: string;
+      draft?: { draftId: string };
+    };
     error?: { code: string; detail: string };
   };
 }
@@ -30,6 +45,7 @@ describe("retired per-suite verbs", () => {
     ["runtime", "apex-agents", "select"],
     ["runtime", "apex-swe-dev", "select"],
     ["runtime", "deep-swe-v1.1", "select"],
+    ["runtime", "terminal-bench", "migrate"],
     ["runtime", "inspect", "eval", "select"],
     ["runtime", "inspect", "eval", "export"],
     ["runtime", "inspect", "bind-judge"],
@@ -136,5 +152,62 @@ describe("method bind", () => {
     const body = parseJson(result.stdout);
     expect(body.ok).toBe(false);
     expect(body.error?.detail).not.toMatch(/unknown flag --n/);
+  });
+});
+
+describe("method bind catalog identity", () => {
+  let root: string;
+  let workspaceDir: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "method-cli-bind-"));
+    workspaceDir = join(root, "workspace");
+    mkdirSync(workspaceDir);
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  test("catalog bind with empty host.json seals identity without a selection hash", async () => {
+    const hostPath = join(root, "host.json");
+    writeFileSync(hostPath, "{}");
+    const ctx: CliContext = { cwd: root, clock: () => "2026-08-18T00:00:00.000Z" };
+    expect((await runCli(["init", "--workspace", workspaceDir, "--principal", "sponsor-1", "--json"], ctx)).exitCode).toBe(0);
+    const created = await runCli(
+      ["draft", "create", "--workspace", workspaceDir, "--principal", "sponsor-1", "--name", "One", "--json"],
+      ctx,
+    );
+    expect(created.exitCode).toBe(0);
+    const draftId = parseJson(created.stdout).result?.draft?.draftId;
+    expect(draftId).toBe("one");
+    const bound = await runCli(
+      [
+        "method", "terminal-bench-2.1",
+        "--workspace", workspaceDir,
+        "--principal", "sponsor-1",
+        "--draft", "one",
+        "--slice", "1",
+        "--host", hostPath,
+        "--json",
+      ],
+      ctx,
+    );
+    expect(bound.exitCode, bound.stdout).toBe(0);
+    const body = parseJson(bound.stdout);
+    expect(body.ok).toBe(true);
+    expect(body.result?.catalogId).toBe("terminal-bench-2.1");
+    expect(body.result?.official).toBe(true);
+    expect(body.result?.selectionManifestSha256).toBeUndefined();
+    const text = await runCli(
+      [
+        "method", "terminal-bench-2.1",
+        "--workspace", workspaceDir,
+        "--principal", "sponsor-1",
+        "--draft", "one",
+        "--slice", "1",
+        "--host", hostPath,
+      ],
+      ctx,
+    );
+    expect(text.exitCode).toBe(0);
+    expect(text.stdout).toBe("bound official terminal-bench-2.1 catalog identity for draft one\n");
   });
 });

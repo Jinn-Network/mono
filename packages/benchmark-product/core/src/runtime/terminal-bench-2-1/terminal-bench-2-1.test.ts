@@ -8,7 +8,7 @@ import { createDraft, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectTerminalBench21Runtime } from "../../operations/terminal-bench-2-1.js";
+import { prepareTerminalBench21Draft } from "../testing/terminal-bench-2-1-draft.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import type { HarborSelectionManifest } from "../harbor/manifest.js";
@@ -129,7 +129,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
 
   test("select seals replicates=5 and one Task per selected name; quote shows 1 × 2 × 5 and two-axis bits", async () => {
     const context = await prepareDraft("one");
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "one", ...request("one_task") });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "one", ...request("one_task") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(selected.result.draft.spec.replicates).toBe(5);
@@ -156,7 +156,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
 
   test("ten_task and full slices seal the named membership; custom cannot be leaderboard-ready", async () => {
     const tenContext = await prepareDraft("ten");
-    const ten = await selectTerminalBench21Runtime(tenContext, { draftId: "ten", ...request("ten_task") });
+    const ten = await prepareTerminalBench21Draft(tenContext, { draftId: "ten", ...request("ten_task") });
     expect(ten.ok, JSON.stringify(ten)).toBe(true);
     if (!ten.ok) return;
     expect(parseBenchmark(getSealedBytes(workspaceDir, ten.result.benchmarkSha256)).items).toHaveLength(10);
@@ -168,7 +168,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
     const customContext = await prepareDraft("custom");
-    const custom = await selectTerminalBench21Runtime(customContext, { draftId: "custom", ...request(undefined, ["t11"]) });
+    const custom = await prepareTerminalBench21Draft(customContext, { draftId: "custom", ...request(undefined, ["t11"]) });
     expect(custom.ok, JSON.stringify(custom)).toBe(true);
     if (!custom.ok) return;
     const customQuoted = await runQuote(customContext, { draftId: "custom" });
@@ -179,7 +179,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
 
   test("full coverage quote is method-eligible and not leaderboard_submit_ready; lock without those quote bits refuses", async () => {
     const context = await prepareDraft("full");
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "full", ...request("full") });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "full", ...request("full") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(parseBenchmark(getSealedBytes(workspaceDir, selected.result.benchmarkSha256)).items).toHaveLength(12);
@@ -200,7 +200,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
     const refuseContext = await prepareDraft("full-refuse");
-    const refuseSelected = await selectTerminalBench21Runtime(refuseContext, { draftId: "full-refuse", ...request("full") });
+    const refuseSelected = await prepareTerminalBench21Draft(refuseContext, { draftId: "full-refuse", ...request("full") });
     expect(refuseSelected.ok, JSON.stringify(refuseSelected)).toBe(true);
     if (!refuseSelected.ok) return;
     const refuseQuoted = await runQuote(refuseContext, { draftId: "full-refuse" });
@@ -216,7 +216,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
 
   test("lock refuses when replicates was edited after select away from the sealed suite k", async () => {
     const context = await prepareDraft("edited-k");
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "edited-k", ...request("one_task") });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "edited-k", ...request("one_task") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(selected.result.draft.spec.replicates).toBe(5);
@@ -236,7 +236,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
       draftId: "small-budget",
       patch: { policy: { completenessFloor: "1", cellWindowMs: 3_600_000, closeAfterMs: 86_400_000, replacement: { allowed: true, maxPerCell: 1 } } },
     }).ok).toBe(true);
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "small-budget", ...request("one_task") });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "small-budget", ...request("one_task") });
     expect(selected.ok).toBe(false);
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/maxPerCell of at least 3/u);
@@ -248,7 +248,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
       draftId: "binary",
       patch: { analysis: { method: "jinn.benchmarking.method/binary-instrument", version: "1" } },
     }).ok).toBe(true);
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "binary", ...request("one_task") });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "binary", ...request("one_task") });
     expect(selected.ok).toBe(false);
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/binary-instrument/u);
@@ -265,7 +265,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
       }],
     }));
     const context = await prepareDraft("mini-full");
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "mini-full", ...request("full") });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "mini-full", ...request("full") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(parseBenchmark(getSealedBytes(workspaceDir, selected.result.benchmarkSha256)).items).toHaveLength(1);

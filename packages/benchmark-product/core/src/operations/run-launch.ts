@@ -195,9 +195,7 @@ function loadLockedOrRunningRun(workspaceDir: string, draftId: string, expectedS
 
 const APEX_SWE_DEV_OPERATOR_HOST_REFUSAL =
   "APEX-SWE-dev executes on the operator host, not through the Colophon venue: the protocol wraps"
-  + " Mercor's own `apx` and `run_e2e.py` directly. `run launch` does not drive this protocol."
-  + " Grade the locked selection with `yarn apex-swe-dev-one-task-qualify` (see"
-  + " docs/runbooks/apex-swe-dev-official-one-task.md), then `apex-swe export`.";
+  + " Mercor's own `apx` and `run_e2e.py` directly. `run launch` does not drive this protocol.";
 
 /** APEX-SWE-dev seals arms against a harness id the local venue registers no launcher for, by
  * design (DR-2026-08-18-c: their harnesses run, unmodified, on the operator host). Refuse the

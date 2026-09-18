@@ -26,8 +26,6 @@ const EXPECTED_UNAVAILABLE_REASONS = {
     "requires a machine-local configured signer key; browser key custody is forbidden",
   admitHumanTruth:
     "requires local signed-review, roster, and licensed truth evidence files",
-  migrateTerminalBenchLegacyTask:
-    "requires server-configured migration input paths; browser-supplied paths are forbidden",
   exportDerivedBundle:
     "copies a machine-local job or log directory; browser path-based export is forbidden",
   identityBind:
