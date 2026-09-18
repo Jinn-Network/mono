@@ -7,6 +7,7 @@ import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { LauncherCapabilities, LauncherContract, LaunchPlan } from "@jinn-network/task-execution-launchers";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import { DEEP_SWE_V11_TRIAL_TIMEOUT_SECONDS } from "../deep-swe-v1.1/manifest.js";
+import { TERMINAL_BENCH_21_ITEM_PROFILE_URI } from "../../intake/terminal-bench-2-1.js";
 import { PIER_ADAPTER_ID, type HarborSelectionManifest } from "./manifest.js";
 import type { HarborHostBinding } from "./host.js";
 import { inheritedTempEnv, scopedTempEnv } from "../child-temp-env.js";
@@ -225,7 +226,11 @@ export function makeHarborLauncher(input: { readonly manifest: HarborSelectionMa
   return {
     id: launcherId,
     capabilities: (): LauncherCapabilities => ({
-      taskProfiles: ["https://spec.jinn.network/task-profiles/prediction-forecast/1.0", "https://spec.jinn.network/task-profiles/repository-work/1.0"],
+      taskProfiles: [
+        "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
+        "https://spec.jinn.network/task-profiles/repository-work/1.0",
+        TERMINAL_BENCH_21_ITEM_PROFILE_URI,
+      ],
       inputMediaTypes: ["application/json", "text/plain"], outputMediaTypes: ["application/json"], structuredOutput: true,
       resume: false, interruptionBehaviorDefault: "nonrepeatable", secretForwards: [],
       runPinning: { keys: [

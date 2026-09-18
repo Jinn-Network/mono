@@ -132,6 +132,10 @@ import {
   type InspectEvaluationStrategy,
 } from "../runtime/inspect/assurance.js";
 import { HarborSelectionManifestSchema, isHarborCompatibleAdapterId, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
+import {
+  buildTerminalBench21ItemProfile,
+  TERMINAL_BENCH_21_ITEM_PROFILE_URI,
+} from "../intake/terminal-bench-2-1.js";
 import { APEX_SWE_DEV_ADAPTER_ID } from "../runtime/apex-swe-dev/manifest.js";
 import { ARCHIPELAGO_ADAPTER_ID, SWE_BENCH_HARNESS_ADAPTER_ID } from "../runtime/suite-protocol/comparability.js";
 import { readHarborHostBinding } from "../runtime/harbor/host.js";
@@ -636,6 +640,7 @@ function resolveTaskProfileFor(
   repositoryWorkProfile: TaskProfileDocument,
   inspectProfile?: TaskProfileDocument,
   binaryJudgmentProfile?: TaskProfileDocument,
+  terminalBench21Profile?: TaskProfileDocument,
 ): (descriptor: TaskSpecification["profile"]) => TaskProfileDocument {
   return (descriptor) => {
     if (descriptor.uri === PREDICTION_FORECAST_PROFILE_URI) return predictionProfile;
@@ -644,6 +649,9 @@ function resolveTaskProfileFor(
     if (descriptor.uri === INSPECT_TASK_PROFILE_URI && inspectProfile !== undefined) return inspectProfile;
     if (descriptor.uri === BINARY_JUDGMENT_PROFILE_URI && binaryJudgmentProfile !== undefined) {
       return binaryJudgmentProfile;
+    }
+    if (descriptor.uri === TERMINAL_BENCH_21_ITEM_PROFILE_URI && terminalBench21Profile !== undefined) {
+      return terminalBench21Profile;
     }
     return refuse(
       "execution",
@@ -825,6 +833,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const binaryJudgmentProfile = inspectBinaryJudgeSelection === undefined
     ? undefined
     : buildBinaryJudgmentProfile();
+  const terminalBench21Profile = buildTerminalBench21ItemProfile();
   const sealedEvaluationProfile = sealTaskProfile(evaluationProfile);
   const profileStore: ProfileStore = {
     get(digest) {
@@ -1213,9 +1222,10 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       PREDICTION_FORECAST_PROFILE_URI,
       EVALUATION_TASK_PROFILE_URI,
       REPOSITORY_WORK_PROFILE_URI,
+      TERMINAL_BENCH_21_ITEM_PROFILE_URI,
       ...(inspectProfile === undefined ? [] : [INSPECT_TASK_PROFILE_URI]),
       ...(binaryJudgmentProfile === undefined ? [] : [BINARY_JUDGMENT_PROFILE_URI]),
-      ...(harborSelection === undefined ? [] : [PREDICTION_FORECAST_PROFILE_URI, REPOSITORY_WORK_PROFILE_URI]),
+      ...(harborSelection === undefined ? [] : [PREDICTION_FORECAST_PROFILE_URI, REPOSITORY_WORK_PROFILE_URI, TERMINAL_BENCH_21_ITEM_PROFILE_URI]),
     ],
     workspaceKinds: ["dir", "worktree"],
     inputMediaTypes: ["application/json", "text/plain"],
@@ -1250,6 +1260,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       repositoryWorkProfile,
       inspectProfile,
       binaryJudgmentProfile,
+      terminalBench21Profile,
     ),
     launchers: [
       baselineLauncher,

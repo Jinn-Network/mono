@@ -16,15 +16,16 @@ import { computeHarbor021TaskContentHash } from "../terminal-bench-2/host.js";
 import { namedSliceTaskNames } from "../suite-protocol/manifest.js";
 import { resolveTerminalBench21Selection } from "./host.js";
 import { TERMINAL_BENCH_2_1_DATASET_ID, TERMINAL_BENCH_2_1_DATASET_REF } from "./manifest.js";
+import { officialTerminalBench21TaskNames } from "../../intake/terminal-bench-2-1.js";
 
-const names = ["t00", "t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09", "t10", "t11"] as const;
+const names = officialTerminalBench21TaskNames().slice(0, 12);
 const image = `registry.example/tb21@sha256:${"c".repeat(64)}`;
 const arms: HarborSelectionManifest["arms"] = [
   { armId: "one", agent: { id: "terminus", configuration: {} }, model: { id: "openai/model-one", configuration: {} }, jobAgent: { name: "terminus", model_name: "openai/model-one" } },
   { armId: "two", agent: { id: "terminus", configuration: {} }, model: { id: "openai/model-two", configuration: {} }, jobAgent: { name: "terminus", model_name: "openai/model-two" } },
 ];
 const outputs: HarborSelectionManifest["outputs"] = [{
-  name: "prediction",
+  name: "result",
   mediaType: "application/json",
   artifact: { source: "/logs/artifacts/prediction.json", destination: "prediction.json" },
   nativePath: "artifacts/prediction.json",
@@ -108,12 +109,12 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("Terminal-Bench 2.1 official-suite intake", () => {
   test("named slices are lexicographic first 1 / first 10 / all from the 12-task fixture", () => {
-    expect(namedSliceTaskNames([...names], "one_task")).toEqual(["t00"]);
+    expect(namedSliceTaskNames([...names], "one_task")).toEqual([names[0]]);
     expect(namedSliceTaskNames([...names], "ten_task")).toEqual([...names.slice(0, 10)]);
     expect(namedSliceTaskNames([...names], "full")).toEqual([...names]);
     const one = resolveTerminalBench21Selection(workspaceDir, request("one_task"));
     expect(one.coverage).toBe("one_task");
-    expect(one.selectedTaskNames).toEqual(["t00"]);
+    expect(one.selectedTaskNames).toEqual([names[0]]);
     expect(one.profile.execution.maxRetries).toBe(3);
     expect(one.harbor.retryPolicy).toEqual({ nAttempts: 5, nConcurrent: 1, maxRetries: 3 });
     const ten = resolveTerminalBench21Selection(workspaceDir, request("ten_task"));
@@ -122,9 +123,9 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     const full = resolveTerminalBench21Selection(workspaceDir, request("full"));
     expect(full.coverage).toBe("full");
     expect(full.selectedTaskNames).toEqual([...names]);
-    const custom = resolveTerminalBench21Selection(workspaceDir, request(undefined, ["t11"]));
+    const custom = resolveTerminalBench21Selection(workspaceDir, request(undefined, [names[11]!]));
     expect(custom.coverage).toBe("custom");
-    expect(custom.selectedTaskNames).toEqual(["t11"]);
+    expect(custom.selectedTaskNames).toEqual([names[11]]);
   });
 
   test("select seals replicates=5 and one Task per selected name; quote shows 1 × 2 × 5 and two-axis bits", async () => {
@@ -168,7 +169,7 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
     const customContext = await prepareDraft("custom");
-    const custom = await selectTerminalBench21Runtime(customContext, { draftId: "custom", ...request(undefined, ["t11"]) });
+    const custom = await selectTerminalBench21Runtime(customContext, { draftId: "custom", ...request(undefined, [names[11]!]) });
     expect(custom.ok, JSON.stringify(custom)).toBe(true);
     if (!custom.ok) return;
     const customQuoted = await runQuote(customContext, { draftId: "custom" });
@@ -260,8 +261,8 @@ describe("Terminal-Bench 2.1 official-suite intake", () => {
       dataset_version_content_hash: TERMINAL_BENCH_2_1_DATASET_REF,
       task_ids: [{
         org: "terminal-bench",
-        name: "t00",
-        ref: `sha256:${computeHarbor021TaskContentHash(join(materialPath, "t00")).contentHash}`,
+        name: names[0],
+        ref: `sha256:${computeHarbor021TaskContentHash(join(materialPath, names[0]!)).contentHash}`,
       }],
     }));
     const context = await prepareDraft("mini-full");

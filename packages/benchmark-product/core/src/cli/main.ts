@@ -807,7 +807,7 @@ async function handleMethodBind(
   return renderResult(
     result,
     jsonMode,
-    (value) => `bound ${value.official ? "official" : "custom"} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`,
+    (value) => `bound ${value.official ? "official" : "custom"} ${value.documentKind} method ${value.selectionManifestSha256 ?? value.benchmarkSha256} for draft ${draftId}\n`,
   );
 }
 
