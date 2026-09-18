@@ -1,5 +1,6 @@
 /** One method bind and one derived export (DR-2026-08-18-f). */
 import type { DraftDocument } from "../domain/draft.js";
+import { isDraftMutable } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 import { HARBOR_ADAPTER_ID } from "../runtime/harbor/manifest.js";
@@ -7,11 +8,6 @@ import { SWE_BENCH_HARNESS_ADAPTER_ID } from "../runtime/swe-bench-verified/mani
 import { ARCHIPELAGO_ADAPTER_ID } from "../runtime/apex-agents/manifest.js";
 import { APEX_SWE_DEV_ADAPTER_ID } from "../runtime/apex-swe-dev/manifest.js";
 import type { HarborRuntimeSelectionRequest } from "../runtime/harbor/host.js";
-import type { TerminalBench2SelectionRequest } from "../runtime/terminal-bench-2/host.js";
-import type { TerminalBench30SelectionRequest } from "../runtime/terminal-bench-3-0/host.js";
-import type { SwebenchVerifiedSelectionRequest } from "../runtime/swe-bench-verified/host.js";
-import type { ApexAgentsSelectionRequest } from "../runtime/apex-agents/host.js";
-import type { ApexSweDevSelectionRequest } from "../runtime/apex-swe-dev/host.js";
 import type { InspectRuntimeSelectionRequest } from "../runtime/host-port.js";
 import {
   INSPECT_BINARY_JUDGE_ADAPTER_ID,
@@ -26,14 +22,9 @@ import type { OperationResult } from "./result.js";
 import { executeSelectInspectEvaluation } from "./inspect-runtime.js";
 import { executeBindInspectBinaryJudge } from "./inspect-binary-judge.js";
 import { executeSelectHarborRuntime } from "./harbor-runtime.js";
-import { executeSelectTerminalBench2Runtime } from "./terminal-bench-2.js";
-import { executeSelectTerminalBench30Runtime } from "./terminal-bench-3-0.js";
 import { attachBenchmarkToDraft } from "./attach.js";
 import { buildTerminalBench21Tasks } from "../intake/terminal-bench-2-1.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
-import { executeSelectSwebenchVerifiedRuntime } from "./swe-bench-verified.js";
-import { executeSelectApexAgentsRuntime } from "./apex-agents.js";
-import { executeSelectApexSweDevRuntime } from "./apex-swe-dev.js";
 import {
   executeExportHarborHubPackage,
   type ExportHarborHubPackageResult,
@@ -158,6 +149,30 @@ function attachOfficialTerminalBench21Slate(
   };
 }
 
+function bindNamedSuiteIdentity(
+  context: OperationContext,
+  draftId: string,
+  documentKind: MethodDocumentKind,
+  official: boolean,
+): SelectMethodResult {
+  const current = readDraftDocument(context.workspaceDir, draftId);
+  if (!isDraftMutable(current.state)) {
+    refuse("illegal-transition", `drafts.${draftId}.state`, "locked drafts refuse method bind");
+  }
+  return finish({ draft: current }, documentKind, official);
+}
+
+function bindOfficialTerminalBench21(
+  context: OperationContext,
+  draftId: string,
+  input: {
+    readonly coverage?: Exclude<SuiteCoverage, "custom">;
+    readonly taskNames?: readonly string[];
+  },
+): SelectMethodResult {
+  return finish(attachOfficialTerminalBench21Slate(context, draftId, input), "terminal-bench-2.1", true);
+}
+
 async function bindFile(
   context: OperationContext,
   draftId: string,
@@ -186,88 +201,27 @@ async function bindFile(
         "harbor",
         resolved.official,
       );
-    case "terminal-bench-2":
-      return finish(
-        await executeSelectTerminalBench2Runtime(context, { draftId, ...document } as { draftId: string } & TerminalBench2SelectionRequest),
-        "terminal-bench-2",
-        resolved.official,
-      );
     case "terminal-bench-2.1":
-      return finish(
-        attachOfficialTerminalBench21Slate(context, draftId, slateInputFromTerminalBench21File(document)),
-        "terminal-bench-2.1",
-        resolved.official,
-      );
-    case "terminal-bench-3.0":
-      return finish(
-        await executeSelectTerminalBench30Runtime(context, { draftId, ...document } as { draftId: string } & TerminalBench30SelectionRequest),
-        "terminal-bench-3.0",
-        resolved.official,
-      );
-    case "swe-bench-verified":
-      return finish(
-        await executeSelectSwebenchVerifiedRuntime(context, { draftId, ...document } as { draftId: string } & SwebenchVerifiedSelectionRequest),
-        "swe-bench-verified",
-        resolved.official,
-      );
-    case "apex-agents":
-      return finish(
-        await executeSelectApexAgentsRuntime(context, { draftId, ...document } as { draftId: string } & ApexAgentsSelectionRequest),
-        "apex-agents",
-        resolved.official,
-      );
-    case "apex-swe-dev":
-      return finish(
-        await executeSelectApexSweDevRuntime(context, { draftId, ...document } as { draftId: string } & ApexSweDevSelectionRequest),
-        "apex-swe-dev",
-        resolved.official,
-      );
+      return bindOfficialTerminalBench21(context, draftId, slateInputFromTerminalBench21File(document));
+    default:
+      return bindNamedSuiteIdentity(context, draftId, resolved.documentKind, resolved.official);
   }
 }
 
-async function bindCatalog(
+function bindCatalog(
   context: OperationContext,
   draftId: string,
   resolved: Extract<ResolvedMethod, { kind: "catalog" }>,
-): Promise<SelectMethodResult> {
-  const host = resolved.host;
-  const coverage = namedCoverage(resolved.coverage);
-  const ids = resolved.selectedIds;
-  switch (resolved.catalogId) {
-    case "terminal-bench-2.1":
-      return finish(attachOfficialTerminalBench21Slate(context, draftId, {
-        ...(coverage === undefined ? {} : { coverage }),
-        ...(ids === undefined ? {} : { taskNames: ids }),
-      }), "terminal-bench-2.1", true);
-    case "terminal-bench-3.0":
-      return finish(await executeSelectTerminalBench30Runtime(context, {
-        draftId,
-        ...host,
-        ...(coverage === undefined ? {} : { coverage }),
-        ...(ids === undefined ? {} : { taskNames: ids }),
-      } as { draftId: string } & TerminalBench30SelectionRequest), "terminal-bench-3.0", true);
-    case "swe-bench-verified":
-      return finish(await executeSelectSwebenchVerifiedRuntime(context, {
-        draftId,
-        ...host,
-        ...(coverage === undefined ? {} : { coverage }),
-        ...(ids === undefined ? {} : { instanceIds: ids }),
-      } as { draftId: string } & SwebenchVerifiedSelectionRequest), "swe-bench-verified", true);
-    case "apex-agents":
-      return finish(await executeSelectApexAgentsRuntime(context, {
-        draftId,
-        ...host,
-        ...(coverage === undefined ? {} : { coverage }),
-        ...(ids === undefined ? {} : { taskIds: ids }),
-      } as { draftId: string } & ApexAgentsSelectionRequest), "apex-agents", true);
-    case "apex-swe-dev":
-      return finish(await executeSelectApexSweDevRuntime(context, {
-        draftId,
-        ...host,
-        ...(coverage === undefined ? {} : { coverage }),
-        ...(ids === undefined ? {} : { taskIds: ids }),
-      } as { draftId: string } & ApexSweDevSelectionRequest), "apex-swe-dev", true);
+): SelectMethodResult {
+  if (resolved.catalogId === "terminal-bench-2.1") {
+    const coverage = namedCoverage(resolved.coverage);
+    const ids = resolved.selectedIds;
+    return bindOfficialTerminalBench21(context, draftId, {
+      ...(coverage === undefined ? {} : { coverage }),
+      ...(ids === undefined ? {} : { taskNames: ids }),
+    });
   }
+  return bindNamedSuiteIdentity(context, draftId, resolved.catalogId, true);
 }
 
 async function bindResolved(

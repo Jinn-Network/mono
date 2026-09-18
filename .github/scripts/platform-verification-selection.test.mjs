@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { copyFileSync, existsSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import {
@@ -121,15 +122,38 @@ test('operator-only and documentation-only changes skip verification', () => {
 // `['']` — length 1, which slipped past a pre-normalization emptiness check and
 // unselected every lane. These pin the documented fail-safe through the entry
 // point that actually has the bug (spawn, not a direct function call).
-const cli = (stdin) => {
+const cli = (stdin, script = resolve(import.meta.dirname, 'platform-verification-selection.mjs')) => {
   const result = spawnSync(
     process.execPath,
-    [resolve(import.meta.dirname, 'platform-verification-selection.mjs'), '--repo-root', repoRoot],
+    [script, '--repo-root', repoRoot],
     { input: stdin, encoding: 'utf8' },
   );
   assert.equal(result.status, 0, `selector exited ${result.status}: ${result.stderr}`);
   return JSON.parse(result.stdout);
 };
+
+// #4144: the entry guard compared the raw `argv[1]` with a percent-encoded URL
+// pathname, so from a checkout path containing a space the CLI printed nothing, and
+// comparing unresolved paths printed nothing through a symlinked directory.
+test('the CLI runs from a checkout path containing a space or reached through a symlink (#4144)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'jinn selector space-'));
+  try {
+    for (const file of [
+      'platform-verification-selection.mjs',
+      'platform-catalog.mjs',
+      'public-surface-assets.mjs',
+      'repository-candidates.mjs',
+    ]) {
+      copyFileSync(resolve(import.meta.dirname, file), join(dir, file));
+    }
+    symlinkSync(dir, join(dir, 'via link'));
+    for (const script of [join(dir, 'platform-verification-selection.mjs'), join(dir, 'via link', 'platform-verification-selection.mjs')]) {
+      assert.equal(typeof cli(`${real('docs/engineering/handbook.md')}\n`, script).run, 'boolean', script);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('empty stdin selects full verification through the CLI', () => {
   const result = cli('');

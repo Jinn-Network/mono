@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { parseBenchmark } from "@jinn-network/benchmarking-records";
 import { readAuditEntries } from "../audit/journal.js";
@@ -19,6 +20,18 @@ import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
 import { InspectSelectionManifestSchema, SUPPORTED_INSPECT_VERSION, SUPPORTED_INSPECT_WHEEL_SHA256 } from "../runtime/inspect/manifest.js";
 import { exportDerivedBundle, selectMethod } from "./method.js";
 import { INSPECT_SELECTION_SCHEMA } from "./method-catalog.js";
+import { runtimeHostsDir } from "../workspace/layout.js";
+
+const coreSrc = join(dirname(fileURLToPath(import.meta.url)), "..");
+const OFFICIAL_SUITE_DIRS = [
+  "apex-agents",
+  "apex-swe-dev",
+  "deep-swe-v1.1",
+  "swe-bench-verified",
+  "terminal-bench-2",
+  "terminal-bench-2-1",
+  "terminal-bench-3-0",
+] as const;
 
 let root: string;
 let workspaceDir: string;
@@ -45,7 +58,63 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
+describe("draft-selection operations are gone", () => {
+  test("runtime/<suite>/select.ts is not on disk for the official suites", () => {
+    for (const suite of OFFICIAL_SUITE_DIRS) {
+      expect(existsSync(join(coreSrc, "runtime", suite, "select.ts")), suite).toBe(false);
+    }
+  });
+
+  test("method.bind does not import official-suite executeSelect* or host.js", () => {
+    const source = readFileSync(join(coreSrc, "operations", "method.ts"), "utf8");
+    expect(source).not.toMatch(/executeSelect(?:TerminalBench|Swebench|Apex|DeepSwe)/u);
+    expect(source).not.toMatch(
+      /from "\.\.\/runtime\/(?:apex-agents|apex-swe-dev|deep-swe-v1\.1|swe-bench-verified|terminal-bench-2|terminal-bench-2-1|terminal-bench-3-0)\/(?:select|host)\.js"/u,
+    );
+  });
+
+  test("host tests do not call select*Runtime", () => {
+    const selectRuntime = /select(?:TerminalBench|Swebench|Apex|DeepSwe)\w*Runtime/u;
+    for (const suite of OFFICIAL_SUITE_DIRS) {
+      const testFile = join(coreSrc, "runtime", suite, `${suite}.test.ts`);
+      if (!existsSync(testFile)) continue;
+      expect(readFileSync(testFile, "utf8"), suite).not.toMatch(selectRuntime);
+    }
+    expect(readFileSync(join(coreSrc, "runtime", "harbor", "harbor-batched.test.ts"), "utf8")).not.toMatch(selectRuntime);
+  });
+});
+
 describe("selectMethod", () => {
+  test("catalog bind seals catalog identity without host selection", async () => {
+    const hostPath = join(root, "host.json");
+    writeFileSync(hostPath, "{}");
+    const context = await prepareDraft("one");
+    const selected = await selectMethod(context, {
+      draftId: "one",
+      ref: "swe-bench-verified",
+      cwd: root,
+      slice: "1",
+      hostPath,
+    });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    expect(selected.result.catalogId).toBe("swe-bench-verified");
+    expect(selected.result.documentKind).toBe("swe-bench-verified");
+    expect(selected.result.official).toBe(true);
+    expect(selected.result.selectionManifestSha256).toBeUndefined();
+    expect(selected.result.benchmarkSha256).toBeUndefined();
+    expect(selected.result.suiteProtocolSha256).toBeUndefined();
+    expect(selected.result.draft.spec.evaluationRuntime).toBeUndefined();
+    expect(selected.result.draft.spec.arms.map((arm) => arm.pinning)).toEqual([
+      { harness: { id: "placeholder", version: "1" } },
+      { harness: { id: "placeholder", version: "1" } },
+    ]);
+    expect(existsSync(runtimeHostsDir(workspaceDir)) ? readdirSync(runtimeHostsDir(workspaceDir)) : []).toEqual([]);
+    const actions = readAuditEntries(workspaceDir).map((entry) => entry.action);
+    expect(actions).toContain("method.bind");
+    expect(actions).not.toContain("runtime.swe-bench-verified.select");
+  });
+
   test("catalog terminal-bench-2.1 bind seals the official slate without Harbor select", async () => {
     const hostPath = join(root, "host.json");
     writeFileSync(hostPath, "{}");

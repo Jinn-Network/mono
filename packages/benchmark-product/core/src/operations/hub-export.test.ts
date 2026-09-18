@@ -23,16 +23,15 @@ import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
 import { requireRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
-import { selectTerminalBench21Runtime } from "./terminal-bench-2-1.js";
-import { selectTerminalBench30Runtime } from "./terminal-bench-3-0.js";
+import { prepareTerminalBench21Draft } from "../runtime/testing/terminal-bench-2-1-draft.js";
+import { prepareTerminalBench30Draft } from "../runtime/testing/terminal-bench-3-0-draft.js";
 import {
   decideHarborHubExportMode,
   exportHarborHubPackage,
   harborHubExportInstructions,
 } from "./hub-export.js";
-import { officialTerminalBench21TaskNames } from "../intake/terminal-bench-2-1.js";
 
-const names = officialTerminalBench21TaskNames().slice(0, 12);
+const names = ["t00", "t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09", "t10", "t11"] as const;
 const image = `registry.example/tb21@sha256:${"c".repeat(64)}`;
 const arms: HarborSelectionManifest["arms"] = [
   { armId: "one", agent: { id: "terminus", configuration: {} }, model: { id: "openai/model-one", configuration: {} }, jobAgent: { name: "terminus", model_name: "openai/model-one" } },
@@ -40,12 +39,6 @@ const arms: HarborSelectionManifest["arms"] = [
 ];
 const outputs: HarborSelectionManifest["outputs"] = [{
   name: "prediction",
-  mediaType: "application/json",
-  artifact: { source: "/logs/artifacts/prediction.json", destination: "prediction.json" },
-  nativePath: "artifacts/prediction.json",
-}];
-const tb21Outputs: HarborSelectionManifest["outputs"] = [{
-  name: "result",
   mediaType: "application/json",
   artifact: { source: "/logs/artifacts/prediction.json", destination: "prediction.json" },
   nativePath: "artifacts/prediction.json",
@@ -180,7 +173,7 @@ function request(coverage?: "one_task" | "ten_task" | "full", taskNames?: readon
     nConcurrent: 1,
     arms,
     environment: { type: "docker" as const, image, configuration: {} },
-    outputs: tb21Outputs,
+    outputs,
     ...(coverage === undefined ? {} : { coverage }),
     ...(taskNames === undefined ? {} : { taskNames }),
   };
@@ -271,7 +264,7 @@ describe("Harbor Hub export", () => {
 
   test("named-slice export is inspection-only and keeps the native job directory", async () => {
     const context = await prepareDraft("one");
-    expectOk("selectTerminalBench21Runtime", await selectTerminalBench21Runtime(context, { draftId: "one", ...request("one_task") }));
+    expectOk("prepareTerminalBench21Draft", await prepareTerminalBench21Draft(context, { draftId: "one", ...request("one_task") }));
     expectOk("runQuote", await runQuote(context, { draftId: "one" }));
     expectOk("runLock", runLock(context, { draftId: "one" }));
     const jobDir = stubArmJob("one", "one");
@@ -315,7 +308,7 @@ describe("Harbor Hub export", () => {
 
   test("custom coverage and missing jobs refuse suite-named Hub export", async () => {
     const context = await prepareDraft("custom");
-    expectOk("selectTerminalBench21Runtime", await selectTerminalBench21Runtime(context, { draftId: "custom", ...request(undefined, [names[11]!]) }));
+    expectOk("prepareTerminalBench21Draft", await prepareTerminalBench21Draft(context, { draftId: "custom", ...request(undefined, ["t11"]) }));
     expectOk("runQuote", await runQuote(context, { draftId: "custom" }));
     expectOk("runLock", runLock(context, { draftId: "custom" }));
     stubArmJob("custom", "one");
@@ -328,7 +321,7 @@ describe("Harbor Hub export", () => {
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
     const missing = await prepareDraft("missing");
-    expectOk("selectTerminalBench21Runtime", await selectTerminalBench21Runtime(missing, { draftId: "missing", ...request("one_task") }));
+    expectOk("prepareTerminalBench21Draft", await prepareTerminalBench21Draft(missing, { draftId: "missing", ...request("one_task") }));
     expectOk("runQuote", await runQuote(missing, { draftId: "missing" }));
     expectOk("runLock", runLock(missing, { draftId: "missing" }));
     const absent = exportHarborHubPackage(missing, { draftId: "missing", armId: "one" });
@@ -339,7 +332,7 @@ describe("Harbor Hub export", () => {
 
   test("full coverage plus stubbed result.json without collect is inspection-upload", async () => {
     const context = await prepareDraft("full");
-    expectOk("selectTerminalBench21Runtime", await selectTerminalBench21Runtime(context, { draftId: "full", ...request("full") }));
+    expectOk("prepareTerminalBench21Draft", await prepareTerminalBench21Draft(context, { draftId: "full", ...request("full") }));
     expectOk("runQuote", await runQuote(context, { draftId: "full" }));
     expectOk("runLock", runLock(context, { draftId: "full" }));
     stubArmJob("full", "two");
@@ -358,13 +351,13 @@ describe("Harbor Hub export", () => {
       dataset_version_content_hash: TERMINAL_BENCH_2_1_DATASET_REF,
       task_ids: [{
         org: "terminal-bench",
-        name: names[0],
-        ref: `sha256:${computeHarbor021TaskContentHash(join(materialPath, names[0]!)).contentHash}`,
+        name: "t00",
+        ref: `sha256:${computeHarbor021TaskContentHash(join(materialPath, "t00")).contentHash}`,
       }],
     }));
     executable = writeBatchedFakeHarbor();
     const context = await prepareDraft("ready");
-    expectOk("selectTerminalBench21Runtime", await selectTerminalBench21Runtime(context, { draftId: "ready", ...request("full") }));
+    expectOk("prepareTerminalBench21Draft", await prepareTerminalBench21Draft(context, { draftId: "ready", ...request("full") }));
     expectOk("runQuote", await runQuote(context, { draftId: "ready" }));
     expect(requireRunState(workspaceDir, "ready").suiteQuote).toMatchObject({
       coverage: "full",
@@ -378,14 +371,13 @@ describe("Harbor Hub export", () => {
     expect(collected.ok, JSON.stringify(collected)).toBe(true);
     const collectedState = requireRunState(workspaceDir, "ready");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collectedState.matrixSha256!));
-    // Official TB 2.1 items are knowing-half identity (dataset pin + task name), not the
-    // prediction-forecast fixture the Harbor collect path used to judge. Cells stay accounted
-    // as judged or unscorable; Hub eligibility still reads ATIF on the retained job.
+    expect(matrix.cells.map((cell) => `${cell.armId}/${cell.replicate}:${cell.outcome}`)).toEqual(
+      expect.arrayContaining(["one/1:judged", "two/5:judged"]),
+    );
     expect(
       matrix.cells.every((cell) => cell.outcome === "judged" || cell.outcome === "unscorable"),
       `a cell landed on neither judged nor unscorable: ${matrix.cells.map((cell) => `${cell.armId}/${cell.replicate}:${cell.outcome}`).join(", ")}`,
     ).toBe(true);
-    expect(matrix.cells).toHaveLength(10);
     const exported = exportHarborHubPackage(context, { draftId: "ready", armId: "two" });
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
@@ -432,7 +424,7 @@ describe("Terminal-Bench 3.0 Hub export", () => {
 
   test("named-slice export is inspection-only without the 2.1 closed-submissions sentence", async () => {
     const context = await prepareDraft("one");
-    expectOk("selectTerminalBench30Runtime", await selectTerminalBench30Runtime(context, { draftId: "one", ...tb30Request("one_task") }));
+    expectOk("prepareTerminalBench30Draft", await prepareTerminalBench30Draft(context, { draftId: "one", ...tb30Request("one_task") }));
     expectOk("runQuote", await runQuote(context, { draftId: "one" }));
     expectOk("runLock", runLock(context, { draftId: "one" }));
     stubArmJob("one", "one");
@@ -449,7 +441,7 @@ describe("Terminal-Bench 3.0 Hub export", () => {
 
   test("custom coverage refuses the Terminal-Bench 3.0 Hub suite name", async () => {
     const context = await prepareDraft("custom");
-    expectOk("selectTerminalBench30Runtime", await selectTerminalBench30Runtime(context, { draftId: "custom", ...tb30Request(undefined, [names[11]!]) }));
+    expectOk("prepareTerminalBench30Draft", await prepareTerminalBench30Draft(context, { draftId: "custom", ...tb30Request(undefined, ["t11"]) }));
     expectOk("runQuote", await runQuote(context, { draftId: "custom" }));
     expectOk("runLock", runLock(context, { draftId: "custom" }));
     stubArmJob("custom", "one");

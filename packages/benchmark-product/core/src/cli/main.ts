@@ -71,7 +71,6 @@ import {
   sampleInit,
   selectMethod,
   exportDerivedBundle,
-  migrateTerminalBenchLegacyTask,
   updateDraft,
   type ArmWarning,
   type AnchorSubject,
@@ -80,7 +79,6 @@ import {
   type QuotePresentation,
   type RunBindResult,
   type RunLaunchDeps,
-  type MigrateTerminalBenchLegacyTaskInput,
   type AdmitHumanTruthInput,
   type CreateHumanReviewPacketsInput,
   type ImportBinaryItemBankInput,
@@ -106,9 +104,7 @@ import {
   verifyFreezeRepo,
 } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { formatSampleSizeAdvisory } from "../run/sample-size-advisory.js";
-import { readRunJournalEntries } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
 import { resolveWorkspacePublicationSourceName } from "../run/publication-source.js";
 import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
@@ -145,7 +141,6 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <response.json> --signer <configured-signer.json>
   human-review admit --workspace <dir> --principal <id> --draft <draftId>
                    --file <admission-manifest.json>
-  runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
                    [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
                    (catalog id or method-document file; omit ref to list)
@@ -213,12 +208,10 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   freeze-repo verify --bundle <dir> --repo <dir> [--json]
                    (re-renders from the bundle and compares the published tree byte for byte;
                    a drifted tree exits 1 and names every drifted member)
-  demo1 prereg verify --workspace <dir> --draft <draftId> --witness <witness.json>
-                   --method-summary-sha256 <sha256> --grader-program-sha256 <sha256>
-                   --source-commit <full-git-oid> [--json]
   help                  (also: --help, or no arguments)
 
 Exit codes: 0 success, 2 invalid-invocation, 3 authority-denied, 1 any other typed error.
+The Demo-1 / SkillsBench method is gone, including demo1 prereg verify. Colophon creates no benchmarks.
 `;
 
 function methodHelp(): string {
@@ -277,7 +270,6 @@ const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "fi
 const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "n", "host"] as const;
 const METHOD_LIST_FLAGS = ["json"] as const;
 const EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
-const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -322,9 +314,6 @@ const PUBLISH_FLAGS = ["workspace", "principal", "json", "draft", "include-nativ
 const BUNDLE_VERIFY_FLAGS = ["bundle", "json"] as const;
 const FREEZE_REPO_EXPORT_FLAGS = ["bundle", "out", "json"] as const;
 const FREEZE_REPO_VERIFY_FLAGS = ["bundle", "repo", "json"] as const;
-const DEMO1_PREREG_VERIFY_FLAGS = [
-  "workspace", "draft", "witness", "method-summary-sha256", "grader-program-sha256", "source-commit", "json",
-] as const;
 
 /** Exit-code table (spec §4.3, §5.2): distinct codes so a caller can branch without parsing stdout. */
 function exitCodeFor(code: ProductErrorCode): number {
@@ -807,16 +796,17 @@ async function handleMethodBind(
   return renderResult(
     result,
     jsonMode,
-    (value) => `bound ${value.official ? "official" : "custom"} ${value.documentKind} method ${value.selectionManifestSha256 ?? value.benchmarkSha256} for draft ${draftId}\n`,
+    (value) => {
+      const kind = value.official ? "official" : "custom";
+      if (value.selectionManifestSha256 !== undefined) {
+        return `bound ${kind} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`;
+      }
+      if (value.benchmarkSha256 !== undefined) {
+        return `bound ${kind} ${value.documentKind} method ${value.benchmarkSha256} for draft ${draftId}\n`;
+      }
+      return `bound ${kind} ${value.catalogId ?? value.documentKind} catalog identity for draft ${draftId}\n`;
+    },
   );
-}
-
-async function handleTerminalBenchMigration(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as MigrateTerminalBenchLegacyTaskInput;
-  const result = await migrateTerminalBenchLegacyTask(opContext, configuration);
-  return renderResult(result, jsonMode, (value) => `migrated legacy Terminal-Bench task as ${value.manifestSha256}\n`);
 }
 
 function handleDerivedExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -1845,36 +1835,6 @@ async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jso
   return { exitCode, stdout: "", stderr: `${renderHumanError(error)}${skippedModeNote(result)}` };
 }
 
-function handleDemo1PreregistrationVerify(
-  args: ParsedArgs,
-  context: CliContext,
-  jsonMode: boolean,
-): CliResult {
-  assertKnownFlags(args, DEMO1_PREREG_VERIFY_FLAGS);
-  const workspaceDir = pathFrom(context.cwd, required(args, "workspace"));
-  const draftId = required(args, "draft");
-  const runState = requireRunState(workspaceDir, draftId);
-  if (runState.runSha256 === undefined) {
-    refuse("illegal-transition", `runs.${draftId}`, "Demo-1 preregistration verification requires a sealed Run");
-  }
-  const result = verifyDemo1PreregistrationPreDispatch({
-    commitment: {
-      runSha256: runState.runSha256,
-      methodSummarySha256: required(args, "method-summary-sha256"),
-      graderProgramSha256: required(args, "grader-program-sha256"),
-      sourceCommit: required(args, "source-commit"),
-    },
-    witness: readJsonFile(pathFrom(context.cwd, required(args, "witness"))),
-    runState,
-    journal: readRunJournalEntries(workspaceDir, draftId),
-  });
-  return renderResult(
-    { ok: true, result },
-    jsonMode,
-    (value) => `Demo-1 preregistration ready (${value.stage}): ${value.manifestCid} / ${value.transactionHash}\n`,
-  );
-}
-
 type VerbHandler = (args: ParsedArgs, context: CliContext, jsonMode: boolean) => CliResult | Promise<CliResult>;
 
 const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
@@ -1892,7 +1852,6 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["human-review admit", handleHumanReviewAdmit],
   ["method", handleMethodBind],
   ["export", handleDerivedExport],
-  ["runtime terminal-bench migrate", handleTerminalBenchMigration],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],
@@ -1932,7 +1891,6 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["bundle verify", handleBundleVerify],
   ["freeze-repo export", handleFreezeRepoExport],
   ["freeze-repo verify", handleFreezeRepoVerify],
-  ["demo1 prereg verify", handleDemo1PreregistrationVerify],
 ]);
 
 /** The complete verb surface, derived from `VERBS` — the parity anchor `./parity.test.ts` checks

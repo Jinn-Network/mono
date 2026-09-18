@@ -333,6 +333,43 @@ describe("freeze repository rendering", () => {
  */
 const GOLDEN_COMMIT_ID = "e2bbfa6a16edd9cc67d3392c4e142aa4d5b8fd83";
 
+/**
+ * The carried roles, pinned as a literal. The partition test below cannot see a role moved from
+ * `FREEZE_REPO_ROLES` into `FREEZE_REPO_EXCLUDED_ROLES` -- the complement still matches -- and
+ * `snapshotOf()` carries only four of these roles, so moving any other leaves the golden commit
+ * unchanged. Changing this list changes every rendered tree, so it is a `FREEZE_REPO_FORMAT` bump.
+ */
+const EXPECTED_CARRIED_ROLES = [
+  "item-bank",
+  "source-manifest",
+  "admission-index",
+  "admission-manifest",
+  "replacement-ledger",
+  "source-item",
+  "judge-instrument",
+  "analysis-context",
+  "label-resolution",
+  "human-review-evaluation-spec",
+  "human-review-form",
+  "human-review-packet",
+  "human-review-response",
+  "human-review-verdict",
+  "reviewer-roster",
+  "review-visibility-receipt",
+  "review-reveal-receipt",
+  "operator-assertion",
+  "screening-table",
+  "screening-reveal-receipt",
+  "screening-instrument",
+  "screening-sampling-script",
+  "screening-raw-outputs",
+  "screening-prompt",
+  "screening-procedure",
+  "screening-pool",
+  "screening-sample-commitment",
+  "screening-transcript",
+] as const;
+
 describe("freeze repository rendered bytes", () => {
   test("renders to the pinned commit id, so a renderer change is a format bump and not silent drift", () => {
     expect(renderFreezeRepo(snapshotOf()).commitId).toBe(GOLDEN_COMMIT_ID);
@@ -345,6 +382,10 @@ describe("freeze repository rendered bytes", () => {
     const excluded = new Set<string>(FREEZE_REPO_EXCLUDED_ROLES);
     expect([...FREEZE_REPO_ROLES])
       .toEqual(BUNDLE_V4_EVIDENCE_ROLES.filter((role) => !excluded.has(role)));
+  });
+
+  test("carries exactly the pinned role list, so dropping a role is a format bump", () => {
+    expect([...FREEZE_REPO_ROLES]).toEqual(EXPECTED_CARRIED_ROLES);
   });
 });
 

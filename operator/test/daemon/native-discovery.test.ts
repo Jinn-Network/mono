@@ -18,6 +18,13 @@ import {
 } from '../../src/daemon/native-discovery.js';
 import type { AnnouncedSubmissionCard } from '../../src/daemon/native-submission-facts.js';
 import {
+  NativeRecordDestinationError,
+  createBaseSepoliaRecordTransport,
+} from '../../src/daemon/native-base-sepolia-infrastructure.js';
+import { buildNativeRequesterAnnouncementDecode } from '../../src/daemon/native-requester-decode.js';
+import { LOCATION_PROFILE_HTTPS } from '../../src/daemon/native-signed-source.js';
+import { NATIVE_REQUESTER_ASSOCIATION_FACT } from '../../src/native-requester/requester.js';
+import {
   NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD,
   isPoisonQuarantined,
 } from '../../src/daemon/native-discovery-quarantine.js';
@@ -1406,6 +1413,84 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
     await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [], quarantined: 0 });
     expect(synced.takePending()).toHaveLength(1);
     warn.mockRestore();
+  });
+
+  // #3854: the degraded line is the operator's only view of WHY a source stalled, so it must carry
+  // the refused destination and the refusal detail, not just `(undecodable)`.
+  describe('the undecodable degrade line names the decode refusal (#3854)', () => {
+    const LOCATOR = 'records/abc';
+
+    function requesterEntry(): AnnouncementEntry {
+      const base = entry('0000000000000001', null, DIGEST_A);
+      const [announcement] = base.announcements;
+      if (announcement?.action !== 'available') throw new Error('fixture entry is not an announcement');
+      return {
+        ...base,
+        announcements: [{
+          ...announcement,
+          facts: {
+            taskDigest: DIGEST_A,
+            taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
+            [NATIVE_REQUESTER_ASSOCIATION_FACT]: {
+              authorityTime: {
+                chainId: 84532,
+                blockNumber: '100',
+                blockHash: `0x${'d'.repeat(64)}`,
+                timestamp: '2026-08-02T00:00:00.000Z',
+                finalized: true,
+              },
+            },
+          },
+          locations: [{ profile: LOCATION_PROFILE_HTTPS, locator: LOCATOR }],
+        }],
+      };
+    }
+
+    const rows = [
+      {
+        caller: 'requester',
+        // The real decode the solver and fleet install, over the real record transport, so the
+        // refusal is the one a peer's scheme-less locator actually produces (#3853).
+        decode: () => buildNativeRequesterAnnouncementDecode({
+          assertTrustFresh: async () => undefined,
+          verifyAuthorityTime: async () => true,
+          recordByLocation: createBaseSepoliaRecordTransport({
+            ipfsApiUrl: 'https://ipfs.example.invalid',
+            recordOrigins: [ROOT],
+            fetchImpl: async () => { throw new Error('the refusal must precede any fetch'); },
+          }).byLocation,
+          canonicalTaskCreated: async () => { throw new Error('unused'); },
+        }),
+      },
+      {
+        caller: 'evaluator',
+        // A stand-in: the evaluator's decode is inline in `native-evaluator-opportunity-source.ts`
+        // and runs only inside `syncSignedSources()`, which needs a live HTTP transport and a
+        // verified signed source that no test drives. It throws what its `records.byLocation`
+        // call would. The wrap, classify and report chain under test belongs to
+        // `createNativeDiscoveryConsumer` alone and is the same for both callers.
+        decode: () => async (): Promise<AnnouncedSubmissionCard> => {
+          throw new NativeRecordDestinationError(LOCATOR, 'it is not a resolvable URL');
+        },
+      },
+    ];
+
+    it.each(rows)('through the $caller decode', async ({ decode }) => {
+      const routes = routesFor([requesterEntry()]);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const synced = consumer({ store: new Store(':memory:'), routes, verify: okVerify, decode: decode() });
+        await expect(synced.sync()).resolves.toMatchObject({ degraded: [{ reason: 'undecodable' }] });
+        const lines = warn.mock.calls.map((call) => String(call[0]));
+        expect(lines).toContainEqual(expect.stringContaining('(undecodable)'));
+        const line = lines.find((candidate) => candidate.includes('(undecodable)'));
+        expect(line).toContain(LOCATOR);
+        expect(line).toContain('not a resolvable URL');
+        expect(line).toContain('announcement-0000000000000001');
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 
   /**

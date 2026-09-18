@@ -226,8 +226,9 @@ function redactLeaf(value: unknown): unknown {
   // exactly what JSON.stringify would have produced in the bundle, and it
   // cannot carry a secret.
   if (value instanceof Date) return value.toISOString();
-  // Functions, symbols, Maps, Sets, class instances — nothing JSON-shaped to
-  // walk. Say so rather than emitting a misleading `{}`.
+  // Functions, symbols, bigints, Maps, Sets, class instances — nothing
+  // JSON-shaped to walk. Say so rather than emitting a misleading `{}`.
+  // Counterpart: `sanitizeStructuredLeaf` in `src/rpc/transport.ts`.
   return marker('unserializable');
 }
 
