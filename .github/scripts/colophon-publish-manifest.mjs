@@ -21,7 +21,6 @@ export const PRODUCT_RELEASE_PLATFORM_PINS_PATH = 'packages/benchmark-product/pr
  * gating a publish (issue #3647).
  */
 export const CLAIM_PIN_SOURCES = [
-  'packages/benchmark-product/core/scripts/demo1-export-public-bundle.mjs',
   'packages/benchmark-product/core/src/legacy-closures.ts',
   'packages/benchmark-product/verify/src/legacy-closures.ts',
   'packages/benchmark-product/cli/src/main.ts',

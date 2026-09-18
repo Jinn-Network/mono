@@ -10,11 +10,10 @@
  * sealed slate exists to prevent. A slot the harness could not supply is imported with outcome
  * `error`, `timeout`, or `unrun` and a non-blank reason, and it counts.
  *
- * The refusal follows the shape `admitDeclaredCells` set in
- * `../method/skillsbench-demo1-declaration.ts`: collect EVERY problem in one pass and report them
- * all at once. First-failure reporting is worse than useless here — it turns a broken dump into a
- * repair-and-retry loop where each round shows one more problem and the operator never sees the
- * shape of what went wrong.
+ * The refusal collects EVERY problem in one pass and reports them all at once. First-failure
+ * reporting is worse than useless here — it turns a broken dump into a repair-and-retry loop
+ * where each round shows one more problem and the operator never sees the shape of what went
+ * wrong.
  *
  * This module is validation only. Journal and record synthesis from an accepted plan is a separate
  * concern and lives elsewhere; on refusal nothing at all is written.
