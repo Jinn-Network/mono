@@ -1,4 +1,4 @@
-/** Audited product operations for DeepSWE v1.1 official-suite selection. */
+/** Test fixture (launch/export setup). Not a claimant operation. Former DeepSWE v1.1 official-suite selection. */
 import { BENCHMARK_RECORD_KIND, BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
@@ -20,14 +20,14 @@ import {
 import {
   resolveDeepSweV11Selection,
   type DeepSweV11SelectionRequest,
-} from "./host.js";
+} from "../deep-swe-v1.1/host.js";
 import {
   DEEP_SWE_V11_DATASET_ID,
   DEEP_SWE_V11_GIT_SHA,
   DEEP_SWE_V11_PROFILE,
   DeepSweV11SelectionManifestSchema,
   deepSweV11SelectionBytes,
-} from "./manifest.js";
+} from "../deep-swe-v1.1/manifest.js";
 import { loadOrCreateReportSigningKey } from "../../report/signing.js";
 import { recordWorkspaceAuthorship } from "../../run/publication-authority.js";
 import { draftPath } from "../../workspace/layout.js";
@@ -46,10 +46,10 @@ export interface SelectDeepSweV11RuntimeResult {
   readonly benchmarkSha256: string;
 }
 
-export function selectDeepSweV11Runtime(context: OperationContext, input: SelectDeepSweV11RuntimeInput): Promise<OperationResult<SelectDeepSweV11RuntimeResult>> {
+export function prepareDeepSweV11Draft(context: OperationContext, input: SelectDeepSweV11RuntimeInput): Promise<OperationResult<SelectDeepSweV11RuntimeResult>> {
   const at = context.clock();
   const clocked = { ...context, clock: () => at };
-  return operateAsync({ context: clocked, action: "runtime.deep-swe-v1.1.select", subject: input.draftId, inputs: input, run: async () => {
+  return operateAsync({ context: clocked, action: "test.fixture.prepare-official-suite-draft", subject: input.draftId, inputs: input, run: async () => {
     const current = readDraftDocument(context.workspaceDir, input.draftId);
     if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse DeepSWE v1.1 selection");
     if (current.spec.analysis?.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {

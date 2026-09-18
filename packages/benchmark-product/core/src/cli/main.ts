@@ -803,7 +803,13 @@ async function handleMethodBind(
   return renderResult(
     result,
     jsonMode,
-    (value) => `bound ${value.official ? "official" : "custom"} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`,
+    (value) => {
+      const kind = value.official ? "official" : "custom";
+      if (value.selectionManifestSha256 === undefined) {
+        return `bound ${kind} ${value.catalogId ?? value.documentKind} catalog identity for draft ${draftId}\n`;
+      }
+      return `bound ${kind} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`;
+    },
   );
 }
 

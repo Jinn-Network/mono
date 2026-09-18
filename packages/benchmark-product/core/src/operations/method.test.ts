@@ -1,12 +1,9 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { readAuditEntries } from "../audit/journal.js";
-import type { HarborSelectionManifest } from "../runtime/harbor/manifest.js";
-import { computeHarbor021TaskContentHash } from "../runtime/terminal-bench-2/host.js";
-import { TERMINAL_BENCH_2_1_DATASET_ID, TERMINAL_BENCH_2_1_DATASET_REF } from "../runtime/terminal-bench-2-1/manifest.js";
-import { getSealedBytes } from "../workspace/sealed-store.js";
 import { armAdd } from "./arms.js";
 import type { OperationContext } from "./context.js";
 import { createDraft } from "./drafts.js";
@@ -15,19 +12,18 @@ import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
 import { InspectSelectionManifestSchema, SUPPORTED_INSPECT_VERSION, SUPPORTED_INSPECT_WHEEL_SHA256 } from "../runtime/inspect/manifest.js";
 import { exportDerivedBundle, selectMethod } from "./method.js";
 import { INSPECT_SELECTION_SCHEMA } from "./method-catalog.js";
+import { runtimeHostsDir } from "../workspace/layout.js";
 
-const names = ["t00", "t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09", "t10", "t11"] as const;
-const image = `registry.example/tb21@sha256:${"c".repeat(64)}`;
-const arms: HarborSelectionManifest["arms"] = [
-  { armId: "one", agent: { id: "terminus", configuration: {} }, model: { id: "openai/model-one", configuration: {} }, jobAgent: { name: "terminus", model_name: "openai/model-one" } },
-  { armId: "two", agent: { id: "terminus", configuration: {} }, model: { id: "openai/model-two", configuration: {} }, jobAgent: { name: "terminus", model_name: "openai/model-two" } },
-];
-const outputs: HarborSelectionManifest["outputs"] = [{
-  name: "prediction",
-  mediaType: "application/json",
-  artifact: { source: "/logs/artifacts/prediction.json", destination: "prediction.json" },
-  nativePath: "artifacts/prediction.json",
-}];
+const coreSrc = join(dirname(fileURLToPath(import.meta.url)), "..");
+const OFFICIAL_SUITE_DIRS = [
+  "apex-agents",
+  "apex-swe-dev",
+  "deep-swe-v1.1",
+  "swe-bench-verified",
+  "terminal-bench-2",
+  "terminal-bench-2-1",
+  "terminal-bench-3-0",
+] as const;
 
 let root: string;
 let workspaceDir: string;
@@ -54,43 +50,36 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-describe("selectMethod", () => {
-  test("catalog terminal-bench-2.1 with --slice 1 seals the same protocol id as today's select", async () => {
-    const executable = join(root, "harbor");
-    writeFileSync(executable, `#!/usr/bin/env node
-const args = process.argv.slice(2);
-if (args[0] === "--version" && args.length === 1) { process.stdout.write("harbor 0.21.4\\n"); process.exit(0); }
-process.exit(64);
-`, { mode: 0o700 });
-    chmodSync(executable, 0o700);
-    const materialPath = join(root, "selected-dataset");
-    mkdirSync(materialPath, { recursive: true });
-    for (const name of names) {
-      mkdirSync(join(materialPath, name), { recursive: true });
-      writeFileSync(join(materialPath, name, "task.toml"), `[task]\nname = "${name}"\n[environment]\ndocker_image = "${image}"\n`);
-      writeFileSync(join(materialPath, name, "instruction.md"), `solve ${name}\n`);
+describe("draft-selection operations are gone", () => {
+  test("runtime/<suite>/select.ts is not on disk for the official suites", () => {
+    for (const suite of OFFICIAL_SUITE_DIRS) {
+      expect(existsSync(join(coreSrc, "runtime", suite, "select.ts")), suite).toBe(false);
     }
-    const metadataPath = join(root, "dataset-metadata.json");
-    writeFileSync(metadataPath, JSON.stringify({
-      name: TERMINAL_BENCH_2_1_DATASET_ID,
-      dataset_version_content_hash: TERMINAL_BENCH_2_1_DATASET_REF,
-      task_ids: names.map((name) => ({
-        org: "terminal-bench",
-        name,
-        ref: `sha256:${computeHarbor021TaskContentHash(join(materialPath, name)).contentHash}`,
-      })),
-    }));
+  });
+
+  test("method.bind does not import official-suite executeSelect* or host.js", () => {
+    const source = readFileSync(join(coreSrc, "operations", "method.ts"), "utf8");
+    expect(source).not.toMatch(/executeSelect(?:TerminalBench|Swebench|Apex|DeepSwe)/u);
+    expect(source).not.toMatch(
+      /from "\.\.\/runtime\/(?:apex-agents|apex-swe-dev|deep-swe-v1\.1|swe-bench-verified|terminal-bench-2|terminal-bench-2-1|terminal-bench-3-0)\/(?:select|host)\.js"/u,
+    );
+  });
+
+  test("host tests do not call select*Runtime", () => {
+    const selectRuntime = /select(?:TerminalBench|Swebench|Apex|DeepSwe)\w*Runtime/u;
+    for (const suite of OFFICIAL_SUITE_DIRS) {
+      const testFile = join(coreSrc, "runtime", suite, `${suite}.test.ts`);
+      if (!existsSync(testFile)) continue;
+      expect(readFileSync(testFile, "utf8"), suite).not.toMatch(selectRuntime);
+    }
+    expect(readFileSync(join(coreSrc, "runtime", "harbor", "harbor-batched.test.ts"), "utf8")).not.toMatch(selectRuntime);
+  });
+});
+
+describe("selectMethod", () => {
+  test("catalog bind seals catalog identity without host selection", async () => {
     const hostPath = join(root, "host.json");
-    writeFileSync(hostPath, JSON.stringify({
-      executable,
-      registryMetadataPath: metadataPath,
-      datasetRevision: TERMINAL_BENCH_2_1_DATASET_REF,
-      taskMaterialPath: materialPath,
-      nConcurrent: 1,
-      arms,
-      environment: { type: "docker", image, configuration: {} },
-      outputs,
-    }));
+    writeFileSync(hostPath, "{}");
     const context = await prepareDraft("one");
     const selected = await selectMethod(context, {
       draftId: "one",
@@ -102,10 +91,16 @@ process.exit(64);
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(selected.result.catalogId).toBe("terminal-bench-2.1");
+    expect(selected.result.documentKind).toBe("terminal-bench-2.1");
     expect(selected.result.official).toBe(true);
-    const suite = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, selected.result.suiteProtocolSha256!))) as { protocol: string; coverage: string };
-    expect(suite.protocol).toBe("terminal-bench-2.1");
-    expect(suite.coverage).toBe("one_task");
+    expect(selected.result.selectionManifestSha256).toBeUndefined();
+    expect(selected.result.suiteProtocolSha256).toBeUndefined();
+    expect(selected.result.draft.spec.evaluationRuntime).toBeUndefined();
+    expect(selected.result.draft.spec.arms.map((arm) => arm.pinning)).toEqual([
+      { harness: { id: "placeholder", version: "1" } },
+      { harness: { id: "placeholder", version: "1" } },
+    ]);
+    expect(existsSync(runtimeHostsDir(workspaceDir)) ? readdirSync(runtimeHostsDir(workspaceDir)) : []).toEqual([]);
     const actions = readAuditEntries(workspaceDir).map((entry) => entry.action);
     expect(actions).toContain("method.bind");
     expect(actions).not.toContain("runtime.terminal-bench-2-1.select");

@@ -9,7 +9,7 @@ import { apexSweExportInstructions, exportApexSwePackage, decideApexSweExportMod
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectApexSweDevRuntime } from "./select.js";
+import { prepareApexSweDevDraft } from "../testing/apex-swe-dev-draft.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { exportCompletenessCertification } from "../suite-protocol/comparability.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
@@ -226,7 +226,7 @@ process.stdout.write("0.3.255\\n");
 
   test("select seals replicates=1 and apex-swe-dev; quote shows 1 × 2 × 1 and never leaderboard-ready", async () => {
     const context = await prepareDraft("one");
-    const selected = await selectApexSweDevRuntime(context, { draftId: "one", ...request("one_task") });
+    const selected = await prepareApexSweDevDraft(context, { draftId: "one", ...request("one_task") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(selected.result.draft.spec.replicates).toBe(1);
@@ -257,7 +257,7 @@ process.stdout.write("0.3.255\\n");
       policy: { completenessFloor: "1", cellWindowMs: 3_600_000, replacement: { allowed: true, maxPerCell: 3 }, closeAfterMs: 86_400_000 },
     } });
     expect(opened.ok, JSON.stringify(opened)).toBe(true);
-    const selected = await selectApexSweDevRuntime(context, { draftId: "pinned", ...request("one_task") });
+    const selected = await prepareApexSweDevDraft(context, { draftId: "pinned", ...request("one_task") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     // Pass@1: each task maps onto exactly one cell, so a replaced cell cannot wear k=1 conformance.
@@ -275,7 +275,7 @@ process.stdout.write("0.3.255\\n");
 
   test("full coverage quote is never method-eligible; lock without quote bits refuses", async () => {
     const context = await prepareDraft("full");
-    const selected = await selectApexSweDevRuntime(context, { draftId: "full", ...request("full") });
+    const selected = await prepareApexSweDevDraft(context, { draftId: "full", ...request("full") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(parseBenchmark(getSealedBytes(workspaceDir, selected.result.benchmarkSha256)).items).toHaveLength(50);
@@ -296,7 +296,7 @@ process.stdout.write("0.3.255\\n");
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
     const refuseContext = await prepareDraft("full-refuse");
-    const refuseSelected = await selectApexSweDevRuntime(refuseContext, { draftId: "full-refuse", ...request("full") });
+    const refuseSelected = await prepareApexSweDevDraft(refuseContext, { draftId: "full-refuse", ...request("full") });
     expect(refuseSelected.ok, JSON.stringify(refuseSelected)).toBe(true);
     if (!refuseSelected.ok) return;
     const refuseQuoted = await runQuote(refuseContext, { draftId: "full-refuse" });
@@ -314,7 +314,7 @@ process.stdout.write("0.3.255\\n");
 describe("APEX-SWE-dev dual harness and export", () => {
   test("fake apx and run_e2e write passed JSON; missing JSON is unscorable; export is inspection-upload never submit", async () => {
     const context = await prepareDraft("grade");
-    const selected = await selectApexSweDevRuntime(context, { draftId: "grade", ...request(undefined, ["1-int-00", "0xobs-00"]) });
+    const selected = await prepareApexSweDevDraft(context, { draftId: "grade", ...request(undefined, ["1-int-00", "0xobs-00"]) });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect((await runQuote(context, { draftId: "grade" })).ok).toBe(true);
@@ -378,7 +378,7 @@ describe("APEX-SWE-dev dual harness and export", () => {
     expect(createDraft(namedContext, { draftId: "named-export", name: "named-export" }).ok).toBe(true);
     expect(armAdd(namedContext, { draftId: "named-export", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
     expect(armAdd(namedContext, { draftId: "named-export", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
-    const namedSelected = await selectApexSweDevRuntime(namedContext, { draftId: "named-export", ...request("one_task") });
+    const namedSelected = await prepareApexSweDevDraft(namedContext, { draftId: "named-export", ...request("one_task") });
     expect(namedSelected.ok, JSON.stringify(namedSelected)).toBe(true);
     if (!namedSelected.ok) return;
     expect((await runQuote(namedContext, { draftId: "named-export" })).ok).toBe(true);
@@ -429,7 +429,7 @@ describe("APEX-SWE-dev dual harness and export", () => {
 
   test("refuses without a sealed Run, naming the digest requirement rather than emitting a certification for undefined (§8.2 known wrinkle)", async () => {
     const context = await prepareDraft("no-lock");
-    const selected = await selectApexSweDevRuntime(context, { draftId: "no-lock", ...request("one_task") });
+    const selected = await prepareApexSweDevDraft(context, { draftId: "no-lock", ...request("one_task") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     expect((await runQuote(context, { draftId: "no-lock" })).ok).toBe(true);
     const exported = exportApexSwePackage(context, { draftId: "no-lock", armId: "one" });
@@ -448,7 +448,7 @@ describe("APEX-SWE-dev dual harness and export", () => {
 
   test("a locked APEX-SWE-dev draft refuses `run launch` and names the operator-host path", async () => {
     const context = await prepareDraft("no-launch");
-    const selected = await selectApexSweDevRuntime(context, { draftId: "no-launch", ...request("one_task") });
+    const selected = await prepareApexSweDevDraft(context, { draftId: "no-launch", ...request("one_task") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect((await runQuote(context, { draftId: "no-launch" })).ok).toBe(true);

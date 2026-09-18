@@ -1,4 +1,4 @@
-/** Audited product operations for SWE-bench Verified official-suite selection. */
+/** Test fixture (launch/export setup). Not a claimant operation. Former APEX-SWE-dev official-suite selection. */
 import { BENCHMARK_RECORD_KIND, BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
@@ -6,22 +6,22 @@ import { isDraftMutable } from "../../domain/lifecycle.js";
 import { parseDraftSpec, type DraftDocument } from "../../domain/draft.js";
 import { refuse } from "../../errors.js";
 import { atomicWriteFileSync } from "../../fs/atomic.js";
-import { buildSwebenchVerifiedTasks } from "../../intake/swe-bench-verified.js";
+import { buildApexSweDevTasks } from "../../intake/apex-swe-dev.js";
 import { deriveWorkspaceAuthoredBenchmark, deriveWorkspaceAuthoredTask } from "../../intake/workspace-authored.js";
 import { attachBenchmarkToDraft } from "../../operations/attach.js";
 import {
-  SWE_BENCH_HARNESS_ADAPTER_ID,
-  SWE_BENCH_VERIFIED_DATASET_ID,
-  SWE_BENCH_VERIFIED_SELECTION_SCHEMA,
-  SwebenchVerifiedSelectionManifestSchema,
-  swebenchVerifiedSelectionBytes,
-} from "./manifest.js";
+  APEX_SWE_DEV_ADAPTER_ID,
+  APEX_SWE_DEV_DATASET_ID,
+  APEX_SWE_DEV_SELECTION_SCHEMA,
+  ApexSweDevSelectionManifestSchema,
+  apexSweDevSelectionBytes,
+} from "../apex-swe-dev/manifest.js";
 import {
-  resolveSwebenchVerifiedSelection,
-  sealSwebenchVerifiedSelectionDependencies,
-  writeSwebenchVerifiedHostBinding,
-  type SwebenchVerifiedSelectionRequest,
-} from "./host.js";
+  resolveApexSweDevSelection,
+  sealApexSweDevSelectionDependencies,
+  writeApexSweDevHostBinding,
+  type ApexSweDevSelectionRequest,
+} from "../apex-swe-dev/host.js";
 import { SuiteProtocolSelectionSchema, suiteProtocolSelectionBytes } from "../suite-protocol/manifest.js";
 import { loadOrCreateReportSigningKey } from "../../report/signing.js";
 import { recordWorkspaceAuthorship } from "../../run/publication-authority.js";
@@ -32,43 +32,42 @@ import { readDraftDocument } from "../../operations/drafts.js";
 import { operateAsync } from "../../operations/operate-async.js";
 import type { OperationResult } from "../../operations/result.js";
 
-export type SelectSwebenchVerifiedRuntimeInput = { readonly draftId: string } & SwebenchVerifiedSelectionRequest;
-export interface SelectSwebenchVerifiedRuntimeResult {
+export type SelectApexSweDevRuntimeInput = { readonly draftId: string } & ApexSweDevSelectionRequest;
+export interface SelectApexSweDevRuntimeResult {
   readonly draft: DraftDocument;
   readonly selectionManifestSha256: string;
   readonly suiteProtocolSha256: string;
   readonly benchmarkSha256: string;
 }
 
-export function selectSwebenchVerifiedRuntime(
+export function prepareApexSweDevDraft(
   context: OperationContext,
-  input: SelectSwebenchVerifiedRuntimeInput,
-): Promise<OperationResult<SelectSwebenchVerifiedRuntimeResult>> {
+  input: SelectApexSweDevRuntimeInput,
+): Promise<OperationResult<SelectApexSweDevRuntimeResult>> {
   const at = context.clock();
   const clocked = { ...context, clock: () => at };
   return operateAsync({
     context: clocked,
-    action: "runtime.swe-bench-verified.select",
+    action: "test.fixture.prepare-official-suite-draft",
     subject: input.draftId,
     inputs: input,
-    run: () => executeSelectSwebenchVerifiedRuntime(clocked, input),
+    run: () => executeSelectApexSweDevRuntime(clocked, input),
   });
 }
 
-export async function executeSelectSwebenchVerifiedRuntime(
+async function executeSelectApexSweDevRuntime(
   context: OperationContext,
-  input: SelectSwebenchVerifiedRuntimeInput,
-): Promise<SelectSwebenchVerifiedRuntimeResult> {
+  input: SelectApexSweDevRuntimeInput,
+): Promise<SelectApexSweDevRuntimeResult> {
   const at = context.clock();
-  const current = readDraftDocument(context.workspaceDir, input.draftId);
-      if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse SWE-bench Verified selection");
+      const current = readDraftDocument(context.workspaceDir, input.draftId);
+      if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse APEX-SWE-dev selection");
       if (current.spec.analysis?.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
-        refuse("validation", `drafts.${input.draftId}.spec.analysis`, "SWE-bench Verified official suite refuses binary-instrument majority-k; use wilson@1 over judged cells");
+        refuse("validation", `drafts.${input.draftId}.spec.analysis`, "APEX-SWE-dev official suite refuses binary-instrument majority-k; use wilson@1 over judged cells");
       }
-      const selected = resolveSwebenchVerifiedSelection(context.workspaceDir, input);
+      const selected = resolveApexSweDevSelection(context.workspaceDir, input);
       putSealedBytes(context.workspaceDir, sealTaskProfile(buildPredictionForecastProfile()).bytes);
-      const built = await buildSwebenchVerifiedTasks(selected.selectedInstanceIds);
-      void built.evaluationSpec.sha256;
+      const built = await buildApexSweDevTasks(selected.selectedTasks.map((task) => task.taskId));
       const author = loadOrCreateReportSigningKey(context.workspaceDir).keyId;
       const authoredTasks: Array<{ taskName: string; taskSha256: string; bytes: Uint8Array }> = [];
       for (const task of built.tasks) {
@@ -77,7 +76,7 @@ export async function executeSelectSwebenchVerifiedRuntime(
         const authored = deriveWorkspaceAuthoredTask({
           sourceBytes: task.bytes,
           author,
-          sourceKind: "swe-bench-verified",
+          sourceKind: "apex-swe-dev",
           sourceReceiptSha256,
         });
         const taskSha256 = putSealedBytes(context.workspaceDir, authored.bytes);
@@ -104,30 +103,34 @@ export async function executeSelectSwebenchVerifiedRuntime(
       });
       const suite = SuiteProtocolSelectionSchema.parse({
         schema: "jinn.network/benchmark-product/suite-protocol-selection/1",
-        protocol: "swe-bench-verified",
+        protocol: "apex-swe-dev",
         coverage: selected.coverage,
-        datasetId: SWE_BENCH_VERIFIED_DATASET_ID,
+        datasetId: APEX_SWE_DEV_DATASET_ID,
         datasetRevision: selected.dataset.revision,
-        selectedTaskNames: [...selected.selectedInstanceIds],
-        datasetTaskCount: selected.dataset.instanceCount,
+        selectedTaskNames: selected.selectedTasks.map((task) => task.taskId),
+        datasetTaskCount: selected.dataset.taskCount,
         replicates: 1,
         atifRequired: false,
-        items: authoredTasks.map((task) => ({ taskName: task.taskName, taskSha256: task.taskSha256 })),
+        items: authoredTasks.map((task) => {
+          const typed = selected.selectedTasks.find((candidate) => candidate.taskId === task.taskName);
+          if (typed === undefined) refuse("record-integrity", "apex-swe-dev.items", "authored task is missing from the selected APEX-SWE-dev slice");
+          return { taskName: task.taskName, taskSha256: task.taskSha256, taskType: typed.taskType };
+        }),
       });
       const suiteBytes = suiteProtocolSelectionBytes(suite);
       const suiteProtocolSha256 = putSealedBytes(context.workspaceDir, suiteBytes);
-      const profile = SwebenchVerifiedSelectionManifestSchema.parse({
-        schema: SWE_BENCH_VERIFIED_SELECTION_SCHEMA,
+      const profile = ApexSweDevSelectionManifestSchema.parse({
+        schema: APEX_SWE_DEV_SELECTION_SCHEMA,
         dataset: selected.dataset,
         coverage: selected.coverage,
-        selectedInstances: selected.selectedInstanceIds.map((instanceId) => ({ instanceId })),
+        selectedTasks: selected.selectedTasks,
         harness: selected.harness,
         suite,
       });
-      const bytes = swebenchVerifiedSelectionBytes(profile);
+      const bytes = apexSweDevSelectionBytes(profile);
       const selectionManifestSha256 = putSealedBytes(context.workspaceDir, bytes);
-      sealSwebenchVerifiedSelectionDependencies(context.workspaceDir, selected);
-      writeSwebenchVerifiedHostBinding(context.workspaceDir, selectionManifestSha256, selected.binding);
+      sealApexSweDevSelectionDependencies(context.workspaceDir, selected);
+      writeApexSweDevHostBinding(context.workspaceDir, selectionManifestSha256, selected.binding);
       attachBenchmarkToDraft(context.workspaceDir, input.draftId, benchmarkSha256, at);
       const attached = readDraftDocument(context.workspaceDir, input.draftId);
       const draft: DraftDocument = {
@@ -136,22 +139,25 @@ export async function executeSelectSwebenchVerifiedRuntime(
         spec: parseDraftSpec({
           ...attached.spec,
           replicates: 1,
+          // Pass@1 is the protocol: each task maps onto exactly one cell (DR-2026-08-18-c §4), so a
+          // replaced cell would be a second attempt wearing the same k=1 conformance claim.
+          policy: { ...attached.spec.policy, replacement: { allowed: false } },
           arms: attached.spec.arms.map((arm) => {
             const mapped = input.arms.find((candidate) => candidate.armId === arm.armId);
             if (mapped === undefined) {
-              refuse("validation", `spec.arms.${arm.armId}`, "SWE-bench Verified selection has no model mapping for this Run arm");
+              refuse("validation", `spec.arms.${arm.armId}`, "APEX-SWE-dev selection has no model mapping for this Run arm");
             }
             return {
               ...arm,
               pinning: {
                 ...arm.pinning,
-                harness: { id: SWE_BENCH_HARNESS_ADAPTER_ID, version: selected.harness.version },
+                harness: { id: APEX_SWE_DEV_ADAPTER_ID, version: selected.harness.apxVersion },
                 model: { id: mapped.modelNameOrPath },
               },
             };
           }),
           evaluationRuntime: {
-            adapterId: SWE_BENCH_HARNESS_ADAPTER_ID,
+            adapterId: APEX_SWE_DEV_ADAPTER_ID,
             selectionManifestSha256,
             isolationPolicy: "unrestricted",
           },

@@ -1,4 +1,4 @@
-/** Audited product operations for Terminal-Bench 3.0 official-suite selection. */
+/** Test fixture (launch/export setup). Not a claimant operation. Former Terminal-Bench 3.0 official-suite selection. */
 import { BENCHMARK_RECORD_KIND, BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
@@ -20,13 +20,13 @@ import {
 import {
   resolveTerminalBench30Selection,
   type TerminalBench30SelectionRequest,
-} from "./host.js";
+} from "../terminal-bench-3-0/host.js";
 import {
   TERMINAL_BENCH_3_0_DATASET_ID,
   TERMINAL_BENCH_3_0_PROFILE,
   TerminalBench30SelectionManifestSchema,
   terminalBench30SelectionBytes,
-} from "./manifest.js";
+} from "../terminal-bench-3-0/manifest.js";
 import { loadOrCreateReportSigningKey } from "../../report/signing.js";
 import { recordWorkspaceAuthorship } from "../../run/publication-authority.js";
 import { draftPath } from "../../workspace/layout.js";
@@ -45,13 +45,13 @@ export interface SelectTerminalBench30RuntimeResult {
   readonly benchmarkSha256: string;
 }
 
-export function selectTerminalBench30Runtime(context: OperationContext, input: SelectTerminalBench30RuntimeInput): Promise<OperationResult<SelectTerminalBench30RuntimeResult>> {
+export function prepareTerminalBench30Draft(context: OperationContext, input: SelectTerminalBench30RuntimeInput): Promise<OperationResult<SelectTerminalBench30RuntimeResult>> {
   const at = context.clock();
   const clocked = { ...context, clock: () => at };
-  return operateAsync({ context: clocked, action: "runtime.terminal-bench-3-0.select", subject: input.draftId, inputs: input, run: () => executeSelectTerminalBench30Runtime(clocked, input) });
+  return operateAsync({ context: clocked, action: "test.fixture.prepare-official-suite-draft", subject: input.draftId, inputs: input, run: () => executeSelectTerminalBench30Runtime(clocked, input) });
 }
 
-export async function executeSelectTerminalBench30Runtime(context: OperationContext, input: SelectTerminalBench30RuntimeInput): Promise<SelectTerminalBench30RuntimeResult> {
+async function executeSelectTerminalBench30Runtime(context: OperationContext, input: SelectTerminalBench30RuntimeInput): Promise<SelectTerminalBench30RuntimeResult> {
   const at = context.clock();
   const current = readDraftDocument(context.workspaceDir, input.draftId);
     if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse Terminal-Bench 3.0 selection");

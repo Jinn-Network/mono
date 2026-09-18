@@ -14,7 +14,7 @@ import { runCollect } from "../../operations/run-collect.js";
 import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectTerminalBench21Runtime } from "../terminal-bench-2-1/select.js";
+import { prepareTerminalBench21Draft } from "../testing/terminal-bench-2-1-draft.js";
 import { exportHarborHubPackage } from "../../operations/hub-export.js";
 import { readRunJournalEntries } from "../../run/journal.js";
 import { readRunState } from "../../run/state.js";
@@ -393,7 +393,7 @@ describe("Harbor per-arm batched Job", () => {
     expect(createDraft(context, { draftId: "batched", name: "batched" }).ok).toBe(true);
     expect(armAdd(context, { draftId: "batched", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
     expect(armAdd(context, { draftId: "batched", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "batched", ...request() });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "batched", ...request() });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(selected.result.draft.spec.policy.replacement).toEqual({ allowed: true, maxPerCell: 3 });
@@ -445,7 +445,7 @@ describe("Harbor per-arm batched Job", () => {
     expect(createDraft(context, { draftId: "salvage", name: "salvage" }).ok).toBe(true);
     expect(armAdd(context, { draftId: "salvage", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
     expect(armAdd(context, { draftId: "salvage", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "salvage", ...request() });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "salvage", ...request() });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect((await runQuote(context, { draftId: "salvage" })).ok).toBe(true);
@@ -531,7 +531,7 @@ describe("Harbor per-arm batched Job", () => {
     expect(createDraft(context, { draftId: "retry", name: "retry" }).ok).toBe(true);
     expect(armAdd(context, { draftId: "retry", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
     expect(armAdd(context, { draftId: "retry", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "retry", ...request() });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "retry", ...request() });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect((await runQuote(context, { draftId: "retry" })).ok).toBe(true);

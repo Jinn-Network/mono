@@ -1,4 +1,4 @@
-/** Audited product operations for APEX-Agents official-suite selection. */
+/** Test fixture (launch/export setup). Not a claimant operation. Former APEX-Agents official-suite selection. */
 import { BENCHMARK_RECORD_KIND, BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
@@ -15,13 +15,13 @@ import {
   ARCHIPELAGO_ADAPTER_ID,
   ApexAgentsSelectionManifestSchema,
   apexAgentsSelectionBytes,
-} from "./manifest.js";
+} from "../apex-agents/manifest.js";
 import {
   resolveApexAgentsSelection,
   sealApexAgentsSelectionDependencies,
   writeApexAgentsHostBinding,
   type ApexAgentsSelectionRequest,
-} from "./host.js";
+} from "../apex-agents/host.js";
 import { SuiteProtocolSelectionSchema, suiteProtocolSelectionBytes } from "../suite-protocol/manifest.js";
 import { loadOrCreateReportSigningKey } from "../../report/signing.js";
 import { recordWorkspaceAuthorship } from "../../run/publication-authority.js";
@@ -40,7 +40,7 @@ export interface SelectApexAgentsRuntimeResult {
   readonly benchmarkSha256: string;
 }
 
-export function selectApexAgentsRuntime(
+export function prepareApexAgentsDraft(
   context: OperationContext,
   input: SelectApexAgentsRuntimeInput,
 ): Promise<OperationResult<SelectApexAgentsRuntimeResult>> {
@@ -48,14 +48,14 @@ export function selectApexAgentsRuntime(
   const clocked = { ...context, clock: () => at };
   return operateAsync({
     context: clocked,
-    action: "runtime.apex-agents.select",
+    action: "test.fixture.prepare-official-suite-draft",
     subject: input.draftId,
     inputs: input,
     run: () => executeSelectApexAgentsRuntime(clocked, input),
   });
 }
 
-export async function executeSelectApexAgentsRuntime(
+async function executeSelectApexAgentsRuntime(
   context: OperationContext,
   input: SelectApexAgentsRuntimeInput,
 ): Promise<SelectApexAgentsRuntimeResult> {
