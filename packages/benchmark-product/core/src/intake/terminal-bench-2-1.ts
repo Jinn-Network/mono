@@ -91,10 +91,22 @@ export interface TerminalBench21SlateSelection {
   readonly selectedTaskNames: readonly string[];
 }
 
-export function resolveTerminalBench21OfficialSlate(input: {
+type TerminalBench21SlateResolverInput = {
   readonly coverage?: Exclude<SuiteCoverage, "custom">;
   readonly taskNames?: readonly string[];
-}): TerminalBench21SlateSelection {
+};
+
+type TerminalBench21TaskNamesOrInput = readonly string[] | TerminalBench21SlateResolverInput;
+
+function isTerminalBench21TaskNameList(
+  value: TerminalBench21TaskNamesOrInput,
+): value is readonly string[] {
+  return Array.isArray(value);
+}
+
+export function resolveTerminalBench21OfficialSlate(
+  input: TerminalBench21SlateResolverInput,
+): TerminalBench21SlateSelection {
   const officialNames = officialTerminalBench21TaskNames();
   if (input.taskNames !== undefined) {
     if (input.taskNames.length === 0) {
@@ -189,12 +201,9 @@ function sealOfficialItem(
  * inventory must not use this builder for unofficial names — bind is the product path.
  */
 export function buildTerminalBench21Tasks(
-  taskNamesOrInput: readonly string[] | {
-    readonly coverage?: Exclude<SuiteCoverage, "custom">;
-    readonly taskNames?: readonly string[];
-  },
+  taskNamesOrInput: TerminalBench21TaskNamesOrInput,
 ): BuiltTerminalBench21Slate {
-  const resolved = Array.isArray(taskNamesOrInput)
+  const resolved = isTerminalBench21TaskNameList(taskNamesOrInput)
     ? resolveTerminalBench21OfficialSlate({ taskNames: taskNamesOrInput })
     : resolveTerminalBench21OfficialSlate(taskNamesOrInput);
   const sealedProfile = sealTaskProfile(buildTerminalBench21ItemProfile());
