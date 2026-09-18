@@ -55,6 +55,7 @@ function taskCreated(
     taskId?: bigint;
     blockNumber?: number;
     txHash?: Hex;
+    submissionDigest?: Hex;
   } = {},
 ): ObservationMarketplaceEvent {
   const taskDigest = overrides.taskDigest ?? TASK_DIGEST;
@@ -75,7 +76,7 @@ function taskCreated(
     facts: {
       creator: "0x2222222222222222222222222222222222222222",
       taskCidDigest: `0x${taskDigest}`,
-      submissionDigest: `0x${"8".repeat(64)}`,
+      submissionDigest: overrides.submissionDigest ?? HONEST_SUBMISSION_DIGEST,
       taskId: overrides.taskId ?? 42n,
       maxTotal: 2,
       maxConcurrent: 2,
@@ -122,23 +123,36 @@ function attemptCreated(input: {
   } as ObservationMarketplaceEvent;
 }
 
-function sealedSubmissionBytes(runDigest: string = RUN_DIGEST) {
+function sealedSubmissionBytes({
+  runDigest = RUN_DIGEST,
+  submission = SUBMISSION_URN,
+  taskDigest = TASK_DIGEST,
+  nonce = "ordering-kit",
+}: {
+  runDigest?: string;
+  submission?: `urn:uuid:${string}`;
+  taskDigest?: string;
+  nonce?: string;
+} = {}) {
   return sealSubmission({
     protocol: "https://spec.jinn.network/profiles/task-execution/v1",
-    submission: SUBMISSION_URN,
-    task: { digest: { sha256: TASK_DIGEST } },
+    submission,
+    task: { digest: { sha256: taskDigest } },
     requester: "urn:uuid:20000000-0000-5000-8000-000000000002",
-    nonce: "ordering-kit",
+    nonce,
     idempotencyKey: "ordering/kit/1",
     deadline: "2026-08-04T00:00:00Z",
     requirements: { isolationPolicy: "fixture" },
     [BENCHMARKING_CELL_EXTENSION]: {
       run: runDigest,
-      cellKey: `${TASK_DIGEST}/armA/1`,
+      cellKey: `${taskDigest}/armA/1`,
       armId: "armA",
     },
   });
 }
+
+const HONEST_SUBMISSION_BYTES = sealedSubmissionBytes();
+const HONEST_SUBMISSION_DIGEST = `0x${memberSha256Hex(HONEST_SUBMISSION_BYTES)}` as Hex;
 
 function materialFor(bytes: Uint8Array) {
   return {
@@ -156,12 +170,11 @@ const PASSING_EVENTS = [
 ] as const;
 
 async function passingReceipt(events: readonly ObservationMarketplaceEvent[] = PASSING_EVENTS) {
-  const bytes = sealedSubmissionBytes();
   return buildMarketplaceOrderingReceipt({
     events,
     closeAnchor: ANCHOR,
     runDigest: RUN_DIGEST,
-    material: materialFor(bytes),
+    material: materialFor(HONEST_SUBMISSION_BYTES),
     transcript: {
       runDigestAnchorAt: events[0]!.projection.timestamp,
       earliestCellPostAt: events[events.length - 1]!.projection.timestamp,
@@ -309,7 +322,7 @@ describe("buildMarketplaceOrderingReceipt + evaluateOrderingBytes", () => {
       events,
       closeAnchor: ANCHOR,
       runDigest: RUN_DIGEST,
-      material: materialFor(sealedSubmissionBytes(OTHER_RUN)),
+      material: materialFor(sealedSubmissionBytes({ runDigest: OTHER_RUN })),
       transcript: {
         runDigestAnchorAt: "2026-08-03T09:00:00Z",
         earliestCellPostAt: "2026-08-03T09:00:01Z",
@@ -407,6 +420,74 @@ describe("buildMarketplaceOrderingReceipt + evaluateOrderingBytes", () => {
     const evaluation = await evaluateOrderingBytes({ recordBytes, members });
     expect(evaluation.status).toBe("invalid");
     expect(evaluation.detail).toMatch(/identity does not match sealed document/);
+  });
+
+  test("catalog blob that claims a foreign TaskCreated but is not its anchored digest is invalid", async () => {
+    const honestSha = memberSha256Hex(HONEST_SUBMISSION_BYTES);
+    const honestPath = submissionMemberPath(honestSha);
+    const foreignUrn = "urn:uuid:22222222-2222-4222-8222-222222222222" as const;
+    const foreignTask = "9999999999999999999999999999999999999999999999999999999999999999";
+    const foreignHonestBytes = sealedSubmissionBytes({
+      submission: foreignUrn,
+      taskDigest: foreignTask,
+      runDigest: OTHER_RUN,
+      nonce: "foreign-honest",
+    });
+    const fakeBytes = sealedSubmissionBytes({
+      submission: foreignUrn,
+      taskDigest: foreignTask,
+      nonce: "foreign-fake",
+    });
+    const fakeSha = memberSha256Hex(fakeBytes);
+    const fakePath = submissionMemberPath(fakeSha);
+    const events = [
+      taskCreated("2026-08-03T08:00:00Z", {
+        submission: foreignUrn,
+        taskDigest: foreignTask,
+        taskId: 41n,
+        blockNumber: 90,
+        txHash: `0x${"2".repeat(64)}`,
+        submissionDigest: `0x${memberSha256Hex(foreignHonestBytes)}`,
+      }),
+      ...PASSING_EVENTS,
+    ];
+    const members = new Map<string, Uint8Array>();
+    const eventEntries = events.map((event, ordinal) => {
+      const bytes = serializeMarketplaceEvent(event);
+      const digest = memberSha256Hex(bytes);
+      const eventPath = eventMemberPath(ordinal, digest);
+      members.set(eventPath, bytes);
+      return { ordinal, sha256: digest, path: eventPath };
+    });
+    members.set(honestPath, HONEST_SUBMISSION_BYTES);
+    members.set(fakePath, fakeBytes);
+    const submissions = [
+      {
+        submission: SUBMISSION_URN,
+        task: `sha256:${TASK_DIGEST}` as const,
+        sha256: honestSha,
+        path: honestPath,
+      },
+      {
+        submission: foreignUrn,
+        task: `sha256:${foreignTask}` as const,
+        sha256: fakeSha,
+        path: fakePath,
+      },
+    ].sort(compareSubmissionEntries);
+    const recordBytes = serializeMarketplaceOrderingRecord({
+      schema: MARKETPLACE_ORDERING_SCHEMA_ID,
+      runDigest: RUN_DIGEST,
+      closeAnchor: ANCHOR,
+      events: eventEntries,
+      submissions,
+      transcript: {
+        runDigestAnchorAt: "2026-08-03T08:00:00Z",
+        earliestCellPostAt: "2026-08-03T09:00:01Z",
+      },
+    });
+    const evaluation = await evaluateOrderingBytes({ recordBytes, members });
+    expect(evaluation.status).toBe("invalid");
   });
 
   test("reordered projector input is a different replay", async () => {

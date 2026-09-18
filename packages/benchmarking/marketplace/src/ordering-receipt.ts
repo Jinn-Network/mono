@@ -20,6 +20,7 @@ import type { CloseAnchorRef } from "./input-scope.js";
 import {
   deriveEarliestCellPostAt,
   deriveRunDigestAnchorAt,
+  sealedSubmissionBytesMatchProjectionAnchor,
   type AnchoredOrderingTranscript,
 } from "./ordering-leg-b.js";
 import {
@@ -132,6 +133,14 @@ async function collectCommittedSubmissions(input: {
     const validation = validateSubmission(parsed);
     if (!bytesMatchCanonicalSeal(bytes, parsed, sealSubmission, validation)) return;
     if (!sealedSubmissionMatchesIdentity(parsed, submissionUrn, taskDigest)) return;
+    if (!sealedSubmissionBytesMatchProjectionAnchor({
+      bytes,
+      submissionUrn,
+      taskDigest,
+      projection,
+    })) {
+      return;
+    }
     const extension = parsed[BENCHMARKING_CELL_EXTENSION];
     if (!isRecord(extension) || extension.run !== input.runDigest) return;
     const sha256 = memberSha256Hex(bytes);
@@ -304,7 +313,17 @@ export async function evaluateOrderingBytes(input: {
         (candidate) => candidate.submission === submissionUrn && candidate.task === taskDigest,
       );
       if (entry === undefined) return undefined;
-      return submissionBytes.get(entry.path);
+      const bytes = submissionBytes.get(entry.path);
+      if (bytes === undefined) return undefined;
+      if (!sealedSubmissionBytesMatchProjectionAnchor({
+        bytes,
+        submissionUrn,
+        taskDigest,
+        projection,
+      })) {
+        return undefined;
+      }
+      return bytes;
     },
   };
   const runDigestAnchorAt = await deriveRunDigestAnchorAt({
