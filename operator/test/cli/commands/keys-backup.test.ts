@@ -265,7 +265,6 @@ describe('keys change-password command', () => {
     expect(existsSync(join(defaultEarningDir, 'keystore-password'))).toBe(false);
     expect(existsSync(passwordFile)).toBe(false);
     const leftover = readKeystorePasswordFile(defaultEarningDir, { HOME: home });
-    expect(leftover?.password).not.toBe(password);
     expect(leftover).toBeUndefined();
     await expectDecryptsWith(defaultEarningDir, 'brand-new-password');
   });
