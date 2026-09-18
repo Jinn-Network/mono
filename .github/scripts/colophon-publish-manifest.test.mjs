@@ -369,7 +369,6 @@ test('every verifier specifier in the product tree is classified, whatever its e
  * stays `sealed` in the exhaustiveness walk above and would otherwise pass unnoticed (issue #3900).
  */
 const CLAIM_PIN_SETS = {
-  'packages/benchmark-product/core/scripts/demo1-export-public-bundle.mjs': ['0.1'],
   'packages/benchmark-product/core/src/legacy-closures.ts': ['0.1', '0.1.0', '0.2', '0.2.0', '0.2.1'],
   'packages/benchmark-product/verify/src/legacy-closures.ts': ['0.1', '0.1.0', '0.2', '0.2.0', '0.2.1'],
   'packages/benchmark-product/cli/src/main.ts': ['0.1'],
