@@ -962,7 +962,8 @@ export async function createSyntheticV4BundleFixture(input: {
    * real `disclosure declare` operation (issue #2839). OPTIONS-ONLY and defaults off, so every
    * existing caller's bundle bytes and closure version are unchanged. With it on AND `anchorLock`,
    * the run is anchored, qualification-projecting, and disclosed — the only cell
-   * `benchmark-product-public-bundle/8` occupies.
+   * `benchmark-product-public-bundle/8` occupies. WITHOUT `anchorLock` the legacy path refuses the
+   * run at `report`, so that combination builds only when `composedFormat` is also set.
    *
    * The declaration is synthetic placeholder prose written for this fixture (design R7): no
    * third-party prompt, dataset row, annotation, or audit-derived text appears in it.

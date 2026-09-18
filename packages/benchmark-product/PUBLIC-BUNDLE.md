@@ -613,9 +613,15 @@ two paths can be proven equivalent before the default moves. Asked, it derives
 the vector from the run's own facts: an anchored run declares `anchoring`, a run
 projecting a binary qualification declares `binary-qualification`, and a
 qualification run with a sealed disclosure declaration declares
-`disclosure-specification`, anchored or not. Every run that does not ask emits
-exactly the v2, v4, v6, v7, or v8 bundle it always did, byte for byte. The
-default flips in the change that pins v10 to the release serving it.
+`disclosure-specification`, anchored or not. A run that asks emits v10 in place
+of the v2, v4, v6, v7, or v8 bundle the sections above describe. One run is
+treated differently, not only renumbered: a qualification run with a sealed
+disclosure declaration and no anchor is refused at `report` by default, because
+v8 is the only disclosed closure and it is anchored, and asked for the composed
+generation it is admitted and declares `binary-qualification` and
+`disclosure-specification`. Every run that does not ask emits exactly the v2,
+v4, v6, v7, or v8 bundle it always did, byte for byte. The default flips in the
+change that pins v10 to the release serving it.
 
 ## Portable verification
 

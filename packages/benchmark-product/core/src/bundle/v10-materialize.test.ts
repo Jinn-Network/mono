@@ -32,7 +32,6 @@ import {
   BUNDLE_V10_FORMAT,
   CAPABILITY_REGISTRY,
   composeClosure,
-  readerInstructions,
   verifyPublicBundle,
 } from "@colophon-claims/verify";
 import type { OperationContext } from "../operations/context.js";
@@ -41,6 +40,8 @@ import { COMPOSED_CLAIM_PACKAGE_SCHEMA_ID } from "../report/claim.js";
 import {
   PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V7_CHECKS,
+  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_CHECKS,
 } from "../legacy-closures.js";
 import { buildBundleManifest } from "./manifest.js";
@@ -140,6 +141,11 @@ const CELLS = [
   },
 ] as const;
 
+/** By name, never by position: a cell inserted above would silently repoint an index. */
+function cell(name: (typeof CELLS)[number]["cell"]): (typeof CELLS)[number] {
+  return CELLS.find((entry) => entry.cell === name)!;
+}
+
 function json(bundleDir: string, path: string): Record<string, any> {
   return JSON.parse(readFileSync(join(bundleDir, path), "utf8")) as Record<string, any>;
 }
@@ -182,8 +188,12 @@ describe("composed bundle v10 — producer, one run per pre-composition cell", (
       expect(manifest["capabilities"]).toEqual(expected.vector);
       const members = new Set((manifest["files"] as { path: string }[]).map((file) => file.path));
       for (const path of closure.mandatoryFiles) expect(members.has(path), path).toBe(true);
-      expect([...members].some((path) => path.startsWith("anchors/")))
-        .toBe(expected.vector.includes("anchoring" as never));
+      // One direction only. `anchoring` may carry no member -- a Run that declared intent no
+      // carried anchor satisfies still declares it -- so what is invariant is that an undeclared
+      // capability contributes none. The reader's own two-way closure below covers the rest.
+      if (!(expected.vector as readonly string[]).includes("anchoring")) {
+        expect([...members].filter((path) => path.startsWith("anchors/"))).toEqual([]);
+      }
 
       // One claim id for every vector; sections present exactly when declared; derived pins.
       const claim = json(built.bundleDir, "claim-package.json");
@@ -193,7 +203,10 @@ describe("composed bundle v10 — producer, one run per pre-composition cell", (
           .toBe((expected.vector as readonly string[]).includes(capability.token));
       }
       expect(claim["verification"]["checks"]).toEqual(expected.checks);
-      expect(claim["verification"]).toEqual(expect.objectContaining(readerInstructions(expected.vector)));
+      // Against the frozen constants, not against the derivation that produced them: every vector
+      // registered today pins the 0.2.1 line `/7` and `/8` pin, and never `/6`'s first-public 0.1.
+      expect(claim["verification"]["command"]).toBe(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND);
+      expect(claim["verification"]["compatibleCommand"]).toBe(PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND);
       // The Report extension is the disclosure capability's one edge, present exactly when declared.
       expect(json(built.bundleDir, "report.json")[DISCLOSURE_SPECIFICATION_EXTENSION] !== undefined)
         .toBe((expected.vector as readonly string[]).includes("disclosure-specification"));
@@ -219,7 +232,7 @@ describe("composed bundle v10 — producer, one run per pre-composition cell", (
 
 describe("composed bundle v10 — a real bundle under another declaration", () => {
   test("dropping a declared capability never yields a quieter bundle", async () => {
-    const disclosed = await CELLS[4].run();
+    const disclosed = await cell("/8").run();
 
     // `disclosure-specification` has no member of its own, so the member closure has nothing to
     // object to. The Report still names the record, and the closure-independent guard refuses it.
@@ -241,12 +254,12 @@ describe("composed bundle v10 — a real bundle under another declaration", () =
     // and with the declaration gone the reader parses them under the base grammar, so the refusal
     // is the refined grammar's own and arrives before the member closure is ever reached. Taken
     // from the undisclosed cell, so the closure-independent guard above is not what fires.
-    const qualified = await CELLS[3].run();
+    const qualified = await cell("/7").run();
     const unqualified = detach(qualified.bundleDir, "unqualified");
     redeclare(unqualified, ["anchoring"]);
     expect(await refusal(unqualified)).toEqual({
       path: "evidence.json",
-      message: expect.stringContaining("evidence.json"),
+      message: "evidence.json does not satisfy its public bundle schema",
     });
   }, 300_000);
 
@@ -257,8 +270,8 @@ describe("composed bundle v10 — a real bundle under another declaration", () =
     // undeclared half: the same record and its catalog entry carried into a bundle whose vector
     // does not declare the capability, and whose Report names no record. Nothing derives the role
     // there, so the closed-world evidence-closure compare refuses it — no bespoke guard involved.
-    const disclosed = await CELLS[4].run();
-    const qualified = await CELLS[3].run();
+    const disclosed = await cell("/8").run();
+    const qualified = await cell("/7").run();
     const extension = json(disclosed.bundleDir, "report.json")[DISCLOSURE_SPECIFICATION_EXTENSION];
     const recordPath = `records/${extension.digest.sha256 as string}.bin`;
 
@@ -280,7 +293,7 @@ describe("composed bundle v10 — a real bundle under another declaration", () =
   }, 300_000);
 
   test("declaring a capability the bundle does not carry is refused", async () => {
-    const qualified = await CELLS[3].run();
+    const qualified = await cell("/7").run();
 
     // Declared without its record: nothing on this Report names a disclosure-specification record.
     const overdeclared = detach(qualified.bundleDir, "overdeclared");
@@ -291,7 +304,7 @@ describe("composed bundle v10 — a real bundle under another declaration", () =
     });
 
     // Declared without its members, on the base cell: there is no qualification document.
-    const base = await CELLS[0].run();
+    const base = await cell("/2").run();
     const unbacked = detach(base.bundleDir, "unbacked");
     redeclare(unbacked, ["binary-qualification"]);
     expect(await refusal(unbacked)).toEqual({
