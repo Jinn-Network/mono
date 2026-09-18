@@ -1,9 +1,10 @@
 # External run-record import
 
 How results a *different* harness already produced become a benchmark-product
-run. You lock a run here, hand the importer one file of per-attempt records,
-and the ordinary product chain — collect, then report — reads that evidence
-exactly as it reads a driven run's.
+run. You lock a run here, then either hand the importer a named harness's
+finished output (`--from harbor` for Harbor 0.21 jobs and trials) or a file of
+generic per-attempt records. The ordinary product chain — collect, then report
+— reads that evidence exactly as it reads a driven run's.
 
 > **Publication of an imported run is refused today.** `colophon publish`, the
 > GUI's `run.publish`, and managed signed-Report publication all refuse a run
@@ -253,6 +254,64 @@ The template also removes any need for a mapping from your harness's task ids
 to task digests. The sealed benchmark record cannot supply one — its items
 carry a task *reference*, not a foreign id — so the coordinates in the template
 are the only names import accepts.
+
+## Named readers — Harbor is the first
+
+DR-2026-09-04 decision 3: an adapter is a reader, one per harness, from that
+harness's native finished output into the sealed per-attempt record. Generic
+JSONL/CSV (#2979) stays as the dump dialect a named reader normalizes *into*,
+not as the product path for a brought Harbor run.
+
+Harbor is the first named reader:
+
+```bash
+colophon run import --from harbor ./jobs \
+  --workspace ./ws --principal me --draft draft-1
+```
+
+`--from harbor` takes the jobs directory, not `--file` / `--source` /
+`--format`. It walks Harbor 0.21 job roots (a directory of jobs, or one job
+directory) and their trial subdirectories. One finished trial becomes one
+per-attempt record. Trial identity is the same mapping the orchestrated Harbor
+path already uses: `harborTrialTaskName` / `assignHarborTrialAttempt` (Harbor
+0.21 often omits `attempt_number`) and the suite-protocol name table in
+`from-harbor.ts` (`taskNameByDigestFromSuite` / `digestByTaskNameFromSuite`).
+This issue does not invent a second Harbor mapper.
+
+Outcomes are the closed vocabulary above. A Harbor trial that finished with
+verifier reward or a prediction artifact is imported as `ungradeable`: Harbor's
+grader is not the subject Task's sealed EvaluationSpec, and this reader does
+not invent measurements for that spec. `AgentTimeoutError` /
+`VerifierTimeoutError` are `timeout`. Other terminal Harbor failures are
+`error`. A slot the jobs directory did not contain is written as `unrun` with
+a reason so it stays in the denominator. There is no exclude flag.
+
+Timings (`started_at` / `finished_at`) and evidence paths (`result.json`,
+`config.json`, `verifier/reward.txt`, prediction and trajectory artifacts) are
+carried on the record. Evidence paths are relative to the jobs directory you
+passed. The #2979 sealed-run window still applies: an imported timestamp must
+fall at or after lock and at or before import. Harbor timestamps from a run
+that finished before you locked this draft will be refused for that reason —
+omit them from the trial `result.json`, or lock the Colophon run so its window
+covers the Harbor times.
+
+A trial whose Harbor task name is not on the locked slate is left as an
+unknown-slot cellKey for the #2979 validator to refuse. Duplicate trials for
+the same expected coordinate are likewise the validator's `duplicate-slot`.
+Missing, unknown, extra, and duplicate slots are refused together, with the
+whole problem list, exactly as a JSONL dump is.
+
+Until the official Terminal-Bench 2.1 pin lands (#4678), a locked run that has
+no Harbor suite-protocol selection recovers Harbor task names from each Task's
+`payload.forecast.marketId`. The Terminal-Bench 2.1 intake shim stores
+`terminal-bench-2-1/<taskName>` there; other prediction-shaped intake (including
+the bundled sample) uses the market id as the Harbor task name. Full official
+89-name coverage is that pin, not this reader.
+
+**Left open — issue #3417.** Digesting the source dump's bytes into the import
+marker is not implemented here. Publication of an imported run stays refused
+on that issue. This reader feeds the same `#2979` import declaration; it does
+not change what a sealed import record means.
 
 ## What import refuses outright
 
