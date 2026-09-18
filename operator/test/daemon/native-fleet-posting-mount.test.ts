@@ -8,25 +8,14 @@
  *  - BOOT-INERT otherwise: a legacy composition, or an empty `posting[]`, constructs no loop, so the
  *    `posting` heartbeat is never seeded — a default boot is byte-identical.
  */
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Daemon, type DaemonConfig } from '@/daemon/daemon.js';
 import { LocalAdapter } from '@/adapters/local/adapter.js';
 import { SimpleRunner } from '@/runner/simple.js';
-import { HarnessRegistry } from '@/harnesses/engine/registry.js';
 import { Store } from '@/store/store.js';
 import { getLoopTick, LOOP_REGISTRY } from '@/daemon/loop-heartbeat.js';
 import type { PostingLoopPorts } from '@/daemon/posting-loop.js';
-
-function minimalEngineConfig(root: string): DaemonConfig['restorationEngine'] {
-  return {
-    implRegistry: new HarnessRegistry({ default: 'legacy-claude' }),
-    paths: { workingDirRoot: join(root, 'work'), implStateDirRoot: join(root, 'impl-state') },
-  };
-}
 
 /** Inert ports — the mount is what is under test, not the port behaviour (covered elsewhere). */
 function stubPorts(): PostingLoopPorts {
@@ -42,7 +31,7 @@ function stubPorts(): PostingLoopPorts {
   };
 }
 
-function makeDaemon(store: Store, tmp: string, posting: DaemonConfig['posting']): Daemon {
+function makeDaemon(store: Store, posting: DaemonConfig['posting']): Daemon {
   return new Daemon({
     adapter: new LocalAdapter(),
     runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
@@ -50,20 +39,16 @@ function makeDaemon(store: Store, tmp: string, posting: DaemonConfig['posting'])
     dbPath: ':memory:',
     apiPort: 0,
     pollIntervalMs: 60_000,
-    taskSources: [],
-    restorationEngine: minimalEngineConfig(tmp),
     watchdog: { autoRestart: false },
     posting,
   });
 }
 
 describe('M5d posting loop host-wire', () => {
-  let tmp: string;
   let store: Store;
   let daemon: Daemon | undefined;
 
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'jinn-m5d-posting-'));
     store = new Store(':memory:');
   });
 
@@ -77,7 +62,7 @@ describe('M5d posting loop host-wire', () => {
   });
 
   it('mounts and heartbeats posting for native mode with a non-empty posting[]', async () => {
-    daemon = makeDaemon(store, tmp, {
+    daemon = makeDaemon(store, {
       compositionMode: 'native',
       postingEntryCount: 1,
       ports: stubPorts(),
@@ -89,7 +74,7 @@ describe('M5d posting loop host-wire', () => {
   });
 
   it('is boot-inert for a legacy composition (default boot)', async () => {
-    daemon = makeDaemon(store, tmp, {
+    daemon = makeDaemon(store, {
       compositionMode: 'legacy',
       postingEntryCount: 3,
       ports: stubPorts(),
@@ -101,7 +86,7 @@ describe('M5d posting loop host-wire', () => {
   });
 
   it('is boot-inert for native mode with an empty posting[]', async () => {
-    daemon = makeDaemon(store, tmp, {
+    daemon = makeDaemon(store, {
       compositionMode: 'native',
       postingEntryCount: 0,
       ports: stubPorts(),
@@ -113,7 +98,7 @@ describe('M5d posting loop host-wire', () => {
   });
 
   it('starts nothing posting-related when the posting config is omitted', async () => {
-    daemon = makeDaemon(store, tmp, undefined);
+    daemon = makeDaemon(store, undefined);
     await daemon.start();
     expect(getLoopTick(store, 'posting')).toBeNull();
     await daemon.stop();
