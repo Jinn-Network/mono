@@ -1057,7 +1057,9 @@ describe('gather-status RPC error masking (spec §14.2 item 2, issue #2402)', ()
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
 
     await withTempStore(async (store) => {
+      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-mask-nested-'));
       const status = await gatherStatusForApi(store, {
+        earningDir,
         rpcUrl: LEAKY_URL,
         network: 'testnet',
         pollIntervalMs: 5000,
