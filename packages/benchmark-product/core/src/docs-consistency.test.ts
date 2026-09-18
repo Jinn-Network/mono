@@ -137,7 +137,7 @@ describe("product documentation consistency", () => {
     };
     const coreReadme = read(coreReadmePath);
 
-    expect(parity.entries).toHaveLength(46);
+    expect(parity.entries).toHaveLength(45);
     for (const entry of parity.entries) {
       expect(coreReadme, entry.operation).toContain(`\`${entry.operation}\``);
       expect(coreReadme, entry.cliVerb).toContain(`\`${PRODUCT_BRANDING.commandName} ${entry.cliVerb}`);
@@ -147,7 +147,7 @@ describe("product documentation consistency", () => {
 
     for (const operation of GATED_OPERATIONS) expect(coreReadme).toContain(`\`${operation}\``);
     for (const code of PRODUCT_ERROR_CODES) expect(coreReadme).toContain(`\`${code}\``);
-    expect(coreReadme).toContain("46 generated operations");
+    expect(coreReadme).toContain("45 generated operations");
     expect(coreReadme).toContain("ten gated operations");
     expect(coreReadme).toContain("11 typed error codes");
     expect(coreReadme).toContain("`{\"ok\":true,\"result\":...}`");
@@ -266,6 +266,39 @@ describe("product documentation consistency", () => {
     expect(guide).toContain("`source/`");
   });
 
+  it("scopes the external guide to /2 and states the evidence-native v5 split", () => {
+    // Issue #3328: the external guide read as if it covered every format, while its table,
+    // walkthrough, and script only read public-bundle/2, and v5 had no split at all.
+    const doc = read(externalVerificationPath);
+    // The scope statement sits in the preamble, before the first section; `/2` is named all over
+    // the rest of the guide, so only the preamble can prove the scope is stated.
+    const preamble = doc.slice(0, doc.indexOf("\n## "));
+    expect(preamble).toContain(`\`${BUNDLE_FORMAT}\``);
+    expect(preamble).toContain(`\`${BUNDLE_V5_FORMAT}\``);
+    expect(preamble).toContain("`external-verify.py`");
+    const start = doc.indexOf("\n## Evidence-native bundle v5\n");
+    expect(start, "v5 section present").toBeGreaterThan(-1);
+    const next = doc.indexOf("\n## ", start + 1);
+    const section = doc.slice(start, next === -1 ? undefined : next);
+    const rows = section
+      .split("\n")
+      .filter((line) => /^\| `[a-z-]+` \|/u.test(line))
+      .map((line) => /^\| `([a-z-]+)` \|/u.exec(line)![1]);
+    expect(rows).toEqual([...EVIDENCE_NATIVE_BUNDLE_V5_CHECKS]);
+    expect(section).toContain("`benchmark-product.claim-package/3`");
+    expect(section).toContain("metadata-first");
+    expect(section).toContain("not fetched");
+    // No metadata-first command constant exists (PUBLIC-BUNDLE.md says so); the metadata-first
+    // reader is the `@0.2.1` release, which is the prompted-screening exact line.
+    const fullEvidence = readerLine(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND);
+    const metadataFirst = readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND);
+    const stated = fenceBodies(section)
+      .flatMap((body) => body.split("\n"))
+      .filter((line) => line.includes("npx "))
+      .map(readerLine);
+    expect([...new Set(stated)].sort()).toEqual([fullEvidence, metadataFirst].sort());
+  });
+
   it("pins the per-format reader table to the reader's own constants", () => {
     // Issue #3519: the format-to-reader-line mapping is stated in each format section, in this
     // table, and again in the too-old subsection. Nothing pinned any of them, so a ninth format or
@@ -368,6 +401,31 @@ describe("product documentation consistency", () => {
     for (const format of SUPPORTED_BUNDLE_FORMATS) {
       expect(rows.some((cells) => cells[0]!.startsWith(`\`${format}\``)), format).toBe(true);
     }
+  });
+
+  it("pins the claim-package/1, /2, /4 reader-line paragraph to the reader's constants", () => {
+    // Issue #3329: the table above is pinned, but the prose stating which line a prompted
+    // claim-package/1 or /2 stamps was not, and it had already drifted once.
+    const block = read(bundleReadmePath)
+      .split(/\n\s*\n/u)
+      .find((candidate) => candidate.startsWith("Claim-package/1, claim-package/2, and claim-package/4"));
+    expect(block, "paragraph present").toBeDefined();
+    // The same block goes on to claim-package/3, /5, and /6, which also name `@0.2.1`; cut there so
+    // those sentences cannot satisfy the pins for this one.
+    const end = block!.indexOf("\nClaim-package/3,");
+    expect(end, "claim-package/3 sentence present").toBeGreaterThan(-1);
+    const paragraph = block!.slice(0, end);
+    const legacy = PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[BUNDLE_FORMAT];
+    for (const command of [
+      PUBLIC_BUNDLE_VERIFICATION_COMMAND,
+      legacy.compatibleCommand,
+      PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+      PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+      LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+    ]) {
+      expect(paragraph, command).toContain(`\`${readerLine(command)}\``);
+    }
+    expect(paragraph).toContain("`promptedScreeningProfile`");
   });
 
   it("pins every format section's reader commands to the lines that format pins", () => {

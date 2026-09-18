@@ -225,9 +225,9 @@ test('Increment 1 moves only verify onto a demand-gated independent product line
   assert.equal(catalog.releaseGroups['transitional-or-private'].expectedPackageCount, 12);
 });
 
-test('Colophon trusted publishing is a separate workflow and never joins the stack 77', () => {
+test('Colophon trusted publishing is a separate workflow and never joins the stack 75', () => {
   const stack = buildRegistrationList(repoRoot);
-  assert.equal(stack.length, 77);
+  assert.equal(stack.length, 75);
   assert.equal(stack.some((row) => row.package.startsWith('@colophon-claims/')), false);
   assert.equal(COLOPHON_PUBLISH_WORKFLOW, 'colophon-npm-publish.yml');
   const workflow = readFileSync(join(repoRoot, '.github/workflows', COLOPHON_PUBLISH_WORKFLOW), 'utf8');
@@ -369,7 +369,6 @@ test('every verifier specifier in the product tree is classified, whatever its e
  * stays `sealed` in the exhaustiveness walk above and would otherwise pass unnoticed (issue #3900).
  */
 const CLAIM_PIN_SETS = {
-  'packages/benchmark-product/core/scripts/demo1-export-public-bundle.mjs': ['0.1'],
   'packages/benchmark-product/core/src/legacy-closures.ts': ['0.1', '0.1.0', '0.2', '0.2.0', '0.2.1'],
   'packages/benchmark-product/verify/src/legacy-closures.ts': ['0.1', '0.1.0', '0.2', '0.2.0', '0.2.1'],
   'packages/benchmark-product/cli/src/main.ts': ['0.1'],

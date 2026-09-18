@@ -26,7 +26,7 @@ import type { NativeSnapshotEntry, NativeSnapshotReader } from "@jinn-network/be
  * PR #2712 shipped `NativeSnapshotPort` and `IdempotentNativeLauncher` with test doubles only, and
  * named provider-backed bindings as follow-up integration. They are Colophon's to own — the
  * evidence-first design assigns local storage and process orchestration to tier 4 — and they are
- * shared: Harbor and Inspect need exactly the same two ports that SkillsBench does.
+ * shared: Harbor and Inspect need exactly the same two ports that native-capture adapters do.
  *
  * Neither binding runs a container. The snapshot port walks a directory; the launcher spawns a
  * process. What the invocation points at is the caller's business.

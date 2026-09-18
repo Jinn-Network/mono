@@ -14,7 +14,7 @@ import { runCollect } from "../../operations/run-collect.js";
 import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectTerminalBench21Runtime } from "../../operations/terminal-bench-2-1.js";
+import { prepareTerminalBench21Draft } from "../testing/terminal-bench-2-1-draft.js";
 import { exportHarborHubPackage } from "../../operations/hub-export.js";
 import { readRunJournalEntries } from "../../run/journal.js";
 import { readRunState } from "../../run/state.js";
@@ -24,6 +24,7 @@ import { TERMINAL_BENCH_2_1_DATASET_ID, TERMINAL_BENCH_2_1_DATASET_REF } from ".
 import { harborArmFollowUpJobName, harborArmJobName } from "./launcher.js";
 import { harborRetrySnapshotDir } from "./retry-bind.js";
 import { readHarborDispatchArchive } from "./venue.js";
+import { officialTerminalBench21TaskNames } from "../../intake/terminal-bench-2-1.js";
 import type { HarborSelectionManifest } from "./manifest.js";
 
 type JournalEntries = ReturnType<typeof readRunJournalEntries>;
@@ -93,14 +94,14 @@ async function directoryUntil(directory: string, expected: number, what: string)
   }
 }
 
-const names = ["t00", "t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09", "t10", "t11"] as const;
+const names = officialTerminalBench21TaskNames().slice(0, 12);
 const image = `registry.example/tb21@sha256:${"c".repeat(64)}`;
 const arms: HarborSelectionManifest["arms"] = [
   { armId: "one", agent: { id: "terminus", configuration: {} }, model: { id: "openai/model-one", configuration: {} }, jobAgent: { name: "terminus", model_name: "openai/model-one" } },
   { armId: "two", agent: { id: "terminus", configuration: {} }, model: { id: "openai/model-two", configuration: {} }, jobAgent: { name: "terminus", model_name: "openai/model-two" } },
 ];
 const outputs: HarborSelectionManifest["outputs"] = [{
-  name: "prediction",
+  name: "result",
   mediaType: "application/json",
   artifact: { source: "/logs/artifacts/prediction.json", destination: "prediction.json" },
   nativePath: "artifacts/prediction.json",
@@ -410,7 +411,7 @@ describe("Harbor per-arm batched Job", () => {
     expect(createDraft(context, { draftId: "batched", name: "batched" }).ok).toBe(true);
     expect(armAdd(context, { draftId: "batched", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
     expect(armAdd(context, { draftId: "batched", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "batched", ...request() });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "batched", ...request() });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(selected.result.draft.spec.policy.replacement).toEqual({ allowed: true, maxPerCell: 3 });
@@ -462,7 +463,7 @@ describe("Harbor per-arm batched Job", () => {
     expect(createDraft(context, { draftId: "salvage", name: "salvage" }).ok).toBe(true);
     expect(armAdd(context, { draftId: "salvage", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
     expect(armAdd(context, { draftId: "salvage", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "salvage", ...request() });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "salvage", ...request() });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect((await runQuote(context, { draftId: "salvage" })).ok).toBe(true);
@@ -515,7 +516,7 @@ describe("Harbor per-arm batched Job", () => {
       n_attempts: 1,
       n_concurrent_trials: 1,
       max_retries: 0,
-      task_names: ["t00"],
+      task_names: [names[0]!],
     });
     const submissionSha256 = replacementDispatch?.kind === "cell-event"
       ? replacementDispatch.event.submissionDigest?.slice("sha256:".length)
@@ -548,7 +549,7 @@ describe("Harbor per-arm batched Job", () => {
     expect(createDraft(context, { draftId: "retry", name: "retry" }).ok).toBe(true);
     expect(armAdd(context, { draftId: "retry", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
     expect(armAdd(context, { draftId: "retry", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
-    const selected = await selectTerminalBench21Runtime(context, { draftId: "retry", ...request() });
+    const selected = await prepareTerminalBench21Draft(context, { draftId: "retry", ...request() });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect((await runQuote(context, { draftId: "retry" })).ok).toBe(true);

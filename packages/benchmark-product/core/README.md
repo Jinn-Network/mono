@@ -12,8 +12,7 @@ retains the advanced command library used by that endpoint.
 Authority: [product design](../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md).
 Start at the [product overview](../README.md); see the
 [public-bundle guide](../PUBLIC-BUNDLE.md), [Inspect runtime guide](../INSPECT-RUNTIME.md),
-[threat model](../SECURITY.md), and
-[Demo-1 E4 adapter runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
+and [threat model](../SECURITY.md).
 
 This package is public-shaped, not yet published, and requires Node 22. The complete
 portal dependency graph must be built from source before core. The exact
@@ -39,14 +38,14 @@ release gate. With `COLOPHON_PUBLICATION_RELEASE_HARBOR` set to an exact Harbor
 Docker, then proves prospective registration, six public-before-Harbor
 Submissions, complete runtime evidence, Accounting/Matrix v2, signed Report v2,
 exact public retrieval, and no publication-triggered rerun. It uses Harbor's
-built-in Oracle agent and does not use model credentials. See the
-[product overview](../README.md#real-harbor-publication-rehearsal) for the exact
-operator command.
+built-in Oracle agent and does not use model credentials. The
+[product overview](../README.md#real-harbor-publication-rehearsal) names this as
+a service launch.
 
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **46 generated operations**, all shipped through the library and CLI
+contains **45 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -69,11 +68,10 @@ with an explicit shipped/deferred GUI disposition:
 | `admitHumanTruth` | `colophon human-review admit` | Derive two-person unanimous or explicitly operator-only truth records, including exclusion/replacement accounting. |
 | `importBinaryItemBank` | `colophon import item-bank` | Import admitted binary-judgment items from three canonical JSONL manifests. |
 | `importSweBenchRows` | `colophon import swebench` | Import SWE-bench-shaped rows through interop. |
-| `importRunRecords` | `colophon run import` | Turn a locked run into a run from an external harness's per-attempt records over the whole sealed slate. |
+| `importRunRecords` | `colophon run import` | Turn a locked run into a run from an external harness's per-attempt records over the whole sealed slate. `--from harbor` reads Harbor 0.21 jobs and trials; `--from inspect` reads Inspect EvalLogs. |
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
 | `listDrafts` | `colophon draft list` | List drafts. |
-| `migrateTerminalBenchLegacyTask` | `colophon runtime terminal-bench migrate` | Transform legacy Terminal-Bench material with pinned Harbor and preserve both byte histories. |
 | `publicationConfigure` | `colophon publication configure` | Configure the public locator and opt into prospective disclosure. |
 | `publicationRegister` | `colophon publication register` | Store, announce, and exact-probe the registration closure. |
 | `publicationStatus` | `colophon publication status` | Read timing assurance, stage receipts, compatibility, and recovery guidance without backend calls. |
@@ -123,20 +121,7 @@ same guide states per format.
 The full installed product delegates to the same verifier implementation with
 `colophon bundle verify --bundle <dir> --json`.
 
-Demo-1's second read-only standalone verifier is the explicit post-lock/pre-dispatch E4 gate:
-
-```text
-colophon demo1 prereg verify --workspace <dir> --draft <draftId> \
-  --witness <witness.json> --method-summary-sha256 <sha256> \
-  --grader-program-sha256 <sha256> --source-commit <full-git-oid> --json
-```
-
-It reads the locked Run and empty run journal, verifies the exact external-anchor witness, and
-performs no network or credential access. It is an ordering gate, not publication; the exact
-contract and post-dispatch ordering check are in the
-[E4 runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
-
-The third standalone pair projects a sealed bundle's freeze artifacts into a
+The second standalone pair projects a sealed bundle's freeze artifacts into a
 deterministic public repository, and checks a published tree against the bundle
 it claims to be derived from:
 

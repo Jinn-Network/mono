@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The `run import` verb (#2979): the slate template, both dump dialects, and the refusals that
- * keep the verb from being a quiet way to shrink a denominator.
+ * The `run import` verb (#2979): the slate template, both dump dialects, the Harbor 0.21 named
+ * reader (#3991), the Inspect named reader (#3992), and the refusals that keep the verb from being
+ * a quiet way to shrink a denominator.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -90,6 +91,7 @@ describe("run import — the slate template", () => {
   test("USAGE exposes run import as a first-class verb", () => {
     expect(USAGE).toContain("run import       --workspace <dir> --principal <id> --draft <draftId>");
     expect(USAGE).toContain("--from inspect <eval-log-or-dir>");
+    expect(USAGE).toContain("--from harbor <jobs-dir>");
   });
 
   test("the CSV template is the whole sealed slate, one blank row per expected slot", async () => {
@@ -143,7 +145,7 @@ describe("run import — the slate template", () => {
 
   test("--template reads nothing, so it refuses --file, --source, and --from", async () => {
     await lockedDraft();
-    for (const [flag, value] of [["file", "dump.csv"], ["source", "some-harness"], ["from", "inspect"]] as const) {
+    for (const [flag, value] of [["file", "dump.csv"], ["source", "some-harness"], ["from", "inspect"], ["from", "harbor"]] as const) {
       const refused = await runCli(
         ["run", "import", "--template", "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1", `--${flag}`, value, "--json"],
         cliContext(),
@@ -453,14 +455,14 @@ describe("run import --from inspect", () => {
     );
     expect(withFile.exitCode).toBe(2);
     const unknown = await runCli(
-      ["run", "import", "--from", "harbor", dumpDir,
+      ["run", "import", "--from", "zip", dumpDir,
         "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1", "--json"],
       cliContext(),
     );
     expect(unknown.exitCode).toBe(2);
     expect(JSON.parse(unknown.stdout)).toMatchObject({
       ok: false,
-      error: { code: "invalid-invocation", detail: expect.stringContaining("--from must be \"inspect\"") },
+      error: { code: "invalid-invocation", detail: expect.stringContaining("--from must be \"harbor\" or \"inspect\"") },
     });
     const missingDir = await runCli(
       ["run", "import", "--from", "inspect",
@@ -489,5 +491,155 @@ describe("run import --from inspect", () => {
       error: { code: "conflict", detail: expect.stringContaining("run import --from inspect") },
     });
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+  }, 60_000);
+});
+
+describe("run import --from harbor", () => {
+  const SAMPLE_HARBOR_TASK = "sample-market-alpha";
+
+  function writeHarborTrial(input: {
+    readonly jobName: string;
+    readonly trialDir: string;
+    readonly taskName: string;
+    readonly status: string;
+    readonly exceptionType?: string;
+    readonly reward?: string;
+    readonly attempt?: number;
+  }): void {
+    const job = join(dumpDir, input.jobName);
+    const trial = join(job, input.trialDir);
+    mkdirSync(join(trial, "verifier"), { recursive: true });
+    writeFileSync(join(job, "config.json"), JSON.stringify({
+      job_name: input.jobName,
+      harbor_version: "0.21.4",
+      agents: [{ name: "baseline", model_name: "prediction-v1-baseline" }],
+    }));
+    writeFileSync(join(job, "result.json"), JSON.stringify({
+      id: input.jobName,
+      status: "success",
+      n_total_trials: 1,
+      stats: { n_retries: 0 },
+    }));
+    writeFileSync(join(trial, "config.json"), JSON.stringify({
+      task: { path: `/cache/${input.taskName}`, source: "local" },
+      trial_name: `${input.taskName}__55xttAM`,
+      agent: { name: "baseline", model_name: "prediction-v1-baseline" },
+      ...(input.attempt === undefined ? {} : { attempt: input.attempt }),
+    }));
+    writeFileSync(join(trial, "result.json"), JSON.stringify({
+      id: `${input.jobName}:${input.trialDir}`,
+      status: input.status,
+      ...(input.exceptionType === undefined ? {} : { exception_type: input.exceptionType }),
+    }));
+    if (input.reward !== undefined) {
+      writeFileSync(join(trial, "verifier", "reward.txt"), input.reward);
+    }
+  }
+
+  test("reads a synthetic Harbor 0.21 jobs dir into the locked sample slate", async () => {
+    await lockedDraft();
+    writeHarborTrial({
+      jobName: "brought-job",
+      trialDir: "trial-1",
+      taskName: SAMPLE_HARBOR_TASK,
+      status: "success",
+      reward: "1\n",
+    });
+    const imported = await runCli(
+      ["run", "import", "--from", "harbor", dumpDir,
+        "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1", "--json"],
+      cliContext(),
+    );
+    expect(imported.exitCode, imported.stdout + imported.stderr).toBe(0);
+    expect(JSON.parse(imported.stdout)).toMatchObject({
+      ok: true,
+      result: { importedCellCount: 6, written: { graded: 0, ungradeable: 1, notDelivered: 5 } },
+    });
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
+  }, 60_000);
+
+  test("refuses an extra Harbor task as unknown-slot and does not shrink the denominator", async () => {
+    await lockedDraft();
+    writeHarborTrial({
+      jobName: "hello",
+      trialDir: "trial-1",
+      taskName: SAMPLE_HARBOR_TASK,
+      status: "success",
+      reward: "1\n",
+    });
+    writeHarborTrial({
+      jobName: "extra",
+      trialDir: "trial-1",
+      taskName: "not-on-slate",
+      status: "success",
+      reward: "1\n",
+    });
+    const refused = await runCli(
+      ["run", "import", "--from", "harbor", dumpDir,
+        "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1", "--json"],
+      cliContext(),
+    );
+    expect(refused.exitCode).toBe(1);
+    const envelope = JSON.parse(refused.stdout) as { ok: boolean; error: { code: string; detail: string; issues: { path: string }[] } };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error.code).toBe("validation");
+    expect(envelope.error.issues.map((issue) => issue.path)).toContain("unknown-slot");
+    expect(envelope.error.detail).toContain("There is no exclude flag.");
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+  }, 60_000);
+
+  test("refuses two Harbor trials that name the same expected slot", async () => {
+    await lockedDraft();
+    writeHarborTrial({
+      jobName: "dup",
+      trialDir: "trial-1",
+      taskName: SAMPLE_HARBOR_TASK,
+      status: "success",
+      reward: "1\n",
+      attempt: 1,
+    });
+    writeHarborTrial({
+      jobName: "dup",
+      trialDir: "trial-2",
+      taskName: SAMPLE_HARBOR_TASK,
+      status: "success",
+      reward: "0\n",
+      attempt: 1,
+    });
+    const refused = await runCli(
+      ["run", "import", "--from", "harbor", dumpDir,
+        "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1", "--json"],
+      cliContext(),
+    );
+    expect(refused.exitCode).toBe(1);
+    const envelope = JSON.parse(refused.stdout) as { ok: boolean; error: { issues: { path: string }[] } };
+    expect(envelope.error.issues.map((issue) => issue.path)).toContain("duplicate-slot");
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+  }, 60_000);
+
+  test("refuses --file/--source/--format alongside --from harbor, and an unknown reader", async () => {
+    await lockedDraft();
+    const withFile = await runCli(
+      ["run", "import", "--from", "harbor", dumpDir, "--file", join(dumpDir, "records.jsonl"),
+        "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1", "--json"],
+      cliContext(),
+    );
+    expect(withFile.exitCode).toBe(2);
+    const unknown = await runCli(
+      ["run", "import", "--from", "zip", dumpDir,
+        "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1", "--json"],
+      cliContext(),
+    );
+    expect(unknown.exitCode).toBe(2);
+    expect(JSON.parse(unknown.stdout)).toMatchObject({
+      ok: false,
+      error: { code: "invalid-invocation", detail: expect.stringContaining("--from must be \"harbor\" or \"inspect\"") },
+    });
+    const missingDir = await runCli(
+      ["run", "import", "--from", "harbor",
+        "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1", "--json"],
+      cliContext(),
+    );
+    expect(missingDir.exitCode).toBe(2);
   }, 60_000);
 });
