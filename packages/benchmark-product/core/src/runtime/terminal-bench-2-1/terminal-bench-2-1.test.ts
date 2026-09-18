@@ -8,7 +8,7 @@ import { createDraft, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectTerminalBench21Runtime } from "../../operations/terminal-bench-2-1.js";
+import { selectTerminalBench21Runtime } from "./select.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import type { HarborSelectionManifest } from "../harbor/manifest.js";

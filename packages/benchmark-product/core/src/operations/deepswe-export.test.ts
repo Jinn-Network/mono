@@ -20,7 +20,7 @@ import { runQuote } from "./run-quote.js";
 import { requireRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { DEEP_SWE_V11_GIT_SHA } from "../runtime/deep-swe-v1.1/manifest.js";
-import { selectDeepSweV11Runtime } from "./deep-swe-v1.1.js";
+import { selectDeepSweV11Runtime } from "../runtime/deep-swe-v1.1/select.js";
 import { exportHarborHubPackage } from "./hub-export.js";
 import {
   decideDeepSweExportMode,

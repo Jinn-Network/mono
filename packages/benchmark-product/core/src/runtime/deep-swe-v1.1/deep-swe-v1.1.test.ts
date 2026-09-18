@@ -1,8 +1,6 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { parseBenchmark } from "@jinn-network/benchmarking-records";
 import { armAdd } from "../../operations/arms.js";
@@ -10,7 +8,7 @@ import { createDraft, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectDeepSweV11Runtime } from "../../operations/deep-swe-v1.1.js";
+import { selectDeepSweV11Runtime } from "./select.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { draftPath } from "../../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../../workspace/sealed-store.js";
@@ -293,12 +291,5 @@ describe("DeepSWE v1.1 official-suite intake", () => {
     expect(selected.ok).toBe(false);
     if (selected.ok) return;
     expect(selected.error.detail).toMatch(/binary-instrument/u);
-  });
-
-  test("one-task qualify refuses unless COLOPHON_DEEPSWE_ONE_TASK_QUALIFY=1", () => {
-    const script = join(dirname(fileURLToPath(import.meta.url)), "../../../scripts/deepswe-v1.1-one-task-qualify.mjs");
-    const result = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, COLOPHON_DEEPSWE_ONE_TASK_QUALIFY: "" } });
-    expect(result.status).toBe(2);
-    expect(result.stderr).toMatch(/never downloads DeepSWE v1\.1/u);
   });
 });

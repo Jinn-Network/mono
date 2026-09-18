@@ -9,7 +9,7 @@ import { exportApexAgentsInspection } from "../../operations/apex-agents-export.
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectApexAgentsRuntime } from "../../operations/apex-agents.js";
+import { selectApexAgentsRuntime } from "./select.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { exportCompletenessCertification } from "../suite-protocol/comparability.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";

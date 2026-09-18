@@ -27,12 +27,12 @@ import type { OperationResult } from "./result.js";
 import { executeSelectInspectEvaluation } from "./inspect-runtime.js";
 import { executeBindInspectBinaryJudge } from "./inspect-binary-judge.js";
 import { executeSelectHarborRuntime } from "./harbor-runtime.js";
-import { executeSelectTerminalBench2Runtime } from "./terminal-bench-2.js";
-import { executeSelectTerminalBench21Runtime } from "./terminal-bench-2-1.js";
-import { executeSelectTerminalBench30Runtime } from "./terminal-bench-3-0.js";
-import { executeSelectSwebenchVerifiedRuntime } from "./swe-bench-verified.js";
-import { executeSelectApexAgentsRuntime } from "./apex-agents.js";
-import { executeSelectApexSweDevRuntime } from "./apex-swe-dev.js";
+import { executeSelectTerminalBench2Runtime } from "../runtime/terminal-bench-2/select.js";
+import { executeSelectTerminalBench21Runtime } from "../runtime/terminal-bench-2-1/select.js";
+import { executeSelectTerminalBench30Runtime } from "../runtime/terminal-bench-3-0/select.js";
+import { executeSelectSwebenchVerifiedRuntime } from "../runtime/swe-bench-verified/select.js";
+import { executeSelectApexAgentsRuntime } from "../runtime/apex-agents/select.js";
+import { executeSelectApexSweDevRuntime } from "../runtime/apex-swe-dev/select.js";
 import {
   executeExportHarborHubPackage,
   type ExportHarborHubPackageResult,

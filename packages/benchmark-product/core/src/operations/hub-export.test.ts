@@ -23,8 +23,8 @@ import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
 import { requireRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
-import { selectTerminalBench21Runtime } from "./terminal-bench-2-1.js";
-import { selectTerminalBench30Runtime } from "./terminal-bench-3-0.js";
+import { selectTerminalBench21Runtime } from "../runtime/terminal-bench-2-1/select.js";
+import { selectTerminalBench30Runtime } from "../runtime/terminal-bench-3-0/select.js";
 import {
   decideHarborHubExportMode,
   exportHarborHubPackage,

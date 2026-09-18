@@ -1,25 +1,25 @@
 /** Audited product operations for Terminal-Bench 2 selection and legacy migration. */
-import { isDraftMutable } from "../domain/lifecycle.js";
-import { parseDraftSpec, type DraftDocument } from "../domain/draft.js";
-import { refuse } from "../errors.js";
-import { atomicWriteFileSync } from "../fs/atomic.js";
-import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
-import { harborSelectionManifestBytes, harborSelectionManifestSha256 } from "../runtime/harbor/manifest.js";
-import { sealHarborSelectionDependencies, writeHarborHostBinding } from "../runtime/harbor/host.js";
+import { isDraftMutable } from "../../domain/lifecycle.js";
+import { parseDraftSpec, type DraftDocument } from "../../domain/draft.js";
+import { refuse } from "../../errors.js";
+import { atomicWriteFileSync } from "../../fs/atomic.js";
+import { createDefaultBenchmarkRuntimeHost } from "../host-port.js";
+import { harborSelectionManifestBytes, harborSelectionManifestSha256 } from "../harbor/manifest.js";
+import { sealHarborSelectionDependencies, writeHarborHostBinding } from "../harbor/host.js";
 import {
   migrateTerminalBenchLegacyMaterial,
   resolveTerminalBench2Selection,
   type TerminalBench2SelectionRequest,
   type TerminalBenchMigrationRequest,
   type TerminalBenchMigrationResolution,
-} from "../runtime/terminal-bench-2/host.js";
-import { TERMINAL_BENCH_2_PROFILE, TerminalBench2SelectionManifestSchema, TerminalBenchMigrationManifestSchema, terminalBench2SelectionBytes } from "../runtime/terminal-bench-2/manifest.js";
-import { draftPath } from "../workspace/layout.js";
-import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
-import type { OperationContext } from "./context.js";
-import { readDraftDocument } from "./drafts.js";
-import { operateAsync } from "./operate-async.js";
-import type { OperationResult } from "./result.js";
+} from "./host.js";
+import { TERMINAL_BENCH_2_PROFILE, TerminalBench2SelectionManifestSchema, TerminalBenchMigrationManifestSchema, terminalBench2SelectionBytes } from "./manifest.js";
+import { draftPath } from "../../workspace/layout.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
+import type { OperationContext } from "../../operations/context.js";
+import { readDraftDocument } from "../../operations/drafts.js";
+import { operateAsync } from "../../operations/operate-async.js";
+import type { OperationResult } from "../../operations/result.js";
 
 export type SelectTerminalBench2RuntimeInput = { readonly draftId: string } & TerminalBench2SelectionRequest;
 export interface SelectTerminalBench2RuntimeResult {

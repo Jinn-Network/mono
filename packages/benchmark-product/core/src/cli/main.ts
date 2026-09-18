@@ -71,7 +71,6 @@ import {
   sampleInit,
   selectMethod,
   exportDerivedBundle,
-  migrateTerminalBenchLegacyTask,
   updateDraft,
   type ArmWarning,
   type AnchorSubject,
@@ -80,7 +79,6 @@ import {
   type QuotePresentation,
   type RunBindResult,
   type RunLaunchDeps,
-  type MigrateTerminalBenchLegacyTaskInput,
   type AdmitHumanTruthInput,
   type CreateHumanReviewPacketsInput,
   type ImportBinaryItemBankInput,
@@ -145,7 +143,6 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <response.json> --signer <configured-signer.json>
   human-review admit --workspace <dir> --principal <id> --draft <draftId>
                    --file <admission-manifest.json>
-  runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
                    [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
                    (catalog id or method-document file; omit ref to list)
@@ -277,7 +274,6 @@ const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "fi
 const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "n", "host"] as const;
 const METHOD_LIST_FLAGS = ["json"] as const;
 const EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
-const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -809,14 +805,6 @@ async function handleMethodBind(
     jsonMode,
     (value) => `bound ${value.official ? "official" : "custom"} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`,
   );
-}
-
-async function handleTerminalBenchMigration(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as MigrateTerminalBenchLegacyTaskInput;
-  const result = await migrateTerminalBenchLegacyTask(opContext, configuration);
-  return renderResult(result, jsonMode, (value) => `migrated legacy Terminal-Bench task as ${value.manifestSha256}\n`);
 }
 
 function handleDerivedExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -1892,7 +1880,6 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["human-review admit", handleHumanReviewAdmit],
   ["method", handleMethodBind],
   ["export", handleDerivedExport],
-  ["runtime terminal-bench migrate", handleTerminalBenchMigration],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],

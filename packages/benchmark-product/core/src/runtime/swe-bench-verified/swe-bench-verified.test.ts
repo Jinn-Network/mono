@@ -9,7 +9,7 @@ import { exportSwebenchPredictions } from "../../operations/swebench-export.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectSwebenchVerifiedRuntime } from "../../operations/swe-bench-verified.js";
+import { selectSwebenchVerifiedRuntime } from "./select.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { exportCompletenessCertification } from "../suite-protocol/comparability.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";

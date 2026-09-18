@@ -29,6 +29,7 @@ describe("retired per-suite verbs", () => {
     ["runtime", "apex-agents", "select"],
     ["runtime", "apex-swe-dev", "select"],
     ["runtime", "deep-swe-v1.1", "select"],
+    ["runtime", "terminal-bench", "migrate"],
     ["runtime", "inspect", "eval", "select"],
     ["runtime", "inspect", "eval", "export"],
     ["runtime", "inspect", "bind-judge"],

@@ -14,7 +14,7 @@ import { runCollect } from "../../operations/run-collect.js";
 import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectTerminalBench21Runtime } from "../../operations/terminal-bench-2-1.js";
+import { selectTerminalBench21Runtime } from "../terminal-bench-2-1/select.js";
 import { exportHarborHubPackage } from "../../operations/hub-export.js";
 import { readRunJournalEntries } from "../../run/journal.js";
 import { readRunState } from "../../run/state.js";

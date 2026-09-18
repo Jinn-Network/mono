@@ -39,14 +39,14 @@ release gate. With `COLOPHON_PUBLICATION_RELEASE_HARBOR` set to an exact Harbor
 Docker, then proves prospective registration, six public-before-Harbor
 Submissions, complete runtime evidence, Accounting/Matrix v2, signed Report v2,
 exact public retrieval, and no publication-triggered rerun. It uses Harbor's
-built-in Oracle agent and does not use model credentials. See the
-[product overview](../README.md#real-harbor-publication-rehearsal) for the exact
-operator command.
+built-in Oracle agent and does not use model credentials. The
+[product overview](../README.md#real-harbor-publication-rehearsal) names this as
+a service launch.
 
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **46 generated operations**, all shipped through the library and CLI
+contains **45 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -73,7 +73,6 @@ with an explicit shipped/deferred GUI disposition:
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
 | `listDrafts` | `colophon draft list` | List drafts. |
-| `migrateTerminalBenchLegacyTask` | `colophon runtime terminal-bench migrate` | Transform legacy Terminal-Bench material with pinned Harbor and preserve both byte histories. |
 | `publicationConfigure` | `colophon publication configure` | Configure the public locator and opt into prospective disclosure. |
 | `publicationRegister` | `colophon publication register` | Store, announce, and exact-probe the registration closure. |
 | `publicationStatus` | `colophon publication status` | Read timing assurance, stage receipts, compatibility, and recovery guidance without backend calls. |

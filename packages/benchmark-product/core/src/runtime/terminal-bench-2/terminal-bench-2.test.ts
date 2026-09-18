@@ -14,7 +14,7 @@ import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { sampleInit } from "../../operations/sample.js";
-import { migrateTerminalBenchLegacyTask, selectTerminalBench2Runtime } from "../../operations/terminal-bench-2.js";
+import { migrateTerminalBenchLegacyTask, selectTerminalBench2Runtime } from "./select.js";
 import { readRunJournalEntries } from "../../run/journal.js";
 import { requireRunState } from "../../run/state.js";
 import { createWorkspacePublicationHttpHandler, publicArchiveUrl, recordPath } from "../../run/publication-source.js";

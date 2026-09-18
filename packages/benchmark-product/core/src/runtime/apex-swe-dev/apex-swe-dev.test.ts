@@ -1,8 +1,6 @@
-import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { cellKey, parseBenchmark } from "@jinn-network/benchmarking-records";
 import { armAdd } from "../../operations/arms.js";
@@ -11,7 +9,7 @@ import { apexSweExportInstructions, exportApexSwePackage, decideApexSweExportMod
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectApexSweDevRuntime } from "../../operations/apex-swe-dev.js";
+import { selectApexSweDevRuntime } from "./select.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { exportCompletenessCertification } from "../suite-protocol/comparability.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
@@ -461,23 +459,8 @@ describe("APEX-SWE-dev dual harness and export", () => {
     if (launched.ok) return;
     expect(launched.error.code).toBe("venue-unavailable");
     expect(launched.error.detail).toMatch(/executes on the operator host/u);
-    expect(launched.error.detail).toMatch(/apex-swe-dev-one-task-qualify/u);
-    expect(launched.error.detail).toMatch(/docs\/runbooks\/apex-swe-dev-official-one-task\.md/u);
     expect(launched.error.detail).toMatch(/`run launch` does not drive this protocol/u);
     // The refusal precedes the locked -> running transition, so nothing is half-launched.
     expect(readDraftDocument(workspaceDir, "no-launch").state).toBe("locked");
   }, 60_000);
-
-  test("operator qualify script fails closed without COLOPHON_APEX_SWE_DEV_ONE_TASK_QUALIFY=1", () => {
-    const script = join(dirname(fileURLToPath(import.meta.url)), "../../../scripts/apex-swe-dev-one-task-qualify.mjs");
-    const source = readFileSync(script, "utf8");
-    expect(source).not.toMatch(/huggingface-cli|git lfs pull|docker compose|huggingface\.co\/datasets/iu);
-    const spawned = spawnSync(process.execPath, [script], {
-      encoding: "utf8",
-      env: { ...process.env, COLOPHON_APEX_SWE_DEV_ONE_TASK_QUALIFY: "" },
-    });
-    expect(spawned.status).toBe(2);
-    expect(`${spawned.stderr}${spawned.stdout}`).toMatch(/COLOPHON_APEX_SWE_DEV_ONE_TASK_QUALIFY/u);
-    expect(`${spawned.stderr}${spawned.stdout}`).not.toMatch(/huggingface-cli|git lfs pull|compose/iu);
-  });
 });

@@ -2,35 +2,35 @@
 import { BENCHMARK_RECORD_KIND, BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
-import { isDraftMutable } from "../domain/lifecycle.js";
-import { parseDraftSpec, type DraftDocument } from "../domain/draft.js";
-import { refuse } from "../errors.js";
-import { atomicWriteFileSync } from "../fs/atomic.js";
-import { buildApexSweDevTasks } from "../intake/apex-swe-dev.js";
-import { deriveWorkspaceAuthoredBenchmark, deriveWorkspaceAuthoredTask } from "../intake/workspace-authored.js";
-import { attachBenchmarkToDraft } from "./attach.js";
+import { isDraftMutable } from "../../domain/lifecycle.js";
+import { parseDraftSpec, type DraftDocument } from "../../domain/draft.js";
+import { refuse } from "../../errors.js";
+import { atomicWriteFileSync } from "../../fs/atomic.js";
+import { buildApexSweDevTasks } from "../../intake/apex-swe-dev.js";
+import { deriveWorkspaceAuthoredBenchmark, deriveWorkspaceAuthoredTask } from "../../intake/workspace-authored.js";
+import { attachBenchmarkToDraft } from "../../operations/attach.js";
 import {
   APEX_SWE_DEV_ADAPTER_ID,
   APEX_SWE_DEV_DATASET_ID,
   APEX_SWE_DEV_SELECTION_SCHEMA,
   ApexSweDevSelectionManifestSchema,
   apexSweDevSelectionBytes,
-} from "../runtime/apex-swe-dev/manifest.js";
+} from "./manifest.js";
 import {
   resolveApexSweDevSelection,
   sealApexSweDevSelectionDependencies,
   writeApexSweDevHostBinding,
   type ApexSweDevSelectionRequest,
-} from "../runtime/apex-swe-dev/host.js";
-import { SuiteProtocolSelectionSchema, suiteProtocolSelectionBytes } from "../runtime/suite-protocol/manifest.js";
-import { loadOrCreateReportSigningKey } from "../report/signing.js";
-import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
-import { draftPath } from "../workspace/layout.js";
-import { putSealedBytes } from "../workspace/sealed-store.js";
-import type { OperationContext } from "./context.js";
-import { readDraftDocument } from "./drafts.js";
-import { operateAsync } from "./operate-async.js";
-import type { OperationResult } from "./result.js";
+} from "./host.js";
+import { SuiteProtocolSelectionSchema, suiteProtocolSelectionBytes } from "../suite-protocol/manifest.js";
+import { loadOrCreateReportSigningKey } from "../../report/signing.js";
+import { recordWorkspaceAuthorship } from "../../run/publication-authority.js";
+import { draftPath } from "../../workspace/layout.js";
+import { putSealedBytes } from "../../workspace/sealed-store.js";
+import type { OperationContext } from "../../operations/context.js";
+import { readDraftDocument } from "../../operations/drafts.js";
+import { operateAsync } from "../../operations/operate-async.js";
+import type { OperationResult } from "../../operations/result.js";
 
 export type SelectApexSweDevRuntimeInput = { readonly draftId: string } & ApexSweDevSelectionRequest;
 export interface SelectApexSweDevRuntimeResult {

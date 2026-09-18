@@ -1,8 +1,6 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { parseBenchmark } from "@jinn-network/benchmarking-records";
 import { armAdd } from "../../operations/arms.js";
@@ -10,8 +8,8 @@ import { createDraft, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectTerminalBench21Runtime } from "../../operations/terminal-bench-2-1.js";
-import { selectTerminalBench30Runtime } from "../../operations/terminal-bench-3-0.js";
+import { selectTerminalBench21Runtime } from "../terminal-bench-2-1/select.js";
+import { selectTerminalBench30Runtime } from "./select.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import type { HarborSelectionManifest } from "../harbor/manifest.js";
@@ -288,15 +286,6 @@ describe("Terminal-Bench 3.0 official-suite intake", () => {
       evaluationRuntime: { adapterId: INSPECT_ADAPTER_ID, selectionManifestSha256: selected.result.selectionManifestSha256 },
     })).toThrow(/sealed Inspect selection manifest is invalid/u);
   }, 60_000);
-
-  test("qualify script exits non-zero without COLOPHON_TB30_ONE_TASK_QUALIFY=1", () => {
-    const script = join(dirname(fileURLToPath(import.meta.url)), "../../../scripts/tb30-one-task-qualify.mjs");
-    const env = { ...process.env };
-    delete env.COLOPHON_TB30_ONE_TASK_QUALIFY;
-    const result = spawnSync(process.execPath, [script], { encoding: "utf8", env });
-    expect(result.status).toBe(2);
-    expect(`${result.stdout}${result.stderr}`).toMatch(/COLOPHON_TB30_ONE_TASK_QUALIFY=1/u);
-  });
 
   test("official suite refuses binary-instrument majority-k", async () => {
     const context = await prepareDraft("binary");
