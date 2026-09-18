@@ -6,7 +6,7 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **100** entries: **14** `sealed-platform-v1` packages, **63** `implementations-v1` packages, **2** disabled `experimental-policy` packages, **15** other entries below `packages/**`, and **6** adjacent entries.
+The catalog contains **98** entries: **14** `sealed-platform-v1` packages, **61** `implementations-v1` packages, **2** disabled `experimental-policy` packages, **15** other entries below `packages/**`, and **6** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -23,7 +23,6 @@ The catalog contains **100** entries: **14** `sealed-platform-v1` packages, **63
 | @jinn-network/benchmarking-evidence | packages/benchmarking/evidence | benchmarking | 3 | platform | evidence-native cohort verification and matrix assembly | candidate | implementations-v1 | canary-and-stable | @jinn-network/benchmarking-aggregate<br>@jinn-network/benchmarking-protocol<br>@jinn-network/evidence-protocol<br>@jinn-network/trust-core | — | vitest |
 | @jinn-network/benchmarking-interop | packages/benchmarking/interop | benchmarking | 3 | platform | task-execution import and export | candidate | implementations-v1 | canary-and-stable | @jinn-network/benchmarking-records<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol | — | — |
 | @jinn-network/benchmarking-local | packages/benchmarking/local | benchmarking | 3 | platform | local venue adapter | candidate | implementations-v1 | canary-and-stable | @jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run | — | — |
-| @jinn-network/benchmarking-marketplace | packages/benchmarking/marketplace | benchmarking | 3 | platform | marketplace adapter | candidate | implementations-v1 | canary-and-stable | @jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-projector<br>@jinn-network/task-execution-protocol | — | — |
 | @jinn-network/benchmarking-native-capture | packages/benchmarking/native-capture | benchmarking | 3 | platform | resumable native execution capture coordinator | candidate | implementations-v1 | canary-and-stable | @jinn-network/benchmarking-protocol<br>@jinn-network/evidence-protocol<br>@jinn-network/execution-evidence-builder | — | vitest |
 | @jinn-network/benchmarking-protocol | packages/benchmarking/protocol | benchmarking | 2 | platform | evidence-native benchmarking record protocol | candidate | sealed-platform-v1 | canary-and-stable | @jinn-network/evidence-protocol<br>@noble/hashes<br>zod | — | vitest |
 | @jinn-network/benchmarking-publication | packages/benchmarking/publication | benchmarking | 3 | platform | benchmark publication planning and accounting verification | candidate | implementations-v1 | canary-and-stable | @jinn-network/benchmarking-records<br>@jinn-network/record-publication<br>@jinn-network/task-execution-protocol | — | — |
@@ -33,7 +32,6 @@ The catalog contains **100** entries: **14** `sealed-platform-v1` packages, **63
 | @jinn-network/contract-abis | packages/contract-abis | contracts | 2 | platform | authoritative generated contract ABIs and consumer slices | candidate | implementations-v1 | canary-and-stable | — | — | — |
 | @jinn-network/core | packages/core | legacy-plugin-stack | — | legacy | legacy product-support kernel | transitional | legacy-product-lines | independent | @huggingface/transformers<br>@jinn-network/plugin<br>@lmoe/gliner-onnx<br>@noble/hashes<br>@secretlint/core<br>@secretlint/secretlint-rule-preset-recommend<br>better-sqlite3<br>canonicalize<br>zod | — | vitest |
 | @jinn-network/record-discovery-client | packages/discovery/client | discovery | 3 | platform | discovery client and resolution | candidate | implementations-v1 | canary-and-stable | @jinn-network/record-discovery-protocol<br>@jinn-network/trust-core<br>zod | — | — |
-| @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking | discovery | 3 | platform | benchmarking facts projection | candidate | implementations-v1 | canary-and-stable | @jinn-network/benchmarking-records<br>@jinn-network/record-discovery-protocol<br>@jinn-network/trust-core | — | — |
 | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments | environments | 3 | platform | chain-environment facts projection | experimental | implementations-v1 | canary-and-stable | @jinn-network/chain-environment-record<br>@jinn-network/information-world<br>@jinn-network/record-discovery-protocol | — | — |
 | @jinn-network/record-discovery-facts-environments | packages/discovery/facts/environments | environments | 3 | platform | experimental environment facts projection | experimental | implementations-v1 | canary-and-stable | @jinn-network/environment-record<br>@jinn-network/record-discovery-protocol | — | — |
 | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence | discovery | 3 | platform | evidence facts projection | candidate | implementations-v1 | canary-and-stable | @jinn-network/evidence-discovery<br>@jinn-network/evidence-repository<br>@jinn-network/record-discovery-protocol<br>zod | — | — |
@@ -177,11 +175,6 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/benchmarking-interop | runtime | @jinn-network/task-execution-protocol |
 | @jinn-network/benchmarking-local | runtime | @jinn-network/benchmarking-records |
 | @jinn-network/benchmarking-local | runtime | @jinn-network/benchmarking-run |
-| @jinn-network/benchmarking-marketplace | runtime | @jinn-network/benchmarking-records |
-| @jinn-network/benchmarking-marketplace | runtime | @jinn-network/benchmarking-run |
-| @jinn-network/benchmarking-marketplace | runtime | @jinn-network/marketplace-binding |
-| @jinn-network/benchmarking-marketplace | runtime | @jinn-network/marketplace-projector |
-| @jinn-network/benchmarking-marketplace | runtime | @jinn-network/task-execution-protocol |
 | @jinn-network/benchmarking-native-capture | runtime | @jinn-network/benchmarking-protocol |
 | @jinn-network/benchmarking-native-capture | runtime | @jinn-network/evidence-protocol |
 | @jinn-network/benchmarking-native-capture | runtime | @jinn-network/execution-evidence-builder |
@@ -352,9 +345,6 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/policy-outcomes | runtime | @jinn-network/policy-identity |
 | @jinn-network/record-discovery-client | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/record-discovery-client | runtime | @jinn-network/trust-core |
-| @jinn-network/record-discovery-facts-benchmarking | runtime | @jinn-network/benchmarking-records |
-| @jinn-network/record-discovery-facts-benchmarking | runtime | @jinn-network/record-discovery-protocol |
-| @jinn-network/record-discovery-facts-benchmarking | runtime | @jinn-network/trust-core |
 | @jinn-network/record-discovery-facts-chain-environments | runtime | @jinn-network/chain-environment-record |
 | @jinn-network/record-discovery-facts-chain-environments | runtime | @jinn-network/information-world |
 | @jinn-network/record-discovery-facts-chain-environments | runtime | @jinn-network/record-discovery-protocol |
@@ -463,10 +453,10 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 
 ### `implementations-v1` runtime waves
 
-1. `@jinn-network/benchmarking-aggregate`, `@jinn-network/benchmarking-interop`, `@jinn-network/benchmarking-run`, `@jinn-network/chain-environment-verification`, `@jinn-network/contract-abis`, `@jinn-network/environment-verification`, `@jinn-network/evidence-derivation`, `@jinn-network/evidence-repository`, `@jinn-network/evidence-trace-decode`, `@jinn-network/execution-evidence-builder`, `@jinn-network/information-world`, `@jinn-network/record-discovery-client`, `@jinn-network/record-discovery-facts-benchmarking`, `@jinn-network/record-discovery-facts-environments`, `@jinn-network/record-discovery-facts-offers`, `@jinn-network/record-discovery-facts-task-execution`, `@jinn-network/record-discovery-facts-trust`, `@jinn-network/record-discovery-serve`, `@jinn-network/task-admission`, `@jinn-network/task-curation`, `@jinn-network/task-execution-backend`, `@jinn-network/task-execution-workspace`, `@jinn-network/trust-observation`, `@jinn-network/trust-resolve`
+1. `@jinn-network/benchmarking-aggregate`, `@jinn-network/benchmarking-interop`, `@jinn-network/benchmarking-run`, `@jinn-network/chain-environment-verification`, `@jinn-network/contract-abis`, `@jinn-network/environment-verification`, `@jinn-network/evidence-derivation`, `@jinn-network/evidence-repository`, `@jinn-network/evidence-trace-decode`, `@jinn-network/execution-evidence-builder`, `@jinn-network/information-world`, `@jinn-network/record-discovery-client`, `@jinn-network/record-discovery-facts-environments`, `@jinn-network/record-discovery-facts-offers`, `@jinn-network/record-discovery-facts-task-execution`, `@jinn-network/record-discovery-facts-trust`, `@jinn-network/record-discovery-serve`, `@jinn-network/task-admission`, `@jinn-network/task-curation`, `@jinn-network/task-execution-backend`, `@jinn-network/task-execution-workspace`, `@jinn-network/trust-observation`, `@jinn-network/trust-resolve`
 2. `@jinn-network/attestation-issuer`, `@jinn-network/benchmarking-evidence`, `@jinn-network/benchmarking-local`, `@jinn-network/benchmarking-native-capture`, `@jinn-network/chain-state-extraction`, `@jinn-network/evidence-discovery`, `@jinn-network/evidence-gate`, `@jinn-network/evidence-repository-ipfs`, `@jinn-network/evidence-repository-oci`, `@jinn-network/execution-recorder`, `@jinn-network/marketplace-binding`, `@jinn-network/record-discovery-facts-chain-environments`, `@jinn-network/record-discovery-transport-http`, `@jinn-network/record-publication`, `@jinn-network/task-derivation`, `@jinn-network/task-execution-supervisor`, `@jinn-network/trust-testing`
 3. `@jinn-network/benchmarking-evaluation`, `@jinn-network/benchmarking-publication`, `@jinn-network/chain-scenarios`, `@jinn-network/evidence-catalog-sqlite`, `@jinn-network/evidence-publication`, `@jinn-network/evidence-retrieval`, `@jinn-network/execution-recorder-bridge`, `@jinn-network/marketplace-projector`, `@jinn-network/record-discovery-facts-evidence`, `@jinn-network/record-discovery-source-evidence-journal`, `@jinn-network/task-execution-launchers`, `@jinn-network/task-posting`
-4. `@jinn-network/benchmarking-marketplace`, `@jinn-network/evidence-contribution`, `@jinn-network/evidence-local-runtime`, `@jinn-network/marketplace-venue-base`, `@jinn-network/task-execution-backend-local`, `@jinn-network/task-execution-evaluation-harness`
+4. `@jinn-network/evidence-contribution`, `@jinn-network/evidence-local-runtime`, `@jinn-network/marketplace-venue-base`, `@jinn-network/task-execution-backend-local`, `@jinn-network/task-execution-evaluation-harness`
 5. `@jinn-network/task-execution-evaluator-adapters`, `@jinn-network/task-execution-testing`
 6. `@jinn-network/marketplace-testing`, `@jinn-network/task-execution-oci-grader`
 
@@ -480,7 +470,6 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/benchmarking-evidence | @jinn-network/benchmarking-aggregate |
 | @jinn-network/benchmarking-interop | — |
 | @jinn-network/benchmarking-local | @jinn-network/benchmarking-run |
-| @jinn-network/benchmarking-marketplace | @jinn-network/benchmarking-run<br>@jinn-network/contract-abis<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-projector<br>@jinn-network/record-discovery-serve<br>@jinn-network/task-execution-backend<br>@jinn-network/trust-resolve |
 | @jinn-network/benchmarking-native-capture | @jinn-network/execution-evidence-builder |
 | @jinn-network/benchmarking-publication | @jinn-network/record-discovery-serve<br>@jinn-network/record-publication |
 | @jinn-network/benchmarking-run | — |
@@ -510,7 +499,6 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/marketplace-testing | @jinn-network/contract-abis<br>@jinn-network/evidence-discovery<br>@jinn-network/evidence-repository<br>@jinn-network/execution-evidence-builder<br>@jinn-network/execution-recorder<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-projector<br>@jinn-network/marketplace-venue-base<br>@jinn-network/record-discovery-serve<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-testing<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-resolve<br>@jinn-network/trust-testing |
 | @jinn-network/marketplace-venue-base | @jinn-network/contract-abis<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-projector<br>@jinn-network/record-discovery-serve<br>@jinn-network/task-execution-backend<br>@jinn-network/trust-resolve |
 | @jinn-network/record-discovery-client | — |
-| @jinn-network/record-discovery-facts-benchmarking | — |
 | @jinn-network/record-discovery-facts-chain-environments | @jinn-network/information-world |
 | @jinn-network/record-discovery-facts-environments | — |
 | @jinn-network/record-discovery-facts-evidence | @jinn-network/evidence-discovery<br>@jinn-network/evidence-repository |
@@ -546,12 +534,12 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | experimental-lifecycle-notifications | 1 | lifecycle-notifications-ci | disabled | false | false | false |
 | experimental-policy | 2 | policy-ci | disabled | false | false | false |
 | experimental-read-plane | 1 | read-plane-ci | disabled | false | false | false |
-| implementations-v1 | 63 | benchmarking-ci<br>contracts-ci<br>environments-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>task-supply-ci<br>trust-ci | canary-and-stable | true | true | true |
+| implementations-v1 | 61 | benchmarking-ci<br>contracts-ci<br>environments-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>task-supply-ci<br>trust-ci | canary-and-stable | true | true | true |
 | legacy-product-lines | 6 | client-ci<br>core-ci<br>layer-ci<br>marketplace-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
 | sealed-platform-v1 | 14 | benchmarking-ci<br>environments-ci<br>evidence-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-and-stable | true | true | true |
 | transitional-or-private | 12 | benchmark-product-ci<br>broadcast-bot-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>operator-console-ci<br>plugin-tree-ci<br>policy-optimization-ci<br>task-supply-ci<br>website-ci | private<br>never | false | false | false |
 
-The exact 77-package trusted-publisher set is the union of stack-published groups. Receipt-gated canary publication is enabled for every stack-published group. **Stable publication is disabled until live `spec.jinn.network` profile hosting verification passes.** The 2 `experimental-policy` packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
+The exact 75-package trusted-publisher set is the union of stack-published groups. Receipt-gated canary publication is enabled for every stack-published group. **Stable publication is disabled until live `spec.jinn.network` profile hosting verification passes.** The 2 `experimental-policy` packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
 | Package | Workflow | Environment field |
 | --- | --- | --- |
@@ -561,7 +549,6 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | @jinn-network/benchmarking-evidence | stack-npm-publish.yml | npm-publish |
 | @jinn-network/benchmarking-interop | stack-npm-publish.yml | npm-publish |
 | @jinn-network/benchmarking-local | stack-npm-publish.yml | npm-publish |
-| @jinn-network/benchmarking-marketplace | stack-npm-publish.yml | npm-publish |
 | @jinn-network/benchmarking-native-capture | stack-npm-publish.yml | npm-publish |
 | @jinn-network/benchmarking-protocol | stack-npm-publish.yml | npm-publish |
 | @jinn-network/benchmarking-publication | stack-npm-publish.yml | npm-publish |
@@ -599,7 +586,6 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | @jinn-network/marketplace-testing | stack-npm-publish.yml | npm-publish |
 | @jinn-network/marketplace-venue-base | stack-npm-publish.yml | npm-publish |
 | @jinn-network/record-discovery-client | stack-npm-publish.yml | npm-publish |
-| @jinn-network/record-discovery-facts-benchmarking | stack-npm-publish.yml | npm-publish |
 | @jinn-network/record-discovery-facts-chain-environments | stack-npm-publish.yml | npm-publish |
 | @jinn-network/record-discovery-facts-environments | stack-npm-publish.yml | npm-publish |
 | @jinn-network/record-discovery-facts-evidence | stack-npm-publish.yml | npm-publish |
@@ -650,7 +636,6 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | @jinn-network/benchmarking-evidence | implementations-v1 | — | — | — | — |
 | @jinn-network/benchmarking-interop | implementations-v1 | — | — | fixtures | — |
 | @jinn-network/benchmarking-local | implementations-v1 | — | — | — | — |
-| @jinn-network/benchmarking-marketplace | implementations-v1 | — | — | fixtures | — |
 | @jinn-network/benchmarking-native-capture | implementations-v1 | — | — | — | — |
 | @jinn-network/benchmarking-protocol | sealed-platform-v1 | — | — | — | — |
 | @jinn-network/benchmarking-publication | implementations-v1 | — | — | — | — |
@@ -660,7 +645,6 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | @jinn-network/contract-abis | implementations-v1 | — | — | — | — |
 | @jinn-network/core | legacy-product-lines | — | — | — | — |
 | @jinn-network/record-discovery-client | implementations-v1 | — | — | — | — |
-| @jinn-network/record-discovery-facts-benchmarking | implementations-v1 | — | profiles | — | — |
 | @jinn-network/record-discovery-facts-chain-environments | implementations-v1 | — | profiles | — | — |
 | @jinn-network/record-discovery-facts-environments | implementations-v1 | — | profiles | — | — |
 | @jinn-network/record-discovery-facts-evidence | implementations-v1 | — | profiles | — | — |
@@ -766,8 +750,6 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/benchmarking-interop | packages/benchmarking/interop/fixtures/swebench/expected.v2.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-interop | packages/benchmarking/interop/fixtures/swebench/row.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-interop | packages/benchmarking/interop/fixtures/swebench/rows.multi-repo.json | — | — | — |
-| fixtures | @jinn-network/benchmarking-marketplace | packages/benchmarking/marketplace/fixtures/manifest.sha256.json | — | — | — |
-| fixtures | @jinn-network/benchmarking-marketplace | packages/benchmarking/marketplace/fixtures/projector/golden-events/revised-task-created.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-records | packages/benchmarking/records/fixtures/benchmark-accounting/invalid-authorization-after-close.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-records | packages/benchmarking/records/fixtures/benchmark-accounting/invalid-missing-protocol.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-records | packages/benchmarking/records/fixtures/benchmark-accounting/invalid-missing-publisher-authority.json | — | — | — |
@@ -874,16 +856,6 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/miniature-run/verdicts.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/ordering/transcripts.json | — | — | — |
 | conformance | @jinn-network/benchmarking-testing | packages/benchmarking/testing/src/index.ts | . | ./dist/index.d.ts<br>./dist/index.js | — |
-| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json | — | — | https://spec.jinn.network/facts/benchmark-accounting/v1 |
-| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v2.json | — | — | https://spec.jinn.network/facts/benchmark-accounting/v2 |
-| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v1.json | — | — | https://spec.jinn.network/facts/benchmark/v1 |
-| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v2.json | — | — | https://spec.jinn.network/facts/benchmark/v2 |
-| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v1.json | — | — | https://spec.jinn.network/facts/benchmark-matrix/v1 |
-| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v2.json | — | — | https://spec.jinn.network/facts/benchmark-matrix/v2 |
-| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v1.json | — | — | https://spec.jinn.network/facts/benchmark-report/v1 |
-| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v2.json | — | — | https://spec.jinn.network/facts/benchmark-report/v2 |
-| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v1.json | — | — | https://spec.jinn.network/facts/benchmark-run/v1 |
-| profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v2.json | — | — | https://spec.jinn.network/facts/benchmark-run/v2 |
 | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.v1.json | — | — | https://spec.jinn.network/facts/chain-environment/v1 |
 | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.v2.json | — | — | https://spec.jinn.network/facts/chain-environment/v2 |
 | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/crypto-environment.v1.json | — | — | https://spec.jinn.network/facts/crypto-environment/v1 |
@@ -1770,16 +1742,6 @@ The exact 77-package trusted-publisher set is the union of stack-published group
 | --- | --- | --- | --- | --- |
 | https://spec.jinn.network/facts/authorization/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.v1.json |
 | https://spec.jinn.network/facts/authorization/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.v2.json |
-| https://spec.jinn.network/facts/benchmark-accounting/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json |
-| https://spec.jinn.network/facts/benchmark-accounting/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v2.json |
-| https://spec.jinn.network/facts/benchmark-matrix/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v1.json |
-| https://spec.jinn.network/facts/benchmark-matrix/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.v2.json |
-| https://spec.jinn.network/facts/benchmark-report/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v1.json |
-| https://spec.jinn.network/facts/benchmark-report/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.v2.json |
-| https://spec.jinn.network/facts/benchmark-run/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v1.json |
-| https://spec.jinn.network/facts/benchmark-run/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.v2.json |
-| https://spec.jinn.network/facts/benchmark/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v1.json |
-| https://spec.jinn.network/facts/benchmark/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.v2.json |
 | https://spec.jinn.network/facts/chain-environment/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.v1.json |
 | https://spec.jinn.network/facts/chain-environment/v2 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.v2.json |
 | https://spec.jinn.network/facts/checkpoint/v1 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/checkpoint.v1.json |
