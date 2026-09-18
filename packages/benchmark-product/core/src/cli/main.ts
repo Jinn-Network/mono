@@ -94,6 +94,7 @@ import {
   readExternalRunRecords,
   type ExternalRunRecordFormat,
 } from "../intake/external-run-records.js";
+import { readHarborRunImport } from "../intake/harbor-run-records.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
 import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/verify";
@@ -192,6 +193,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   run import       --workspace <dir> --principal <id> --draft <draftId>
                    --file <records.jsonl|records.csv> --source <harness>
                    [--format jsonl|csv]
+                   --from harbor <jobs-dir> instead of --file reads Harbor 0.21
+                   jobs and trials into the same per-attempt records
                    --template instead of --file/--source prints the sealed
                    slate as a skeleton to fill in
   launch           --workspace <dir> --principal <id> --draft <draftId>
@@ -309,7 +312,7 @@ const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as 
 const PUBLICATION_SERVE_FLAGS = ["workspace", "principal", "json", "source", "host", "port"] as const;
 const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const RUN_IMPORT_FLAGS = ["workspace", "principal", "json", "draft", "file", "format", "source", "template"] as const;
+const RUN_IMPORT_FLAGS = ["workspace", "principal", "json", "draft", "file", "format", "source", "template", "from"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const RESUME_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const CANCEL_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -1564,14 +1567,14 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
   assertKnownFlags(args, RUN_IMPORT_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
-  const format = importFormat(args);
 
   if (present(args, "template")) {
-    for (const flag of ["file", "source"] as const) {
+    for (const flag of ["file", "source", "from"] as const) {
       if (optional(args, flag) !== undefined) {
         refuse("invalid-invocation", flag, `run import --template prints a skeleton and reads nothing; --${flag} is not accepted with it`);
       }
     }
+    const format = importFormat(args);
     const rendered = renderImportTemplate(opContext.workspaceDir, draftId, format);
     if (jsonMode) {
       return {
@@ -1583,6 +1586,45 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
     return { exitCode: 0, stdout: rendered.template, stderr: "" };
   }
 
+  if (present(args, "from")) {
+    const reader = required(args, "from");
+    if (reader !== "harbor") {
+      refuse("invalid-invocation", "from", `--from must be "harbor", got "${reader}"`);
+    }
+    for (const flag of ["file", "format", "source"] as const) {
+      if (optional(args, flag) !== undefined) {
+        refuse("invalid-invocation", flag, `run import --from harbor reads a jobs directory; --${flag} is not accepted with it`);
+      }
+    }
+    const extra = args.words.slice(2);
+    const jobsDirWord = extra[0];
+    if (extra.length !== 1 || jobsDirWord === undefined || jobsDirWord === "") {
+      refuse("invalid-invocation", "from", "run import --from harbor requires <jobs-dir>");
+    }
+    const jobsDir = pathFrom(context.cwd, jobsDirWord);
+    const dump = readHarborRunImport({
+      workspaceDir: opContext.workspaceDir,
+      draftId,
+      jobsDir,
+    });
+    const result = await importRunRecords(opContext, {
+      draftId,
+      records: dump.records,
+      source: dump.source,
+      evidenceRoot: dump.evidenceRoot,
+    });
+    return renderResult(
+      result,
+      jsonMode,
+      (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
+        + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `
+        + `${value.written.notDelivered} not delivered\n`
+        + "note: publication of an imported run is refused pending issue #3417 — collect and report "
+        + "work, publish does not (see EXTERNAL-RUN-IMPORT.md)\n",
+    );
+  }
+
+  const format = importFormat(args);
   // Relative `evidence[].path` entries resolve against the dump's own directory, so a dump and the
   // artifacts it names move together as one tree.
   const file = pathFrom(context.cwd, required(args, "file"));
