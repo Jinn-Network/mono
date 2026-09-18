@@ -21,6 +21,7 @@ import {
   type JinnConfig,
 } from '../../config.js';
 import { getChainConfig, ERC20_ABI } from '../../earning/contracts.js';
+import { sanitizeErrorText } from '../../rpc/transport.js';
 import { runPortfolioV0DoctorChecks as defaultRunPortfolioV0DoctorChecks } from '../../api/portfolio-v0-doctor.js';
 import { mnemonicKeystorePath } from '../../earning/store.js';
 import {
@@ -252,7 +253,7 @@ function checkDaemonRuntimeReady(): CheckResult {
  * to refill the distributor. Emitted as a warning, not a hard failure,
  * because a refill may be in-flight.
  */
-async function checkDistributorReachable(config: JinnConfig): Promise<CheckResult | null> {
+export async function checkDistributorReachable(config: JinnConfig): Promise<CheckResult | null> {
   if (config.network !== 'testnet') return null;
   try {
     const cfg = getChainConfig('base-sepolia', {
@@ -297,7 +298,7 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
     return {
       name: 'distributor_reachable',
       ok: true, // Non-fatal — probe failure doesn't mean the pool is empty.
-      detail: `distributor probe failed: ${err instanceof Error ? err.message : String(err)}`,
+      detail: `distributor probe failed: ${sanitizeErrorText(err)}`,
     };
   }
 }
