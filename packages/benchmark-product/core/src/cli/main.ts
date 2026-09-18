@@ -78,6 +78,7 @@ import {
   type OperationContext,
   type OperationResult,
   type QuotePresentation,
+  type RunBindResult,
   type RunLaunchDeps,
   type MigrateTerminalBenchLegacyTaskInput,
   type AdmitHumanTruthInput,
@@ -98,6 +99,7 @@ import { disclosureDeclare, disclosureShow } from "../operations/disclosure-decl
 import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/verify";
 import {
   DOMAIN_BINDING_MECHANISM_NAMES,
+  beaconIndexWord,
   exportFreezeRepo,
   spdxLicenseProblem,
   summarizeVerificationOutcome,
@@ -1182,12 +1184,18 @@ function handleBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): C
       value: required(args, "beacon-value"),
     },
   });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `bound run ${value.binding.sealDigest} to ${value.binding.beacon.source} round `
-      + `${value.binding.beacon.round}: ${value.recordSha256}\n${value.statement}\n`,
-  );
+  return renderResult(result, jsonMode, renderBindLine);
+}
+
+/**
+ * The `bind` human line (issue #3871). The index word follows the source's time basis through the
+ * same helper the reader's report face uses, so a height-indexed beacon is never called a round
+ * here while the report calls it a height.
+ */
+export function renderBindLine(value: RunBindResult): string {
+  const { beacon } = value.binding;
+  return `bound run ${value.binding.sealDigest} to ${beacon.source} ${beaconIndexWord(beacon.source)} `
+    + `${beacon.round}: ${value.recordSha256}\n${value.statement}\n`;
 }
 
 async function handleAnchor(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
