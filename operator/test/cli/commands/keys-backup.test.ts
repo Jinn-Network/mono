@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import keysCmd from '../../../src/cli/commands/keys-backup.js';
 import type { CommandContext } from '../../../src/cli/command.js';
+import { readKeystorePasswordFile } from '../../../src/earning/password-file.js';
 
 async function makeKeystore(): Promise<{ dir: string; password: string }> {
   const dir = mkdtempSync(join(tmpdir(), 'jinn-keys-backup-test-'));
@@ -247,7 +248,7 @@ describe('keys change-password command', () => {
     await expectDecryptsWith(defaultEarningDir, 'brand-new-password');
   });
 
-  it('deletes the default-operator primary file and leaves the unused legacy file', async () => {
+  it('deletes a same-secret default-operator legacy leftover after primary rotation', async () => {
     const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
     writeFileSync(join(defaultEarningDir, 'keystore-password'), `${password}\n`, { mode: 0o600 });
 
@@ -262,8 +263,30 @@ describe('keys change-password command', () => {
     const result = JSON.parse(writes[writes.length - 1]!);
     expect(result.passwordFileDeleted).toBe(true);
     expect(existsSync(join(defaultEarningDir, 'keystore-password'))).toBe(false);
-    expect(existsSync(passwordFile)).toBe(true);
-    expect(readFileSync(passwordFile, 'utf-8').trim()).toBe(password);
+    expect(existsSync(passwordFile)).toBe(false);
+    const leftover = readKeystorePasswordFile(defaultEarningDir, { HOME: home });
+    expect(leftover?.password).not.toBe(password);
+    expect(leftover).toBeUndefined();
+    await expectDecryptsWith(defaultEarningDir, 'brand-new-password');
+  });
+
+  it('keeps a default-operator legacy file that holds a different secret', async () => {
+    const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
+    writeFileSync(join(defaultEarningDir, 'keystore-password'), `${password}\n`, { mode: 0o600 });
+    writeFileSync(passwordFile, 'other-host-secret\n', { mode: 0o600 });
+
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home,
+      JINN_EARNING_DIR: defaultEarningDir,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    const result = JSON.parse(writes[writes.length - 1]!);
+    expect(result.passwordFileDeleted).toBe(true);
+    expect(existsSync(join(defaultEarningDir, 'keystore-password'))).toBe(false);
+    expect(readFileSync(passwordFile, 'utf-8').trim()).toBe('other-host-secret');
     await expectDecryptsWith(defaultEarningDir, 'brand-new-password');
   });
 

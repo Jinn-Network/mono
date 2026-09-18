@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
@@ -9,6 +9,7 @@ import { emitEnvelope } from '../../errors/envelope.js';
 import { FleetStateStore } from '../../earning/store.js';
 import {
   isDefaultOperatorKeystore,
+  passwordFileIsStale,
   primaryKeystorePasswordPath,
 } from '../../earning/password-file.js';
 import { decryptMnemonic, encryptMnemonic } from '../../earning/wallet.js';
@@ -92,6 +93,13 @@ function deleteRotatedPasswordFile(
     const path = current.filePath ?? primaryKeystorePasswordPath(earningDir);
     if (!fileStillHolds(path, current.password)) return false;
     unlinkSync(path);
+    // Default-operator HTTP rotation keeps primary and legacy in sync. After a
+    // later CLI rotation sourced from primary, a same-secret leftover at the
+    // legacy path is the next resolve source — delete it only when stale.
+    const legacyPath = join(dirname(defaultEarningDir), 'keystore-password');
+    if (passwordFileIsStale(legacyPath, defaultEarningDir, earningDir, current.password, newPassword, warn)) {
+      unlinkSync(legacyPath);
+    }
     return true;
   }
   if (current.source === 'legacy' && current.filePath) {
@@ -319,7 +327,9 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
   // 8. Save new keystore
   await store.saveMnemonicKeystore(newKeystore);
 
-  // 9. Delete only the file that actually supplied the old secret.
+  // 9. Delete the file that supplied the old secret; for the default operator,
+  //    also drop a same-secret legacy leftover so the next resolve cannot
+  //    resurrect the rotated-away password.
   let passwordFileDeleted = false;
   const warn = (m: string): void => { process.stderr.write(`${m}\n`); };
   if (deleteRotatedPasswordFile(current, defaultEarningDir, earningDir, newPass.password, warn)) {
