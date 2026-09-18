@@ -68,7 +68,7 @@ with an explicit shipped/deferred GUI disposition:
 | `admitHumanTruth` | `colophon human-review admit` | Derive two-person unanimous or explicitly operator-only truth records, including exclusion/replacement accounting. |
 | `importBinaryItemBank` | `colophon import item-bank` | Import admitted binary-judgment items from three canonical JSONL manifests. |
 | `importSweBenchRows` | `colophon import swebench` | Import SWE-bench-shaped rows through interop. |
-| `importRunRecords` | `colophon run import` | Turn a locked run into a run from an external harness's per-attempt records over the whole sealed slate. `--from harbor` reads Harbor 0.21 jobs and trials into those records. |
+| `importRunRecords` | `colophon run import` | Turn a locked run into a run from an external harness's per-attempt records over the whole sealed slate. `--from harbor` reads Harbor 0.21 jobs and trials; `--from inspect` reads Inspect EvalLogs. |
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
 | `listDrafts` | `colophon draft list` | List drafts. |
