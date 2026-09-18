@@ -65,8 +65,8 @@ import {
   admitHumanTruth,
   createHumanReviewPackets,
   signHumanReviewResponse,
-} from "../../operations/human-review.js";
-import { importBinaryItemBank } from "../../operations/import-item-bank.js";
+} from "./seed-admission.js";
+import { importBinaryItemBank, renderCanonicalJsonl } from "./seed-binary-item-bank.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runAnchor } from "../../operations/run-anchor.js";
 import { disclosureDeclare } from "../../operations/disclosure-declare.js";
@@ -78,10 +78,9 @@ import { runReport } from "../../operations/report.js";
 import {
   BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
   BINARY_ITEM_BANK_ENTRY_PROTOCOL,
+  BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED,
   BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
-  renderCanonicalJsonl,
-} from "../../intake/binary-item-bank.js";
-import { BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED } from "../../human-review/application.js";
+} from "@colophon-claims/verify/admission";
 import { readRunState } from "../../run/state.js";
 import type { ProxiedBackend } from "../../run/drive.js";
 import {

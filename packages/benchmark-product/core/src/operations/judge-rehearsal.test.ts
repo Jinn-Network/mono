@@ -37,7 +37,7 @@ import {
 import {
   PROMPTED_SCREENING_LIMITATIONS,
   PROMPTED_SCREENING_PROFILE,
-} from "../human-review/contracts.js";
+} from "@colophon-claims/verify/admission";
 import { CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE } from "../runtime/suite-protocol/comparability.js";
 import { readRunState } from "../run/state.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
