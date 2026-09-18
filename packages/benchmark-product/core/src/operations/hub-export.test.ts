@@ -378,13 +378,14 @@ describe("Harbor Hub export", () => {
     expect(collected.ok, JSON.stringify(collected)).toBe(true);
     const collectedState = requireRunState(workspaceDir, "ready");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collectedState.matrixSha256!));
-    expect(matrix.cells.map((cell) => `${cell.armId}/${cell.replicate}:${cell.outcome}`)).toEqual(
-      expect.arrayContaining(["one/1:judged", "two/5:judged"]),
-    );
+    // Official TB 2.1 items are knowing-half identity (dataset pin + task name), not the
+    // prediction-forecast fixture the Harbor collect path used to judge. Cells stay accounted
+    // as judged or unscorable; Hub eligibility still reads ATIF on the retained job.
     expect(
       matrix.cells.every((cell) => cell.outcome === "judged" || cell.outcome === "unscorable"),
       `a cell landed on neither judged nor unscorable: ${matrix.cells.map((cell) => `${cell.armId}/${cell.replicate}:${cell.outcome}`).join(", ")}`,
     ).toBe(true);
+    expect(matrix.cells).toHaveLength(10);
     const exported = exportHarborHubPackage(context, { draftId: "ready", armId: "two" });
     expect(exported.ok, JSON.stringify(exported)).toBe(true);
     if (!exported.ok) return;
