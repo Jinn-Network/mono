@@ -17,6 +17,7 @@ function parseJson(stdout: string): {
     catalogId?: string;
     official?: boolean;
     selectionManifestSha256?: string;
+    benchmarkSha256?: string;
     draft?: { draftId: string };
   };
   error?: { code: string; detail: string };
@@ -28,6 +29,7 @@ function parseJson(stdout: string): {
       catalogId?: string;
       official?: boolean;
       selectionManifestSha256?: string;
+      benchmarkSha256?: string;
       draft?: { draftId: string };
     };
     error?: { code: string; detail: string };
@@ -196,18 +198,24 @@ describe("method bind catalog identity", () => {
     expect(body.result?.catalogId).toBe("terminal-bench-2.1");
     expect(body.result?.official).toBe(true);
     expect(body.result?.selectionManifestSha256).toBeUndefined();
+    expect(body.result?.benchmarkSha256).toMatch(/^[a-f0-9]{64}$/u);
+    const createdTwo = await runCli(
+      ["draft", "create", "--workspace", workspaceDir, "--principal", "sponsor-1", "--name", "Two", "--json"],
+      ctx,
+    );
+    expect(createdTwo.exitCode).toBe(0);
     const text = await runCli(
       [
         "method", "terminal-bench-2.1",
         "--workspace", workspaceDir,
         "--principal", "sponsor-1",
-        "--draft", "one",
+        "--draft", "two",
         "--slice", "1",
         "--host", hostPath,
       ],
       ctx,
     );
-    expect(text.exitCode).toBe(0);
-    expect(text.stdout).toBe("bound official terminal-bench-2.1 catalog identity for draft one\n");
+    expect(text.exitCode, text.stdout).toBe(0);
+    expect(text.stdout).toBe(`bound official terminal-bench-2.1 method ${body.result?.benchmarkSha256} for draft two\n`);
   });
 });

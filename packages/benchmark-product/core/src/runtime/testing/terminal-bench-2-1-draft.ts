@@ -1,7 +1,6 @@
 /** Test fixture (launch/export setup). Not a claimant operation. Former Terminal-Bench 2.1 official-suite selection. */
 import { BENCHMARK_RECORD_KIND, BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
-import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
 import { isDraftMutable } from "../../domain/lifecycle.js";
 import { parseDraftSpec, type DraftDocument } from "../../domain/draft.js";
 import { refuse } from "../../errors.js";
@@ -66,20 +65,16 @@ async function executeSelectTerminalBench21Runtime(context: OperationContext, in
     if (putSealedBytes(context.workspaceDir, terminalBench21SelectionBytes(selected.profile)) !== selected.profileSha256) {
       refuse("record-integrity", "terminalBench21.profile", "Terminal-Bench 2.1 profile bytes changed while storing");
     }
-    const built = await buildTerminalBench21Tasks(selected.selectedTaskNames);
-    putSealedBytes(context.workspaceDir, sealTaskProfile(buildPredictionForecastProfile()).bytes);
-    const evaluationSpecSha256 = putSealedBytes(context.workspaceDir, built.evaluationSpec.bytes);
-    void evaluationSpecSha256;
+    const built = buildTerminalBench21Tasks(selected.selectedTaskNames);
+    putSealedBytes(context.workspaceDir, built.profile.bytes);
     const author = loadOrCreateReportSigningKey(context.workspaceDir).keyId;
     const authoredTasks: Array<{ taskName: string; taskSha256: string; bytes: Uint8Array }> = [];
     for (const task of built.tasks) {
-      const sourceReceiptSha256 = putSealedBytes(context.workspaceDir, task.receipt.envelopeBytes);
       putSealedBytes(context.workspaceDir, task.bytes);
       const authored = deriveWorkspaceAuthoredTask({
         sourceBytes: task.bytes,
         author,
         sourceKind: "terminal-bench-2-1",
-        sourceReceiptSha256,
       });
       const taskSha256 = putSealedBytes(context.workspaceDir, authored.bytes);
       recordWorkspaceAuthorship({

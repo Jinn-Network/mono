@@ -243,6 +243,34 @@ export function harborTrialAttemptNumber(trial: Readonly<Record<string, unknown>
 }
 
 /**
+ * Harbor 0.21 often omits `attempt_number` (`exclude_defaults`). The orchestrated observer
+ * (`arm-job.ts`) assigns the next per-task attempt on first sight of a trial directory and
+ * reuses that assignment if the same directory is seen again. Import of a finished jobs dir
+ * uses this same rule — it is not a second mapper.
+ */
+export function assignHarborTrialAttempt(input: {
+  readonly trial: Readonly<Record<string, unknown>>;
+  readonly directory: string;
+  readonly nextAttemptByTask: Map<string, number>;
+  readonly directoryAttempt: Map<string, number>;
+}): { readonly taskName: string; readonly attempt: number } | undefined {
+  const taskName = harborTrialTaskName(input.trial);
+  if (taskName.length === 0) return undefined;
+  const explicitAttempt = harborTrialAttemptNumber(input.trial);
+  let attempt: number;
+  if (explicitAttempt !== undefined) {
+    attempt = explicitAttempt;
+  } else if (input.directoryAttempt.has(input.directory)) {
+    attempt = input.directoryAttempt.get(input.directory)!;
+  } else {
+    attempt = (input.nextAttemptByTask.get(taskName) ?? 0) + 1;
+    input.nextAttemptByTask.set(taskName, attempt);
+    input.directoryAttempt.set(input.directory, attempt);
+  }
+  return { taskName, attempt };
+}
+
+/**
  * Harbor inner retry is accounted as the cell's next Colophon dispatch, or pinned off.
  * `source_trial` is regrade, never `max_retries`. Unmapped `n_retries` stay hidden attempts.
  */
