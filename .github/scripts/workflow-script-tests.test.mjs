@@ -507,7 +507,11 @@ function isBlockScalar(rest) {
   return /^(?:>|\|)[-+]?\d*[-+]?\s*$/u.test(rest);
 }
 
-const YARN_SCRIPT_RE = /\byarn(?:\s+run)?(?:\s+--cwd\s+\S+)?(?:\s+run)?\s+([A-Za-z0-9:_-]+)/gu;
+// Command-position only. `\byarn\b` credits `echo yarn skill:check` and
+// `yarn install # yarn skill:check`, which is fail-OPEN for a wiring
+// obligation (the opposite polarity of collectTestInvocations). Script names
+// start with a letter so a flag such as `--check` is not read as a guard.
+const YARN_SCRIPT_RE = /(?:^|[;|&(]|\s(?:&&|\|\|)\s)\s*yarn(?:\s+run)?(?:\s+--cwd\s+\S+)?(?:\s+run)?\s+([A-Za-z][A-Za-z0-9:_-]*)/gu;
 
 function parseYarnInvocations(text, baseCwd) {
   const results = [];
@@ -716,7 +720,10 @@ export function findOrphanedGuardScripts(
 
 export function formatGuardOrphans(orphans) {
   return orphans.map((printForm) => {
-    const key = printForm.includes(': ') ? printForm.replace(': ', '::') : printForm;
+    const separator = printForm.indexOf(': ');
+    const key = separator === -1
+      ? printForm
+      : guardKey(printForm.slice(0, separator), printForm.slice(separator + 2));
     const owner = SUGGESTED_OWNER_BY_GUARD[key] ?? 'an owning workflow under .github/workflows/';
     return `- ${printForm} (suggested owner: ${owner})`;
   }).join('\n');
@@ -1172,6 +1179,63 @@ test('self-test: harvest binds yarn invocations via working-directory, --cwd, an
   }
 });
 
+test('self-test: harvest does not credit yarn mentions or yarn install', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'jinn-guard-mention-repo-'));
+  const workflows = mkdtempSync(join(tmpdir(), 'jinn-guard-mention-wf-'));
+  try {
+    writePlantedManifest(repo, 'operator', {
+      'skill:check': 'echo skill',
+      'install:check': 'echo install-check',
+    });
+    writeFileSync(join(workflows, 'mention.yml'), [
+      'jobs:',
+      '  check:',
+      '    defaults:',
+      '      run:',
+      '        working-directory: operator',
+      '    steps:',
+      '      - run: yarn install --immutable',
+      '      - run: echo yarn skill:check',
+      '      - run: echo "yarn install:check"',
+      '      - run: yarn install # yarn skill:check',
+      '',
+    ].join('\n'));
+    const harvested = collectYarnGuardInvocations(repo, workflows);
+    assert.equal(harvested.has('operator::skill:check'), false);
+    assert.equal(harvested.has('operator::install:check'), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(workflows, { recursive: true, force: true });
+  }
+});
+
+test('self-test: harvest keys same-named scripts by workspace', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'jinn-guard-homonym-repo-'));
+  const workflows = mkdtempSync(join(tmpdir(), 'jinn-guard-homonym-wf-'));
+  try {
+    writePlantedManifest(repo, 'operator', { 'skill:check': 'echo operator' });
+    writePlantedManifest(repo, 'packages/foo', { 'skill:check': 'echo foo' });
+    writeFileSync(join(workflows, 'wired.yml'), [
+      'jobs:',
+      '  check:',
+      '    steps:',
+      '      - working-directory: operator',
+      '        run: yarn skill:check',
+      '',
+    ].join('\n'));
+    const harvested = collectYarnGuardInvocations(repo, workflows);
+    assert.equal(harvested.has('operator::skill:check'), true);
+    assert.equal(harvested.has('packages/foo::skill:check'), false);
+    assert.deepEqual(
+      findOrphanedGuardScripts(repo, workflows, {}),
+      ['packages/foo: skill:check'],
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(workflows, { recursive: true, force: true });
+  }
+});
+
 test('self-test: harvest does not prefix-match script names', () => {
   const repo = mkdtempSync(join(tmpdir(), 'jinn-guard-prefix-repo-'));
   const extraWorkflows = mkdtempSync(join(tmpdir(), 'jinn-guard-prefix-extra-'));
@@ -1291,6 +1355,10 @@ test('self-test: orphan detector names a planted unwired guard', () => {
     assert.match(message, /an owning workflow under \.github\/workflows\//);
     assert.match(
       formatGuardOrphans(['operator: skill:check']),
+      /ci\.yml \(check job\)/,
+    );
+    assert.match(
+      formatGuardOrphans(['operator: generate:openapi:check']),
       /ci\.yml \(check job\)/,
     );
   } finally {
