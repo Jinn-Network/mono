@@ -2,9 +2,10 @@
 
 How results a *different* harness already produced become a benchmark-product
 run. You lock a run here, then either hand the importer a named harness's
-finished output (`--from harbor` for Harbor 0.21 jobs and trials) or a file of
-generic per-attempt records. The ordinary product chain — collect, then report
-— reads that evidence exactly as it reads a driven run's.
+finished output (`--from harbor` for Harbor 0.21 jobs and trials, `--from inspect`
+for Inspect `read_eval_log` JSON) or a file of generic per-attempt records. The
+ordinary product chain — collect, then report — reads that evidence exactly as
+it reads a driven run's.
 
 > **Publication of an imported run is refused today.** `colophon publish`, the
 > GUI's `run.publish`, and managed signed-Report publication all refuse a run
@@ -255,12 +256,12 @@ to task digests. The sealed benchmark record cannot supply one — its items
 carry a task *reference*, not a foreign id — so the coordinates in the template
 are the only names import accepts.
 
-## Named readers — Harbor is the first
+## Named readers — Harbor and Inspect
 
 DR-2026-09-04 decision 3: an adapter is a reader, one per harness, from that
 harness's native finished output into the sealed per-attempt record. Generic
 JSONL/CSV (#2979) stays as the dump dialect a named reader normalizes *into*,
-not as the product path for a brought Harbor run.
+not as the product path for a brought Harbor or Inspect run.
 
 Harbor is the first named reader:
 
@@ -301,18 +302,45 @@ the same expected coordinate are likewise the validator's `duplicate-slot`.
 Missing, unknown, extra, and duplicate slots are refused together, with the
 whole problem list, exactly as a JSONL dump is.
 
-Until the official Terminal-Bench 2.1 pin lands (#4678), a locked run that has
-no Harbor suite-protocol selection recovers Harbor task names from each Task's
-`payload.forecast.marketId`. The Terminal-Bench 2.1 intake shim stores
-`terminal-bench-2-1/<taskName>` there; other prediction-shaped intake (including
-the bundled sample) uses the market id as the Harbor task name. Full official
-89-name coverage is that pin, not this reader.
+When a locked run has no Harbor suite-protocol selection, Harbor task names
+are recovered from each Task's `payload.forecast.marketId`. The Terminal-Bench
+2.1 intake stores `terminal-bench-2-1/<taskName>` there; other prediction-shaped
+intake (including the bundled sample) uses the market id as the Harbor task
+name. A Harbor suite-protocol selection, including the official Terminal-Bench
+2.1 pin (#4678), is the name table when present.
+
+Inspect is the second named reader. Bringing a completed Inspect evaluation is
+the product path; orchestrating Inspect per cell is the service's.
+
+```bash
+colophon run import --from inspect ./eval-logs \
+  --workspace ./ws --principal me --draft draft-1
+```
+
+`--from inspect` takes one EvalLog file or a directory of them, not `--file` /
+`--source` / `--format`. The in-process shape is Inspect's official
+`read_eval_log` dump (JSON EvalLog, including Inspect `log_format=json`). One
+sample becomes one per-attempt record. Sample identity is the suite-protocol
+name table in `from-inspect.ts` (`sampleIdByDigestFromSuite` /
+`digestBySampleIdFromSuite`). Scorer outputs are projected into the
+pre-registered measurements the Inspect adapter already uses for orchestrated
+cells — that can be `graded` when the sealed EvaluationSpec types those
+measurements. This is not Harbor's ungradeable mapping: Harbor's grader is
+not the sealed spec; Inspect's scorers are.
+
+A zip `.eval` container is refused rather than unpacked. Convert it with
+Inspect to JSON (`log_format=json` / an EvalLog dump) so the reader stays on
+the official shape without a second parser.
+
+A slot the logs did not contain is written as `unrun` with a reason so it
+stays in the denominator. Extra and duplicate samples are left for the
+`#2979` validator (`unknown-slot` / `duplicate-slot`). There is no exclude
+flag.
 
 **Left open — issue #3417.** Digesting the source dump's bytes into the import
 marker is not implemented here. Publication of an imported run stays refused
-on that issue. This reader feeds the same `#2979` import declaration; it does
+on that issue. These readers feed the same `#2979` import declaration; they do
 not change what a sealed import record means.
-
 ## What import refuses outright
 
 Each of these is a refusal rather than a best effort, because the alternative
@@ -321,9 +349,10 @@ is fabricating the artifact a skeptic reads.
 - **A draft that is not locked, or a run whose journal already has entries.**
   Import is not a merge. It writes a run's evidence from scratch and never
   extends a lineage whose dispatch numbering it did not observe.
-- **An Inspect or binary-judgment adapter.** Those bundles require native
-  Inspect logs, summaries, and selection manifests. A summary synthesized from
-  a foreign dump would be a forgery of exactly the artifact a reader checks.
+- **An Inspect or binary-judgment adapter, except `--from inspect`.** Generic
+  dumps of those runs would have to synthesize native Inspect summaries. The
+  named Inspect reader brings real EvalLogs and projects sealed scorers; it
+  does not invent `inspect-summary`. Binary-judgment stays refused.
 - **`policy.evaluation.minVerdicts > 1`.** A dump carries one result per slot.
   Fanning it across several evaluator legs would manufacture agreement between
   evaluators that never independently existed.

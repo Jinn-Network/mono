@@ -85,6 +85,7 @@ import {
   type ExternalRunRecordFormat,
 } from "../intake/external-run-records.js";
 import { readHarborRunImport } from "../intake/harbor-run-records.js";
+import { readInspectRunImport } from "../intake/inspect-run-records.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
 import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/verify";
@@ -169,6 +170,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--format jsonl|csv]
                    --from harbor <jobs-dir> instead of --file reads Harbor 0.21
                    jobs and trials into the same per-attempt records
+                   --from inspect <eval-log-or-dir> instead of --file reads
+                   Inspect read_eval_log JSON (.eval / EvalLog dump)
                    --template instead of --file/--source prints the sealed
                    slate as a skeleton to fill in
   launch           --workspace <dir> --principal <id> --draft <draftId>
@@ -1414,33 +1417,52 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
 
   if (present(args, "from")) {
     const reader = required(args, "from");
-    if (reader !== "harbor") {
-      refuse("invalid-invocation", "from", `--from must be "harbor", got "${reader}"`);
+    if (reader !== "inspect" && reader !== "harbor") {
+      refuse("invalid-invocation", "from", `--from must be "harbor" or "inspect", got "${reader}"`);
     }
     for (const flag of ["file", "format", "source"] as const) {
       if (optional(args, flag) !== undefined) {
-        refuse("invalid-invocation", flag, `run import --from harbor reads a jobs directory; --${flag} is not accepted with it`);
+        refuse(
+          "invalid-invocation",
+          flag,
+          reader === "inspect"
+            ? `run import --from inspect reads an eval log or directory; --${flag} is not accepted with it`
+            : `run import --from harbor reads a jobs directory; --${flag} is not accepted with it`,
+        );
       }
     }
     const extra = args.words.slice(2);
-    const jobsDirWord = extra[0];
-    if (extra.length !== 1 || jobsDirWord === undefined || jobsDirWord === "") {
-      refuse("invalid-invocation", "from", "run import --from harbor requires <jobs-dir>");
+    const pathWord = extra[0];
+    if (extra.length !== 1 || pathWord === undefined || pathWord === "") {
+      refuse(
+        "invalid-invocation",
+        "from",
+        reader === "inspect"
+          ? "run import --from inspect requires <eval-log-or-dir>"
+          : "run import --from harbor requires <jobs-dir>",
+      );
     }
-    const jobsDir = pathFrom(context.cwd, jobsDirWord);
-    const dump = readHarborRunImport({
-      workspaceDir: opContext.workspaceDir,
-      draftId,
-      jobsDir,
-    });
-    const result = await importRunRecords(opContext, {
+    const resolvedPath = pathFrom(context.cwd, pathWord);
+    const dump = reader === "inspect"
+      ? readInspectRunImport({
+        workspaceDir: opContext.workspaceDir,
+        draftId,
+        evalLogOrDir: resolvedPath,
+      })
+      : readHarborRunImport({
+        workspaceDir: opContext.workspaceDir,
+        draftId,
+        jobsDir: resolvedPath,
+      });
+    const imported = await importRunRecords(opContext, {
       draftId,
       records: dump.records,
       source: dump.source,
       evidenceRoot: dump.evidenceRoot,
+      ...(reader === "inspect" ? { namedReader: "inspect" as const } : {}),
     });
     return renderResult(
-      result,
+      imported,
       jsonMode,
       (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
         + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `

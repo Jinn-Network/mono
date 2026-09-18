@@ -64,7 +64,7 @@ with an explicit shipped/deferred GUI disposition:
 | `createDraft` | `colophon draft create` | Create a draft, optionally from JSON. |
 | `getDraft` | `colophon draft show` | Read one draft. |
 | `importSweBenchRows` | `colophon import swebench` | Import SWE-bench-shaped rows through interop. |
-| `importRunRecords` | `colophon run import` | Turn a locked run into a run from an external harness's per-attempt records over the whole sealed slate. `--from harbor` reads Harbor 0.21 jobs and trials into those records. |
+| `importRunRecords` | `colophon run import` | Turn a locked run into a run from an external harness's per-attempt records over the whole sealed slate. `--from harbor` reads Harbor 0.21 jobs and trials; `--from inspect` reads Inspect EvalLogs. |
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
 | `listDrafts` | `colophon draft list` | List drafts. |
