@@ -328,4 +328,105 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
     expect(filterOutcome.status).toBe("verified");
     if (filterOutcome.status === "verified") expect(filterOutcome.derivation).toBeUndefined();
   });
+
+  it("verifySource refuses a later chain that dropped a recorded anchored-entry hold", async () => {
+    const entry: AnnouncementEntry = parseAnnouncementEntry({
+      protocol: "https://spec.jinn.network/record-discovery/v1",
+      source: { agent: "did:key:zProjector", name: "marketplace" },
+      sequence: "0000000000000001",
+      previous: null,
+      timestamp: "2026-07-28T12:00:00.000Z",
+      announcements: [
+        {
+          announcementId: "ann-1",
+          action: "available",
+          record: { kind: "https://spec.jinn.network/records/delivery/v1", digest: sealJson({ kind: "delivery" }).digest },
+        },
+      ],
+    });
+    const entryDigest = sealJson(entry).digest as `sha256:${string}`;
+    const now = new Date("2026-07-28T12:00:00.000Z");
+    const holds = new Map();
+    const trust = createTrustAdapter({
+      bindingResolver: {
+        async resolveBinding(query): Promise<ResolvedBinding | null> {
+          return {
+            binding: { agent: query.agent, scope: [DISCOVERY_SIGNING_SCOPE], key: { keyid: "key-1", publicKey: "pubkey-key-1", algorithm: "ed25519" } } as never,
+            envelopeBytes: new Uint8Array(),
+            bindingDigest: `sha256:${"0".repeat(64)}`,
+            effectiveStart: "2026-01-01T00:00:00.000Z",
+            isGenesis: true,
+            revocations: [],
+          };
+        },
+      },
+      keyCatalog: { async candidateKeys() { return [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }]; } },
+      verifier: acceptAllVerifier,
+    });
+    const holdStore = {
+      async get(origin: string) { return holds.get(origin); },
+      async put(hold: { origin: string } & Record<string, unknown>) { holds.set(hold.origin, hold); },
+    };
+    const driverFor = () => createVerifyDriver({
+      trust,
+      hwm: createInMemoryHighWaterMarkStore(),
+      factsProfiles: { get: () => undefined },
+      factsRecompute: { get: () => undefined },
+      records: { "fetch": async () => sealJson({ kind: "delivery" }).bytes },
+      entries: { "fetch": async () => sealJson(entry).bytes },
+      holds: holdStore as never,
+      now: () => now,
+    });
+    const driver = driverFor();
+    const head: SourceHead = {
+      protocol: "https://spec.jinn.network/record-discovery/v1",
+      origin: "did:key:zProjector/marketplace",
+      sequence: "0000000000000001",
+      entry: entryDigest,
+      issuedAt: "2026-07-28T12:00:00.000Z",
+      refreshBy: "2026-07-29T12:00:00.000Z",
+    };
+    const fakeEnvelope = (payloadType: string, bytes: Uint8Array) => ({
+      payloadType,
+      payload: Buffer.from(bytes).toString("base64"),
+      signatures: [{ keyid: "key-1", sig: Buffer.from("any").toString("base64") }],
+    });
+    const sourceOpts = {
+      source: { agent: "did:key:zProjector", name: "marketplace" },
+      head,
+      headSignature: fakeEnvelope("application/vnd.jinn.record-discovery.head.v1+json", sealJson(head).bytes) as never,
+      entries: toAsyncIterable([
+        { entry, signature: fakeEnvelope("application/vnd.jinn.record-discovery.entry.v1+json", sealJson(entry).bytes) as never },
+      ]),
+      firstAdoption: true,
+      observedAnchoredEntry: {
+        sequence: "0000000000000001",
+        entryDigest,
+        anchorRecordDigest: `sha256:${"b".repeat(64)}` as const,
+        anchoredTime: "2026-07-28T12:00:00.000Z",
+      },
+    };
+    expect((await driver.verifySource(sourceOpts)).status).toBe("ok");
+
+    const rewritten = parseAnnouncementEntry({
+      ...entry,
+      announcements: [{
+        announcementId: "ann-1",
+        action: "available",
+        record: { kind: "https://spec.jinn.network/records/delivery/v1", digest: sealJson({ kind: "other" }).digest },
+      }],
+    });
+    const rewrittenDigest = sealJson(rewritten).digest;
+    const rewrittenHead: SourceHead = { ...head, entry: rewrittenDigest };
+    const truncated = await driverFor().verifySource({
+      source: sourceOpts.source,
+      head: rewrittenHead,
+      headSignature: fakeEnvelope("application/vnd.jinn.record-discovery.head.v1+json", sealJson(rewrittenHead).bytes) as never,
+      entries: toAsyncIterable([
+        { entry: rewritten, signature: fakeEnvelope("application/vnd.jinn.record-discovery.entry.v1+json", sealJson(rewritten).bytes) as never },
+      ]),
+      firstAdoption: true,
+    });
+    expect(truncated.status).toBe("missing-held-entry");
+  });
 });

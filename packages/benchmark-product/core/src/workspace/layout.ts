@@ -171,7 +171,7 @@ export function publicationServeRoot(workspaceDir: string): string {
   return join(publicationDir(workspaceDir), "public");
 }
 
-export function publicationStatePath(workspaceDir: string, sourceId: string, kind: "state" | "intent"): string {
+export function publicationStatePath(workspaceDir: string, sourceId: string, kind: "state" | "intent" | "entry-anchors"): string {
   // Source ids contain IRIs and are deliberately never used as path components.
   return join(publicationDir(workspaceDir), "sources", `${sourceId}.${kind}.json`);
 }

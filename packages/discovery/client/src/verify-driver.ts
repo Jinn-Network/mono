@@ -4,10 +4,14 @@ import {
   verifyItem,
   verifySourceChain,
   verifySourceHead,
+  verifyAnchoredEntryHold,
+  formatOrigin,
 } from "@jinn-network/record-discovery-protocol";
 import type {
   AnnouncedItem,
   AnnouncementEntry,
+  AnchoredEntryHold,
+  AnchoredEntryHoldStore,
   EntryFetcher,
   FactsRecompute,
   HighWaterMarkStore,
@@ -44,6 +48,11 @@ export interface VerifyDriverDeps {
   entries: EntryFetcher;
   /** Present for decision-grade derivation-consistency (§6.2); a filter-only driver may omit it. */
   substrate?: SubstrateChecker;
+  /**
+   * Consumer refusal for a previously recorded anchored entry (publication-head
+   * anchoring §5.4 step 5). Absent: the chain procedure runs unchanged.
+   */
+  holds?: AnchoredEntryHoldStore;
   now(): Date;
 }
 
@@ -53,7 +62,13 @@ export interface VerifySourceOptions {
   headSignature: DsseEnvelope;
   entries: AsyncIterable<{ entry: AnnouncementEntry; signature: DsseEnvelope }>;
   firstAdoption: boolean;
+  /** First-visit tuple after the caller verified an entry-anchor proof. */
+  observedAnchoredEntry?: Omit<AnchoredEntryHold, "origin">;
 }
+
+export type VerifySourceResult =
+  | SourceChainOutcome
+  | { status: "missing-held-entry"; hold: AnchoredEntryHold };
 
 export interface VerifyHeadOptions {
   source: SourceIdentity;
@@ -62,8 +77,8 @@ export interface VerifyHeadOptions {
 }
 
 export interface VerifyDriver {
-  /** Runs `source-chain-verification` (§10.3) and, on `ok`, records every walked entry as verified-onto-chain for later `verifyItem` provenance checks (§10.4 step 3). */
-  verifySource(opts: VerifySourceOptions): Promise<SourceChainOutcome>;
+  /** Runs `source-chain-verification` (§10.3) and, on `ok`, records every walked entry as verified-onto-chain for later `verifyItem` provenance checks (§10.4 step 3). When a hold store is injected, also applies `anchored-entry-hold`. */
+  verifySource(opts: VerifySourceOptions): Promise<VerifySourceResult>;
   /**
    * Runs `source-head-revalidation` on a head that names the chain position
    * this consumer already holds. Adopts nothing and advances no mark; the
@@ -98,7 +113,7 @@ export function createVerifyDriver(deps: VerifyDriverDeps): VerifyDriver {
     return false;
   }
 
-  async function verifySource(opts: VerifySourceOptions): Promise<SourceChainOutcome> {
+  async function verifySource(opts: VerifySourceOptions): Promise<VerifySourceResult> {
     const walked: AnnouncementEntry[] = [];
     async function* tee(): AsyncGenerator<{ entry: AnnouncementEntry; signature: DsseEnvelope }> {
       for await (const item of opts.entries) {
@@ -123,6 +138,18 @@ export function createVerifyDriver(deps: VerifyDriverDeps): VerifyDriver {
 
     if (outcome.status === "ok") {
       for (const entry of walked) markVerified(opts.source, sealJson(entry).digest);
+      if (deps.holds !== undefined) {
+        const hold = await verifyAnchoredEntryHold({
+          origin: formatOrigin(opts.source.agent, opts.source.name),
+          entries: walked.map((entry) => ({
+            sequence: entry.sequence,
+            digest: sealJson(entry).digest as `sha256:${string}`,
+          })),
+          ports: { holds: deps.holds },
+          ...(opts.observedAnchoredEntry === undefined ? {} : { observed: opts.observedAnchoredEntry }),
+        });
+        if (hold.status === "missing-held-entry") return hold;
+      }
     }
     return outcome;
   }

@@ -29,6 +29,10 @@ export const RECORD_KINDS = {
   evaluationSpec: "https://spec.jinn.network/records/evaluation-spec/v1",
   plugin: "https://spec.jinn.network/records/plugin/v1",
   checkpoint: "https://spec.jinn.network/records/checkpoint/v1",
+  // Publication-head anchoring (2026-09-01 design §4.2 / §7 item 1): the
+  // announcement entry's own kind, so an AnchorEvidence `subject.kind` can be
+  // normative rather than colliding with the head document's protocol URI.
+  announcementEntry: "https://spec.jinn.network/records/announcement-entry/v1",
 } as const;
 
 // Trust-layer signing scope (§5.5, program §7.11). Conformant with trust-core's
