@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -14,6 +14,19 @@ import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './platform-c
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const select = (changedFiles) => selectVerification({ repoRoot, changedFiles });
+
+// Selection matches on path prefix, so a fixture's leaf name is never resolved
+// and a phantom path would pass silently. Every fixture path is therefore
+// declared as one of two kinds, and the declaration is checked against the tree:
+// `real` names a file that must exist, `synthetic` names one that must not.
+const real = (path) => {
+  assert.ok(existsSync(resolve(repoRoot, path)), `real fixture path does not exist: ${path}`);
+  return path;
+};
+const synthetic = (path) => {
+  assert.ok(!existsSync(resolve(repoRoot, path)), `synthetic fixture path exists: ${path}`);
+  return path;
+};
 
 test('every required gate of stack-published groups maps to a catalog domain', () => {
   const catalog = loadPlatformCatalog(repoRoot);
@@ -33,7 +46,7 @@ test('a changed package selects lanes through its dependents, not its own domain
   // `packages/evidence/discovery` is domain `evidence`, but
   // `packages/discovery/facts/evidence` consumes it. A label-only gate would skip
   // `discovery` here; the dependency closure must not.
-  const result = select(['packages/evidence/discovery/src/index.ts']);
+  const result = select([real('packages/evidence/discovery/src/index.ts')]);
   assert.equal(result.run, true);
   assert.ok(
     result.selectedDomains.includes('discovery'),
@@ -46,7 +59,7 @@ test('a changed package selects lanes through its dependents, not its own domain
 // leaf that depends on nothing, so no other package's change can reach its lane
 // through the dependency closure. It is selected by its own path (below).
 test('a leaf protocol package reaches every verified lane it can reach', () => {
-  const result = select(['packages/evidence/protocol/src/index.ts']);
+  const result = select([real('packages/evidence/protocol/src/index.ts')]);
   assert.equal(result.run, true);
   assert.deepEqual(
     result.selectedDomains,
@@ -55,7 +68,7 @@ test('a leaf protocol package reaches every verified lane it can reach', () => {
 });
 
 test('a contract-abis change selects the contracts lane and its consumers', () => {
-  const result = select(['packages/contract-abis/src/generated/slices/bindingJinnRouterV3.ts']);
+  const result = select([real('packages/contract-abis/src/generated/slices/bindingJinnRouterV3.ts')]);
   assert.equal(result.run, true);
   assert.ok(
     result.selectedDomains.includes('contracts'),
@@ -65,7 +78,7 @@ test('a contract-abis change selects the contracts lane and its consumers', () =
 });
 
 test('an unmatched path defaults to full verification', () => {
-  const result = select(['some-uncatalogued-directory/index.ts']);
+  const result = select([synthetic('some-uncatalogued-directory/index.ts')]);
   assert.equal(result.run, true);
   assert.match(result.reason, /unmatched paths default to full verification/u);
 });
@@ -77,7 +90,7 @@ test('an empty change set defaults to full verification', () => {
 
 test('global selectors force full verification', () => {
   for (const selector of GLOBAL_SELECTORS) {
-    const path = selector.endsWith('/') ? `${selector}probe.yml` : selector;
+    const path = selector.endsWith('/') ? synthetic(`${selector}probe.yml`) : real(selector);
     const result = select([path]);
     assert.equal(result.run, true, `${path} must force verification`);
     assert.match(result.reason, /global selector/u);
@@ -87,8 +100,8 @@ test('global selectors force full verification', () => {
 test('generated architecture output does not force verification', () => {
   // `generate-architecture.mjs --check` already guards this in the always-on job.
   const result = select([
-    'architecture/generated/platform-topology.md',
-    'architecture/generated/platform-topology.v1.json',
+    real('architecture/generated/platform-topology.md'),
+    real('architecture/generated/platform-topology.v1.json'),
   ]);
   assert.equal(result.run, false);
 });
@@ -97,9 +110,9 @@ test('operator-only and documentation-only changes skip verification', () => {
   // The motivating case: PRs touching only the operator app and docs paid for all
   // six lanes because `workflow_call` ignores `paths:` filters.
   const result = select([
-    'operator/src/cli/commands/native-requester.ts',
-    'apps/operator-console/app/page.tsx',
-    'docs/engineering/handbook.md',
+    real('operator/src/cli/commands/native-requester.ts'),
+    real('apps/operator-console/app/page.tsx'),
+    real('docs/engineering/handbook.md'),
   ]);
   assert.equal(result.run, false);
   assert.deepEqual(result.selectedDomains, []);
@@ -135,7 +148,7 @@ test('the CLI runs from a checkout path containing a space or reached through a 
     }
     symlinkSync(dir, join(dir, 'via link'));
     for (const script of [join(dir, 'platform-verification-selection.mjs'), join(dir, 'via link', 'platform-verification-selection.mjs')]) {
-      assert.equal(typeof cli('docs/engineering/handbook.md\n', script).run, 'boolean', script);
+      assert.equal(typeof cli(`${real('docs/engineering/handbook.md')}\n`, script).run, 'boolean', script);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -157,7 +170,7 @@ test('blank-lines-only stdin selects full verification through the CLI', () => {
 
 test('the CLI still unselects for a genuinely irrelevant diff', () => {
   // Control: the fail-safe must not have been widened into selecting everything.
-  const result = cli('docs/engineering/handbook.md\n');
+  const result = cli(`${real('docs/engineering/handbook.md')}\n`);
   assert.equal(result.run, false);
 });
 
