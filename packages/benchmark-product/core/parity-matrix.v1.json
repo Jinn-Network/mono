@@ -475,10 +475,6 @@
       "reason": "standalone byte-for-byte comparison of a published tree against the bundle it claims to be derived from; reads only what the caller names"
     },
     {
-      "name": "demo1 prereg verify",
-      "reason": "read-only post-lock/pre-dispatch gate verifies the exact local E4 witness without credentials or network access"
-    },
-    {
       "name": "agent add",
       "reason": "stores a strict machine-local built-in agent profile outside every workspace"
     },

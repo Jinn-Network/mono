@@ -12,8 +12,7 @@ retains the advanced command library used by that endpoint.
 Authority: [product design](../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md).
 Start at the [product overview](../README.md); see the
 [public-bundle guide](../PUBLIC-BUNDLE.md), [Inspect runtime guide](../INSPECT-RUNTIME.md),
-[threat model](../SECURITY.md), and
-[Demo-1 E4 adapter runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
+and [threat model](../SECURITY.md).
 
 This package is public-shaped, not yet published, and requires Node 22. The complete
 portal dependency graph must be built from source before core. The exact
@@ -122,20 +121,7 @@ same guide states per format.
 The full installed product delegates to the same verifier implementation with
 `colophon bundle verify --bundle <dir> --json`.
 
-Demo-1's second read-only standalone verifier is the explicit post-lock/pre-dispatch E4 gate:
-
-```text
-colophon demo1 prereg verify --workspace <dir> --draft <draftId> \
-  --witness <witness.json> --method-summary-sha256 <sha256> \
-  --grader-program-sha256 <sha256> --source-commit <full-git-oid> --json
-```
-
-It reads the locked Run and empty run journal, verifies the exact external-anchor witness, and
-performs no network or credential access. It is an ordering gate, not publication; the exact
-contract and post-dispatch ordering check are in the
-[E4 runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
-
-The third standalone pair projects a sealed bundle's freeze artifacts into a
+The second standalone pair projects a sealed bundle's freeze artifacts into a
 deterministic public repository, and checks a published tree against the bundle
 it claims to be derived from:
 

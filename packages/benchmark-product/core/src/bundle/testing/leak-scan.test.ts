@@ -168,6 +168,14 @@ describe("bundle leak scan (#3063)", () => {
     ]);
   });
 
+  test("a data URI whose parameter follows `; ` (as swe-rebench emits) is still exempted", () => {
+    const doc = `{"body":"data:text/plain; charset=utf-8;base64,${base64Spelling("LoCoMo")}",`
+      + `"note":"sourced from a licensed benchmark"}`;
+    expect(findLeaks(utf8(doc), { path: "records/x.json" })).toEqual([
+      { path: "records/x.json", kind: "pattern", where: "raw.note", match: "licensed benchmark" },
+    ]);
+  });
+
   test("a leak inside a decoded data URI is a finding", () => {
     const mark = Buffer.from("<svg><title>LoCoMo</title></svg>", "utf8").toString("base64");
     const findings = findLeaks(utf8(`<img src="data:image/svg+xml;base64,${mark}">`), { path: "social-card.svg" });
