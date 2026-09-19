@@ -44,10 +44,10 @@ import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { readAuditEntries } from "../audit/journal.js";
 import { materializePublicBundle } from "../bundle/materialize.js";
-import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "../legacy-closures.js";
+import { PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "../legacy-closures.js";
 import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { BUNDLE_V3_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
+import { BUNDLE_V3_FORMAT, BUNDLE_V10_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
 import { runCli } from "../cli/main.js";
 import { runCollect } from "./run-collect.js";
 import { runLaunch } from "./run-launch.js";
@@ -1157,7 +1157,9 @@ describe("portable public bundle", () => {
       rmSync(workspaceDir, { recursive: true, force: true });
       const verified = await verifyPublicBundle(copied);
       expect(verified.identity).toBe(materialized.identity);
-      expect(verified.format).toBe(BUNDLE_FORMAT);
+      expect(verified.format).toBe(BUNDLE_V10_FORMAT);
+      if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
+      expect(verified.capabilities).toEqual([]);
       expect(verified.checks).toEqual([
         "manifest",
         "evidence-closure",
@@ -2256,14 +2258,19 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
           // Report's own method, and a run can legitimately emit bundles of different formats).
           const manifest = JSON.parse(readFileSync(join(dir, "bundle.json"), "utf8")) as {
             readonly format: string;
+            readonly capabilities?: readonly string[];
             readonly files: ReadonlyArray<{ readonly path: string }>;
           };
           expect(verified.format).toBe(manifest.format);
-          expect([BUNDLE_FORMAT, BUNDLE_V4_FORMAT] as readonly string[]).toContain(manifest.format);
-          // PUBLIC_BUNDLE_FILES/V4 name the fixed, non-content-addressed members exactly; the
-          // remainder of the manifest is exactly the evidence catalog's own `records/<sha256>.bin`
-          // entries, never a numbered or otherwise-named extra member.
-          const expectedFixed = manifest.format === BUNDLE_V4_FORMAT ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
+          expect(manifest.format).toBe(BUNDLE_V10_FORMAT);
+          expect(Array.isArray(manifest.capabilities)).toBe(true);
+          // PUBLIC_BUNDLE_FILES/V4 name the fixed, non-content-addressed members exactly; on /10
+          // the same lists are derived from the declared vector. The remainder of the manifest is
+          // exactly the evidence catalog's own `records/<sha256>.bin` entries, never a numbered or
+          // otherwise-named extra member.
+          const expectedFixed = (manifest.capabilities ?? []).includes("binary-qualification")
+            ? PUBLIC_BUNDLE_V4_FILES
+            : PUBLIC_BUNDLE_FILES;
           const paths = manifest.files.map((file) => file.path);
           const fixedPaths = paths.filter((path) => !path.startsWith("records/"));
           const recordPaths = paths.filter((path) => path.startsWith("records/"));

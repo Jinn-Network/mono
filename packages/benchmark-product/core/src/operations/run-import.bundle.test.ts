@@ -17,9 +17,9 @@
  * operator ruling (issue #3417) an imported run is refused at PUBLICATION, because the Report's
  * sealed local-venue disclosure asserts an admission gate at dispatch time that no imported run
  * ever passed through. Materializing here keeps the structural claim — the bundle an imported run
- * produces is the ordinary frozen format, and every reader check including matrix re-derivation
- * accepts it — provable, while the second describe block pins the refusal that keeps that bundle
- * from ever reaching an operator through a supported path.
+ * produces is the ordinary production format (composed `/10` after issue #3405), and every reader
+ * check including matrix re-derivation accepts it — provable, while the second describe block
+ * pins the refusal that keeps that bundle from ever reaching an operator through a supported path.
  */
 
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -30,7 +30,7 @@ import { expectedCellSet, parseBenchmark, parseMatrix, parseRun } from "@jinn-ne
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
 import { materializePublicBundle } from "../bundle/materialize.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { BUNDLE_FORMAT } from "../legacy-closures.js";
+import { BUNDLE_V10_FORMAT } from "../bundle/manifest.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { publicBundlesDir } from "../workspace/layout.js";
 import { externalRunImportMarker } from "../run/imported-run.js";
@@ -202,7 +202,9 @@ describe("run.import — the imported bundle passes the public reader", () => {
 
       const verified = await verifyPublicBundle(copied);
       expect(verified.identity).toBe(materialized.identity);
-      expect(verified.format).toBe(BUNDLE_FORMAT);
+      expect(verified.format).toBe(BUNDLE_V10_FORMAT);
+      if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
+      expect(verified.capabilities).toEqual([]);
       // `matrix-rederivation` is the load-bearing one: it recomputes the Matrix from the bundle's
       // own evidence closure and byte-compares it against the carried Matrix. Its passing is what
       // proves the imported outcomes are the honest aggregation of the imported evidence rather

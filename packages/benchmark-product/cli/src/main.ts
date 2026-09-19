@@ -13,7 +13,7 @@ import {
   type CredentialGrant,
 } from "@colophon-claims/core";
 import { runSampleLifecycle, SAMPLE_LIFECYCLE_MODES, type SampleLifecycleEvent } from "@colophon-claims/core/sample-lifecycle";
-import { BUNDLE_FORMAT } from "@colophon-claims/check";
+import { BUNDLE_V10_FORMAT } from "@colophon-claims/check";
 import { createVerifiedBundleViewer } from "./viewer.js";
 import { startLocalWorkspaceApp } from "./local-app.js";
 import {
@@ -135,7 +135,7 @@ export interface QuickstartReceipt {
   readonly architecture: string;
   readonly bundlePath: string;
   readonly bundleIdentity: string;
-  readonly bundleFormat: typeof BUNDLE_FORMAT;
+  readonly bundleFormat: typeof BUNDLE_V10_FORMAT;
   readonly checks: readonly string[];
   readonly sourceCommit: string;
 }
@@ -157,7 +157,7 @@ export function writeQuickstartCompanions(
     architecture: process.arch,
     bundlePath,
     bundleIdentity: `sha256:${bundleIdentity}`,
-    bundleFormat: BUNDLE_FORMAT,
+    bundleFormat: BUNDLE_V10_FORMAT,
     checks: [...checks],
     sourceCommit: buildMetadata.sourceCommit,
   };
