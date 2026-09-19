@@ -27,7 +27,7 @@ import {
   KIT_AUTHORITY_SEED,
   KIT_BITCOIN_BLOCK_HEIGHT,
   KIT_CALENDAR_URI,
-  buildLinearOtsProof,
+  buildOtsCalendarNodeBody,
   createFixtureAuthority,
 } from "@jinn-network/trust-testing";
 import { readAuditEntries } from "../audit/journal.js";
@@ -114,15 +114,15 @@ function rfc3161SourceFor(
   };
 }
 
-/** A calendar's bare-node answer: the kit's proof minus its 36-byte detached-file header. */
+/** A calendar's bare-node answer: the kit's proof minus its detached-file header. */
 function calendarBody(height?: number): Uint8Array {
-  return buildLinearOtsProof({
+  return buildOtsCalendarNodeBody({
     fileDigest: new Uint8Array(32),
     operations: [{ kind: "append", argument: Uint8Array.of(0x6a, 0x69, 0x6e, 0x6e) }, { kind: "sha256" }],
     attestations: height === undefined
       ? [{ kind: "pending", uri: KIT_CALENDAR_URI }]
       : [{ kind: "bitcoin", height }],
-  }).subarray(31 + 1 + 1 + 32);
+  });
 }
 
 /** A transport that stamps, then answers the upgrade query once `confirmed` flips. */

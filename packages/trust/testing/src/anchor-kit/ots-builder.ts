@@ -311,6 +311,28 @@ export function buildLinearOtsProof(options: LinearOtsProofOptions): Uint8Array 
   });
 }
 
+/**
+ * Length of the detached `.ots` file prefix `serializeDetachedOtsProof` writes:
+ * magic + version varint + SHA-256 tag + 32-byte file digest. A calendar's
+ * bare-node response is everything after this prefix.
+ */
+export function otsDetachedFileHeaderLength(): number {
+  return OTS_HEADER_MAGIC.length
+    + encodeVaruint(OTS_MAJOR_VERSION).length
+    + Uint8Array.of(OTS_OP_SHA256).length
+    + 32;
+}
+
+/** Strip the detached-file header so the remaining bytes are a calendar node. */
+export function otsCalendarNodeBody(detachedProof: Uint8Array): Uint8Array {
+  return detachedProof.subarray(otsDetachedFileHeaderLength());
+}
+
+/** Build a linear proof and return only the calendar-node body. */
+export function buildOtsCalendarNodeBody(options: LinearOtsProofOptions): Uint8Array {
+  return otsCalendarNodeBody(buildLinearOtsProof(options));
+}
+
 // --- Synthetic Bitcoin block headers ---------------------------------------
 
 export const KIT_CALENDAR_URI = "https://calendar.invalid/anchor-kit";
