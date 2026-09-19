@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createSupplyCommand } from '@/cli/commands/supply.js';
+import { DiscoveryUnavailableError } from '@/discovery-client/types.js';
 import { runCommand } from '@test/cli.js';
 
 const WINDOW = {
@@ -98,6 +99,63 @@ describe('jinn supply', () => {
     expect(raw.join('')).not.toContain('incomplete indexer evidence');
   });
 
+  it('warns that the class list is short when the indexer skipped activity rows', async () => {
+    const deps = commandWith({
+      schemaVersion: 1, status: 'available', chainId: 84532,
+      generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
+      incompleteActivityRows: 3,
+      classes: [{
+        workClass: 'prediction.v1', contractId: 'prediction', contractVersion: 'v1',
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
+        latestAttemptAt: '2026-09-06T10:00:00.000Z',
+        latestVerdictAt: '2026-09-06T11:00:00.000Z',
+      }],
+    });
+    const { raw } = await runCommand(deps.command, { argv: ['--human'] });
+    expect(raw.join('')).toContain('3 activity row(s) had no matching task');
+    expect(raw.join('')).toContain('unproven, not absent');
+  });
+
+  it('says nothing about skipped activity when the indexer skipped none', async () => {
+    const deps = commandWith({
+      schemaVersion: 1, status: 'available', chainId: 84532,
+      generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
+      classes: [{
+        workClass: 'prediction.v1', contractId: 'prediction', contractVersion: 'v1',
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
+        latestAttemptAt: '2026-09-06T10:00:00.000Z',
+        latestVerdictAt: '2026-09-06T11:00:00.000Z',
+      }],
+    });
+    const { raw } = await runCommand(deps.command, { argv: ['--human'] });
+    expect(raw.join('')).not.toContain('no matching task');
+  });
+
+  it('strips C0, DEL, and C1 from human class lines and leaves JSON untouched', async () => {
+    const workClass = 'pred\u0007iction\u007F.\u009Bv1';
+    const response = {
+      schemaVersion: 1, status: 'available', chainId: 84532,
+      generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
+      classes: [{
+        workClass, contractId: 'pred\u0007iction', contractVersion: '\u009Bv1',
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
+        latestAttemptAt: '2026-09-06T10:00:00.000Z',
+        latestVerdictAt: '2026-09-06T11:00:00.000Z',
+      }],
+    };
+    const human = commandWith(response);
+    const { raw } = await runCommand(human.command, { argv: ['--human'] });
+    const text = raw.join('');
+    expect(text).toContain('prediction.v1:');
+    const classLine = text.split('\n').find((line) => line.includes('prediction.v1:'));
+    expect(classLine).toBeDefined();
+    expect(classLine).not.toMatch(/[\u0000-\u001F\u007F-\u009F]/u);
+
+    const json = commandWith(response);
+    const { envelopes } = await runCommand(json.command);
+    expect(envelopes[0]).toMatchObject({ classes: [{ workClass }] });
+  });
+
   it('renders unknown without calling it zero', async () => {
     const deps = commandWith({
       schemaVersion: 1, status: 'unknown', reason: 'incomplete_indexer_evidence',
@@ -129,5 +187,42 @@ describe('jinn supply', () => {
   it('keeps the command dependency boundary config-and-HTTP only', () => {
     const source = readFileSync(new URL('../../../src/cli/commands/supply.ts', import.meta.url), 'utf8');
     expect(source).not.toMatch(/(?:wallet|daemon|mcp|store|chain-client|viem)/iu);
+  });
+
+  it('maps invalid_request to invalid_invocation (exit 11)', async () => {
+    const loadConfig = vi.fn(() => ({
+      network: 'testnet',
+      discovery: { mode: 'http', url: 'https://indexer.example' },
+    }));
+    const command = createSupplyCommand({
+      loadConfig: loadConfig as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({
+        getCurrentSupply: async () => {
+          throw new DiscoveryUnavailableError('bad chain', undefined, 'invalid_request');
+        },
+      }),
+    });
+    const { envelopes, exits } = await runCommand(command);
+    expect(exits).toEqual([11]);
+    expect(envelopes[0]).toMatchObject({ code: 'invalid_invocation', exitCode: 11 });
+  });
+
+  it('maps untagged discovery failures to transient_error (exit 40)', async () => {
+    const command = createSupplyCommand({
+      loadConfig: (() => ({
+        network: 'testnet',
+        discovery: { mode: 'http', url: 'https://indexer.example' },
+      })) as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({
+        getCurrentSupply: async () => {
+          throw new DiscoveryUnavailableError('indexer down');
+        },
+      }),
+    });
+    const { envelopes, exits } = await runCommand(command);
+    expect(exits).toEqual([40]);
+    expect(envelopes[0]).toMatchObject({ code: 'transient_error', exitCode: 40 });
   });
 });

@@ -10,7 +10,11 @@ import {
   createHttpDiscoveryClient,
   type HttpDiscoveryClientOptions,
 } from '../../discovery-client/http.js';
-import type { CurrentSupplyResponse, DiscoveryClient } from '../../discovery-client/types.js';
+import {
+  DiscoveryUnavailableError,
+  type CurrentSupplyResponse,
+  type DiscoveryClient,
+} from '../../discovery-client/types.js';
 
 const CHAIN_ID_BY_NETWORK = { testnet: 84532, mainnet: 8453 } as const;
 
@@ -25,6 +29,10 @@ const PRODUCTION_DEPS: SupplyCommandDeps = {
   getConfigPathFromArgs: defaultGetConfigPathFromArgs,
   createDiscoveryClient: createHttpDiscoveryClient,
 };
+
+function sanitizeHumanIdentifier(value: string): string {
+  return value.replace(/[\u0000-\u001F\u007F-\u009F]/gu, '');
+}
 
 function humanSupply(result: CurrentSupplyResponse): string {
   const window = `${result.window.start} to ${result.window.end}`;
@@ -53,9 +61,15 @@ function humanSupply(result: CurrentSupplyResponse): string {
       + 'evidence and are not represented below. A class missing here is unproven, not absent.',
     );
   }
+  if (result.incompleteActivityRows !== undefined) {
+    lines.push(
+      `Note: ${result.incompleteActivityRows} activity row(s) had no matching task `
+      + 'and are not represented below. A class missing here is unproven, not absent.',
+    );
+  }
   for (const entry of result.classes) {
     lines.push(
-      `${entry.workClass}: ${entry.acceptingSolverNets} accepting SolverNet(s), `
+      `${sanitizeHumanIdentifier(entry.workClass)}: ${entry.acceptingSolverNets} accepting SolverNet(s), `
       + `${entry.claimingOperators} recent operator(s), `
       + `${entry.verdictDeliveries} recent verdict delivery(ies)`,
     );
@@ -131,11 +145,14 @@ Examples:
         result = await deps.createDiscoveryClient({ url: config.discovery.url })
           .getCurrentSupply({ chainId });
       } catch (error) {
+        const invalid = error instanceof DiscoveryUnavailableError && error.code === 'invalid_request';
         emitEnvelope(
           {
-            code: 'transient_error',
+            code: invalid ? 'invalid_invocation' : 'transient_error',
             message: `Supply lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-            hint: 'Retry when the configured discovery indexer is reachable and current.',
+            hint: invalid
+              ? 'Fix discovery.url or the requested chain; this indexer will not answer that request.'
+              : 'Retry when the configured discovery indexer is reachable and current.',
             exampleCli: 'jinn supply',
             details: { chainId },
           },

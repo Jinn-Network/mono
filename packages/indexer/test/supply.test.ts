@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildCurrentSupply, completedSupplyWindow, resolveSupplyChainId } from '../src/api/supply.js';
+import { buildCurrentSupply, assembleCurrentSupply, completedSupplyWindow, resolveSupplyChainId } from '../src/api/supply.js';
 import { BASE_SEPOLIA_CHAIN_ID, indexedChainIds } from '../src/chain-config.js';
 
 const CHAIN_ID = 84532;
@@ -174,6 +174,82 @@ describe('buildCurrentSupply', () => {
     expect(build({ verdicts: [verdict({ attemptIndex: 9 })] }).status).toBe('unknown');
   });
 
+  it('counts a verdict code outside 0-4 as loop closure', () => {
+    const result = build({ verdicts: [verdict({ verdictCode: 5 })] });
+    expect(result.status).toBe('available');
+    expect(result.classes[0]?.verdictDeliveries).toBe(1);
+  });
+
+  it('counts a negative safe-integer verdict code as loop closure', () => {
+    const result = build({ verdicts: [verdict({ verdictCode: -1 })] });
+    expect(result.status).toBe('available');
+    expect(result.classes[0]?.verdictDeliveries).toBe(1);
+  });
+
+  it('still preserves uncertainty when verdictCode is not a safe integer', () => {
+    expect(build({ verdicts: [verdict({ verdictCode: 1.5 })] }).status).toBe('unknown');
+    expect(build({ verdicts: [verdict({ verdictCode: Number.NaN })] }).status).toBe('unknown');
+  });
+
+  it('reports why a verdict without an attempt is unknown', () => {
+    const assembled = assembleCurrentSupply({
+      chainId: CHAIN_ID,
+      asOfMs: AS_OF,
+      manifestEvidenceComplete: true,
+      activityEvidenceComplete: true,
+      manifests: [manifest()],
+      tasks: [task()],
+      attempts: [attempt()],
+      verdicts: [verdict({ attemptIndex: 9 })],
+    });
+    expect(assembled.response.status).toBe('unknown');
+    expect(assembled.unknownBecause).toBe('verdict with no attempt');
+  });
+
+  it('skips an attempt whose task row is missing instead of blacking out a proven class', () => {
+    const result = build({
+      attempts: [attempt(), attempt({ taskId: '404', attemptIndex: 1 })],
+      verdicts: [verdict()],
+    });
+    expect(result.status).toBe('available');
+    expect(result.classes).toHaveLength(1);
+    expect(result.classes[0]).toMatchObject({
+      workClass: 'prediction.v1',
+      claimingOperators: 1,
+      verdictDeliveries: 1,
+    });
+    expect(result.incompleteActivityRows).toBe(1);
+  });
+
+  it('skips a verdict whose task row is missing instead of blacking out a proven class', () => {
+    const result = build({
+      attempts: [attempt(), attempt({ taskId: '404', operator: `0x${'bb'.repeat(20)}` })],
+      verdicts: [verdict(), verdict({ taskId: '404' })],
+    });
+    expect(result.status).toBe('available');
+    expect(result.classes[0]?.verdictDeliveries).toBe(1);
+    expect(result.incompleteActivityRows).toBe(2);
+  });
+
+  it('omits incompleteActivityRows when every activity row joined', () => {
+    expect(build()).not.toHaveProperty('incompleteActivityRows');
+  });
+
+  it('refuses to prove a zero when skipped activity could have been the live class', () => {
+    expect(build({
+      attempts: [attempt({ taskId: '404' })],
+      verdicts: [],
+    })).toMatchObject({
+      status: 'unknown',
+      reason: 'incomplete_indexer_evidence',
+      classes: [],
+    });
+    expect(build({
+      attempts: [attempt({ taskId: '404' })],
+      verdicts: [],
+    })).not.toHaveProperty('incompleteActivityRows');
+  });
+
   it('reports a healthy class even when another launched manifest is degraded', () => {
     // The guard must be MONOTONE. One row whose IPFS enrichment failed — a
     // permanent state with no retry path — cannot subtract from a class whose
@@ -322,10 +398,9 @@ describe('GET /supply evidence reads', () => {
     // flags compare with `<=`, so a full page is read as truncation rather than
     // as a proven zero. Counting bare `.limit(` occurrences would not see
     // either half: dropping the `+ 1`, or flipping a `<=` to `<`, makes every
-    // completeness flag unconditionally true while keeping the count at 7.
+    // completeness flag unconditionally true while keeping the count at 5.
     expect(route.match(/\.limit\(SUPPLY_EVIDENCE_ROW_LIMIT \+ 1\)/gu)).toHaveLength(5);
-    expect(route.match(/\.limit\(1\)/gu)).toHaveLength(2);
-    expect(route.match(/\.limit\(/gu)).toHaveLength(7);
+    expect(route.match(/\.limit\(/gu)).toHaveLength(5);
     expect(route.match(/\.length <= SUPPLY_EVIDENCE_ROW_LIMIT/gu)).toHaveLength(5);
     // The attempts referenced by in-window verdicts are fetched WITHOUT the
     // window filter, so a long loop cannot look like a broken join.
@@ -334,6 +409,31 @@ describe('GET /supply evidence reads', () => {
     expect(route).toContain('attempt.createdAtTimestamp} < ${windowEnd}');
     expect(route).toContain('verdict.createdAtTimestamp} >= ${windowStart}');
     expect(route).toContain('verdict.createdAtTimestamp} < ${windowEnd}');
+  });
+
+  it('does not probe the whole chain for zero timestamps', () => {
+    const source = readFileSync(new URL('../src/api/index.ts', import.meta.url), 'utf8');
+    const route = source.slice(
+      source.indexOf('// ── GET /supply'),
+      source.indexOf('// ── Shared ebu7-schema probe'),
+    );
+    expect(route).not.toContain('missingAttemptTimes');
+    expect(route).not.toContain('missingVerdictTimes');
+    expect(route).not.toMatch(/createdAtTimestamp, 0n/);
+    expect(route.match(/\.limit\(1\)/gu)).toBeNull();
+  });
+
+  it('splits query failures from assembler failures and caches successful answers', () => {
+    const source = readFileSync(new URL('../src/api/index.ts', import.meta.url), 'utf8');
+    const route = source.slice(
+      source.indexOf('// ── GET /supply'),
+      source.indexOf('// ── Shared ebu7-schema probe'),
+    );
+    expect(route).toContain("detail: 'assembler failed'");
+    expect(route).toContain("c.header('Cache-Control', 'public, max-age=30, must-revalidate')");
+    expect(route).toContain('assembleCurrentSupply');
+    expect(route).toContain('unknownBecause');
+    expect(route).toContain('console.warn');
   });
 });
 
@@ -369,9 +469,10 @@ describe('served chain set', () => {
   it.each([undefined, '', '   ', 'abc', '0', '-1', '1.5', 'Infinity', '9007199254740993'])(
     'refuses %o as a chain id before touching the database',
     (raw) => {
-      expect(resolveSupplyChainId(raw, [BASE_SEPOLIA_CHAIN_ID])).toMatchObject({
+      expect(resolveSupplyChainId(raw, [BASE_SEPOLIA_CHAIN_ID])).toEqual({
         ok: false,
         error: 'invalid chainId',
+        detail: 'provide a positive integer ?chainId=; this indexer serves 84532',
       });
     },
   );

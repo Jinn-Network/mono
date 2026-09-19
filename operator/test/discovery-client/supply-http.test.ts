@@ -72,6 +72,49 @@ describe('DiscoveryClient.getCurrentSupply', () => {
     ).rejects.toThrow(DiscoveryUnavailableError);
   });
 
+  it('carries the incomplete-activity marker through decoding', async () => {
+    const body = { ...available, incompleteActivityRows: 3 };
+    await expect(clientFor(body).client.getCurrentSupply({ chainId: 84532 })).resolves.toEqual(body);
+  });
+
+  it('rejects a non-positive incomplete-activity marker', async () => {
+    await expect(
+      clientFor({ ...available, incompleteActivityRows: 0 }).client.getCurrentSupply({ chainId: 84532 }),
+    ).rejects.toThrow(DiscoveryUnavailableError);
+  });
+
+  it('rejects a class identifier longer than 128 characters', async () => {
+    const contractId = 'c'.repeat(129);
+    await expect(
+      clientFor({
+        ...available,
+        classes: [{
+          ...available.classes[0],
+          contractId,
+          workClass: `${contractId}.v1`,
+        }],
+      }).client.getCurrentSupply({ chainId: 84532 }),
+    ).rejects.toThrow(DiscoveryUnavailableError);
+  });
+
+  it('accepts a 128-character class identifier', async () => {
+    // workClass is `${contractId}.${contractVersion}`, so a 128-char workClass
+    // is the longest identifier the schema can accept while keeping the tuple
+    // identity check.
+    const contractId = 'c'.repeat(125);
+    const contractVersion = 'v1';
+    const body = {
+      ...available,
+      classes: [{
+        ...available.classes[0],
+        contractId,
+        contractVersion,
+        workClass: `${contractId}.${contractVersion}`,
+      }],
+    };
+    await expect(clientFor(body).client.getCurrentSupply({ chainId: 84532 })).resolves.toEqual(body);
+  });
+
   it('preserves a server unknown response', async () => {
     const unknown = {
       ...available,
@@ -105,13 +148,15 @@ describe('DiscoveryClient.getCurrentSupply', () => {
       .rejects.toBeInstanceOf(DiscoveryUnavailableError);
   });
 
-  it('carries the indexer\'s own refusal through so an unserved chain is actionable', async () => {
+  it('tags indexer 4xx as invalid_request and keeps the served-chain detail', async () => {
     const { client } = clientFor(
       { error: 'unsupported chainId', detail: 'this indexer serves 84532; it has no evidence about 8453' },
       400,
     );
-    await expect(client.getCurrentSupply({ chainId: 8453 }))
-      .rejects.toThrow(/no evidence about 8453/u);
+    await expect(client.getCurrentSupply({ chainId: 8453 })).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+    await expect(client.getCurrentSupply({ chainId: 8453 })).rejects.toThrow(/serves 84532.*8453/u);
   });
 
   it('rejects an unavailable route instead of falling back to GraphQL or chain reads', async () => {
@@ -119,5 +164,58 @@ describe('DiscoveryClient.getCurrentSupply', () => {
     await expect(client.getCurrentSupply({ chainId: 84532 }))
       .rejects.toBeInstanceOf(DiscoveryUnavailableError);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('tags a non-positive chainId as invalid_request', async () => {
+    const { client } = clientFor(available);
+    await expect(client.getCurrentSupply({ chainId: 0 })).rejects.toMatchObject({
+      name: 'DiscoveryUnavailableError',
+      code: 'invalid_request',
+    });
+  });
+
+  it('tags a Zod decoder rejection as invalid_request', async () => {
+    await expect(
+      clientFor({ ...available, schemaVersion: 0 }).client.getCurrentSupply({ chainId: 84532 }),
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+  });
+
+  it('tags a malformed discovery.url as invalid_request', async () => {
+    // Real fetch throws TypeError on an unparseable URL. A stub that returns
+    // 200 for any string lets /ready succeed and hides the misclassification.
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      void new URL(String(input));
+      return new Response('ok', { status: 200 });
+    });
+    const client = createHttpDiscoveryClient({
+      url: 'not a url',
+      fetchImpl: fetchImpl as typeof fetch,
+      retryDelaysMs: [],
+    });
+    await expect(client.getCurrentSupply({ chainId: 84532 })).rejects.toMatchObject({
+      name: 'DiscoveryUnavailableError',
+      code: 'invalid_request',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('leaves 5xx and transport failures untagged so they stay transient', async () => {
+    await expect(
+      clientFor({ error: 'unavailable' }, 503).client.getCurrentSupply({ chainId: 84532 }),
+    ).rejects.toMatchObject({ code: undefined });
+
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/ready')) return new Response('ok', { status: 200 });
+      throw new TypeError('network down');
+    });
+    const client = createHttpDiscoveryClient({
+      url: 'https://indexer.example/graphql',
+      fetchImpl: fetchImpl as typeof fetch,
+      retryDelaysMs: [],
+    });
+    await expect(client.getCurrentSupply({ chainId: 84532 })).rejects.toMatchObject({
+      code: undefined,
+    });
   });
 });
