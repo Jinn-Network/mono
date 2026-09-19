@@ -18,22 +18,29 @@ import { BINARY_INSTRUMENT_MEASUREMENT_PROFILE } from "@jinn-network/benchmarkin
 import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
+  DISCLOSURE_SPECIFICATION_RECORD_KIND,
+  DISCLOSURE_VARIABLE_KEYS,
+  MATRIX_RECORD_KIND,
+  SIX_VARIABLE_DISCLOSURE_SPECIFICATION,
+  sealDisclosureSpecification,
   type BenchmarkRecord,
   type MatrixRecord,
   type ReportRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
 import { assertClaimConsistency, firstDifference, type ClaimRecordIdentities } from "./claim-consistency.js";
-import { buildClaimPackage, ClaimPackageSchema, type ClaimPackage } from "./claim.js";
+import { buildClaimPackage, ClaimPackageSchema, COMPOSED_CLAIM_PACKAGE_SCHEMA_ID, type ClaimPackage } from "./claim.js";
 import {
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
-  BUNDLE_V6_FORMAT,
+  CLAIM_PACKAGE_SCHEMA_ID,
+  PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
 } from "../legacy-closures.js";
-import { BUNDLE_V10_FORMAT } from "../manifest.js";
+import { expectedChecks, readerInstructions } from "../capabilities.js";
+import { deriveDisclosureSpecification } from "./disclosure.js";
 import { BenchmarkProductError } from "./errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 import { binaryInstrumentReportLimitations, BINARY_INSTRUMENT_REPORT_LIMITATIONS } from "./binary-qualification.js";
@@ -154,19 +161,23 @@ function refusalFor(tamper: (claim: Record<string, unknown>) => void): Benchmark
 }
 
 /**
- * Issue #4191: `claim-package/4` is carried by two bundle formats, and its pin admission has to
- * say so.
+ * Issue #3403: the composed generation's shared claim package, `claim-package/7`.
  *
- * `/10` is `/6`'s closure with a different report page, so its claim's SHAPE is byte-identical to
- * `/6`'s — minting a fifth claim-package id for an identical shape would be dishonest. What does
- * differ is the reader line: `/6` stamps the first public `0.1` line, and `/10` cannot, because no
- * released `0.1` reader understands the format. So the admission accepts either pair and nothing
- * else, and which one a bundle must carry is settled where it can be: `claim-consistency` rebuilds
- * the claim from the format the bundle's own manifest declares, so a `/6` bundle carrying `/10`'s
- * pin fails on the exact field that disagrees.
+ * A pre-composition claim says what it carries by its ID: `/4` is "anchored", `/5` is "anchored and
+ * qualified", and each id has a hand-written guard. The composed claim carries one id for every
+ * combination, and what it must carry is derived from the capability vector its bundle declares:
+ * the sections (biconditionally), the check list, and the reader line.
+ *
+ * The vector is read from the BUNDLE, never from the claim under test. A claim cannot satisfy
+ * itself: both "a section the vector does not declare" and "a declaration with no section" are
+ * differences the rebuild names, not tautologies the claim's own shape would pass.
+ *
+ * This replaces the arrangement issue #4191 made while `/10` was `/6`'s closure exactly, where
+ * `/10` shared `claim-package/4` and that id admitted a second reader pair. `claim-package/4` is
+ * carried by `/6` alone again, and admits the one pair it always did.
  */
-describe("issue #4191: the anchored claim package's two reader lines", () => {
-  function anchoredClaim(anchoredBundleFormat?: typeof BUNDLE_V6_FORMAT | typeof BUNDLE_V10_FORMAT): ClaimPackage {
+describe("issue #3403: the composed claim package", () => {
+  function claimFor(input: { readonly composedCapabilities?: readonly string[]; readonly anchors?: readonly never[] }): ClaimPackage {
     return buildClaimPackage({
       draftId: DRAFT_ID,
       benchmarkSha256: identities.benchmarkSha256,
@@ -180,70 +191,12 @@ describe("issue #4191: the anchored claim package's two reader lines", () => {
       venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, []),
       verificationCommandVerb: "bundle verify",
       assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
-      anchors: [],
-      ...(anchoredBundleFormat === undefined ? {} : { anchoredBundleFormat }),
+      ...input,
     });
   }
-
-  test("omitting the format keeps every existing anchored claim byte-identical", () => {
-    const claim = anchoredClaim();
-    expect(claim.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
-    expect(claim.verification.command).toBe(PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND);
-    expect(claim.verification.compatibleCommand).toBe(PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND);
-    expect(anchoredClaim(BUNDLE_V6_FORMAT)).toEqual(claim);
-  });
-
-  test("/10 pins the 0.2.1 line and keeps claim-package/4's shape", () => {
-    const composed = anchoredClaim(BUNDLE_V10_FORMAT);
-    expect(composed.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
-    expect(composed.verification.command).toBe(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND);
-    expect(composed.verification.compatibleCommand).toBe(PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND);
-    // The shape, not merely the id: the whole justification for not minting a fifth id is that
-    // nothing but the two reader lines moves.
-    expect({ ...composed, verification: undefined })
-      .toEqual({ ...anchoredClaim(), verification: undefined });
-  });
-
-  test("the admission accepts both pairs and no third one", () => {
-    expect(ClaimPackageSchema.safeParse(anchoredClaim()).success).toBe(true);
-    expect(ClaimPackageSchema.safeParse(anchoredClaim(BUNDLE_V10_FORMAT)).success).toBe(true);
-    const mixed = {
-      ...anchoredClaim(),
-      verification: {
-        ...anchoredClaim().verification,
-        compatibleCommand: PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
-      },
-    };
-    // A pair split across the two formats is not a pair either format pins.
-    expect(ClaimPackageSchema.safeParse(mixed).success).toBe(false);
-  });
-
-  test("a /6 bundle carrying /10's pin fails claim-consistency on the field that disagrees", () => {
-    // The admission alone cannot settle this — both pairs are legal claim-package/4 — so the
-    // binding is done by the rebuild, from the format the bundle's own manifest declares.
-    try {
-      assertClaimConsistency({
-        claim: anchoredClaim(BUNDLE_V10_FORMAT),
-        identities,
-        benchmarkRecord: {} as unknown as BenchmarkRecord,
-        runRecord,
-        matrixRecord,
-        reportRecord,
-        draftId: DRAFT_ID,
-        assurancePreset: ASSURANCE_PRESET,
-        anchors: [],
-      });
-    } catch (cause) {
-      expect(cause).toBeInstanceOf(BenchmarkProductError);
-      expect((cause as BenchmarkProductError).message).toContain("verification.command");
-      return;
-    }
-    throw new Error("expected the mismatched reader pin to be refused");
-  });
-
-  test("declaring the bundle's own format makes the same claim consistent", () => {
-    expect(() => assertClaimConsistency({
-      claim: anchoredClaim(BUNDLE_V10_FORMAT),
+  const consistency = (claim: ClaimPackage, bundle: { readonly composedCapabilities?: readonly string[]; readonly anchors?: readonly never[] }) =>
+    () => assertClaimConsistency({
+      claim,
       identities,
       benchmarkRecord: {} as unknown as BenchmarkRecord,
       runRecord,
@@ -251,9 +204,117 @@ describe("issue #4191: the anchored claim package's two reader lines", () => {
       reportRecord,
       draftId: DRAFT_ID,
       assurancePreset: ASSURANCE_PRESET,
-      anchors: [],
-      anchoredBundleFormat: BUNDLE_V10_FORMAT,
-    })).not.toThrow();
+      ...bundle,
+    });
+
+  test("omitting the vector keeps every pre-composition claim byte-identical", () => {
+    const anchored = claimFor({ anchors: [] });
+    expect(anchored.claimSchema).toBe(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(anchored.verification.command).toBe(PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND);
+    expect(anchored.verification.compatibleCommand).toBe(PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND);
+    expect(anchored.verification.checks).toEqual(PUBLIC_BUNDLE_V6_CHECKS);
+    expect(claimFor({}).claimSchema).toBe(CLAIM_PACKAGE_SCHEMA_ID);
+  });
+
+  test("claim-package/4 admits its one reader pair again, and no other", () => {
+    const anchored = claimFor({ anchors: [] });
+    expect(ClaimPackageSchema.safeParse(anchored).success).toBe(true);
+    for (const verification of [
+      { ...anchored.verification, ...readerInstructions(["anchoring"]) },
+      { ...anchored.verification, compatibleCommand: PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND },
+    ]) {
+      expect(ClaimPackageSchema.safeParse({ ...anchored, verification }).success).toBe(false);
+    }
+  });
+
+  test("supplying the vector, even empty, makes the composed claim: one id, derived pins", () => {
+    const base = claimFor({ composedCapabilities: [] });
+    expect(base.claimSchema).toBe(COMPOSED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(base.verification.checks).toEqual(expectedChecks([]));
+    expect(base.anchors).toBeUndefined();
+
+    const anchored = claimFor({ composedCapabilities: ["anchoring"], anchors: [] });
+    expect(anchored.claimSchema).toBe(COMPOSED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(anchored.verification.checks).toEqual(PUBLIC_BUNDLE_V6_CHECKS);
+    expect(anchored.verification).toEqual(expect.objectContaining(readerInstructions(["anchoring"])));
+    // No composed claim names the first-public 0.1 line: no 0.1 reader understands the format.
+    expect(anchored.verification.command).toBe(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND);
+    expect(base.verification.command).toBe(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND);
+
+    // Section contents move across verbatim: only the id and the pins differ from claim-package/4.
+    expect({ ...anchored, claimSchema: undefined, verification: undefined })
+      .toEqual({ ...claimFor({ anchors: [] }), claimSchema: undefined, verification: undefined });
+    for (const claim of [base, anchored]) expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+  });
+
+  test("the builder refuses a section and a declaration that do not arrive together", () => {
+    expect(() => claimFor({ composedCapabilities: ["anchoring"] })).toThrow(/"anchoring" and its "anchors" section/u);
+    expect(() => claimFor({ composedCapabilities: [], anchors: [] })).toThrow(/"anchoring" and its "anchors" section/u);
+    // A wilson@1 Report projects no qualification, so the vector cannot declare one.
+    expect(() => claimFor({ composedCapabilities: ["binary-qualification"] }))
+      .toThrow(/"binary-qualification" and its "qualification" section/u);
+  });
+
+  test("the builder refuses a vector the registry does not admit, as a typed refusal", () => {
+    for (const composedCapabilities of [["zz-unknown"], ["disclosure-specification"], ["binary-qualification", "anchoring"]]) {
+      expect(() => claimFor({ composedCapabilities }), JSON.stringify(composedCapabilities)).toThrow(BenchmarkProductError);
+    }
+  });
+
+  test("the schema pins the checks and the reader line to the sections the claim carries", () => {
+    const anchored = claimFor({ composedCapabilities: ["anchoring"], anchors: [] });
+    const { anchors: _section, ...stripped } = anchored;
+    const undisclosed = { status: "undisclosed", reason: "not-stated" } as const;
+    const disclosure = deriveDisclosureSpecification(sealDisclosureSpecification({
+      kind: DISCLOSURE_SPECIFICATION_RECORD_KIND,
+      specification: SIX_VARIABLE_DISCLOSURE_SPECIFICATION,
+      author: "did:key:zPlaceholderAuthorIdentity",
+      subject: { kind: MATRIX_RECORD_KIND, digest: { sha256: identities.matrixSha256 } },
+      variables: Object.fromEntries(DISCLOSURE_VARIABLE_KEYS.map((key) => [key, undisclosed])),
+    }).bytes);
+    const issuesOf = (claim: unknown): string[] => {
+      const parsed = ClaimPackageSchema.safeParse(claim);
+      return parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
+    };
+
+    // The section removed, the seven checks kept: the sections now imply the base six.
+    expect(issuesOf(stripped)).toEqual([expect.stringContaining("six base checks plus each carried capability's")]);
+    // The section kept, a check dropped.
+    expect(issuesOf({ ...anchored, verification: { ...anchored.verification, checks: [...expectedChecks([])] } }))
+      .toEqual([expect.stringContaining("six base checks plus each carried capability's")]);
+    // A reader line the vector does not derive.
+    expect(issuesOf({ ...anchored, verification: { ...anchored.verification, command: PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND } }))
+      .toEqual([expect.stringContaining("must pin the reader release its capability sections derive")]);
+    // A disclosure section with no qualification to ride on is a combination the registry refuses,
+    // so the claim is refused on resolution, exactly as the manifest declaring it would be.
+    expect(issuesOf({ ...anchored, disclosure }))
+      .toEqual([expect.stringContaining('capability "disclosure-specification" requires "binary-qualification"')]);
+  });
+
+  test("declared without its section: the rebuild names the missing section", () => {
+    const refused = consistency(claimFor({ composedCapabilities: [] }), { composedCapabilities: ["anchoring"], anchors: [] });
+    expect(refused).toThrow(BenchmarkProductError);
+    expect(refused).toThrow(/claim package anchors is not the exact projection/u);
+  });
+
+  test("a section without its declaration: the rebuild names the undeclared section", () => {
+    const refused = consistency(claimFor({ composedCapabilities: ["anchoring"], anchors: [] }), { composedCapabilities: [] });
+    expect(refused).toThrow(/claim package anchors is not the exact projection/u);
+  });
+
+  test("a pre-composition claim inside a composed bundle is refused on its id, and the reverse", () => {
+    expect(consistency(claimFor({ anchors: [] }), { composedCapabilities: ["anchoring"], anchors: [] }))
+      .toThrow(/claim package claimSchema is not the exact projection/u);
+    expect(consistency(claimFor({ composedCapabilities: ["anchoring"], anchors: [] }), { anchors: [] }))
+      .toThrow(/claim package claimSchema is not the exact projection/u);
+  });
+
+  test("the vector the bundle declares makes the matching claim consistent", () => {
+    expect(consistency(claimFor({ composedCapabilities: [] }), { composedCapabilities: [] })).not.toThrow();
+    expect(consistency(
+      claimFor({ composedCapabilities: ["anchoring"], anchors: [] }),
+      { composedCapabilities: ["anchoring"], anchors: [] },
+    )).not.toThrow();
   });
 });
 

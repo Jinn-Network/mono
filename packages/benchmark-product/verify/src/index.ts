@@ -133,7 +133,11 @@ export * from "./schema.js";
 export * from "./assembly-v3.js";
 export * from "./profile/binary-judge-manifest.js";
 export * from "./profile/binary-qualification.js";
-export { ClaimPackageSchema, DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID } from "./profile/claim.js";
+export {
+  COMPOSED_CLAIM_PACKAGE_SCHEMA_ID,
+  ClaimPackageSchema,
+  DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
+} from "./profile/claim.js";
 export type { ClaimPackage } from "./profile/claim.js";
 export { firstDifference } from "./profile/claim-consistency.js";
 export {
@@ -175,7 +179,6 @@ export {
   PUBLIC_BUNDLE_V8_CHECKS,
   PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V10_CHECKS,
   PUBLIC_BUNDLE_V10_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
