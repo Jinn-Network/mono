@@ -20,7 +20,6 @@ import { fileURLToPath } from 'node:url';
 import { loadCatalogPackages, loadPlatformCatalog, RUNTIME_DEPENDENCY_SECTIONS, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
 
 export const GATE_DOMAINS = new Map([
-  ['benchmarking-ci', 'benchmarking'],
   ['contracts-ci', 'contracts'],
   ['environments-ci', 'environments'],
   ['evidence-ci', 'evidence'],
