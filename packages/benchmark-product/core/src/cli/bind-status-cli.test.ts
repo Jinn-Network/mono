@@ -14,7 +14,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { requiredBeaconRound } from "@colophon-claims/verify";
+import { requiredBeaconRound } from "@colophon-claims/check";
 import { armAdd } from "../operations/arms.js";
 import type { OperationContext } from "../operations/context.js";
 import { createDraft } from "../operations/drafts.js";

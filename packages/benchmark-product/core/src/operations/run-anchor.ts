@@ -46,7 +46,7 @@ import {
   sealAnchorEvidence,
 } from "@jinn-network/trust-core";
 import type { AnchorEvidence, AnchorProofResult, AnchorProofSource } from "@jinn-network/trust-core";
-import { nodeCryptoAnchorPorts } from "@colophon-claims/verify";
+import { nodeCryptoAnchorPorts } from "@colophon-claims/check";
 import {
   anchorProofMediaType,
   encodeAnchorProofContent,
