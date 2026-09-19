@@ -74,7 +74,7 @@ const EnumeratedBundleManifestSchema = z.object({
 /**
  * `/2`'s manifest plus one member, the capability vector (design §3.2). Required, so that "no
  * capabilities" is the spelled statement `[]` rather than an absence; and closed, so an unknown
- * top-level member is refused. Mirrors `@colophon-claims/verify`'s `manifest.ts` exactly; the two
+ * top-level member is refused. Mirrors `@colophon-claims/check`'s `manifest.ts` exactly; the two
  * copies must agree.
  */
 const ComposedBundleManifestSchema = z.strictObject({
