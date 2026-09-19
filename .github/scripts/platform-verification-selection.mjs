@@ -52,7 +52,6 @@ export const IGNORABLE_PREFIXES = [
   'architecture/generated/',
   'docs/',
   'growth/',
-  'legacy/',
   'log/',
   'spec/',
 ];
