@@ -26,17 +26,38 @@ import { firstCommand, usesPrimaryWrapperHelp } from "./help-routing.js";
 
 export const USAGE = `Colophon — Publish benchmark claims people can check.
 
+Published claimant verbs:
+  method, arm add, lock, anchor, run import, collect, report, publish, results, status
+
 Primary commands:
   colophon                         Run the bundled sample and open its verified local viewer
   colophon demo [--output <dir>] [--no-open] [--json]
   colophon open --bundle <dir> [--port <n>] [--no-browser]
   colophon open [--workspace <dir>] [--port <n>] [--no-browser]
+  colophon method --help
+  colophon arm add --help
+  colophon lock --help
+  colophon anchor --help
+  colophon run import --help
+  colophon collect --help
+  colophon report --help
+  colophon publish --help
+  colophon results --help
+  colophon status --help
   colophon import swebench ...     Import your own SWE-bench tasks
   colophon bundle verify ...       Verify through the full product
-  colophon help --advanced         Show the explicit lifecycle commands
-  colophon method --help           Named suites, --host keys, and --n
+  colophon help --advanced         Show the explicit lifecycle library
+
+launch, resume, preview, quote, and the other venue-orchestration verbs are the
+service's machinery on a venue Colophon controls. They remain in the advanced
+library; they are not the claimant path. A claimant brings a finished run with
+\`run import\`.
 
 No account, API key, funds, or Docker are needed for the bundled sample.
+
+Protocol identifiers in the installed platform packages are names, not addresses.
+This CLI fetches nothing from them. Checks run against the exact platform bytes
+installed from npm.
 `;
 
 function result(exitCode: number, stdout = "", stderr = ""): CliResult {

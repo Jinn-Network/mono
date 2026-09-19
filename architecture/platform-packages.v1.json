@@ -196,7 +196,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 12,
+      "expectedPackageCount": 10,
       "publishPolicies": [
         "private",
         "never"
@@ -234,7 +234,7 @@
       "stable": false
     },
     "colophon-claims-v1": {
-      "expectedPackageCount": 1,
+      "expectedPackageCount": 3,
       "publishPolicies": [
         "independent"
       ],
@@ -565,8 +565,8 @@
         ],
         "decisionRecord": null
       },
-      "releaseGroup": "transitional-or-private",
-      "publishPolicy": "never",
+      "releaseGroup": "colophon-claims-v1",
+      "publishPolicy": "independent",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmark-product-ci"
@@ -609,8 +609,8 @@
         ],
         "decisionRecord": null
       },
-      "releaseGroup": "transitional-or-private",
-      "publishPolicy": "never",
+      "releaseGroup": "colophon-claims-v1",
+      "publishPolicy": "independent",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmark-product-ci"
