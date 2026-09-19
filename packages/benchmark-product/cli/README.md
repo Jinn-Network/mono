@@ -100,7 +100,7 @@ It is not a floating `@canary` dependency and is not a stable stack release.
 For a received bundle, the smaller reader surface is:
 
 ```sh
-npx @colophon-claims/verify@0.1 ./bundle
+npx @colophon-claims/check@0.2 ./bundle
 ```
 
 That line reads the bundle formats through public-bundle/6, and only the claims that pin it.

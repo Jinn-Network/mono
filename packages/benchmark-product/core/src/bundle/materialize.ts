@@ -98,7 +98,7 @@ import {
 } from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
-import { derivePublicComparison } from "@colophon-claims/verify";
+import { derivePublicComparison } from "@colophon-claims/check";
 
 const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
 

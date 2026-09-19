@@ -6,11 +6,11 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 const root = new URL("..", import.meta.url).pathname;
-const scratch = await mkdtemp(join(tmpdir(), "colophon-verify-pack-"));
+const scratch = await mkdtemp(join(tmpdir(), "colophon-check-pack-"));
 try {
-  const { stdout } = await run("yarn", ["pack", "--out", join(scratch, "verify.tgz")], { cwd: root });
-  if (!stdout.includes("verify.tgz")) throw new Error("yarn pack did not create the requested tarball");
-  const archive = join(scratch, "verify.tgz");
+  const { stdout } = await run("yarn", ["pack", "--out", join(scratch, "check.tgz")], { cwd: root });
+  if (!stdout.includes("check.tgz")) throw new Error("yarn pack did not create the requested tarball");
+  const archive = join(scratch, "check.tgz");
   const listing = (await run("tar", ["-tzf", archive])).stdout.split("\n");
   for (const required of [
     "package/dist/admission/index.js",
@@ -39,7 +39,7 @@ try {
     throw new Error(`packed verifier carries test modules: ${packedTests.join(", ")}`);
   }
   const manifest = JSON.parse((await run("tar", ["-xOzf", archive, "package/package.json"])).stdout);
-  if (manifest.name !== "@colophon-claims/verify" || manifest.version !== "0.2.1") {
+  if (manifest.name !== "@colophon-claims/check" || manifest.version !== "0.2.1") {
     throw new Error("packed verifier identity/version drifted");
   }
   if (manifest.exports?.["./admission"] === undefined) {

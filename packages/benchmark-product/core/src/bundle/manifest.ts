@@ -12,7 +12,7 @@ import {
 import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
-import { CapabilityVectorSchema, composeClosure } from "@colophon-claims/verify";
+import { CapabilityVectorSchema, composeClosure } from "@colophon-claims/check";
 import { refuse } from "../errors.js";
 import {
   BUNDLE_FORMAT,
@@ -38,7 +38,7 @@ export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
 /**
  * The composed generation (bundle-capability-composition design §3, issue #3403): its manifest
  * carries an explicit, canonically ordered, must-understand capability vector, and everything else
- * about the closure is derived from that vector by the registry in `@colophon-claims/verify`. It
+ * about the closure is derived from that vector by the registry in `@colophon-claims/check`. It
  * renders the report page the four report-prose rulings direct (issue #4191). A SECOND,
  * independent copy of the verifier's own constant, for the same reason `/8`'s is -- both packages
  * must carry it or the producer cannot emit what the verifier accepts.
@@ -74,7 +74,7 @@ const EnumeratedBundleManifestSchema = z.object({
 /**
  * `/2`'s manifest plus one member, the capability vector (design §3.2). Required, so that "no
  * capabilities" is the spelled statement `[]` rather than an absence; and closed, so an unknown
- * top-level member is refused. Mirrors `@colophon-claims/verify`'s `manifest.ts` exactly; the two
+ * top-level member is refused. Mirrors `@colophon-claims/check`'s `manifest.ts` exactly; the two
  * copies must agree.
  */
 const ComposedBundleManifestSchema = z.strictObject({
