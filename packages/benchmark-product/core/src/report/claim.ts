@@ -742,7 +742,7 @@ const REPORT_SOURCE = "report.json";
  * surfaced as `execution`, the code `toErrorEnvelope` carries an untyped throw as; they now
  * surface as `record-integrity` at `report.json`, which is what a reader already got for the
  * same bytes through the standalone verifier. Where that code reaches a reader through
- * `colophon-verify`'s exit mapping, this is the 2 ("the verifier broke") to 1 ("the bundle is
+ * `colophon-check`'s exit mapping, this is the 2 ("the verifier broke") to 1 ("the bundle is
  * bad") shift issue #3943 named, and it is the same shift issues #3741 and #3855 each stated for
  * their own conversions. `errors.ts` documents why the two "not supported" conditions live under
  * `record-integrity` rather than a compat code of their own (issue #3944).

@@ -95,7 +95,7 @@ export function identityBind(
       const documentBytes = canonicalJsonBytes({ ...statement.data, signature });
 
       // The shipped reader is the acceptance test for what this writes. A binding this product
-      // minted but `colophon-verify` would refuse is a defect that must surface here, at the one
+      // minted but `colophon-check` would refuse is a defect that must surface here, at the one
       // moment the operator is still in front of it.
       const verified = verifyDomainBinding(documentBytes, [key.keyId]);
 

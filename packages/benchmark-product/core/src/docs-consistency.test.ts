@@ -287,15 +287,14 @@ describe("product documentation consistency", () => {
     expect(section).toContain("`benchmark-product.claim-package/3`");
     expect(section).toContain("metadata-first");
     expect(section).toContain("not fetched");
-    // No metadata-first command constant exists (PUBLIC-BUNDLE.md says so); the metadata-first
-    // reader is the `@0.2.1` release, which is the prompted-screening exact line.
-    const fullEvidence = readerLine(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND);
-    const metadataFirst = readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND);
+    // Fresh instructions print the current reader name. Both v5 profiles (full-evidence and
+    // metadata-first) are served by `@colophon-claims/check@0.2`; the `@0.1` line still refuses
+    // metadata-first, which the prose states. Sealed historical pins live in PUBLIC-BUNDLE.md.
     const stated = fenceBodies(section)
       .flatMap((body) => body.split("\n"))
       .filter((line) => line.includes("npx "))
       .map(readerLine);
-    expect([...new Set(stated)].sort()).toEqual([fullEvidence, metadataFirst].sort());
+    expect([...new Set(stated)].sort()).toEqual(["@0.2"]);
   });
 
   it("pins the per-format reader table to the reader's own constants", () => {

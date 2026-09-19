@@ -2,7 +2,7 @@
  * Compatibility surface for full-product callers.
  *
  * The reader verifier is owned by the smaller Colophon package so that this
- * path and `colophon-verify` cannot drift into two implementations. This
+ * path and `colophon-check` cannot drift into two implementations. This
  * adapter preserves core's typed operation-error identity; it does not
  * implement or reinterpret a verification check.
  */
