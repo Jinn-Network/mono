@@ -2,11 +2,11 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalPolicy": 2,
-    "implementationsV1": 61,
+    "implementationsV1": 53,
     "inventory": 98,
-    "otherPackagesRootEntries": 15,
+    "otherPackagesRootEntries": 26,
     "packagesRootEntries": 92,
-    "sealedPlatformV1": 14
+    "sealedPlatformV1": 11
   },
   "graph": {
     "edgeSections": {
@@ -1667,26 +1667,6 @@
           "@jinn-network/attestation-issuer": [
             "@jinn-network/evidence-repository"
           ],
-          "@jinn-network/benchmarking-aggregate": [],
-          "@jinn-network/benchmarking-evaluation": [
-            "@jinn-network/attestation-issuer",
-            "@jinn-network/evidence-repository"
-          ],
-          "@jinn-network/benchmarking-evidence": [
-            "@jinn-network/benchmarking-aggregate"
-          ],
-          "@jinn-network/benchmarking-interop": [],
-          "@jinn-network/benchmarking-local": [
-            "@jinn-network/benchmarking-run"
-          ],
-          "@jinn-network/benchmarking-native-capture": [
-            "@jinn-network/execution-evidence-builder"
-          ],
-          "@jinn-network/benchmarking-publication": [
-            "@jinn-network/record-discovery-serve",
-            "@jinn-network/record-publication"
-          ],
-          "@jinn-network/benchmarking-run": [],
           "@jinn-network/chain-environment-verification": [],
           "@jinn-network/chain-scenarios": [
             "@jinn-network/task-admission",
@@ -1890,9 +1870,6 @@
         },
         "waves": [
           [
-            "@jinn-network/benchmarking-aggregate",
-            "@jinn-network/benchmarking-interop",
-            "@jinn-network/benchmarking-run",
             "@jinn-network/chain-environment-verification",
             "@jinn-network/contract-abis",
             "@jinn-network/environment-verification",
@@ -1916,9 +1893,6 @@
           ],
           [
             "@jinn-network/attestation-issuer",
-            "@jinn-network/benchmarking-evidence",
-            "@jinn-network/benchmarking-local",
-            "@jinn-network/benchmarking-native-capture",
             "@jinn-network/chain-state-extraction",
             "@jinn-network/evidence-discovery",
             "@jinn-network/evidence-gate",
@@ -1934,8 +1908,6 @@
             "@jinn-network/trust-testing"
           ],
           [
-            "@jinn-network/benchmarking-evaluation",
-            "@jinn-network/benchmarking-publication",
             "@jinn-network/chain-scenarios",
             "@jinn-network/evidence-catalog-sqlite",
             "@jinn-network/evidence-publication",
@@ -1966,19 +1938,6 @@
       },
       "sealed-platform-v1": {
         "closure": {
-          "@jinn-network/benchmarking-protocol": [
-            "@jinn-network/evidence-protocol"
-          ],
-          "@jinn-network/benchmarking-records": [
-            "@jinn-network/task-execution-protocol",
-            "@jinn-network/trust-core"
-          ],
-          "@jinn-network/benchmarking-testing": [
-            "@jinn-network/benchmarking-records",
-            "@jinn-network/task-execution-profiles",
-            "@jinn-network/task-execution-protocol",
-            "@jinn-network/trust-core"
-          ],
           "@jinn-network/chain-environment-record": [],
           "@jinn-network/environment-record": [],
           "@jinn-network/evidence-offer": [
@@ -2014,8 +1973,6 @@
             "@jinn-network/trust-core"
           ],
           [
-            "@jinn-network/benchmarking-protocol",
-            "@jinn-network/benchmarking-records",
             "@jinn-network/evidence-offer",
             "@jinn-network/evidence-trace",
             "@jinn-network/record-discovery-protocol",
@@ -2023,7 +1980,6 @@
             "@jinn-network/trust-authoring"
           ],
           [
-            "@jinn-network/benchmarking-testing",
             "@jinn-network/record-discovery-testing"
           ]
         ]
@@ -2511,7 +2467,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2530,8 +2486,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2539,7 +2495,7 @@
       "role": "aggregation capability",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2548,7 +2504,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [
@@ -2572,8 +2528,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2581,7 +2537,7 @@
       "role": "TEP-free exact subject evaluation issuance",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2590,7 +2546,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [
@@ -2613,8 +2569,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2622,7 +2578,7 @@
       "role": "evidence-native cohort verification and matrix assembly",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2631,7 +2587,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2653,8 +2609,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2662,7 +2618,7 @@
       "role": "task-execution import and export",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2671,7 +2627,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2690,8 +2646,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2699,7 +2655,7 @@
       "role": "local venue adapter",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2708,7 +2664,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [
@@ -2730,8 +2686,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2739,7 +2695,7 @@
       "role": "resumable native execution capture coordinator",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2748,7 +2704,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [
@@ -2770,8 +2726,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "sealed-platform-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2779,7 +2735,7 @@
       "role": "evidence-native benchmarking record protocol",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 2,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2788,7 +2744,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2808,8 +2764,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2817,7 +2773,7 @@
       "role": "benchmark publication planning and accounting verification",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2826,7 +2782,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2851,8 +2807,8 @@
           "schemas"
         ]
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "sealed-platform-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2860,7 +2816,7 @@
       "role": "benchmark record family",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 2,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2869,7 +2825,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2889,8 +2845,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2898,7 +2854,7 @@
       "role": "benchmark orchestration",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2907,7 +2863,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform-support",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [
@@ -2933,8 +2889,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "sealed-platform-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2942,7 +2898,7 @@
       "role": "benchmarking conformance kit",
       "stability": "candidate",
       "supersedes": [],
-      "tier": null,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -15767,7 +15723,7 @@
         "name": "@jinn-network/benchmarking-aggregate",
         "path": "packages/benchmarking/aggregate",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15776,7 +15732,7 @@
         "name": "@jinn-network/benchmarking-evaluation",
         "path": "packages/benchmarking/evaluation",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15785,7 +15741,7 @@
         "name": "@jinn-network/benchmarking-evidence",
         "path": "packages/benchmarking/evidence",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15796,7 +15752,7 @@
         "name": "@jinn-network/benchmarking-interop",
         "path": "packages/benchmarking/interop",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15805,7 +15761,7 @@
         "name": "@jinn-network/benchmarking-local",
         "path": "packages/benchmarking/local",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15814,7 +15770,7 @@
         "name": "@jinn-network/benchmarking-native-capture",
         "path": "packages/benchmarking/native-capture",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15823,7 +15779,7 @@
         "name": "@jinn-network/benchmarking-protocol",
         "path": "packages/benchmarking/protocol",
         "profiles": [],
-        "releaseGroup": "sealed-platform-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15832,7 +15788,7 @@
         "name": "@jinn-network/benchmarking-publication",
         "path": "packages/benchmarking/publication",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15843,7 +15799,7 @@
         "name": "@jinn-network/benchmarking-records",
         "path": "packages/benchmarking/records",
         "profiles": [],
-        "releaseGroup": "sealed-platform-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": [
           "schemas"
         ]
@@ -15854,7 +15810,7 @@
         "name": "@jinn-network/benchmarking-run",
         "path": "packages/benchmarking/run",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15867,7 +15823,7 @@
         "name": "@jinn-network/benchmarking-testing",
         "path": "packages/benchmarking/testing",
         "profiles": [],
-        "releaseGroup": "sealed-platform-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -17193,14 +17149,6 @@
         "implementations-v1": {
           "packages": [
             "@jinn-network/attestation-issuer",
-            "@jinn-network/benchmarking-aggregate",
-            "@jinn-network/benchmarking-evaluation",
-            "@jinn-network/benchmarking-evidence",
-            "@jinn-network/benchmarking-interop",
-            "@jinn-network/benchmarking-local",
-            "@jinn-network/benchmarking-native-capture",
-            "@jinn-network/benchmarking-publication",
-            "@jinn-network/benchmarking-run",
             "@jinn-network/chain-environment-verification",
             "@jinn-network/chain-scenarios",
             "@jinn-network/chain-state-extraction",
@@ -17266,9 +17214,6 @@
         },
         "sealed-platform-v1": {
           "packages": [
-            "@jinn-network/benchmarking-protocol",
-            "@jinn-network/benchmarking-records",
-            "@jinn-network/benchmarking-testing",
             "@jinn-network/chain-environment-record",
             "@jinn-network/environment-record",
             "@jinn-network/evidence-offer",
@@ -17294,17 +17239,6 @@
       },
       "packages": [
         "@jinn-network/attestation-issuer",
-        "@jinn-network/benchmarking-aggregate",
-        "@jinn-network/benchmarking-evaluation",
-        "@jinn-network/benchmarking-evidence",
-        "@jinn-network/benchmarking-interop",
-        "@jinn-network/benchmarking-local",
-        "@jinn-network/benchmarking-native-capture",
-        "@jinn-network/benchmarking-protocol",
-        "@jinn-network/benchmarking-publication",
-        "@jinn-network/benchmarking-records",
-        "@jinn-network/benchmarking-run",
-        "@jinn-network/benchmarking-testing",
         "@jinn-network/chain-environment-record",
         "@jinn-network/chain-environment-verification",
         "@jinn-network/chain-scenarios",
@@ -17377,127 +17311,6 @@
           "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/attestation-issuer",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-aggregate",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-evaluation",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-evidence",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-interop",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-local",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-native-capture",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-protocol",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-publication",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-records",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-run",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-testing",
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
@@ -18199,11 +18012,45 @@
     }
   },
   "releaseGroups": {
+    "benchmarking-product-v1": {
+      "allowedClassifications": [
+        "product"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
+        "implementations-v1",
+        "sealed-platform-v1"
+      ],
+      "canary": true,
+      "expectedPackageCount": 11,
+      "packages": [
+        "@jinn-network/benchmarking-aggregate",
+        "@jinn-network/benchmarking-evaluation",
+        "@jinn-network/benchmarking-evidence",
+        "@jinn-network/benchmarking-interop",
+        "@jinn-network/benchmarking-local",
+        "@jinn-network/benchmarking-native-capture",
+        "@jinn-network/benchmarking-protocol",
+        "@jinn-network/benchmarking-publication",
+        "@jinn-network/benchmarking-records",
+        "@jinn-network/benchmarking-run",
+        "@jinn-network/benchmarking-testing"
+      ],
+      "publishPolicies": [
+        "canary-only"
+      ],
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "stable": false,
+      "stackPublished": false
+    },
     "colophon-claims-v1": {
       "allowedClassifications": [
         "product"
       ],
       "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
         "colophon-claims-v1",
         "implementations-v1",
         "sealed-platform-v1"
@@ -18304,17 +18151,9 @@
         "sealed-platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 61,
+      "expectedPackageCount": 53,
       "packages": [
         "@jinn-network/attestation-issuer",
-        "@jinn-network/benchmarking-aggregate",
-        "@jinn-network/benchmarking-evaluation",
-        "@jinn-network/benchmarking-evidence",
-        "@jinn-network/benchmarking-interop",
-        "@jinn-network/benchmarking-local",
-        "@jinn-network/benchmarking-native-capture",
-        "@jinn-network/benchmarking-publication",
-        "@jinn-network/benchmarking-run",
         "@jinn-network/chain-environment-verification",
         "@jinn-network/chain-scenarios",
         "@jinn-network/chain-state-extraction",
@@ -18372,7 +18211,6 @@
         "canary-and-stable"
       ],
       "requiredGateIds": [
-        "benchmarking-ci",
         "contracts-ci",
         "environments-ci",
         "evidence-ci",
@@ -18432,11 +18270,8 @@
         "sealed-platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 14,
+      "expectedPackageCount": 11,
       "packages": [
-        "@jinn-network/benchmarking-protocol",
-        "@jinn-network/benchmarking-records",
-        "@jinn-network/benchmarking-testing",
         "@jinn-network/chain-environment-record",
         "@jinn-network/environment-record",
         "@jinn-network/evidence-offer",
@@ -18453,7 +18288,6 @@
         "canary-and-stable"
       ],
       "requiredGateIds": [
-        "benchmarking-ci",
         "environments-ci",
         "evidence-ci",
         "record-discovery-ci",
@@ -18471,6 +18305,7 @@
         "transitional"
       ],
       "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
         "colophon-claims-v1",
         "experimental-lifecycle-notifications",
         "experimental-policy",

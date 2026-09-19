@@ -37,10 +37,10 @@
   "manifestExclusions": [],
   "ownerGroups": {
     "architecture-control": [
-        "@oaksprout",
-        "@ritsukai",
-        "@ritsuKai2000"
-      ]
+      "@oaksprout",
+      "@ritsukai",
+      "@ritsuKai2000"
+    ]
   },
   "gateDefinitions": {
     "benchmarking-ci": {
@@ -220,6 +220,7 @@
         "transitional"
       ],
       "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
         "colophon-claims-v1",
         "experimental-lifecycle-notifications",
         "experimental-policy",
@@ -245,6 +246,7 @@
         "product"
       ],
       "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
         "colophon-claims-v1",
         "implementations-v1",
         "sealed-platform-v1"
@@ -253,13 +255,32 @@
       "canary": false,
       "stable": false
     },
+    "benchmarking-product-v1": {
+      "expectedPackageCount": 11,
+      "publishPolicies": [
+        "canary-only"
+      ],
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "allowedClassifications": [
+        "product"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
+        "implementations-v1",
+        "sealed-platform-v1"
+      ],
+      "stackPublished": false,
+      "canary": true,
+      "stable": false
+    },
     "sealed-platform-v1": {
-      "expectedPackageCount": 14,
+      "expectedPackageCount": 11,
       "publishPolicies": [
         "canary-and-stable"
       ],
       "requiredGateIds": [
-        "benchmarking-ci",
         "environments-ci",
         "evidence-ci",
         "record-discovery-ci",
@@ -278,12 +299,11 @@
       "stable": true
     },
     "implementations-v1": {
-      "expectedPackageCount": 61,
+      "expectedPackageCount": 53,
       "publishPolicies": [
         "canary-and-stable"
       ],
       "requiredGateIds": [
-        "benchmarking-ci",
         "contracts-ci",
         "environments-ci",
         "evidence-ci",
@@ -720,8 +740,8 @@
       "path": "packages/benchmarking/aggregate",
       "domain": "benchmarking",
       "role": "aggregation capability",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -739,8 +759,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -763,8 +783,8 @@
       "path": "packages/benchmarking/evaluation",
       "domain": "benchmarking",
       "role": "TEP-free exact subject evaluation issuance",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -782,8 +802,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -806,8 +826,8 @@
       "path": "packages/benchmarking/evidence",
       "domain": "benchmarking",
       "role": "evidence-native cohort verification and matrix assembly",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -825,8 +845,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -849,8 +869,8 @@
       "path": "packages/benchmarking/interop",
       "domain": "benchmarking",
       "role": "task-execution import and export",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -868,8 +888,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -894,8 +914,8 @@
       "path": "packages/benchmarking/local",
       "domain": "benchmarking",
       "role": "local venue adapter",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -913,8 +933,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -937,8 +957,8 @@
       "path": "packages/benchmarking/native-capture",
       "domain": "benchmarking",
       "role": "resumable native execution capture coordinator",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -956,8 +976,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -980,8 +1000,8 @@
       "path": "packages/benchmarking/protocol",
       "domain": "benchmarking",
       "role": "evidence-native benchmarking record protocol",
-      "tier": 2,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -999,8 +1019,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "sealed-platform-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -1023,8 +1043,8 @@
       "path": "packages/benchmarking/publication",
       "domain": "benchmarking",
       "role": "benchmark publication planning and accounting verification",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -1042,8 +1062,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -1066,8 +1086,8 @@
       "path": "packages/benchmarking/records",
       "domain": "benchmarking",
       "role": "benchmark record family",
-      "tier": 2,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -1085,8 +1105,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "sealed-platform-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -1113,8 +1133,8 @@
       "path": "packages/benchmarking/run",
       "domain": "benchmarking",
       "role": "benchmark orchestration",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -1132,8 +1152,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -1156,8 +1176,8 @@
       "path": "packages/benchmarking/testing",
       "domain": "benchmarking",
       "role": "benchmarking conformance kit",
-      "tier": null,
-      "classification": "platform-support",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -1175,8 +1195,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "sealed-platform-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -1196,8 +1216,7 @@
         ]
       },
       "supersedes": [],
-      "replacedBy": [],
-      "tierReason": "Conformance machinery is platform support rather than a protocol tier."
+      "replacedBy": []
     },
     {
       "ownerGroup": "architecture-control",

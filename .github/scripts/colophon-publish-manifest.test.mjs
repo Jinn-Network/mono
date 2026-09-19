@@ -268,9 +268,9 @@ test('Increment 2 moves cli and core onto the demand-gated independent product l
   assert.equal(catalog.releaseGroups['transitional-or-private'].expectedPackageCount, 10);
 });
 
-test('Colophon trusted publishing is a separate workflow and never joins the stack 75', () => {
+test('Colophon trusted publishing is a separate workflow and never joins the stack', () => {
   const stack = buildRegistrationList(repoRoot);
-  assert.equal(stack.length, 75);
+  assert.equal(stack.length, 64);
   assert.equal(stack.some((row) => row.package.startsWith('@colophon-claims/')), false);
   assert.equal(COLOPHON_PUBLISH_WORKFLOW, 'colophon-npm-publish.yml');
   const workflow = readFileSync(join(repoRoot, '.github/workflows', COLOPHON_PUBLISH_WORKFLOW), 'utf8');
