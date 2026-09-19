@@ -1224,7 +1224,7 @@ export async function createSyntheticV4BundleFixture<Skip extends true | undefin
     instrumentSha256s,
   };
   if (input.skipReport === true) {
-    return collected as [Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture;
+    return collected as unknown as [Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture;
   }
   const reported = requireOk(
     await runReport(context, { draftId: DRAFT_ID, ...(input.composedFormat === true ? { composedFormat: true } : {}) }),
@@ -1241,5 +1241,5 @@ export async function createSyntheticV4BundleFixture<Skip extends true | undefin
   return {
     ...collected,
     bundle,
-  } as [Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture;
+  } as unknown as [Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture;
 }

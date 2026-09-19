@@ -604,7 +604,7 @@ export async function createSyntheticV6BundleFixture<Skip extends true | undefin
     matrixOts: anchors.otsFixturesFor(collectedState.matrixSha256),
   };
   if (input.skipReport === true) {
-    return collected as [Skip] extends [true] ? Omit<SyntheticV6BundleFixture, "bundle"> : SyntheticV6BundleFixture;
+    return collected as unknown as [Skip] extends [true] ? Omit<SyntheticV6BundleFixture, "bundle"> : SyntheticV6BundleFixture;
   }
   requireOk(
     await runReport(context, { draftId: DRAFT_ID, ...(input.composedFormat === true ? { composedFormat: true } : {}) }),
@@ -625,5 +625,5 @@ export async function createSyntheticV6BundleFixture<Skip extends true | undefin
     ...collected,
     runState,
     bundle,
-  } as [Skip] extends [true] ? Omit<SyntheticV6BundleFixture, "bundle"> : SyntheticV6BundleFixture;
+  } as unknown as [Skip] extends [true] ? Omit<SyntheticV6BundleFixture, "bundle"> : SyntheticV6BundleFixture;
 }
