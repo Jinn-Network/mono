@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Fixture-only construction of sealed binary-judgment admission records.
+ * Not a facade operation: the screening workflow was removed in #3987.
+ */
+
 import { Buffer } from "node:buffer";
 import { z } from "zod";
 import {
@@ -21,13 +26,13 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import { dssePreAuthEncoding, parseExactDsseEnvelope, sealDsseEnvelope } from "@jinn-network/trust-core";
-import { BenchmarkProductError, refuse, refuseWithIssues } from "../errors.js";
+import { BenchmarkProductError, refuse, refuseWithIssues } from "../../errors.js";
 import {
   BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED,
   HUMAN_REVIEW_FORM,
   HUMAN_REVIEW_FORM_SEALED,
   binaryJudgmentItemBytes,
-} from "../human-review/application.js";
+} from "@colophon-claims/check/admission";
 import {
   BINARY_JUDGMENT_ADMISSION_MANIFEST_PROTOCOL,
   BinaryJudgmentAdmissionManifestSchema,
@@ -68,12 +73,14 @@ import {
   ScreeningRevealReceiptSchema,
   computeScreeningPoolDigest,
   computeScreeningSample,
-  parseCanonicalHumanReviewBytes,
-  sealHumanReviewDocument,
   type PromptedScreeningRowV2,
   type ScreeningPool,
   type ScreeningRow,
-} from "../human-review/contracts.js";
+} from "@colophon-claims/check/admission";
+import {
+  parseCanonicalHumanReviewBytes,
+  sealHumanReviewDocument,
+} from "./seed-human-review-bytes.js";
 import {
   promptedScreeningCommitmentView,
   parseScreeningSampleCommitmentBytes,
@@ -84,20 +91,20 @@ import {
   BinaryJudgmentAdmissionClosureError,
   verifyBinaryJudgmentAdmissionClosure,
   verifyBinaryJudgmentReviewerResult,
-} from "../human-review/verification.js";
-import { buildBinaryJudgmentAdmissionClosureWorkspacePorts } from "../human-review/verification-workspace.js";
+} from "@colophon-claims/check/admission";
+import { buildBinaryJudgmentAdmissionClosureWorkspacePorts } from "../../run/admission-workspace.js";
 import {
   createVerdictDsseSigner,
   loadOrCreateEvaluatorSigningKeys,
   sealVerdictStatement,
-} from "../venue/signing.js";
-import { loadOrCreateReportSigningKey } from "../report/signing.js";
-import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
-import { readDraftDocument } from "./drafts.js";
-import { operate } from "./operate.js";
-import { operateAsync } from "./operate-async.js";
-import type { OperationContext } from "./context.js";
-import type { OperationResult } from "./result.js";
+} from "../../venue/signing.js";
+import { loadOrCreateReportSigningKey } from "../../report/signing.js";
+import { getSealedBytes, putSealedBytes } from "../../workspace/sealed-store.js";
+import { readDraftDocument } from "../../operations/drafts.js";
+import { operate } from "../../operations/operate.js";
+import { operateAsync } from "../../operations/operate-async.js";
+import type { OperationContext } from "../../operations/context.js";
+import type { OperationResult } from "../../operations/result.js";
 
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const IdentitySchema = z.string().min(1).max(256);

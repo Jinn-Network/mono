@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 42 parity operations over the operations facade, plus the path-oriented
+ * 41 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -40,12 +40,8 @@ import {
   runBind,
   createDraft,
   getDraft,
-  importBinaryItemBank,
   importRunRecords,
   importSweBenchRows,
-  admitHumanTruth,
-  createHumanReviewPackets,
-  signHumanReviewResponse,
   initWorkspace,
   inspectDraft,
   listDrafts,
@@ -79,10 +75,6 @@ import {
   type QuotePresentation,
   type RunBindResult,
   type RunLaunchDeps,
-  type AdmitHumanTruthInput,
-  type CreateHumanReviewPacketsInput,
-  type ImportBinaryItemBankInput,
-  type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
 import { dirname } from "node:path";
@@ -101,7 +93,6 @@ import {
   DOMAIN_BINDING_MECHANISM_NAMES,
   beaconIndexWord,
   exportFreezeRepo,
-  spdxLicenseProblem,
   summarizeVerificationOutcome,
   verifyFreezeRepo,
 } from "@colophon-claims/check";
@@ -131,18 +122,6 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--name <name>] [--description <text>] [--version <ver>]
                    [--provenance-timestamp <rfc3339>]
                    (homemade instance rows, not official SWE-bench Verified)
-  import item-bank --workspace <dir> --principal <id> --profile binary-judgment@2
-                   --draft <draftId> --items <items.jsonl> --sources <sources.jsonl>
-                   --admissions <admissions.jsonl>
-                   [--name <name>] [--description <text>] [--version <ver>]
-                   [--license <spdx-id>] [--citation <text>]
-                   [--parser-invalid-policy reject|abstain]
-  human-review packet create --workspace <dir> --principal <id> --draft <draftId>
-                   --file <packet-request.json>
-  human-review response sign --workspace <dir> --principal <id> --draft <draftId>
-                   --file <response.json> --signer <configured-signer.json>
-  human-review admit --workspace <dir> --principal <id> --draft <draftId>
-                   --file <admission-manifest.json>
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
                    [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
                    (catalog id or method-document file; omit ref to list)
@@ -266,13 +245,6 @@ const SAMPLE_INIT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const IMPORT_SWEBENCH_FLAGS = [
   "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
 ] as const;
-const IMPORT_ITEM_BANK_FLAGS = [
-  "workspace", "principal", "json", "profile", "draft", "items", "sources", "admissions",
-  "name", "description", "version", "license", "citation", "parser-invalid-policy",
-] as const;
-const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
-const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "n", "host"] as const;
 const METHOD_LIST_FLAGS = ["json"] as const;
 const EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -625,142 +597,6 @@ function handleImportSweBench(args: ParsedArgs, context: CliContext, jsonMode: b
     jsonMode,
     (value) =>
       `imported ${value.taskSha256s.length} task(s) as benchmark ${value.benchmarkSha256} into draft ${value.draft.draftId}\n`,
-  );
-}
-
-function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, IMPORT_ITEM_BANK_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const profile = required(args, "profile");
-  if (profile !== "binary-judgment@2") {
-    refuse("invalid-invocation", "--profile", "--profile must be binary-judgment@2");
-  }
-  const name = optional(args, "name");
-  const description = optional(args, "description");
-  const version = optional(args, "version");
-  const license = optional(args, "license");
-  const licenseProblem = license !== undefined ? spdxLicenseProblem(license) : undefined;
-  if (licenseProblem !== undefined) {
-    // The whole check the freeze-repository export applies before it renders
-    // `SPDX-License-Identifier:` — imported rather than restated, so the flag and the export
-    // cannot come to disagree about what a licence is. Importing the grammar alone would not do
-    // that: the grammar tokenizes on whitespace, so it admits padding and tabs the export refuses
-    // (issue #3878). Refusing here makes such a value a one-second failure at the flag rather than
-    // a refusal after the record is sealed and published — at which point the licence can no
-    // longer be corrected. It is an expression, not a bare identifier: `Apache-2.0 OR MIT` is an
-    // ordinary dual licence, and the narrower check refused it outright.
-    refuse("invalid-invocation", "--license", `--license ${licenseProblem}`);
-  }
-  const citation = optional(args, "citation");
-  const parserInvalidPolicy = optional(args, "parser-invalid-policy");
-  if (
-    parserInvalidPolicy !== undefined
-    && parserInvalidPolicy !== "reject"
-    && parserInvalidPolicy !== "abstain"
-  ) {
-    refuse(
-      "invalid-invocation",
-      "--parser-invalid-policy",
-      "--parser-invalid-policy must be reject or abstain",
-    );
-  }
-  const input: ImportBinaryItemBankInput = {
-    profile,
-    draftId: required(args, "draft"),
-    itemBankJsonl: readTextFile(pathFrom(context.cwd, required(args, "items"))),
-    sourceManifestJsonl: readTextFile(pathFrom(context.cwd, required(args, "sources"))),
-    admissionIndexJsonl: readTextFile(pathFrom(context.cwd, required(args, "admissions"))),
-    ...(name === undefined ? {} : { name }),
-    ...(description === undefined ? {} : { description }),
-    ...(version === undefined ? {} : { version }),
-    ...(license === undefined ? {} : { license }),
-    ...(citation === undefined ? {} : { citation }),
-    ...(parserInvalidPolicy === undefined ? {} : { parserInvalidPolicy }),
-  };
-  const operation = importBinaryItemBank(opContext, input);
-  return renderResult(
-    operation,
-    jsonMode,
-    (value) => `imported ${value.taskSha256s.length} admitted binary item(s) as benchmark ${value.benchmarkSha256} into draft ${value.draft.draftId}; excluded ${value.excludedItemSha256s.length}, held back ${value.nonAdmittedItemSha256s.length}\n`,
-  );
-}
-
-function handleHumanReviewPacketCreate(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, HUMAN_REVIEW_PACKET_CREATE_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const request = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
-    CreateHumanReviewPacketsInput,
-    "draftId"
-  >;
-  const result = createHumanReviewPackets(opContext, {
-    draftId: required(args, "draft"),
-    item: request.item,
-    evaluatorIds: request.evaluatorIds,
-  });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `created ${value.packets.length} blind review packets for ${value.itemSha256}\n`,
-  );
-}
-
-async function handleHumanReviewResponseSign(
-  args: ParsedArgs,
-  context: CliContext,
-  jsonMode: boolean,
-): Promise<CliResult> {
-  assertKnownFlags(args, HUMAN_REVIEW_RESPONSE_SIGN_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const response = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
-    SignHumanReviewResponseInput,
-    "draftId" | "configuredEvaluatorIds" | "activeEvaluatorId"
-  >;
-  const signer = readJsonFile(pathFrom(context.cwd, required(args, "signer"))) as Pick<
-    SignHumanReviewResponseInput,
-    "configuredEvaluatorIds" | "activeEvaluatorId"
-  >;
-  const result = await signHumanReviewResponse(opContext, {
-    draftId: required(args, "draft"),
-    configuredEvaluatorIds: signer.configuredEvaluatorIds,
-    activeEvaluatorId: signer.activeEvaluatorId,
-    packetSha256: response.packetSha256,
-    visibilityReceiptSha256: response.visibilityReceiptSha256,
-    label: response.label,
-    complete: response.complete,
-    completedAt: response.completedAt,
-  });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `signed human review ${value.verdictSha256} as configured evaluator ${value.evaluatorId}\n`,
-  );
-}
-
-function handleHumanReviewAdmit(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, HUMAN_REVIEW_ADMIT_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const request = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
-    AdmitHumanTruthInput,
-    "draftId"
-  >;
-  const result = admitHumanTruth(opContext, {
-    draftId: required(args, "draft"),
-    truthAdmission: request.truthAdmission,
-    candidates: request.candidates,
-    ...(request.evidenceEnvelopesBase64 === undefined
-      ? {}
-      : { evidenceEnvelopesBase64: request.evidenceEnvelopesBase64 }),
-    // H-6 (packet P6): a new top-level field on AdmitHumanTruthInput is silently dropped here
-    // unless explicitly forwarded — this handler reads the whole request object from a file but
-    // only ever spreads the fields named below.
-    ...(request.screening === undefined
-      ? {}
-      : { screening: request.screening }),
-  });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `admitted ${value.resolutions.length} truth resolution(s); publication-grade=${value.publicationGrade}\n`,
   );
 }
 
@@ -1910,10 +1746,6 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["inspect", handleInspect],
   ["sample init", handleSampleInit],
   ["import swebench", handleImportSweBench],
-  ["import item-bank", handleImportItemBank],
-  ["human-review packet create", handleHumanReviewPacketCreate],
-  ["human-review response sign", handleHumanReviewResponseSign],
-  ["human-review admit", handleHumanReviewAdmit],
   ["method", handleMethodBind],
   ["export", handleDerivedExport],
   ["arm add", handleArmAdd],

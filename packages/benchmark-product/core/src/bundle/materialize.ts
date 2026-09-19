@@ -39,11 +39,9 @@ import {
   COMPOSED_CLAIM_PACKAGE_SCHEMA_ID,
   DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
 } from "../report/claim.js";
-import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../human-review/verification-workspace.js";
-import type { AdmissionAuthorityRole, BinaryJudgmentAdmissionRecordRole } from "../human-review/verification.js";
-import {
-  parseBinaryItemBankIntakeExtension,
-} from "../intake/binary-item-bank.js";
+import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../run/admission-workspace.js";
+import type { AdmissionAuthorityRole, BinaryJudgmentAdmissionRecordRole } from "@colophon-claims/check/admission";
+import { parseBinaryItemBankIntakeExtension } from "../run/binary-instrument-profile.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import {
   scanPredictionSnapshotAdmissionReceiptRecords,

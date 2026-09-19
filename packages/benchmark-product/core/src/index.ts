@@ -14,11 +14,12 @@ export * from "./agent/index.js";
 export { BENCHMARKING_PROTOCOL } from "./platform.js";
 export { OPERATION_TO_GUI as GUI_CAPABILITY_CATALOG } from "./cli/parity-map.js";
 export type { GuiCapability } from "./cli/parity-map.js";
-export * from "./human-review/contracts.js";
-export * from "./human-review/application.js";
-export * from "./human-review/verification.js";
-export * from "./human-review/verification-workspace.js";
 export * from "./evidence-first.js";
+export {
+  buildBinaryJudgmentAdmissionClosureWorkspacePorts,
+  verifyBinaryJudgmentAdmissionClosureInWorkspace,
+} from "./run/admission-workspace.js";
+export type { VerifyBinaryJudgmentAdmissionClosureInWorkspaceInput } from "./run/admission-workspace.js";
 
 // Typed errors (spec §4.3): callers branch on `code`, never on `message`.
 export { BenchmarkProductError, PRODUCT_ERROR_CODES, toErrorEnvelope } from "./errors.js";
@@ -399,14 +400,9 @@ export {
   authorityGrant,
   authorityRevoke,
   authorityShow,
-  BINARY_ITEM_BANK_PROFILE,
   createDraft,
   getDraft,
-  importBinaryItemBank,
   importSweBenchRows,
-  admitHumanTruth,
-  createHumanReviewPackets,
-  signHumanReviewResponse,
   initWorkspace,
   importRunRecords,
   inspectDraft,
@@ -453,20 +449,8 @@ export type {
   CreateDraftInput,
   DraftInspection,
   DraftSummary,
-  ImportBinaryItemBankInput,
-  ImportBinaryItemBankResult,
   ImportSweBenchRowsInput,
   ImportSweBenchRowsResult,
-  AdmitHumanTruthInput,
-  AdmitHumanTruthResult,
-  CreateHumanReviewPacketsInput,
-  CreateHumanReviewPacketsResult,
-  HumanAdmissionCandidateInput,
-  HumanAdmissionExclusionSummary,
-  HumanAdmissionResolutionSummary,
-  HumanReviewPacketSummary,
-  SignHumanReviewResponseInput,
-  SignHumanReviewResponseResult,
   OperationContext,
   OperationResult,
   PreviewArtifact,
@@ -548,7 +532,7 @@ export { LOCAL_VENUE_LIMITS } from "./operations/index.js";
 export { anchorAfterLockIfConfigured } from "./operations/run-anchor.js";
 export type { AnchorAfterLockOutcome } from "./operations/run-anchor.js";
 
-// Method catalog listing is CLI/GUI discovery, not a facade operation (DR-2026-08-19; parity stays 40).
+// Method catalog listing is CLI/GUI discovery, not a facade operation (DR-2026-08-19; parity stays 41).
 export { METHOD_CATALOG, isMethodCatalogId, listMethodCatalog } from "./operations/method-catalog.js";
 
 
@@ -592,27 +576,24 @@ export type { SampleBenchmark, SampleBenchmarkTask } from "./intake/sample.js";
 export { convertSweBenchRows } from "./intake/swebench.js";
 export type { ConvertSweBenchRowsOptions } from "./intake/swebench.js";
 export {
+  BINARY_ITEM_BANK_INTAKE_EXTENSION,
+  parseBinaryItemBankIntakeExtension,
+} from "./run/binary-instrument-profile.js";
+export {
   BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
   BINARY_ITEM_BANK_ENTRY_PROTOCOL,
-  BINARY_ITEM_BANK_INTAKE_EXTENSION,
   BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
   BinaryAdmissionIndexEntrySchema,
   BinaryItemBankEntrySchema,
   BinaryItemBankIntakeExtensionSchema,
   BinarySourceManifestEntrySchema,
-  convertBinaryItemBank,
-  parseBinaryItemBankIntakeExtension,
-  renderCanonicalJsonl,
-} from "./intake/binary-item-bank.js";
+} from "@colophon-claims/check/admission";
 export type {
   BinaryAdmissionIndexEntry,
   BinaryItemBankEntry,
   BinaryItemBankIntakeExtension,
   BinarySourceManifestEntry,
-  ConvertBinaryItemBankInput,
-  ConvertedBinaryItem,
-  ConvertedBinaryItemBank,
-} from "./intake/binary-item-bank.js";
+} from "@colophon-claims/check/admission";
 
 // The CLI as a library (spec §5.2): `runCli` is a pure function of argv and its context;
 // only dist/cli/bin.js touches the process.
