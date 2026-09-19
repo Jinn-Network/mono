@@ -1,4 +1,12 @@
-import { parseEvidenceNativeClaimPackageV3, type EvidenceNativeClaimPackageV3 } from "@jinn-network/benchmarking-protocol";
+import {
+  evidenceReferenceKey,
+  parseEvidenceCohort,
+  parseEvidenceNativeClaimPackageV3,
+  type EvidenceCohort,
+  type EvidenceNativeClaimPackageV3,
+  type EvidenceRecordReference,
+} from "@jinn-network/benchmarking-protocol";
+import { parseExactDsseEnvelope } from "@jinn-network/trust-core";
 import { keyFingerprintFromDidKey } from "./identity/did-key.js";
 import type { BundleTrust, BundleV4Trust } from "./schema.js";
 
@@ -102,24 +110,94 @@ const EVIDENCE_NATIVE_PURPOSE_ROLES: Record<EvidenceNativeSignerPurpose, PublicB
   "label-admission": "label-admission",
 };
 
+type ClaimSelection = EvidenceCohort["members"][number]["evaluations"];
+
+function addSelection(
+  into: Map<string, EvidenceRecordReference>,
+  selection: ClaimSelection,
+): void {
+  for (const reference of selection.considered) into.set(evidenceReferenceKey(reference), reference);
+  for (const reference of selection.admitted) into.set(evidenceReferenceKey(reference), reference);
+  for (const entry of selection.excluded) {
+    into.set(evidenceReferenceKey(entry.reference), entry.reference);
+  }
+}
+
+/** Cohort-referenced evidence records. `capture` is a typed source, not declared evidence, and is omitted. */
+function cohortReferencedEvidence(cohort: EvidenceCohort): readonly EvidenceRecordReference[] {
+  const referenced = new Map<string, EvidenceRecordReference>();
+  for (const member of cohort.members) {
+    referenced.set(evidenceReferenceKey(member.execution), member.execution);
+    addSelection(referenced, member.evaluations);
+    addSelection(referenced, member.verifications);
+    addSelection(referenced, member.labelResolutions);
+  }
+  for (const excluded of cohort.excludedExecutions) {
+    referenced.set(evidenceReferenceKey(excluded.execution), excluded.execution);
+  }
+  return [...referenced.values()];
+}
+
+function lookupRecordBytes(
+  recordFiles: ReadonlyMap<string, Uint8Array>,
+  reference: EvidenceRecordReference,
+): Uint8Array | undefined {
+  const digestPath = `records/${reference.record.digest.sha256}.bin`;
+  const byDigest = recordFiles.get(digestPath);
+  if (byDigest !== undefined) return byDigest;
+  const byName = recordFiles.get(reference.record.name);
+  if (byName !== undefined) return byName;
+  return recordFiles.get(`records/${reference.record.name}`);
+}
+
+function referencedEvidenceKeyIds(
+  cohortBytes: Uint8Array,
+  recordFiles: ReadonlyMap<string, Uint8Array>,
+): Set<string> {
+  const keyIds = new Set<string>();
+  // Missing `cohort.json` is wired as empty bytes: disclose report keys only, never throw.
+  if (cohortBytes.byteLength === 0) return keyIds;
+  for (const reference of cohortReferencedEvidence(parseEvidenceCohort(cohortBytes))) {
+    if (reference.family === "execution-evidence") continue;
+    const bytes = lookupRecordBytes(recordFiles, reference);
+    if (bytes === undefined) continue;
+    try {
+      for (const signature of parseExactDsseEnvelope(bytes).signatures) {
+        if (signature.keyid !== undefined) keyIds.add(signature.keyid);
+      }
+    } catch {
+      // Disclosure must not throw a verification-shaped error for a missing or non-DSSE record.
+    }
+  }
+  return keyIds;
+}
+
 /**
  * Signers of a v5 evidence-native bundle, read from the same authenticated `claim-package.json`
  * bytes the closure verified.
  *
- * `claim.trust.signers` is a publisher-written declaration used by the closure only as a lookup
- * table: a surplus entry there is never contradicted, because no signature ever selects it. So this
- * keeps only the keys that actually carried a signature the closure accepted
- * (`verifiedSignerKeyIds`). Without that filter a bundle could declare a human reviewer, or a dozen
- * graders, that signed nothing and have the checker print them as fact. The claim package declares
- * no custody, so nothing here upgrades a signer to same-operator either.
+ * The reader-facing set is verified keys that signed the report or a cohort-referenced declared
+ * evidence record. `claim.trust.signers` is a publisher-written declaration used by the closure
+ * only as a lookup table: a surplus entry there is never contradicted, because no signature ever
+ * selects it. A surplus signed record still verifies and still appears in `verifiedSignerKeyIds`;
+ * without the cohort-reference filter a bundle could declare a human reviewer, or a dozen graders,
+ * that signed nothing the cohort named and have the checker print them as fact. The claim package
+ * declares no custody, so nothing here upgrades a signer to same-operator either.
  */
 export function evidenceNativeBundleSigners(
   claimPackageBytes: Uint8Array,
   verifiedSignerKeyIds: readonly string[],
+  cohortBytes: Uint8Array,
+  recordFiles: ReadonlyMap<string, Uint8Array>,
 ): readonly PublicBundleSigner[] {
+  const claim = parseEvidenceNativeClaimPackageV3(claimPackageBytes);
   const verified = new Set(verifiedSignerKeyIds);
-  return deduplicate(parseEvidenceNativeClaimPackageV3(claimPackageBytes).trust.signers
-    .filter((signer) => verified.has(signer.keyId))
+  const allowed = referencedEvidenceKeyIds(cohortBytes, recordFiles);
+  for (const signer of claim.trust.signers) {
+    if (signer.purpose === "report" && verified.has(signer.keyId)) allowed.add(signer.keyId);
+  }
+  return deduplicate(claim.trust.signers
+    .filter((signer) => verified.has(signer.keyId) && allowed.has(signer.keyId))
     .map((signer) => withKeyFingerprint({
       role: EVIDENCE_NATIVE_PURPOSE_ROLES[signer.purpose],
       identity: signer.identity,

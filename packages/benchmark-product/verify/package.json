@@ -78,9 +78,12 @@
     "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@jinn-network/trust-core": "portal:../../trust/core",
     "@jinn-network/trust-resolve": "portal:../../trust/resolve",
-    "@jinn-network/trust-testing": "portal:../../trust/testing"
+    "@jinn-network/trust-testing": "portal:../../trust/testing",
+    "@jinn-network/execution-evidence-builder": "portal:../../evidence/execution-evidence-builder"
   },
   "devDependencies": {
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/execution-evidence-builder": "0.1.0",
     "@jinn-network/trust-testing": "0.1.0",
     "@types/node": "^22.0.0",
     "ajv": "8.17.1",
