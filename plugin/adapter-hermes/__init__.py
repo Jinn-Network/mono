@@ -12,6 +12,7 @@ broken session.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -35,6 +36,14 @@ logger = logging.getLogger(__name__)
 
 _FIRST_SESSION_MARKER = "first-session-done"
 _SEAL_TIMEOUT_S = 60.0
+
+#: The producer-controlled inputs this host binds, as one auditable identifier. A verifier
+#: reading a sealed record needs to know which rule selected the artifacts it is looking at,
+#: and a rule that changes what it binds must change its version rather than its meaning.
+CONTROLLED_INPUT_SELECTION_RULE = "prompt+config@1"
+
+_PROMPT_INPUT_NAME = "initial-user-message.md"
+_CONFIG_INPUT_NAME = "effective-capture-config.json"
 
 #: A session start must not feel like a hang, so the whole observation shares one deadline
 #: rather than giving each read its own: an unreachable repository costs the base state, not the
@@ -70,6 +79,7 @@ class _SessionState:
     feed: Optional[feed_module.SessionFeed] = None
     pickup_done: bool = False
     degraded: Optional[str] = None
+    controlled_bound: bool = False
     cwd: Optional[str] = None
     model: str = ""
     announced: bool = field(default=False)
@@ -155,6 +165,88 @@ def _ensure_capture(state: "_SessionState", model: str) -> None:
     if observed is not None:
         state.feed.repository_state(**observed)
     state.feed.environment(tools=[], skills=[])
+
+
+def _effective_capture_config(state: "_SessionState") -> bytes:
+    """The configuration this capture actually ran under, as deterministic JSON.
+
+    Assembled field by field from values the adapter itself computed, never copied out of the
+    machine it ran on: no filesystem path, no environment, no credential. The artifact is
+    durable and publicly projectable, so "segregate secrets at the source" is held here by
+    construction rather than left to a later scrub.
+
+    Sorted keys and no whitespace: two sessions under one configuration must produce one
+    digest, and a digest that drifts with dict ordering binds nothing.
+    """
+    provider, model_name = _split_model(state.model)
+    host_name, host_version = _host_identity()
+    model: Dict[str, Any] = {"provider": provider, "name": model_name}
+    service = feed_module.derive_model_service(provider, model_name)
+    if service:
+        model["service"] = service
+    document: Dict[str, Any] = {
+        "selectionRule": CONTROLLED_INPUT_SELECTION_RULE,
+        "adapter": mcp_client.CLIENT_NAME,
+        "feedVersion": feed_module.FEED_VERSION,
+        "host": {"name": host_name, "version": host_version},
+        "model": model,
+        "controlledInputBounds": {
+            "maxBytes": feed_module.CONTROLLED_INPUT_MAX_BYTES,
+            "maxCount": feed_module.CONTROLLED_INPUT_MAX_COUNT,
+        },
+        "gitObservationBudgetSeconds": _GIT_BUDGET_S,
+    }
+    try:
+        pin = runtime_pin.read_pin()
+    except runtime_pin.RuntimePinError as exc:
+        # The pin is context on this artifact, not the artifact. Losing it must not lose the
+        # configuration it describes.
+        logger.debug("jinn: runtime pin unreadable for the effective configuration: %s", exc)
+    else:
+        document["runtime"] = {"package": pin.package, "version": pin.version}
+    return json.dumps(
+        document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+
+
+def _bind_controlled_inputs(state: "_SessionState", user_message: str, first_turn: bool) -> None:
+    """Bind the producer-controlled inputs this host actually supplies (#3260).
+
+    Two, and the reason for each is the same: the adapter holds their exact bytes.
+
+    * ``config`` — the effective capture configuration above.
+    * ``prompt`` — the first user message, which is the instruction that drove the session.
+      Its bytes are already in the feed as a ``user-turn``, so binding them adds no
+      disclosure surface; it makes them content-addressed rather than narrative.
+
+    Nothing is bound for ``workflow`` or ``skill``: the host hook API hands this adapter
+    neither, and reading a guess out of the working directory would seal a confident wrong
+    answer to the one question a controlled-input artifact exists to answer.
+
+    The writer drops an input that would exceed the runtime's bounds, so an unusually large
+    first message costs itself rather than the capture.
+    """
+    if state.feed is None or state.controlled_bound:
+        return
+    state.controlled_bound = True
+    try:
+        content = _effective_capture_config(state)
+    except Exception as exc:  # a capture problem must never break the session
+        logger.debug("jinn: effective configuration unavailable: %s", exc)
+    else:
+        state.feed.controlled_input(
+            role="config",
+            name=_CONFIG_INPUT_NAME,
+            media_type="application/json",
+            content=content,
+        )
+    if first_turn and user_message:
+        state.feed.controlled_input(
+            role="prompt",
+            name=_PROMPT_INPUT_NAME,
+            media_type="text/markdown",
+            content=user_message.encode("utf-8"),
+        )
 
 
 def _git(cwd: str, deadline: float, *args: str) -> str:
@@ -363,6 +455,7 @@ def _on_pre_llm_call(
         state.cwd = str(kwargs["cwd"])
     _ensure_capture(state, state.model)
     if state.feed is not None:
+        _bind_controlled_inputs(state, user_message or "", is_first_turn)
         state.feed.user_turn(user_message or "")
     if not is_first_turn or state.pickup_done:
         return None
