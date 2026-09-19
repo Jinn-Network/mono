@@ -38,7 +38,7 @@ import { refuse } from "./profile/errors.js";
 import type { PublicBundleVerificationCheck } from "./verify.js";
 
 /**
- * The published `@colophon-claims/verify` releases a capability may name as its minimum, each with
+ * The published reader releases a capability may name as its minimum, each with
  * the exact and compatible reader lines a claim pins for it. Aliases of the frozen commands rather
  * than fresh literals: those constants are what the publish guard checks against npm, so a release
  * cannot appear here without having been published.
@@ -125,7 +125,7 @@ export interface CapabilityEntry {
   readonly claimSection: string;
   /** Check names this capability appends, in order. */
   readonly checks: readonly PublicBundleVerificationCheck[];
-  /** First `@colophon-claims/verify` release implementing this capability. */
+  /** First published reader release implementing this capability. */
   readonly minimumReaderRelease: ReaderRelease;
   /** The producer-side predicate on run state that turns this capability on. */
   readonly activation: (facts: CapabilityActivationFacts) => boolean;
