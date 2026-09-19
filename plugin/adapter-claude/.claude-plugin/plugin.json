@@ -1,0 +1,8 @@
+{
+  "name": "jinn",
+  "description": "Seal each Claude Code session into a local Execution Evidence record.",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/Jinn-Network/mono/tree/next/plugin/adapter-claude",
+  "hooks": "./hooks/hooks.json"
+}

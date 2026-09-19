@@ -6,12 +6,14 @@ import { GATED_OPERATIONS } from "./authority/policy.js";
 import { BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
 import { BUNDLE_FORMAT, PUBLIC_BUNDLE_FILES } from "./legacy-closures.js";
 import {
+  BINARY_QUALIFICATION_CAPABILITY,
   BUNDLE_V4_FORMAT,
   BUNDLE_V5_FORMAT,
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
   BUNDLE_V8_FORMAT,
   BUNDLE_V10_FORMAT,
+  CAPABILITY_REGISTRY,
   FREEZE_REPO_BUNDLE_SUPPORT,
   FREEZE_REPO_FORMAT,
   FREEZE_REPO_MANIFEST_FILENAME,
@@ -27,9 +29,9 @@ import {
   PUBLIC_BUNDLE_V7_CHECKS,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_CHECKS,
-  PUBLIC_BUNDLE_V10_CHECKS,
   SUPPORTED_BUNDLE_FORMATS,
   BEACON_SOURCES,
+  expectedChecks,
 } from "@colophon-claims/verify";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
 import {
@@ -230,9 +232,12 @@ describe("product documentation consistency", () => {
     const freezeEnd = guide.indexOf("\n## ", freezeStart + 1);
     const freezeSection = guide.slice(freezeStart, freezeEnd === -1 ? undefined : freezeEnd);
     for (const format of SUPPORTED_BUNDLE_FORMATS) {
-      const accepted = FREEZE_REPO_BUNDLE_SUPPORT[format].qualification;
+      // The composed generation has no row: a `/10` bundle is accepted exactly when its vector
+      // declares the qualification graph, so the section names the format AND the deciding token.
+      const accepted = format === BUNDLE_V10_FORMAT || FREEZE_REPO_BUNDLE_SUPPORT[format].qualification;
       expect(freezeSection.includes(`\`${format}\``), `${format} accepted=${accepted}`).toBe(accepted);
     }
+    expect(freezeSection).toContain(`\`${BINARY_QUALIFICATION_CAPABILITY}\``);
   });
 
   it("pins the published evidence-native v5 closure, its two profiles, and its reader line", () => {
@@ -320,9 +325,14 @@ describe("product documentation consistency", () => {
 
     // Keyed by the row's first cell verbatim. Prompted screening is a fourth axis the format string
     // does not record, so `/2` and `/4` each carry two rows pinning different lines.
+    // `/10` has no fixed check list: it runs whatever its declared vector derives. Its row states
+    // the range, from the empty vector to the vector naming every registered capability.
+    const composedChecks = [[], CAPABILITY_REGISTRY.map((capability) => capability.token).sort()]
+      .map((vector) => checkCountWord(expectedChecks(vector)))
+      .join(" to ");
     const expected: Record<
       string,
-      { pinned: readonly string[]; compatible: readonly string[]; checks: readonly string[] }
+      { pinned: readonly string[]; compatible: readonly string[]; checks: readonly string[] | string }
     > = {
       [`\`${BUNDLE_FORMAT}\`, unprompted`]: {
         pinned: [readerLine(instruction(BUNDLE_FORMAT).command)],
@@ -378,7 +388,7 @@ describe("product documentation consistency", () => {
       [`\`${BUNDLE_V10_FORMAT}\``]: {
         pinned: [readerLine(instruction(BUNDLE_V10_FORMAT).command)],
         compatible: [readerLine(instruction(BUNDLE_V10_FORMAT).compatibleCommand)],
-        checks: PUBLIC_BUNDLE_V10_CHECKS,
+        checks: `${composedChecks}, by declared capability`,
       },
     };
 
@@ -394,7 +404,7 @@ describe("product documentation consistency", () => {
       for (const line of row.pinned) expect(pinnedCell, subject).toContain(`\`${line}\``);
       for (const line of row.compatible) expect(compatibleCell, subject).toContain(`\`${line}\``);
       if (row.compatible.length === 0) expect(compatibleCell, subject).toBe("none pinned");
-      expect(checksCell, subject).toBe(checkCountWord(row.checks));
+      expect(checksCell, subject).toBe(typeof row.checks === "string" ? row.checks : checkCountWord(row.checks));
     }
     // A format with no row is the defect this pins: the table is the fallback for a reader who has
     // only `bundle.json`, so every format that reader can hold must appear in it.
@@ -445,7 +455,7 @@ describe("product documentation consistency", () => {
       [BUNDLE_V6_FORMAT]: "\n### Anchored bundle v6\n",
       [BUNDLE_V7_FORMAT]: "\n### Anchored binary qualification bundle v7\n",
       [BUNDLE_V8_FORMAT]: "\n### Disclosed anchored binary qualification bundle v8\n",
-      [BUNDLE_V10_FORMAT]: "\n### Composed presentation bundle v10\n",
+      [BUNDLE_V10_FORMAT]: "\n### Composed bundle v10\n",
     };
     // Prompted screening is the fourth axis the format string does not record, so the `/2` and
     // `/4` sections state a second, later line beside the unprompted one.
