@@ -130,6 +130,7 @@ export type {
 export type { BundleManifest, VerifiedBundleSnapshot } from "./manifest.js";
 export * from "./admission/index.js";
 export * from "./schema.js";
+export * from "./assembly-v3.js";
 export * from "./profile/binary-judge-manifest.js";
 export * from "./profile/binary-qualification.js";
 export {
