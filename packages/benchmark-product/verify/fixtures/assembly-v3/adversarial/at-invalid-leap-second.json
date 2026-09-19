@@ -1,0 +1,78 @@
+{
+  "format": "benchmark-product-assembly/3",
+  "kind": "run",
+  "runCancelled": false,
+  "draftId": "dispatch-boundaries-golden",
+  "assurancePreset": "direct-check",
+  "graph": {
+    "admissions": [],
+    "solveSubmissions": [
+      {
+        "cellKey": "cell-a",
+        "dispatch": 1,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ],
+    "evaluationSubmissions": [
+      {
+        "cellKey": "cell-a",
+        "dispatch": 1,
+        "evalIndex": 1,
+        "evaluationAttempt": 1,
+        "evaluator": "urn:jinn:benchmark-product:local-venue:evaluator-1",
+        "evalTaskSha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      }
+    ],
+    "solveDeliveries": [],
+    "evaluations": [],
+    "dispatchBoundaries": [
+      {
+        "journalIndex": 4,
+        "entrySha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "kind": "submission-captured",
+        "at": "2026-01-01T00:00:60Z",
+        "cellKey": "cell-a",
+        "armId": "arm-a",
+        "replicate": 1,
+        "dispatch": 1,
+        "submissionSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "publicationSourceSequence": "0000000000000001",
+        "publicationEntrySha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      {
+        "journalIndex": 8,
+        "entrySha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "kind": "submission-captured",
+        "at": "2026-09-06T08:00:30.000Z",
+        "cellKey": "cell-a",
+        "armId": "arm-a",
+        "replicate": 1,
+        "dispatch": 2,
+        "submissionSha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      {
+        "journalIndex": 11,
+        "entrySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "kind": "evaluation-submission-captured",
+        "at": "2026-09-06T08:01:00.200Z",
+        "cellKey": "cell-a",
+        "dispatch": 1,
+        "evalIndex": 1,
+        "evaluationAttempt": 1,
+        "submissionSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      {
+        "journalIndex": 15,
+        "entrySha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "kind": "evaluation-submission-captured",
+        "at": "2026-09-06T08:02:00.300Z",
+        "cellKey": "cell-a",
+        "dispatch": 1,
+        "evalIndex": 1,
+        "evaluationAttempt": 1,
+        "submissionSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      }
+    ]
+  }
+}

@@ -21,6 +21,8 @@ try {
     // dependency-free reference script must actually reach the tarball.
     "package/schemas/claim-package.schema.json",
     "package/schemas/dsse-envelope.schema.json",
+    "package/schemas/assembly-row.schema.json",
+    "package/schemas/assembly-row-v3.schema.json",
     "package/scripts/external-verify.py",
   ]) {
     if (!listing.includes(required)) throw new Error(`packed verifier is missing ${required}`);
