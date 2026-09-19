@@ -37,6 +37,7 @@ import { refuse } from "./profile/errors.js";
 import {
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ClaimPackageSchema,
+  COMPOSED_CLAIM_PACKAGE_SCHEMA_ID,
   DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
 } from "./profile/claim.js";
 import { buildMethodPortsFromResolver } from "./profile/ports.js";
@@ -96,12 +97,18 @@ import {
 } from "./manifest.js";
 import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V10_FORMAT } from "./manifest.js";
 import {
-  BUNDLE_V6_FORMAT,
   LEGACY_ANCHOR_MEMBER_PATTERN,
   PUBLIC_BUNDLE_V4_FILES,
   legacyClosure,
   type LegacyBundleFormat,
 } from "./legacy-closures.js";
+import {
+  ANCHORING_CAPABILITY,
+  BINARY_QUALIFICATION_CAPABILITY,
+  DISCLOSURE_SPECIFICATION_CAPABILITY,
+  assertMemberClosure,
+  composeClosure,
+} from "./capabilities.js";
 import {
   DISCLOSURE_SPECIFICATION_BUNDLE_ROLE,
   DisclosureProjectionError,
@@ -161,15 +168,15 @@ export type PublicBundleVerificationCheck =
    * other format. Deliberately not an enumeration: the last one went stale when `/10` joined the
    * anchored closures (#4406). */
   | "integrity-anchors"
-  /** Present exactly when the declared format's closure carries a disclosure record — today only
-   * `benchmark-product-public-bundle/8` (disclosure-specification-record design §7, issue #2839).
-   * Absence means the closure carries no disclosure record, not that the format is older: `/10` is
-   * numerically later than `/8` and carries none. Runs last: the claim's `disclosure` section is
-   * among the things it depends on having already been byte-compared. */
+  /** Present exactly when the declared format's closure carries a disclosure record —
+   * `benchmark-product-public-bundle/8`, and a `/10` bundle whose vector declares
+   * `disclosure-specification` (disclosure-specification-record design §7, issue #2839). Absence
+   * means the closure carries no disclosure record, not that the format is older: a `/10` bundle
+   * is numerically later than `/8` and carries one only if it says so. Runs last: the claim's
+   * `disclosure` section is among the things it depends on having already been byte-compared. */
   | "disclosure-specification";
 
-export interface LegacyPublicBundleVerificationResult extends PublicBundleSignerDisclosure {
-  readonly format: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT | typeof BUNDLE_V10_FORMAT;
+interface ClassicPublicBundleVerificationFacts extends PublicBundleSignerDisclosure {
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
@@ -199,6 +206,17 @@ export interface LegacyPublicBundleVerificationResult extends PublicBundleSigner
     readonly exclusionCount: number;
   };
 }
+
+/**
+ * A classic-lineage result. A pre-composition bundle encodes its capabilities in the choice of
+ * format number; a composed one states them, so its result carries the declared vector — the one
+ * input `summarizeVerificationOutcome` derives its denominator from. A discriminated union rather
+ * than an optional member, so a `/10` result with no vector is unrepresentable.
+ */
+export type LegacyPublicBundleVerificationResult = ClassicPublicBundleVerificationFacts & (
+  | { readonly format: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT }
+  | { readonly format: typeof BUNDLE_V10_FORMAT; readonly capabilities: readonly string[] }
+);
 
 /** Who signed the bundle, with the identifiers the human surface deliberately does not print. */
 export interface PublicBundleSignerDisclosure {
@@ -459,9 +477,10 @@ export async function verifyPublicBundleSnapshot(
   const checked = verifyBundleSnapshot(bundleDir, deps);
   // ── G0, the closure-INDEPENDENT extension guard (disclosure design §7 preamble, issue #2839) ──
   //
-  // A Report carrying `DISCLOSURE_SPECIFICATION_EXTENSION` on any format other than `/8` refuses,
-  // here, before the format branch — so this holds for `/2`, `/4`, `/5`, `/6`, and `/7` alike, the
-  // evidence-native path included.
+  // A Report carrying `DISCLOSURE_SPECIFICATION_EXTENSION` on any closure that does not carry a
+  // disclosure record refuses, here, before the format branch — so this holds for `/2`, `/4`, `/5`,
+  // `/6`, and `/7` alike, the evidence-native path included, and for every `/10` bundle whose vector
+  // does not declare `disclosure-specification`.
   //
   // Without it there is a real hole: a `/7` bundle could carry both the extension and the record,
   // have the record's role derived by the extension edge, satisfy the evidence-closure reachability
@@ -473,7 +492,10 @@ export async function verifyPublicBundleSnapshot(
   // Read deliberately at the JSON level rather than through `parseReport`: this must fire on a
   // format whose `report.json` this function never otherwise parses, and it must fire on the
   // extension's PRESENCE, not on its well-formedness.
-  if (checked.manifest.format !== BUNDLE_V8_FORMAT) {
+  const declaresDisclosureRecord = checked.manifest.format === BUNDLE_V8_FORMAT
+    || (checked.manifest.format === BUNDLE_V10_FORMAT
+      && checked.manifest.capabilities.includes(DISCLOSURE_SPECIFICATION_CAPABILITY));
+  if (!declaresDisclosureRecord) {
     const carriedReport = checked.fileBytes.get("report.json");
     if (carriedReport !== undefined) {
       let parsedReportJson: unknown;
@@ -490,8 +512,12 @@ export async function verifyPublicBundleSnapshot(
           "record-integrity",
           "report.json",
           `a Report carrying ${DISCLOSURE_SPECIFICATION_EXTENSION} is publishable only on`
-          + ` ${BUNDLE_V8_FORMAT}, whose disclosure-specification check reads it; this bundle`
-          + ` declares ${checked.manifest.format}`,
+          + ` ${BUNDLE_V8_FORMAT}, or on ${BUNDLE_V10_FORMAT} declaring`
+          + ` "${DISCLOSURE_SPECIFICATION_CAPABILITY}", whose disclosure-specification check reads it;`
+          + ` this bundle declares ${checked.manifest.format}`
+          + (checked.manifest.format === BUNDLE_V10_FORMAT
+            ? ` with capabilities ${JSON.stringify(checked.manifest.capabilities)}`
+            : ""),
         );
       }
     }
@@ -536,47 +562,60 @@ export async function verifyPublicBundleSnapshot(
   // no mandatory MEMBER: the sealed disclosure record travels at the already-allowlisted
   // `records/<sha256>.bin` path, so its list is v7's, which is v4's.
   //
-  // `/10` moves NONE of those three axes: it is v6's closure exactly, differing only in which
-  // report page `buildPublicAssets` renders (issue #4191). A presentation generation that changed
-  // a member or a check would be claiming the render proves something the records did not already
-  // prove. So it is READ FROM v6's own row rather than restated as a fourth cell here: a copy
-  // would be a second place for v6's closure to be described, and the two could silently drift.
-  // Unlike `/8`, which really is a new closure, `/10` has nothing of its own to state.
-  const declaredFormat = checked.manifest.format;
-  const carriesDisclosure = declaredFormat === BUNDLE_V8_FORMAT;
-  const { carriesQualification, carriesAnchors, mandatoryFiles } = carriesDisclosure
-    ? { carriesQualification: true, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_V4_FILES }
-    : legacyClosure(declaredFormat === BUNDLE_V10_FORMAT ? BUNDLE_V6_FORMAT : declaredFormat);
+  // `/10` states none of this by its number. It DECLARES the same three axes in its capability
+  // vector, and the registry derives the mandatory members, the allowlisted member shapes, and the
+  // check list from the declaration (bundle-capability-composition design §6, issue #3403). The
+  // vector was resolved when the manifest was authenticated, so an unknown token never reaches
+  // here. What each axis MEANS is unchanged and stays below: the registry moves carriage only.
+  const composed = checked.manifest.format === BUNDLE_V10_FORMAT
+    ? composeClosure(checked.manifest.capabilities)
+    : undefined;
+  const carriesDisclosure = declaresDisclosureRecord;
+  const { carriesQualification, carriesAnchors, mandatoryFiles } = checked.manifest.format === BUNDLE_V10_FORMAT
+    ? {
+      carriesQualification: checked.manifest.capabilities.includes(BINARY_QUALIFICATION_CAPABILITY),
+      carriesAnchors: checked.manifest.capabilities.includes(ANCHORING_CAPABILITY),
+      mandatoryFiles: composed!.mandatoryFiles,
+    }
+    : checked.manifest.format === BUNDLE_V8_FORMAT
+      ? { carriesQualification: true, carriesAnchors: true, mandatoryFiles: PUBLIC_BUNDLE_V4_FILES }
+      : legacyClosure(checked.manifest.format);
+  // Grammars are the base's, with each refined member's replaced by its single declared refiner's
+  // (design §6 step 2). A pre-composition cell states the same thing as its qualification axis.
+  const refinedByQualification = (member: string): boolean => composed === undefined
+    ? carriesQualification
+    : composed.refinedMembers.get(member) === BINARY_QUALIFICATION_CAPABILITY;
   for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
 
   const evidenceBytes = read("evidence.json");
-  const evidence = carriesQualification
+  const evidence = refinedByQualification("evidence.json")
     ? parseJson(evidenceBytes, BundleV4EvidenceCatalogSchema, "evidence.json")
     : parseJson(evidenceBytes, BundleEvidenceCatalogSchema, "evidence.json");
   requireCanonical(evidenceBytes, evidence, "evidence.json");
   unique(evidence.records.map((record) => record.sha256), "evidence.json.records");
   for (const record of evidence.records) unique(record.roles, `evidence.json.records.${record.sha256}.roles`);
-  const expectedPaths = new Set<string>([
-    ...mandatoryFiles,
-    ...evidence.records.map((record) => `records/${record.sha256}.bin`),
-  ]);
-  if (manifestPaths.has("verification/cancel-requested.json")) expectedPaths.add("verification/cancel-requested.json");
+  // The members the base graph derives from the bundle's own content, on every closure.
+  const graphPaths = evidence.records.map((record) => `records/${record.sha256}.bin`);
+  if (manifestPaths.has("verification/cancel-requested.json")) graphPaths.push("verification/cancel-requested.json");
   for (const path of manifestPaths) {
-    if (/^native\/inspect\/[a-f0-9]{64}\.eval$/u.test(path)) expectedPaths.add(path);
+    if (/^native\/inspect\/[a-f0-9]{64}\.eval$/u.test(path)) graphPaths.push(path);
   }
-  const anchorPaths: string[] = [];
-  if (carriesAnchors) {
-    for (const path of manifestPaths) {
-      if (LEGACY_ANCHOR_MEMBER_PATTERN.test(path)) {
-        expectedPaths.add(path);
-        anchorPaths.push(path);
-      }
-    }
-  }
-  for (const path of manifestPaths) if (!expectedPaths.has(path)) refuse("record-integrity", path, `public bundle contains non-allowlisted file "${path}"`);
-  for (const path of expectedPaths) if (!manifestPaths.has(path)) refuse("record-integrity", path, `public bundle closure is missing "${path}"`);
+  // One two-way closure for every classic format (design §6 step 3): the mechanism is unchanged,
+  // and only the sets it runs over differ. A composed bundle's come from its declared vector; a
+  // pre-composition bundle's are its frozen cell, stated in the same two terms.
+  assertMemberClosure(
+    composed ?? {
+      mandatoryFiles,
+      memberPatterns: carriesAnchors ? [{ pattern: LEGACY_ANCHOR_MEMBER_PATTERN, mayBeEmpty: true }] : [],
+    },
+    manifestPaths,
+    graphPaths,
+  );
+  const anchorPaths = carriesAnchors
+    ? [...manifestPaths].filter((path) => LEGACY_ANCHOR_MEMBER_PATTERN.test(path))
+    : [];
 
   const records = new Map<string, Uint8Array>();
   const declaredRoles = new Map<string, ReadonlySet<EvidenceRole>>();
@@ -588,7 +627,7 @@ export async function verifyPublicBundleSnapshot(
   }
 
   const trustBytes = read("trust/public-keys.json");
-  const trust = carriesQualification
+  const trust = refinedByQualification("trust/public-keys.json")
     ? parseJson(trustBytes, BundleV4TrustSchema, "trust/public-keys.json")
     : parseJson(trustBytes, BundleTrustSchema, "trust/public-keys.json");
   requireCanonical(trustBytes, trust, "trust/public-keys.json");
@@ -660,8 +699,9 @@ export async function verifyPublicBundleSnapshot(
     refuse(
       "record-integrity",
       "bundle.json",
-      `bundle format ${checked.manifest.format} declares`
-      + ` ${carriesQualification ? "a qualifying" : "a non-qualifying"} closure, but its sealed`
+      `bundle format ${checked.manifest.format}`
+      + (composed === undefined ? "" : ` with capabilities ${JSON.stringify(composed.capabilities)}`)
+      + ` declares ${carriesQualification ? "a qualifying" : "a non-qualifying"} closure, but its sealed`
       + ` Report declares method ${report.method.id}`,
     );
   }
@@ -741,7 +781,8 @@ export async function verifyPublicBundleSnapshot(
       refuse(
         "record-integrity",
         "disclosure-specification",
-        `a ${BUNDLE_V8_FORMAT} bundle must carry ${DISCLOSURE_SPECIFICATION_EXTENSION} on its Report`,
+        `a ${composed === undefined ? BUNDLE_V8_FORMAT : `${BUNDLE_V10_FORMAT} "${DISCLOSURE_SPECIFICATION_CAPABILITY}"`}`
+        + ` bundle must carry ${DISCLOSURE_SPECIFICATION_EXTENSION} on its Report`,
       );
     }
     disclosureExtensionDigest = descriptor.digest.sha256;
@@ -797,13 +838,20 @@ export async function verifyPublicBundleSnapshot(
   // ── The disclosed closure's one graph edge (issue #2839, design §6.2 / §10.2) ───────────────
   //
   // The Report extension IS the edge: it is the only thing that derives the
-  // `disclosure-specification` role for any record. Adding it here — and only on `/8` — is what
-  // makes the two refusals in §6.5.2 fire on every other format without a bespoke guard. A
-  // standalone disclosure record on a `/7` bundle makes `declaredRoles` exceed `expectedRoles` and
-  // trips the size compare; the role appended to an existing graph record's array leaves the sizes
-  // equal and trips the per-digest compare instead. Both refusals already existed and cannot be
-  // forgotten.
-  if (disclosureExtensionDigest !== undefined) {
+  // `disclosure-specification` role for any record. Adding it here — and only on a closure that
+  // carries a disclosure record — is what makes the two refusals in §6.5.2 fire on every other
+  // closure without a bespoke guard. A standalone disclosure record on a `/7` bundle makes
+  // `declaredRoles` exceed `expectedRoles` and trips the size compare; the role appended to an
+  // existing graph record's array leaves the sizes equal and trips the per-digest compare instead.
+  // Both refusals already existed and cannot be forgotten.
+  //
+  // On a composed bundle the derivations are the base graph's plus each DECLARED capability's
+  // (bundle-capability-composition design §6 step 2), so the edge is applied exactly when the
+  // declared vector contributes it. A registry entry that carried the record but omitted the
+  // derivation leaves its own declared record unreachable, here, rather than somewhere later.
+  const derivesDisclosureRole = composed === undefined
+    || composed.roleDerivations.some(({ role }) => role === DISCLOSURE_SPECIFICATION_BUNDLE_ROLE);
+  if (disclosureExtensionDigest !== undefined && derivesDisclosureRole) {
     addRole(expectedRoles, disclosureExtensionDigest, DISCLOSURE_SPECIFICATION_BUNDLE_ROLE);
   }
   const evaluationSpecs = new Map<string, ReturnType<typeof parseEvaluationSpec>>();
@@ -1948,12 +1996,10 @@ export async function verifyPublicBundleSnapshot(
       : {}),
     ...(assembly.header.rehearsal === undefined ? {} : { rehearsal: assembly.header.rehearsal }),
     ...(claimAnchors === undefined ? {} : { anchors: claimAnchors }),
-    // claim-package/4 admits two reader pins, one per format that carries it (issue #4191), so the
-    // rebuild is told which format the BUNDLE declares. Passed for the two anchored, non-qualifying
-    // formats only — every other closure derives its pin from facts the rebuild already has.
-    ...(declaredFormat === BUNDLE_V6_FORMAT || declaredFormat === BUNDLE_V10_FORMAT
-      ? { anchoredBundleFormat: declaredFormat }
-      : {}),
+    // A composed bundle's claim is derived from the vector its MANIFEST declares (issue #3403):
+    // the claim-package id, the check list, the reader line, and which sections must be present.
+    // Every pre-composition closure derives those from facts the rebuild already has.
+    ...(composed === undefined ? {} : { composedCapabilities: composed.capabilities }),
     ...(claimDisclosure === undefined ? {} : { disclosure: claimDisclosure }),
   });
   checks.push("claim-consistency");
@@ -1972,18 +2018,21 @@ export async function verifyPublicBundleSnapshot(
     // the qualification graph was built for, and that shape is claim-package/2's on every binary
     // allocation — so the frozen literal does not move, while `claim-package.json` declares the
     // closure. Either field carrying the other's value refuses, so the two cannot drift together.
-    if (claim.claimSchema !== DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID) {
+    const disclosedClaimSchema = composed === undefined
+      ? DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID
+      : COMPOSED_CLAIM_PACKAGE_SCHEMA_ID;
+    if (claim.claimSchema !== disclosedClaimSchema) {
       refuse(
         "record-integrity",
         "claim-package.json",
-        `a ${BUNDLE_V8_FORMAT} bundle's claim must declare ${DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID}`,
+        `a ${checked.manifest.format} bundle's claim must declare ${disclosedClaimSchema}`,
       );
     }
     if (qualification?.claimSchema !== BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID) {
       refuse(
         "record-integrity",
         "qualification.json",
-        `a ${BUNDLE_V8_FORMAT} bundle's qualification document must keep its frozen`
+        `a ${checked.manifest.format} bundle's qualification document must keep its frozen`
         + ` ${BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID} projection literal`,
       );
     }
@@ -1996,6 +2045,16 @@ export async function verifyPublicBundleSnapshot(
       refuse: (path, message) => refuse("record-integrity", path, message),
     });
     checks.push("disclosure-specification");
+  }
+  // Design §6 step 4: the checks that actually ran are compared for exact equality against the
+  // list the declared vector derives. A mismatch is a refusal, not a shorter list — it is what
+  // makes registering a capability without implementing it here impossible to pass.
+  if (composed !== undefined && !equalBytes(canonicalJsonBytes(checks), canonicalJsonBytes([...composed.checks]))) {
+    refuse(
+      "record-integrity",
+      "bundle.manifest.capabilities",
+      `this verifier ran ${JSON.stringify(checks)}, which is not the check list the declared capabilities derive`,
+    );
   }
 
   const dissentCellKeys = assembly.cells
@@ -2050,7 +2109,9 @@ export async function verifyPublicBundleSnapshot(
     );
   return {
     verification: {
-      format: checked.manifest.format,
+      ...(checked.manifest.format === BUNDLE_V10_FORMAT
+        ? { format: checked.manifest.format, capabilities: checked.manifest.capabilities }
+        : { format: checked.manifest.format }),
       identity: checked.identity,
       checks,
       signers: legacyBundleSigners(trust, new Set(verdictCatalog.verdicts.map((verdict) => verdict.evaluator))),

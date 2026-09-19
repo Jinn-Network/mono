@@ -14,6 +14,7 @@ import {
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
 } from "./legacy-closures.js";
+import { COMPOSED_FORMAT_MINIMUM_READER_RELEASE, READER_RELEASE_LINES } from "./capabilities.js";
 import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V10_FORMAT } from "./manifest.js";
 
 /**
@@ -55,32 +56,28 @@ export const PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND =
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND;
 
 /**
- * The composed presentation generation runs exactly the anchored list (issue #4191). `/10` is `/6`
- * with a different report page: the four report-prose rulings delete and re-word authored prose,
- * and no record changes, so nothing new becomes checkable. A presentation allocation that grew a
- * check would be claiming the render proves something the records did not already prove.
- */
-export const PUBLIC_BUNDLE_V10_CHECKS = PUBLIC_BUNDLE_V6_CHECKS;
-
-/**
- * `/10` must not inherit `/6`'s first-public `@0.1` line: no `0.1` reader understands
- * `benchmark-product-public-bundle/10`, so a claim naming one would be an instruction to fail. It
- * pins the same `0.2.1` line as `/7` and `/8`.
+ * The composed generation has no check array of its own: a `/10` bundle runs
+ * `expectedChecks(vector)`, derived from the capabilities it declares (`capabilities.ts`).
  *
- * **This pin is provisional and nothing seals it yet**: no producer emits `/10`
- * (`core/src/bundle/materialize.ts`'s format selection is unchanged), precisely because `0.2.1` is
- * published, immutable, and predates `/10` — it refuses `/10` at manifest parse. The pin is
- * repointed by the change that publishes a release actually serving `/10`, and the producer flips
- * there.
+ * Its reader line is derived too — `readerInstructions(vector)`, the latest minimum release among
+ * the declared capabilities and the generation's own base. This row states that BASE, for a reader
+ * who has only the format string. `/10` must not inherit `/6`'s first-public `@0.1` line: no `0.1`
+ * reader understands the format, so a claim naming one would be an instruction to fail.
+ *
+ * **This pin is provisional, and only an explicitly requested bundle seals it**: `0.2.1` is
+ * published, immutable, and predates `/10` — it refuses `/10` at manifest parse — so the producer
+ * emits `/10` only when asked and never by default. The base is repointed by the change that
+ * publishes a release actually serving `/10`, and the producer's default flips there.
  */
-export const PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND = PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND;
+export const PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND =
+  READER_RELEASE_LINES[COMPOSED_FORMAT_MINIMUM_READER_RELEASE].command;
 export const PUBLIC_BUNDLE_V10_COMPATIBLE_VERIFICATION_COMMAND =
-  PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND;
+  READER_RELEASE_LINES[COMPOSED_FORMAT_MINIMUM_READER_RELEASE].compatibleCommand;
 
 /**
  * Spans every lineage, so it is composed here rather than frozen in `legacy-closures.ts`: the four
  * legacy rows come from the frozen closures, the `/5` row is the evidence-native line, and the `/8`
- * row is the disclosed closure and the `/10` row the composed presentation generation. Every
+ * row is the disclosed closure and the `/10` row the composed generation's base line. Every
  * format through v6 stamps the same first public 0.1 line; v7 is the first that cannot, and v8 and
  * v10 pin the same 0.2.1 line as v7.
  *
