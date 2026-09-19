@@ -1,8 +1,9 @@
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
 import { isMetadataFirstBundleProfile } from "@jinn-network/benchmarking-protocol";
+import { expectedChecks } from "./capabilities.js";
 import { legacyClosure } from "./legacy-closures.js";
 import { refuse } from "./profile/errors.js";
-import { PUBLIC_BUNDLE_V8_CHECKS, PUBLIC_BUNDLE_V10_CHECKS } from "./reader-instructions.js";
+import { PUBLIC_BUNDLE_V8_CHECKS } from "./reader-instructions.js";
 import type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./verify.js";
 
 /**
@@ -118,10 +119,12 @@ export function summarizeVerificationOutcome(result: PublicBundleVerificationRes
     : result.format === "benchmark-product-public-bundle/8"
       ? PUBLIC_BUNDLE_V8_CHECKS.length
       // Named before the fall-through for the same reason `/8` is: `legacyClosure` refuses any
-      // format outside the frozen four rather than answering from another cell, and the composed
-      // presentation generation is not one of them (issue #4191).
+      // format outside the frozen four rather than answering from another cell. The composed
+      // generation has no cell at all: its denominator is derived from the vector the bundle
+      // declares (design §6 step 5), and an untyped caller's unknown or missing vector is refused
+      // by that derivation rather than counted.
       : result.format === "benchmark-product-public-bundle/10"
-        ? PUBLIC_BUNDLE_V10_CHECKS.length
+        ? expectedChecks(result.capabilities).length
         : legacyClosure(result.format).checks.length;
   const deferred = result.format === "benchmark-product-public-bundle/5"
     && result.artifactContent.status === "not-fetched"

@@ -14,6 +14,7 @@ import { z } from "zod";
 import { EvidenceNativeBundleManifestV5Schema } from "@jinn-network/benchmarking-protocol";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "./profile/errors.js";
+import { CapabilityVectorSchema, composeClosure } from "./capabilities.js";
 import {
   BUNDLE_FORMAT,
   BUNDLE_V4_FORMAT,
@@ -44,27 +45,26 @@ export const BUNDLE_V5_FORMAT = "benchmark-product-public-bundle/5" as const;
  */
 export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
 /**
- * The composed presentation generation (issue #4191, #3016 AC1/AC3): v6's exact closure — same
- * mandatory members, same seven checks, same `claim-package/4` shape — rendering the report page
- * the four operator rulings on report prose direct. Nothing about what the bundle PROVES moves; a
- * presentation allocation that grew a check would be claiming the render proves something the
- * records did not already prove.
+ * The composed generation (bundle-capability-composition design §3, issue #3403; operator ruling
+ * 2026-09-05, amended 2026-09-07). It states its capabilities in the bundle rather than in the
+ * choice of number: its `bundle.json` carries an explicit, canonically ordered, must-understand
+ * capability vector, and the mandatory members, allowlist, grammars, checks, and claim sections are
+ * derived from that vector by the registry in `capabilities.ts`. A feature registers an entry
+ * there; it never takes an eleventh format number.
  *
- * It is a new format number rather than an edit because the page is byte-pinned:
- * `verifyPublicBundleSnapshot` rebuilds every presentation asset and byte-compares it, and every
- * published claim seals the exact `npx` line that performs that rebuild. Changing a rendered
- * string in place would break every already-published bundle under the command printed on its own
- * page.
- *
- * Unlike v6, v7, and v8 it carries a presentation CAPABILITY REGISTRY rather than one more
- * feature-shaped boolean: `FORMAT_PRESENTATION_CAPABILITIES` in `assets.ts` seeds this format with
- * `report-prose-singularity`, and the next presentation feature registers an entry there instead of
- * taking an eleventh format number (operator ruling 2026-09-05, amended 2026-09-07).
+ * The vector naming `anchoring` alone composes to v6's exact closure, which is the whole of what
+ * this format was when issue #4191 first allocated it for the report page the four operator
+ * rulings on report prose direct (#3016 AC1/AC3). That page is unchanged and still belongs to this
+ * format: `FORMAT_PRESENTATION_CAPABILITIES` in `assets.ts` seeds it with
+ * `report-prose-singularity`. It took a format number rather than an edit because the page is
+ * byte-pinned -- `verifyPublicBundleSnapshot` rebuilds every presentation asset and byte-compares
+ * it, so changing a rendered string in place would break every already-published bundle under the
+ * command printed on its own page.
  */
 export const BUNDLE_V10_FORMAT = "benchmark-product-public-bundle/10" as const;
 /**
  * Spans every lineage: the four frozen legacy closures, the evidence-native bundle, `/8`, and the
- * composed presentation generation `/10`.
+ * composed generation `/10`.
  *
  * `/9` is a DELIBERATE HOLE. It is allocated on an open branch (PR #4090, issue #3698) that has not
  * landed on the default branch, so this package must not claim to read it; both allocations are
@@ -91,12 +91,26 @@ export const BundleManifestFileSchema = z.object({
 });
 
 const LegacyBundleManifestSchema = z.object({
-  format: z.union([LegacyBundleFormatSchema, z.literal(BUNDLE_V8_FORMAT), z.literal(BUNDLE_V10_FORMAT)]),
+  format: z.union([LegacyBundleFormatSchema, z.literal(BUNDLE_V8_FORMAT)]),
+  files: z.array(BundleManifestFileSchema).min(1),
+});
+
+/**
+ * `/2`'s manifest plus one member, the capability vector (design §3.2). Required, so that "no
+ * capabilities" is the spelled statement `[]` rather than an absence; and closed, following `/5`
+ * rather than the open legacy object, so an unknown top-level member is refused. `bundle.json` is
+ * the authenticated root and the bundle identity is the SHA-256 of its bytes, which makes the
+ * vector exactly as tamper-evident as the file list beside it.
+ */
+const ComposedBundleManifestSchema = z.strictObject({
+  format: z.literal(BUNDLE_V10_FORMAT),
+  capabilities: CapabilityVectorSchema,
   files: z.array(BundleManifestFileSchema).min(1),
 });
 
 export const BundleManifestSchema = z.union([
   LegacyBundleManifestSchema,
+  ComposedBundleManifestSchema,
   EvidenceNativeBundleManifestV5Schema,
 ]);
 
@@ -118,10 +132,11 @@ export interface VerifyBundleSnapshotDeps {
   readonly afterManifestValidated?: () => void;
 }
 
-export interface BuildBundleManifestOptions {
+export type BuildBundleManifestOptions =
   /** Defaults to v2 so existing producer and golden bytes remain immutable. */
-  readonly format?: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT | typeof BUNDLE_V10_FORMAT;
-}
+  | { readonly format?: LegacyBundleFormat | typeof BUNDLE_V8_FORMAT }
+  /** The composed generation states its vector; there is no default, because `[]` is a statement. */
+  | { readonly format: typeof BUNDLE_V10_FORMAT; readonly capabilities: readonly string[] };
 
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -247,7 +262,13 @@ export function buildBundleManifest(
       return { path, sha256: sha256(bytes), bytes: bytes.length };
     })
     .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
-  const manifest = BundleManifestSchema.parse({ format: options.format ?? BUNDLE_FORMAT, files });
+  // Both ends read one registry: a vector this build could not verify is not one it will seal.
+  if ("capabilities" in options) composeClosure(options.capabilities);
+  const manifest = BundleManifestSchema.parse({
+    format: options.format ?? BUNDLE_FORMAT,
+    ...("capabilities" in options ? { capabilities: options.capabilities } : {}),
+    files,
+  });
   const bytes = canonicalJsonBytes(manifest);
   return { manifest, bytes, identity: sha256(bytes) };
 }
@@ -294,6 +315,10 @@ export function verifyBundleSnapshot(
   if (!equalBytes(bytes, canonical)) {
     refuse("record-integrity", BUNDLE_MANIFEST_FILENAME, "bundle.json bytes are not the exact canonical manifest encoding");
   }
+  // Resolve, or refuse (design §6 step 1). Every token is must-understand, so a vector naming
+  // anything this build does not implement -- or a combination the registry does not admit --
+  // refuses the bundle whole, here, before any member is read.
+  if (parsed.data.format === BUNDLE_V10_FORMAT) composeClosure(parsed.data.capabilities);
 
   const seen = new Set<string>();
   let previous = "";

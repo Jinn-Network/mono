@@ -36,6 +36,7 @@ import {
   BUNDLE_V6_FORMAT,
   BUNDLE_V7_FORMAT,
 } from "./legacy-closures.js";
+import { BINARY_QUALIFICATION_CAPABILITY, DISCLOSURE_SPECIFICATION_CAPABILITY } from "./capabilities.js";
 import { BundleV4EvidenceCatalogSchema, type BundleV4EvidenceRole } from "./schema.js";
 import { BinarySourceManifestEntrySchema, type BinarySourceManifestEntry } from "./admission/intake.js";
 import { refuse } from "./profile/errors.js";
@@ -60,6 +61,10 @@ export const FREEZE_REPO_FORMAT = "colophon-freeze-repo/2" as const;
  * claim-side record — landed beside it and was refused for its version alone. Keyed by
  * `SupportedBundleFormat`, a new closure version is a type error here until someone states what it
  * means to the freeze projection; `freeze-repo.test.ts` makes the same omission a test failure.
+ *
+ * The composed generation is the one format with no row. It states its capabilities rather than
+ * encoding them in its number, so what a `/10` bundle means here is a function of the vector it
+ * declares — `freezeRepoBundleSupport` below — and a row could only be wrong for some such bundle.
  */
 export interface FreezeRepoBundleSupport {
   /** Whether the bundle carries the qualification graph, and therefore whether the export accepts it. */
@@ -68,22 +73,40 @@ export interface FreezeRepoBundleSupport {
   readonly disclosure: boolean;
 }
 
-export const FREEZE_REPO_BUNDLE_SUPPORT: Record<SupportedBundleFormat, FreezeRepoBundleSupport> = {
+export const FREEZE_REPO_BUNDLE_SUPPORT: Record<
+  Exclude<SupportedBundleFormat, typeof BUNDLE_V10_FORMAT>,
+  FreezeRepoBundleSupport
+> = {
   [BUNDLE_FORMAT]: { qualification: false, disclosure: false },
   [BUNDLE_V4_FORMAT]: { qualification: true, disclosure: false },
   [BUNDLE_V5_FORMAT]: { qualification: false, disclosure: false },
   [BUNDLE_V6_FORMAT]: { qualification: false, disclosure: false },
   [BUNDLE_V7_FORMAT]: { qualification: true, disclosure: false },
   [BUNDLE_V8_FORMAT]: { qualification: true, disclosure: true },
-  // The composed presentation generation is v6's closure with a different report page (issue
-  // #4191), so it means to this projection exactly what v6 means: no qualification graph, so no
-  // freeze artifacts, so the export refuses it.
-  [BUNDLE_V10_FORMAT]: { qualification: false, disclosure: false },
 };
 
-/** The accepted formats, in the order `SUPPORTED_BUNDLE_FORMATS` declares them. */
-const FREEZE_REPO_ACCEPTED_FORMATS: readonly SupportedBundleFormat[] = SUPPORTED_BUNDLE_FORMATS
-  .filter((format) => FREEZE_REPO_BUNDLE_SUPPORT[format].qualification);
+/**
+ * What one bundle means to this projection: its format's row, or — for a composed bundle — the
+ * same two facts read from the capability vector it declares. `undefined` for a format with no row,
+ * which the caller refuses rather than answering from another format's.
+ */
+export function freezeRepoBundleSupport(manifest: VerifiedBundleSnapshot["manifest"]): FreezeRepoBundleSupport | undefined {
+  if (manifest.format === BUNDLE_V10_FORMAT) {
+    return {
+      qualification: manifest.capabilities.includes(BINARY_QUALIFICATION_CAPABILITY),
+      disclosure: manifest.capabilities.includes(DISCLOSURE_SPECIFICATION_CAPABILITY),
+    };
+  }
+  return Object.hasOwn(FREEZE_REPO_BUNDLE_SUPPORT, manifest.format)
+    ? FREEZE_REPO_BUNDLE_SUPPORT[manifest.format as keyof typeof FREEZE_REPO_BUNDLE_SUPPORT]
+    : undefined;
+}
+
+/** What the export accepts, in the order `SUPPORTED_BUNDLE_FORMATS` declares the formats. */
+const FREEZE_REPO_ACCEPTED_FORMATS: readonly string[] = SUPPORTED_BUNDLE_FORMATS.flatMap((format) =>
+  format === BUNDLE_V10_FORMAT
+    ? [`${format} declaring "${BINARY_QUALIFICATION_CAPABILITY}"`]
+    : FREEZE_REPO_BUNDLE_SUPPORT[format].qualification ? [format] : []);
 
 /** `a or b`, `a, b, or c` — the accepted set is now long enough that a chain of `or` reads badly. */
 function listAccepted(formats: readonly string[]): string {
@@ -1068,7 +1091,7 @@ function renderReadme(
  */
 export function renderFreezeRepo(snapshot: VerifiedBundleSnapshot): FreezeRepoTree {
   const bundleFormat = snapshot.manifest.format;
-  const support = FREEZE_REPO_BUNDLE_SUPPORT[bundleFormat as SupportedBundleFormat];
+  const support = freezeRepoBundleSupport(snapshot.manifest);
   if (support?.qualification !== true) {
     // The freeze artifacts ARE the qualification graph. A bundle without one has none, and an
     // empty repository claiming to be a freeze would be worse than a refusal. The accepted list is
@@ -1079,7 +1102,10 @@ export function renderFreezeRepo(snapshot: VerifiedBundleSnapshot): FreezeRepoTr
       "validation",
       "bundle.json.format",
       `a freeze repository requires a qualification bundle (${listAccepted(FREEZE_REPO_ACCEPTED_FORMATS)});`
-        + ` this bundle is ${bundleFormat}`,
+        + ` this bundle is ${bundleFormat}`
+        + (snapshot.manifest.format === BUNDLE_V10_FORMAT
+          ? ` with capabilities ${JSON.stringify(snapshot.manifest.capabilities)}`
+          : ""),
     );
   }
 
