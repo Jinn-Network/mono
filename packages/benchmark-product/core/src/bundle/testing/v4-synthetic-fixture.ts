@@ -916,7 +916,7 @@ async function admitItems(
  * Produces a complete binary public-bundle/4 with no provider, registry, Docker, Harbor, or
  * licensed-data dependency. The caller owns workspace cleanup.
  */
-export async function createSyntheticV4BundleFixture(input: {
+export async function createSyntheticV4BundleFixture<Skip extends true | undefined = undefined>(input: {
   readonly workspaceDir: string;
   readonly truthAdmission: SyntheticV4TruthAdmission;
   readonly scenario?: SyntheticV4Scenario;
@@ -974,7 +974,14 @@ export async function createSyntheticV4BundleFixture(input: {
    * defaults off, so every existing caller's bundle bytes and closure version are unchanged.
    */
   readonly composedFormat?: true;
-}): Promise<SyntheticV4BundleFixture> {
+  /**
+   * Stops after collect (and disclosure declare, when asked), without reporting or materializing.
+   * OPTIONS-ONLY and defaults off. A caller that needs the SAME run published two ways — the
+   * legacy default and `composedFormat: true` — copies this workspace and reports each copy
+   * (issue #3404). Mutually ignored with `composedFormat`: there is no report to flag.
+   */
+  readonly skipReport?: Skip;
+}): Promise<[Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture> {
   const scenario = input.scenario ?? "minimal";
   const withEvidence = input.withEvidence ?? false;
   const judgeModel: AcceptedJudgeModelId = input.judgeModel ?? "gpt-5.6-luna";
@@ -1204,6 +1211,20 @@ export async function createSyntheticV4BundleFixture(input: {
       "disclosure declare",
     );
   }
+  const collected = {
+    workspaceDir: input.workspaceDir,
+    draftId: DRAFT_ID,
+    truthAdmission: input.truthAdmission,
+    publicationGrade: imported.publicationGrade,
+    scenario,
+    benchmarkSha256: imported.benchmarkSha256,
+    admissionManifestSha256: imported.admissionManifestSha256,
+    taskSha256s: imported.taskSha256s,
+    instrumentSha256s,
+  };
+  if (input.skipReport === true) {
+    return collected as unknown as [Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture;
+  }
   const reported = requireOk(
     await runReport(context, { draftId: DRAFT_ID, ...(input.composedFormat === true ? { composedFormat: true } : {}) }),
     "report",
@@ -1217,15 +1238,7 @@ export async function createSyntheticV4BundleFixture(input: {
     runState,
   });
   return {
-    workspaceDir: input.workspaceDir,
-    draftId: DRAFT_ID,
-    truthAdmission: input.truthAdmission,
-    publicationGrade: imported.publicationGrade,
-    scenario,
-    benchmarkSha256: imported.benchmarkSha256,
-    admissionManifestSha256: imported.admissionManifestSha256,
-    taskSha256s: imported.taskSha256s,
-    instrumentSha256s,
+    ...collected,
     bundle,
-  };
+  } as unknown as [Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture;
 }
