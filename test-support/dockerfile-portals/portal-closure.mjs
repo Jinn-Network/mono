@@ -87,8 +87,63 @@ function contextCopySources(args) {
 }
 
 /**
+ * Yarn's default command is `install`. A RUN that only names `yarn` plus flags (including
+ * `--immutable` and `--cwd <dir>`) still resolves portals; requiring the word `install` lets a
+ * later `yarn install` in the same stage (e.g. explorer) become the check point (#4635).
+ * Flags that take a value are skipped so `yarn --cwd ./app install` is still an install and
+ * `yarn test` is not.
+ */
+const YARN_FLAGS_WITH_VALUE = new Set([
+  '--cwd',
+  '-C',
+  '--mode',
+  '--cache-folder',
+  '--preferred-cache-folder',
+  '--mutex',
+]);
+
+function skipEnvAssignments(tokens) {
+  let index = 0;
+  while (index < tokens.length && /^(?:[A-Za-z_][A-Za-z0-9_]*=|\d+>)/u.test(tokens[index])) {
+    index += 1;
+  }
+  return tokens.slice(index);
+}
+
+function yarnCommandAfterFlags(tokens) {
+  let index = 0;
+  while (index < tokens.length && tokens[index].startsWith('-')) {
+    const flag = tokens[index];
+    const equals = flag.indexOf('=');
+    const name = equals === -1 ? flag : flag.slice(0, equals);
+    index += 1;
+    if (equals === -1 && YARN_FLAGS_WITH_VALUE.has(name)) index += 1;
+  }
+  return tokens[index];
+}
+
+function isYarnInstallInvocation(tokens) {
+  const body = skipEnvAssignments(tokens);
+  const afterYarn =
+    body[0] === 'corepack' && body[1] === 'yarn'
+      ? body.slice(2)
+      : body[0] === 'yarn'
+        ? body.slice(1)
+        : null;
+  if (afterYarn === null) return false;
+  const command = yarnCommandAfterFlags(afterYarn);
+  return command === undefined || command === 'install';
+}
+
+function runContainsYarnInstall(args) {
+  return args
+    .split(/\s*(?:&&|\|\||;)\s*/u)
+    .some((segment) => isYarnInstallInvocation(segment.trim().split(/\s+/u).filter(Boolean)));
+}
+
+/**
  * Every edge whose target manifest is not copied from the build context, IN THE SAME BUILD STAGE,
- * before each install that resolves it -- the first `yarn install` after any COPY of the
+ * before each install that resolves it -- the first yarn install after any COPY of the
  * consumer's own manifest. Comparing whole-file offsets would let a COPY in another stage satisfy the
  * check while the image breaks (#4465).
  */
@@ -109,7 +164,7 @@ export function missingPortalManifestCopies(dockerfile, edges) {
         candidate > index &&
         instruction.stage === instructions[index].stage &&
         instruction.keyword === 'RUN' &&
-        /\byarn\s+install\b/u.test(instruction.args),
+        runContainsYarnInstall(instruction.args),
     );
 
   const missing = [];
