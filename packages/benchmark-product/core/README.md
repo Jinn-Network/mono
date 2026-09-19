@@ -4,7 +4,7 @@ The public Tier 4 core package is the single trusted product boundary. It owns
 workspace and draft state, lifecycle transitions, authority checks, the audit
 journal, real local-venue composition, Report and claim production, and local
 public-bundle emission. Portable verification is owned by the smaller
-`@colophon-claims/verify` package and re-exported here. The CLI and private web app
+`@colophon-claims/check` package and re-exported here. The CLI and private web app
 are clients of these public operations; neither is a second implementation.
 The user-facing `colophon` executable is owned by `@colophon-claims/cli`; core
 retains the advanced command library used by that endpoint.
