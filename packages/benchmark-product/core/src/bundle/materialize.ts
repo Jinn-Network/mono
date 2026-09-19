@@ -1095,16 +1095,14 @@ function recordClosure(input: MaterializeBundleInput): {
   });
   // Hoisted above the render because `buildPublicAssets` now needs it: the format selects which
   // presentation generation's page is rendered, and the verifier byte-compares the result against
-  // the same selection read from `bundle.json`. THE DEFAULT FORMAT IS UNCHANGED -- this is the
-  // same expression the return below used to compute inline, moved, not edited. No run emits
-  // `/10` by default: its claim seals a released reader that predates `/10` and refuses it at
-  // manifest parse, so the bundle is unverifiable under its own instruction (issue #4191). The
-  // default flips in the change that pins `/10` to the release serving it.
+  // the same selection read from `bundle.json`.
   //
-  // A run whose `report` was explicitly asked for the composed generation emits `/10` instead, and
-  // states the same three axes in its capability vector rather than in the choice of number (issue
-  // #3403). The vector comes from the registry's activation predicates over the facts derived
-  // above -- the same facts, and the same predicates, `report` sealed the claim's sections from.
+  // D1 clean cutover (issue #3405): a run whose sealed claim is the composed generation emits
+  // `/10` and states the three axes in its capability vector rather than in the choice of number
+  // (issue #3403). The vector comes from the registry's activation predicates over the facts
+  // derived above -- the same facts, and the same predicates, `report` sealed the claim's
+  // sections from. `composedFormat: false` at `report` still seals a legacy claim, and this
+  // function then emits the enumerated cell that claim implies.
   const legacyFormat = anchored
     ? binaryQualification
       ? disclosed

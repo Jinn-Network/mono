@@ -16,8 +16,8 @@
  * required to carry the composed claim its own vector derives). Neither is exercised by a test that
  * only reads constants, and a drift in either would be silent.
  *
- * The producer's default path does not emit `/10`, so the bundle here is BUILT as `/6` and
- * converted. Doing that in the test is what proves the reader independently of the producer.
+ * The producer also emits `/10` by default (issue #3405). The bundle here is still BUILT as `/6`
+ * and converted, so this file proves the reader independently of the producer.
  */
 
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

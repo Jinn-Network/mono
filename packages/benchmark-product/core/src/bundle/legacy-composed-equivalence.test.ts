@@ -4,7 +4,8 @@
  * Closure-equivalence between each pre-composition cell and the composed generation (bundle
  * capability-composition design §10 step 3 / §9; issue #3404).
  *
- * Packet C4 taught the producer to emit `/10` when asked. This packet proves the two paths are
+ * Packet C4 taught the producer to emit `/10` when asked. Packet C5 flipped the production
+ * default to `/10` (issue #3405). This packet proves the two paths are
  * the same closure: for each allocated cell (`/2`, `/4`, `/6`, `/7`, and `/8` — the fifth cell
  * #2839 allocated after the spec was written), one collected run is copied and reported both
  * ways, then the composed bundle is required to carry the same member set, the same check list
@@ -16,9 +17,9 @@
  * subset; this file does not duplicate it. What is unique here is the producer materialize
  * proof, including `/8`.
  *
- * Existing golden bundles stay byte-identical: the legacy path is still the default, and the
- * committed `/2` conformance golden plus the wilson presentation goldens are asserted against
- * the blobs `HEAD` already holds.
+ * Existing golden bundles stay byte-identical: the legacy path is still reachable via
+ * `composedFormat: false`, and the committed `/2` conformance golden plus the wilson
+ * presentation goldens are asserted against the blobs `HEAD` already holds.
  */
 
 import { execFileSync } from "node:child_process";
@@ -103,7 +104,7 @@ async function publish(
     clock: () => new Date().toISOString(),
   };
   requireOk(
-    await runReport(context, { draftId, ...(composedFormat ? { composedFormat: true } : {}) }),
+    await runReport(context, { draftId, composedFormat }),
     composedFormat ? "composed report" : "legacy report",
   );
   const runState = readRunState(workspaceDir, draftId);

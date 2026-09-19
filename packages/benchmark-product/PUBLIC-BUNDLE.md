@@ -604,24 +604,22 @@ npx @colophon-claims/verify@0.2.1 <bundle-dir> \
 `--tsa-root` and `--ots-headers` carry the meaning and the defaults stated for
 v6.
 
-**No run emits v10 by default.** `0.2.1` is immutable and predates this format,
-so it refuses v10 at manifest parse --- a v10 bundle is unverifiable under its
-own instruction until its claim can pin a release that reads the format. The
-producer emits v10 only when the `report` operation is explicitly asked for the
-composed generation, an operation input with no CLI switch, which exists so the
-two paths can be proven equivalent before the default moves. Asked, it derives
-the vector from the run's own facts: an anchored run declares `anchoring`, a run
-projecting a binary qualification declares `binary-qualification`, and a
-qualification run with a sealed disclosure declaration declares
-`disclosure-specification`, anchored or not. A run that asks emits v10 in place
-of the v2, v4, v6, v7, or v8 bundle the sections above describe. One run is
-treated differently, not only renumbered: a qualification run with a sealed
-disclosure declaration and no anchor is refused at `report` by default, because
-v8 is the only disclosed closure and it is anchored, and asked for the composed
-generation it is admitted and declares `binary-qualification` and
-`disclosure-specification`. Every run that does not ask emits exactly the v2,
-v4, v6, v7, or v8 bundle it always did, byte for byte. The default flips in the
-change that pins v10 to the release serving it.
+**New bundles emit v10.** Decision D1 is a clean cutover: the `report` operation defaults to
+the composed generation, so a run that does not ask otherwise publishes on
+`benchmark-product-public-bundle/10` with the capability vector derived from the run's own
+facts: an anchored run declares `anchoring`, a run projecting a binary qualification
+declares `binary-qualification`, and a qualification run with a sealed disclosure
+declaration declares `disclosure-specification`, anchored or not. The enumerated v2, v4,
+v6, v7, and v8 producer paths remain behind `composedFormat: false` on `report` --- that is
+the rollback. The verifier's legacy path for those formats remains forever.
+
+`0.2.1` is immutable and predates this format, so it refuses v10 at manifest parse --- a
+v10 bundle's sealed instruction names that line until a later reader that serves the format
+can be named. One run is treated differently, not only renumbered: a qualification run with
+a sealed disclosure declaration and no anchor is refused at `report` on the rollback path,
+because v8 is the only disclosed enumerated cell and it is anchored, and on the default
+composed path it is admitted and declares `binary-qualification` and
+`disclosure-specification`.
 
 ## Portable verification
 

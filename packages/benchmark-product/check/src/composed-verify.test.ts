@@ -9,9 +9,10 @@
  * can supply: a real, fully signed bundle declaring a vector, taken through every check by the same
  * `verifyPublicBundle` a third party runs.
  *
- * No producer emits the composed format by default, so the bundle here is the conformance kit's
- * published `/2` golden bundle, copied and converted to the composed bundle the same facts produce
- * under the empty vector -- the plain base graph, which is exactly the closure `/2` describes. The
+ * The producer now emits the composed format by default (issue #3405). The bundle here is still
+ * the conformance kit's published `/2` golden bundle, copied and converted to the composed bundle
+ * the same facts produce under the empty vector -- the plain base graph, which is exactly the
+ * closure `/2` describes -- so this file proves the reader independently of the producer. The
  * golden directory itself is never written to, and the first test proves it still verifies.
  */
 
