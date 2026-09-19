@@ -11,7 +11,7 @@ import type {
   SubmissionUri,
 } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
-import { computeBeaconOrder, requiredBeaconRound } from "@colophon-claims/verify";
+import { computeBeaconOrder, requiredBeaconRound } from "@colophon-claims/check";
 import { itemTaskDigest, parseBenchmark } from "@jinn-network/benchmarking-records";
 import { readAuditEntries } from "../audit/journal.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";

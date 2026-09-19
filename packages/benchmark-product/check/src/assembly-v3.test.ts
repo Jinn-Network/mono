@@ -202,7 +202,7 @@ describe("/2 byte-identity", () => {
     expect(BUNDLE_ASSEMBLY_FORMAT).toBe("benchmark-product-assembly/2");
     expect(BUNDLE_ASSEMBLY_V3_FORMAT).toBe("benchmark-product-assembly/3");
     expect(sha256File(v2SchemaPath)).toBe(
-      "dfd3328a11913cc29402272a783c1d8987628d7a333a1848b0d7e4b932e42e3b",
+      "e18eb3dd93834bd5cf27c433b61a8d537d9d8df90af7ad7d37a461596ce19d33",
     );
     expect(sha256File(v2GoldenAssembly)).toBe(
       "e0a0f1fc2d6e7ff3ba51f135d9e6e6f87ea282ea2cfe896ed310f275e9487d29",

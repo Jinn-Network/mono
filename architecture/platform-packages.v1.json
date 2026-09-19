@@ -234,7 +234,7 @@
       "stable": false
     },
     "colophon-claims-v1": {
-      "expectedPackageCount": 3,
+      "expectedPackageCount": 4,
       "publishPolicies": [
         "independent"
       ],
@@ -549,6 +549,45 @@
       }
     },
     {
+      "name": "@colophon-claims/check",
+      "path": "packages/benchmark-product/check",
+      "domain": "benchmark-product",
+      "role": "standalone Colophon public-bundle reader checker",
+      "tier": 4,
+      "classification": "product",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "spec/2026-08-13-colophon-self-serve.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-17-colophon-first-cut-canary-pin.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "colophon-claims-v1",
+      "publishPolicy": "independent",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
       "name": "@colophon-claims/cli",
       "path": "packages/benchmark-product/cli",
       "domain": "benchmark-product",
@@ -632,10 +671,10 @@
       "name": "@colophon-claims/verify",
       "path": "packages/benchmark-product/verify",
       "domain": "benchmark-product",
-      "role": "standalone Colophon public-bundle reader verifier",
+      "role": "deprecated passthrough alias for @colophon-claims/check",
       "tier": 4,
       "classification": "product",
-      "stability": "experimental",
+      "stability": "deprecated",
       "authority": {
         "documents": [
           {
@@ -665,7 +704,14 @@
         "conformance": []
       },
       "supersedes": [],
-      "replacedBy": []
+      "replacedBy": [
+        "@colophon-claims/check"
+      ],
+      "transition": {
+        "reason": "The checker publishes as @colophon-claims/check; this name stays as a permanent passthrough alias so sealed bundle instructions never 404 (issue #4188).",
+        "status": "permanent passthrough alias re-released with every checker version",
+        "sunsetCondition": "none planned"
+      }
     },
     {
       "name": "@colophon-claims/web",

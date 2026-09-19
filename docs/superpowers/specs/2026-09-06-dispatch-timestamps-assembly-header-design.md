@@ -97,11 +97,11 @@ The required producer boundary already exists.
   ([`demo1-preregistration.ts`](../../../packages/benchmark-product/core/src/method/demo1-preregistration.ts)).
 - The public assembly is frozen as `benchmark-product-assembly/2`; its graph
   contains accepted Submission edges but no pre-submit capture edges
-  ([`schema.ts`](../../../packages/benchmark-product/verify/src/schema.ts)).
+  ([`schema.ts`](../../../packages/benchmark-product/check/src/schema.ts)).
 - Public bundle `/8` and claim package `/6` are already allocated to the
   disclosed anchored binary-qualification closure
-  ([`manifest.ts`](../../../packages/benchmark-product/verify/src/manifest.ts),
-  [`claim.ts`](../../../packages/benchmark-product/verify/src/profile/claim.ts)).
+  ([`manifest.ts`](../../../packages/benchmark-product/check/src/manifest.ts),
+  [`claim.ts`](../../../packages/benchmark-product/check/src/profile/claim.ts)).
 
 Accepted Submission edges and `cell-event:dispatch` are not substitutes. They
 are observed after, or independently of, the prospective capture boundary and
@@ -387,7 +387,7 @@ say what it contributes to fix that.
 
 `evidence-closure` is closed-world. `declaredRoles` is built from the evidence
 catalog's own records
-([`verify.ts:569-574`](../../../packages/benchmark-product/verify/src/verify.ts)),
+([`verify.ts:569-574`](../../../packages/benchmark-product/check/src/verify.ts)),
 while `expectedRoles` is derived exclusively from graph edges plus
 header/coordinate-derived roles (`verify.ts:1235` for `solve-submission`,
 `verify.ts:1555` and `verify.ts:1629` for the evaluation equivalents). Those
@@ -442,13 +442,13 @@ section already works: `claim-consistency` byte-compares the section, and the
 `integrity-anchors` *check result* is reported afterward. The anchor token
 verification itself runs much earlier — deliberately, so that an invalid anchor
 surfaces as an anchor refusal rather than as a downstream claim mismatch
-([`verify.ts:667-706`, `:1923-1943`](../../../packages/benchmark-product/verify/src/verify.ts);
-[`claim-consistency.ts:57`](../../../packages/benchmark-product/verify/src/profile/claim-consistency.ts)).
+([`verify.ts:667-706`, `:1923-1943`](../../../packages/benchmark-product/check/src/verify.ts);
+[`claim-consistency.ts:57`](../../../packages/benchmark-product/check/src/profile/claim-consistency.ts)).
 `disclosure-specification` is the stronger precedent, because it carries both
 halves of exactly this shape. Its role derivation runs inside the
 `evidence-closure` base check (`verify.ts:786-794`, discussed above), while its
 own named check is pushed after `claim-consistency`
-([`verify.ts:1979`](../../../packages/benchmark-product/verify/src/verify.ts)).
+([`verify.ts:1979`](../../../packages/benchmark-product/check/src/verify.ts)).
 Both precedents show the same thing: a capability's substantive work may run
 wherever correctness demands, and only its reported position is fixed by the
 registry's `order`.
@@ -766,7 +766,7 @@ The implementation bar is:
   undeclared case is refused by the assembly grammar. The `/2` header parse
   drops the unknown key (`graph` is also a non-strict object), and `requireCanonical` then rejects the header bytes
   as not the canonical encoding
-  ([`verify.ts:299-300`](../../../packages/benchmark-product/verify/src/verify.ts)).
+  ([`verify.ts:299-300`](../../../packages/benchmark-product/check/src/verify.ts)).
   The declared case is refused because the vector selects the `/3` grammar,
   which requires `format` `/3` and a non-empty array;
 - the role derivation is gated per declaration. For every satisfiable vector
@@ -775,7 +775,7 @@ The implementation bar is:
   is still refused as unreachable by
   `evidence-closure`'s size compare. The contribution must derive nothing unless
   the token is declared, following the `disclosure-specification` precedent
-  ([`schema.ts:70-73`](../../../packages/benchmark-product/verify/src/schema.ts));
+  ([`schema.ts:70-73`](../../../packages/benchmark-product/check/src/schema.ts));
 - the docs-consistency suite has a total row for `/10` and the reader release
   its vector derives; and
 - core and verifier typecheck, test, build, parity, and package-smoke commands
