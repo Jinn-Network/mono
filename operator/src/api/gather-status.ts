@@ -65,7 +65,7 @@ import type {
   JoinedHarnessSpec,
 } from '../harnesses/readiness-registry.js';
 import { phaseDTransitionUsageDiagnostics } from '../compatibility/phase-d-transition-usage.js';
-import { maskUrlsInMessage } from '../rpc/transport.js';
+import { sanitizeErrorText } from '../rpc/transport.js';
 
 const ERC20_BALANCE_OF_ABI = [
   {
@@ -388,14 +388,13 @@ function predictionV1Unavailable(
  * response/receipt path (spec §14.2 item 2, issue #2402). A failing RPC call
  * (`client.getBlockNumber`, `readContract`, …) throws a viem
  * `HttpRequestError` whose message embeds the full request URL — for an
- * operator-configured paid primary that's a key-in-path secret. Masking here
- * means every other call site in this file (and the balance-cache
- * persistence path) inherits the redaction by construction instead of each
- * needing its own `maskUrlsInMessage` call.
+ * operator-configured paid primary that's a key-in-path secret. Routing
+ * through `sanitizeErrorText` walks `Error.cause`, so a nested transport
+ * URL cannot bypass the host-only redaction. Every other call site in this
+ * file inherits that walk by construction.
  */
 function errorMessage(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error); // lint:no-error-leak-allow — sole raw-message read; masked on the next line
-  return maskUrlsInMessage(raw);
+  return sanitizeErrorText(error);
 }
 
 export async function sumPendingStakingRewards(
