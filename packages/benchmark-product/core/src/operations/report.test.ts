@@ -1899,7 +1899,7 @@ describe("portable public bundle", () => {
       ["assurance", (claim) => { claim.assurance.preset = "evaluator-panel"; }],
       ["disclosure summaries", (claim) => { claim.disclosures.integrityTierCounts["re-derivable"] += 1; }],
       ["venue honesty", (claim) => { claim.venueHonesty = { venue: "self-run", dishonest: true }; }],
-      ["verification", (claim) => { claim.verification.command = "benchmark-product verify --workspace /private/source --draft draft-1"; }],
+      ["verification", (claim) => { claim.verification.trustRoot = "tampered-trust-root"; }],
       ["rehearsal", (claim) => { claim.rehearsal = { previewCount: 1, timestamps: ["2026-08-05T00:00:00.000Z"] }; }],
     ];
     for (const [name, mutate] of claimVectors) {
