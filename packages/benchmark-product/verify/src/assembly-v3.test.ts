@@ -68,6 +68,7 @@ const goldenHeader = loadJson(join(fixturesDir, "golden-header.json")) as {
     dispatchBoundaries: {
       kind: string;
       journalIndex: number;
+      entrySha256: string;
       replicate?: number;
       evalIndex?: number;
       evaluationAttempt?: number;

@@ -1,6 +1,70 @@
 {
   "entries": [
     {
+      "id": "assembly-v3/adversarial/at-impossible-date.json",
+      "sha256": "a8ee8da7838358fd4e2ac157478c1cf24c50c613d7abf5577368292340f75769"
+    },
+    {
+      "id": "assembly-v3/adversarial/at-invalid-leap-second.json",
+      "sha256": "0cfb9d0c953b0a622afb9949473a75c15512f21fc86e34c5724bdff5a7e9f792"
+    },
+    {
+      "id": "assembly-v3/adversarial/at-not-rfc3339.json",
+      "sha256": "18440b0e93cb832312a5fd3b59a0e8997d85b2aa77433d8c873a4da652ce54ee"
+    },
+    {
+      "id": "assembly-v3/adversarial/empty-boundaries.json",
+      "sha256": "64a11b56697d5fc1cb604bfc508930d02c10d1ea59c2bde525623f7fa013e618"
+    },
+    {
+      "id": "assembly-v3/adversarial/format-still-v2.json",
+      "sha256": "b6f96f43595a09e9449fdbab7cf5b545a0ba5dc717291e4c90f8d4f4fa92f211"
+    },
+    {
+      "id": "assembly-v3/adversarial/journal-index-duplicate.json",
+      "sha256": "6e6af2e1dd0b4fcb7df9b1047c34ac068e06005e3a516b5f6255816244693737"
+    },
+    {
+      "id": "assembly-v3/adversarial/journal-index-not-increasing.json",
+      "sha256": "1d6adcaa31ef632dda2c8d3b10e112f354bf5c33b8db4d06052c44164b88d1ab"
+    },
+    {
+      "id": "assembly-v3/adversarial/missing-arm-id.json",
+      "sha256": "de8a62d6227a33f8a53be11d36379e4c0a592cf6e0388862b157ce9b364d4e23"
+    },
+    {
+      "id": "assembly-v3/adversarial/missing-dispatch-boundaries.json",
+      "sha256": "1def20c57cad3a6f3c82ba87a0b84fed5dc127335713b90b2122a6a889e9f346"
+    },
+    {
+      "id": "assembly-v3/adversarial/missing-eval-index.json",
+      "sha256": "01805099822770c89cd6f7cd32860fbf642248361fa2ed07e584743278d2ea5f"
+    },
+    {
+      "id": "assembly-v3/adversarial/publication-digest-without-sequence.json",
+      "sha256": "3915d5254d8b7c053ac158748a2cb68c7408699c1809c5076cdf05149e3cc952"
+    },
+    {
+      "id": "assembly-v3/adversarial/publication-sequence-without-digest.json",
+      "sha256": "c9e5b5b875d02007c0997b51e09fd5258edd18df4cfe26b82d06efb5fa8a4a58"
+    },
+    {
+      "id": "assembly-v3/adversarial/replicate-negative.json",
+      "sha256": "652e3f271f085758269a739f42a5b92f46b8832dff2e6a576ad7cd728b4e4cf3"
+    },
+    {
+      "id": "assembly-v3/adversarial/replicate-zero.json",
+      "sha256": "833dfda2aa970195bafd34615a85abbd4d05c75bbd0336e737fc050b5b076441"
+    },
+    {
+      "id": "assembly-v3/golden-cell.json",
+      "sha256": "602678cc8434ffa482fca93817c4c22cac2f4900991fab9c69e47c0c39703262"
+    },
+    {
+      "id": "assembly-v3/golden-header.json",
+      "sha256": "f3227b481be5892cdbd666af1beba47427114c2c0d0510f3d7341637a71368bc"
+    },
+    {
       "id": "public-bundle-conformance-v1/golden/README.md",
       "sha256": "02ac685fe2557a57c9d574d56be7c50dacaad91413957cda6423b89cb127ed4d"
     },
