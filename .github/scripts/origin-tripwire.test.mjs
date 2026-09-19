@@ -238,7 +238,6 @@ test('the exclusion list is closed: widening it is a reviewed edit', () => {
     '.github/scripts/public-surface-assets.test.mjs',
     'operator/src/daemon/bridge-legacy-delivery.ts',
     'packages/benchmarking/records/src/identifiers.test.ts',
-    'packages/discovery/facts/benchmarking/src/identifiers.test.ts',
     'packages/discovery/protocol/src/grammar.test.ts',
     'packages/environments/chain-record/src/identifiers.test.ts',
     'packages/environments/chain-record/src/primitives.test.ts',

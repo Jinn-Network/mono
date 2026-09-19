@@ -2,6 +2,7 @@ import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evi
 import { isMetadataFirstBundleProfile } from "@jinn-network/benchmarking-protocol";
 import { expectedChecks } from "./capabilities.js";
 import { legacyClosure } from "./legacy-closures.js";
+import { refuse } from "./profile/errors.js";
 import { PUBLIC_BUNDLE_V8_CHECKS } from "./reader-instructions.js";
 import type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./verify.js";
 
@@ -69,7 +70,17 @@ const CHECK_SUBJECTS: { readonly [C in VerificationCheckName]: string } = {
 export function describeRecomputedChecks(outcome: VerificationOutcome): string {
   const subjects = outcome.outcomes
     .filter(({ state }) => state === "passed")
-    .map(({ check }) => CHECK_SUBJECTS[check]);
+    .map(({ check }) => {
+      // Same norm as `legacyClosure`: `summarizeVerificationOutcome` and `renderVerifiedBundle` are
+      // published entry points an untyped caller reaches, so an unrecognized name is the verifier's
+      // own refusal, never the word "undefined" in a reader's caveat. `Object.hasOwn` because
+      // inherited keys ("constructor", "toString") would pass a plain lookup; `String(check)`
+      // because a symbol would otherwise throw a bare TypeError on its way into the message.
+      if (!Object.hasOwn(CHECK_SUBJECTS, check)) {
+        refuse("record-integrity", "outcome.outcomes.check", `unknown verification check "${String(check)}"`);
+      }
+      return CHECK_SUBJECTS[check];
+    });
   if (subjects.length === 0) return "nothing";
   if (subjects.length === 1) return subjects[0]!;
   if (subjects.length === 2) return `${subjects[0]!} and ${subjects[1]!}`;

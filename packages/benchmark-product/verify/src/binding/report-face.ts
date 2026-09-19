@@ -32,6 +32,7 @@
 import {
   BEACON_BINDING_PROCEDURE,
   BEACON_SOURCES,
+  beaconIndexWord,
   type VerifiedRunBinding,
 } from "./beacon-binding.js";
 
@@ -55,8 +56,7 @@ export function runBindingClass(binding: VerifiedRunBinding | undefined): RunBin
  */
 function beaconName(binding: VerifiedRunBinding): string {
   const source = BEACON_SOURCES[binding.beacon.source];
-  const index = source.timeBasis === "attributive-height" ? "height" : "round";
-  return `${source.displayName} ${index} ${binding.beacon.round}`;
+  return `${source.displayName} ${beaconIndexWord(binding.beacon.source)} ${binding.beacon.round}`;
 }
 
 /**

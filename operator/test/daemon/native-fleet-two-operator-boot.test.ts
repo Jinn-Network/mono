@@ -48,7 +48,6 @@ import {
   createInMemoryPostingIntentStore,
 } from '@jinn-network/marketplace-binding';
 import { RECORD_DISCOVERY_VERSION, WELL_KNOWN_PATH, headPath } from '@jinn-network/record-discovery-protocol';
-import type { BindingResolver, DsseChainVerifier, PolicyCheckInput, WitnessVerifier } from '@jinn-network/trust-core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startPublicArchiveServer, type PublicArchiveServer } from '../../src/api/public-archive-server.js';
 import { createFileAdoptionReceiptStore } from '../../src/daemon/native-adoption-receipt-store.js';
@@ -62,7 +61,7 @@ import {
 import { buildNativeDiscoverySources } from '../../src/daemon/native-discovery-trust.js';
 import { openNativeEvaluatorPublisher } from '../../src/daemon/native-evaluator-publisher.js';
 import { openNativeSolutionPublisher } from '../../src/daemon/native-solution-publisher.js';
-import type { NativeTrustAuthority } from '../../src/daemon/native-trust-catalog.js';
+import { fakeTrust } from '../_support/native-trust.js';
 import type { NativeRecordSource } from '../../src/config/native-sections.js';
 import type { NativeRequesterRoles } from '../../src/native-requester/requester.js';
 import { Store } from '../../src/store/store.js';
@@ -114,33 +113,6 @@ function requesterRoles(): NativeRequesterRoles {
       if (identity === undefined) throw new Error(`missing test role ${role}`);
       return identity;
     },
-  };
-}
-
-/**
- * A trust authority double. Boot-time source resolution calls only `resolverFor`; the verifier
- * ports it hands to `createTrustAdapter` are exercised at POLL, which this file does not reach —
- * see the module header for why that separation is the point rather than a shortcut.
- */
-function fakeTrust(): NativeTrustAuthority {
-  const bindingResolver: BindingResolver = { async resolveBinding() { return null; } };
-  const witnessVerifier: WitnessVerifier = {
-    async verify1271Witness() { return { verified: false, reason: 'fixture never verifies' }; },
-  };
-  const dsseVerifier: DsseChainVerifier = () => ({ validSignerKeyids: [] });
-  return {
-    bindingResolver,
-    dsseVerifier,
-    witnessVerifier,
-    conflicts: [],
-    newestPolicyVersion: 1,
-    rawSignatureVerifier: { async verify() { return false; } },
-    async assertFresh() { /* no-op fixture */ },
-    candidateKeys() { return []; },
-    policy(purpose) { return { accepted: [`accepted-for-${purpose}`], requiredStrength: 'strong' } as PolicyCheckInput; },
-    async verifyRoleBinding() { return { bindingDigest: `sha256:${'0'.repeat(64)}` as const }; },
-    async verifyOnchainAuthority() { return { bindingDigest: `sha256:${'0'.repeat(64)}` as const }; },
-    resolverFor() { return bindingResolver; },
   };
 }
 

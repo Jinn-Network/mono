@@ -42,6 +42,11 @@ export function taskNameByDigestFromSuite(suite: SuiteProtocolSelection): Readon
   return Object.fromEntries(suite.items.map((item) => [item.taskSha256, item.taskName]));
 }
 
+export function digestByTaskNameFromSuite(suite: SuiteProtocolSelection): Readonly<Record<string, string>> {
+  // Inverse of `taskNameByDigestFromSuite`. Named Harbor import uses this table as the front door.
+  return Object.fromEntries(suite.items.map((item) => [item.taskName, item.taskSha256]));
+}
+
 export interface SuiteQuotePresentation extends SuiteComparability {
   readonly protocol: SuiteProtocolId;
   readonly methodLeaderboardEligible: boolean;

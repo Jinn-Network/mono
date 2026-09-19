@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { cellKey } from "@jinn-network/benchmarking-records";
 import { artifactsDir } from "../../workspace/layout.js";
 import { recordHarborDispatchMapping } from "./dispatch-mapping.js";
-import { harborTrialAttemptNumber, harborTrialTaskName } from "./manifest.js";
+import { assignHarborTrialAttempt } from "./manifest.js";
 import {
   harborRetryGenerationTrialId,
   harborTrialRetryable,
@@ -139,17 +139,14 @@ export async function observeHarborArmTrials(input: {
       let trial: Record<string, unknown>;
       try { trial = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(configPath))) as Record<string, unknown>; }
       catch { continue; }
-      const name = harborTrialTaskName(trial);
-      if (name.length === 0) continue;
-      const explicitAttempt = harborTrialAttemptNumber(trial);
-      let attempt: number;
-      if (explicitAttempt !== undefined) attempt = explicitAttempt;
-      else if (directoryAttempt.has(entry.name)) attempt = directoryAttempt.get(entry.name)!;
-      else {
-        attempt = (nextAttemptByTask.get(name) ?? 0) + 1;
-        nextAttemptByTask.set(name, attempt);
-        directoryAttempt.set(entry.name, attempt);
-      }
+      const assigned = assignHarborTrialAttempt({
+        trial,
+        directory: entry.name,
+        nextAttemptByTask,
+        directoryAttempt,
+      });
+      if (assigned === undefined) continue;
+      const { taskName: name, attempt } = assigned;
       const slot = `${name}:${attempt}`;
       const mappedCellKey = cellKey(
         taskDigestForName(name, input.fallbackTaskDigest, input.taskNameByDigest),

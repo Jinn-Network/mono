@@ -6,14 +6,14 @@
  * allowSolverSelfEvaluation)` tuple, which occupies TWO head words -- so every field after
  * `policy` read one word early and `creatorCredited` was truthy for any non-zero
  * `finalizedAttemptCount`. All components are static, so viem decoded 9 of the 10 words without
- * throwing: silently wrong, no error. These tests decode a realistic record through the shared
- * `TASK_COORDINATOR_ABI` slice the call site now consumes and pin the fields after `policy`.
+ * throwing: silently wrong, no error. These tests decode a fixed on-chain payload through the
+ * shared `TASK_COORDINATOR_ABI` slice the call site now consumes and pin the fields after `policy`.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { decodeFunctionResult, encodeAbiParameters, getAbiItem } from 'viem';
+import { type Abi, decodeFunctionResult, encodeAbiParameters, getAbiItem, type Hex } from 'viem';
 import { TASK_COORDINATOR_ABI } from '@jinn-network/marketplace-binding';
 
 const RECORD = {
@@ -28,40 +28,90 @@ const RECORD = {
   creatorCredited: false,
 } as const;
 
+const word = (hex: string) => hex.padStart(64, '0');
+
 /**
- * The fixture is encoded against the ABI under test's own `getTask` outputs, so it cannot drift
- * from the declaration it is meant to prove.
+ * `getTask`'s return as the contract lays it out: ten static head words, `policy` spanning words
+ * 4 and 5. Written out by hand rather than encoded from the ABI under test, so the decode below
+ * proves the declaration against a fixed layout instead of against itself.
  */
+const PAYLOAD: Hex = `0x${[
+  word('a1'), // creator
+  '11'.repeat(32), // taskCidDigest
+  '22'.repeat(32), // manifestDigest
+  word('2'), // status
+  word('5'), // policy.maxClaims
+  word('1'), // policy.allowSolverSelfEvaluation
+  word('4'), // claimCount
+  word('3'), // submittedCount
+  word('1'), // finalizedAttemptCount
+  word('0'), // creatorCredited
+].join('')}`;
+
 const getTaskOutputs = getAbiItem({ abi: TASK_COORDINATOR_ABI, name: 'getTask' }).outputs;
-const encoded = encodeAbiParameters(getTaskOutputs, [RECORD]);
+
+/** The deleted `composition-root.ts` literal, kept here only as the known-bad control. */
+const OLD_GET_TASK_VIEW_ABI = [
+  {
+    type: 'function',
+    name: 'getTask',
+    stateMutability: 'view',
+    inputs: [{ name: 'taskId', type: 'uint256' }],
+    outputs: [
+      {
+        name: 'task',
+        type: 'tuple',
+        components: [
+          { name: 'creator', type: 'address' },
+          { name: 'taskCidDigest', type: 'bytes32' },
+          { name: 'manifestDigest', type: 'bytes32' },
+          { name: 'status', type: 'uint8' },
+          { name: 'policy', type: 'uint8' },
+          { name: 'claimCount', type: 'uint32' },
+          { name: 'submittedCount', type: 'uint32' },
+          { name: 'finalizedAttemptCount', type: 'uint32' },
+          { name: 'creatorCredited', type: 'bool' },
+        ],
+      },
+    ],
+  },
+] as const satisfies Abi;
 
 const compositionRoot = readFileSync(
   resolve(fileURLToPath(new URL('.', import.meta.url)), '../../src/daemon/composition-root.ts'),
   'utf8',
 );
 
-function decodeRecord() {
-  return decodeFunctionResult({
-    abi: TASK_COORDINATOR_ABI,
-    functionName: 'getTask',
-    data: encoded,
-  });
+function decodeRecord(abi: Abi = TASK_COORDINATOR_ABI) {
+  return decodeFunctionResult({ abi, functionName: 'getTask', data: PAYLOAD }) as Record<
+    string,
+    unknown
+  >;
 }
 
 describe('TaskCoordinator.getTask decode (#4286)', () => {
-  it('decodes the whole record at the right offsets', () => {
-    // Decode this same (correctly encoded) payload through the deleted `GET_TASK_VIEW_ABI` and
-    // four fields redden at once; `creatorCredited` is the sharpest, decoding `true` against a
-    // fixture that says false. Swapping the `abi` here would not show that -- the fixture is
-    // encoded from the same declaration, so the old literal fails at ENCODE instead. The proof
-    // pins the old literal on the decode side only (recorded as P6 in the sweep's evidence).
+  it('decodes the fixed payload at the right offsets', () => {
     expect(decodeRecord()).toEqual(RECORD);
   });
 
+  it('encodes the record to the same fixed payload', () => {
+    expect(encodeAbiParameters(getTaskOutputs, [RECORD])).toBe(PAYLOAD);
+  });
+
+  it('misreads the fixed payload through the old policy-as-uint8 literal', () => {
+    // Known-bad control: the one-word `policy` shifts every later field one word early, which is
+    // #4286's failure scenario. If this stops diverging, the payload no longer proves the offsets.
+    const old = decodeRecord(OLD_GET_TASK_VIEW_ABI);
+    expect(old.creatorCredited).toBe(true);
+    expect(old.finalizedAttemptCount).toBe(3);
+    expect(old.creatorCredited).not.toBe(RECORD.creatorCredited);
+    expect(old.finalizedAttemptCount).not.toBe(RECORD.finalizedAttemptCount);
+  });
+
   it('declares the record components the compiled contract returns', () => {
-    // The pin the round trip above cannot supply: `policy` is a nested tuple occupying two head
-    // words, and `creator` then `taskCidDigest` are components 0/1 because `getTaskCidDigest`
-    // (`adapters/mech/contracts.ts`) decodes positionally at `task[1]`.
+    // `policy` is a nested tuple occupying two head words, and `creator` then `taskCidDigest` are
+    // components 0/1 because `getTaskCidDigest` (`adapters/mech/contracts.ts`) decodes
+    // positionally at `task[1]`.
     expect(getTaskOutputs[0].components?.map((c) => `${c.name}:${c.type}`)).toEqual([
       'creator:address',
       'taskCidDigest:bytes32',
@@ -82,6 +132,6 @@ describe('TaskCoordinator.getTask decode (#4286)', () => {
 
   it('reads getTask through the shared slice, not a local literal', () => {
     expect(compositionRoot.includes('abi: TASK_COORDINATOR_ABI')).toBe(true);
-    expect(compositionRoot.includes("name: 'getTask'")).toBe(false);
+    expect(compositionRoot).not.toMatch(/\bname\s*:\s*['"`]getTask['"`]/);
   });
 });
