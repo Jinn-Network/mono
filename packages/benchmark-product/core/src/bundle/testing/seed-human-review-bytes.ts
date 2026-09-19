@@ -11,7 +11,7 @@ function issues(error: z.ZodError) {
   }));
 }
 
-/** Fixture-only product error adapter. Canonical schemas live in verify admission. */
+/** Fixture-only product error adapter. Canonical schemas live in check admission. */
 export function parseHumanReviewDocument<T>(schema: z.ZodType<T>, input: unknown, _label: string): T {
   const parsed = schema.safeParse(input);
   if (!parsed.success) refuseWithIssues("validation", issues(parsed.error));

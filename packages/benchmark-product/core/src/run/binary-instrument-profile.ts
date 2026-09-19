@@ -74,12 +74,12 @@ import {
   BINARY_INSTRUMENT_REPORT_LIMITATIONS,
   PROMPTED_SCREENING_PROFILE,
   binaryInstrumentReportLimitations,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import {
   BINARY_ITEM_BANK_INTAKE_EXTENSION,
   BinaryItemBankIntakeExtensionSchema,
   type BinaryItemBankIntakeExtension,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
 export {

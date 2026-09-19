@@ -49,7 +49,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { BenchmarkProductError } from "../errors.js";
-import { BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED } from "@colophon-claims/verify/admission";
+import { BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED } from "@colophon-claims/check/admission";
 import type { OperationContext } from "../operations/context.js";
 import { createDraft, readDraftDocument } from "../operations/drafts.js";
 import { admitHumanTruth } from "../bundle/testing/seed-admission.js";

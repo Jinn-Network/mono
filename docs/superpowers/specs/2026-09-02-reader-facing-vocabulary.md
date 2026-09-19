@@ -1,8 +1,8 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.6
+- **Version:** 1.7
 - **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16;
-  v1.5: 2026-09-17; v1.6: 2026-09-18)
+  v1.5: 2026-09-17; v1.6: 2026-09-18; v1.7: 2026-09-19)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -46,6 +46,11 @@
 - **v1.6** (#4608): replaces the remaining `assets.ts:<line>` pointers with function, caption,
   and type names so they stop drifting the way `assets.ts:827` did before v1.5. No disposition
   changes.
+- **v1.7** (#4188): the checker publishes as `@colophon-claims/check` / `colophon-check`.
+  `@colophon-claims/verify` / `colophon-verify` stay as a permanent passthrough alias so already-
+  sealed bundle instructions keep resolving. §2's contract classification of those names gets
+  this exception: a freshly emitted instruction prints the new name; the sealed name remains
+  contract because published bundles pin it. No earlier disposition is reversed.
 
 ## 1. Scope
 
@@ -113,13 +118,16 @@ belongs to a bundle-format revision and to nothing smaller:
   `BENCHMARKING_METHOD_IDS`, `packages/benchmarking/records/src/identifiers.ts:99`), sealed as
   `method.id` alongside `method.version` — and enum values (`two-human-unanimous`,
   `operator-only`, `screened-operator-sampled`, `complete`/`partial`/`cancelled`);
-- `--json` output keys, the package name `@colophon-claims/verify`, and the command name
-  `colophon-verify`.
+- `--json` output keys, the package name `@colophon-claims/check` (and the permanent
+  passthrough alias `@colophon-claims/verify`), and the command name `colophon-check`
+  (and the alias binary `colophon-verify`). Issue #4188: a freshly emitted instruction
+  prints the new name; already-sealed bundles keep the old name as contract because they
+  pin it, and the alias exists so those pins never 404.
 
 The `wilson@1`-style spellings are **not** on this side. They are a presentation composition of
 `method.id` and `method.version`, and they appear in **zero** sealed records —
 `claim-package.json` carries `jinn.benchmarking.method/wilson` and `"1"` in two separate
-fields. Every reader-facing `@1` in `verify/src/` is one of four hard-coded literals: the two
+fields. Every reader-facing `@1` in `check/src/` is one of four hard-coded literals: the two
 table captions in `armResultsHtml` (`Exact wilson@1 values from the sealed Report`) and
 `pairwiseDisagreementFactsHtml` (`Exact pairwise-disagreement@1 values from the sealed Report`),
 and the two neutral-verdict sentences in `neutralClaimHtml` (the `wilson` and
@@ -423,11 +431,11 @@ leaves by rename (§4.1: `CAS record` → *Evidence file*), not by hiding.
 reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in this order:
 
 1. **Reader tool check-name glosses** (#3861) — §4.2's gloss column, in
-   `verify/src/cli.ts` `renderVerifiedBundle`; gate `verify/test/cli.test.mjs`. Highest value,
+   `check/src/cli.ts` `renderVerifiedBundle`; gate `check/test/cli.test.mjs`. Highest value,
    smallest diff, zero contract exposure. Do this first, independently of everything else.
-2. **Report page vocabulary** (#3862) — §4.1 applied to `verify/src/assets.ts` (`index.html`,
+2. **Report page vocabulary** (#3862) — §4.1 applied to `check/src/assets.ts` (`index.html`,
    `README.md`, `share.txt`, badge, social card); gates
-   `verify/src/assets-presentation-profile.test.ts` and `assets-binary-admission.test.ts`.
+   `check/src/assets-presentation-profile.test.ts` and `assets-binary-admission.test.ts`.
    Covers the ordinary report surface and both method-specific surfaces ruled at the end of
    §4.1: the binary-qualification surface — `binaryFactsHtml`, `binaryFactsMarkdown`, and the
    two `binaryAdmission*` sub-headings — whose rate labels are the clearest instance of an

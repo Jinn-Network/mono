@@ -41,7 +41,7 @@ import {
   parseRun,
   type ReportRecord,
 } from "@jinn-network/benchmarking-records";
-import { evaluateIntegrityAnchors, type IntegrityAnchorsReport } from "@colophon-claims/verify";
+import { evaluateIntegrityAnchors, type IntegrityAnchorsReport } from "@colophon-claims/check";
 import { verifyMatrix } from "@jinn-network/benchmarking-run";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";

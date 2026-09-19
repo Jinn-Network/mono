@@ -80,7 +80,7 @@ import {
   BINARY_ITEM_BANK_ENTRY_PROTOCOL,
   BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED,
   BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import { readRunState } from "../../run/state.js";
 import type { ProxiedBackend } from "../../run/drive.js";
 import {

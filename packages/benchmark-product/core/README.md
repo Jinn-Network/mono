@@ -4,7 +4,7 @@ The public Tier 4 core package is the single trusted product boundary. It owns
 workspace and draft state, lifecycle transitions, authority checks, the audit
 journal, real local-venue composition, Report and claim production, and local
 public-bundle emission. Portable verification is owned by the smaller
-`@colophon-claims/verify` package and re-exported here. The CLI and private web app
+`@colophon-claims/check` package and re-exported here. The CLI and private web app
 are clients of these public operations; neither is a second implementation.
 The user-facing `colophon` executable is owned by `@colophon-claims/cli`; core
 retains the advanced command library used by that endpoint.
@@ -100,8 +100,8 @@ public line, illustrated below, is the one the formats through public-bundle/6
 pin:
 
 ```text
-npx @colophon-claims/verify@0.1.0 <dir>
-npx @colophon-claims/verify@0.1 <dir>
+npx @colophon-claims/check@0.2.1 <dir>
+npx @colophon-claims/check@0.2 <dir>
 ```
 
 Reader lines are not forward compatible, and a reader that is too old refuses
@@ -141,7 +141,7 @@ It replays the exact manifest, resolutions, analysis contexts, item bytes, exclu
 ledger, reviewer Result Evaluations, and role-separated authority evidence before returning
 derived publication status, classes, strata, accepted/excluded items, and the complete reachable
 digest inventory. Portable readers can call `verifyBinaryJudgmentAdmissionClosure` from
-`@colophon-claims/verify/admission` with their own exact-record resolver and reviewer/authority
+`@colophon-claims/check/admission` with their own exact-record resolver and reviewer/authority
 trust ports; neither API accepts caller-authored candidate truth.
 
 ## Authority and lifecycle behavior

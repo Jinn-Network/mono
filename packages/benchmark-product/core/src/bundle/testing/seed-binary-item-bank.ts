@@ -41,7 +41,7 @@ import {
   BinaryAdmissionIndexEntrySchema,
   BinaryItemBankEntrySchema,
   BinarySourceManifestEntrySchema,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import {
   buildBinaryJudgmentEvaluationSpecification,
   isBinaryJudgmentEvaluationSpecification,
@@ -55,12 +55,12 @@ import { refuse, refuseWithIssues } from "../../errors.js";
 import type {
   BinaryJudgmentAdmissionManifest,
   HumanReviewReplacementLedger,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import {
   BinaryJudgmentAdmissionClosureError,
   verifyBinaryJudgmentAdmissionClosure,
   type BinaryJudgmentAdmissionClosurePorts,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import { parseBinaryItemBankIntakeExtension } from "../../run/binary-instrument-profile.js";
 
 import { BENCHMARK_RECORD_KIND } from "@jinn-network/benchmarking-records";

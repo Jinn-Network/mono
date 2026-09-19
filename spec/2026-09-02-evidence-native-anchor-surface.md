@@ -39,7 +39,7 @@ Both halves of the issue's own suggested remedy are unavailable today:
   Benchmark v2, Analysis Manifest, Cohort, Matrix v2 and Report v3, and it has
   no `run.json`. The refusal is mechanical rather than a matter of lineage
   taste: `/6`'s mandatory member list is `PUBLIC_BUNDLE_FILES`, which includes
-  `run.json` (`packages/benchmark-product/verify/src/legacy-closures.ts`), so
+  `run.json` (`packages/benchmark-product/check/src/legacy-closures.ts`), so
   such a bundle would refuse at `mandatory public bundle file "run.json" is
   missing` (`verify/src/verify.ts`). `/7` and `/8` are dead for the same reason:
   both take `PUBLIC_BUNDLE_V4_FILES`, which is that same list plus
@@ -107,7 +107,7 @@ it.
 
 What remains is code, across three packages, plus documentation:
 
-- **`packages/benchmark-product/verify/src/anchor/check.ts`** — generalize
+- **`packages/benchmark-product/check/src/anchor/check.ts`** — generalize
   `evaluateIntegrityAnchors` off its hard-wired `SUBJECT_KINDS` map of
   `lock`→`RUN_RECORD_KIND` / `matrix`→`MATRIX_RECORD_KIND`, and off its
   `runSha256` / `matrixSha256` input names, onto an explicit taxonomy
@@ -115,14 +115,14 @@ What remains is code, across three packages, plus documentation:
   This is a pure generalization: the classic lineage passes today's taxonomy
   and its behavior is unchanged. It also carries the §3 splice-catch policy
   (below) as an explicit taxonomy field rather than an unconditional rule.
-- **`packages/benchmark-product/verify/src/verify.ts`** and
+- **`packages/benchmark-product/check/src/verify.ts`** and
   **`packages/benchmarking/evidence/src/portable.ts`** — a `/10` branch that
   selects the evidence-native taxonomy when the anchor capability entry is
   present.
 - **`packages/benchmark-product/core/scripts/demo1-export-public-bundle.mjs`** —
   anchor sealing and carriage, under the §4 ruling-3 re-report path.
-- **`packages/benchmark-product/verify/src/reader-instructions.ts` and
-  `packages/benchmark-product/verify/src/freeze-repo.ts`** — the two
+- **`packages/benchmark-product/check/src/reader-instructions.ts` and
+  `packages/benchmark-product/check/src/freeze-repo.ts`** — the two
   format-keyed registries a new closure must extend:
   `PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS`, which carries a `command` /
   `compatibleCommand` pair per format and nothing else, and
@@ -130,7 +130,7 @@ What remains is code, across three packages, plus documentation:
   an unstated closure a type error rather than a silent gap. The reader flags
   themselves (`--tsa-root`, `--ots-headers`) need nothing: they are declared
   and parsed format-agnostically in
-  `packages/benchmark-product/verify/src/cli.ts` and already reach any closure
+  `packages/benchmark-product/check/src/cli.ts` and already reach any closure
   that evaluates anchors. The check-name list is a separate export from the
   instructions registry, and the one a `/10` implementer needs is the
   evidence-native `EVIDENCE_NATIVE_BUNDLE_V5_CHECKS`

@@ -55,7 +55,7 @@ describe("portable bundle manifest", () => {
   });
 
   // Issue #3403: the composed generation's manifest is `/2`'s plus one required member, the
-  // capability vector. This copy and `@colophon-claims/verify`'s must agree, or the producer
+  // capability vector. This copy and `@colophon-claims/check`'s must agree, or the producer
   // cannot emit what the verifier accepts.
   test("a composed manifest carries its capability vector, spelled even when empty", () => {
     writeFixture();

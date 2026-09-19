@@ -7,7 +7,7 @@ import {
   verifyBinaryJudgmentAdmissionClosure,
   type BinaryJudgmentAdmissionClosurePorts,
   type VerifiedBinaryJudgmentAdmissionClosure,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { readEvaluatorPublicKeyRecords } from "../venue/signing.js";
 import { loadOrCreateReportSigningKey, verifyReportEnvelopeSignatures } from "../report/signing.js";

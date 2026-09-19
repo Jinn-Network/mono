@@ -32,7 +32,7 @@ import {
   HUMAN_REVIEW_FORM,
   HUMAN_REVIEW_FORM_SEALED,
   binaryJudgmentItemBytes,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import {
   BINARY_JUDGMENT_ADMISSION_MANIFEST_PROTOCOL,
   BinaryJudgmentAdmissionManifestSchema,
@@ -76,7 +76,7 @@ import {
   type PromptedScreeningRowV2,
   type ScreeningPool,
   type ScreeningRow,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import {
   parseCanonicalHumanReviewBytes,
   sealHumanReviewDocument,
@@ -86,12 +86,12 @@ import {
   parseScreeningSampleCommitmentBytes,
   selectPromptedScreeningPool,
   PromptedScreeningSelectionError,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import {
   BinaryJudgmentAdmissionClosureError,
   verifyBinaryJudgmentAdmissionClosure,
   verifyBinaryJudgmentReviewerResult,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import { buildBinaryJudgmentAdmissionClosureWorkspacePorts } from "../../run/admission-workspace.js";
 import {
   createVerdictDsseSigner,

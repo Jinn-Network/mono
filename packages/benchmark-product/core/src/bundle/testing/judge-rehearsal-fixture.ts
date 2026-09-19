@@ -101,7 +101,7 @@ import {
   ScreeningSampleCommitmentV1Schema,
   computeScreeningPoolDigest,
   computeScreeningSample,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import { sealHumanReviewDocument } from "./seed-human-review-bytes.js";
 import { readRunJournalEntries, type RunJournalEntry } from "../../run/journal.js";
 import { readRunState } from "../../run/state.js";
