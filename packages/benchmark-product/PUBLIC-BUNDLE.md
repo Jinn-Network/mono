@@ -604,12 +604,24 @@ npx @colophon-claims/verify@0.2.1 <bundle-dir> \
 `--tsa-root` and `--ots-headers` carry the meaning and the defaults stated for
 v6.
 
-**No run emits v10 yet.** The producer's format selection is unchanged, because
-`0.2.1` is immutable and predates this format, so it refuses v10 at manifest
-parse --- a v10 bundle would be unverifiable under its own instruction. Every
-run emits exactly the v2, v4, v6, v7, or v8 bundle it always did, byte for byte.
-The producer's default flips in the change that pins v10 to the release serving
-it.
+**No run emits v10 by default.** `0.2.1` is immutable and predates this format,
+so it refuses v10 at manifest parse --- a v10 bundle is unverifiable under its
+own instruction until its claim can pin a release that reads the format. The
+producer emits v10 only when the `report` operation is explicitly asked for the
+composed generation, an operation input with no CLI switch, which exists so the
+two paths can be proven equivalent before the default moves. Asked, it derives
+the vector from the run's own facts: an anchored run declares `anchoring`, a run
+projecting a binary qualification declares `binary-qualification`, and a
+qualification run with a sealed disclosure declaration declares
+`disclosure-specification`, anchored or not. A run that asks emits v10 in place
+of the v2, v4, v6, v7, or v8 bundle the sections above describe. One run is
+treated differently, not only renumbered: a qualification run with a sealed
+disclosure declaration and no anchor is refused at `report` by default, because
+v8 is the only disclosed closure and it is anchored, and asked for the composed
+generation it is admitted and declares `binary-qualification` and
+`disclosure-specification`. Every run that does not ask emits exactly the v2,
+v4, v6, v7, or v8 bundle it always did, byte for byte. The default flips in the
+change that pins v10 to the release serving it.
 
 ## Portable verification
 

@@ -513,6 +513,12 @@ export async function createSyntheticV6BundleFixture(input: {
   readonly declaredProviders?: readonly string[];
   /** #2980 task-selection provenance, sealed into the Run at lock time. */
   readonly taskSelection?: "claimant-chosen" | "fixed-public-set" | "drawn-post-lock";
+  /**
+   * Asks `report` for the composed generation (issue #3403), so the run publishes on
+   * `benchmark-product-public-bundle/10` with a derived capability vector. OPTIONS-ONLY and
+   * defaults off, so every existing caller's bundle bytes and closure version are unchanged.
+   */
+  readonly composedFormat?: true;
 }): Promise<SyntheticV6BundleFixture> {
   const context: OperationContext = {
     workspaceDir: input.workspaceDir,
@@ -574,7 +580,10 @@ export async function createSyntheticV6BundleFixture(input: {
   for (const plan of plans.filter((entry) => !LOCK_PLANS.has(entry.kind))) {
     await applyPlan(context, plan, anchors);
   }
-  requireOk(await runReport(context, { draftId: DRAFT_ID }), "report");
+  requireOk(
+    await runReport(context, { draftId: DRAFT_ID, ...(input.composedFormat === true ? { composedFormat: true } : {}) }),
+    "report",
+  );
 
   const runState = readRunState(input.workspaceDir, DRAFT_ID);
   if (runState?.runSha256 === undefined || runState.matrixSha256 === undefined) {
