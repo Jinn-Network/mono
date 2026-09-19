@@ -48,9 +48,23 @@ export const WorkspaceMetadataSchema = z.object({
    * attempted, no warning prints, and the unconditional limitation stands (§7.3).
    */
   anchoring: z.array(WorkspaceAnchoringEntrySchema).optional(),
+  /**
+   * Producer-side post-dating allowance for an entry-anchor `authority-time`
+   * proof (publication-head anchoring design §4.4 / ruling D3). Milliseconds
+   * the token's `genTime` may precede the entry timestamp. Absent means the
+   * 5-minute default; not a storage-format change.
+   */
+  entryAnchorSkewAllowanceMs: z.number().int().nonnegative().optional(),
 });
 
 export type WorkspaceMetadata = z.infer<typeof WorkspaceMetadataSchema>;
+
+/** Design §4.4 / D3: 5 minutes, used when `entryAnchorSkewAllowanceMs` is absent. */
+export const DEFAULT_ENTRY_ANCHOR_SKEW_ALLOWANCE_MS = 5 * 60 * 1000;
+
+export function entryAnchorSkewAllowanceMs(metadata: WorkspaceMetadata): number {
+  return metadata.entryAnchorSkewAllowanceMs ?? DEFAULT_ENTRY_ANCHOR_SKEW_ALLOWANCE_MS;
+}
 
 function zodIssuesToProductIssues(error: z.ZodError) {
   return error.issues.map((issue) => ({

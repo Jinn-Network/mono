@@ -47,6 +47,13 @@ import { refuse } from "../errors.js";
 import { publicationJournalPath, publicationServeRoot, publicationStatePath, runsDir, runStatePath } from "../workspace/layout.js";
 import { acquirePublicationLock } from "./publication-lock.js";
 import { DEFAULT_PUBLICATION_SOURCE_NAME } from "./state.js";
+import {
+  acquireEntryAnchorAfterAppend,
+  flushPendingEntryAnchorAnnouncements,
+} from "../operations/source-entry-anchor.js";
+import type { RunAnchorDeps } from "../operations/run-anchor.js";
+
+const entryAnchorDepsByWorkspace = new Map<string, RunAnchorDeps>();
 
 /** Canonical archive-mount contract shared by registration, accounting, launch, and Report. */
 export function normalizePublicArchiveBaseUrl(value: string): string {
@@ -250,7 +257,12 @@ export interface WorkspacePublicationSource {
 }
 
 /** Creates/reopens the one stable source for this workspace. */
-export function createWorkspacePublicationSource(workspaceDir: string, sourceName: string): WorkspacePublicationSource {
+export function createWorkspacePublicationSource(
+  workspaceDir: string,
+  sourceName: string,
+  entryAnchorDeps?: RunAnchorDeps,
+): WorkspacePublicationSource {
+  if (entryAnchorDeps !== undefined) entryAnchorDepsByWorkspace.set(workspaceDir, entryAnchorDeps);
   const signer = sourceSigner(workspaceDir);
   const source: SourceIdentity = { agent: signer.keyId, name: sourceName };
   const sourceId = `${source.agent}\u001f${source.name}`;
@@ -291,6 +303,14 @@ export function createWorkspacePublicationSource(workspaceDir: string, sourceNam
     append: async (command) => {
       const receipt = await writer.append(command);
       await refreshWellKnown();
+      await acquireEntryAnchorAfterAppend(workspaceDir, {
+        sourceName,
+        agent: source.agent,
+        sequence: receipt.sequence,
+        entryDigest: receipt.entryDigest,
+        entryTimestamp: command.timestamp,
+        announcement: command.announcement,
+      }, entryAnchorDepsByWorkspace.get(workspaceDir) ?? {});
       return receipt;
     },
     recover: async () => {
@@ -357,7 +377,16 @@ export async function withWorkspacePublicationSourceLock<T>(
   onContended?: () => void,
 ): Promise<T> {
   const lock = await acquirePublicationLock(workspaceDir, "__record-discovery-source__", undefined, { ...(onContended === undefined ? {} : { onContended }) });
-  try { return await run(); } finally { lock.release(); }
+  try {
+    const result = await run();
+    try {
+      await flushPendingEntryAnchorAnnouncements(
+        workspaceDir,
+        (name) => createWorkspacePublicationSource(workspaceDir, name),
+      );
+    } catch { /* never-blocks: a dedicated announce failure is a visible gap, not an append failure */ }
+    return result;
+  } finally { lock.release(); }
 }
 
 /**
