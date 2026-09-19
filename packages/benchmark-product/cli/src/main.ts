@@ -45,7 +45,6 @@ Primary commands:
   colophon results --help
   colophon status --help
   colophon import swebench ...     Import your own SWE-bench tasks
-  colophon import item-bank ...    Import admitted binary-judgment item manifests
   colophon bundle verify ...       Verify through the full product
   colophon help --advanced         Show the explicit lifecycle library
 

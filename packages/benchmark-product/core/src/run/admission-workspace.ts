@@ -3,14 +3,14 @@
 import { Buffer } from "node:buffer";
 import { verify as verifySignature } from "node:crypto";
 import { dssePreAuthEncoding, parseExactDsseEnvelope } from "@jinn-network/trust-core";
-import { getSealedBytes } from "../workspace/sealed-store.js";
-import { readEvaluatorPublicKeyRecords } from "../venue/signing.js";
-import { loadOrCreateReportSigningKey, verifyReportEnvelopeSignatures } from "../report/signing.js";
 import {
   verifyBinaryJudgmentAdmissionClosure,
   type BinaryJudgmentAdmissionClosurePorts,
   type VerifiedBinaryJudgmentAdmissionClosure,
-} from "./verification.js";
+} from "@colophon-claims/check/admission";
+import { getSealedBytes } from "../workspace/sealed-store.js";
+import { readEvaluatorPublicKeyRecords } from "../venue/signing.js";
+import { loadOrCreateReportSigningKey, verifyReportEnvelopeSignatures } from "../report/signing.js";
 
 export interface VerifyBinaryJudgmentAdmissionClosureInWorkspaceInput {
   readonly workspaceDir: string;

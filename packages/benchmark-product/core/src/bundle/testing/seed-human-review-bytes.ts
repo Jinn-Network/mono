@@ -2,9 +2,7 @@
 
 import { z } from "zod";
 import { canonicalJsonBytes, recordDigest } from "@jinn-network/task-execution-profiles";
-import { refuse, refuseWithIssues } from "../errors.js";
-
-export * from "@colophon-claims/check/admission";
+import { refuse, refuseWithIssues } from "../../errors.js";
 
 function issues(error: z.ZodError) {
   return error.issues.map((issue) => ({
@@ -13,7 +11,7 @@ function issues(error: z.ZodError) {
   }));
 }
 
-/** Product error adapter retained for existing operation callers. Canonical schemas live in verify. */
+/** Fixture-only product error adapter. Canonical schemas live in check admission. */
 export function parseHumanReviewDocument<T>(schema: z.ZodType<T>, input: unknown, _label: string): T {
   const parsed = schema.safeParse(input);
   if (!parsed.success) refuseWithIssues("validation", issues(parsed.error));
