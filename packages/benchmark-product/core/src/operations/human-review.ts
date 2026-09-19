@@ -79,7 +79,7 @@ import {
   parseScreeningSampleCommitmentBytes,
   selectPromptedScreeningPool,
   PromptedScreeningSelectionError,
-} from "@colophon-claims/verify/admission";
+} from "@colophon-claims/check/admission";
 import {
   BinaryJudgmentAdmissionClosureError,
   verifyBinaryJudgmentAdmissionClosure,

@@ -607,7 +607,7 @@ call.
    later `earliestCellPostAt`, passes `checkPreregistrationAnchoredOrder`
    (`packages/benchmarking/run/src/checks.ts:104`, a two-timestamp comparison),
    and seals the strong literal. The two existing literals
-   (`packages/benchmark-product/verify/src/profile/anchor-claims.ts:321`,
+   (`packages/benchmark-product/check/src/profile/anchor-claims.ts:321`,
    `:323`) name their evidentiary basis rather than their conclusion. Whether to
    grade the scalar, or to state normatively that it is a producer assertion and
    forbid deriving a badge from the check status alone, is undecided.
@@ -635,6 +635,6 @@ call.
    and verifier to derive byte-identical claim text, and the self-run limits are
    exact string constants duplicated on both sides
    (`packages/benchmark-product/core/src/operations/run-results.ts:167`;
-   `packages/benchmark-product/verify/src/profile/run-results.ts:8`). Which §5
+   `packages/benchmark-product/check/src/profile/run-results.ts:8`). Which §5
    strings become entries, in what order, and whether placeholders are
    interpolated, must be pinned before slice 4.

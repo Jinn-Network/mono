@@ -96,7 +96,7 @@ import { readHarborRunImport } from "../intake/harbor-run-records.js";
 import { readInspectRunImport } from "../intake/inspect-run-records.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
-import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/verify";
+import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/check";
 import {
   DOMAIN_BINDING_MECHANISM_NAMES,
   beaconIndexWord,
@@ -104,7 +104,7 @@ import {
   spdxLicenseProblem,
   summarizeVerificationOutcome,
   verifyFreezeRepo,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { formatSampleSizeAdvisory } from "../run/sample-size-advisory.js";
 import { requireRunState } from "../run/state.js";

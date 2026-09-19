@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
-import { BUNDLE_FORMAT, BUNDLE_V10_FORMAT } from "@colophon-claims/verify";
+import { BUNDLE_FORMAT, BUNDLE_V10_FORMAT } from "@colophon-claims/check";
 import type { PublicAssetInput } from "./assets.js";
 import { buildPublicAssets } from "./assets.js";
 

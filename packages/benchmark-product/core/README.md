@@ -104,8 +104,8 @@ public line, illustrated below, is the one the formats through public-bundle/6
 pin:
 
 ```text
-npx @colophon-claims/verify@0.1.0 <dir>
-npx @colophon-claims/verify@0.1 <dir>
+npx @colophon-claims/check@0.2.1 <dir>
+npx @colophon-claims/check@0.2 <dir>
 ```
 
 Reader lines are not forward compatible, and a reader that is too old refuses
