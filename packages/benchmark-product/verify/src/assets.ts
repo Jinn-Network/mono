@@ -659,11 +659,10 @@ function binaryFactsHtml(facts: BinaryFacts, capabilities: ReadonlySet<Presentat
     return `<section class="binary-arm"><h3>${escapeMarkup(armId)}</h3><p>Instrument <span class="digest">${escapeMarkup(String(arm["instrumentSha256"]))}</span></p><h4>Item, call, and confusion denominators</h4><pre>${escapeMarkup(canonicalText({ item: arm["item"], call: arm["call"], confusion: arm["confusion"] }))}</pre><div class="table-scroll" tabindex="0" role="region" aria-label="${escapeMarkup(armId)} qualification rates"><table><caption>Five registered rates with exact denominators and Wilson intervals</caption><thead><tr><th scope="col">Rate</th><th scope="col">Registered result</th></tr></thead><tbody>${rates}</tbody></table></div><h4>Every candidate-class bucket</h4><pre>${escapeMarkup(canonicalText(arm["byCandidateClass"]))}</pre><h4>${escapeMarkup(caption)}</h4><pre>${escapeMarkup(canonicalText(arm["byStratum"]))}</pre></section>`;
   }).join("");
   // Ruling 1's second half: this opening sentence is the tail of the claim line `neutralClaimHtml`
-  // already rendered above it, so the composed page drops it. UNREACHABLE in production today --
-  // `/10` mirrors `/6`, which is non-qualifying, so no `/10` bundle renders a binary page -- but
-  // the ruling binds it ("drops it in the same revision"), and the capability entry is what the
-  // next qualification-projecting allocation will register, at which point the drop becomes live
-  // with no further code change. Driven directly by a unit test rather than through a bundle.
+  // already rendered above it, so the composed page drops it. Written while `/10` was `/6`'s
+  // closure and no `/10` bundle could render a binary page, because the ruling binds it ("drops it
+  // in the same revision"). Reachable since `/10` became the capability generation (issue #3403):
+  // a `/10` bundle declaring `binary-qualification` renders this page, with no further code change.
   const opening = capabilities.has("report-prose-singularity")
     ? ""
     : '<p class="neutral">Qualification facts are presented per instrument without comparative conclusions.</p>';

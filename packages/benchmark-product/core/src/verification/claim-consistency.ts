@@ -47,10 +47,11 @@ export function assertClaimConsistency(input: {
    * verification path authenticated, never read out of the claim being checked. Empty rebuilds the
    * unanchored claim, so a stored claim asserting an anchor nobody carries fails here. */
   readonly anchors?: readonly ClaimAnchor[];
-  /** issue #4191: which anchored bundle format the manifest declares, so the rebuilt claim pins the
-   * reader line that format pins. Read from the BUNDLE, never from the claim under test — that is
-   * what makes a mismatched pin a difference rather than a tautology. */
-  readonly anchoredBundleFormat?: BuildClaimPackageInput["anchoredBundleFormat"];
+  /** issue #3403: the capability vector of the composed bundle this claim is for, so the rebuilt
+   * claim is the composed generation's, with the id, check list, and reader line that vector
+   * derives. Derived from the run's own facts, never read from the claim under test — that is what
+   * makes a section the vector does not declare a difference rather than a tautology. */
+  readonly composedCapabilities?: BuildClaimPackageInput["composedCapabilities"];
   /** disclosure-specification-record design §7 step 10 (issue #2839): the disclosure section
    * re-derived from the sealed record's own bytes, never read from the claim under test. */
   readonly disclosure?: ClaimDisclosureSection;
@@ -101,7 +102,7 @@ export function assertClaimConsistency(input: {
     },
     ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }),
     ...(input.anchors === undefined ? {} : { anchors: input.anchors }),
-    ...(input.anchoredBundleFormat === undefined ? {} : { anchoredBundleFormat: input.anchoredBundleFormat }),
+    ...(input.composedCapabilities === undefined ? {} : { composedCapabilities: input.composedCapabilities }),
     ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }),
     ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   });

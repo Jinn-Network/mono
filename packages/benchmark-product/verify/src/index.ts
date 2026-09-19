@@ -89,6 +89,27 @@ export {
   BUNDLE_V10_FORMAT,
   SUPPORTED_BUNDLE_FORMATS,
 } from "./manifest.js";
+// The capability registry and its derivations (bundle-capability-composition design §4, issue
+// #3403). Single-sourced here for the reason the two projections around it are: the product core
+// imports this package, so the vector a producer emits and the closure a verifier derives from it
+// come from one registry rather than from two lists that must be kept in step.
+export {
+  ANCHORING_CAPABILITY,
+  BINARY_QUALIFICATION_CAPABILITY,
+  CAPABILITY_REGISTRY,
+  CapabilityVectorSchema,
+  DISCLOSURE_SPECIFICATION_CAPABILITY,
+  activeCapabilityVector,
+  composeClosure,
+  expectedChecks,
+  readerInstructions,
+} from "./capabilities.js";
+export type {
+  CapabilityActivationFacts,
+  CapabilityEntry,
+  CapabilityToken,
+  ComposedClosure,
+} from "./capabilities.js";
 // The disclosed-closure projection and check (disclosure-specification-record design §6.4/§6.6/§7,
 // issue #2839). Single-sourced here for exactly the reason the anchored projection above is: the
 // product core imports this package, so the producer's claim section and the verifier's rebuild of
@@ -111,7 +132,11 @@ export * from "./admission/index.js";
 export * from "./schema.js";
 export * from "./profile/binary-judge-manifest.js";
 export * from "./profile/binary-qualification.js";
-export { ClaimPackageSchema, DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID } from "./profile/claim.js";
+export {
+  COMPOSED_CLAIM_PACKAGE_SCHEMA_ID,
+  ClaimPackageSchema,
+  DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
+} from "./profile/claim.js";
 export type { ClaimPackage } from "./profile/claim.js";
 export { firstDifference } from "./profile/claim-consistency.js";
 export {
@@ -153,7 +178,6 @@ export {
   PUBLIC_BUNDLE_V8_CHECKS,
   PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V8_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V10_CHECKS,
   PUBLIC_BUNDLE_V10_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
