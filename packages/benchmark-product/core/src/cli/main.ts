@@ -71,15 +71,14 @@ import {
   sampleInit,
   selectMethod,
   exportDerivedBundle,
-  migrateTerminalBenchLegacyTask,
   updateDraft,
   type ArmWarning,
   type AnchorSubject,
   type OperationContext,
   type OperationResult,
   type QuotePresentation,
+  type RunBindResult,
   type RunLaunchDeps,
-  type MigrateTerminalBenchLegacyTaskInput,
   type AdmitHumanTruthInput,
   type CreateHumanReviewPacketsInput,
   type ImportBinaryItemBankInput,
@@ -93,20 +92,21 @@ import {
   readExternalRunRecords,
   type ExternalRunRecordFormat,
 } from "../intake/external-run-records.js";
+import { readHarborRunImport } from "../intake/harbor-run-records.js";
+import { readInspectRunImport } from "../intake/inspect-run-records.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
 import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/verify";
 import {
   DOMAIN_BINDING_MECHANISM_NAMES,
+  beaconIndexWord,
   exportFreezeRepo,
   spdxLicenseProblem,
   summarizeVerificationOutcome,
   verifyFreezeRepo,
 } from "@colophon-claims/verify";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { formatSampleSizeAdvisory } from "../run/sample-size-advisory.js";
-import { readRunJournalEntries } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
 import { resolveWorkspacePublicationSourceName } from "../run/publication-source.js";
 import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
@@ -143,7 +143,6 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <response.json> --signer <configured-signer.json>
   human-review admit --workspace <dir> --principal <id> --draft <draftId>
                    --file <admission-manifest.json>
-  runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
                    [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
                    (catalog id or method-document file; omit ref to list)
@@ -190,6 +189,10 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   run import       --workspace <dir> --principal <id> --draft <draftId>
                    --file <records.jsonl|records.csv> --source <harness>
                    [--format jsonl|csv]
+                   --from harbor <jobs-dir> instead of --file reads Harbor 0.21
+                   jobs and trials into the same per-attempt records
+                   --from inspect <eval-log-or-dir> instead of --file reads
+                   Inspect read_eval_log JSON (.eval / EvalLog dump)
                    --template instead of --file/--source prints the sealed
                    slate as a skeleton to fill in
   launch           --workspace <dir> --principal <id> --draft <draftId>
@@ -211,12 +214,10 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   freeze-repo verify --bundle <dir> --repo <dir> [--json]
                    (re-renders from the bundle and compares the published tree byte for byte;
                    a drifted tree exits 1 and names every drifted member)
-  demo1 prereg verify --workspace <dir> --draft <draftId> --witness <witness.json>
-                   --method-summary-sha256 <sha256> --grader-program-sha256 <sha256>
-                   --source-commit <full-git-oid> [--json]
   help                  (also: --help, or no arguments)
 
 Exit codes: 0 success, 2 invalid-invocation, 3 authority-denied, 1 any other typed error.
+The Demo-1 / SkillsBench method is gone, including demo1 prereg verify. Colophon creates no benchmarks.
 `;
 
 function methodHelp(): string {
@@ -275,7 +276,6 @@ const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "fi
 const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "n", "host"] as const;
 const METHOD_LIST_FLAGS = ["json"] as const;
 const EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
-const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -307,7 +307,7 @@ const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as 
 const PUBLICATION_SERVE_FLAGS = ["workspace", "principal", "json", "source", "host", "port"] as const;
 const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const RUN_IMPORT_FLAGS = ["workspace", "principal", "json", "draft", "file", "format", "source", "template"] as const;
+const RUN_IMPORT_FLAGS = ["workspace", "principal", "json", "draft", "file", "format", "source", "template", "from"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const RESUME_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const CANCEL_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -320,9 +320,6 @@ const PUBLISH_FLAGS = ["workspace", "principal", "json", "draft", "include-nativ
 const BUNDLE_VERIFY_FLAGS = ["bundle", "json"] as const;
 const FREEZE_REPO_EXPORT_FLAGS = ["bundle", "out", "json"] as const;
 const FREEZE_REPO_VERIFY_FLAGS = ["bundle", "repo", "json"] as const;
-const DEMO1_PREREG_VERIFY_FLAGS = [
-  "workspace", "draft", "witness", "method-summary-sha256", "grader-program-sha256", "source-commit", "json",
-] as const;
 
 /** Exit-code table (spec §4.3, §5.2): distinct codes so a caller can branch without parsing stdout. */
 function exitCodeFor(code: ProductErrorCode): number {
@@ -805,16 +802,17 @@ async function handleMethodBind(
   return renderResult(
     result,
     jsonMode,
-    (value) => `bound ${value.official ? "official" : "custom"} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`,
+    (value) => {
+      const kind = value.official ? "official" : "custom";
+      if (value.selectionManifestSha256 !== undefined) {
+        return `bound ${kind} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`;
+      }
+      if (value.benchmarkSha256 !== undefined) {
+        return `bound ${kind} ${value.documentKind} method ${value.benchmarkSha256} for draft ${draftId}\n`;
+      }
+      return `bound ${kind} ${value.catalogId ?? value.documentKind} catalog identity for draft ${draftId}\n`;
+    },
   );
-}
-
-async function handleTerminalBenchMigration(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as MigrateTerminalBenchLegacyTaskInput;
-  const result = await migrateTerminalBenchLegacyTask(opContext, configuration);
-  return renderResult(result, jsonMode, (value) => `migrated legacy Terminal-Bench task as ${value.manifestSha256}\n`);
 }
 
 function handleDerivedExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -1189,12 +1187,18 @@ function handleBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): C
       value: required(args, "beacon-value"),
     },
   });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `bound run ${value.binding.sealDigest} to ${value.binding.beacon.source} round `
-      + `${value.binding.beacon.round}: ${value.recordSha256}\n${value.statement}\n`,
-  );
+  return renderResult(result, jsonMode, renderBindLine);
+}
+
+/**
+ * The `bind` human line (issue #3871). The index word follows the source's time basis through the
+ * same helper the reader's report face uses, so a height-indexed beacon is never called a round
+ * here while the report calls it a height.
+ */
+export function renderBindLine(value: RunBindResult): string {
+  const { beacon } = value.binding;
+  return `bound run ${value.binding.sealDigest} to ${beacon.source} ${beaconIndexWord(beacon.source)} `
+    + `${beacon.round}: ${value.recordSha256}\n${value.statement}\n`;
 }
 
 async function handleAnchor(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -1556,14 +1560,14 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
   assertKnownFlags(args, RUN_IMPORT_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
-  const format = importFormat(args);
 
   if (present(args, "template")) {
-    for (const flag of ["file", "source"] as const) {
+    for (const flag of ["file", "source", "from"] as const) {
       if (optional(args, flag) !== undefined) {
         refuse("invalid-invocation", flag, `run import --template prints a skeleton and reads nothing; --${flag} is not accepted with it`);
       }
     }
+    const format = importFormat(args);
     const rendered = renderImportTemplate(opContext.workspaceDir, draftId, format);
     if (jsonMode) {
       return {
@@ -1575,6 +1579,64 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
     return { exitCode: 0, stdout: rendered.template, stderr: "" };
   }
 
+  if (present(args, "from")) {
+    const reader = required(args, "from");
+    if (reader !== "inspect" && reader !== "harbor") {
+      refuse("invalid-invocation", "from", `--from must be "harbor" or "inspect", got "${reader}"`);
+    }
+    for (const flag of ["file", "format", "source"] as const) {
+      if (optional(args, flag) !== undefined) {
+        refuse(
+          "invalid-invocation",
+          flag,
+          reader === "inspect"
+            ? `run import --from inspect reads an eval log or directory; --${flag} is not accepted with it`
+            : `run import --from harbor reads a jobs directory; --${flag} is not accepted with it`,
+        );
+      }
+    }
+    const extra = args.words.slice(2);
+    const pathWord = extra[0];
+    if (extra.length !== 1 || pathWord === undefined || pathWord === "") {
+      refuse(
+        "invalid-invocation",
+        "from",
+        reader === "inspect"
+          ? "run import --from inspect requires <eval-log-or-dir>"
+          : "run import --from harbor requires <jobs-dir>",
+      );
+    }
+    const resolvedPath = pathFrom(context.cwd, pathWord);
+    const dump = reader === "inspect"
+      ? readInspectRunImport({
+        workspaceDir: opContext.workspaceDir,
+        draftId,
+        evalLogOrDir: resolvedPath,
+      })
+      : readHarborRunImport({
+        workspaceDir: opContext.workspaceDir,
+        draftId,
+        jobsDir: resolvedPath,
+      });
+    const imported = await importRunRecords(opContext, {
+      draftId,
+      records: dump.records,
+      source: dump.source,
+      evidenceRoot: dump.evidenceRoot,
+      ...(reader === "inspect" ? { namedReader: "inspect" as const } : {}),
+    });
+    return renderResult(
+      imported,
+      jsonMode,
+      (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
+        + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `
+        + `${value.written.notDelivered} not delivered\n`
+        + "note: publication of an imported run is refused pending issue #3417 — collect and report "
+        + "work, publish does not (see EXTERNAL-RUN-IMPORT.md)\n",
+    );
+  }
+
+  const format = importFormat(args);
   // Relative `evidence[].path` entries resolve against the dump's own directory, so a dump and the
   // artifacts it names move together as one tree.
   const file = pathFrom(context.cwd, required(args, "file"));
@@ -1837,36 +1899,6 @@ async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jso
   return { exitCode, stdout: "", stderr: `${renderHumanError(error)}${skippedModeNote(result)}` };
 }
 
-function handleDemo1PreregistrationVerify(
-  args: ParsedArgs,
-  context: CliContext,
-  jsonMode: boolean,
-): CliResult {
-  assertKnownFlags(args, DEMO1_PREREG_VERIFY_FLAGS);
-  const workspaceDir = pathFrom(context.cwd, required(args, "workspace"));
-  const draftId = required(args, "draft");
-  const runState = requireRunState(workspaceDir, draftId);
-  if (runState.runSha256 === undefined) {
-    refuse("illegal-transition", `runs.${draftId}`, "Demo-1 preregistration verification requires a sealed Run");
-  }
-  const result = verifyDemo1PreregistrationPreDispatch({
-    commitment: {
-      runSha256: runState.runSha256,
-      methodSummarySha256: required(args, "method-summary-sha256"),
-      graderProgramSha256: required(args, "grader-program-sha256"),
-      sourceCommit: required(args, "source-commit"),
-    },
-    witness: readJsonFile(pathFrom(context.cwd, required(args, "witness"))),
-    runState,
-    journal: readRunJournalEntries(workspaceDir, draftId),
-  });
-  return renderResult(
-    { ok: true, result },
-    jsonMode,
-    (value) => `Demo-1 preregistration ready (${value.stage}): ${value.manifestCid} / ${value.transactionHash}\n`,
-  );
-}
-
 type VerbHandler = (args: ParsedArgs, context: CliContext, jsonMode: boolean) => CliResult | Promise<CliResult>;
 
 const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
@@ -1884,7 +1916,6 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["human-review admit", handleHumanReviewAdmit],
   ["method", handleMethodBind],
   ["export", handleDerivedExport],
-  ["runtime terminal-bench migrate", handleTerminalBenchMigration],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],
@@ -1924,7 +1955,6 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["bundle verify", handleBundleVerify],
   ["freeze-repo export", handleFreezeRepoExport],
   ["freeze-repo verify", handleFreezeRepoVerify],
-  ["demo1 prereg verify", handleDemo1PreregistrationVerify],
 ]);
 
 /** The complete verb surface, derived from `VERBS` — the parity anchor `./parity.test.ts` checks

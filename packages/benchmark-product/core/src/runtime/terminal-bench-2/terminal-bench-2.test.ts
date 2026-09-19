@@ -14,7 +14,7 @@ import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { sampleInit } from "../../operations/sample.js";
-import { migrateTerminalBenchLegacyTask, selectTerminalBench2Runtime } from "../../operations/terminal-bench-2.js";
+import { prepareTerminalBenchLegacyMigration, prepareTerminalBench2Draft } from "../testing/terminal-bench-2-draft.js";
 import { readRunJournalEntries } from "../../run/journal.js";
 import { requireRunState } from "../../run/state.js";
 import { createWorkspacePublicationHttpHandler, publicArchiveUrl, recordPath } from "../../run/publication-source.js";
@@ -251,7 +251,7 @@ describe("Terminal-Bench 2 product profile", () => {
       dataset_version_content_hash: datasetRevision,
       task_ids: [{ org: "terminal-bench", name: "echo", ref: nestedTaskRevision }],
     }));
-    const selected = await selectTerminalBench2Runtime(context, { draftId: "nested", ...request(), taskRevision: nestedTaskRevision });
+    const selected = await prepareTerminalBench2Draft(context, { draftId: "nested", ...request(), taskRevision: nestedTaskRevision });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     const outer = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))));
@@ -292,7 +292,7 @@ describe("Terminal-Bench 2 product profile", () => {
     expect((await sampleInit(context, { draftId: "tb2" })).ok).toBe(true);
     expect(armAdd(context, { draftId: "tb2", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
     expect(armAdd(context, { draftId: "tb2", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
-    const selected = await selectTerminalBench2Runtime(context, { draftId: "tb2", ...request() });
+    const selected = await prepareTerminalBench2Draft(context, { draftId: "tb2", ...request() });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     const outer = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))));
@@ -373,7 +373,7 @@ describe("Terminal-Bench 2 product profile", () => {
     const context = { workspaceDir, principal: "sponsor-1", clock: clock() };
     expect(initWorkspace(context).ok).toBe(true);
     const legacy = join(root, "legacy"); mkdirSync(legacy); writeFileSync(join(legacy, "instruction.md"), "legacy task\n"); writeFileSync(join(legacy, "empty.txt"), "");
-    const migrated = await migrateTerminalBenchLegacyTask(context, { executable, sourcePath: legacy, manualAdjustment: { status: "none" } });
+    const migrated = await prepareTerminalBenchLegacyMigration(context, { executable, sourcePath: legacy, manualAdjustment: { status: "none" } });
     expect(migrated.ok, JSON.stringify(migrated)).toBe(true);
     if (!migrated.ok) return;
     expect(migrated.result.manifest.command.argv).toEqual(["task", "migrate", "-i", "source", "-o", "transformed"]);
@@ -393,7 +393,7 @@ describe("Terminal-Bench 2 product profile", () => {
     expect((await sampleInit(context, { draftId: "migrated" })).ok).toBe(true);
     expect(armAdd(context, { draftId: "migrated", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
     expect(armAdd(context, { draftId: "migrated", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
-    const selected = await selectTerminalBench2Runtime(context, { draftId: "migrated", ...request(), taskMaterialPath: selectedDataset, taskRevision: migratedTaskRevision, migrationManifestSha256: migrated.result.manifestSha256 });
+    const selected = await prepareTerminalBench2Draft(context, { draftId: "migrated", ...request(), taskMaterialPath: selectedDataset, taskRevision: migratedTaskRevision, migrationManifestSha256: migrated.result.manifestSha256 });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     const outer = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))));

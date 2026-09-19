@@ -223,16 +223,6 @@
       }
     },
     {
-      "operation": "migrateTerminalBenchLegacyTask",
-      "cliVerb": "runtime terminal-bench migrate",
-      "authorityGated": false,
-      "description": "Transforms a legacy Terminal-Bench task through the pinned Harbor mapper and seals both byte histories.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured migration input paths; browser-supplied paths are forbidden"
-      }
-    },
-    {
       "operation": "publicationAccounting",
       "cliVerb": "publication accounting",
       "authorityGated": true,
@@ -483,10 +473,6 @@
     {
       "name": "freeze-repo verify",
       "reason": "standalone byte-for-byte comparison of a published tree against the bundle it claims to be derived from; reads only what the caller names"
-    },
-    {
-      "name": "demo1 prereg verify",
-      "reason": "read-only post-lock/pre-dispatch gate verifies the exact local E4 witness without credentials or network access"
     },
     {
       "name": "agent add",

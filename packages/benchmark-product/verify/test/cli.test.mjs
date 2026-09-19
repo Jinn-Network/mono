@@ -144,7 +144,12 @@ test("human success names all six checks and states the verification limit", asy
   // Ordering is asserted over the per-check list, not the whole report: the caveat above it now
   // names what each check recomputed ("signing trust", issue #3691), so a whole-output `indexOf`
   // would find prose rather than the list row it means to order.
-  const checkList = output.slice(output.indexOf("\nmanifest  "));
+  // The slice is line-anchored and width-independent: it starts at the list's first row, not at
+  // caveat prose that also names "manifest" (issue #3755). It is asserted found, so a changed
+  // layout fails here rather than silently ordering the whole report.
+  const listStart = output.search(/^manifest\s+passed\b/m);
+  assert.ok(listStart >= 0, "per-check list not found in verify output");
+  const checkList = output.slice(listStart);
   assert.deepEqual(
     orderedChecks.map((check) => checkList.indexOf(check)),
     [...orderedChecks.map((check) => checkList.indexOf(check))].sort((a, b) => a - b),

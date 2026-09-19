@@ -118,7 +118,6 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
     expect(gui.filter((entry) => entry.gui.status === "unavailable").map((entry) => entry.operation).sort()).toEqual([
       "admitHumanTruth", "createHumanReviewPackets", "disclosureDeclare", "disclosureShow",
       "exportDerivedBundle", "identityBind", "importBinaryItemBank", "importRunRecords",
-      "migrateTerminalBenchLegacyTask",
       "signHumanReviewResponse",
     ]);
   });

@@ -223,6 +223,7 @@ export {
   BeaconSourceIdSchema,
   RunBindingError,
   RunBindingSchema,
+  beaconIndexWord,
   beaconRoundInstant,
   computeBeaconOrder,
   requiredBeaconRound,

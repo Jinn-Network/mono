@@ -196,7 +196,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 12,
+      "expectedPackageCount": 10,
       "publishPolicies": [
         "private",
         "never"
@@ -234,7 +234,7 @@
       "stable": false
     },
     "colophon-claims-v1": {
-      "expectedPackageCount": 1,
+      "expectedPackageCount": 3,
       "publishPolicies": [
         "independent"
       ],
@@ -278,7 +278,7 @@
       "stable": true
     },
     "implementations-v1": {
-      "expectedPackageCount": 63,
+      "expectedPackageCount": 61,
       "publishPolicies": [
         "canary-and-stable"
       ],
@@ -565,8 +565,8 @@
         ],
         "decisionRecord": null
       },
-      "releaseGroup": "transitional-or-private",
-      "publishPolicy": "never",
+      "releaseGroup": "colophon-claims-v1",
+      "publishPolicy": "independent",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmark-product-ci"
@@ -609,8 +609,8 @@
         ],
         "decisionRecord": null
       },
-      "releaseGroup": "transitional-or-private",
-      "publishPolicy": "never",
+      "releaseGroup": "colophon-claims-v1",
+      "publishPolicy": "independent",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmark-product-ci"
@@ -927,51 +927,6 @@
         "schemas": [],
         "profiles": [],
         "fixtures": [],
-        "conformance": []
-      },
-      "supersedes": [],
-      "replacedBy": []
-    },
-    {
-      "name": "@jinn-network/benchmarking-marketplace",
-      "path": "packages/benchmarking/marketplace",
-      "domain": "benchmarking",
-      "role": "marketplace adapter",
-      "tier": 3,
-      "classification": "platform",
-      "stability": "candidate",
-      "authority": {
-        "documents": [
-          {
-            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
-            "status": "ratified"
-          },
-          {
-            "path": "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md",
-            "status": "proposed"
-          }
-        ],
-        "decisionRecord": {
-          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
-          "status": "ratified"
-        }
-      },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
-      "ownerGroup": "architecture-control",
-      "requiredGateIds": [
-        "benchmarking-ci"
-      ],
-      "boundaryPolicy": {
-        "kind": "source-boundary",
-        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
-      },
-      "publicSurface": {
-        "schemas": [],
-        "profiles": [],
-        "fixtures": [
-          "fixtures"
-        ],
         "conformance": []
       },
       "supersedes": [],
@@ -1326,51 +1281,6 @@
       "publicSurface": {
         "schemas": [],
         "profiles": [],
-        "fixtures": [],
-        "conformance": []
-      },
-      "supersedes": [],
-      "replacedBy": []
-    },
-    {
-      "name": "@jinn-network/record-discovery-facts-benchmarking",
-      "path": "packages/discovery/facts/benchmarking",
-      "domain": "discovery",
-      "role": "benchmarking facts projection",
-      "tier": 3,
-      "classification": "platform",
-      "stability": "candidate",
-      "authority": {
-        "documents": [
-          {
-            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
-            "status": "ratified"
-          },
-          {
-            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
-            "status": "approved"
-          }
-        ],
-        "decisionRecord": {
-          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
-          "status": "ratified"
-        }
-      },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
-      "ownerGroup": "architecture-control",
-      "requiredGateIds": [
-        "record-discovery-ci"
-      ],
-      "boundaryPolicy": {
-        "kind": "source-boundary",
-        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
-      },
-      "publicSurface": {
-        "schemas": [],
-        "profiles": [
-          "profiles"
-        ],
         "fixtures": [],
         "conformance": []
       },
