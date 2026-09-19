@@ -65,11 +65,12 @@ function entry(token: string, order: number, overrides: Partial<CapabilityEntry>
 }
 
 describe("the registered capabilities", () => {
-  test("exactly three, under their stable wire tokens", () => {
+  test("exactly four, under their stable wire tokens", () => {
     expect(CAPABILITY_REGISTRY.map((capability) => capability.token)).toEqual([
       "binary-qualification",
       "anchoring",
       "disclosure-specification",
+      "external-import",
     ]);
   });
 
@@ -110,7 +111,7 @@ describe("the registered capabilities", () => {
     // The role name is the one the evidence catalog spells, and the deriving fact is the Report
     // extension: the only edge that reaches the record. A derivation is additive, never a
     // refinement target, so contributing one does not make the capability a refiner.
-    const [qualification, anchoring, disclosure] = CAPABILITY_REGISTRY;
+    const [qualification, anchoring, disclosure, imported] = CAPABILITY_REGISTRY;
     expect(disclosure!.roleDerivations).toEqual([{
       role: "disclosure-specification",
       derivedFrom: "https://spec.jinn.network/extensions/disclosure-specification/v1",
@@ -118,6 +119,18 @@ describe("the registered capabilities", () => {
     expect(disclosure!.refines).toEqual([]);
     expect(qualification!.roleDerivations).toEqual([]);
     expect(anchoring!.roleDerivations).toEqual([]);
+    expect(imported!.roleDerivations).toEqual([]);
+  });
+
+  test("external-import adds a mandatory marker member, a check, and no grammar", () => {
+    const imported = CAPABILITY_REGISTRY[3]!;
+    expect(imported.mandatoryFiles).toEqual(["external-import.json"]);
+    expect(imported.memberPatterns).toEqual([]);
+    expect(imported.requires).toEqual([]);
+    expect(imported.conflicts).toEqual([]);
+    expect(imported.refines).toEqual([]);
+    expect(imported.checks).toEqual(["external-import"]);
+    expect(imported.claimSection).toBe("externalImport");
   });
 });
 
@@ -369,18 +382,31 @@ describe("reader instructions", () => {
 });
 
 describe("producer-side activation", () => {
-  const NONE = { anchoredClosure: false, projectsBinaryQualification: false, declaresDisclosure: false };
+  const NONE = {
+    anchoredClosure: false,
+    projectsBinaryQualification: false,
+    declaresDisclosure: false,
+    importedRun: false,
+  };
 
   test("each predicate turns on exactly its own token, in canonical wire order", () => {
     expect(activeCapabilityVector(NONE)).toEqual([]);
     expect(activeCapabilityVector({ ...NONE, anchoredClosure: true })).toEqual(["anchoring"]);
     expect(activeCapabilityVector({ ...NONE, projectsBinaryQualification: true }))
       .toEqual(["binary-qualification"]);
+    expect(activeCapabilityVector({ ...NONE, importedRun: true })).toEqual(["external-import"]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
       projectsBinaryQualification: true,
       declaresDisclosure: true,
+      importedRun: false,
     })).toEqual(["anchoring", "binary-qualification", "disclosure-specification"]);
+    expect(activeCapabilityVector({
+      anchoredClosure: true,
+      projectsBinaryQualification: true,
+      declaresDisclosure: true,
+      importedRun: true,
+    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", "external-import"]);
   });
 
   test("a declaration rides the qualification analysis alone, and needs no anchor", () => {
@@ -398,8 +424,10 @@ describe("producer-side activation", () => {
     for (const anchoredClosure of [false, true]) {
       for (const projectsBinaryQualification of [false, true]) {
         for (const declaresDisclosure of [false, true]) {
-          const facts = { anchoredClosure, projectsBinaryQualification, declaresDisclosure };
-          expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+          for (const importedRun of [false, true]) {
+            const facts = { anchoredClosure, projectsBinaryQualification, declaresDisclosure, importedRun };
+            expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+          }
         }
       }
     }

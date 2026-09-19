@@ -312,6 +312,7 @@ const CHECK_GLOSSES: { readonly [C in VerificationCheckName]: string } = {
   "claim-consistency": "the claim agrees with the records here",
   "integrity-anchors": "the timestamp proofs are well formed",
   "disclosure-specification": "what was pinned is recorded and matches",
+  "external-import": "the import marker matches the claim",
   "artifact-integrity": "each artifact matches its fingerprint",
   "signature-validity": "each signature matches its key",
 };

@@ -86,6 +86,7 @@ import {
 } from "../intake/external-run-records.js";
 import { readHarborRunImport } from "../intake/harbor-run-records.js";
 import { readInspectRunImport } from "../intake/inspect-run-records.js";
+import { dumpIdentityFromPath } from "../run/external-import.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
 import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/check";
@@ -1459,6 +1460,7 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
       records: dump.records,
       source: dump.source,
       evidenceRoot: dump.evidenceRoot,
+      dump: dumpIdentityFromPath(resolvedPath, dump.records),
       ...(reader === "inspect" ? { namedReader: "inspect" as const } : {}),
     });
     return renderResult(
@@ -1466,9 +1468,7 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
       jsonMode,
       (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
         + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `
-        + `${value.written.notDelivered} not delivered\n`
-        + "note: publication of an imported run is refused pending issue #3417 — collect and report "
-        + "work, publish does not (see EXTERNAL-RUN-IMPORT.md)\n",
+        + `${value.written.notDelivered} not delivered\n`,
     );
   }
 
@@ -1482,19 +1482,14 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
     records,
     source: { harness: required(args, "source") },
     evidenceRoot: dirname(file),
+    dump: dumpIdentityFromPath(file, records),
   });
   return renderResult(
     result,
     jsonMode,
-    // The second line is not decoration. `publish` refuses an imported run (operator ruling, issue
-    // #3417), and an operator who learns that only after collect and report has spent the whole
-    // chain to find out. The `--json` envelope is unchanged: machine callers branch on the
-    // publication refusal's own typed code and path, not on this prose.
     (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
       + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `
-      + `${value.written.notDelivered} not delivered\n`
-      + "note: publication of an imported run is refused pending issue #3417 — collect and report "
-      + "work, publish does not (see EXTERNAL-RUN-IMPORT.md)\n",
+      + `${value.written.notDelivered} not delivered\n`,
   );
 }
 

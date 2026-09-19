@@ -100,6 +100,8 @@ export interface CapabilityActivationFacts {
   readonly projectsBinaryQualification: boolean;
   /** The run carries a sealed disclosure-specification declaration. */
   readonly declaresDisclosure: boolean;
+  /** The run's evidence was imported (`run import`) rather than dispatched on a venue. */
+  readonly importedRun: boolean;
 }
 
 /** The uniform per-entry contract (design §4). */
@@ -135,6 +137,7 @@ export interface CapabilityEntry {
 export const BINARY_QUALIFICATION_CAPABILITY = "binary-qualification" as const;
 export const ANCHORING_CAPABILITY = "anchoring" as const;
 export const DISCLOSURE_SPECIFICATION_CAPABILITY = "disclosure-specification" as const;
+export const EXTERNAL_IMPORT_CAPABILITY = "external-import" as const;
 
 /**
  * Every capability this build implements, in `order`.
@@ -202,6 +205,24 @@ export const CAPABILITY_REGISTRY = [
     // A run publishes one bundle per analysis, and only the qualification analysis's Report names
     // the record, so a sibling headline or comparison analysis never carried the declaration.
     activation: (facts) => facts.declaresDisclosure && facts.projectsBinaryQualification,
+  },
+  {
+    // Issue #3417. Additive: a mandatory marker member, a claim section, and a check. The
+    // import-aware disclosure is not a member — both claim-consistency copies rebuild it from
+    // the declared vector — so registering the token without implementing that rebuild cannot
+    // pass the check-list equality below.
+    token: EXTERNAL_IMPORT_CAPABILITY,
+    order: 4,
+    requires: [],
+    conflicts: [],
+    mandatoryFiles: ["external-import.json"],
+    memberPatterns: [],
+    refines: [],
+    roleDerivations: [],
+    claimSection: "externalImport",
+    checks: ["external-import"],
+    minimumReaderRelease: "0.2.1",
+    activation: (facts) => facts.importedRun,
   },
 ] as const satisfies readonly CapabilityEntry[];
 

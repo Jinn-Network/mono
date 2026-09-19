@@ -20,7 +20,7 @@ passed, and never as a failure.
 This tree's checker supports public bundle formats v2, v4, v5, v6, v7, v8, and
 v10. It intentionally rejects the unrelated accounting bundle v3. Formats v2 and v4 run six
 checks; the evidence-native v5 and the two anchored formats, v6 and v7, run seven; the
-disclosed v8 runs eight; v10 runs six to eight by declared capability. The v7 format is the anchored binary-qualification closure —
+disclosed v8 runs eight; v10 runs six to nine by declared capability. The v7 format is the anchored binary-qualification closure —
 v4's members plus v6's anchors — and v8 is v7 plus a sealed six-variable
 disclosure-specification record and the `disclosure-specification` check. Both exist
 only from this 0.2.1 release, so their bundles pin `@0.2.1` rather than the `@0.1` line

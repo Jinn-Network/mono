@@ -355,6 +355,8 @@ describe("issue #3403: the composed claim package", () => {
     expect(() => claimFor({ composedCapabilities: [], anchors: [] })).toThrow(/"anchoring" and its "anchors" section/u);
     expect(() => claimFor({ composedCapabilities: ["binary-qualification"] }))
       .toThrow(/"binary-qualification" and its "qualification" section/u);
+    expect(() => claimFor({ composedCapabilities: ["external-import"] }))
+      .toThrow(/"external-import" and its "externalImport" section/u);
     // A vector the registry does not admit is refused before any section is looked at.
     expect(() => claimFor({ composedCapabilities: ["zz-unknown"] })).toThrow(/does not implement capability "zz-unknown"/u);
   });

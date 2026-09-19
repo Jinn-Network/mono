@@ -82,8 +82,8 @@ To verify a bundle with tools that are not ours, see
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
 
 To import results another harness already produced, see
-[`EXTERNAL-RUN-IMPORT.md`](EXTERNAL-RUN-IMPORT.md). Publication of an
-imported run is refused pending issue #3417.
+[`EXTERNAL-RUN-IMPORT.md`](EXTERNAL-RUN-IMPORT.md). An imported run
+publishes as composed `/10` declaring `external-import`.
 
 The contributor proof remains available from the mono:
 
@@ -143,8 +143,8 @@ The service launches Inspect eval on Colophon's venue.
   limitations, and portable verification.
 - [External run-record import](./EXTERNAL-RUN-IMPORT.md) — the per-attempt
   record shape, both dump dialects, the closed import vocabulary, the
-  `--template` workflow, and why publication of an imported run is refused
-  pending issue #3417.
+  `--template` workflow, and how an imported run publishes as composed `/10`
+  declaring `external-import`.
 - [Inspect runtime](./INSPECT-RUNTIME.md) — optional real Inspect selection,
   execution, scorer attribution, native logs, and security limitations.
 - [Security and threat model](./SECURITY.md) — protected assets, boundaries,

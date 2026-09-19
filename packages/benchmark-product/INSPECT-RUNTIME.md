@@ -17,9 +17,10 @@ pre-registered measurements the same way this adapter already does for
 orchestrated cells. Slate validation is the `#2979` rule: every expected slot
 once, missing / duplicate / unknown / extra refused together, a missing slot
 is `error` / `timeout` / `unrun` with a reason and stays in the denominator,
-and there is no exclude flag. Digesting the source dump's bytes into the
-import marker is **issue #3417** and is not done here; publication of an
-imported run stays refused on that issue.
+and there is no exclude flag. `--from inspect` pointing at an eval-log file
+hashes those file bytes into the public `external-import` marker; a directory
+hashes the canonical JSON of the normalized records. The published bundle is
+composed `/10` declaring `external-import`.
 
 Orchestrating Inspect per cell — spawning Inspect, pinning the runtime, writing
 native logs — is the **service's** machinery on a venue Colophon controls. It

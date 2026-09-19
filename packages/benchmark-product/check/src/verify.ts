@@ -87,6 +87,13 @@ import {
   inspectLogVerifierMethod,
 } from "./profile/inspect-assurance.js";
 import { assertClaimConsistency } from "./profile/claim-consistency.js";
+import {
+  EXTERNAL_IMPORT_BUNDLE_MEMBER,
+  assertExternalImport,
+  deriveClaimExternalImport,
+  parseExternalImportMarker,
+  type ClaimExternalImportSection,
+} from "./profile/external-import.js";
 import { assertTaskSelectionConsistency } from "./profile/task-selection.js";
 import { buildPublicAssets } from "./assets.js";
 import { derivePublicComparison, type PublicComparisonView } from "./comparison.js";
@@ -106,6 +113,7 @@ import {
   ANCHORING_CAPABILITY,
   BINARY_QUALIFICATION_CAPABILITY,
   DISCLOSURE_SPECIFICATION_CAPABILITY,
+  EXTERNAL_IMPORT_CAPABILITY,
   assertMemberClosure,
   composeClosure,
 } from "./capabilities.js";
@@ -174,7 +182,12 @@ export type PublicBundleVerificationCheck =
    * means the closure carries no disclosure record, not that the format is older: a `/10` bundle
    * is numerically later than `/8` and carries one only if it says so. Runs last: the claim's
    * `disclosure` section is among the things it depends on having already been byte-compared. */
-  | "disclosure-specification";
+  | "disclosure-specification"
+  /** Present exactly when the declared vector names `external-import` (issue #3417): the
+   * bundle-visible marker, its dump digest, and the claim section projected from it. Runs after
+   * `claim-consistency` so the section byte-compare has already run; this check authenticates the
+   * marker and pairs it with the sealed Matrix's cell keys. */
+  | "external-import";
 
 interface ClassicPublicBundleVerificationFacts extends PublicBundleSignerDisclosure {
   readonly identity: string;
@@ -802,6 +815,14 @@ export async function verifyPublicBundleSnapshot(
       }
       throw cause;
     }
+  }
+
+  // Issue #3417: the marker is a mandatory member of the declared capability, so it is already
+  // authenticated by the snapshot. The claim rebuild must project from THAT member, never from
+  // the claim under test — same discipline as disclosure above.
+  let claimExternalImport: ClaimExternalImportSection | undefined;
+  if (composed !== undefined && composed.capabilities.includes(EXTERNAL_IMPORT_CAPABILITY)) {
+    claimExternalImport = deriveClaimExternalImport(parseExternalImportMarker(read(EXTERNAL_IMPORT_BUNDLE_MEMBER)));
   }
 
   const assembly = parseAssembly(read("verification/assembly.jsonl"));
@@ -2001,6 +2022,7 @@ export async function verifyPublicBundleSnapshot(
     // Every pre-composition closure derives those from facts the rebuild already has.
     ...(composed === undefined ? {} : { composedCapabilities: composed.capabilities }),
     ...(claimDisclosure === undefined ? {} : { disclosure: claimDisclosure }),
+    ...(claimExternalImport === undefined ? {} : { externalImport: claimExternalImport }),
   });
   checks.push("claim-consistency");
   // Always present for the anchored closure versions, and never for any earlier one: an anchored
@@ -2045,6 +2067,14 @@ export async function verifyPublicBundleSnapshot(
       refuse: (path, message) => refuse("record-integrity", path, message),
     });
     checks.push("disclosure-specification");
+  }
+  if (composed !== undefined && composed.capabilities.includes(EXTERNAL_IMPORT_CAPABILITY)) {
+    assertExternalImport({
+      bytes: read(EXTERNAL_IMPORT_BUNDLE_MEMBER),
+      claim,
+      matrixCellKeys: matrix.cells.map((cell) => cell.cellKey),
+    });
+    checks.push("external-import");
   }
   // Design §6 step 4: the checks that actually ran are compared for exact equality against the
   // list the declared vector derives. A mismatch is a refusal, not a shorter list — it is what
