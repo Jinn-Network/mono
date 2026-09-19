@@ -31,10 +31,10 @@ The self-serve source is now split into Colophon-owned Tier 4 packages:
 
 - `@colophon-claims/cli` — the installable `colophon` command;
 - `@colophon-claims/core` — product operations and local composition;
-- `@colophon-claims/verify` — the smaller reader-only verifier;
+- `@colophon-claims/check` — the smaller reader-only checker;
 - `@colophon-claims/web` — private source/build input for the local UI.
 
-`@colophon-claims/verify` is published to npm, `latest` `0.2.1`. The reader
+`@colophon-claims/check` is published to npm, `latest` `0.2.1`. The reader
 lines below therefore run straight from the registry; nothing has to be checked
 out to verify a received bundle.
 
@@ -62,7 +62,7 @@ a registry command because `@colophon-claims/cli` has not been published.
 For a received bundle, the smaller reader surface is:
 
 ```bash
-npx @colophon-claims/verify@0.1 ./bundle
+npx @colophon-claims/check@0.2 ./bundle
 ```
 
 That line reads the bundle formats through public-bundle/6, and only the claims
@@ -73,6 +73,10 @@ anything from a refusal, read the line the bundle's own claim package pins in
 per-format table in [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) covers the case where
 you have only `bundle.json`; the format string alone is not sufficient, because
 prompted-screening bundles pin a later line without changing their format.
+
+Reports sealed before the rename pin `@colophon-claims/verify`. That name stays
+published permanently as a passthrough alias onto `@colophon-claims/check`, so
+every sealed instruction keeps resolving.
 
 To verify a bundle with tools that are not ours, see
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
@@ -130,7 +134,7 @@ The service launches Inspect eval on Colophon's venue.
 - [Installable CLI](./cli/README.md) — the no-argument sample and local viewer.
 - [Core](./core/README.md) — the operations library, complete agent surface,
   typed errors, authority, and real-venue behavior.
-- [Reader verifier](./verify/README.md) — the independent small install for a
+- [Reader checker](./check/README.md) — the independent small install for a
   person checking a received bundle.
 - [Private web app](./web/README.md) — the server-only human client, local
   configuration, routes, and production browser gate.

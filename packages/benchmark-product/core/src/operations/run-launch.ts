@@ -67,7 +67,7 @@ import {
 } from "../run/journal.js";
 import { requireRunState, writeRunState, type PublicationState } from "../run/state.js";
 import { readRunBindingCarriage } from "../binding/carriage.js";
-import type { VerifiedRunBinding } from "@colophon-claims/verify";
+import type { VerifiedRunBinding } from "@colophon-claims/check";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";

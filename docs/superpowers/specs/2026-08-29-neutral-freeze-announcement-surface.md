@@ -98,7 +98,7 @@ verifier rebuilds the section with, single-sourced rather than mirrored, so
 claim-consistency stays an exact byte-compare.
 
 **Verification.** The `integrity-anchors` check
-(`packages/benchmark-product/verify/src/anchor/check.ts`) is shared by `bundle verify`
+(`packages/benchmark-product/check/src/anchor/check.ts`) is shared by `bundle verify`
 and workspace-side `run.verify`. It never throws; every carried anchor gets an
 outcome. Its four rules are exact-bytes strict-schema parse, subject recomputation
 from the snapshot's own `run.json` / `matrix.json` bytes (never a stored assertion),

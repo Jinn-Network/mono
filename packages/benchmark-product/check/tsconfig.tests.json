@@ -9,7 +9,7 @@
   // This project checks them under the same rules as the code it guards, which is why it
   // extends `tsconfig.json` rather than restating it. It is a separate project because these
   // suites import `../dist/index.js` on purpose -- they test the published surface of
-  // `@colophon-claims/verify`, which is what an external consumer actually gets -- so their
+  // `@colophon-claims/check`, which is what an external consumer actually gets -- so their
   // types resolve only once `dist/` exists. `yarn typecheck` runs before `yarn build`; this
   // one runs from the `test` script, after it.
   "extends": "./tsconfig.json",

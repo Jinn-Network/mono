@@ -2,7 +2,7 @@
 
 /**
  * Issue #3943: `report/claim.ts` is the hand-maintained mirror of
- * `@colophon-claims/verify`'s `profile/claim.ts`, and `operations/verify.ts` reaches it through
+ * `@colophon-claims/check`'s `profile/claim.ts`, and `operations/verify.ts` reaches it through
  * core's own `assertClaimConsistency` -- a reader path of its own. Issue #3855 (PR #3899) typed
  * the ten projection-rebuild refusals on the verify side only, so until this file the SAME
  * malformed sealed Report was classified two ways depending on which entry point read it:
@@ -28,7 +28,7 @@ import {
   type ReportRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
-import { expectedChecks, readerInstructions } from "@colophon-claims/verify";
+import { expectedChecks, readerInstructions } from "@colophon-claims/check";
 import { buildClaimPackage, ClaimPackageSchema, COMPOSED_CLAIM_PACKAGE_SCHEMA_ID, type ClaimPackage } from "./claim.js";
 import { buildLocalVenueHonesty } from "../operations/run-results.js";
 import { assertClaimConsistency } from "../verification/claim-consistency.js";
@@ -270,7 +270,7 @@ describe("issue #3943: core's mirror projection rebuild refuses at the source th
 });
 
 /**
- * Issue #3403, mirrored from `@colophon-claims/verify`'s own
+ * Issue #3403, mirrored from `@colophon-claims/check`'s own
  * `profile/claim-consistency.test.ts`. The two claim projections are hand-maintained copies that
  * must agree byte for byte, so the composed claim package is asserted on both sides rather than on
  * whichever one a given entry point happens to reach.

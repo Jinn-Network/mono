@@ -225,7 +225,7 @@ domain binding is how a publisher offers a name a reader can act on. It is
 material you supply:
 
 ```bash
-npx @colophon-claims/verify <bundle-dir> --identity-binding ./binding.json
+npx @colophon-claims/check@0.2 <bundle-dir> --identity-binding ./binding.json
 ```
 
 The document is small and self-describing:
@@ -383,8 +383,12 @@ openssl subprocess calls — read it, or reimplement it; it holds no secrets.
 The reference verifier covers the remaining rows of the table:
 
 ```bash
-npx @colophon-claims/verify@0.1 <bundle-dir>
+npx @colophon-claims/check@0.2 <bundle-dir>
 ```
+
+A bundle sealed before the checker was renamed names `@colophon-claims/verify`
+there. That name stays published permanently as a passthrough alias onto
+`@colophon-claims/check`, so the command the bundle itself pins keeps resolving.
 
 Exit 0 with `Recomputed: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
 `trust`, `matrix-rederivation`, `report-verification`, `claim-consistency`);
@@ -412,7 +416,7 @@ Its seven checks split as follows.
 The reference verifier runs all seven. The line a full-evidence v5 claim pins is:
 
 ```bash
-npx @colophon-claims/verify@0.1 <bundle-dir>
+npx @colophon-claims/check@0.2 <bundle-dir>
 ```
 
 A metadata-first bundle omits the evidence artifact bodies. There,
@@ -421,18 +425,18 @@ fail; a body that is carried is still digest-checked, and a mismatch still fails
 the whole verification. The carried artifact set must be exactly the declared
 signer public keys. The other six checks are unchanged: they read records and
 fixed members, never artifact bodies. The `@0.1` line refuses a metadata-first
-bundle at manifest parse; `@colophon-claims/verify@0.2.1` lists the
+bundle at manifest parse; `@colophon-claims/check@0.2` lists the
 metadata-first profile among the ones it accepts, and `@0.2.0` and every earlier
 line refuse it. Read a metadata-first bundle with:
 
 ```bash
-npx @colophon-claims/verify@0.2.1 <bundle-dir>
+npx @colophon-claims/check@0.2 <bundle-dir>
 ```
 
 ## The conformance kit
 
 The kit is the self-test corpus for external implementations. It lives in the
-source repository at `packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/`;
+source repository at `packages/benchmark-product/check/fixtures/public-bundle-conformance-v1/`;
 it is deliberately not in the npm tarball, because it is roughly 10 MB of bundle
 bytes that a reader verifying one bundle does not need.
 
