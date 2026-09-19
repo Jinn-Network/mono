@@ -101,13 +101,14 @@ test("schema discriminators are pinned to the verifier's own exported literals",
   // leaving the published schemas describing a format nobody emits.
   const {
     BUNDLE_FORMAT, BUNDLE_EVIDENCE_FORMAT, BUNDLE_VERDICTS_FORMAT,
-    BUNDLE_TRUST_FORMAT, BUNDLE_ASSEMBLY_FORMAT,
+    BUNDLE_TRUST_FORMAT, BUNDLE_ASSEMBLY_FORMAT, BUNDLE_ASSEMBLY_V3_FORMAT,
   } = await import("../dist/index.js");
   assert.equal(loadSchema("bundle-manifest.schema.json").properties.format.const, BUNDLE_FORMAT);
   assert.equal(loadSchema("evidence-catalog.schema.json").properties.format.const, BUNDLE_EVIDENCE_FORMAT);
   assert.equal(loadSchema("verdict-catalog.schema.json").properties.format.const, BUNDLE_VERDICTS_FORMAT);
   assert.equal(loadSchema("public-trust.schema.json").properties.format.const, BUNDLE_TRUST_FORMAT);
   assert.equal(loadSchema("assembly-row.schema.json").$defs.header.properties.format.const, BUNDLE_ASSEMBLY_FORMAT);
+  assert.equal(loadSchema("assembly-row-v3.schema.json").$defs.header.properties.format.const, BUNDLE_ASSEMBLY_V3_FORMAT);
 
   const { CLAIM_PACKAGE_SCHEMA_ID, BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID } =
     await import("../dist/profile/claim.js");
@@ -138,4 +139,43 @@ test("schema validity does not imply verification: a key-swapped trust file stil
 test("the schemas ship in the npm tarball", () => {
   const manifest = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"));
   assert.ok(manifest.files.includes("schemas/"), "package.json files must include schemas/");
+});
+
+const assemblyV3Fixtures = fileURLToPath(new URL("../fixtures/assembly-v3", import.meta.url));
+
+test("assembly/3 golden rows validate against assembly-row-v3.schema.json", () => {
+  const validate = ajv.compile(loadSchema("assembly-row-v3.schema.json"));
+  for (const name of ["golden-header.json", "golden-cell.json"]) {
+    const doc = JSON.parse(readFileSync(join(assemblyV3Fixtures, name), "utf8"));
+    assert.equal(validate(doc), true, `${name}: ${JSON.stringify(validate.errors, null, 1)}`);
+  }
+});
+
+test("assembly/3 source and public schemas agree on every /3 member", async () => {
+  const {
+    BundleAssemblyV3HeaderSchema,
+    DispatchBoundarySolveEventSchema,
+    DispatchBoundaryEvaluationEventSchema,
+  } = await import("../dist/index.js");
+  const published = loadSchema("assembly-row-v3.schema.json");
+  assert.deepEqual(
+    Object.keys(published.$defs.header.properties.graph.properties).sort(),
+    Object.keys(BundleAssemblyV3HeaderSchema.shape.graph.shape).sort(),
+  );
+  assert.deepEqual(
+    Object.keys(published.$defs.solveCapture.properties).sort(),
+    Object.keys(DispatchBoundarySolveEventSchema.shape).sort(),
+  );
+  assert.deepEqual(
+    Object.keys(published.$defs.evaluationCapture.properties).sort(),
+    Object.keys(DispatchBoundaryEvaluationEventSchema.shape).sort(),
+  );
+});
+
+test("assembly/2 golden still validates only against the /2 schema", () => {
+  const validateV2 = ajv.compile(loadSchema("assembly-row.schema.json"));
+  const validateV3 = ajv.compile(loadSchema("assembly-row-v3.schema.json"));
+  const header = JSON.parse(readFileSync(join(golden, "verification", "assembly.jsonl"), "utf8").split("\n")[0]);
+  assert.equal(validateV2(header), true);
+  assert.equal(validateV3(header), false);
 });
