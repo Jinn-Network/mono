@@ -33,7 +33,7 @@ import {
   CAPABILITY_REGISTRY,
   composeClosure,
   verifyPublicBundle,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import type { OperationContext } from "../operations/context.js";
 import { runVerify } from "../operations/verify.js";
 import { COMPOSED_CLAIM_PACKAGE_SCHEMA_ID } from "../report/claim.js";

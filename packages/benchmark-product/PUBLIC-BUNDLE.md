@@ -664,6 +664,10 @@ rather than from the format.
 Every row runs as `npx @colophon-claims/verify<line> <bundle-dir>`, with the anchor flags appended
 where the row lists them.
 
+The checker is now published as `@colophon-claims/check`. `@colophon-claims/verify` — the name
+every row above states, because it is the name those formats sealed — stays published permanently
+as a passthrough alias onto it, so each sealed line keeps resolving.
+
 The qualification axis, unlike prompted screening, is not left to the format string's word. Across
 the legacy lineage and v8 — every row above but `.../5`, whose evidence-native closure is read by a
 different path — a reader binds that axis to the sealed Report: the Report's method is

@@ -1785,7 +1785,7 @@ describe("binary screened-operator-sampled admission", () => {
   // The mechanism, mirrored here at the admission-closure level (this workspace's own
   // `buildBinaryJudgmentAdmissionClosureWorkspacePorts`, `../human-review/verification-workspace.ts`)
   // and structurally identical to the standalone bundle verifier's own port
-  // (`packages/benchmark-product/verify/src/verify.ts:610-612`): every authority signature must
+  // (`packages/benchmark-product/check/src/verify.ts:610-612`): every authority signature must
   // (1) name a keyId that binds the record's role, AND (2) that keyId must equal the single
   // report-signing key for the whole workspace/bundle -- so if the table is signed by key A and
   // the receipt by key B, at most one of the two can ever equal the report key, and the other

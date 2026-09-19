@@ -66,7 +66,7 @@ import {
   DISCLOSURE_SPECIFICATION_EXTENSION,
   DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
 } from "@jinn-network/benchmarking-records";
-import { DISCLOSURE_SPECIFICATION_CAPABILITY, activeCapabilityVector } from "@colophon-claims/verify";
+import { DISCLOSURE_SPECIFICATION_CAPABILITY, activeCapabilityVector } from "@colophon-claims/check";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
