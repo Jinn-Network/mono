@@ -25,6 +25,7 @@ import {
   type RunBinding,
 } from "./beacon-binding.js";
 import { computeScreeningPoolDigest } from "../admission/screening-sample.js";
+import { BenchmarkProductError } from "../profile/errors.js";
 
 const ID = (digit: string): string => `sha256:${digit.repeat(64)}`;
 const SEAL = ID("a");
@@ -433,5 +434,22 @@ describe("beaconIndexWord", () => {
         BEACON_SOURCES[id].timeBasis === "attributive-height" ? "height" : "round",
       );
     }
+  });
+
+  test.each([
+    ["an unknown name", "bogus"],
+    ["an inherited key", "constructor"],
+    ["another inherited key", "toString"],
+    ["the prototype key", "__proto__"],
+    ["a symbol", Symbol("x")],
+  ])("refuses %s with record-integrity", (_label, source) => {
+    let thrown: unknown;
+    try {
+      beaconIndexWord(source as BeaconSourceId);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(BenchmarkProductError);
+    expect((thrown as BenchmarkProductError).code).toBe("record-integrity");
   });
 });
