@@ -8,6 +8,10 @@ const RUNBOOK = readFileSync(
   resolve(REPOSITORY_ROOT, 'docs/runbooks/phase-b-native-vertical.md'),
   'utf8',
 );
+const RESTART_DRILL_WORKFLOW = readFileSync(
+  resolve(REPOSITORY_ROOT, '.github/workflows/native-restart-drill.yml'),
+  'utf8',
+);
 
 describe('Phase B native vertical runbook contract', () => {
   it('pins the accepted command and Base Sepolia deployment', () => {
@@ -89,5 +93,24 @@ describe('Phase B native vertical runbook contract', () => {
       expect(RUNBOOK).toContain(evidence);
     }
     expect(RUNBOOK).toContain('Do not retain passwords, private keys');
+  });
+
+  it('names the restart-drill CI lane, harness fence, and seeded-fixture liveRunDelta', () => {
+    expect(RUNBOOK).toContain('yarn drill:native-restart:verify');
+    expect(RUNBOOK).toContain('.github/workflows/native-restart-drill.yml');
+    expect(RUNBOOK).toContain('broadcastOnce');
+    expect(RUNBOOK).toContain('invocations.broadcast');
+    expect(RUNBOOK).toContain('invocations.broadcastSent');
+    expect(RUNBOOK).toContain('single-role seeded-fixture framing');
+  });
+
+  it('keeps the restart-drill lane off the merge path and fail-closed', () => {
+    expect(RESTART_DRILL_WORKFLOW).toContain('yarn drill:native-restart:verify');
+    expect(RESTART_DRILL_WORKFLOW).toContain('foundry-rs/foundry-toolchain@v1');
+    expect(RESTART_DRILL_WORKFLOW).toContain('workflow_dispatch');
+    expect(RESTART_DRILL_WORKFLOW).toContain('schedule:');
+    expect(RESTART_DRILL_WORKFLOW).not.toMatch(/^ {2}pull_request:/mu);
+    expect(RESTART_DRILL_WORKFLOW).not.toMatch(/^ {2}merge_group:/mu);
+    expect(RESTART_DRILL_WORKFLOW).not.toContain('continue-on-error');
   });
 });

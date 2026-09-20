@@ -72,7 +72,8 @@ export async function runPostingScenario(context: ScenarioContext): Promise<RunO
   const stateDir = join(context.stateDir, 'requester');
   mkdirSync(stateDir, { recursive: true });
 
-  let broadcasts = 0;
+  let broadcastCalls = 0;
+  let broadcastsSent = 0;
   let recoveries = 0;
 
   /** The exact calldata identity of this posting, and the key its recovery reconciles on. */
@@ -102,7 +103,8 @@ export async function runPostingScenario(context: ScenarioContext): Promise<RunO
         // The wallet has returned by the time the boundary fires. Everything after it is hash
         // persistence, which is exactly what the injected boundary must interrupt.
         const posted = await broadcastOnce(context, postingKey, () => context.boundary());
-        if (posted.broadcast) broadcasts += 1;
+        broadcastCalls += 1;
+        if (posted.broadcast) broadcastsSent += 1;
         return { taskId: POSTED_TASK_ID, txHash: posted.txHash };
       },
       recover: async () => {
@@ -157,7 +159,7 @@ export async function runPostingScenario(context: ScenarioContext): Promise<RunO
       // Canonical history, not a local counter: two posts on chain would show up here.
       duplicatePosts: Math.max(history.length - 1, 0),
     },
-    invocations: { broadcast: broadcasts, recover: recoveries },
+    invocations: { broadcast: broadcastCalls, broadcastSent: broadcastsSent, recover: recoveries },
     stateBefore: `sender nonce ${nonceBefore}; posting draft not yet broadcast`,
     stateAfter: `sender nonce ${nonceAfter}; ${history.length} canonical posting transaction(s) for one draft`,
   };

@@ -103,3 +103,16 @@ export function checkRequiredEffects(
   }
   return failures;
 }
+
+/**
+ * A completed run must reach the checkpoint's expected terminal state. Matching failures
+ * (`failed`/`failed`) and loop-exhausted hangs would otherwise seal, because `compareRuns`
+ * only asks whether the two lanes agree (#4196).
+ */
+export function checkExpectedFinalState(
+  observation: RunObservation,
+  expected: string,
+): readonly string[] {
+  if (observation.finalState === expected) return [];
+  return [`finalState=${observation.finalState}, expected ${expected}`];
+}

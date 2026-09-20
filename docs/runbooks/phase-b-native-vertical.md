@@ -218,7 +218,20 @@ nothing, because `comparison.equalToUninterrupted` is a literal `true` in the re
 
 Each report also carries `liveRunDelta`, naming what the deterministic drill does **not** cover — a
 funded, mech-registered operator Safe and the escrowed marketplace legs, a live requester record
-source, and container-graded evaluation. A green drill is not a green live round trip.
+source, container-graded evaluation, and the single-role seeded-fixture framing (each checkpoint
+drills one role against directly seeded durable state, not a chained vertical). A green drill is
+not a green live round trip.
+
+The drill's own broadcast port (`broadcastOnce`) is a harness fence: it reconciles canonical
+history before it signs, so a recovered operator that re-drives a post/claim/settlement does not
+mint a second on-chain transaction. Reports therefore count port invocations separately from
+actual broadcasts (`invocations.broadcast` vs `invocations.broadcastSent`). Duplicate counters
+remain canonical history, not a local tally.
+
+CI runs `yarn drill:native-restart:verify` on a nightly/manual Foundry-provisioned lane
+(`.github/workflows/native-restart-drill.yml`). That lane is not a pull-request gate: the drill
+spawns twelve Anvil nodes and eighteen role-host processes. A red job there is a real regression
+(hermetic Anvil, no public RPC) rather than a flake.
 
 ## Public artifact capture
 

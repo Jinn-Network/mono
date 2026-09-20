@@ -72,6 +72,7 @@ export const LIVE_RUN_DELTA: readonly string[] = [
   'a funded, mech-registered operator Safe and the escrowed marketplace post/claim/deliver legs',
   'a live requester record source serving its signed .well-known introduction',
   'container-graded evaluation (Docker), which is deploy-time by construction',
+  'each checkpoint drills one role against directly seeded durable state, not a chained vertical',
 ];
 
 /**

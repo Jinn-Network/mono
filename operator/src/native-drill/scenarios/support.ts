@@ -105,8 +105,14 @@ export class ExternalJournal<T> {
   entries(): readonly T[] {
     try {
       return JSON.parse(readFileSync(this.path, 'utf8')) as T[];
-    } catch {
-      return [];
+    } catch (error) {
+      // Absence is the first-write case. Anything else — truncated JSON, EISDIR, EACCES —
+      // is a corrupt model of the external system, and must fail the drill rather than
+      // masquerade as an empty journal (#4197).
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw new Error(`restart drill journal unreadable at ${this.path}: ${String(error)}`, {
+        cause: error,
+      });
     }
   }
 

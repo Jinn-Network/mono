@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PHASE_B_RESTART_CHECKPOINT_SET } from '../../src/daemon/phase-b-closure-manifest.js';
 import { DRILL_CHECKPOINTS, DRILL_SPECS, drillSpec } from '../../src/native-drill/checkpoints.js';
 import {
+  LIVE_RUN_DELTA,
   buildDrillReport,
   parseDrillReport,
   sealDrillReport,
@@ -85,6 +86,16 @@ describe('restart-drill recovery report', () => {
       comparison: { equal: false, differences: ['graphDigest differs'] },
       requiredEffects: {},
     })).toThrow(/diverged from the uninterrupted run/u);
+  });
+
+  it('names the single-role seeded-fixture framing in liveRunDelta', () => {
+    expect(LIVE_RUN_DELTA).toEqual([
+      'a funded, mech-registered operator Safe and the escrowed marketplace post/claim/deliver legs',
+      'a live requester record source serving its signed .well-known introduction',
+      'container-graded evaluation (Docker), which is deploy-time by construction',
+      'each checkpoint drills one role against directly seeded durable state, not a chained vertical',
+    ]);
+    expect(report().report.liveRunDelta).toEqual([...LIVE_RUN_DELTA]);
   });
 
   it('refuses a pair that does not share one checkpoint and seed', () => {
