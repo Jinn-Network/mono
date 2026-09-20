@@ -80,6 +80,32 @@ test('lane discovery finds every diff-selected lane and no publish lane', () => 
   assert.ok(discovered.includes('contracts-ci'), 'a flow-sequence paths: must be discovered');
 });
 
+test('indexer image-guard lanes select the shared dockerfile-portals module (#4637)', () => {
+  for (const file of ['indexer-ci.yml', 'indexer-enrichment-ci.yml']) {
+    const source = readFileSync(join(repoRoot, '.github/workflows', file), 'utf8');
+    const blocks = parsePathsBlocks(source);
+    assert.ok(
+      blocks.some(({ trigger }) => trigger === 'pull_request'),
+      `${file} must filter pull_request`,
+    );
+    assert.ok(blocks.some(({ trigger }) => trigger === 'push'), `${file} must filter push`);
+    for (const { trigger, entries } of blocks) {
+      assert.ok(
+        entries.includes('test-support/dockerfile-portals/**'),
+        `${file} ${trigger} must include test-support/dockerfile-portals/**`,
+      );
+    }
+  }
+});
+
+test('operator lane selects the shared dockerfile-portals module (#4645)', () => {
+  const source = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+  assert.ok(
+    parseShellArray(source, 'patterns').includes('^test-support/dockerfile-portals/'),
+    'ci.yml patterns must include ^test-support/dockerfile-portals/',
+  );
+});
+
 test('the trees named in #3573 now select on packages/trust/core', () => {
   const graph = readWorkspaceGraph(repoRoot);
   const lanes = discoverLanes(repoRoot);

@@ -14,6 +14,8 @@ on:
       # from source into this lane, so a change confined to one of them changes what
       # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
       - 'packages/trust/core/**'
+      # Shared portal-closure walk imported by packages/indexer/test/dockerfile-portals.test.ts (#4637).
+      - 'test-support/dockerfile-portals/**'
   push:
     branches: [main, next]
     paths:
@@ -27,6 +29,8 @@ on:
       # from source into this lane, so a change confined to one of them changes what
       # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
       - 'packages/trust/core/**'
+      # Shared portal-closure walk imported by packages/indexer/test/dockerfile-portals.test.ts (#4637).
+      - 'test-support/dockerfile-portals/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

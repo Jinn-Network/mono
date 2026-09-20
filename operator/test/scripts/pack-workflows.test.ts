@@ -62,6 +62,8 @@ const OPERATOR_CI_SELECTED_PATHS = [
   // edit confined to it must still run the lane that executes it.
   '.github/scripts/docker-workflow.test.mjs',
   '.github/scripts/operator-*.test.mjs',
+  // Shared portal-closure walk imported by the operator image guards (#4645).
+  'test-support/dockerfile-portals/**',
 ];
 
 function selectionEntries(path: string): string[] {
