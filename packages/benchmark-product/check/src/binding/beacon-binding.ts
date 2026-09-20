@@ -71,6 +71,7 @@ import {
   computeScreeningPoolDigest,
   type ScreeningStreamEntry,
 } from "../admission/screening-sample.js";
+import { refuse } from "../profile/errors.js";
 
 /** The procedure identifier a binding record must carry. */
 export const BEACON_BINDING_PROCEDURE = "beacon-binding/1" as const;
@@ -129,6 +130,9 @@ export const BEACON_SOURCE_IDS = Object.keys(BEACON_SOURCES).sort() as readonly 
  * the report face and the publisher CLI's `bind` line.
  */
 export function beaconIndexWord(source: BeaconSourceId): "round" | "height" {
+  if (!Object.hasOwn(BEACON_SOURCES, source)) {
+    refuse("record-integrity", "beacon.source", `unknown beacon source "${String(source)}"`);
+  }
   return BEACON_SOURCES[source].timeBasis === "attributive-height" ? "height" : "round";
 }
 
