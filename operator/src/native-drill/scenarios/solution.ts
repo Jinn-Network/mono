@@ -158,8 +158,6 @@ export async function runSolutionScenario(
     backendSubmit: 0,
     evidenceRead: 0,
     publish: 0,
-    settlementBroadcast: 0,
-    settlementBroadcastSent: 0,
   };
   const settlementBroadcasts = { attempts: 0, sent: 0 };
 
@@ -274,8 +272,6 @@ export async function runSolutionScenario(
             if (checkpoint === 'solution-settlement') await context.boundary();
           });
           countBroadcast(sent, settlementBroadcasts);
-          invocations.settlementBroadcast = settlementBroadcasts.attempts;
-          invocations.settlementBroadcastSent = settlementBroadcasts.sent;
           return { txHash: sent.txHash };
         },
         readCanonical: async () => {
@@ -358,7 +354,11 @@ export async function runSolutionScenario(
         settlements: settlementHistory.length === 0 ? 0 : 1,
         duplicateSettlements: Math.max(settlementHistory.length - 1, 0),
       },
-      invocations,
+      invocations: {
+        ...invocations,
+        settlementBroadcast: settlementBroadcasts.attempts,
+        settlementBroadcastSent: settlementBroadcasts.sent,
+      },
       stateBefore: `engagement ${finalEngagement.engagementId} claimed and finalized`,
       stateAfter: `state ${finalEngagement.state}; ${publishedKeys.size} published record(s); `
         + `${settlementHistory.length} canonical settlement transaction(s)`,
