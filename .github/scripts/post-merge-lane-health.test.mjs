@@ -27,6 +27,7 @@ const workflowsDir = path.resolve(scriptsDir, '..', 'workflows');
 const monitor = readFileSync(path.join(workflowsDir, 'post-merge-lane-monitor.yml'), 'utf8');
 
 const LANE = MONITORED_LANES[0];
+const STACK = MONITORED_LANES.find((lane) => lane.file === 'stack-npm-publish.yml');
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.parse('2026-08-18T12:00:00Z');
 
@@ -54,6 +55,10 @@ function run({ conclusion, hoursAgo, event = 'push', branch = 'next', status = '
 
 function classify(runs, now = NOW) {
   return classifyLane({ lane: LANE, runs, now });
+}
+
+function classifyStack(runs, jobsByRunId, now = NOW) {
+  return classifyLane({ lane: STACK, runs, now, jobsByRunId });
 }
 
 test('a green latest run is healthy', () => {
@@ -151,6 +156,67 @@ test('cancelled and skipped runs are neither failures nor recoveries', () => {
 
   const blip = classify([run({ conclusion: 'cancelled', hoursAgo: 0.1 }), run({ conclusion: 'success', hoursAgo: 1 })]);
   assert.equal(blip.state, 'healthy');
+});
+
+test('the Stack lane names stack-canary as its publishing job; the other lanes do not', () => {
+  assert.equal(STACK.publishingJob, 'stack-canary');
+  assert.equal(STACK.workflow, 'Stack npm Publish');
+  for (const lane of MONITORED_LANES) {
+    if (lane !== STACK) {
+      assert.equal(lane.publishingJob, undefined, `${lane.workflow} must keep classifying from the run conclusion alone`);
+    }
+  }
+});
+
+test('a Stack success whose stack-canary job was skipped is unknown, not healthy', () => {
+  const latest = run({ conclusion: 'success', hoursAgo: 1 });
+  const verdict = classifyStack([latest], { [latest.id]: [{ name: 'stack-canary', conclusion: 'skipped' }] });
+  assert.equal(verdict.state, 'unknown');
+  assert.notEqual(verdict.state, 'healthy');
+});
+
+test('a Stack success whose matrix stack-canary job was skipped is unknown', () => {
+  const latest = run({ conclusion: 'success', hoursAgo: 1 });
+  const verdict = classifyStack(
+    [latest],
+    { [String(latest.id)]: [{ name: 'stack-canary (sealed-platform-v1)', conclusion: 'skipped' }] },
+  );
+  assert.equal(verdict.state, 'unknown');
+});
+
+test('a Stack success with a live stack-canary job is healthy', () => {
+  const latest = run({ conclusion: 'success', hoursAgo: 1 });
+  const verdict = classifyStack([latest], { [latest.id]: [{ name: 'stack-canary', conclusion: 'success' }] });
+  assert.equal(verdict.state, 'healthy');
+  assert.equal(verdict.lastSuccess, latest);
+});
+
+test('a Stack success without a matching publishing job is unknown (fail-closed)', () => {
+  const latest = run({ conclusion: 'success', hoursAgo: 1 });
+  assert.equal(classifyStack([latest]).state, 'unknown', 'no jobsByRunId');
+  assert.equal(classifyStack([latest], {}).state, 'unknown', 'run id missing from jobsByRunId');
+  assert.equal(classifyStack([latest], { [latest.id]: [] }).state, 'unknown', 'empty job list');
+  assert.equal(
+    classifyStack([latest], { [latest.id]: [{ name: 'canary-verification', conclusion: 'success' }] }).state,
+    'unknown',
+    'unrelated job names',
+  );
+});
+
+test('Operator Images success without jobsByRunId is still healthy', () => {
+  assert.equal(classify([run({ conclusion: 'success', hoursAgo: 1 })]).state, 'healthy');
+});
+
+test('a skipped Stack success does not mask a later decisive failure as healthy', () => {
+  const skipSuccess = run({ conclusion: 'success', hoursAgo: 0.1 });
+  const failure = run({ conclusion: 'failure', hoursAgo: 2 });
+  const verdict = classifyStack([skipSuccess, failure], {
+    [skipSuccess.id]: [{ name: 'stack-canary', conclusion: 'skipped' }],
+  });
+  assert.notEqual(verdict.state, 'healthy');
+  assert.equal(verdict.latestRun, failure);
+  assert.equal(verdict.state, 'wait');
+  assert.equal(verdict.lastSuccess, undefined);
 });
 
 test('runs from other branches and other events are excluded', () => {
@@ -472,6 +538,30 @@ test('reconcile: only a healthy verdict closes open alerts', () => {
   ]);
 });
 
+test('reconcile: a skipped Stack success does not close an open Stack alert', () => {
+  const skipSuccess = run({ conclusion: 'success', hoursAgo: 0.1 });
+  const failing = classifyLane({
+    lane: STACK,
+    runs: [run({ conclusion: 'failure', hoursAgo: 1 }), run({ conclusion: 'failure', hoursAgo: 2 })],
+    now: NOW,
+  });
+  const rendered = renderAlert({ lane: STACK, verdict: failing });
+  const verdict = classifyStack([skipSuccess], {
+    [skipSuccess.id]: [{ name: 'stack-canary', conclusion: 'skipped' }],
+  });
+  assert.equal(verdict.state, 'unknown');
+  const actions = planLaneReconcile({
+    lane: STACK,
+    verdict,
+    openAlerts: [{ number: 11, ...rendered }],
+    closedAlerts: [],
+  });
+  assert.deepEqual(actions, [
+    { kind: 'log', level: 'info', message: `${STACK.workflow}: unknown; leaving 1 alert(s) open.` },
+  ]);
+  assert.ok(!actions.some((action) => action.kind === 'close'));
+});
+
 test('reconcile: a pull request carrying the label is never acted on', () => {
   const { alert, rendered, healthy } = reconcileFixtures();
   const pr = { number: 2, ...rendered, pull_request: { url: 'https://api.github.com/repos/o/r/pulls/2' } };
@@ -693,12 +783,22 @@ test('the monitor runs on a schedule and holds only read-plus-issues authority',
 
 test('the monitor delegates every decision to planLaneReconcile and reads a full page', () => {
   // The driver performs API calls only (#4260); the decisions above are unit-tested here.
+  // Fetching jobs for a lane.publishingJob is I/O (#4257), not a lifecycle decision.
   assert.ok(monitor.includes('planLaneReconcile('), 'the driver executes the planned actions');
   for (const decision of ['isAlertFor(', 'parseMarker(', 'planAlertUpdate(', 'sameFailingRun(', 'verdict.state', 'startsWith(']) {
     assert.ok(!monitor.includes(decision), `the driver makes no lifecycle decision of its own (${decision})`);
   }
   assert.ok(/switch \(action\.kind\)/u.test(monitor), 'the driver dispatches on the action kind');
-  assert.ok(/per_page: 100,\s*\n\s*\}\);\s*\n\s*const verdict = classifyLane/u.test(monitor), 'the run window is the full page one request allows');
+  assert.ok(
+    /listWorkflowRuns\(\{[\s\S]*?per_page: 100,\s*\n\s*\}\);/u.test(monitor),
+    'the run window is the full page one request allows',
+  );
+  assert.ok(monitor.includes('listJobsForWorkflowRun'), 'publishing-job lanes fetch jobs for success runs');
+  assert.ok(/lane\.publishingJob/u.test(monitor), 'job fetches are gated on the lane registry, not a driver rule');
+  assert.ok(
+    /classifyLane\(\{[\s\S]*?jobsByRunId/u.test(monitor),
+    'jobsByRunId is passed into classifyLane; the driver does not interpret jobs',
+  );
 });
 
 test('lanes that already have a dedicated monitor are excluded on the record', () => {

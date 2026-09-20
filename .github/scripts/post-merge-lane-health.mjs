@@ -11,12 +11,13 @@
 // metadata and never executes code from the monitored revision. Precedents:
 // npm-publish-monitor.yml, indexer-monitor.yml, main-next-ancestor-check.yml.
 //
-// Scope: this monitor decides from the RUN-LEVEL conclusion only. A run that
-// concludes `success` while its publishing job was skipped reads healthy here — the
-// stack canary publish is gated on `vars.PLATFORM_CANARY_PUBLISH_ENABLED`
-// (stack-npm-publish.yml, DR-2026-08-17-d), and while that flag is off the lane is
-// deliberately not publishing rather than failing. Resolving jobs per run, the way
-// npm-publish-monitor.yml does for one lane, is a separate decision (#4257).
+// Scope: this monitor decides from the RUN-LEVEL conclusion, except on a lane that
+// names a `publishingJob`. There a `success` is decisive only when that job actually
+// ran: a skipped `stack-canary` (the flag-off path in stack-npm-publish.yml,
+// DR-2026-08-17-d) is non-decisive, the same as a cancelled run or a path-filter
+// skip. A success with no job list, an empty list, or no matching job is also
+// non-decisive (fail-closed). Failures, timeouts, and startup_failure stay
+// decisive without jobs. The driver fetches those jobs; this module classifies.
 //
 // This module is pure so the classification, the issue body, and every
 // open/update/close decision are unit-testable without GitHub.
@@ -47,7 +48,8 @@ export const GRACE_MS = 24 * 60 * 60 * 1000;
  * that is in neither. Add a lane here and to the monitor's `workflow_run` list
  * together — the same test pins the two to each other.
  *
- * @type {ReadonlyArray<{workflow: string, file: string, branch: string, staleArtifact: string}>}
+ * @type {ReadonlyArray<{workflow: string, file: string, branch: string, staleArtifact: string,
+ *   publishingJob?: string}>}
  */
 export const MONITORED_LANES = Object.freeze([
   Object.freeze({
@@ -77,6 +79,7 @@ export const MONITORED_LANES = Object.freeze([
     branch: 'next',
     staleArtifact:
       'The canary dist-tags for the stack packages keep resolving to the last versions this lane published.',
+    publishingJob: 'stack-canary',
   }),
 ]);
 
@@ -175,6 +178,32 @@ function day(run) {
   return Number.isFinite(at) ? new Date(at).toISOString().slice(0, 10) : 'unknown';
 }
 
+function jobsForRun(jobsByRunId, runId) {
+  if (jobsByRunId == null) return undefined;
+  if (jobsByRunId instanceof Map) {
+    return jobsByRunId.get(runId) ?? jobsByRunId.get(String(runId));
+  }
+  return jobsByRunId[runId] ?? jobsByRunId[String(runId)];
+}
+
+function publishingJobRan(jobs, publishingJob) {
+  if (!Array.isArray(jobs)) return false;
+  const matrixPrefix = `${publishingJob} (`;
+  return jobs.some(
+    (job) =>
+      (job.name === publishingJob || (typeof job.name === 'string' && job.name.startsWith(matrixPrefix))) &&
+      job.conclusion !== 'skipped',
+  );
+}
+
+function isDecisiveRun(run, lane, jobsByRunId) {
+  if (run.status !== 'completed' || run.event !== 'push' || run.head_branch !== lane.branch) return false;
+  if (!DECISIVE.has(run.conclusion)) return false;
+  if (FAILING.has(run.conclusion)) return true;
+  if (!lane.publishingJob) return true;
+  return publishingJobRan(jobsForRun(jobsByRunId, run.id), lane.publishingJob);
+}
+
 /**
  * Classify one lane's health from its recent runs.
  *
@@ -185,21 +214,17 @@ function day(run) {
  * `windowBounded` is whether the window reaches past the failing streak: only then are
  * the streak length, its first failure, and the last success known rather than floors.
  *
- * @param {{lane: {branch: string}, runs: ReadonlyArray<object>, now: number}} input
- *   `runs` is any window of that lane's runs, in any order.
+ * @param {{lane: {branch: string, publishingJob?: string}, runs: ReadonlyArray<object>, now: number,
+ *   jobsByRunId?: Map<string|number, ReadonlyArray<object>> | Record<string, ReadonlyArray<object>>}} input
+ *   `runs` is any window of that lane's runs, in any order. `jobsByRunId` is consulted only
+ *   when `lane.publishingJob` is set; run ids may be numbers or strings.
  * @returns {{state: 'healthy'|'unknown'|'wait'|'alert', confidence?: 'confirmed'|'unconfirmed',
  *   consecutiveFailures: number, observedRuns: number, windowBounded: boolean,
  *   latestRun?: object, firstFailure?: object, lastSuccess?: object}}
  */
-export function classifyLane({ lane, runs, now }) {
+export function classifyLane({ lane, runs, now, jobsByRunId }) {
   const decisive = runs
-    .filter(
-      (run) =>
-        run.status === 'completed' &&
-        run.event === 'push' &&
-        run.head_branch === lane.branch &&
-        DECISIVE.has(run.conclusion),
-    )
+    .filter((run) => isDecisiveRun(run, lane, jobsByRunId))
     .sort((a, b) => b.run_number - a.run_number);
 
   const lastSuccess = decisive.find((run) => run.conclusion === 'success');

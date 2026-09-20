@@ -98,7 +98,26 @@ jobs:
                 event: 'push',
                 per_page: 100,
               });
-              const verdict = classifyLane({ lane, runs: data.workflow_runs, now: Date.now() });
+              // Job lists are I/O for lanes that name a publishingJob (#4257).
+              // classifyLane decides whether a success is decisive; this loop
+              // does not inspect job names or conclusions.
+              const jobsByRunId = {};
+              if (lane.publishingJob) {
+                for (const run of data.workflow_runs) {
+                  if (run.status === 'completed' && run.conclusion === 'success') {
+                    jobsByRunId[run.id] = await github.paginate(
+                      github.rest.actions.listJobsForWorkflowRun,
+                      { ...repo, run_id: run.id, per_page: 100 },
+                    );
+                  }
+                }
+              }
+              const verdict = classifyLane({
+                lane,
+                runs: data.workflow_runs,
+                now: Date.now(),
+                jobsByRunId,
+              });
               const openAlerts = await github.paginate(
                 github.rest.issues.listForRepo,
                 { ...repo, state: 'open', labels: label, per_page: 100 },
