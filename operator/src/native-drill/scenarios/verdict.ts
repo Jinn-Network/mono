@@ -261,9 +261,19 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
       retry: { now: () => DRILL_CLOCK, delayMs: 0, maxAttempts: 5 },
     });
 
+    let complete = false;
     for (let pass = 0; pass < 8; pass += 1) {
       const result = await coordinator.reconcileEvaluation(evaluationId);
-      if (result.kind === 'complete' || result.kind === 'failed') break;
+      if (result.kind === 'failed') {
+        throw new Error('restart drill verdict-settlement: reconcile failed');
+      }
+      if (result.kind === 'complete') {
+        complete = true;
+        break;
+      }
+    }
+    if (!complete) {
+      throw new Error('restart drill verdict-settlement: reconcile loop exhausted without complete');
     }
 
     const evaluation = state.getEvaluation(evaluationId)!;

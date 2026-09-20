@@ -27,6 +27,11 @@ export interface DrillCheckpointSpec {
    * "zero duplicate posts/claims/deliveries/settlements" assertions made machine-checkable.
    */
   readonly requiredEffects: Readonly<Record<string, number>>;
+  /**
+   * Terminal lifecycle state the drilled record must reach. Two lanes that fail identically
+   * still compare equal; this assertion is what turns that into a red drill.
+   */
+  readonly expectedFinalState: string;
 }
 
 /**
@@ -42,6 +47,7 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     proof: 'Reconcile canonical TaskCreated/nonce history; zero duplicate posts; the signed '
       + 'association uses the original Submission and posting terms',
     requiredEffects: { posting: 1, signedSourceEntries: 1, duplicatePosts: 0 },
+    expectedFinalState: 'published',
   },
   {
     checkpoint: 'claim',
@@ -51,6 +57,7 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     proof: 'One logical claimOperationId; replacement hashes remain attached to it; execution '
       + 'starts only after canonical finality',
     requiredEffects: { claims: 1, claimOperations: 1, duplicateClaims: 0 },
+    expectedFinalState: 'claim-finalized',
   },
   {
     checkpoint: 'backend-submit',
@@ -59,6 +66,7 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     boundary: 'after the dispatch context is durable, before the backend submit is recorded',
     proof: 'backend.recover reports matching; no second Attempt or divergent submit',
     requiredEffects: { backendSubmissions: 1, duplicateSubmits: 0 },
+    expectedFinalState: 'solution-settled',
   },
   {
     checkpoint: 'evidence',
@@ -71,6 +79,7 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     // envelope. Pinned, so a change in what the solution path publishes fails this drill rather
     // than quietly redefining what "publication resumes once" was measured against.
     requiredEffects: { publishedRecords: 4 },
+    expectedFinalState: 'solution-settled',
   },
   {
     checkpoint: 'solution-settlement',
@@ -79,6 +88,7 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     boundary: 'after the solution settlement transaction is broadcast, before it is reconciled',
     proof: 'Receipt/replacement/canonical logs reconcile to one finalized solution operation',
     requiredEffects: { settlements: 1, duplicateSettlements: 0 },
+    expectedFinalState: 'solution-settled',
   },
   {
     checkpoint: 'verdict-settlement',
@@ -88,6 +98,7 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     proof: 'Decision-grade gate reruns over public bytes; one finalized verdict operation; '
       + 'consumer graph equals uninterrupted run',
     requiredEffects: { canonicalVerdictSettlements: 1, duplicateVerdictSettlements: 0 },
+    expectedFinalState: 'complete',
   },
 ];
 

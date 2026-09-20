@@ -103,3 +103,15 @@ export function checkRequiredEffects(
   }
   return failures;
 }
+
+/**
+ * A recovered run that fails the same way as the uninterrupted run still compares equal.
+ * The expected terminal state is what makes that a drill failure rather than a green seal.
+ */
+export function checkExpectedFinalState(
+  observation: RunObservation,
+  expected: string,
+): readonly string[] {
+  if (observation.finalState === expected) return [];
+  return [`finalState=${observation.finalState}, expected ${expected}`];
+}

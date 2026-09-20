@@ -296,11 +296,21 @@ export async function runSolutionScenario(
       },
     });
 
-    // One reconcile loop drives the engagement to its terminal state in both modes. The recovered
-    // run enters it with the same durable row the uninterrupted run passed through.
+    // One reconcile loop drives the engagement to solution-settled in both modes. Failed and
+    // non-terminal outcomes must not fall through into a sealed observation.
+    let settled = false;
     for (let pass = 0; pass < 8; pass += 1) {
       const results = await coordinator.reconcileStartup();
-      if (results.every(({ kind }) => kind === 'solution-settled' || kind === 'failed')) break;
+      if (results.some(({ kind }) => kind === 'failed')) {
+        throw new Error(`restart drill ${checkpoint}: reconcile failed`);
+      }
+      if (results.every(({ kind }) => kind === 'solution-settled')) {
+        settled = true;
+        break;
+      }
+    }
+    if (!settled) {
+      throw new Error(`restart drill ${checkpoint}: reconcile loop exhausted without solution-settled`);
     }
 
     const finalEngagement = state.getEngagement(engagementId)!;
