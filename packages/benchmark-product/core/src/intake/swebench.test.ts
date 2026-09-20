@@ -62,13 +62,28 @@ describe("convertSweBenchRows", () => {
     // against a task DIGEST. The platform now validates the batch value at its edge, exactly as it
     // already did the per-instance map, so the refusal names what an operator can act on. The
     // `benchmark-judgeability` mapping this test used to trigger is covered by
-    // swebench.judgeability-mapping.test.ts.
+    // swebench.judgeability-mapping.test.ts. Path is the option name (#3365), not the generic
+    // `rows` catch-all.
     const error = catchError(() =>
       convertSweBenchRows([GOLDEN_ROW], { ...OPTS, provenanceTimestamp: "not-a-timestamp" }),
     );
     expect(error.code).toBe("validation");
     expect(error.issues).toHaveLength(1);
+    expect(error.issues[0]?.path).toBe("provenanceTimestamp");
     expect(error.issues[0]?.message).toMatch(/provenanceTimestamp: .*"not-a-timestamp"/u);
+    expect(error.issues[0]?.message).not.toMatch(/taskDigest/u);
+  });
+
+  test("an invalid provenanceTimestamps entry refuses validation naming that option", () => {
+    const error = catchError(() =>
+      convertSweBenchRows([GOLDEN_ROW], {
+        ...OPTS,
+        provenanceTimestamps: { [GOLDEN_ROW.instance_id]: "not-a-timestamp" },
+      }),
+    );
+    expect(error.code).toBe("validation");
+    expect(error.issues).toHaveLength(1);
+    expect(error.issues[0]?.path).toBe(`provenanceTimestamps["${GOLDEN_ROW.instance_id}"]`);
     expect(error.issues[0]?.message).not.toMatch(/taskDigest/u);
   });
 

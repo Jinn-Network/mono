@@ -4,6 +4,9 @@
 export {
   defineBenchmark,
   importSweBench,
+  ProvenanceTimestampError,
+  SWE_BENCH_JUDGEABILITY_FAILURE_MESSAGE_PREFIX,
+  sweBenchJudgeabilityFailureMessage,
 } from "./import/swebench.js";
 export type {
   DefineBenchmarkOptions,

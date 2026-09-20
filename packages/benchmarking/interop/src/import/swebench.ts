@@ -128,6 +128,32 @@ export function defineBenchmark(
 }
 
 /**
+ * Edge refusal for a malformed `provenanceTimestamp` / `provenanceTimestamps[...]`
+ * value. The product maps `option` onto `issues[].path` without parsing prose (#3365).
+ */
+export class ProvenanceTimestampError extends Error {
+  readonly option: string;
+
+  constructor(option: string, detail: string) {
+    super(`${option}: ${detail}`);
+    this.name = "ProvenanceTimestampError";
+    this.option = option;
+  }
+}
+
+/**
+ * Shared prefix of the platform's judgeability throw. The product recovers the named
+ * `benchmark-judgeability` check by matching this prefix; the mapping test builds the
+ * stub throw from `sweBenchJudgeabilityFailureMessage` so a reword cannot drift (#3364).
+ */
+export const SWE_BENCH_JUDGEABILITY_FAILURE_MESSAGE_PREFIX =
+  "imported SWE-bench Benchmark failed checkJudgeability: ";
+
+export function sweBenchJudgeabilityFailureMessage(result: unknown): string {
+  return `${SWE_BENCH_JUDGEABILITY_FAILURE_MESSAGE_PREFIX}${JSON.stringify(result)}`;
+}
+
+/**
  * Converts a caller-supplied provenance timestamp, naming the option it came from.
  *
  * Left to `checkJudgeability`, a malformed date surfaces as `invalid-provenance` against a task
@@ -140,7 +166,7 @@ function normalizeProvenanceTimestamp(value: string, option: string): string {
     return toCalendarStrictRfc3339(value);
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
-    throw new Error(`${option}: ${detail}`);
+    throw new ProvenanceTimestampError(option, detail);
   }
 }
 
@@ -183,7 +209,7 @@ export function importSweBench(
     (digest) => tasks.find((task) => stripSha256Prefix(task.digest) === digest)?.bytes,
   );
   if (!("ok" in judgeability) || judgeability.ok !== true) {
-    throw new Error(`imported SWE-bench Benchmark failed checkJudgeability: ${JSON.stringify(judgeability)}`);
+    throw new Error(sweBenchJudgeabilityFailureMessage(judgeability));
   }
   return { tasks, benchmark };
 }

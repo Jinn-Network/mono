@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolveBenchmarkTaskProvenance } from "@jinn-network/benchmarking-records";
 import { describe, expect, test } from "vitest";
-import { importSweBench, type SweBenchRow } from "./swebench.js";
+import { importSweBench, ProvenanceTimestampError, type SweBenchRow } from "./swebench.js";
 
 const ROWS = JSON.parse(
   readFileSync(fileURLToPath(new URL("../../fixtures/swebench/rows.multi-repo.json", import.meta.url)), "utf8"),
@@ -109,6 +109,8 @@ describe("SWE-bench import — the batch timestamp is validated at the same edge
     // neither the option nor the bad value — the digest-hunt the per-instance path was fixed to
     // avoid.
     expect(() => importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "2026-02-30" }))
+      .toThrow(ProvenanceTimestampError);
+    expect(() => importSweBench(ROWS, { ...OPTS, provenanceTimestamp: "2026-02-30" }))
       .toThrow(/^provenanceTimestamp: timestamp "2026-02-30" cannot be converted/u);
   });
 
@@ -151,6 +153,12 @@ describe("SWE-bench import — per-instance timestamps are validated at the edge
   test("a malformed timestamp names the offending instance, not a task digest", () => {
     // Left to checkJudgeability, this surfaces as `invalid-provenance` against a digest, naming
     // neither the instance nor the bad value — a digest-hunt on a large import.
+    expect(() =>
+      importSweBench(ROWS, {
+        ...OPTS,
+        provenanceTimestamps: { "swe-rebench-cluster-00002": "2026-02-30" },
+      }),
+    ).toThrow(ProvenanceTimestampError);
     expect(() =>
       importSweBench(ROWS, {
         ...OPTS,

@@ -17,17 +17,25 @@
  * throws:
  *  - `benchmark-judgeability` — the platform's own named check, run inside
  *    `importSweBench`; its throw message is passed through as the issue message.
- *    A malformed `provenanceTimestamp`/`provenanceTimestamps` value no longer
- *    reaches it: the platform converts and refuses both at its own edge, so a bad
- *    timestamp surfaces through the generic `rows` path naming the offending value
- *    rather than as `invalid-provenance` against a task digest.
+ *    A malformed `provenanceTimestamp`/`provenanceTimestamps` value is refused at
+ *    the platform edge as `ProvenanceTimestampError`; this product maps `option`
+ *    onto `issues[].path` so a machine caller can distinguish a bad timestamp from
+ *    a row-shape failure without parsing prose (#3365). The remaining
+ *    `benchmark-judgeability` mapping matches
+ *    `SWE_BENCH_JUDGEABILITY_FAILURE_MESSAGE_PREFIX` (#3364).
  *  - `benchmark-item-distinctness` — `checkItemDistinctness`, run here explicitly.
  *    The Benchmark schema itself does not refuse duplicate items, so this product
  *    surfaces the platform's named check as a typed refusal instead of silently
  *    admitting a Benchmark with repeated Task digests.
  */
 
-import { importSweBench, type ImportedBenchmark, type SweBenchRow } from "@jinn-network/benchmarking-interop";
+import {
+  importSweBench,
+  ProvenanceTimestampError,
+  SWE_BENCH_JUDGEABILITY_FAILURE_MESSAGE_PREFIX,
+  type ImportedBenchmark,
+  type SweBenchRow,
+} from "@jinn-network/benchmarking-interop";
 import { checkItemDistinctness } from "@jinn-network/benchmarking-records";
 import { sealEvaluationSpec, sweRebenchRowToTaskAndSpec } from "@jinn-network/task-execution-profiles";
 import { z } from "zod";
@@ -87,6 +95,8 @@ function issuesFromZodError(error: z.ZodError) {
  * Validates `rowsInput` against the SWE-bench row file shape, then converts it via
  * the platform's `importSweBench` (see module header). Refuses `"validation"`:
  *  - with `rows.<index>.<field>` issues when the row file itself is malformed;
+ *  - with a single `"provenanceTimestamp"` / `provenanceTimestamps["<id>"]` issue
+ *    when the platform refuses a malformed timestamp option (#3365);
  *  - with a single `"benchmark-judgeability"` issue when the platform's own named
  *    judgeability check fails (the platform's throw message is carried through);
  *  - with a single `"benchmark-item-distinctness"` issue naming the duplicate task
@@ -102,16 +112,14 @@ export function convertSweBenchRows(rowsInput: unknown, opts: ConvertSweBenchRow
   try {
     imported = importSweBench(parsedRows.data as unknown as readonly SweBenchRow[], opts);
   } catch (cause) {
+    if (cause instanceof ProvenanceTimestampError) {
+      refuse("validation", cause.option, cause.message);
+    }
     const message = cause instanceof Error ? cause.message : String(cause);
-    // Fragile-by-necessity coupling: the importer throws a plain Error on a
-    // judgeability failure, so the named check is recovered by matching its
-    // message. If the platform ever rewords that message, this degrades to
-    // the generic `rows` path below. No public option reaches the judgeability
-    // throw any more — the platform validates both provenance-timestamp options
-    // at its own edge — so the mapping is pinned against a stubbed platform
-    // throw in swebench.judgeability-mapping.test.ts, which carries a verbatim
-    // copy of the platform template and must be updated with it.
-    if (message.includes("checkJudgeability")) {
+    // The named check is recovered by matching the shared prefix exported by the
+    // platform (#3364). A reword of that prefix turns this mapping test red
+    // (swebench.judgeability-mapping.test.ts builds the stub from the same helper).
+    if (message.startsWith(SWE_BENCH_JUDGEABILITY_FAILURE_MESSAGE_PREFIX)) {
       refuseWithIssues("validation", [{ path: "benchmark-judgeability", message }]);
     }
     refuse("validation", "rows", message);
