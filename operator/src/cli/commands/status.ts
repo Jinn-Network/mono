@@ -5,7 +5,7 @@ import { emitEnvelope } from '../../errors/envelope.js';
 import { gatherIntrospectionRaw as defaultGatherIntrospectionRaw } from '../introspection-context.js';
 import { assembleStatusRollupV1 as defaultAssembleStatusRollupV1 } from '../../api/status-rollup-build.js';
 import type { StatusRollupV1Response, StatusDetailV1 } from '../../api/status-rollup-build.js';
-import { loadConfig, getConfigPathFromArgs, buildConfigProvenance, type ConfigProvenance } from '../../config.js';
+import { loadConfig, requireConfigPathFromArgvSources, buildConfigProvenance, type ConfigProvenance } from '../../config.js';
 import type { JinnConfig } from '../../config.js';
 import {
   resolveTaskNativeReadiness,
@@ -16,7 +16,7 @@ export interface StatusDeps {
   gatherIntrospectionRaw: typeof defaultGatherIntrospectionRaw;
   assembleStatusRollupV1: typeof defaultAssembleStatusRollupV1;
   loadConfig?: typeof loadConfig;
-  getConfigPathFromArgs?: typeof getConfigPathFromArgs;
+  getConfigPathFromArgs?: (argv?: string[]) => string | undefined;
   resolveTaskNativeReadiness?: (config: JinnConfig) => TaskNativeReadiness;
 }
 
@@ -123,9 +123,24 @@ Examples:
         );
         return;
       }
-      const configPath =
-        (deps.getConfigPathFromArgs ?? getConfigPathFromArgs)(ctx.argv ?? []) ??
-        getConfigPathFromArgs(process.argv.slice(2));
+      let configPath: string | undefined;
+      try {
+        configPath = deps.getConfigPathFromArgs
+          ? (deps.getConfigPathFromArgs(ctx.argv ?? []) ?? deps.getConfigPathFromArgs(process.argv.slice(2)))
+          : requireConfigPathFromArgvSources(ctx.argv ?? []);
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: err instanceof Error ? err.message : String(err),
+            hint: 'Pass a config path or omit --config.',
+            exampleCli: 'jinn status --config ~/.jinn-operator/config.json',
+            details: { field: 'config' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
       let configProvenance: ConfigProvenance | undefined;
       let taskNative: TaskNativeReadiness | undefined;
       try {

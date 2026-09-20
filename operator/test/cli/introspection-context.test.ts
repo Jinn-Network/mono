@@ -73,4 +73,8 @@ describe('gatherIntrospectionRaw — /v1/status auth (spec §10.1)', () => {
     const raw = await gatherIntrospectionRaw({ argv: ['--config', configPath] });
     expect(raw).toBeDefined();
   });
+
+  it('throws when --config is empty instead of loading the default (#4673)', async () => {
+    await expect(gatherIntrospectionRaw({ argv: ['--config='] })).rejects.toThrow(/empty/i);
+  });
 });

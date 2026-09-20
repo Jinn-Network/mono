@@ -502,8 +502,9 @@ describe("unreviewedReportProse", () => {
   });
 });
 
-// Issue #4291: the reviewed corpus is every authored text block HTML has, not the subset the page
-// renders today, so one more heading level or a pulled quote cannot put prose past the rules.
+// Issue #4291 / #4644: the reviewed corpus is the tags `AUTHORED` matches (`p`, `h1`–`h6`,
+// `caption`, `figcaption`, `blockquote`), not every authored text block HTML has. Silent
+// remainder (`address`, `legend`, bare `summary`) is named on `AUTHORED`.
 describe("authored blocks beyond the tags the page renders today", () => {
   test.each(["h5", "h6", "figcaption", "blockquote"])("reviews a <%s>", (tag) => {
     const html = page(`<${tag}>Click to expand the evidence</${tag}>`);

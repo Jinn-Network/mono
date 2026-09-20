@@ -10,7 +10,7 @@ import {
   buildConfigProvenance,
   getConfigPathFromArgs,
 } from '../src/config.js';
-import { requireConfigPathFromArgs } from '../src/config/path-args.js';
+import { requireConfigPathFromArgs, requireConfigPathFromArgvSources } from '../src/config/path-args.js';
 import { phaseDTransitionUsageSnapshot } from '../src/compatibility/phase-d-transition-usage.js';
 
 /**
@@ -1543,5 +1543,24 @@ describe('requireConfigPathFromArgs (#4376)', () => {
   it('falls through an empty value to a later usable occurrence without throwing', () => {
     expect(requireConfigPathFromArgs(['--config=', '--config', '/tmp/later.json']))
       .toBe('/tmp/later.json');
+  });
+});
+
+describe('requireConfigPathFromArgvSources (#4673)', () => {
+  it('prefers a usable verb argv over process argv', () => {
+    expect(requireConfigPathFromArgvSources(
+      ['--config', '/tmp/verb.json'],
+      ['--config', '/tmp/process.json'],
+    )).toBe('/tmp/verb.json');
+  });
+
+  it('falls through to process argv when the verb omitted --config', () => {
+    expect(requireConfigPathFromArgvSources(['--json'], ['--config', '/tmp/process.json']))
+      .toBe('/tmp/process.json');
+  });
+
+  it('throws when the verb named --config with an empty value', () => {
+    expect(() => requireConfigPathFromArgvSources(['--config='], ['--config', '/tmp/process.json']))
+      .toThrow('--config was given with an empty value');
   });
 });

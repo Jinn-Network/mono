@@ -14,7 +14,7 @@
 import type { GatheredStatusRaw } from '../api/status-build.js';
 import type { StatusV1Response } from '../api/status-build.js';
 import { gatherGatheredStatusRaw, type StatusGatherConfig } from '../api/gather-status.js';
-import { loadConfig, getConfigPathFromArgs } from '../config.js';
+import { loadConfig, requireConfigPathFromArgvSources } from '../config.js';
 import { Store } from '../store/store.js';
 import { resolveUiToken } from './daemon-control-client.js';
 
@@ -78,10 +78,7 @@ async function tryMergeStatusFromHttp(
 export async function gatherIntrospectionRaw(opts?: {
   argv?: string[];
 }): Promise<GatheredStatusRaw> {
-  const fromVerbFlags = getConfigPathFromArgs(opts?.argv ?? []);
-  const fromProcess =
-    typeof process !== 'undefined' ? getConfigPathFromArgs(process.argv.slice(2)) : undefined;
-  const configPath = fromVerbFlags ?? fromProcess;
+  const configPath = requireConfigPathFromArgvSources(opts?.argv ?? []);
   const config = loadConfig(configPath);
   const store = new Store(config.dbPath);
   const status: StatusGatherConfig = {

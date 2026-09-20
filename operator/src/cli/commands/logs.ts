@@ -4,7 +4,7 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import {
   loadConfig as defaultLoadConfig,
-  getConfigPathFromArgs as defaultGetConfigPathFromArgs,
+  requireConfigPathFromArgs as defaultGetConfigPathFromArgs,
 } from '../../config.js';
 import { Store } from '../../store/store.js';
 
@@ -103,10 +103,25 @@ Examples:
 
       const n = parseInt(parsed.values.limit as string, 10);
       const limit = Math.min(Math.max(Number.isFinite(n) ? n : 100, 1), 1000);
-      const fromVerbFlags = deps.getConfigPathFromArgs(ctx.argv);
-      const fromProcess =
-        typeof process !== 'undefined' ? deps.getConfigPathFromArgs(process.argv.slice(2)) : undefined;
-      const config = deps.loadConfig(fromVerbFlags ?? fromProcess);
+      let configPath: string | undefined;
+      try {
+        configPath =
+          deps.getConfigPathFromArgs(ctx.argv) ??
+          (typeof process !== 'undefined' ? deps.getConfigPathFromArgs(process.argv.slice(2)) : undefined);
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: err instanceof Error ? err.message : String(err),
+            hint: 'Pass a config path or omit --config.',
+            exampleCli: 'jinn logs --config ~/.jinn-operator/config.json',
+            details: { field: 'config' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+      const config = deps.loadConfig(configPath);
       const store = deps.storeFactory(config.dbPath);
       const rows = store.getRecentActivityEvents(limit);
       const events: LogLine[] = rows

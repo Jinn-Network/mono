@@ -59,6 +59,23 @@ repository/catalog contracts and the execution-recorder producer; delivery waits
 recorder's finalization receipt, while catalog indexing remains an explicit later operation and
 never gates `delivered`.
 
+## Terminal attempt directory retention
+
+Boot rehydration used to walk every attempt directory under the state root, including
+terminals that settlement no longer needs. The local backend now prunes those directories
+before that walk (#4596):
+
+- **Removed:** terminal journals whose authoritative terminal time is a real past timestamp
+  older than `terminalAttemptRetentionMs` (default seven days) and that have no
+  `meta/delivery.sealed` checkpoint.
+- **Kept:** every nonterminal attempt; every terminal that still has a delivery checkpoint
+  (settlement may still reference it); terminals inside the retention window; journals whose
+  terminal time is missing, unparseable, or in the future.
+
+The prune never rewrites history and never deletes another attempt's files. After it runs,
+the number of directories the rehydration walk inspects is the retained set, not unbounded
+historical terminals.
+
 ## Never touches
 
 Scheduling, queues, settlement, or application authority (design §5).

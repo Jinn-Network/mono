@@ -220,4 +220,16 @@ describe('buildCliSignerContext daemon guard (D0a round 1)', () => {
     });
     expect(result.ok).toBe(true);
   });
+
+  it('rejects an empty --config instead of loading the default (#4673)', async () => {
+    const result = await createCliSignerContext({
+      argv: ['--config='],
+      env: { JINN_PASSWORD: 'test-password' },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.envelope.code).toBe('invalid_invocation');
+    expect(result.envelope.details).toMatchObject({ field: 'config' });
+    expect(result.envelope.message).toMatch(/empty/i);
+  });
 });
