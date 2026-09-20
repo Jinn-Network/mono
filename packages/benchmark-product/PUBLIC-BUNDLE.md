@@ -535,14 +535,16 @@ Every token is **must-understand**. A reader that does not implement a token in
 the vector refuses the bundle whole, naming the token, before it reads any
 member. There is no tier of tokens a reader may ignore.
 
-Three capabilities are registered. Each one's members, checks, and claim section
-are exactly what the closure it came from carries:
+Four capabilities are registered. Each one's members, checks, and claim section
+are exactly what the closure it came from carries, except `external-import`,
+which is new with this generation:
 
 | Token | Adds | Check it appends | Claim section |
 | --- | --- | --- | --- |
 | `binary-qualification` | `qualification.json`, and the v4 grammar for `evidence.json` and `trust/public-keys.json` | none --- it expands the existing checks, as v4 does | `qualification` |
 | `anchoring` | `anchors/<sha256>.bin`, which may be empty under the declared-but-absent rule stated for v6 | `integrity-anchors` | `anchors` |
 | `disclosure-specification` | no member of its own; the sealed record travels at `records/<sha256>.bin`, named by the Report extension stated for v8 | `disclosure-specification` | `disclosure` |
+| `external-import` | `external-import.json`, the dump digest plus one row per sealed Matrix cell | `external-import` | `externalImport` |
 
 `disclosure-specification` requires `binary-qualification`, because the evidence
 role that carries its record exists only in the v4 grammar. It does not require
@@ -551,9 +553,10 @@ role that carries its record exists only in the v4 grammar. It does not require
 Everything else is derived from the vector. The mandatory members are v2's plus
 each declared capability's. The checks are v2's **six**, then each declared
 capability's in the order of the table above --- so `["anchoring"]` runs v6's
-seven and all three tokens run v8's eight. The vector naming `anchoring` alone
+seven and all three pre-composition tokens run v8's eight. The vector naming `anchoring` alone
 is v6's closure exactly, the vector naming `anchoring` and
-`binary-qualification` is v7's, and the vector naming all three is v8's.
+`binary-qualification` is v7's, and the vector naming those three is v8's.
+`external-import` is additive and has no pre-composition cell.
 
 Declaration is authoritative, and presence is derived from it, never the
 reverse. A member of a capability the vector does not declare --- an
@@ -608,8 +611,9 @@ v6.
 the composed generation, so a run that does not ask otherwise publishes on
 `benchmark-product-public-bundle/10` with the capability vector derived from the run's own
 facts: an anchored run declares `anchoring`, a run projecting a binary qualification
-declares `binary-qualification`, and a qualification run with a sealed disclosure
-declaration declares `disclosure-specification`, anchored or not. The enumerated v2, v4,
+declares `binary-qualification`, a qualification run with a sealed disclosure
+declaration declares `disclosure-specification`, anchored or not, and a run whose
+evidence was imported (`run import`) declares `external-import`. The enumerated v2, v4,
 v6, v7, and v8 producer paths remain behind `composedFormat: false` on `report` --- that is
 the rollback. The verifier's legacy path for those formats remains forever.
 
@@ -649,7 +653,7 @@ out where it applies.
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/8` | `@0.2.1` | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
-| `benchmark-product-public-bundle/10` | `@0.2.1` | `@0.2` | six to eight, by declared capability | `--tsa-root`, `--ots-headers`, when `anchoring` is declared |
+| `benchmark-product-public-bundle/10` | `@0.2.1` | `@0.2` | six to nine, by declared capability | `--tsa-root`, `--ots-headers`, when `anchoring` is declared |
 
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a

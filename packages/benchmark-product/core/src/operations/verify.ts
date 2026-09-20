@@ -43,6 +43,7 @@ import {
 } from "@jinn-network/benchmarking-records";
 import {
   DISCLOSURE_SPECIFICATION_CAPABILITY,
+  EXTERNAL_IMPORT_CAPABILITY,
   activeCapabilityVector,
   evaluateIntegrityAnchors,
   type IntegrityAnchorsReport,
@@ -83,6 +84,7 @@ import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receip
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
 import { foldRunJournal, readRunJournalEntries } from "../run/journal.js";
 import { readPreviewLog } from "../run/preview-log.js";
+import { loadPublicExternalImport } from "../run/imported-run.js";
 import { requireRunState } from "../run/state.js";
 import { artifactsDir, claimPackageArtifactPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
@@ -272,6 +274,7 @@ export async function verifyRunWorkspace(
         /** issue #2839: the disclosure section re-derived from the sealed record's own bytes, so
          * this workspace-side rebuild compares the same projection the portable reader does. */
         readonly disclosureCarriage: ReturnType<typeof readRunDisclosureCarriage>;
+        readonly importedCarriage: ReturnType<typeof loadPublicExternalImport>;
         readonly additionalLimitations: readonly string[];
         readonly suiteComparability?: {
           readonly executionConformance: boolean;
@@ -339,6 +342,7 @@ export async function verifyRunWorkspace(
           // Report.
           const carriage = anchorCarriage;
           const disclosureCarriage = readRunDisclosureCarriage(context.workspaceDir, runState);
+          const importedCarriage = loadPublicExternalImport(context.workspaceDir, input.draftId, runState);
           const inspectAdditional = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
             && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
             ? [...INSPECT_SEPARATE_ASSURANCE_LIMITATIONS]
@@ -409,6 +413,7 @@ export async function verifyRunWorkspace(
             previewLog,
             carriage,
             disclosureCarriage,
+            importedCarriage,
             additionalLimitations: [
               ...inspectAdditional,
               ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),
@@ -422,7 +427,7 @@ export async function verifyRunWorkspace(
             }),
           };
         }
-        const { previewLog, carriage, disclosureCarriage, additionalLimitations, suiteComparability } = sharedContext;
+        const { previewLog, carriage, disclosureCarriage, importedCarriage, additionalLimitations, suiteComparability } = sharedContext;
         // Which generation `report` was asked for is the one fact taken from the stored claim: it is
         // the operator's choice, recorded nowhere else, and no record could contradict it.
         // Everything the choice implies -- the vector, and through it the id, the sections, the
@@ -432,6 +437,7 @@ export async function verifyRunWorkspace(
             anchoredClosure: carriage.anchoredClosure,
             projectsBinaryQualification: reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument,
             declaresDisclosure: disclosureCarriage !== undefined,
+            importedRun: importedCarriage !== undefined,
           })
           : undefined;
 
@@ -466,6 +472,11 @@ export async function verifyRunWorkspace(
                 || reportRecord.method.id !== BENCHMARKING_METHOD_IDS.binaryInstrument)
             ? {}
             : { disclosure: disclosureCarriage.disclosure }),
+          ...(importedCarriage === undefined
+            || composedCapabilities === undefined
+            || !composedCapabilities.includes(EXTERNAL_IMPORT_CAPABILITY)
+            ? {}
+            : { externalImport: importedCarriage.claim }),
           ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
           ...(previewLog === undefined
             ? {}

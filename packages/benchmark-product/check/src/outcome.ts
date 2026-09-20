@@ -58,6 +58,7 @@ const CHECK_SUBJECTS: { readonly [C in VerificationCheckName]: string } = {
   "claim-consistency": "claim consistency",
   "integrity-anchors": "anchor well-formedness",
   "disclosure-specification": "the disclosure specification",
+  "external-import": "the external-import marker",
   "artifact-integrity": "artifact integrity",
   "signature-validity": "signature validity",
 };

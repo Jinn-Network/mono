@@ -7,13 +7,13 @@ for Inspect `read_eval_log` JSON) or a file of generic per-attempt records. The
 ordinary product chain — collect, then report — reads that evidence exactly as
 it reads a driven run's.
 
-> **Publication of an imported run is refused today.** `colophon publish`, the
-> GUI's `run.publish`, and managed signed-Report publication all refuse a run
-> whose evidence was imported. The reason is a disclosure defect that cannot be
-> fixed inside this feature, and the fix is tracked as **issue #3417**. Read
-> [Why publication is refused](#why-publication-is-refused-issue-3417) before
-> planning around this document. Everything up to and including the sealed,
-> signed Report works; the act of emitting a public bundle does not.
+> **An imported run publishes as composed `/10` declaring `external-import`.**
+> `colophon publish`, the GUI's `run.publish`, and managed signed-Report
+> publication all succeed on a run whose evidence was imported. The public
+> marker, dump digest, and import-aware disclosure are **issue #3417**. Read
+> [How an imported run publishes](#how-an-imported-run-publishes-issue-3417)
+> before planning around this document. `composedFormat: false` is refused:
+> an imported run has no enumerated-cell form whose disclosure is honest.
 
 [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) is the output format.
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md) is the verification
@@ -32,7 +32,7 @@ Read this table first. It is the whole point of the document.
 | The external harness ran the pinned harness, model, or loadout | **not claimed** — every pinning axis reports `unverifiable` |
 | Anyone here observed the attempt | **not claimed** — the evaluator identity transcribed measurements and evaluated nothing |
 | The dump is a faithful record of what the external harness did | **not claimed by any tool** — it is the operator's assertion |
-| The run can be published as a public bundle | **refused** — the sealed disclosure would contradict itself; see [below](#why-publication-is-refused-issue-3417) |
+| The run can be published as a public bundle | proven — composed `/10` declaring `external-import`; see [below](#how-an-imported-run-publishes-issue-3417) |
 
 The verdict records say the second and third of the "not claimed" rows in their
 own `limitations` field, so a reader cannot miss them:
@@ -43,57 +43,50 @@ own `limitations` field, so a reader cannot miss them:
 The transcribing identity is `urn:jinn:colophon:external-import-transcriber/v1`,
 deliberately unmistakable and distinct from every venue evaluator.
 
-## Why publication is refused (issue #3417)
+## How an imported run publishes (issue #3417)
 
-Every Report this product seals carries the local-venue disclosure verbatim,
-and its third line reads:
+Every Report this product seals carries the local-venue disclosure, and its
+third line on a driven run reads:
 
 > Run pinning on the harness, model, and loadout axes is enforced by an
 > admission gate at dispatch time.
 
 For an imported run that sentence is false. No venue dispatched these cells and
 no admission gate ever ran — while the same bundle's own cells report every
-pinning axis as `unverifiable`. Publishing it would put a self-contradicting
-claim inside a signed disclosure, which is the one artifact whose whole purpose
-is to state honestly what a run does and does not prove.
+pinning axis as `unverifiable`. Publishing that sentence would put a
+self-contradicting claim inside a signed disclosure.
 
-It cannot be fixed inside this feature. The workspace verifier and the shipped
-reader both derive the *expected* disclosure from the sealed Run record alone
-(`localVenueLimitsForRun`), and the Run record is sealed at `lock` — before the
-import exists. The two facts that record the import, `RunState`'s
-`externalImportSha256` and the `external-import` run-journal entry, are
+The workspace verifier and the shipped reader both derive the *expected*
+disclosure from the sealed Run record (`localVenueLimitsForRun`), and the Run
+record is sealed at `lock` — before the import exists. `RunState`'s
+`externalImportSha256` and the `external-import` run-journal entry are
 workspace-local: neither enters the bundle closure, and the reader rejects
 bundle members it does not expect. An honest bundle therefore needs a
-reader-visible import marker, which is a format change.
+reader-visible import marker.
 
-That marker is **issue #3417** — registering `external-import` as a capability
-under the ratified `/8` capability vector. Until it lands:
+That marker is **issue #3417**. `external-import` is a capability under the
+composed `/10` generation. An imported run's `report` / `publish` path:
 
-- `colophon publish` refuses, with `code: "conflict"` and issue path
-  `runs.<draftId>.externalImport`. The GUI's `run.publish` is the same
-  operation and refuses on the same fact; the browser boundary redacts every
-  publish detail by policy, so a GUI operator sees the code and that issue path
-  rather than this reason. (`run import` itself is GUI-unavailable, so an
-  imported run reaches the GUI only from a workspace the CLI imported into.)
-- Managed signed Report v2 publication (`colophon publication report`) refuses
-  for the same reason: it seals the same disclosure into a record it announces
-  publicly, without materializing a bundle.
-- The refusal is decided from the run itself, ahead of every other check, so it
-  does not depend on lifecycle state, on flags, or on whether a bundle already
-  exists on disk.
-- Both durable signals are consulted. The importer appends the
-  `external-import` journal marker *before* the first per-cell entry precisely
-  so a crash cannot leave a run that reads as driven; a run whose RunState
-  field never landed is still refused on the journal marker alone.
+- Forces composed `/10`. `composedFormat: false` is refused: there is no
+  enumerated cell whose disclosure is honest for an imported run.
+- Declares `external-import` in the capability vector. The mandatory member is
+  `external-import.json`: dump digest (`sha256` + `byteLength`), declaration
+  digest, source, and one `{cellKey, outcome, reason?}` row per sealed Matrix
+  cell.
+- Rebuilds `venueHonesty.limits[2]` as `IMPORTED_RUN_PINNING_LIMIT` in both
+  claim-consistency implementations, so the sealed disclosure says pinning is
+  unverifiable rather than admission-gated.
+- Hashes `--file` and `--from inspect` pointing at a file by those file bytes;
+  a directory (`--from harbor`, `--from inspect` at a dir) hashes the canonical
+  JSON of the normalized records. In-memory tests hash the records.
+- Caps a hostile dump: 10_000 rows, 8 MiB per evidence file, 64 MiB aggregate.
 
-Everything before publication is unaffected. Import, `run collect`, and
-`report` all work, and the sealed Matrix, the signed Report, and the imported
-records stay readable in the workspace. The structural claim that the resulting
-bundle *shape* is the ordinary frozen
-`benchmark-product-public-bundle/2` — accepted by the packaged public reader,
-matrix re-derivation included — is still proven, in
-`core/src/operations/run-import.bundle.test.ts`, by materializing the bundle
-directly rather than by publishing it.
+`colophon publish` and the GUI's `run.publish` succeed. Managed signed Report
+v2 publication (`colophon publication report`) seals the same import-aware
+venue limits. Both durable signals are still consulted so a crash after the
+journal marker but before `RunState.externalImportSha256` still reads as
+imported. The public reader accepts the published bundle; the extra check is
+`external-import`. Proven in `core/src/operations/run-import.bundle.test.ts`.
 
 ## The per-attempt record shape
 
@@ -337,10 +330,11 @@ stays in the denominator. Extra and duplicate samples are left for the
 `#2979` validator (`unknown-slot` / `duplicate-slot`). There is no exclude
 flag.
 
-**Left open — issue #3417.** Digesting the source dump's bytes into the import
-marker is not implemented here. Publication of an imported run stays refused
-on that issue. These readers feed the same `#2979` import declaration; they do
-not change what a sealed import record means.
+`--from inspect` pointing at an eval-log file hashes those file bytes into the
+declaration and the public marker; a directory hashes the canonical JSON of
+the normalized records. These readers feed the same `#2979` import declaration;
+they do not change what a sealed import record means.
+
 ## What import refuses outright
 
 Each of these is a refusal rather than a best effort, because the alternative

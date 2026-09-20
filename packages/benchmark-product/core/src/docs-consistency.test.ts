@@ -109,7 +109,7 @@ function fenceBodies(markdown: string): readonly string[] {
   return [...markdown.matchAll(/^```[^\n]*\n(.*?)^```/gmsu)].map((fence) => fence[1]!);
 }
 
-const CHECK_COUNT_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight"];
+const CHECK_COUNT_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
 
 /** The guide states check counts in words, so a list length has to be rendered the same way. */
 const checkCountWord = (checks: readonly string[]): string => {

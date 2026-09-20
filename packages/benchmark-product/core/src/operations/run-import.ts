@@ -52,6 +52,7 @@ import type { ExternalRunRecord } from "../intake/external-run-records.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import {
   assertExternalRunImportSource,
+  dumpIdentityFromRecords,
   preflightExternalRunImport,
   validateExternalRunRecords,
   writeExternalRunImport,
@@ -79,6 +80,9 @@ export interface RunImportInput {
    * dump must not open an Inspect-bound draft by labeling `source.harness` "inspect".
    */
   readonly namedReader?: "inspect";
+  /** Digest of the dump the operator handed the importer. Omitted, the canonical JSON of
+   * `records` is hashed — the in-memory path tests use. */
+  readonly dump?: { readonly sha256: string; readonly byteLength: number };
 }
 
 export interface RunImportResult {
@@ -220,6 +224,7 @@ export function importRunRecords(
         runRecord,
         owner: runState.owner,
         source: input.source,
+        dump: input.dump ?? dumpIdentityFromRecords(input.records),
         preflight,
         at,
       });

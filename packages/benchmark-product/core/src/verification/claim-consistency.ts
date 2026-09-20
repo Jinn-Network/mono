@@ -1,5 +1,5 @@
 import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type ReportRecord, type RunRecord } from "@jinn-network/benchmarking-records";
-import { firstDifference, type ClaimAnchor, type ClaimDisclosureSection } from "@colophon-claims/check";
+import { firstDifference, type ClaimAnchor, type ClaimDisclosureSection, type ClaimExternalImportSection } from "@colophon-claims/check";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
@@ -7,6 +7,7 @@ import { buildClaimPackage, type BuildClaimPackageInput, type ClaimPackage } fro
 import { binaryInstrumentReportLimitations } from "../run/binary-instrument-profile.js";
 import { previewDisclosureSummaryLine } from "../run/preview-log.js";
 import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
+import { EXTERNAL_IMPORT_CAPABILITY } from "@colophon-claims/check";
 
 /** Mirrors `operations/report.ts`'s own (unexported) copy of this exact string -- see the comment
  * at its use below. Not shared via export: `operations/publication-report.ts` already carries its
@@ -55,6 +56,9 @@ export function assertClaimConsistency(input: {
   /** disclosure-specification-record design §7 step 10 (issue #2839): the disclosure section
    * re-derived from the sealed record's own bytes, never read from the claim under test. */
   readonly disclosure?: ClaimDisclosureSection;
+  /** issue #3417: the external-import section re-derived from the authenticated marker, never
+   * read from the claim under test. */
+  readonly externalImport?: ClaimExternalImportSection;
   readonly suiteComparability?: {
     readonly executionConformance: boolean;
     readonly coverage: "one_task" | "ten_task" | "full" | "custom";
@@ -79,6 +83,7 @@ export function assertClaimConsistency(input: {
   if (minVerdicts === undefined || distinctEvaluator === undefined) {
     refuse("record-integrity", "claim-consistency", "sealed Run carries no complete evaluation-assurance primitives");
   }
+  const imported = input.composedCapabilities?.includes(EXTERNAL_IMPORT_CAPABILITY) === true;
   const expected = buildClaimPackage({
     draftId: input.draftId,
     benchmarkSha256: identities.benchmarkSha256,
@@ -89,7 +94,7 @@ export function assertClaimConsistency(input: {
     reportRecord,
     reportSha256: identities.reportSha256,
     reportEnvelopeSha256: identities.reportEnvelopeSha256,
-    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, input.anchors ?? []),
+    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, input.anchors ?? [], imported),
     verificationCommandVerb: "bundle verify",
     assurance: {
       preset: input.assurancePreset,
@@ -104,6 +109,7 @@ export function assertClaimConsistency(input: {
     ...(input.anchors === undefined ? {} : { anchors: input.anchors }),
     ...(input.composedCapabilities === undefined ? {} : { composedCapabilities: input.composedCapabilities }),
     ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }),
+    ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
     ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   });
   if (!bytesEqual(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) {
@@ -133,7 +139,7 @@ export function assertClaimConsistency(input: {
       ? [PAIRED_ESTIMATE_LIMITATION]
       : [];
   const expectedLimitations = [
-    ...localVenueLimitsForRun(runRecord),
+    ...localVenueLimitsForRun(runRecord, imported),
     ...(input.additionalLimitations ?? []),
     ...binaryLimitations,
     ...pairedEstimateLimitation,

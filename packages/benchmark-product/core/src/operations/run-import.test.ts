@@ -314,6 +314,8 @@ describe("run.import — honesty invariants", () => {
     );
     expect(declaration.runSha256).toBe(runSha256);
     expect(declaration.source).toEqual(SOURCE);
+    expect(declaration.dump.sha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(declaration.dump.byteLength).toBeGreaterThan(0);
     expect(declaration.rows.map((row) => row.cellKey)).toEqual(cellKeys);
     expect(declaration.rows.find((row) => row.outcome === "unrun")?.reason)
       .toBe("this slot was never scheduled: the sweep was cut short");
@@ -710,8 +712,8 @@ describe("run.import — a refused dump leaves the draft importable", () => {
 /**
  * The publication gate reads a durable fact about the run, not a flag this operation passes along.
  * These tests pin the two signals `../run/imported-run.ts` consults, including the half-written
- * case the marker-first journal ordering exists to make honest — `operations/publish.ts` and
- * `operations/publication-report.ts` refuse on either one (operator ruling, issue #3417).
+ * case the marker-first journal ordering exists to make honest — `report` and `publish` still
+ * treat either signal as an imported run (issue #3417).
  */
 describe("run.import — the durable import marker the publication gate reads", () => {
   test("absent on a locked, never-imported run; names the declaration once imported", async () => {

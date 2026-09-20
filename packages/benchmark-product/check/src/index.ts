@@ -99,6 +99,7 @@ export {
   CAPABILITY_REGISTRY,
   CapabilityVectorSchema,
   DISCLOSURE_SPECIFICATION_CAPABILITY,
+  EXTERNAL_IMPORT_CAPABILITY,
   activeCapabilityVector,
   composeClosure,
   expectedChecks,
@@ -127,6 +128,23 @@ export type {
   ClaimDisclosureSection,
   DisclosureSpecificationReport,
 } from "./profile/disclosure.js";
+export {
+  ClaimExternalImportSectionSchema,
+  EXTERNAL_IMPORT_BUNDLE_MEMBER,
+  EXTERNAL_IMPORT_MARKER_PROTOCOL,
+  ExternalImportMarkerSchema,
+  IMPORTED_RUN_PINNING_LIMIT,
+  assertExternalImport,
+  buildExternalImportMarker,
+  canonicalExternalImportMarkerBytes,
+  deriveClaimExternalImport,
+  dumpIdentityFromBytes,
+  parseExternalImportMarker,
+} from "./profile/external-import.js";
+export type {
+  ClaimExternalImportSection,
+  ExternalImportMarker,
+} from "./profile/external-import.js";
 export type { BundleManifest, VerifiedBundleSnapshot } from "./manifest.js";
 export * from "./admission/index.js";
 export * from "./schema.js";

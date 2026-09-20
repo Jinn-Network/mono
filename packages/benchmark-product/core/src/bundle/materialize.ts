@@ -31,6 +31,7 @@ import { canonicalJsonBytes, dssePreAuthEncoding, parseDsseEnvelope } from "@jin
 import { refuse } from "../errors.js";
 import { parseDraftDocument } from "../domain/draft.js";
 import { atomicWriteFileSync, fsyncDirectorySync } from "../fs/atomic.js";
+import { loadPublicExternalImport } from "../run/imported-run.js";
 import {
   additionalClaimPackagePath,
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
@@ -97,7 +98,7 @@ import {
 } from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
-import { activeCapabilityVector, derivePublicComparison } from "@colophon-claims/check";
+import { activeCapabilityVector, derivePublicComparison, EXTERNAL_IMPORT_BUNDLE_MEMBER } from "@colophon-claims/check";
 
 const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
 
@@ -395,6 +396,7 @@ function recordClosure(input: MaterializeBundleInput): {
   // contents, for the same reason the anchors section is: an undisclosed claim inside a disclosed
   // closure is exactly as wrong as a disclosed claim whose section drifted.
   const disclosureCarriage = readRunDisclosureCarriage(workspaceDir, runState);
+  const importedCarriage = loadPublicExternalImport(workspaceDir, draftId, runState);
   // A run publishes one bundle per analysis. Only the QUALIFICATION bundle can be disclosed, because
   // `/8` is the one disclosed cell; a sibling headline or comparison analysis publishes on its own
   // closure without the section, exactly as it did before this feature existed.
@@ -1080,6 +1082,9 @@ function recordClosure(input: MaterializeBundleInput): {
     })
     : BundleTrustSchema.parse({ format: BUNDLE_TRUST_FORMAT, ...trustBase });
   files.set("trust/public-keys.json", canonicalJsonBytes(trust));
+  if (composedGeneration && importedCarriage !== undefined) {
+    files.set(EXTERNAL_IMPORT_BUNDLE_MEMBER, importedCarriage.bytes);
+  }
   const dissentCellKeys = assemblyCells
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
     .map((cell) => cell.cellKey)
@@ -1098,11 +1103,11 @@ function recordClosure(input: MaterializeBundleInput): {
   // the same selection read from `bundle.json`.
   //
   // D1 clean cutover (issue #3405): a run whose sealed claim is the composed generation emits
-  // `/10` and states the three axes in its capability vector rather than in the choice of number
-  // (issue #3403). The vector comes from the registry's activation predicates over the facts
-  // derived above -- the same facts, and the same predicates, `report` sealed the claim's
-  // sections from. `composedFormat: false` at `report` still seals a legacy claim, and this
-  // function then emits the enumerated cell that claim implies.
+  // `/10` and states capability in its vector rather than in the choice of number (issue #3403).
+  // The vector comes from the registry's activation predicates over the facts derived above --
+  // the same facts, and the same predicates, `report` sealed the claim's sections from. An
+  // imported run is a fourth fact (issue #3417). `composedFormat: false` at `report` still seals
+  // a legacy claim, and this function then emits the enumerated cell that claim implies.
   const legacyFormat = anchored
     ? binaryQualification
       ? disclosed
@@ -1130,12 +1135,12 @@ function recordClosure(input: MaterializeBundleInput): {
   return {
     files,
     evidenceRecords,
-    // Three independent axes: carrying an anchor moves a bundle onto an anchored closure,
-    // projecting a binary qualification moves it onto a qualification closure, and declaring a
-    // disclosure record moves it onto the disclosed one. Everything else emits exactly the version
-    // it emitted before any of these features existed, byte for byte. Derived above, where the
-    // presentation render also reads it -- one selection, so the manifest and the page can never
-    // disagree about which generation this bundle is.
+    // The enumerated-cell axes stay independent: carrying an anchor, projecting a binary
+    // qualification, declaring a disclosure record. `external-import` is additive and has no
+    // pre-composition cell. Everything else emits exactly the version it emitted before any of
+    // these features existed, byte for byte. Derived above, where the presentation render also
+    // reads it -- one selection, so the manifest and the page can never disagree about which
+    // generation this bundle is.
     ...(composedGeneration
       ? {
         format: BUNDLE_V10_FORMAT,
@@ -1143,6 +1148,7 @@ function recordClosure(input: MaterializeBundleInput): {
           anchoredClosure: anchored,
           projectsBinaryQualification: binaryQualification,
           declaresDisclosure: disclosureCarriage !== undefined,
+          importedRun: importedCarriage !== undefined,
         }),
       }
       : { format: legacyFormat }),

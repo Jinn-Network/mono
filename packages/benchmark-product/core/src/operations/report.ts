@@ -66,7 +66,7 @@ import {
   DISCLOSURE_SPECIFICATION_EXTENSION,
   DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
 } from "@jinn-network/benchmarking-records";
-import { DISCLOSURE_SPECIFICATION_CAPABILITY, activeCapabilityVector } from "@colophon-claims/check";
+import { DISCLOSURE_SPECIFICATION_CAPABILITY, EXTERNAL_IMPORT_CAPABILITY, activeCapabilityVector } from "@colophon-claims/check";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
@@ -81,6 +81,7 @@ import {
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
 import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
+import { loadPublicExternalImport } from "../run/imported-run.js";
 import { primaryAnalysisPlanLength } from "../run/compile.js";
 import { requireRunState, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
@@ -246,6 +247,19 @@ export function runReport(
       type SealedAnalysisPlanEntry = (typeof planEntries)[number];
       // D1 clean cutover (issue #3405): omitted means composed `/10`. `false` is the rollback.
       const composedFormat = input.composedFormat !== false;
+      const importedCarriage = loadPublicExternalImport(
+        clockedContext.workspaceDir,
+        input.draftId,
+        runState,
+      );
+      if (importedCarriage !== undefined && input.composedFormat === false) {
+        refuse(
+          "conflict",
+          `runs.${input.draftId}.externalImport`,
+          `draft ${input.draftId} imported its results from an external harness, so composedFormat: false is refused — an imported run can only be reported as composed /10, whose external-import capability is how the sealed disclosure states that no venue dispatched these cells`,
+        );
+      }
+      const importedRun = importedCarriage !== undefined;
 
       // BP-20 (spec §7.2): a pure read of this draft's own preview log — every logged preview
       // necessarily precedes this run's lock (module header). `previewed` is `undefined`'s own
@@ -255,7 +269,7 @@ export function runReport(
       const previewLimitation = previewLog !== undefined && previewLog.count > 0
         ? previewDisclosureLine(previewLog)
         : undefined;
-      const venueLimits = localVenueLimitsForRun(runRecord);
+      const venueLimits = localVenueLimitsForRun(runRecord, importedRun);
       const inspectLimits = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
         && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
         ? INSPECT_SEPARATE_ASSURANCE_LIMITATIONS
@@ -332,7 +346,12 @@ export function runReport(
       // so rather than silently reprojecting a document the operator already read. Computed once —
       // method-independent, so every entry's claim package shares it.
       const carriage = readRunAnchorCarriage(clockedContext.workspaceDir, runState);
-      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells, runRecord, carriage.anchors);
+      const venueHonesty = buildLocalVenueHonesty(
+        matrixRecord.cells,
+        runRecord,
+        carriage.anchors,
+        importedRun,
+      );
       // issue #2839: the sealed disclosure declaration, if this run has one. Read once for the same
       // reason the anchors are -- it is method-independent, so every entry's Report carries the same
       // extension and every entry's claim the same section. Absent for every run that never
@@ -408,6 +427,7 @@ export function runReport(
             anchoredClosure: carriage.anchoredClosure,
             projectsBinaryQualification: entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument,
             declaresDisclosure: disclosureCarriage !== undefined,
+            importedRun,
           })
           : undefined;
         const entryIsDisclosed = composedCapabilities !== undefined
@@ -415,6 +435,8 @@ export function runReport(
           : disclosureCarriage !== undefined
             && carriage.anchoredClosure
             && entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument;
+        const entryIsImported = composedCapabilities !== undefined
+          && composedCapabilities.includes(EXTERNAL_IMPORT_CAPABILITY);
         let produced: ProducedReport;
         try {
           produced = await produceReport(
@@ -482,6 +504,7 @@ export function runReport(
           },
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
           ...(entryIsDisclosed ? { disclosure: disclosureCarriage!.disclosure } : {}),
+          ...(entryIsImported ? { externalImport: importedCarriage!.claim } : {}),
           ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
           ...(previewLog !== undefined && previewLog.count > 0
             ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }

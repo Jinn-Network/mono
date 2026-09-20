@@ -253,6 +253,8 @@ describe("issue #3403: the composed claim package", () => {
     // A wilson@1 Report projects no qualification, so the vector cannot declare one.
     expect(() => claimFor({ composedCapabilities: ["binary-qualification"] }))
       .toThrow(/"binary-qualification" and its "qualification" section/u);
+    expect(() => claimFor({ composedCapabilities: ["external-import"] }))
+      .toThrow(/"external-import" and its "externalImport" section/u);
   });
 
   test("the builder refuses a vector the registry does not admit, as a typed refusal", () => {
