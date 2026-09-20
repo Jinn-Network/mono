@@ -161,6 +161,13 @@ test('cancelled and skipped runs are neither failures nor recoveries', () => {
 test('the Stack lane names stack-canary as its publishing job; the other lanes do not', () => {
   assert.equal(STACK.publishingJob, 'stack-canary');
   assert.equal(STACK.workflow, 'Stack npm Publish');
+  const stackWorkflow = readFileSync(path.join(workflowsDir, STACK.file), 'utf8');
+  // GitHub's job.name is the `name:` field, not the YAML key (`canary-publish`).
+  assert.match(
+    stackWorkflow,
+    new RegExp(`^ {4}name: ${STACK.publishingJob}$`, 'mu'),
+    `${STACK.file} must declare name: ${STACK.publishingJob} — that is the Actions job.name`,
+  );
   for (const lane of MONITORED_LANES) {
     if (lane !== STACK) {
       assert.equal(lane.publishingJob, undefined, `${lane.workflow} must keep classifying from the run conclusion alone`);
@@ -187,6 +194,26 @@ test('a Stack success whose matrix stack-canary job was skipped is unknown', () 
 test('a Stack success with a live stack-canary job is healthy', () => {
   const latest = run({ conclusion: 'success', hoursAgo: 1 });
   const verdict = classifyStack([latest], { [latest.id]: [{ name: 'stack-canary', conclusion: 'success' }] });
+  assert.equal(verdict.state, 'healthy');
+  assert.equal(verdict.lastSuccess, latest);
+});
+
+test('a Stack success whose matrix stack-canary jobs ran is healthy', () => {
+  // stack-npm-publish.yml names the job `stack-canary` and matrices it, so GitHub
+  // reports `stack-canary (<release_group>)`, never the bare name. A skipped matrix
+  // job is also unknown when the name does not match (fail-closed), so that case
+  // cannot prove the prefix matcher; a live matrix success can.
+  const latest = run({ conclusion: 'success', hoursAgo: 1 });
+  const verdict = classifyStack(
+    [latest],
+    {
+      [latest.id]: [
+        { name: 'canary-verification', conclusion: 'success' },
+        { name: 'stack-canary (sealed-platform-v1)', conclusion: 'success' },
+        { name: 'stack-canary (implementations-v1)', conclusion: 'success' },
+      ],
+    },
+  );
   assert.equal(verdict.state, 'healthy');
   assert.equal(verdict.lastSuccess, latest);
 });
