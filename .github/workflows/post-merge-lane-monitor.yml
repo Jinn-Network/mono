@@ -99,8 +99,9 @@ jobs:
                 per_page: 100,
               });
               // Job lists are I/O for lanes that name a publishingJob (#4257).
-              // classifyLane decides whether a success is decisive; this loop
-              // does not inspect job names or conclusions.
+              // Fetching is gated to completed successes because failures stay
+              // decisive without jobs; job names and conclusions are classified
+              // only in classifyLane.
               const jobsByRunId = {};
               if (lane.publishingJob) {
                 for (const run of data.workflow_runs) {
