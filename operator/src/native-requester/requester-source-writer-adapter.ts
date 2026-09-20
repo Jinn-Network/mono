@@ -1,4 +1,5 @@
 import {
+  CEILINGS,
   MEDIA_HEAD,
   RECORD_DISCOVERY_VERSION,
   archivePagePath,
@@ -107,6 +108,11 @@ export function adaptRequesterSourceV1Publication(input: {
  * `new Date(...).toISOString()`, which always produces a conforming spelling.
  * The defect being closed is that the append guard's own reasoning was not
  * enforced on this path, not that a live input reaches it.
+ *
+ * The sealed-byte ceilings (`CEILINGS.entrySealedBytes` / `archivePageBytes`)
+ * are the same kind of frozen-bytes predicate (#4306). They join this
+ * pre-durable refusal so an oversized entry cannot CAS into the pending slot
+ * and wedge `recover()`.
  */
 function assertV1HeadTimestamps(input: {
   readonly publication: RequesterSourcePublicationV1;
@@ -167,6 +173,10 @@ export async function freezeRequesterSourceV1Intent(input: {
     throw new Error('requester source v1 compatibility intent must be available');
   }
   assertV1HeadTimestamps(input);
+  const entryBytes = sealJson(input.publication.entry).bytes;
+  if (entryBytes.length > CEILINGS.entrySealedBytes) {
+    throw new Error('frozen announcement entry exceeds the published-source byte ceiling');
+  }
   const signedEntry = await signAnnouncementEntry(input.publication.entry, input.signer);
   const page: ArchivePage = {
     protocol: RECORD_DISCOVERY_VERSION,
@@ -176,6 +186,9 @@ export async function freezeRequesterSourceV1Intent(input: {
     entries: [{ entry: input.publication.entry, signature: signedEntry }],
   };
   const pageBytes = sealJson(page).bytes;
+  if (pageBytes.length > CEILINGS.archivePageBytes) {
+    throw new Error('frozen archive page exceeds the published-source byte ceiling');
+  }
   const headEnvelope = await signHead(input.publication.head, input.signer);
   const headBytes = sealJson(headEnvelope).bytes;
   const fingerprint = sealJson({

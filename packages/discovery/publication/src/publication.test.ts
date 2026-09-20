@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { executePublicationPlan, sha256, validatePublicationPlan } from "./publication.js";
-import type { CasResult, CasSnapshot, PublicationJournal, PublicationJournalStore, PublicationPlan } from "./types.js";
+import { PublicationPlanError, type CasResult, type CasSnapshot, type PublicationJournal, type PublicationJournalStore, type PublicationPlan } from "./types.js";
 
 class MemoryJournal implements PublicationJournalStore {
   value: CasSnapshot<PublicationJournal> | undefined; revision = 0;
@@ -40,10 +40,14 @@ describe("record publication", () => {
       "2026-02-30T00:00:00.000Z", // silently rolled forward to March by Date.parse
       "August 13, 2026",          // legacy host-parser spelling
       "2026-08-13",               // date only
+      undefined,                  // #4305: pin the non-string refusal `isHeadTimestamp` now owns
+      1,
+      null,
     ]) {
       const invalidPlan = plan();
       (invalidPlan.stages[0]!.members[0]! as any).announcementTimestamp = invalid;
-      expect(() => validatePublicationPlan(invalidPlan), invalid).toThrow("immutable announcement timestamp");
+      expect(() => validatePublicationPlan(invalidPlan), String(invalid)).toThrow(PublicationPlanError);
+      expect(() => validatePublicationPlan(invalidPlan), String(invalid)).toThrow("immutable announcement timestamp");
     }
 
     // A leap second is admitted by §5.2 and so is admitted here.

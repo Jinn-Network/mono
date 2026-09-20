@@ -33,6 +33,7 @@ import type { DurableSourceState } from "@jinn-network/record-discovery-serve";
 import { executePublicationPlan, type PublicationArtifact, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
 import { resolveAssurance } from "../domain/draft.js";
 import { refuse } from "../errors.js";
+import { timestampAfter } from "./publication-report-timestamp.js";
 import { primaryAnalysisPlanLength } from "../run/compile.js";
 import { buildMethodPorts } from "../report/ports.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
@@ -121,12 +122,6 @@ function receiptFor(source: Awaited<ReturnType<typeof createWorkspacePublication
     if (receipt === undefined) throw new Error("report publication completed without a durable signed-envelope receipt");
     return receipt;
   });
-}
-
-function timestampAfter(clockAt: string, priorIssuedAt: string | undefined): string {
-  const clockMs = Date.parse(clockAt);
-  const priorMs = priorIssuedAt === undefined ? Number.NEGATIVE_INFINITY : Date.parse(priorIssuedAt) + 1;
-  return new Date(Math.max(clockMs, priorMs)).toISOString();
 }
 
 function requireStageReceipt(input: {
