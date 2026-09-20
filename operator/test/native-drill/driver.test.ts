@@ -154,7 +154,7 @@ describe('run comparison', () => {
     transactionHashes: [`0x${'b'.repeat(64)}`],
     sourceHeads: [`sha256:${'4'.repeat(64)}`],
     effects: { claims: 1, duplicateClaims: 0 },
-    invocations: { broadcast: 1 },
+    invocations: { broadcast: 1, broadcastSent: 1 },
     stateBefore: 'before',
     stateAfter: 'after',
   };

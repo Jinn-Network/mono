@@ -36,6 +36,7 @@ import type { RunObservation } from '../observation.js';
 import {
   DRILL_CLOCK,
   broadcastOnce,
+  countBroadcast,
   digestOf,
   journal,
   observedMode,
@@ -158,7 +159,9 @@ export async function runSolutionScenario(
     evidenceRead: 0,
     publish: 0,
     settlementBroadcast: 0,
+    settlementBroadcastSent: 0,
   };
+  const settlementBroadcasts = { attempts: 0, sent: 0 };
 
   const store = new Store(path);
   try {
@@ -270,7 +273,9 @@ export async function runSolutionScenario(
           const sent = await broadcastOnce(context, settlementKey, async () => {
             if (checkpoint === 'solution-settlement') await context.boundary();
           });
-          if (sent.broadcast) invocations.settlementBroadcast += 1;
+          countBroadcast(sent, settlementBroadcasts);
+          invocations.settlementBroadcast = settlementBroadcasts.attempts;
+          invocations.settlementBroadcastSent = settlementBroadcasts.sent;
           return { txHash: sent.txHash };
         },
         readCanonical: async () => {

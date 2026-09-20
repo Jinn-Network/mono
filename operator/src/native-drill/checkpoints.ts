@@ -39,7 +39,8 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     seed: 'B810',
     role: 'requester',
     boundary: 'after the posting wallet invocation returns, before the transaction hash is persisted',
-    proof: 'Reconcile canonical TaskCreated/nonce history; zero duplicate posts; the signed '
+    proof: 'Reconcile canonical TaskCreated/nonce history; zero duplicate posts '
+      + '(broadcastOnce fence; report invocations.broadcast vs broadcastSent); the signed '
       + 'association uses the original Submission and posting terms',
     requiredEffects: { posting: 1, signedSourceEntries: 1, duplicatePosts: 0 },
   },
@@ -49,7 +50,8 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     role: 'solver',
     boundary: 'after the claim transaction is broadcast, before the hash is attached to the claim operation',
     proof: 'One logical claimOperationId; replacement hashes remain attached to it; execution '
-      + 'starts only after canonical finality',
+      + 'starts only after canonical finality; zero duplicate claims (broadcastOnce fence; '
+      + 'invocations.broadcast vs broadcastSent)',
     requiredEffects: { claims: 1, claimOperations: 1, duplicateClaims: 0 },
   },
   {
@@ -77,7 +79,9 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     seed: 'B814',
     role: 'solver',
     boundary: 'after the solution settlement transaction is broadcast, before it is reconciled',
-    proof: 'Receipt/replacement/canonical logs reconcile to one finalized solution operation',
+    proof: 'Receipt/replacement/canonical logs reconcile to one finalized solution operation; '
+      + 'zero duplicate settlements (broadcastOnce fence; invocations.settlementBroadcast vs '
+      + 'settlementBroadcastSent)',
     requiredEffects: { settlements: 1, duplicateSettlements: 0 },
   },
   {
@@ -86,7 +90,8 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     role: 'evaluator',
     boundary: 'after the verdict settlement transaction is broadcast, before it is reconciled',
     proof: 'Decision-grade gate reruns over public bytes; one finalized verdict operation; '
-      + 'consumer graph equals uninterrupted run',
+      + 'consumer graph equals uninterrupted run; zero duplicate verdict settlements '
+      + '(broadcastOnce fence; invocations.verdictClaim vs verdictClaimSent)',
     requiredEffects: { canonicalVerdictSettlements: 1, duplicateVerdictSettlements: 0 },
   },
 ];

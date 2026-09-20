@@ -23,6 +23,7 @@ import type { RunObservation } from '../observation.js';
 import {
   DRILL_CLOCK,
   broadcastOnce,
+  countBroadcast,
   digestOf,
   observedMode,
   type ScenarioContext,
@@ -72,7 +73,7 @@ export async function runPostingScenario(context: ScenarioContext): Promise<RunO
   const stateDir = join(context.stateDir, 'requester');
   mkdirSync(stateDir, { recursive: true });
 
-  let broadcasts = 0;
+  const broadcasts = { attempts: 0, sent: 0 };
   let recoveries = 0;
 
   /** The exact calldata identity of this posting, and the key its recovery reconciles on. */
@@ -102,7 +103,7 @@ export async function runPostingScenario(context: ScenarioContext): Promise<RunO
         // The wallet has returned by the time the boundary fires. Everything after it is hash
         // persistence, which is exactly what the injected boundary must interrupt.
         const posted = await broadcastOnce(context, postingKey, () => context.boundary());
-        if (posted.broadcast) broadcasts += 1;
+        countBroadcast(posted, broadcasts);
         return { taskId: POSTED_TASK_ID, txHash: posted.txHash };
       },
       recover: async () => {
@@ -155,9 +156,15 @@ export async function runPostingScenario(context: ScenarioContext): Promise<RunO
       posting: history.length === 0 ? 0 : 1,
       signedSourceEntries: 1,
       // Canonical history, not a local counter: two posts on chain would show up here.
+      // A re-drive that broadcastOnce absorbs still reports duplicatePosts: 0; the pair
+      // invocations.broadcast / broadcastSent is what names that fence.
       duplicatePosts: Math.max(history.length - 1, 0),
     },
-    invocations: { broadcast: broadcasts, recover: recoveries },
+    invocations: {
+      broadcast: broadcasts.attempts,
+      broadcastSent: broadcasts.sent,
+      recover: recoveries,
+    },
     stateBefore: `sender nonce ${nonceBefore}; posting draft not yet broadcast`,
     stateAfter: `sender nonce ${nonceAfter}; ${history.length} canonical posting transaction(s) for one draft`,
   };

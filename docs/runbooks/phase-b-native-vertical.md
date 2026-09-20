@@ -171,12 +171,12 @@ same run ID, operation IDs, exact sealed bytes, source sequence, and transaction
 
 | Checkpoint | Stop after durable evidence | Required recovery proof |
 |---|---|---|
-| `posting` | Posting intent is durable; inject before broadcast and after wallet invocation before hash persistence | Reconcile canonical `TaskCreated`/Safe nonce history; zero duplicate posts; signed association uses the original Submission and posting terms |
-| `claim` | Claim operation intent or uncertain/broadcast transaction is durable | One logical `claimOperationId`; replacement hashes remain attached to it; execution starts only after canonical finality |
+| `posting` | Posting intent is durable; inject before broadcast and after wallet invocation before hash persistence | Reconcile canonical `TaskCreated`/Safe nonce history; zero duplicate posts (`broadcastOnce` fence; report `invocations.broadcast` vs `broadcastSent`); signed association uses the original Submission and posting terms |
+| `claim` | Claim operation intent or uncertain/broadcast transaction is durable | One logical `claimOperationId`; replacement hashes remain attached to it; execution starts only after canonical finality; zero duplicate claims (`broadcastOnce` fence; `invocations.broadcast` vs `broadcastSent`) |
 | `backend-submit` | Exact Task, Submission, dispatch context, and backend-submit intent are durable | `backend.recover` reports matching; no second Attempt or divergent submit |
 | `evidence` | Execution evidence and Delivery are sealed but publication/settlement is incomplete | Every `Delivery.evidenceRecords` digest resolves; publication resumes once; Delivery bytes do not change |
-| `solution-settlement` | Solution publication and settlement intent are durable | Receipt/replacement/canonical logs reconcile to one finalized solution operation |
-| `verdict-settlement` | Verdict/evaluation Delivery publication and verdict-settlement intent are durable | Decision-grade gate reruns over public bytes; one finalized verdict operation; consumer graph equals uninterrupted run |
+| `solution-settlement` | Solution publication and settlement intent are durable | Receipt/replacement/canonical logs reconcile to one finalized solution operation; zero duplicate settlements (`broadcastOnce` fence; `invocations.settlementBroadcast` vs `settlementBroadcastSent`) |
+| `verdict-settlement` | Verdict/evaluation Delivery publication and verdict-settlement intent are durable | Decision-grade gate reruns over public bytes; one finalized verdict operation; consumer graph equals uninterrupted run; zero duplicate verdict settlements (`broadcastOnce` fence; `invocations.verdictClaim` vs `verdictClaimSent`) |
 
 For every drill retain the seed, injected boundary, sanitized before/after state summaries, operation
 IDs and transaction hashes, source heads, final graph digest, and comparison with the uninterrupted
@@ -201,7 +201,9 @@ flushes, or persists.
 Broadcasts are real Anvil transactions and recoveries read the node's real receipts, nonce history,
 and `finalized` tag back; Anvil's `finalized` tag trails `latest` by 64 blocks, so
 "execution starts only after canonical finality" is exercised rather than asserted. Duplicate
-counters are read from canonical chain history, not from a local tally.
+counters are read from canonical chain history, not from a local tally. The drill ports themselves
+are a `broadcastOnce` fence, so those counters stay at zero when the operator re-drives a send
+the harness already broadcast; `invocations.*` vs `*Sent` is the measured distinction.
 
 For forked-contract fidelity before the live run, pin a fork instead — the pinned block is recorded
 in every report, so the fork run stays re-runnable:

@@ -25,6 +25,7 @@ import type { RunObservation } from '../observation.js';
 import {
   DRILL_CLOCK,
   broadcastOnce,
+  countBroadcast,
   digestOf,
   observedMode,
   storePath,
@@ -180,14 +181,16 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
   const evaluationId = seedPublishedVerdict(path);
   const deliveryKey = `${context.runId}:verdict-delivery`;
   const settlementKey = `${context.runId}:verdict-settlement`;
-  const invocations = { marketplaceDeliver: 0, verdictClaim: 0, canonicalRead: 0 };
+  const marketplaceDeliver = { attempts: 0, sent: 0 };
+  const verdictClaim = { attempts: 0, sent: 0 };
+  let canonicalReads = 0;
 
   const store = new Store(path);
   try {
     const state = new NativeEvaluatorStateRepository(store, { now: () => DRILL_CLOCK });
 
     const canonicalOf = async (key: string) => {
-      invocations.canonicalRead += 1;
+      canonicalReads += 1;
       const history = await context.chain.findByDigest(key);
       const first = history[0];
       if (first === undefined) return undefined;
@@ -201,7 +204,7 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
       readCanonicalVerdictAttempt: unreachableMember('readCanonicalVerdictAttempt'),
       deliverVerdictToMarketplace: async ({ operationId }) => {
         const sent = await broadcastOnce(context, deliveryKey);
-        if (sent.broadcast) invocations.marketplaceDeliver += 1;
+        countBroadcast(sent, marketplaceDeliver);
         return { operationId, transaction: await context.chain.awaitFinalized(sent.txHash) };
       },
       readCanonicalVerdictDelivery: async () => {
@@ -216,7 +219,7 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
         // The settlement transaction is on the node once the boundary fires; reconciling it into
         // the operation is what the injected boundary interrupts.
         const sent = await broadcastOnce(context, settlementKey, () => context.boundary());
-        if (sent.broadcast) invocations.verdictClaim += 1;
+        countBroadcast(sent, verdictClaim);
         return {
           operationId,
           status: 'settled' as const,
@@ -296,7 +299,13 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
         canonicalVerdictSettlements: settlementHistory.length === 0 ? 0 : 1,
         duplicateVerdictSettlements: Math.max(settlementHistory.length - 1, 0),
       },
-      invocations,
+      invocations: {
+        marketplaceDeliver: marketplaceDeliver.attempts,
+        marketplaceDeliverSent: marketplaceDeliver.sent,
+        verdictClaim: verdictClaim.attempts,
+        verdictClaimSent: verdictClaim.sent,
+        canonicalRead: canonicalReads,
+      },
       stateBefore: `evaluation ${evaluationId} with a published verdict and no settlement`,
       stateAfter: `state ${evaluation.state}; ${settlementHistory.length} canonical verdict `
         + 'settlement transaction(s)',

@@ -27,7 +27,12 @@ export const RunObservationSchema = z.object({
   sourceHeads: z.array(z.string().regex(/^sha256:[0-9a-f]{64}$/u)),
   /** Durable side-effect counters (posts, claims, publications, settlements, duplicates). */
   effects: z.record(z.number().int().min(0)),
-  /** Port invocation counters — a restart may legitimately raise these where effects do not. */
+  /**
+   * Port invocation counters — a restart may legitimately raise these where effects do not.
+   * Chain-broadcast ports report the call (`broadcast`, or the port-specific attempt key) and
+   * the send that passed `broadcastOnce` (`broadcastSent` / `*Sent`). Duplicate effect counters
+   * are chain history and stay zero when the fence absorbs a re-drive.
+   */
   invocations: z.record(z.number().int().min(0)),
   /** Sanitized one-line state summaries either side of the injected boundary. */
   stateBefore: z.string().min(1),

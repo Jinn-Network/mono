@@ -23,6 +23,7 @@ import type { RunObservation } from '../observation.js';
 import {
   DRILL_CLOCK,
   broadcastOnce,
+  countBroadcast,
   digestOf,
   observedMode,
   storePath,
@@ -113,7 +114,7 @@ export function enqueueCard(store: Store): void {
 export async function runClaimScenario(context: ScenarioContext): Promise<RunObservation | undefined> {
   const path = storePath(context);
   const claimKey = `${context.runId}:claim`;
-  let broadcasts = 0;
+  const broadcasts = { attempts: 0, sent: 0 };
   let canonicalReads = 0;
 
   const store = new Store(path);
@@ -132,7 +133,7 @@ export async function runClaimScenario(context: ScenarioContext): Promise<RunObs
           // is what the boundary interrupts, so the restarted process must find it by reconciling
           // canonical history.
           const sent = await broadcastOnce(context, claimKey, () => context.boundary());
-          if (sent.broadcast) broadcasts += 1;
+          countBroadcast(sent, broadcasts);
           return { txHash: sent.txHash, attemptIndex: 0, requestId: DRILL_REQUEST_ID };
         },
       },
@@ -196,7 +197,11 @@ export async function runClaimScenario(context: ScenarioContext): Promise<RunObs
         claimOperations: operations.filter(({ kind }) => kind === 'claim').length,
         duplicateClaims: Math.max(history.length - 1, 0),
       },
-      invocations: { broadcast: broadcasts, canonicalRead: canonicalReads },
+      invocations: {
+        broadcast: broadcasts.attempts,
+        broadcastSent: broadcasts.sent,
+        canonicalRead: canonicalReads,
+      },
       stateBefore: 'one admitted engagement with a durable claim operation intent',
       stateAfter: `${operations.length} operation(s); ${history.length} canonical claim transaction(s)`,
     };

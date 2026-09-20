@@ -19,7 +19,7 @@ function observation(overrides: Partial<RunObservation> = {}): RunObservation {
     transactionHashes: [`0x${'a'.repeat(64)}`],
     sourceHeads: [`sha256:${'2'.repeat(64)}`],
     effects: { posting: 1, signedSourceEntries: 1, duplicatePosts: 0 },
-    invocations: { broadcast: 1, recover: 0 },
+    invocations: { broadcast: 1, broadcastSent: 1, recover: 0 },
     stateBefore: 'draft not yet broadcast',
     stateAfter: 'one canonical posting transaction',
     ...overrides,
@@ -38,7 +38,10 @@ function report() {
       proof: 'zero duplicate posts',
     },
     uninterrupted: observation(),
-    recovered: observation({ mode: 'recovered', invocations: { broadcast: 0, recover: 1 } }),
+    recovered: observation({
+      mode: 'recovered',
+      invocations: { broadcast: 1, broadcastSent: 0, recover: 0 },
+    }),
     comparison: { equal: true, differences: [] },
     requiredEffects: drillSpec('posting').requiredEffects,
   });
@@ -49,6 +52,18 @@ describe('restart-drill recovery report', () => {
     expect([...DRILL_CHECKPOINTS]).toEqual([...PHASE_B_RESTART_CHECKPOINT_SET]);
     expect(DRILL_SPECS.map(({ checkpoint }) => checkpoint)).toEqual([...PHASE_B_RESTART_CHECKPOINT_SET]);
     expect(new Set(DRILL_SPECS.map(({ seed }) => seed)).size).toBe(DRILL_SPECS.length);
+  });
+
+  it('keeps recovered port calls visible when the fence absorbed the send', () => {
+    const sealed = report();
+    expect(sealed.report.uninterrupted.invocations).toEqual({
+      broadcast: 1, broadcastSent: 1, recover: 0,
+    });
+    expect(sealed.report.recovered.invocations).toEqual({
+      broadcast: 1, broadcastSent: 0, recover: 0,
+    });
+    expect(sealed.report.uninterrupted.effects.duplicatePosts).toBe(0);
+    expect(sealed.report.recovered.effects.duplicatePosts).toBe(0);
   });
 
   it('seals to a stable digest and round-trips through its canonical encoding', () => {

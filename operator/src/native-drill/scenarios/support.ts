@@ -69,6 +69,11 @@ export function unreachablePort<T extends object>(name: string): T {
  *
  * `onBroadcast` runs only on the call that actually reached the chain, which is where a boundary
  * belongs: after the wallet returns and before the operator records anything.
+ *
+ * Callers must count the port call separately from `broadcast === true`. The fence makes
+ * chain-history duplicate counters stay at zero even when the operator re-drives; only the
+ * invocation pair (`broadcast` / `broadcastSent`, or the port-specific equivalent) can tell a
+ * reader whether the operator re-drove and the harness absorbed it.
  */
 export async function broadcastOnce(
   context: ScenarioContext,
@@ -80,6 +85,15 @@ export async function broadcastOnce(
   const txHash = await context.chain.broadcast(key);
   await onBroadcast?.();
   return { txHash, broadcast: true };
+}
+
+/** Count one `broadcastOnce` port call versus an actual chain send (#4195). */
+export function countBroadcast(
+  sent: { readonly broadcast: boolean },
+  counters: { attempts: number; sent: number },
+): void {
+  counters.attempts += 1;
+  if (sent.broadcast) counters.sent += 1;
 }
 
 /**
