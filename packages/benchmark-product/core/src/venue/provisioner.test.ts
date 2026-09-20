@@ -728,6 +728,76 @@ describe("createLocalProvisioner — repository-work cells", () => {
       expect(result.omissions).toEqual(["patch"]);
     });
 
+    // Issues #4631 / #4638: `git -C work` walks parent directories. After an interrupted teardown
+    // removes `work/.git`, an enclosing repository at the temp workspace root would otherwise look
+    // like a usable checkout and harvest would extract a patch from the wrong tree.
+    it("omits patch when work/.git is gone but an enclosing repository at the workspace root has HEAD", async () => {
+      const upstream = makeUpstreamRepository();
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-enclosing-repo-"));
+      const paths = workspacePathsUnder(root);
+      const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+      const task = repositoryWorkTask(upstream.uri, upstream.oid);
+      const requirements = {
+        harness: { id: "claude-code", version: "2.1.222", digest: "a".repeat(64) },
+        isolationPolicy: "unrestricted",
+      };
+
+      await provisionerFor(task, mirror, requirements)
+        .contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+      writeFileSync(join(paths.work, "README.md"), "upstream\nenclosing repo\n");
+      writeFileSync(join(paths.out, "summary"), "collected\n");
+
+      gitIn(paths.root, "init", "--quiet", "--initial-branch", "main");
+      gitIn(paths.root, "config", "user.email", "test@example.invalid");
+      gitIn(paths.root, "config", "user.name", "Test");
+      writeFileSync(join(paths.root, "enclosing.txt"), "enclosing\n");
+      gitIn(paths.root, "add", "enclosing.txt");
+      gitIn(paths.root, "commit", "--quiet", "-m", "enclosing");
+      rmSync(join(paths.work, ".git"), { recursive: true, force: true });
+      expect(existsSync(paths.work)).toBe(true);
+
+      const result = await provisionerFor(task, mirror, requirements).contract.harvest(paths, [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+        { name: "summary", mediaType: "text/markdown", required: false },
+      ] as never);
+
+      expect(result.manifest.map((entry) => entry.path)).toEqual(["summary"]);
+      expect(existsSync(join(paths.out, "patch"))).toBe(false);
+      expect(result.omissions).toEqual(["patch"]);
+    });
+
+    // Issues #4631 / #4638: a real `.git` directory whose object store / HEAD is broken is an
+    // infrastructure fault. Harvest must throw, not treat it as an absent checkout and omit patch.
+    it("throws when the checkout still has a real .git directory but HEAD does not resolve", async () => {
+      const upstream = makeUpstreamRepository();
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-broken-git-"));
+      const paths = workspacePathsUnder(root);
+      const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+      const task = repositoryWorkTask(upstream.uri, upstream.oid);
+      const requirements = {
+        harness: { id: "claude-code", version: "2.1.222", digest: "a".repeat(64) },
+        isolationPolicy: "unrestricted",
+      };
+
+      await provisionerFor(task, mirror, requirements)
+        .contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+      writeFileSync(join(paths.out, "summary"), "collected\n");
+      rmSync(join(paths.work, ".git"), { recursive: true, force: true });
+      mkdirSync(join(paths.work, ".git"));
+      writeFileSync(join(paths.work, ".git", "HEAD"), "ref: refs/heads/main\n");
+
+      const failure = await provisionerFor(task, mirror, requirements)
+        .contract.harvest(paths, [
+          { name: "patch", mediaType: "text/x-diff", required: true },
+          { name: "summary", mediaType: "text/markdown", required: false },
+        ] as never)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).not.toBeInstanceOf(ProvisioningRejectedError);
+      expect((failure as Error).message).toMatch(/git /u);
+    });
+
     // Issue #3655: a checkout that git cannot even be started against is an infrastructure fault,
     // never a declared omission.
     it("propagates a failure to start git from the checkout probe", async () => {
