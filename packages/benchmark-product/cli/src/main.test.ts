@@ -157,7 +157,7 @@ describe("Colophon install surface", () => {
       TEST_BUILD,
     );
     expect(receipt.bundleIdentity).toBe(`sha256:${"a".repeat(64)}`);
-    expect(receipt.bundleFormat).toBe("benchmark-product-public-bundle/2");
+    expect(receipt.bundleFormat).toBe("benchmark-product-public-bundle/10");
     expect(receipt.sourceCommit).toBe("b".repeat(40));
     const bytes = readFileSync(join(root, "quickstart-receipt.json"), "utf8");
     expect(bytes).not.toContain("must-not-appear");

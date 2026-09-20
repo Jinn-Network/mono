@@ -43,10 +43,9 @@ export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
  * independent copy of the verifier's own constant, for the same reason `/8`'s is -- both packages
  * must carry it or the producer cannot emit what the verifier accepts.
  *
- * **No run emits it by default.** A `/10` claim seals a released and immutable reader that
- * predates `/10` and refuses it at manifest parse, so the bundle is unverifiable under its own
- * instruction until a release that reads the format is published. The producer's default flips in
- * the change that pins `/10` to the release serving it.
+ * **New bundles emit it by default** (issue #3405, D1 clean cutover). `report` omitted or
+ * `composedFormat: true` seals the composed claim; `composedFormat: false` is the rollback onto
+ * the enumerated cells. The verifier's legacy path for `/2` `/4` `/6` `/7` `/8` remains forever.
  */
 export const BUNDLE_V10_FORMAT = "benchmark-product-public-bundle/10" as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;

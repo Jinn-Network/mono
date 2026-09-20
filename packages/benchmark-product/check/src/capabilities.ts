@@ -61,10 +61,11 @@ export type ReaderRelease = keyof typeof READER_RELEASE_LINES;
  * vector's minimum is taken against. No `0.1` reader understands the format, so a vector of
  * capabilities that `0.1.0` first implemented still cannot name that line.
  *
- * **Provisional, exactly as `PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND` states**: `0.2.1` is
- * published, immutable, and predates the composed format, so it refuses one at manifest parse.
- * The cutover that publishes a release reading the format repoints this, and the producer's
- * default flips there.
+ * **Leftover (issue #3405):** `0.2.1` is the latest published reader and predates the composed
+ * format, so it refuses one at manifest parse. The in-tree checker reads `/10`. A published npm
+ * pin that serves `/10` does not exist yet; this packet does not publish one. The producer
+ * default is `/10` anyway (D1). The cutover that publishes a release reading the format
+ * repoints this.
  */
 export const COMPOSED_FORMAT_MINIMUM_READER_RELEASE: ReaderRelease = "0.2.1";
 

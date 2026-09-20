@@ -969,16 +969,18 @@ export async function createSyntheticV4BundleFixture<Skip extends true | undefin
    */
   readonly declareDisclosure?: true;
   /**
-   * Asks `report` for the composed generation (issue #3403), so the run publishes on
-   * `benchmark-product-public-bundle/10` with a derived capability vector. OPTIONS-ONLY and
-   * defaults off, so every existing caller's bundle bytes and closure version are unchanged.
+   * Asks `report` for the composed generation (issue #3403 / #3405). OPTIONS-ONLY and defaults
+   * off **in this fixture**, so every existing caller still materializes the enumerated cell it
+   * always did. The production `report` default is the other way: omitted means `/10`. This
+   * fixture passes `composedFormat: false` unless this option is set, which is how the legacy
+   * materialize suites keep proving `/2` `/4` `/6` `/7` `/8`.
    */
   readonly composedFormat?: true;
   /**
    * Stops after collect (and disclosure declare, when asked), without reporting or materializing.
-   * OPTIONS-ONLY and defaults off. A caller that needs the SAME run published two ways — the
-   * legacy default and `composedFormat: true` — copies this workspace and reports each copy
-   * (issue #3404). Mutually ignored with `composedFormat`: there is no report to flag.
+   * OPTIONS-ONLY and defaults off. A caller that needs the SAME run published two ways —
+   * `composedFormat: false` and `composedFormat: true` — copies this workspace and reports each
+   * copy (issue #3404). Mutually ignored with `composedFormat`: there is no report to flag.
    */
   readonly skipReport?: Skip;
 }): Promise<[Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture> {
@@ -1226,7 +1228,7 @@ export async function createSyntheticV4BundleFixture<Skip extends true | undefin
     return collected as unknown as [Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture;
   }
   const reported = requireOk(
-    await runReport(context, { draftId: DRAFT_ID, ...(input.composedFormat === true ? { composedFormat: true } : {}) }),
+    await runReport(context, { draftId: DRAFT_ID, composedFormat: input.composedFormat === true }),
     "report",
   );
   const runState = readRunState(input.workspaceDir, DRAFT_ID);

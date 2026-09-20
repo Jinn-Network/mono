@@ -110,17 +110,17 @@ import { artifactsDir } from "../workspace/layout.js";
 export interface RunReportInput {
   readonly draftId: string;
   /**
-   * Asks for the composed generation (bundle-capability-composition design §10 step 2, issue
-   * #3403): every claim this invocation seals is the composed `claim-package/7`, and `publish`
+   * Selects the composed generation (bundle-capability-composition design §10 step 4, issue
+   * #3405): every claim this invocation seals is the composed `claim-package/7`, and `publish`
    * then emits `benchmark-product-public-bundle/10` with the capability vector the registry's
-   * activation predicates derive. **Off by default, and the legacy path is the default**: omitted,
-   * this operation seals exactly the claims it always did, byte for byte.
+   * activation predicates derive. **On by default (D1 clean cutover)**: omitted or `true`, this
+   * operation emits `/10`. `false` is the rollback onto the enumerated `/2` `/4` `/6` `/7` `/8`
+   * producer path. The verifier's legacy path for those formats remains forever.
    *
-   * An operation input and deliberately not a CLI switch. A composed claim pins a released reader
-   * that predates the format and refuses it at manifest parse, so a composed bundle exists to prove
-   * the two paths equivalent before the default moves, not to be published. The choice is made
-   * here, at `report`, because this is where the claim is sealed; `publish` reads it back from the
-   * sealed claim rather than being told a second time.
+   * An operation input and deliberately not a CLI switch. Rollback is flipping this default
+   * back, not a second emit. The choice is made here, at `report`, because this is where the
+   * claim is sealed; `publish` reads it back from the sealed claim rather than being told a
+   * second time.
    */
   readonly composedFormat?: boolean;
 }
@@ -244,6 +244,8 @@ export function runReport(
       }
       const additionalSelected = planEntries.slice(primaryPlanLength);
       type SealedAnalysisPlanEntry = (typeof planEntries)[number];
+      // D1 clean cutover (issue #3405): omitted means composed `/10`. `false` is the rollback.
+      const composedFormat = input.composedFormat !== false;
 
       // BP-20 (spec §7.2): a pure read of this draft's own preview log — every logged preview
       // necessarily precedes this run's lock (module header). `previewed` is `undefined`'s own
@@ -401,7 +403,7 @@ export function runReport(
         // registry's own rule: the record rides the binary-qualification analysis, anchored or not.
         // The vector is never chosen here. It is what the activation predicates derive from the
         // run's own facts, and each section below is supplied exactly when the vector declares it.
-        const composedCapabilities = input.composedFormat === true
+        const composedCapabilities = composedFormat
           ? activeCapabilityVector({
             anchoredClosure: carriage.anchoredClosure,
             projectsBinaryQualification: entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument,
@@ -518,7 +520,7 @@ export function runReport(
           entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument);
         // The composed generation carries the record on the qualification analysis whether or not
         // the run is anchored, so there only a missing analysis loses the declaration.
-        if (input.composedFormat === true && carriedBy.length === 0) {
+        if (composedFormat && carriedBy.length === 0) {
           refuse(
             "conflict",
             "disclosure",
@@ -528,7 +530,7 @@ export function runReport(
             + " reporting; a declaration made now could never enter any sealed claim.",
           );
         }
-        if (input.composedFormat !== true && (carriedBy.length === 0 || !carriage.anchoredClosure)) {
+        if (!composedFormat && (carriedBy.length === 0 || !carriage.anchoredClosure)) {
           refuse(
             "conflict",
             "disclosure",

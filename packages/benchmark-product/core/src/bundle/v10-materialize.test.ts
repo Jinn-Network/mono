@@ -1,25 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composed generation, emitted (bundle-capability-composition design §10 step 2, §13 packet C4;
- * issue #3403).
+ * The composed generation, emitted (bundle-capability-composition design §10 step 4, §13 packet C5;
+ * issue #3405). Packet C4 taught `report` to emit `/10` when asked; C5 made that the default.
  *
- * `report` takes one explicit input, `composedFormat`. Without it the producer is exactly what it
- * was: every run emits the `/2`, `/4`, `/6`, `/7`, or `/8` bundle it always did, which
- * `v4-`, `v6-`, `v7-`, and `v8-materialize.test.ts` keep proving against the same fixtures. With
- * it, the same run publishes on `benchmark-product-public-bundle/10`: the capability vector is
- * derived from the registry's activation predicates, the claim is the composed generation's
- * `claim-package/7`, and the check list and reader line are whatever that vector derives.
+ * `report` takes one explicit input, `composedFormat`. Omitted or `true`, the run publishes on
+ * `benchmark-product-public-bundle/10`: the capability vector is derived from the registry's
+ * activation predicates, the claim is the composed generation's `claim-package/7`, and the check
+ * list and reader line are whatever that vector derives. `false` is the rollback onto the
+ * enumerated `/2` `/4` `/6` `/7` `/8` cells, which `v4-`, `v6-`, `v7-`, and `v8-materialize.test.ts`
+ * keep proving against the same fixtures.
  *
  * One real run per pre-composition cell, each driven through the production operations with the
  * flag set, then handed to the standalone reader as a detached copy. Five of the six vectors are the
  * five cells the closure model hand-allocated, so each of those cases also states which legacy
- * closure the composed bundle must reproduce -- the full equivalence proof is a later packet (issue
- * #3404); what is asserted here is that the producer emits what the verifier accepts, cell by cell.
+ * closure the composed bundle must reproduce -- the full equivalence proof is issue #3404; what is
+ * asserted here is that the producer emits what the verifier accepts, cell by cell.
  * The sixth is a combination no format number was ever allocated for.
  *
- * The flag is an operation input, not a CLI switch: a composed claim pins a reader release that
- * predates the format, so a flagged bundle exists to prove the path, not to be published.
+ * The flag is an operation input, not a CLI switch. Rollback is flipping the default back.
  */
 
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

@@ -64,10 +64,11 @@ export const PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND =
  * who has only the format string. `/10` must not inherit `/6`'s first-public `@0.1` line: no `0.1`
  * reader understands the format, so a claim naming one would be an instruction to fail.
  *
- * **This pin is provisional, and only an explicitly requested bundle seals it**: `0.2.1` is
- * published, immutable, and predates `/10` — it refuses `/10` at manifest parse — so the producer
- * emits `/10` only when asked and never by default. The base is repointed by the change that
- * publishes a release actually serving `/10`, and the producer's default flips there.
+ * **Leftover (issue #3405):** `0.2.1` is the latest published reader and predates `/10` — it
+ * refuses `/10` at manifest parse. The in-tree checker in this repository reads `/10`. A
+ * published npm pin that serves `/10` does not exist yet; this packet does not publish one.
+ * The producer default is `/10` anyway (D1). The base is repointed when a release that actually
+ * serves `/10` is published.
  */
 export const PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND =
   READER_RELEASE_LINES[COMPOSED_FORMAT_MINIMUM_READER_RELEASE].command;

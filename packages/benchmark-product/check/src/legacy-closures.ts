@@ -12,8 +12,10 @@
  * derived by the registry that replaces this file's job for new bundles
  * (`docs/superpowers/specs/2026-08-29-bundle-capability-composition-design.md` §13, packets C1/C3).
  *
- * The producer still reads these constants until the C5 cutover makes `/8` its default; after it,
- * this module has exactly one consumer, the verifier, which keeps it forever.
+ * After the C5 cutover (issue #3405) the producer still reads these constants for the rollback
+ * (`composedFormat: false`). The verifier keeps this module forever as the legacy path for
+ * `/2`, `/4`, `/6`, and `/7`. `/8` is not frozen here; it is a later enumerated cell the
+ * composed generation also expresses as a vector.
  *
  * The unrelated lineages stay out: `/3` is the accounting-only publication projection and `/5` is
  * the evidence-native bundle (design §12). Anything spanning lineages — `SUPPORTED_BUNDLE_FORMATS`,
