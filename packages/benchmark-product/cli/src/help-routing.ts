@@ -8,9 +8,9 @@ export function firstCommand(argv: readonly string[]): string | undefined {
 }
 
 /**
- * Primary install USAGE (demo / open / bare help), not core's 40-verb list
- * and not a verb-specific page. `method --help`, `help method`, and
- * `help method --help` must fall through to core.
+ * Primary install USAGE (demo / open / claimant-verb list / bare help), not
+ * core's full lifecycle library and not a verb-specific page. `method --help`,
+ * `help method`, and `help method --help` must fall through to core.
  */
 export function usesPrimaryWrapperHelp(argv: readonly string[]): boolean {
   if (!argv.includes("--help")) return false;

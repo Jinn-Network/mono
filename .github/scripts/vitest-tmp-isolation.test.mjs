@@ -27,7 +27,8 @@
 // attached, rather than at whichever job happens to run that package: see
 // `configs that cannot reach the seam they name` below.
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 import {
@@ -37,9 +38,6 @@ import {
   stripComments,
   UnterminatedTemplateError,
 } from './js-source-scanner.mjs';
-
-/** Re-exported so this guard's own scanner cases keep naming it where they always did. */
-export { stripComments };
 
 const root = resolve(import.meta.dirname, '../..');
 
@@ -137,10 +135,13 @@ function enclosedLiterals(source, key, open, close) {
  * one scope and restores the cross-entry crediting this closes. A regex literal holding a quote is
  * the ordinary construct that used to produce exactly that (issue #3154); `regexStartsAt` and the
  * newline-bounded quote span above are what keep it from doing so. That is the same fallback the other
- * scanners take on an unterminated literal, and it is bounded the same way: a config that does not
- * parse cannot load, so its own package job is red before this gate has an opinion. The quote walk
- * below is what keeps that bound honest — an unpaired `'` inside a regex literal parses and loads
- * fine, so without the newline bound the collapse would happen under a green package job.
+ * scanners take on an unterminated literal, and it has two routes. A config that genuinely does not
+ * parse cannot load, so its own package job is red before this gate has an opinion. A config that
+ * parses, but whose `]`-carrying line `regexStartsAt` still mis-reads, loads fine: that route is
+ * fail-open, bounded only by the scanner's one-line residual (see `regexStartsAt` in
+ * `js-source-scanner.mjs`), and no config in the tree writes that shape. The quote walk below is
+ * what keeps the first route the ordinary one — an unpaired `'` inside a regex literal parses and
+ * loads fine, so without the newline bound the collapse would happen under a green package job.
  *
  * An entry whose own `{` never balances is skipped rather than ending the scan, so the entries
  * after it keep their ranges. `break` here was the amplifier that made a single mis-read line cost
@@ -385,6 +386,24 @@ export function wiredPaths(rawSource, configPath, base = root) {
   return paths;
 }
 
+/**
+ * `wiredPaths` over the config at `base`/`config`, read from disk. Held apart from the seam loop
+ * so the path attachment below is reachable from a fixture (#4401).
+ */
+function readWiredPaths(config, base = root) {
+  // The scanner knows the source but never the path, so the file name is attached here (#3088).
+  try {
+    return wiredPaths(readFileSync(resolve(base, config), 'utf8'), config, base);
+  } catch (error) {
+    if (!(error instanceof UnterminatedTemplateError)) throw error;
+    assert.fail(
+      `${config}:${error.line}: backtick pairing ran to the end of the file from here — ` +
+        'either that literal is unterminated, or an earlier mis-read swallowed a backtick. ' +
+        'Either way every wiring read from this config is worthless.',
+    );
+  }
+}
+
 for (const seam of SEAMS) {
   test(`every Vitest config under ${seam.root}/ wires the temp-directory sweep seam`, () => {
     const configs = findVitestConfigs(seam.root);
@@ -392,18 +411,7 @@ for (const seam of SEAMS) {
 
     const unwired = [];
     for (const config of configs) {
-      // The scanner knows the source but never the path, so the file name is attached here (#3088).
-      let wired;
-      try {
-        wired = wiredPaths(readFileSync(resolve(root, config), 'utf8'), config);
-      } catch (error) {
-        if (!(error instanceof UnterminatedTemplateError)) throw error;
-        assert.fail(
-          `${config}:${error.line}: backtick pairing ran to the end of the file from here — ` +
-            'either that literal is unterminated, or an earlier mis-read swallowed a backtick. ' +
-            'Either way every wiring read from this config is worthless.',
-        );
-      }
+      const wired = readWiredPaths(config);
       const missing = [];
       if (!wired.some((entry) => entry.key === 'setupFiles' && entry.resolved === seam.setup)) {
         missing.push(`setupFiles must include a path resolving to ${seam.setup}`);
@@ -563,6 +571,10 @@ test('configs that cannot reach the seam they name', () => {
   const unreachable = [];
   for (const seam of SEAMS) {
     for (const config of findVitestConfigs(seam.root)) {
+      // No path attachment here, deliberately: the seam-wiring test above registers first, walks
+      // this same `findVitestConfigs(seam.root)` set, and node:test runs a file's top-level tests
+      // serially in registration order, so an unclosed backtick has already been reported with
+      // its config name by the time this read reaches it. Still fail-closed either way (#4401).
       const source = readFileSync(resolve(root, config), 'utf8');
       if (!webTransformShaped(source)) continue;
       const configDir = relative(root, dirname(resolve(root, config))).split('\\').join('/');
@@ -582,6 +594,24 @@ test('configs that cannot reach the seam they name', () => {
       `them fails at import:\n  ${unreachable.join('\n  ')}\n` +
       'Add a server.fs.allow entry covering the seam — see packages/indexer/explorer/vitest.config.ts.',
   );
+});
+
+// The scanner's refusal carries a line but never a path; `readWiredPaths` attaches the config name.
+// That attachment was unpinned — a bare `throw error;` in its place left the suite green while the
+// message named no config (#4401). The fixture lives in the OS tmpdir, never in the checkout: an
+// in-tree config would be walked by the live seam test above.
+test('an unterminated template literal is reported with the config name and line', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'vitest-tmp-isolation-unterminated-'));
+  try {
+    writeFileSync(join(fixture, 'vitest.config.ts'), 'export default {}\nconst s = `\n');
+    const configs = findVitestConfigs('.', fixture);
+    assert.deepEqual(configs, ['vitest.config.ts']);
+    for (const config of configs) {
+      assert.throws(() => readWiredPaths(config, fixture), { message: /^vitest\.config\.ts:2: backtick pairing/u });
+    }
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
 });
 
 test('the seam files every config points at exist', () => {

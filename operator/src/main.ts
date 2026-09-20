@@ -25,7 +25,8 @@ import { homedir, hostname, userInfo } from 'node:os';
 import { randomBytes as cryptoRandomBytes, randomUUID as cryptoRandomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { loadConfig, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { requireConfigPathFromArgs } from './config/path-args.js';
 import { writeConfigFileAtomic } from './config/atomic-write.js';
 import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
@@ -60,6 +61,8 @@ import { startDegradedRecoveryLoops } from './daemon/degraded-recovery.js';
 import {
   setDaemonReadiness,
   getDaemonReadiness,
+  setDegradedRecoveryRunning,
+  getDegradedRecoveryRunning,
   buildLoopMetricsSnapshot,
 } from './daemon/loop-heartbeat.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
@@ -226,7 +229,18 @@ if (passwordResolution.source === 'generated') {
 
 // ── Load config ─────────────────────────────────────────────────────────────
 
-const CONFIG_PATH = getConfigPathFromArgs();
+let CONFIG_PATH: string | undefined;
+try {
+  CONFIG_PATH = requireConfigPathFromArgs();
+} catch (err) {
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message: err instanceof Error ? err.message : String(err),
+    hint: 'Pass a config path or omit --config.',
+    exampleCli: 'jinn run --config ~/.jinn-operator/config.json',
+    details: { field: 'config' },
+  });
+}
 const config = loadConfig(CONFIG_PATH);
 /**
  * One-swap M2 (#2461): the network AS WRITTEN, captured before the pre-launch clamp below rewrites
@@ -665,6 +679,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // on ApiServerConfig in server.ts.
       getDaemonReadiness,
       getLoopSnapshot: () => buildLoopMetricsSnapshot(sharedStore),
+      getDegradedRecoveryRunning,
       hermesDoctor: {
         hermesPath: config.hermesPath,
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
@@ -1117,6 +1132,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     bootstrapResult = await runBootstrapWithDegradeOpen({
       runBootstrap: () => runFleetBootstrap({ config, password: PASSWORD, network: NETWORK_CHAIN, emitProgress }),
       setReadiness: setDaemonReadiness,
+      setDegradedRecoveryRunning,
       // #2407 / spec §5: degrade-open boot. An economic-class halt (funding
       // shortfall, incomplete fleet, a recoverable on-chain error) must not
       // leave the daemon fully dark while the caller awaits the retry signal

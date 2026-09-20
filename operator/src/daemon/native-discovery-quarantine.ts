@@ -166,16 +166,50 @@ export function recordPoisonFailure(input: PoisonKey & {
   return { failures: row.failures, quarantined: true };
 }
 
+/** A ledger key without its store, for callers that probe many items against one store. */
+export type PoisonItemKey = Omit<PoisonKey, 'store'>;
+
+const IS_QUARANTINED_SQL = `SELECT quarantined_at FROM native_discovery_quarantine
+      WHERE scope = ? AND source_agent = ? AND source_name = ?
+        AND entry_digest = ? AND announcement_id = ?`;
+
+const CLEAR_FAILURES_SQL = `DELETE FROM native_discovery_quarantine
+      WHERE scope = ? AND source_agent = ? AND source_name = ?
+        AND entry_digest = ? AND announcement_id = ? AND quarantined_at IS NULL`;
+
+function keyParams(key: PoisonItemKey): [string, string, string, string, string] {
+  return [key.scope, key.source.agent, key.source.name, key.entryDigest, key.announcementId];
+}
+
+function quarantinedRow(row: unknown): boolean {
+  return row !== undefined && (row as { quarantined_at: string | null }).quarantined_at !== null;
+}
+
+/** The read-and-clear pair a poll pass runs for every announcement it walks. */
+export interface PoisonProbes {
+  isQuarantined(key: PoisonItemKey): boolean;
+  clear(key: PoisonItemKey): void;
+}
+
+/**
+ * Prepares the per-item probes once, so a pass over many announcements does not re-prepare
+ * the same two statements for each one (#4294). Same semantics as `isPoisonQuarantined` and
+ * `clearPoisonFailures`.
+ */
+export function preparePoisonProbes(store: Store): PoisonProbes {
+  const isQuarantined = store.db.prepare(IS_QUARANTINED_SQL);
+  const clear = store.db.prepare(CLEAR_FAILURES_SQL);
+  return {
+    isQuarantined: (key) => quarantinedRow(isQuarantined.get(...keyParams(key))),
+    clear: (key) => {
+      clear.run(...keyParams(key));
+    },
+  };
+}
+
 /** Has this item already been stepped past? Quarantine is terminal for the item. */
 export function isPoisonQuarantined(input: PoisonKey): boolean {
-  const row = input.store.db.prepare(
-    `SELECT quarantined_at FROM native_discovery_quarantine
-      WHERE scope = ? AND source_agent = ? AND source_name = ?
-        AND entry_digest = ? AND announcement_id = ?`,
-  ).get(
-    input.scope, input.source.agent, input.source.name, input.entryDigest, input.announcementId,
-  ) as { quarantined_at: string | null } | undefined;
-  return row !== undefined && row.quarantined_at !== null;
+  return quarantinedRow(input.store.db.prepare(IS_QUARANTINED_SQL).get(...keyParams(input)));
 }
 
 /**
@@ -183,11 +217,5 @@ export function isPoisonQuarantined(input: PoisonKey): boolean {
  * place — see the module docstring for why reviving a stepped-past item is not offered.
  */
 export function clearPoisonFailures(input: PoisonKey): void {
-  input.store.db.prepare(
-    `DELETE FROM native_discovery_quarantine
-      WHERE scope = ? AND source_agent = ? AND source_name = ?
-        AND entry_digest = ? AND announcement_id = ? AND quarantined_at IS NULL`,
-  ).run(
-    input.scope, input.source.agent, input.source.name, input.entryDigest, input.announcementId,
-  );
+  input.store.db.prepare(CLEAR_FAILURES_SQL).run(...keyParams(input));
 }

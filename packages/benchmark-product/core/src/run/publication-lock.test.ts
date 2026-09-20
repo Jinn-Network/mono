@@ -84,4 +84,22 @@ describe("acquirePublicationLock", () => {
     rmSync(lockPath, { force: true });
     rmSync(displaced, { force: true });
   });
+
+  test("a throwing onContended sink does not fail a contended acquire (#3848)", async () => {
+    const holder = acquireRunPublicationGuard(workspaceDir, "draft-1");
+    expect(holder.acquired).toBe(true);
+    if (!holder.acquired) return;
+    let fired = 0;
+    const pending = acquirePublicationLock(workspaceDir, "draft-1", 1_000, {
+      onContended() { fired += 1; throw new Error("sink is broken"); },
+    });
+    // The async body runs synchronously to its first await, so the first (contended) attempt and
+    // its onContended call have already happened: genuine contention, no timer sleep.
+    expect(fired).toBe(1);
+    holder.release();
+    const lock = await pending;
+    lock.release();
+    // Fired at most once, as documented on PublicationLockDeps.onContended.
+    expect(fired).toBe(1);
+  });
 });

@@ -79,8 +79,8 @@ import {
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import type { OperationContext } from "../../operations/context.js";
 import { createDraft, updateDraft } from "../../operations/drafts.js";
-import { admitHumanTruth } from "../../operations/human-review.js";
-import { importBinaryItemBank } from "../../operations/import-item-bank.js";
+import { admitHumanTruth } from "./seed-admission.js";
+import { importBinaryItemBank, renderCanonicalJsonl } from "./seed-binary-item-bank.js";
 import { initWorkspace } from "../../operations/init.js";
 import { selectMethod } from "../../operations/method.js";
 import { runCollect } from "../../operations/run-collect.js";
@@ -92,10 +92,7 @@ import {
   BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
   BINARY_ITEM_BANK_ENTRY_PROTOCOL,
   BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
-  renderCanonicalJsonl,
-} from "../../intake/binary-item-bank.js";
-import { BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED } from "../../human-review/application.js";
-import {
+  BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED,
   PROMPTED_SCREENING_PROCEDURE_PROTOCOL,
   SCREENING_POOL_PROTOCOL,
   SCREENING_SAMPLE_COMMITMENT_PROTOCOL,
@@ -104,8 +101,8 @@ import {
   ScreeningSampleCommitmentV1Schema,
   computeScreeningPoolDigest,
   computeScreeningSample,
-  sealHumanReviewDocument,
-} from "../../human-review/contracts.js";
+} from "@colophon-claims/check/admission";
+import { sealHumanReviewDocument } from "./seed-human-review-bytes.js";
 import { readRunJournalEntries, type RunJournalEntry } from "../../run/journal.js";
 import { readRunState } from "../../run/state.js";
 import type { ProxiedBackend } from "../../run/drive.js";

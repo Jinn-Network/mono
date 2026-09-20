@@ -140,7 +140,8 @@ publish because it can finally see the events — which is the point of the proc
    Both signatures carry their **output** types on purpose. `cast call` prints raw returndata when
    the return signature is omitted, and `getAttempt` returns a struct — without the tuple you get an
    undecoded blob and have to count 32-byte words to find the field you came for. The tuple is
-   `AttemptRecord` as declared in `operator/src/daemon/composition-root.ts`'s `GET_ATTEMPT_VIEW_ABI`:
+   `AttemptRecord` as declared by `getAttempt` in the `bindingTaskCoordinator` slice
+   (`packages/contract-abis/src/generated/slices/bindingTaskCoordinator.ts`, exported as `TASK_COORDINATOR_ABI`):
    `(taskId, attemptIndex, operator, requestId, solutionCidDigest, solutionWeight, verdictCount,
    status)`.
 

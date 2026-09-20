@@ -15,7 +15,6 @@ on:
       # Transitive `portal:` closure of the workspaces above (#3573). Each is built
       # from source into this lane, so a change confined to one of them changes what
       # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
-      - "packages/benchmarking/records/**"
       - "packages/environments/chain-record/**"
       - "packages/environments/chain-verification/**"
       - "packages/environments/information-world/**"
@@ -41,7 +40,6 @@ on:
       # Transitive `portal:` closure of the workspaces above (#3573). Each is built
       # from source into this lane, so a change confined to one of them changes what
       # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
-      - "packages/benchmarking/records/**"
       - "packages/environments/chain-record/**"
       - "packages/environments/chain-verification/**"
       - "packages/environments/information-world/**"
@@ -92,6 +90,10 @@ jobs:
         run: node --test .github/scripts/record-discovery-package-inventory.test.mjs
       - name: Verify source boundaries and canaries
         run: node --test .github/scripts/record-discovery-source-boundaries.test.mjs
+      - name: Verify the §12 join-edge audit table
+        run: node --test .github/scripts/record-discovery-audit-table.test.mjs
+      - name: Verify §18 ↔ golden-vector correspondence
+        run: node --test .github/scripts/record-discovery-conformance-coverage.test.mjs
 
   packages:
     name: Record Discovery packages
@@ -125,7 +127,6 @@ jobs:
             packages/evidence/discovery/yarn.lock
             packages/task-execution/protocol/yarn.lock
             packages/task-execution/profiles/yarn.lock
-            packages/benchmarking/records/yarn.lock
             packages/environments/record/yarn.lock
             packages/environments/chain-record/yarn.lock
             packages/environments/information-world/yarn.lock
@@ -133,7 +134,6 @@ jobs:
             packages/discovery/facts/evidence/yarn.lock
             packages/discovery/facts/trust/yarn.lock
             packages/discovery/facts/task-execution/yarn.lock
-            packages/discovery/facts/benchmarking/yarn.lock
             packages/discovery/facts/environments/yarn.lock
             packages/discovery/facts/chain-environments/yarn.lock
             packages/discovery/facts/offers/yarn.lock
@@ -227,11 +227,6 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
-      - name: Build cross-tree portal dependency from source (benchmarking-records, §7.8)
-        working-directory: packages/benchmarking/records
-        run: |
-          yarn install --immutable
-          yarn build
       - name: Build cross-tree portal dependency from source (environment-record, §7.8)
         working-directory: packages/environments/record
         run: |
@@ -270,14 +265,6 @@ jobs:
           yarn pack:smoke
       - name: Verify Record Discovery Facts (Task Execution)
         working-directory: packages/discovery/facts/task-execution
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-      - name: Verify Record Discovery Facts (Benchmarking)
-        working-directory: packages/discovery/facts/benchmarking
         run: |
           yarn install --immutable
           yarn typecheck

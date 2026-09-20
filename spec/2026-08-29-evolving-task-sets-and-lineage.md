@@ -156,7 +156,7 @@ This is the constraint §0 names and §4 is built around.
 
 Public presentation is reader-owned: `core/src/bundle/assets.ts` is a shim
 onto `@colophon-claims/verify`, so
-[`packages/benchmark-product/verify/src/assets.ts`](../packages/benchmark-product/verify/src/assets.ts)
+[`packages/benchmark-product/check/src/assets.ts`](../packages/benchmark-product/check/src/assets.ts)
 is the single surface these rules bind to.
 
 - `scopeLine` renders `"<taskCount> tasks · <arms> arms · <replicates> replicates · <venue>"`.
@@ -558,5 +558,5 @@ the bundle already carries, so none of it waits on a format revision.
   decided here. This spec states what one must do if built.
 
 Implementation follows as ordinary work against
-`packages/benchmark-product/verify/src/assets.ts` and the reader verifier,
+`packages/benchmark-product/check/src/assets.ts` and the reader verifier,
 sequenced behind #2985 and #2987 so placement and wording land once.
