@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PHASE_B_RESTART_CHECKPOINT_SET } from '../../src/daemon/phase-b-closure-manifest.js';
 import { DRILL_CHECKPOINTS, DRILL_SPECS, drillSpec } from '../../src/native-drill/checkpoints.js';
 import {
+  LIVE_RUN_DELTA,
   buildDrillReport,
   parseDrillReport,
   sealDrillReport,
@@ -100,6 +101,16 @@ describe('restart-drill recovery report', () => {
       comparison: { equal: true, differences: [] },
       requiredEffects: {},
     })).toThrow(/one checkpoint and seed/u);
+  });
+
+  it('names the single-role seeded-fixture framing in liveRunDelta', () => {
+    expect(LIVE_RUN_DELTA).toEqual(expect.arrayContaining([
+      expect.stringMatching(/seeded/iu),
+      expect.stringMatching(/one role|single-role|exactly one role/iu),
+    ]));
+    const sealed = report();
+    expect(sealed.report.liveRunDelta).toEqual([...LIVE_RUN_DELTA]);
+    expect(sealed.report.liveRunDelta.some((delta) => /chained/iu.test(delta))).toBe(true);
   });
 
   it('records the pinned fork block so a fork run is re-runnable', () => {

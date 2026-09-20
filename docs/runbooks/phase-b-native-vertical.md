@@ -218,7 +218,8 @@ nothing, because `comparison.equalToUninterrupted` is a literal `true` in the re
 
 Each report also carries `liveRunDelta`, naming what the deterministic drill does **not** cover — a
 funded, mech-registered operator Safe and the escrowed marketplace legs, a live requester record
-source, and container-graded evaluation. A green drill is not a green live round trip.
+source, container-graded evaluation, and a chained requester-solver-evaluator vertical (each)
+checkpoint drills one role against seeded fixtures). A green drill is not a green live round trip.
 
 ## Public artifact capture
 
