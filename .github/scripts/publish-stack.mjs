@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   loadPlatformCatalog,
@@ -96,7 +98,11 @@ export function renderPlan(plan) {
   return lines.join('\n');
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const args = parsePublishArgs(process.argv.slice(2));
     if (!args.dryRun) {

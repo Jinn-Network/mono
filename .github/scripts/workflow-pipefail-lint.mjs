@@ -43,8 +43,9 @@
 // convention here — `.github/scripts/` carries no dependency manifest, so every sibling
 // suite slices workflow sources the same way.
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '../..');
 const WORKFLOWS_DIR = join(REPOSITORY_ROOT, '.github', 'workflows');
@@ -1530,4 +1531,8 @@ function main() {
   );
 }
 
-if (process.argv[1] === import.meta.filename) main();
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) main();

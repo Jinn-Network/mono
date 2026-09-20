@@ -36,7 +36,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const PROVENANCE_FILE = '.jinn-split-source';
 const DEFAULT_KEEP = ['.git', PROVENANCE_FILE];
@@ -262,7 +262,11 @@ export function run({ pluginDir, slimDir, monoSha, workflowPath }) {
 // signals ($GITHUB_OUTPUT + ::notice::/::error::). The privileged `git push`
 // stays in the YAML, gated on the emitted `changed`.
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   const pluginDir = process.env.PLUGIN_DIR ?? 'plugin/frozen';
   const slimDir = process.env.SLIM_DIR ?? 'slim';
   const monoSha = process.env.MONO_SHA ?? '';

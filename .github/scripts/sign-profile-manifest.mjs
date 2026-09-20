@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const PAYLOAD_TYPE = 'application/vnd.jinn.profile-manifest+json';
 export const SIGNATURE_FILE_NAME = 'manifest.dsse.json';
@@ -42,7 +43,11 @@ export function verifyEnvelope(envelope, publicKeyPem) {
   }
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const args = process.argv.slice(2);
     const root = args[args.indexOf('--root') + 1];

@@ -11,10 +11,11 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  realpathSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { canonicalJsonBytes, catalogSha256 } from './build-prepublication-bundle.mjs';
 import { buildProfileRoot } from './build-profile-root.mjs';
@@ -418,7 +419,11 @@ function parseArgs(argv) {
   return parsed;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const receipt = createVerificationReceipt(parseArgs(process.argv.slice(2)));
     console.log(`wrote verification receipt for ${receipt.sourceSha}`);

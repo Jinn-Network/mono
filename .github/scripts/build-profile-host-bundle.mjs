@@ -35,6 +35,7 @@ import {
   readFileSync,
   readdirSync,
   writeFileSync,
+  realpathSync,
 } from 'node:fs';
 import {
   dirname,
@@ -44,7 +45,7 @@ import {
   resolve,
   sep,
 } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { hasGitControlSegment } from './public-surface-assets.mjs';
 import { SIGNATURE_FILE_NAME } from './sign-profile-manifest.mjs';
@@ -415,7 +416,11 @@ export function parseArgs(argv) {
   return parsed;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const { profileRoots, outDir } = parseArgs(process.argv.slice(2));
     const result = buildProfileHostBundle({ profileRoots, outDir });

@@ -17,7 +17,8 @@
 // so the test suite imports it offline. The CLI entry is guarded so `import`
 // is side-effect-free.
 
-import { pathToFileURL } from 'node:url';
+import { existsSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 export const STALE_THRESHOLD_BLOCKS = 50;
 
@@ -185,7 +186,11 @@ export async function runRpcMode({ rpcUrl, fetch: fetchImpl = globalThis.fetch }
 
 // --- CLI entry (guarded so `import` is side-effect-free) ---------------------
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   const mode = (process.argv.find((a) => a.startsWith('--mode=')) ?? '--mode=indexer').slice('--mode='.length);
   const baseUrl = process.env.INDEXER_BASE_URL ?? DEFAULT_INDEXER_BASE_URL;
   const rpcUrl = process.env.BASE_SEPOLIA_RPC_URL ?? DEFAULT_BASE_SEPOLIA_RPC_URL;

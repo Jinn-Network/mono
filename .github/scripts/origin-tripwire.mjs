@@ -14,8 +14,9 @@
  * Run with `--report` it prints the whole-tree census, exclusions included, and never fails.
  */
 
-import { lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** The retired origin this tripwire watches for. Never confuse with the new
  * `https://spec.jinn.network/` origin -- see {@link matchesLegacyOrigin}. */
@@ -199,7 +200,11 @@ export function findEnforcedScopeViolations(options) {
   return findLegacyOriginOccurrences(options).filter(({ path }) => isEnforcedPath(path));
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   const args = process.argv.slice(2);
   const root = args.includes('--root') ? args[args.indexOf('--root') + 1] : process.cwd();
   const hits = findLegacyOriginOccurrences({ repoRoot: root });

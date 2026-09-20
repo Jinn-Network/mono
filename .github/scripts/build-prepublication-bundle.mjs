@@ -7,9 +7,10 @@ import {
   readFileSync,
   readdirSync,
   writeFileSync,
+  realpathSync,
 } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import {
   PLATFORM_CATALOG_PATH,
@@ -292,7 +293,11 @@ function parseArgs(argv) {
   return parsed;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const args = parseArgs(process.argv.slice(2));
     const manifest = args.nativeVerticalRoles

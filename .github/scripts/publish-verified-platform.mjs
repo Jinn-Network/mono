@@ -10,10 +10,11 @@ import {
   readdirSync,
   rmSync,
   writeFileSync,
+  realpathSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import {
   canonicalJsonBytes,
@@ -607,7 +608,11 @@ function parseArgs(argv) {
   return parsed;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const receipt = await publishVerifiedPlatform(parseArgs(process.argv.slice(2)));
     console.log(`published and verified ${receipt.packageOrder.length} packages at ${receipt.packageVersion}`);
