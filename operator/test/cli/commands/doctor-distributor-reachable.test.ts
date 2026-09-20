@@ -2,6 +2,10 @@
  * Isolated from doctor.test.ts so `vi.mock('viem')` cannot poison DI
  * integration tests that import `createDoctorCommand`.
  *
+ * After merging origin/next, `checkDistributorReachable` accepts an
+ * injectable `readBalance` (covered by doctor.test.ts). This file still
+ * plants the failure through the default `createPublicClient` path.
+ *
  * Issue #4549: the distributor probe catch interpolated `err.message`. A
  * viem HttpRequestError-shaped failure embeds the RPC URL (userinfo +
  * path key). The detail must keep the hostname and drop credentials.
