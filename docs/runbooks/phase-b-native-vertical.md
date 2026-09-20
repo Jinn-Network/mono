@@ -191,6 +191,10 @@ cd operator
 yarn drill:native-restart --out ./native-restart-drill-reports
 ```
 
+CI runs the same proof nightly (and on `workflow_dispatch`) via
+`.github/workflows/native-restart-drill.yml` (`yarn drill:native-restart:verify`).
+That lane is advisory: it is not a required merge-queue check.
+
 It boots a local Anvil pinned to chain id `84532`, asserts the native boot gate, and for each of the
 six checkpoints runs three real operating-system processes: an uninterrupted oracle, a run the
 harness **SIGKILLs** at the injected boundary, and a recovery run restarted against that run's own

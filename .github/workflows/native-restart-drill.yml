@@ -1,0 +1,71 @@
+name: native-restart-drill
+
+# Scheduled/manual advisory wiring for `yarn drill:native-restart:verify`
+# (issue #4194, follow-up from PR #4078). The Phase B restart-drill e2e
+# (`operator/test/native-drill/restart-drill.e2e.test.ts`) is excluded from
+# default `yarn test` because it spawns twelve Anvil nodes and eighteen
+# role-host processes. Nothing on the merge path should run it: a flake
+# there would eject the queue. This lane is the coverage that does run it.
+#
+# WHY SCHEDULED + manual, NOT a PR-blocking gate (same flake-honesty rule as
+# native-e2e-rig.yml): Foundry + real OS processes on a GitHub-hosted runner
+# can still flake on infra, and the drill's own timeouts are 15–30 minutes
+# per case. A red here is a GitHub Actions failure (email / UI), not a
+# required merge-queue context.
+#
+# The drill itself is hermetic local Anvil at chain id 84532 — no live RPC,
+# no dump-state snapshot — so Foundry is unpinned (unlike hermetic-gate.yml).
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Nightly 05:00 UTC, before the Monday 06:00 native-e2e-rig slot.
+    - cron: '0 5 * * *'
+
+concurrency:
+  group: native-restart-drill-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  native-restart-drill:
+    name: Phase B restart drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
+      ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
+      - run: corepack enable
+
+      # Foundry provides `anvil`. The drill boots a fresh local node at chain
+      # id 84532; it does not load the committed `--dump-state` snapshot.
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install client deps
+        working-directory: operator
+        run: yarn install --immutable
+
+      - name: Build the operator dependency stack
+        working-directory: operator
+        run: yarn build:stack
+
+      - name: Run the Phase B restart-drill verification
+        working-directory: operator
+        run: yarn drill:native-restart:verify
