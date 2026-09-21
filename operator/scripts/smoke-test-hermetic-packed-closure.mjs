@@ -12,7 +12,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -23,8 +22,11 @@ import { fileURLToPath } from 'node:url';
 import {
   assertFixtureLockfilePresent,
   buildConsumerThirdPartyDependencies,
+  closurePackageNames,
+  discoverPackageRoots,
   installThirdPartyGraph,
   packedOverlayInstallArgs,
+  readPackageJson,
   thirdPartyInstallArgs,
   writeConsumerPackageJson,
 } from './lib/hermetic-packed-closure.mjs';
@@ -53,48 +55,6 @@ function run(command, args, context, options = {}) {
     );
   }
   return result;
-}
-
-function readPackageJson(root) {
-  return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-}
-
-function discoverPackageRoots(root, found = new Map()) {
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
-    const entryPath = join(root, entry.name);
-    if (!entry.isDirectory()) continue;
-    const manifestPath = join(entryPath, 'package.json');
-    try {
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      if (typeof manifest.name === 'string' && manifest.name.startsWith('@jinn-network/')) {
-        found.set(manifest.name, entryPath);
-      }
-    } catch {
-      discoverPackageRoots(entryPath, found);
-    }
-  }
-  return found;
-}
-
-function closurePackageNames(clientManifest, packageRoots) {
-  const pending = Object.keys(clientManifest.dependencies ?? {})
-    .filter((name) => name.startsWith('@jinn-network/'));
-  const names = new Set();
-  while (pending.length > 0) {
-    const name = pending.pop();
-    if (name === undefined || names.has(name)) continue;
-    const packageRoot = packageRoots.get(name);
-    if (packageRoot === undefined) {
-      throw new Error(`No local package root is available for ${name}.`);
-    }
-    names.add(name);
-    const manifest = readPackageJson(packageRoot);
-    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
-      if (dependency.startsWith('@jinn-network/')) pending.push(dependency);
-    }
-  }
-  return [...names].sort();
 }
 
 function noLocalSpec(value, context) {

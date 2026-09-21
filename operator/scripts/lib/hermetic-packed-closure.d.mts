@@ -5,6 +5,18 @@ export const COMPILER_DEV_DEPENDENCY_NAMES: readonly [
   '@types/ws',
 ];
 
+export function readPackageJson(root: string): Record<string, unknown>;
+
+export function discoverPackageRoots(
+  root: string,
+  found?: Map<string, string>,
+): Map<string, string>;
+
+export function closurePackageNames(
+  clientManifest: Record<string, unknown>,
+  packageRoots: Map<string, string>,
+): string[];
+
 export function thirdPartyInstallArgs(): string[];
 
 export function packedOverlayInstallArgs(archives: readonly string[]): string[];

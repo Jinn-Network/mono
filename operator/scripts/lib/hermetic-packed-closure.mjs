@@ -1,4 +1,4 @@
-import { cpSync, existsSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const COMPILER_DEV_DEPENDENCY_NAMES = Object.freeze([
@@ -49,6 +49,48 @@ function thirdPartyFromField(manifest, field) {
     entries[name] = specifier;
   }
   return entries;
+}
+
+export function readPackageJson(root) {
+  return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+}
+
+export function discoverPackageRoots(root, found = new Map()) {
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    const entryPath = join(root, entry.name);
+    if (!entry.isDirectory()) continue;
+    const manifestPath = join(entryPath, 'package.json');
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      if (typeof manifest.name === 'string' && manifest.name.startsWith('@jinn-network/')) {
+        found.set(manifest.name, entryPath);
+      }
+    } catch {
+      discoverPackageRoots(entryPath, found);
+    }
+  }
+  return found;
+}
+
+export function closurePackageNames(clientManifest, packageRoots) {
+  const pending = Object.keys(clientManifest.dependencies ?? {})
+    .filter((name) => name.startsWith('@jinn-network/'));
+  const names = new Set();
+  while (pending.length > 0) {
+    const name = pending.pop();
+    if (name === undefined || names.has(name)) continue;
+    const packageRoot = packageRoots.get(name);
+    if (packageRoot === undefined) {
+      throw new Error(`No local package root is available for ${name}.`);
+    }
+    names.add(name);
+    const manifest = readPackageJson(packageRoot);
+    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+      if (dependency.startsWith('@jinn-network/')) pending.push(dependency);
+    }
+  }
+  return [...names].sort();
 }
 
 export function thirdPartyInstallArgs() {
