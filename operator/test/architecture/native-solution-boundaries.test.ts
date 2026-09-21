@@ -129,6 +129,24 @@ describe('Phase B native solution architecture boundaries', () => {
     );
   });
 
+  it('does not describe #3866-inert startDaemon arguments as live wiring', () => {
+    const jinnRepoLoop = rawSource('../e2e/jinn-repo-loop.ts');
+    const jinnRepoLiveLoop = rawSource('../e2e/jinn-repo-live-loop.ts');
+    const helpers = rawSource('../e2e/_daemon-harness-helpers.ts');
+
+    expect(jinnRepoLoop).not.toMatch(
+      /Force jinn-repo\.v1 restoration onto the claude-code learner/u,
+    );
+    expect(jinnRepoLoop).not.toContain("startDaemon('claude-code', extra jinn-repo.v1 map)");
+    expect(jinnRepoLoop).toMatch(/extraSolverTypeHarnesses[\s\S]{0,200}#3866/u);
+
+    expect(jinnRepoLiveLoop).not.toContain('startDaemon(extraHarnesses: [synthetic solver])');
+    expect(jinnRepoLiveLoop).toMatch(/extraHarnesses[\s\S]{0,200}#3866/u);
+
+    expect(helpers).not.toMatch(/via `startDaemon`'s `opts\.polymarketGammaBaseUrl`/u);
+    expect(helpers).toMatch(/polymarketGammaBaseUrl[\s\S]{0,200}inert/u);
+  });
+
   it('uses canonical projector state rather than transaction receipts as finality authority', () => {
     expect(settlement).toContain('readObservations');
     expect(settlement).toContain('readFinalizedBlockNumber');
