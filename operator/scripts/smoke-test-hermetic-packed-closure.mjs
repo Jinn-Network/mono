@@ -22,9 +22,9 @@ import { fileURLToPath } from 'node:url';
 import {
   assertFixtureLockfilePresent,
   buildConsumerThirdPartyDependencies,
-  closurePackageNames,
   discoverPackageRoots,
   installThirdPartyGraph,
+  packedClosurePackageNames,
   packedOverlayInstallArgs,
   readPackageJson,
   thirdPartyInstallArgs,
@@ -105,9 +105,12 @@ function copyPackage(sourceRoot, targetRoot, context) {
 }
 
 function pack(root, destination, context) {
-  const args = ['pack', '--json', '--pack-destination', destination];
-  args.push('--ignore-scripts');
-  const output = run('npm', args, context, { cwd: root }).stdout;
+  const output = run(
+    'npm',
+    ['pack', '--json', '--pack-destination', destination, '--ignore-scripts'],
+    context,
+    { cwd: root },
+  ).stdout;
   const entries = JSON.parse(output);
   if (entries.length !== 1 || typeof entries[0]?.filename !== 'string') {
     throw new Error(`${context} did not produce exactly one tarball.`);
@@ -155,17 +158,7 @@ function assertInstalledUnderConsumer(packageName) {
 try {
   const packageRoots = discoverPackageRoots(packagesRoot);
   const clientManifest = readPackageJson(clientRoot);
-  const compileManifest = {
-    ...clientManifest,
-    dependencies: {
-      ...clientManifest.dependencies,
-      ...Object.fromEntries(
-        Object.entries(clientManifest.devDependencies ?? {})
-          .filter(([name]) => name.startsWith('@jinn-network/')),
-      ),
-    },
-  };
-  const names = closurePackageNames(compileManifest, packageRoots);
+  const names = packedClosurePackageNames(clientManifest, packageRoots);
 
   mkdirSync(archivesRoot, { recursive: true });
   mkdirSync(stagingRoot, { recursive: true });
@@ -188,10 +181,9 @@ try {
     lockfileSource: assertFixtureLockfilePresent(scriptsRoot),
   });
   installPackedArchives([...archives.values()], 'overlay packed first-party closure');
-  const closureDependencies = Object.fromEntries(names.map((name) => [
-    name,
-    readPackageJson(packageRoots.get(name)).version,
-  ]));
+  const closureDependencies = Object.fromEntries(
+    names.map((name, index) => [name, closureManifests[index].version]),
+  );
   writeConsumerPackageJson(consumerRoot, {
     dependencies: { ...thirdParty.dependencies, ...closureDependencies },
     devDependencies: thirdParty.devDependencies,

@@ -17,6 +17,11 @@ export function closurePackageNames(
   packageRoots: Map<string, string>,
 ): string[];
 
+export function packedClosurePackageNames(
+  operatorManifest: Record<string, unknown>,
+  packageRoots: Map<string, string>,
+): string[];
+
 export function thirdPartyInstallArgs(): string[];
 
 export function packedOverlayInstallArgs(archives: readonly string[]): string[];

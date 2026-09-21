@@ -13,10 +13,10 @@ import { fileURLToPath } from 'node:url';
 import {
   assertFixtureLockfilePresent,
   buildConsumerThirdPartyDependencies,
-  closurePackageNames,
   discoverPackageRoots,
   fixtureDir,
   fixtureLockfilePath,
+  packedClosurePackageNames,
   readPackageJson,
   refreshLockfileArgs,
   writeConsumerPackageJson,
@@ -45,17 +45,7 @@ function run(command, args, context, options = {}) {
 try {
   const packageRoots = discoverPackageRoots(packagesRoot);
   const clientManifest = readPackageJson(clientRoot);
-  const compileManifest = {
-    ...clientManifest,
-    dependencies: {
-      ...clientManifest.dependencies,
-      ...Object.fromEntries(
-        Object.entries(clientManifest.devDependencies ?? {})
-          .filter(([name]) => name.startsWith('@jinn-network/')),
-      ),
-    },
-  };
-  const names = closurePackageNames(compileManifest, packageRoots);
+  const names = packedClosurePackageNames(clientManifest, packageRoots);
   const thirdParty = buildConsumerThirdPartyDependencies({
     operatorManifest: clientManifest,
     closureManifests: names.map((name) => readPackageJson(packageRoots.get(name))),

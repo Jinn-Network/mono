@@ -33,6 +33,10 @@ const REFRESH_LOCKFILE_ARGS = Object.freeze([
   '--no-fund',
 ]);
 
+function isFirstPartyPackage(name) {
+  return name.startsWith('@jinn-network/');
+}
+
 function sortRecord(record) {
   return Object.fromEntries(
     Object.entries(record).sort(([left], [right]) => left.localeCompare(right)),
@@ -44,7 +48,7 @@ function thirdPartyFromField(manifest, field) {
   const source = manifest?.[field];
   if (source === null || typeof source !== 'object' || Array.isArray(source)) return entries;
   for (const [name, specifier] of Object.entries(source)) {
-    if (name.startsWith('@jinn-network/')) continue;
+    if (isFirstPartyPackage(name)) continue;
     if (typeof specifier !== 'string') continue;
     entries[name] = specifier;
   }
@@ -63,7 +67,7 @@ export function discoverPackageRoots(root, found = new Map()) {
     const manifestPath = join(entryPath, 'package.json');
     try {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      if (typeof manifest.name === 'string' && manifest.name.startsWith('@jinn-network/')) {
+      if (typeof manifest.name === 'string' && isFirstPartyPackage(manifest.name)) {
         found.set(manifest.name, entryPath);
       }
     } catch {
@@ -75,7 +79,7 @@ export function discoverPackageRoots(root, found = new Map()) {
 
 export function closurePackageNames(clientManifest, packageRoots) {
   const pending = Object.keys(clientManifest.dependencies ?? {})
-    .filter((name) => name.startsWith('@jinn-network/'));
+    .filter(isFirstPartyPackage);
   const names = new Set();
   while (pending.length > 0) {
     const name = pending.pop();
@@ -87,10 +91,26 @@ export function closurePackageNames(clientManifest, packageRoots) {
     names.add(name);
     const manifest = readPackageJson(packageRoot);
     for (const dependency of Object.keys(manifest.dependencies ?? {})) {
-      if (dependency.startsWith('@jinn-network/')) pending.push(dependency);
+      if (isFirstPartyPackage(dependency)) pending.push(dependency);
     }
   }
   return [...names].sort();
+}
+
+export function packedClosurePackageNames(operatorManifest, packageRoots) {
+  return closurePackageNames(
+    {
+      ...operatorManifest,
+      dependencies: {
+        ...operatorManifest.dependencies,
+        ...Object.fromEntries(
+          Object.entries(operatorManifest.devDependencies ?? {})
+            .filter(([name]) => isFirstPartyPackage(name)),
+        ),
+      },
+    },
+    packageRoots,
+  );
 }
 
 export function thirdPartyInstallArgs() {
