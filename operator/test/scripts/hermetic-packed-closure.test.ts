@@ -208,6 +208,9 @@ describe('packed-closure third-party pin', () => {
     expect(firstOverlay).toBeGreaterThan(-1);
     expect(clientOverlay).toBeGreaterThan(firstOverlay);
     expect(persistOperator).toBeGreaterThan(clientOverlay);
+    expect(smoke).toMatch(
+      /installPackedArchives\(\s*\[\s*\.\.\.archives\.values\(\)\s*,\s*clientArchive\s*\]/,
+    );
   });
 
   it('refresh is the only live range-resolution path', () => {

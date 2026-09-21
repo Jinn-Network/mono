@@ -212,11 +212,14 @@ try {
     'packed client',
   );
   rmSync(productRoot, { recursive: true, force: true });
-  // Keep package.json third-party-only until both packed overlays finish.
-  // Recording first-party registry versions first makes `npm install --offline`
-  // look up unpublished `@jinn-network/*` versions instead of the tarballs
-  // already in node_modules (ETARGET).
-  installPackedArchives([clientArchive], 'install packed client into clean closure');
+  // Keep package.json third-party-only until overlays finish. Re-pass the
+  // first-party tarballs with the packed client so `--offline` can satisfy
+  // `@jinn-network/*` from the local set instead of pruning them or looking
+  // up unpublished registry versions.
+  installPackedArchives(
+    [...archives.values(), clientArchive],
+    'install packed client into clean closure',
+  );
   assertInstalledUnderConsumer('@jinn-network/operator');
   writeConsumerPackageJson(consumerRoot, {
     dependencies: {
