@@ -84,9 +84,9 @@
  * `operator/test/**` holds ~1,900 numeric literals that fall inside the band
  * and are not ports at all — timeouts (`50000`, `60000`), Hyperliquid price
  * fixtures (`'50000'`, `'51500'`), and hex-address substrings (`33333`,
- * `55555`, `44444`) — so a value-only rule is pure noise. It also holds 77
- * legitimate fixed port literals in genuine port positions (snapshot
- * 2026-09-21; the live registry is
+ * `55555`, `44444`) — so a value-only rule is pure noise. The scan roots
+ * together hold 77 legitimate fixed port literals in genuine port positions
+ * (snapshot 2026-09-21; the live registry is
  * `operator/test/release/tier-1/T1.2-harness-readiness-contract.ts` — update
  * both when adding a reservation), over the distinct numbers 7331, 7332,
  * 7333, 7340, 7342, 7350, 7351, 7360, 7388, 7389, 7390, 7400, 7450, 7451,
