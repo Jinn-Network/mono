@@ -95,6 +95,13 @@ export interface RunLaunchDeps {
   readonly driverGenerationForTesting?: () => string;
   /** TEST-ONLY §7.4 host classifier. Production launch never supplies host facts. */
   readonly hostTerminalFacts?: LaunchOptions["hostTerminalFacts"];
+  /**
+   * TEST-ONLY (issue #4132). Fired after the locked load and before the draft becomes `running`
+   * or `launchedAt` is stamped, so a test can `runBind` in the window the launch-side re-read
+   * exists to cover. `createVenue` is too late: it runs after both of those, when bind already
+   * refuses.
+   */
+  readonly onBeforeLaunchStampForTesting?: () => void;
 }
 
 export interface RunLaunchInput {
@@ -524,6 +531,7 @@ export function runLaunch(
       const createVenue: typeof createLocalVenue = deps.createVenue
         ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options, context.runtimeHost));
 
+      deps.onBeforeLaunchStampForTesting?.();
       const transitioned = transition("locked", "launch");
       if (!transitioned.ok) {
         refuse("illegal-transition", `drafts.${input.draftId}.state`, transitioned.error.detail);

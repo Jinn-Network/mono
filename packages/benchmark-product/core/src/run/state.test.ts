@@ -423,4 +423,9 @@ describe("binding — never added after launch", () => {
     writeRunState(workspaceDir, "draft-1", minimalState({ binding: BINDING }));
     expect(readRunState(workspaceDir, "draft-1")?.binding).toEqual(BINDING);
   });
+
+  test("a recorded beacon binding cannot be removed", () => {
+    writeRunState(workspaceDir, "draft-1", minimalState({ binding: BINDING }));
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState())).toThrow(/cannot be removed/);
+  });
 });

@@ -459,29 +459,31 @@ function parseItemsFlag(raw: string): number {
 
 /**
  * Parses `--beacon-round`; refuses `"invalid-invocation"` naming `--beacon-round` unless the text
- * is decimal digits denoting a positive round (issue #3332).
+ * is decimal digits denoting a positive round (issue #3332). Surrounding whitespace is stripped
+ * first so this check agrees with the web action, whose `field()` helper trims (issue #4133).
  *
  * The shape check is on the TEXT, before conversion, because `Number` is a coercion rather than a
- * parse: it reads `"1e3"`, `"0x10"`, `"+1"`, `"1."` and `"  1000  "` as integers, and `""` as
- * zero. `Number.isInteger` then passes and the schema's bound admits the result, so the operator
- * who mistyped a round is not refused by name -- they get a successfully bound run at a round they
+ * parse: it reads `"1e3"`, `"0x10"`, `"+1"` and `"1."` as integers, and `""` as zero.
+ * `Number.isInteger` then passes and the schema's bound admits the result, so the operator who
+ * mistyped a round is not refused by name -- they get a successfully bound run at a round they
  * never typed. `bind` is write-once by design (a run binds once, because re-binding is re-drawing),
  * so a coerced round cannot be corrected by rebinding; and a coerced value that happens to land
  * after the seal binds cleanly to the wrong round. The web action applies the same rule at its own
- * entry point (`web/src/app/actions.ts`).
+ * entry point (`web/src/app/actions.ts`): trim, then decimal digits, then a safe positive integer.
  *
  * Leading zeros are admitted: `007` denotes 7 unambiguously, and refusing it would only reject a
- * spelling the operator meant.
+ * spelling the operator meant. `"  1000  "` is the same round after trim, not a refusal.
  */
 function parseBeaconRoundFlag(raw: string): number {
-  if (!/^[0-9]+$/u.test(raw)) {
+  const text = raw.trim();
+  if (!/^[0-9]+$/u.test(text)) {
     refuse(
       "invalid-invocation",
       "--beacon-round",
       `--beacon-round must be decimal digits denoting a round or block height, got ${JSON.stringify(raw)}`,
     );
   }
-  const value = Number(raw);
+  const value = Number(text);
   if (!Number.isSafeInteger(value) || value < 1) {
     refuse(
       "invalid-invocation",

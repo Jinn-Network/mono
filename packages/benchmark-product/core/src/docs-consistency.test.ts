@@ -30,6 +30,7 @@ import {
   PUBLIC_BUNDLE_V8_CHECKS,
   SUPPORTED_BUNDLE_FORMATS,
   BEACON_SOURCES,
+  MAX_BEACON_ROUND,
   expectedChecks,
 } from "@colophon-claims/check";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
@@ -726,7 +727,15 @@ describe("product documentation consistency", () => {
    */
   it("publishes exactly the scheduled beacon sources' own chain parameters", () => {
     const document = read(externalVerificationPath);
-    const rows = [...document.matchAll(
+    const heading = "## Post-seal randomness: `beacon-binding/1`";
+    const headingAt = document.indexOf(heading);
+    expect(headingAt, heading).toBeGreaterThanOrEqual(0);
+    const afterHeading = document.slice(headingAt);
+    const nextHeading = afterHeading.slice(heading.length).search(/^## /mu);
+    const section = nextHeading === -1
+      ? afterHeading
+      : afterHeading.slice(0, heading.length + nextHeading);
+    const rows = [...section.matchAll(
       /^\| `(?<source>[^`]+)` \| (?<genesis>\d+) \| (?<period>\d+) \|$/gmu,
     )].map((match) => ({
       source: match.groups!["source"]!,
@@ -752,8 +761,17 @@ describe("product documentation consistency", () => {
     for (const [source, definition] of Object.entries(BEACON_SOURCES)) {
       if (definition.timeBasis === "deterministic-round-time") continue;
       expect(rows.some((row) => row.source === source), source).toBe(false);
-      expect(document).toContain(`\`${source}\` indexes by block height`);
+      expect(section).toContain(`\`${source}\` indexes by block height`);
     }
+
+    // Refusal ceilings are not beacon facts (issue #4135). A row that did not match the
+    // three-column source table would otherwise go unnoticed while a reader treated it as one.
+    expect(section).not.toMatch(/MAX_BEACON_ROUND/);
+    expect(section).not.toContain(String(MAX_BEACON_ROUND));
+    expect(section).not.toContain("1000000000000");
+    expect(section).not.toContain("1,000,000,000,000");
+    expect(section).not.toContain("8640000000000000");
+    expect(section).not.toContain("8.64e15");
   });
 });
 
