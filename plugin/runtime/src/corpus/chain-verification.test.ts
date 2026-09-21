@@ -126,13 +126,23 @@ describe("driver-backed chain verification", () => {
     expect(passed.head).toBe(head);
   });
 
-  test("rejects an unchanged head when the driver refuses it, surfacing the outcome status", async () => {
+  test("rejects an unchanged head when the driver refuses it, surfacing the shared refusal slug (#3494)", async () => {
     const driver = {
       verifyHead: async () => ({ status: "stale" }) as never,
     } as unknown as VerifyDriver;
     await expect(createDriverChainVerification(driver, spyLogger()).revalidateHead(headInput)).resolves.toEqual({
       status: "rejected",
-      reason: "stale",
+      reason: "stale-source-head",
+    });
+  });
+
+  test("maps unauthorized-signer to the same slug the operator consumer logs (#3494)", async () => {
+    const driver = {
+      verifyHead: async () => ({ status: "unauthorized-signer" }) as never,
+    } as unknown as VerifyDriver;
+    await expect(createDriverChainVerification(driver, spyLogger()).revalidateHead(headInput)).resolves.toEqual({
+      status: "rejected",
+      reason: "unauthorized-source-signer",
     });
   });
 

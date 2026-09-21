@@ -33,6 +33,45 @@ export type SourceHeadOutcome =
   | { status: "head-payload-mismatch" } // envelope does not carry these head bytes
   | { status: "invalid-head-envelope" }; // not a parseable wire DSSE envelope
 
+export type SourceHeadRefusalStatus = Exclude<SourceHeadOutcome["status"], "ok">;
+
+/**
+ * Shared log/reason slug for a `verifySourceHead` refusal (#3494).
+ *
+ * The procedure's typed `status` stays the protocol vocabulary. Callers that
+ * already prefix chain-path refusals (`stale-source-head`,
+ * `unauthorized-source-signer`) use this so a defect reads the same on the
+ * head path as on the chain path.
+ *
+ * `head-origin-mismatch` is deliberately NOT rewritten to
+ * `SOURCE_HEAD_ORIGIN_PRECHECK_REASON`: that latter slug is a consumer's
+ * `formatOrigin` string compare, which fires before this procedure runs.
+ */
+export type SourceHeadRefusalReason =
+  | "stale-source-head"
+  | "unauthorized-source-signer"
+  | "refresh-by-ceiling"
+  | "head-issued-ahead"
+  | "head-origin-mismatch"
+  | "head-payload-mismatch"
+  | "invalid-head-envelope";
+
+export const SOURCE_HEAD_ORIGIN_PRECHECK_REASON = "source-head-origin-mismatch" as const;
+
+export function sourceHeadRefusalReason(
+  status: SourceHeadRefusalStatus,
+): SourceHeadRefusalReason {
+  switch (status) {
+    case "stale": return "stale-source-head";
+    case "unauthorized-signer": return "unauthorized-source-signer";
+    case "refresh-by-ceiling": return "refresh-by-ceiling";
+    case "head-issued-ahead": return "head-issued-ahead";
+    case "head-origin-mismatch": return "head-origin-mismatch";
+    case "head-payload-mismatch": return "head-payload-mismatch";
+    case "invalid-head-envelope": return "invalid-head-envelope";
+  }
+}
+
 export type FactsConsistency = "consistent" | "inconsistent" | "indeterminate";
 
 export type ItemOutcome =

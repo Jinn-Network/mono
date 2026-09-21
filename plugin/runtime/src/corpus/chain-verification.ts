@@ -2,6 +2,7 @@
 
 import type { SyncedEntry, VerifyDriver } from "@jinn-network/record-discovery-client";
 import type { SourceHead, SourceIdentity } from "@jinn-network/record-discovery-protocol";
+import { sourceHeadRefusalReason } from "@jinn-network/record-discovery-protocol";
 import type { DsseEnvelope } from "@jinn-network/trust-core";
 
 import type { RuntimeLogger } from "../logger.js";
@@ -240,7 +241,7 @@ export function createDriverChainVerification(
         });
         return outcome.status === "ok"
           ? { status: "ok" }
-          : { status: "rejected", reason: outcome.status };
+          : { status: "rejected", reason: sourceHeadRefusalReason(outcome.status) };
       } catch (error) {
         reportDriverFailure(input.source, "revalidate-head", error);
         return { status: "rejected", reason: "verification-failed" };

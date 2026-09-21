@@ -287,6 +287,8 @@ export function buildNativeDiscoverySources(input: {
       // catalog fault deserves its own stack rather than a lie about the
       // envelope. `pollSource` still refuses the source either way.
       async verifyHead(candidate) {
+        // Typed protocol outcome. Consumers that log a reason slug share
+        // `sourceHeadRefusalReason` (#3494); this composition is the procedure.
         return verifySourceHead({
           source: candidate.source,
           head: candidate.head,

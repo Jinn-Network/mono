@@ -342,7 +342,7 @@ describe("the verified posture over a genuinely signed archive", () => {
     expect(second.status).toBe("failed");
     expect(second.sources[0]!.failure).toEqual({
       code: "chain-verification-rejected",
-      message: "stale",
+      message: "stale-source-head",
     });
     expect((await chainVerificationCheck(capability)).ok).toBe(false);
   });

@@ -70,7 +70,11 @@ function envelope(payloadType: string, value: unknown): DsseEnvelope {
   };
 }
 
-function publicSource(entries: readonly AnnouncementEntry[], issuedAt: string): {
+function publicSource(
+  entries: readonly AnnouncementEntry[],
+  issuedAt: string,
+  origin = formatOrigin(SOURCE.agent, SOURCE.name),
+): {
   readonly endpoint: { agent: string; name: string; servingRoot: string; archiveRootUrl: string };
   readonly transport: Transport;
   readonly head: SourceHead;
@@ -79,7 +83,7 @@ function publicSource(entries: readonly AnnouncementEntry[], issuedAt: string): 
   const page = '0000000000000001';
   const head: SourceHead = {
     protocol: RECORD_DISCOVERY_VERSION,
-    origin: formatOrigin(SOURCE.agent, SOURCE.name),
+    origin,
     sequence: latest.sequence,
     entry: sealJson(latest).digest,
     issuedAt,
@@ -470,6 +474,66 @@ describe('independent public source sync', () => {
     await expect(verifier.verify(presented)).resolves.toEqual({
       status: 'rejected',
       reason: 'stale-source-head',
+    });
+    state.close();
+  });
+
+  it('refuses a fetched head whose origin string does not name the followed source before the verifier runs (#3494)', async () => {
+    const state = await ConsumerState.open(await stateRoot());
+    const source = publicSource(
+      [entry(1, null)],
+      '2026-08-02T12:01:00.000Z',
+      formatOrigin('did:web:other.example', 'requester'),
+    );
+    const verifier: PublicSourceVerifier = {
+      async verify() {
+        throw new Error('pre-verifier origin check must not reach the verifier');
+      },
+    };
+    await expect(syncPublicSource({ ...source, state, verifier })).rejects.toMatchObject<Partial<ConsumerSyncError>>({
+      reason: 'source-head-origin-mismatch',
+    });
+    expect(state.checkpoint(SOURCE)).toBeUndefined();
+    state.close();
+  });
+
+  it('maps an in-procedure origin refusal to head-origin-mismatch, not the precheck slug (#3494)', async () => {
+    const state = await ConsumerState.open(await stateRoot());
+    const sourceEntry = entry(1, null);
+    const head: SourceHead = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: formatOrigin('did:web:other.example', 'requester'),
+      sequence: sourceEntry.sequence,
+      entry: sealJson(sourceEntry).digest,
+      issuedAt: '2026-08-02T12:01:00.000Z',
+      refreshBy: '2026-08-03T12:00:00.000Z',
+    };
+    const headSignature = envelope(MEDIA_HEAD, head);
+    checkpointHead(state, head, sourceEntry, headSignature);
+
+    const verifier = createProtocolSourceVerifier({
+      state,
+      keys: {
+        async resolve() { return [{ keyid: KEY, publicKey: 'test', algorithm: 'test' }]; },
+        everBound: unusedEverBound,
+      },
+      sigs: {
+        async verify() {
+          throw new Error('origin mismatch must refuse before signature verify');
+        },
+      },
+      fresh: { isFresh: () => true },
+      now: () => new Date('2026-08-02T13:00:00.000Z'),
+    });
+    await expect(verifier.verify({
+      mode: 'unchanged',
+      source: SOURCE,
+      head,
+      headSignature,
+      entries: [],
+    })).resolves.toEqual({
+      status: 'rejected',
+      reason: 'head-origin-mismatch',
     });
     state.close();
   });
