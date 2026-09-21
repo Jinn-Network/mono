@@ -309,22 +309,24 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
   ] as const satisfies readonly SyntheticFixtureItem[];
   if (scenario === "minimal") return minimal;
 
-  // Two excluded items, each replaced by a later admitted item in its own stratum (issue #3247).
-  // The accepted set is two items in the same two strata as `minimal`, and outcomes outside the
-  // 144 scenario are arm-agnostic, so the run, the cells and the Matrix behave exactly as
-  // `minimal`'s do -- the only difference is that the replacement ledger carries TWO entries
-  // instead of zero. That is the point: every other qualification-carrying fixture yields zero or
-  // one exclusion, where sorting the projection is a no-op.
+  // Scenario name is historical (#3247). The bank now carries three exclusions: two excluded
+  // cores plus one excluded stress, each replaced by a later admitted item in the same class
+  // and stratum. The accepted set is still the same two strata as `minimal`, and outcomes
+  // outside the 144 scenario are arm-agnostic, so the run, the cells and the Matrix behave as
+  // `minimal`'s do -- the difference is that the replacement ledger carries THREE entries
+  // instead of zero. That is the point: every other qualification-carrying fixture yields zero
+  // or one exclusion, where sorting the projection is a no-op.
   //
   // Pool order is the array order here, and the item bank additionally requires the array to be
-  // sorted by `itemId`, so the excluded pair must occupy the first two ids. For the two-human path
-  // the ledger is emitted in pool order, and the `itemSha256` digests of these two fall in the
-  // OPPOSITE order (a property of their exact payload bytes, verified by the fixture's own test
-  // rather than asserted here) -- which is what makes replacement-ledger order differ from the
-  // sorted order `materialize.ts` applies. A fixture whose two orders agreed would exercise the
-  // sort vacuously, so `v4-materialize.test.ts` asserts the disagreement directly; if a payload
-  // field ever changes and the digests reorder, that assertion fails loudly instead of the
-  // coverage quietly evaporating.
+  // sorted by `itemId`, so the excluded triple occupies the first three ids. For the two-human
+  // path the ledger is emitted in pool order. Items 0 and 1 MUST stay byte-identical to the
+  // #3247 payloads: their `itemSha256` digests fall in the OPPOSITE of pool order (a property
+  // of those exact bytes, verified by the fixture's own test rather than asserted here). A
+  // sorted 3-tuple would require a sorted 2-prefix, so that inherited disagreement is what
+  // keeps replacement-ledger order different from the sorted order `materialize.ts` applies.
+  // If a payload field on items 0-1 ever changes and those two digests reorder, the
+  // `v4-materialize.test.ts` disagreement assertion fails loudly instead of the coverage
+  // quietly evaporating.
   if (scenario === "two-exclusions") {
     const item = (
       index: number,
@@ -350,8 +352,10 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
     return [
       item(0, "core", "CORRECT", "excluded"),
       item(1, "stress", "WRONG", "excluded"),
-      { ...item(2, "core", "CORRECT", "reserve"), replacesItemId: qualificationItemId(0) },
-      { ...item(3, "stress", "WRONG", "reserve"), replacesItemId: qualificationItemId(1) },
+      item(2, "core", "CORRECT", "excluded"),
+      { ...item(3, "core", "CORRECT", "reserve"), replacesItemId: qualificationItemId(0) },
+      { ...item(4, "stress", "WRONG", "reserve"), replacesItemId: qualificationItemId(1) },
+      { ...item(5, "core", "CORRECT", "reserve"), replacesItemId: qualificationItemId(2) },
     ];
   }
 
