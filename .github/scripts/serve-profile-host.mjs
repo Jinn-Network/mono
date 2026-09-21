@@ -362,7 +362,11 @@ function pemBlock(label, bytes) {
  * process needs. `CA:TRUE` is what makes the second use work.
  * @returns {{ key: string, cert: string }}
  */
-export function selfSignedLoopbackCertificate({ validityHours = 24, now = new Date() } = {}) {
+export function selfSignedLoopbackCertificate({
+  validityHours = 24,
+  now = new Date(),
+  serial = randomBytes(16),
+} = {}) {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   const name = derSequence(derSet(derSequence(
     derOid(COMMON_NAME_OID),
@@ -370,7 +374,7 @@ export function selfSignedLoopbackCertificate({ validityHours = 24, now = new Da
   )));
   const tbsCertificate = derSequence(
     der(0xa0, derInteger(Buffer.from([2]))),
-    derInteger(randomBytes(16)),
+    derInteger(serial),
     ED25519_ALGORITHM,
     name,
     derSequence(

@@ -286,10 +286,16 @@ test('derInteger encodes minimally in both directions', () => {
 });
 
 test('selfSignedLoopbackCertificate survives serials that start with a redundant zero', () => {
-  for (let index = 0; index < 2000; index += 1) {
-    const { cert } = selfSignedLoopbackCertificate();
-    new X509Certificate(cert);
-  }
+  const serial = Buffer.from([
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+  ]);
+  const { cert } = selfSignedLoopbackCertificate({ serial });
+  new X509Certificate(cert);
+  assert.equal(
+    new X509Certificate(cert).serialNumber.toLowerCase(),
+    '0102030405060708090a0b0c0d0e0f',
+  );
 });
 
 test('selfSignedLoopbackCertificate assembles a parseable loopback trust anchor', () => {
