@@ -9,8 +9,10 @@ import {
   consumerManifest,
   fixtureLockfilePath,
   installThirdPartyGraph,
+  packedClosurePackageNames,
   packedOverlayInstallArgs,
   refreshLockfileArgs,
+  requirePackageRoot,
   thirdPartyInstallArgs,
 } from '../../scripts/lib/hermetic-packed-closure.mjs';
 
@@ -77,6 +79,42 @@ describe('packed-closure third-party pin', () => {
         cwd: consumerRoot,
       },
     ]);
+  });
+
+  it('walks first-party packed-closure names from local package roots', () => {
+    const pluginRoot = join(tmpDir(), 'plugin');
+    mkdirSync(pluginRoot);
+    writeFileSync(
+      join(pluginRoot, 'package.json'),
+      `${JSON.stringify({ name: '@jinn-network/plugin', dependencies: {} })}\n`,
+    );
+    expect(
+      packedClosurePackageNames(
+        {
+          dependencies: {},
+          devDependencies: {
+            '@jinn-network/plugin': '0.1.0',
+            vitest: '^4.0.0',
+          },
+        },
+        new Map([['@jinn-network/plugin', pluginRoot]]),
+      ),
+    ).toEqual(['@jinn-network/plugin']);
+  });
+
+  it('throws when a packed-closure name has no local package root', () => {
+    expect(() =>
+      packedClosurePackageNames(
+        { dependencies: { '@jinn-network/missing': '1.0.0' } },
+        new Map(),
+      ),
+    ).toThrow('No local package root is available for @jinn-network/missing.');
+    expect(() => requirePackageRoot(new Map(), '@jinn-network/sdk')).toThrow(
+      'No local package root is available for @jinn-network/sdk.',
+    );
+    expect(
+      requirePackageRoot(new Map([['@jinn-network/sdk', '/packages/sdk']]), '@jinn-network/sdk'),
+    ).toBe('/packages/sdk');
   });
 
   it('builds a sorted union; operator specifiers win collisions; first-party-only deps are kept', () => {
@@ -152,11 +190,14 @@ describe('packed-closure third-party pin', () => {
   it('smoke consults the shared lib instead of an unpinned npm install', () => {
     const smoke = readFileSync(smokePath, 'utf8');
     expect(smoke).toContain("from './lib/hermetic-packed-closure.mjs'");
-    expect(smoke).toContain('thirdPartyInstallArgs');
-    expect(smoke).toContain('installThirdPartyGraph');
-    expect(smoke).toContain('packedOverlayInstallArgs');
-    expect(smoke).toContain('buildConsumerThirdPartyDependencies');
-    expect(smoke).not.toMatch(/'install',\s*'--ignore-scripts',\s*'--package-lock=false'/);
+    expect(smoke).toMatch(/\binstallThirdPartyGraph\s*\(/);
+    expect(smoke).toMatch(/\bpackedOverlayInstallArgs\s*\(/);
+    expect(smoke).toMatch(/\bbuildConsumerThirdPartyDependencies\s*\(/);
+    expect(smoke).toMatch(/\bpackedClosurePackageNames\s*\(/);
+    expect(smoke).not.toMatch(/\bthirdPartyInstallArgs\b/);
+    expect(smoke).toMatch(/\brequirePackageRoot\s*\(/);
+    expect(smoke).not.toMatch(/packageRoots\.get\s*\(/);
+    expect(smoke).not.toMatch(/run\(\s*['"]npm['"]\s*,\s*\[\s*['"]install['"]/);
   });
 
   it('refresh is the only live range-resolution path', () => {
@@ -169,9 +210,13 @@ describe('packed-closure third-party pin', () => {
     ]);
     const refresh = readFileSync(refreshPath, 'utf8');
     expect(refresh).toContain("from './lib/hermetic-packed-closure.mjs'");
-    expect(refresh).toContain('refreshLockfileArgs');
+    expect(refresh).toMatch(/\brefreshLockfileArgs\s*\(/);
+    expect(refresh).toMatch(/\bpackedClosurePackageNames\s*\(/);
+    expect(refresh).toMatch(/\brequirePackageRoot\s*\(/);
+    expect(refresh).not.toMatch(/packageRoots\.get\s*\(/);
     expect(refresh).toContain('--package-lock-only');
     expect(refresh).not.toContain('--package-lock=false');
+    expect(refresh).not.toMatch(/run\(\s*['"]npm['"]\s*,\s*\[\s*['"]install['"]/);
   });
 
   it('commits a third-party-only package-lock.json for the packed-closure consumer', () => {

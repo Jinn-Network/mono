@@ -27,7 +27,7 @@ import {
   packedClosurePackageNames,
   packedOverlayInstallArgs,
   readPackageJson,
-  thirdPartyInstallArgs,
+  requirePackageRoot,
   writeConsumerPackageJson,
 } from './lib/hermetic-packed-closure.mjs';
 
@@ -163,13 +163,14 @@ try {
   mkdirSync(archivesRoot, { recursive: true });
   mkdirSync(stagingRoot, { recursive: true });
   const archives = new Map();
+  const closureManifests = [];
   for (const name of names) {
-    const archive = stageAndPack(packageRoots.get(name), name);
-    archives.set(name, archive);
+    const packageRoot = requirePackageRoot(packageRoots, name);
+    archives.set(name, stageAndPack(packageRoot, name));
+    closureManifests.push(readPackageJson(packageRoot));
   }
 
   mkdirSync(consumerRoot, { recursive: true });
-  const closureManifests = names.map((name) => readPackageJson(packageRoots.get(name)));
   const thirdParty = buildConsumerThirdPartyDependencies({
     operatorManifest: clientManifest,
     closureManifests,

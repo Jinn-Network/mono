@@ -19,6 +19,7 @@ import {
   packedClosurePackageNames,
   readPackageJson,
   refreshLockfileArgs,
+  requirePackageRoot,
   writeConsumerPackageJson,
 } from './lib/hermetic-packed-closure.mjs';
 
@@ -48,7 +49,7 @@ try {
   const names = packedClosurePackageNames(clientManifest, packageRoots);
   const thirdParty = buildConsumerThirdPartyDependencies({
     operatorManifest: clientManifest,
-    closureManifests: names.map((name) => readPackageJson(packageRoots.get(name))),
+    closureManifests: names.map((name) => readPackageJson(requirePackageRoot(packageRoots, name))),
   });
   writeConsumerPackageJson(workRoot, thirdParty);
   run('npm', refreshLockfileArgs(), 'refresh packed-closure third-party lockfile', {

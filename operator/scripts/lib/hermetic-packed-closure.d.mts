@@ -7,6 +7,11 @@ export const COMPILER_DEV_DEPENDENCY_NAMES: readonly [
 
 export function readPackageJson(root: string): Record<string, unknown>;
 
+export function requirePackageRoot(
+  packageRoots: Map<string, string>,
+  name: string,
+): string;
+
 export function discoverPackageRoots(
   root: string,
   found?: Map<string, string>,

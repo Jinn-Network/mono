@@ -59,6 +59,14 @@ export function readPackageJson(root) {
   return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 }
 
+export function requirePackageRoot(packageRoots, name) {
+  const packageRoot = packageRoots.get(name);
+  if (packageRoot === undefined) {
+    throw new Error(`No local package root is available for ${name}.`);
+  }
+  return packageRoot;
+}
+
 export function discoverPackageRoots(root, found = new Map()) {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
@@ -84,10 +92,7 @@ export function closurePackageNames(clientManifest, packageRoots) {
   while (pending.length > 0) {
     const name = pending.pop();
     if (name === undefined || names.has(name)) continue;
-    const packageRoot = packageRoots.get(name);
-    if (packageRoot === undefined) {
-      throw new Error(`No local package root is available for ${name}.`);
-    }
+    const packageRoot = requirePackageRoot(packageRoots, name);
     names.add(name);
     const manifest = readPackageJson(packageRoot);
     for (const dependency of Object.keys(manifest.dependencies ?? {})) {
