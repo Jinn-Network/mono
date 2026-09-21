@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addSetupRoutes } from '../../src/api/setup-endpoints.js';
@@ -9,17 +9,34 @@ import { getChainConfig } from '../../src/earning/contracts.js';
 import { FleetStateStore } from '../../src/earning/store.js';
 import { decryptMnemonic, encryptMnemonic, generateMnemonic } from '../../src/earning/wallet.js';
 
-// Passthrough, except `chmodSync` on one chosen path fails, so a test can pin
-// what the password-file rewrite does when tightening is refused.
-const fsFaults = vi.hoisted(() => ({ chmodFailPath: undefined as string | undefined }));
-// MOCK_JUSTIFICATION: chmodSync is a leaf syscall the route calls directly; a refused chmod cannot be staged on a real file owned by the test user.
+// Passthrough, except a chosen destination can be made to truncate-then-fail
+// on writeFileSync, and writes whose path is that destination or a sibling
+// tmp (`<path>.…`) can be refused wholesale — the in-place rewrite hazard
+// #4610 closes.
+const fsFaults = vi.hoisted(() => ({
+  truncateThenFailPath: undefined as string | undefined,
+  failWritesUnder: undefined as string | undefined,
+}));
+// MOCK_JUSTIFICATION: writeFileSync is a leaf syscall the route calls directly; a mid-write ENOSPC cannot be staged on a real volume the test user owns.
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
   return {
     ...actual,
-    chmodSync: (path: Parameters<typeof actual.chmodSync>[0], mode: Parameters<typeof actual.chmodSync>[1]) => {
-      if (path === fsFaults.chmodFailPath) throw new Error('EPERM: operation not permitted, chmod');
-      actual.chmodSync(path, mode);
+    writeFileSync: (
+      path: Parameters<typeof actual.writeFileSync>[0],
+      data: Parameters<typeof actual.writeFileSync>[1],
+      options?: Parameters<typeof actual.writeFileSync>[2],
+    ) => {
+      const asString = String(path);
+      if (asString === fsFaults.truncateThenFailPath) {
+        actual.writeFileSync(path, '');
+        throw new Error('ENOSPC: no space left on device, write');
+      }
+      if (fsFaults.failWritesUnder && asString.startsWith(fsFaults.failWritesUnder)) {
+        if (asString === fsFaults.failWritesUnder) actual.writeFileSync(path, '');
+        throw new Error('ENOSPC: no space left on device, write');
+      }
+      actual.writeFileSync(path, data, options);
     },
   };
 });
@@ -611,9 +628,10 @@ describe('POST /v1/setup/change-password', () => {
     }
   }, 30000);
 
-  // Tightening happens before the write, so a refused chmod leaves the loose
-  // file holding its old value rather than the new password.
-  it('leaves a loose password file untouched when it cannot be tightened', async () => {
+  // #4610: an in-place writeFileSync that fails after truncating left a
+  // destroyed password file. Atomic replace never writes the live path, so a
+  // destination-only write fault is ignored and the new password lands.
+  it('never writes the live password file in place', async () => {
     const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
     const stateDir = join(home, '.jinn-operator');
     const earningDir = join(stateDir, 'earning');
@@ -623,15 +641,59 @@ describe('POST /v1/setup/change-password', () => {
     const store = new FleetStateStore(earningDir);
     await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
     const pwFilePath = join(stateDir, 'keystore-password');
-    writeFileSync(pwFilePath, 'some-other-value\n');
-    chmodSync(pwFilePath, 0o644);
+    writeFileSync(pwFilePath, 'old-password\n', { mode: 0o600 });
 
     const oldEnv = process.env['JINN_EARNING_DIR'];
     const oldHome = process.env['HOME'];
     const oldPassword = process.env['JINN_PASSWORD'];
     delete process.env['JINN_EARNING_DIR'];
     process.env['HOME'] = home;
-    fsFaults.chmodFailPath = pwFilePath;
+    fsFaults.truncateThenFailPath = pwFilePath;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
+    } finally {
+      fsFaults.truncateThenFailPath = undefined;
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  it('leaves the live password file intact when the atomic rewrite itself fails', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'old-password\n', { mode: 0o600 });
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    const warnings: string[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((message: unknown) => {
+      warnings.push(String(message));
+    });
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    fsFaults.failWritesUnder = pwFilePath;
     try {
       const app = new Hono();
       addSetupRoutes(app, { earningDir });
@@ -643,9 +705,58 @@ describe('POST /v1/setup/change-password', () => {
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: false });
-      expect(readFileSync(pwFilePath, 'utf-8')).toBe('some-other-value\n');
+      expect(readFileSync(pwFilePath, 'utf-8')).toBe('old-password\n');
+      expect(warnings.join('\n')).toMatch(/leaving it in place/);
     } finally {
-      fsFaults.chmodFailPath = undefined;
+      fsFaults.failWritesUnder = undefined;
+      warnSpy.mockRestore();
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  // #4610: rename replaces a symlink at the password-file path rather than
+  // writing through it, so a former target that another operator still
+  // reads is left holding its own password.
+  it('replaces a password-file symlink and leaves its former target intact', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const targetPath = join(home, 'someone-elses-password');
+    writeFileSync(targetPath, 'old-password\n', { mode: 0o600 });
+    const pwFilePath = join(stateDir, 'keystore-password');
+    symlinkSync(targetPath, pwFilePath);
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(lstatSync(pwFilePath).isSymbolicLink()).toBe(false);
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
+      expect(statSync(pwFilePath).mode & 0o777).toBe(0o600);
+      expect(readFileSync(targetPath, 'utf-8')).toBe('old-password\n');
+    } finally {
       if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
       else process.env['JINN_EARNING_DIR'] = oldEnv;
       if (oldHome === undefined) delete process.env['HOME'];

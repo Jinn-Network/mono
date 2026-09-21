@@ -16,7 +16,7 @@
  * here (out of this change's scope).
  */
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { resolveDefaultStateDir } from '../state-dir.js';
 
@@ -52,12 +52,26 @@ export function resolveEarningDirFromEnv(env: NodeJS.ProcessEnv = process.env): 
 export function ensureDaemonApiToken(path: string): { token: string; source: 'file' | 'generated' } {
   if (existsSync(path)) {
     const v = readFileSync(path, 'utf-8').trim();
-    if (v.length >= 32) return { token: v, source: 'file' };
+    if (v.length >= 32) {
+      tightenSecretFileMode(path);
+      return { token: v, source: 'file' };
+    }
   }
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const token = randomBytes(32).toString('hex');
   writeFileSync(path, token + '\n', { mode: 0o600 });
+  // `mode` is ignored when the path already exists (too-short regenerate).
+  tightenSecretFileMode(path);
   return { token, source: 'generated' };
+}
+
+/** Best-effort 0600. A refused chmod must not block boot on a usable token. */
+function tightenSecretFileMode(path: string): void {
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    /* the token is still the one the daemon will accept */
+  }
 }
 
 /** Read-only resolution for non-daemon consumers (the stop-hook CLI). Never generates. */
@@ -137,7 +151,10 @@ function persistDaemonApiToken(
     );
     return 'skipped';
   }
-  if (readDaemonApiToken(path) === token) return 'unchanged';
+  if (readDaemonApiToken(path) === token) {
+    tightenSecretFileMode(path);
+    return 'unchanged';
+  }
   const tmp = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   try {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
