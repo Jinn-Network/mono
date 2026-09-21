@@ -808,7 +808,7 @@ export function scanText(text) {
   }
 
   // One report line per line, however many rules fired on it, and in file
-  // order — three of the rules run over the whole file after the per-line
+  // order — 1a, 1d, 1e, and 2b's whole-file forms run after the per-line
   // pass, so insertion order is not reading order.
   const seen = new Set();
   return violations
