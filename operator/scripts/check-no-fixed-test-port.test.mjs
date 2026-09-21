@@ -103,7 +103,6 @@ test('rule 1c sees through a type annotation', () => {
   assert.deepEqual(flagged('const apiPort: number = 45_000;'), [1]);
   assert.deepEqual(flagged('const apiPort: number = opts.apiPort ?? 45000;'), [1]);
   assert.deepEqual(flagged('const apiPort: number = 7331;'), [], 'sub-band is still fine');
-  assert.deepEqual(flagged('const makePort: () => number = () => 45000;'), [], 'not a binding');
 });
 
 test('rule 1c catches the defaulted-constant form', () => {
@@ -551,6 +550,11 @@ test('rule 2b catches a concise arrow bound to an in-band literal', () => {
   assert.deepEqual(flagged('const pickPort = () => 45000;'), [1], 'concise arrow');
   assert.deepEqual(flagged('const pickPort = () => (45000);'), [1], 'parenthesized concise arrow');
   assert.deepEqual(flagged('const pickPort = (): number => 45000;'), [1], 'typed concise arrow');
+  assert.deepEqual(
+    flagged('const pickPort: () => number = () => 45000;'),
+    [1],
+    'function-typed binding — PORT_DECL must not steal the = of =>',
+  );
   assert.deepEqual(flagged('let pickPort = () => 45_000;'), [1], 'separated, and `let` too');
   assert.deepEqual(flagged('const pickPort = () =>\n  45000;'), [2], 'arrow body on the next line');
   assert.deepEqual(flagged('const pickPort = () => 7732;'), [], 'sub-band is the sanctioned form');
@@ -563,6 +567,11 @@ test('rule 2b catches a returned in-band array from a port-ish declaration', () 
   assert.deepEqual(flagged('function pickPort() { return [45000]; }'), [1], 'single-element return');
   assert.deepEqual(flagged('const pickPort = () => { return [45000]; };'), [1], 'block arrow returning an array');
   assert.deepEqual(flagged('const pickPorts = () => [45000];'), [1], 'concise arrow returning an array');
+  assert.deepEqual(
+    flagged('const pickPorts: () => number[] = () => [45000];'),
+    [1],
+    'function-typed binding returning an array',
+  );
   assert.deepEqual(
     flagged('function pickPorts() {\n  return [\n    45000,\n  ];\n}'),
     [3],

@@ -59,7 +59,8 @@
  *      dropped. The brace-body form is `function pickPort() { return 45000; }`
  *      (#3580). The shapes that escaped it (#4140) are a concise arrow bound
  *      to a scalar (`const pickPort = () => 45000`, including the
- *      parenthesized `() => (45000)` and an optional `(): Type =>`) and a
+ *      parenthesized `() => (45000)`, an optional `(): Type =>`, and a
+ *      function-typed binding `const pickPort: () => number = () => 45000`) and a
  *      returned array (`function pickPorts() { return [45000]; }`,
  *      `const pickPorts = () => [45000]`, and the brace-body
  *      `() => { return [45000]; }`). Same port, one shape away from a form
@@ -354,10 +355,13 @@ const ARRAY_ELEMENT = new RegExp(NUM_FREE, 'g');
 // `const apiPort = 45000` — a bound-later port that PORT_KEY misses because it
 // is an assignment, not an object key. The first optional group is the TS type
 // annotation (`const apiPort: number = 45000`), which is ordinary in a `.ts`
-// file and otherwise breaks the name-to-`=` adjacency; the second is the
-// defaulted form `const portBase = opts.portBase ?? 45000`, which is how a
-// helper's default port is actually written in this tree.
-const PORT_DECL = `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=;\\n]+)?\\s*=\\s*`;
+// file and otherwise breaks the name-to-`=` adjacency. Function types are
+// included: `=>` is consumed as a unit so the type cannot steal the `=` of
+// `() => number` and miss the initializer. The second optional group (on
+// PORT_DECL_LITERAL) is the defaulted form
+// `const portBase = opts.portBase ?? 45000`, which is how a helper's default
+// port is actually written in this tree.
+const PORT_DECL = `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*(?:=>|[^=;\\n])+)?\\s*=\\s*`;
 const PORT_DECL_LITERAL = new RegExp(
   `${PORT_DECL}(?:[^;\\n]*?(?:\\?\\?|\\|\\|)\\s*)?${NUM}`,
   'g',
@@ -385,8 +389,9 @@ const RETURN_LITERAL = new RegExp(`\\breturn\\s+${NUM}`, 'g');
 // Concise-arrow parameter list: `()` optionally annotated `(): Type`. The type
 // stops before `=>` so `(): number[] => [45000]` does not swallow the arrow.
 const CONCISE_ARROW_PARAMS = '\\(\\s*\\)(?:\\s*:\\s*[^=>;\\n]+)?';
-// `const pickPort = () => 45000` / `() => (45000)` / `(): number => 45000`.
-// The optional parens around the literal are the grouping form, not a call.
+// `const pickPort = () => 45000` / `() => (45000)` / `(): number => 45000` /
+// `const pickPort: () => number = () => 45000`. The optional parens around the
+// literal are the grouping form, not a call.
 const CONCISE_ARROW_LITERAL = new RegExp(
   `${PORT_DECL}${CONCISE_ARROW_PARAMS}\\s*=>\\s*\\(?\\s*${NUM}\\s*\\)?`,
   'g',
