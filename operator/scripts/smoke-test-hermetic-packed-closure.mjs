@@ -20,8 +20,17 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  assertFixtureLockfilePresent,
+  buildConsumerThirdPartyDependencies,
+  installThirdPartyGraph,
+  packedOverlayInstallArgs,
+  thirdPartyInstallArgs,
+  writeConsumerPackageJson,
+} from './lib/hermetic-packed-closure.mjs';
 
-const clientRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const scriptsRoot = dirname(fileURLToPath(import.meta.url));
+const clientRoot = join(scriptsRoot, '..');
 const repoRoot = resolve(clientRoot, '..');
 const packagesRoot = join(repoRoot, 'packages');
 const closureRoot = mkdtempSync(join(tmpdir(), 'jinn-hermetic-packed-closure-'));
@@ -152,32 +161,8 @@ function stageAndPack(sourceRoot, packageName) {
   return pack(stagedRoot, archivesRoot, `pack ${packageName}`);
 }
 
-function installPackedArchives(archives, context, offline = false) {
-  run(
-    'npm',
-    [
-      'install',
-      '--no-save',
-      '--ignore-scripts',
-      '--package-lock=false',
-      '--no-audit',
-      '--no-fund',
-      ...(offline ? ['--offline'] : []),
-      ...archives,
-    ],
-    context,
-    { cwd: consumerRoot },
-  );
-}
-
-function writeConsumerManifest(dependencies, devDependencies = {}) {
-  const manifest = sanitizedManifest({
-    private: true,
-    type: 'module',
-    dependencies,
-    devDependencies,
-  }, 'clean consumer manifest', false);
-  writeFileSync(join(consumerRoot, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+function installPackedArchives(archives, context) {
+  run('npm', packedOverlayInstallArgs(archives), context, { cwd: consumerRoot });
 }
 
 function assertNoPersistedLocalSpecs(root) {
@@ -231,30 +216,26 @@ try {
   }
 
   mkdirSync(consumerRoot, { recursive: true });
+  const closureManifests = names.map((name) => readPackageJson(packageRoots.get(name)));
+  const thirdParty = buildConsumerThirdPartyDependencies({
+    operatorManifest: clientManifest,
+    closureManifests,
+  });
+  writeConsumerPackageJson(consumerRoot, thirdParty);
+  installThirdPartyGraph({
+    run,
+    consumerRoot,
+    lockfileSource: assertFixtureLockfilePresent(scriptsRoot),
+  });
+  installPackedArchives([...archives.values()], 'overlay packed first-party closure');
   const closureDependencies = Object.fromEntries(names.map((name) => [
     name,
     readPackageJson(packageRoots.get(name)).version,
   ]));
-  const runtimeExternalDependencies = Object.fromEntries(
-    Object.entries({
-      ...clientManifest.dependencies,
-      ...clientManifest.optionalDependencies,
-    }).filter(([name]) => !name.startsWith('@jinn-network/')),
-  );
-  const compilerDependencies = Object.fromEntries(
-    ['typescript', '@types/node', '@types/semver', '@types/ws']
-      .map((name) => [name, clientManifest.devDependencies?.[name]])
-      .filter(([, version]) => typeof version === 'string'),
-  );
-  writeConsumerManifest(runtimeExternalDependencies, compilerDependencies);
-  run(
-    'npm',
-    ['install', '--ignore-scripts', '--package-lock=false', '--no-audit', '--no-fund'],
-    'install dependency-only packed closure',
-    { cwd: consumerRoot },
-  );
-  installPackedArchives([...archives.values()], 'install dependency-only packed closure');
-  writeConsumerManifest({ ...runtimeExternalDependencies, ...closureDependencies }, compilerDependencies);
+  writeConsumerPackageJson(consumerRoot, {
+    dependencies: { ...thirdParty.dependencies, ...closureDependencies },
+    devDependencies: thirdParty.devDependencies,
+  });
 
   for (const name of names) {
     assertInstalledUnderConsumer(name);
@@ -283,12 +264,15 @@ try {
     'packed client',
   );
   rmSync(productRoot, { recursive: true, force: true });
-  writeConsumerManifest({
-    ...runtimeExternalDependencies,
-    ...closureDependencies,
-    '@jinn-network/operator': clientManifest.version,
-  }, compilerDependencies);
-  installPackedArchives([clientArchive], 'install packed client into clean closure', true);
+  writeConsumerPackageJson(consumerRoot, {
+    dependencies: {
+      ...thirdParty.dependencies,
+      ...closureDependencies,
+      '@jinn-network/operator': clientManifest.version,
+    },
+    devDependencies: thirdParty.devDependencies,
+  });
+  installPackedArchives([clientArchive], 'install packed client into clean closure');
   assertInstalledUnderConsumer('@jinn-network/operator');
   assertNoPersistedLocalSpecs(consumerRoot);
   const resolved = run(
