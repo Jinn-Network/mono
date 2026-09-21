@@ -160,10 +160,10 @@ describe("public bundle v4 contracts", () => {
     qualification.admissionRecords.push(
       ...[0, 1, 2, 3, 4, 5].map((n) => ({ sha256: unused(n), roles: ["source-item"] })),
     );
-    qualification.admissionRecords.sort((left, right) =>
+    qualification.admissionRecords.sort((left: { sha256: string }, right: { sha256: string }) =>
       compareCodeUnitStrings(left.sha256, right.sha256)
     );
-    qualification.reachableSha256s = qualification.admissionRecords.map((entry) => entry.sha256);
+    qualification.reachableSha256s = qualification.admissionRecords.map((entry: { sha256: string }) => entry.sha256);
     qualification.exclusions = [
       { itemSha256: unused(2), replacementItemSha256: unused(3), reason: "review-disagreement" },
       { itemSha256: unused(0), replacementItemSha256: unused(4), reason: "review-disagreement" },
@@ -178,9 +178,10 @@ describe("public bundle v4 contracts", () => {
 
     const sorted = BundleQualificationSchema.safeParse({
       ...qualification,
-      exclusions: [...qualification.exclusions].sort((left, right) =>
-        compareCodeUnitStrings(left.itemSha256, right.itemSha256)
-      ),
+      exclusions: [...qualification.exclusions].sort((
+        left: { itemSha256: string },
+        right: { itemSha256: string },
+      ) => compareCodeUnitStrings(left.itemSha256, right.itemSha256)),
     });
     expect(sorted.success).toBe(true);
   });
