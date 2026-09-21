@@ -185,15 +185,10 @@ try {
   const closureDependencies = Object.fromEntries(
     names.map((name, index) => [name, closureManifests[index].version]),
   );
-  writeConsumerPackageJson(consumerRoot, {
-    dependencies: { ...thirdParty.dependencies, ...closureDependencies },
-    devDependencies: thirdParty.devDependencies,
-  });
 
   for (const name of names) {
     assertInstalledUnderConsumer(name);
   }
-  assertNoPersistedLocalSpecs(consumerRoot);
 
   copyPackage(clientRoot, productRoot, '@jinn-network/operator');
   const tsc = join(consumerRoot, 'node_modules', '.bin', 'tsc');
@@ -217,6 +212,12 @@ try {
     'packed client',
   );
   rmSync(productRoot, { recursive: true, force: true });
+  // Keep package.json third-party-only until both packed overlays finish.
+  // Recording first-party registry versions first makes `npm install --offline`
+  // look up unpublished `@jinn-network/*` versions instead of the tarballs
+  // already in node_modules (ETARGET).
+  installPackedArchives([clientArchive], 'install packed client into clean closure');
+  assertInstalledUnderConsumer('@jinn-network/operator');
   writeConsumerPackageJson(consumerRoot, {
     dependencies: {
       ...thirdParty.dependencies,
@@ -225,8 +226,6 @@ try {
     },
     devDependencies: thirdParty.devDependencies,
   });
-  installPackedArchives([clientArchive], 'install packed client into clean closure');
-  assertInstalledUnderConsumer('@jinn-network/operator');
   assertNoPersistedLocalSpecs(consumerRoot);
   const resolved = run(
     process.execPath,

@@ -200,6 +200,16 @@ describe('packed-closure third-party pin', () => {
     expect(smoke).not.toMatch(/run\(\s*['"]npm['"]\s*,\s*\[\s*['"]install['"]/);
   });
 
+  it('persists first-party registry versions only after both packed overlays', () => {
+    const smoke = readFileSync(smokePath, 'utf8');
+    const firstOverlay = smoke.indexOf('overlay packed first-party closure');
+    const clientOverlay = smoke.indexOf('install packed client into clean closure');
+    const persistOperator = smoke.indexOf("'@jinn-network/operator': clientManifest.version");
+    expect(firstOverlay).toBeGreaterThan(-1);
+    expect(clientOverlay).toBeGreaterThan(firstOverlay);
+    expect(persistOperator).toBeGreaterThan(clientOverlay);
+  });
+
   it('refresh is the only live range-resolution path', () => {
     expect(refreshLockfileArgs()).toEqual([
       'install',
