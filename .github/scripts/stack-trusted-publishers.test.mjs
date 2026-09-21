@@ -101,3 +101,34 @@ test('the CLI writes both artifact files', () => {
     rmSync(out, { recursive: true, force: true });
   }
 });
+
+test('the stack publishing runbook tracks the generated set, CLI registration, and wave truncation', () => {
+  const runbook = readFileSync(join(repoRoot, 'docs/runbooks/stack-npm-publishing.md'), 'utf8');
+  const sealedCount = loadCatalogPackages(repoRoot, { releaseGroup: 'sealed-platform-v1' }).length;
+  const implementationsCount = loadCatalogPackages(repoRoot, {
+    releaseGroup: 'implementations-v1',
+  }).length;
+  const registrations = buildRegistrationList(repoRoot);
+  assert.equal(registrations.length, sealedCount + implementationsCount);
+  assert.match(
+    runbook,
+    new RegExp(String.raw`sealed-platform-v1\` \(${sealedCount} packages\)`),
+  );
+  assert.match(
+    runbook,
+    new RegExp(String.raw`implementations-v1\` \(${implementationsCount} packages\)`),
+  );
+  assert.match(runbook, new RegExp(String.raw`\*\*${registrations.length}\*\* rows`));
+  assert.match(runbook, new RegExp(String.raw`${registrations.length} names`));
+  assert.equal(
+    registrations.some((row) => row.package === '@jinn-network/evidence-offer'),
+    true,
+  );
+  assert.match(runbook, /@jinn-network\/evidence-offer/);
+  assert.match(runbook, /2026-09-01/);
+  assert.match(runbook, /ritsukai/);
+  assert.match(runbook, /npm publish[^\n]*--tag bootstrap/);
+  assert.match(runbook, /npm trust github/);
+  assert.match(runbook, /ENEEDAUTH/);
+  assert.match(runbook, /truncat(?:e|es|ed|ion)|subsequent packages/i);
+});
