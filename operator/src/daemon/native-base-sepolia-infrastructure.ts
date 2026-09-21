@@ -225,8 +225,11 @@ export class NativeRecordDestinationError extends Error {
  */
 export function reportRefusedRecordDestination(context: string, cause: unknown): boolean {
   if (!(cause instanceof NativeRecordDestinationError)) return false;
+  // Same quoting as NativeRecordDestinationError's message (#4643): a peer locator can contain
+  // newlines once it is no longer required to parse as a URL, and raw interpolation would spoof
+  // a following log line.
   console.warn(
-    `[native-records] ${context}: refused destination ${cause.destination}: ${cause.detail}`,
+    `[native-records] ${context}: refused destination ${JSON.stringify(cause.destination)}: ${cause.detail}`,
   );
   return true;
 }
