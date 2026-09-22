@@ -1,24 +1,13 @@
 /**
- * Corpus cache helpers.
+ * Corpus cache is not a public helper surface.
  *
  * The corpus library reuses the existing `network_artifacts` and `served_artifacts`
- * tables on the daemon's `Store`. There is no separate corpus cache layer — the
- * acquire chain in `acquire.ts` is the only writer/reader. This module exposes
- * thin convenience helpers for higher-level code that wants to inspect or
- * pre-populate the cache without going through `acquireArtifactContent`.
+ * tables on the daemon's `Store`. There is no separate corpus cache API —
+ * `acquireArtifactContent` is the only writer/reader, and it digest-checks cached
+ * rows before serving them. Do not reintroduce `getCachedArtifact` /
+ * `hasCachedArtifact`: they returned unverified `network_artifacts` rows and
+ * would reopen the byte-admission gap #4359 closed (#4500).
  *
  * Spec: spec/2026-04-30-phase-a-umbrella.md §2.4 (caching semantics).
  */
-
-import type { CorpusStorePort, NetworkArtifactRow } from './types.js';
-
-export function getCachedArtifact(
-  store: CorpusStorePort,
-  sha256: string,
-): NetworkArtifactRow | null {
-  return store.getNetworkArtifact(sha256);
-}
-
-export function hasCachedArtifact(store: CorpusStorePort, sha256: string): boolean {
-  return store.getNetworkArtifact(sha256) !== null;
-}
+export {};
