@@ -274,7 +274,7 @@ const COVERAGE = [
   {
     label: 'Named checks in isolation',
     claim:
-      "`source-head-revalidation` outcomes (`ok` for a byte-identical head, `stale`, `refresh-by-ceiling`, `head-issued-ahead`, `unauthorized-signer` both for a key that rotated out before the head was issued and for one that rotated out after, `head-origin-mismatch` for a head naming a source other than the one followed, and `head-payload-mismatch`), each exercised with the procedure handed the followed source's seeded high-water mark store, so the kit proves §10.5's *adopts nothing* property — a revalidated head leaves the stored mark unchanged, whatever the outcome",
+      "`source-head-revalidation` outcomes (`ok` for a byte-identical head, `stale`, `refresh-by-ceiling`, `head-issued-ahead`, `unauthorized-signer` both for a key that rotated out before the head was issued and for one that rotated out after, `head-origin-mismatch` for a head naming a source other than the one followed, `head-payload-mismatch`, and `invalid-head-envelope`), each exercised with the procedure handed the followed source's seeded high-water mark store, so the kit proves §10.5's *adopts nothing* property — a revalidated head leaves the stored mark unchanged, whatever the outcome",
     // Every `source-head` vector seeds the followed source's mark, and the harness
     // (`checkSourceHeadVector`) passes that same store to the procedure under test and asserts
     // the stored mark is unchanged after every call, `ok` included, so each vector discharges
@@ -289,6 +289,7 @@ const COVERAGE = [
       'source-head-revalidation-signer-rotated-since-issue',
       'source-head-revalidation-head-origin-mismatch',
       'source-head-revalidation-head-payload-mismatch',
+      'source-head-revalidation-invalid-head-envelope',
     ],
   },
   {

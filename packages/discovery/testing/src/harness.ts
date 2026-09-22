@@ -104,6 +104,17 @@ export function isParseErrorVector(vector: Vector): boolean {
   return (vector.expect as { status?: string }).status === "parse-error";
 }
 
+/**
+ * `source-head` vectors whose `headSignature` is already the unparseable wire
+ * object `verifySourceHead` must refuse as `invalid-head-envelope`. The rest of
+ * the corpus stores legible fixture envelopes that become wire form only via
+ * `vectorEnvelopeToWire`; converting this one would mint valid base64 of the
+ * garbage and hide the parse failure.
+ */
+export function isInvalidHeadEnvelopeVector(vector: Vector): boolean {
+  return vector.kind === "source-head" && (vector.expect as { status?: string }).status === "invalid-head-envelope";
+}
+
 // -- item / facts-consistency / derivation-consistency vector shapes ------
 
 export interface FactsConsistencyVectorInput {
