@@ -102,6 +102,7 @@ test('the canary host refresh copies same-run attested bytes to the host and pus
   assert.match(block, /github\.ref == 'refs\/heads\/next'/u);
   // Unconfigured must skip rather than turn `next` red.
   assert.match(block, /vars\.JINN_PROFILE_HOST_REPOSITORY != ''/u);
+  assert.match(block, /LANE: canary/u);
   assert.match(block, /timeout-minutes:/u);
 
   // Push authority is the PAT, never GITHUB_TOKEN.
@@ -190,7 +191,7 @@ test('the canary host refresh copies same-run attested bytes to the host and pus
   ]);
 });
 
-test('the live-host gate explains a stale or lane-mismatched host', () => {
+test('the live-host gate explains a stale host without claiming a lane-byte mismatch', () => {
   const liveHostAt = workflow.indexOf('stable-live-host-verification:');
   const attestationAt = workflow.indexOf('stable-live-host-attestation:');
   const block = workflow.slice(liveHostAt, attestationAt);
@@ -200,11 +201,9 @@ test('the live-host gate explains a stale or lane-mismatched host', () => {
   // failed checkout, when the job never reached the network.
   assert.match(block, /if: failure\(\) && steps\.gate\.outcome == 'failure'/u);
   assert.match(block, /host refresh may not have run yet/u);
-  // The marker is written only when the mirror commits, so it names the last
-  // content-changing refresh, not the last refresh: a no-op refresh since then leaves
-  // it untouched. The incident-time message must not invite the wrong conclusion.
-  assert.match(block, /content-changing refresh/u);
-  assert.doesNotMatch(block, /lane it was last refreshed/u);
+  assert.match(block, /do not embed lane/u);
+  assert.match(block, /identical content writes nothing/u);
+  assert.doesNotMatch(block, /never byte-match a stable manifest/u);
   assert.match(block, /docs\/runbooks\/jinn-network-profile-hosting\.md/u);
 });
 

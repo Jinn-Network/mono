@@ -77,7 +77,6 @@ function sampleRoot({ signed = true, releaseGroup = GROUP, entries = SAMPLE } = 
     version: 1,
     generatedFrom: { repository: 'Jinn-Network/mono', commit: '0'.repeat(40) },
     releaseGroup,
-    lane: 'canary',
     packages: ['@jinn-network/sample'],
     documents,
   };

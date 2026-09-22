@@ -58,7 +58,6 @@ function writeFile(dir, relativePath, content) {
  */
 function makeBundle({
   groups = ['implementations-v1', 'sealed-platform-v1'],
-  lane = 'canary',
   commit = SHA,
   documents = { 'schemas/task.schema.json': '{"$id":"task"}\n' },
   manifestOverrides = {},
@@ -69,7 +68,6 @@ function makeBundle({
     const manifest = {
       generatedFrom: { repository: 'Jinn-Network/mono', commit },
       releaseGroup: group,
-      lane,
       documents: Object.keys(documents).map((servedPath) => ({ path: servedPath })),
       ...(manifestOverrides[group] ?? {}),
     };
@@ -104,8 +102,8 @@ function commitCount(dir) {
   return Number(git(dir, ['rev-list', '--count', 'HEAD']).trim());
 }
 
-function refresh(bundleDir, hostDir, sourceSha = SHA, expectedGroups = GROUPS) {
-  return run({ bundleDir, hostDir, sourceSha, workflowPath: WORKFLOW_PATH, expectedGroups });
+function refresh(bundleDir, hostDir, sourceSha = SHA, expectedGroups = GROUPS, lane = 'canary') {
+  return run({ bundleDir, hostDir, sourceSha, workflowPath: WORKFLOW_PATH, expectedGroups, lane });
 }
 
 // --- the mirror ------------------------------------------------------------
@@ -409,7 +407,6 @@ test('validateBundleDir refuses a manifest whose releaseGroup disagrees with its
     `${JSON.stringify({
       generatedFrom: { commit: SHA },
       releaseGroup: 'implementations-v1',
-      lane: 'canary',
       documents: [],
     })}\n`,
   );
@@ -417,11 +414,11 @@ test('validateBundleDir refuses a manifest whose releaseGroup disagrees with its
   cleanup(bundle);
 });
 
-test('validateBundleDir refuses groups that disagree on lane or on the source commit', () => {
-  const laneSplit = makeBundle({
+test('validateBundleDir refuses a served lane field and groups that disagree on the source commit', () => {
+  const withLane = makeBundle({
     manifestOverrides: { 'sealed-platform-v1': { lane: 'stable' } },
   });
-  assert.throws(() => validateBundleDir(laneSplit, { sourceSha: SHA, expectedGroups: GROUPS }), /lane/u);
+  assert.throws(() => validateBundleDir(withLane, { sourceSha: SHA, expectedGroups: GROUPS }), /must not embed lane/u);
 
   const commitSplit = makeBundle({
     manifestOverrides: {
@@ -429,33 +426,26 @@ test('validateBundleDir refuses groups that disagree on lane or on the source co
     },
   });
   assert.throws(() => validateBundleDir(commitSplit, { sourceSha: SHA, expectedGroups: GROUPS }), /commit/u);
-  cleanup(laneSplit, commitSplit);
+  cleanup(withLane, commitSplit);
 });
 
-test('validateBundleDir refuses a group that declares no lane and one that names no commit', () => {
+test('validateBundleDir refuses a group that names no commit', () => {
   // `undefined` is the "no group seen yet" sentinel in the agreement loop, so a manifest
-  // that OMITS the field must be refused on sight. Otherwise the value is adopted from a
+  // that OMITS generatedFrom must be refused on sight. Otherwise the value is adopted from a
   // later group: the bundle validates clean, `implementations-v1` is published carrying no
   // commit binding at all, and the same-run check congratulates itself on
   // `sealed-platform-v1`'s commit. `implementations-v1` sorts first, so this is the exact
   // live ordering.
-  for (const missing of [{ lane: undefined }, { generatedFrom: undefined }]) {
-    const bundle = makeBundle({ manifestOverrides: { 'implementations-v1': missing } });
-    assert.throws(
-      () => validateBundleDir(bundle, { sourceSha: SHA, expectedGroups: GROUPS }),
-      /implementations-v1\/manifest\.json (?:declares no lane|names no source commit)/u,
-    );
-    cleanup(bundle);
-  }
+  const bundle = makeBundle({ manifestOverrides: { 'implementations-v1': { generatedFrom: undefined } } });
+  assert.throws(
+    () => validateBundleDir(bundle, { sourceSha: SHA, expectedGroups: GROUPS }),
+    /implementations-v1\/manifest\.json names no source commit/u,
+  );
+  cleanup(bundle);
 
-  // A present-but-wrong value is refused by the same gate: `lane` is written into the
-  // provenance marker, whose canonical form admits only canary or stable, and a commit
-  // that is not a full SHA cannot carry the same-run binding.
-  const badLane = makeBundle({ lane: 'production' });
-  assert.throws(() => validateBundleDir(badLane, { sourceSha: SHA, expectedGroups: GROUPS }), /declares no lane: production/u);
   const shortCommit = makeBundle({ commit: 'abc1234' });
   assert.throws(() => validateBundleDir(shortCommit, { sourceSha: SHA, expectedGroups: GROUPS }), /names no source commit: abc1234/u);
-  cleanup(badLane, shortCommit);
+  cleanup(shortCommit);
 });
 
 test('validateBundleDir refuses a bundle built from a different commit than this run publishes', () => {
@@ -548,7 +538,7 @@ test('the CLI refuses a bundle when EXPECTED_RELEASE_GROUPS is unset or short', 
   const before = git(host, ['rev-parse', 'HEAD']).trim();
 
   for (const [label, expected] of [['unset', undefined], ['short', 'sealed-platform-v1']]) {
-    const env = { ...process.env, BUNDLE_DIR: bundle, HOST_DIR: host, SOURCE_SHA: SHA, WORKFLOW_PATH };
+    const env = { ...process.env, BUNDLE_DIR: bundle, HOST_DIR: host, SOURCE_SHA: SHA, WORKFLOW_PATH, LANE: 'canary' };
     delete env.EXPECTED_RELEASE_GROUPS;
     if (expected !== undefined) env.EXPECTED_RELEASE_GROUPS = expected;
     const result = spawnSync(process.execPath, [HELPER], { encoding: 'utf8', env });
@@ -561,17 +551,16 @@ test('the CLI refuses a bundle when EXPECTED_RELEASE_GROUPS is unset or short', 
   // The whitespace around a hand-typed list is not a different set.
   const result = spawnSync(process.execPath, [HELPER], {
     encoding: 'utf8',
-    env: { ...process.env, BUNDLE_DIR: bundle, HOST_DIR: host, SOURCE_SHA: SHA, WORKFLOW_PATH, EXPECTED_RELEASE_GROUPS: ' implementations-v1 , sealed-platform-v1 ' },
+    env: { ...process.env, BUNDLE_DIR: bundle, HOST_DIR: host, SOURCE_SHA: SHA, WORKFLOW_PATH, LANE: 'canary', EXPECTED_RELEASE_GROUPS: ' implementations-v1 , sealed-platform-v1 ' },
   });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   cleanup(bundle, host);
 });
 
-test('validateBundleDir returns the sorted groups, the agreed lane, and the commit', () => {
+test('validateBundleDir returns the sorted groups and the commit', () => {
   const bundle = makeBundle({ groups: ['sealed-platform-v1', 'implementations-v1'] });
   assert.deepEqual(validateBundleDir(bundle, { sourceSha: SHA, expectedGroups: GROUPS }), {
     groups: ['implementations-v1', 'sealed-platform-v1'],
-    lane: 'canary',
     sourceCommit: SHA,
   });
   cleanup(bundle);
@@ -707,12 +696,35 @@ test('the CLI fails loudly on a missing SOURCE_SHA and leaves the host untouched
       HOST_DIR: host,
       SOURCE_SHA: '',
       WORKFLOW_PATH,
+      LANE: 'canary',
       EXPECTED_RELEASE_GROUPS: GROUPS.join(','),
     },
   });
 
   assert.notEqual(result.status, 0);
   assert.match(result.stdout + result.stderr, /::error::/u);
+  assert.equal(git(host, ['rev-parse', 'HEAD']).trim(), before);
+  cleanup(bundle, host);
+});
+
+test('the CLI fails loudly when LANE is missing and leaves the host untouched', () => {
+  const bundle = makeBundle();
+  const host = makeHostRepo();
+  const before = git(host, ['rev-parse', 'HEAD']).trim();
+  const env = {
+    ...process.env,
+    BUNDLE_DIR: bundle,
+    HOST_DIR: host,
+    SOURCE_SHA: SHA,
+    WORKFLOW_PATH,
+    EXPECTED_RELEASE_GROUPS: GROUPS.join(','),
+  };
+  delete env.LANE;
+
+  const result = spawnSync(process.execPath, [HELPER], { encoding: 'utf8', env });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout + result.stderr, /::error::.*LANE must be canary or stable/u);
   assert.equal(git(host, ['rev-parse', 'HEAD']).trim(), before);
   cleanup(bundle, host);
 });
@@ -731,6 +743,7 @@ test('the CLI emits changed= to $GITHUB_OUTPUT and importing the module runs not
       HOST_DIR: host,
       SOURCE_SHA: SHA,
       WORKFLOW_PATH,
+      LANE: 'canary',
       EXPECTED_RELEASE_GROUPS: GROUPS.join(','),
       GITHUB_OUTPUT: outputFile,
     },

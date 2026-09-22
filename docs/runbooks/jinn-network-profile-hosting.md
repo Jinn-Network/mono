@@ -80,10 +80,11 @@ produce one host commit. Each commit message names the source SHA, the lane, and
 release groups, and `.jinn-profile-host-source` at the host root records the same — for the
 last *content-changing* refresh. A refresh that finds identical content writes nothing, the
 marker included (it rewrites only a missing or malformed marker), so the marker never names
-a SHA whose bytes are not the ones on disk. Because each group manifest pins both the
-source commit and the lane, a refresh that finds identical content is always a re-run at
-the marker's own SHA and lane: the marker's commit does not date the most recent run, but
-its SHA and lane are always the most recent run's.
+a SHA whose bytes are not the ones on disk. Because each group manifest pins the source commit (not the verification lane), a
+refresh that finds identical content is always a re-run at the marker's own SHA: the
+marker's commit does not date the most recent run, but its SHA is always the most
+recent run's. The marker still records `lane` as a job diagnostic — which refresh
+wrote — not as a served byte.
 
 **The host repository's `main` is entirely generated. Never hand-edit it** — the next
 refresh deletes every top-level entry except `.git` and `.jinn-profile-host-source`
@@ -102,19 +103,14 @@ the gate, and a skipped upstream job being a refusal is the whole point of
 `stable-publish-gate`. The ordering is instead made legible: when the live-host gate
 fails it annotates its own failure with the causes to check first.
 
-The profile manifest embeds `lane` and `generatedFrom.commit`, and the automatic refresh
-runs on the canary lane. A host refreshed from a push to `next` therefore serves
-`"lane": "canary"` manifest bytes, while `stable-live-host-verification` byte-compares a
-`lane: "stable"` manifest — so a canary-refreshed host cannot make the stable gate green.
-Nothing is broken by this today: there is no stable publisher, the hard stable hold is in
-force, and the stable gate fires only on a `stack-v*` release or a manual dispatch. But
-it is a real gap and it is the stable path's, not the refresh's: closing it is part of
-lifting the hold, and takes either a stable-lane refresh on the release path or a
-manifest whose bytes do not depend on the lane. Adding a write-credential job to the
-stable gate's dependency chain is not the way to close it — that would let a skipped
-refresh skip the gate. Until it is closed, a red `stable-live-host-verification` should
-be read against `.jinn-profile-host-source` at the host root, which names the SHA and
-lane of the host's last content-changing refresh.
+Served group `manifest.json` bytes do **not** embed `lane`. A host refreshed from a push
+to `next` therefore serves the same inventory bytes `stable-live-host-verification`
+byte-compares for that SHA; lane remains on the verification receipt, the `--lane`
+origin policy, and `.jinn-profile-host-source`. Adding a write-credential job to the
+stable gate's dependency chain is still not a sequencing tool — that would let a skipped
+refresh skip the gate. A red `stable-live-host-verification` should be read against
+`.jinn-profile-host-source` at the host root, which names the SHA and the refresh job
+of the host's last content-changing refresh.
 
 ## Hosting and key-provisioning checklist
 

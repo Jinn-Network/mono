@@ -174,7 +174,7 @@ test('a Git control name in a public surface directory is refused before it is a
   }
 });
 
-test('the profile manifest binds catalog digest, release group, lane, and exact package set', () => {
+test('the profile manifest binds catalog digest, release group, and exact package set, not lane', () => {
   const root = scratchRepo();
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
   try {
@@ -194,7 +194,7 @@ test('the profile manifest binds catalog digest, release group, lane, and exact 
       sha256: catalogDigest,
     });
     assert.equal(manifest.releaseGroup, 'platform-v1');
-    assert.equal(manifest.lane, 'stable');
+    assert.equal('lane' in manifest, false);
     const expectedPackages = loadCatalogPackages(root, { releaseGroup: 'platform-v1' })
       .map(({ name }) => name);
     assert.deepEqual(manifest.packages, expectedPackages);
@@ -214,6 +214,33 @@ test('the profile manifest binds catalog digest, release group, lane, and exact 
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('canary and stable builds of the same commit write identical served manifest bytes', () => {
+  const root = scratchRepo();
+  const canaryDir = mkdtempSync(join(tmpdir(), 'jinn-profile-canary-'));
+  const stableDir = mkdtempSync(join(tmpdir(), 'jinn-profile-stable-'));
+  try {
+    const catalogDigest = createHash('sha256')
+      .update(readFileSync(join(root, 'architecture/platform-packages.v1.json')))
+      .digest('hex');
+    const args = {
+      repoRoot: root,
+      commit: SHA,
+      catalogDigest,
+      releaseGroup: 'platform-v1',
+    };
+    buildProfileRoot({ ...args, outDir: canaryDir, lane: 'canary' });
+    buildProfileRoot({ ...args, outDir: stableDir, lane: 'stable' });
+    assert.equal(
+      readFileSync(join(canaryDir, 'manifest.json'), 'utf8'),
+      readFileSync(join(stableDir, 'manifest.json'), 'utf8'),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(canaryDir, { recursive: true, force: true });
+    rmSync(stableDir, { recursive: true, force: true });
   }
 });
 
