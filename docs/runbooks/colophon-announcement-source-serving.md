@@ -286,12 +286,12 @@ already yields every entry oldest-first. Then:
    a pending anchor ride on the next substantive append — so what keeps them off this
    chain is only this producer's one-announcement-per-entry writer. Step 3 therefore
    revises step 2's provisional partition, and steps 4 through 6 read the revised one.
-   Deduplicate by `subject.digest`, because several announcements can cover one subject
-   two ways: an OpenTimestamps upgrade is announced as a second *announcement* naming
-   the pending record through `upgrades` in its facts, and the anchor ledger is keyed
-   `(entryDigest, provider)` (§4.4), so two different providers may each anchor the same
-   entry with no upgrade relationship between them. Count subjects rather than
-   announcements.
+   Deduplicate by `subject.digest` after applying step 4's normalization, because
+   several announcements can cover one subject two ways: an OpenTimestamps upgrade is
+   announced as a second *announcement* naming the pending record through `upgrades` in
+   its facts, and the anchor ledger is keyed `(entryDigest, provider)` (§4.4), so two
+   different providers may each anchor the same entry with no upgrade relationship
+   between them. Count subjects rather than announcements.
 4. **Read off coverage.** A substantive entry is anchored when its digest is in that
    set. Normalize the two spellings before comparing: `sealJson` returns
    `sha256:<hex>`, while the record's `subject.digest` is a digest set carrying the
