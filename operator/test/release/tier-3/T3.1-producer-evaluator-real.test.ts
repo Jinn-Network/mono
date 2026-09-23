@@ -16,6 +16,7 @@ import {
   T31_APPROVED_HERMES_PROVIDER_ENV,
   T31_EXPECTED_HERMES_MODEL_ENV,
   T31_EXPECTED_HERMES_PROVIDER_ENV,
+  parseT31ResolvedModelGuardPolicy,
 } from '../../../src/harnesses/impls/hermes-agent/resolved-model-guard.js';
 import { defaultImplStateDirRoot } from '../../../src/state-dir.js';
 import { HERMES_AGENT_HARNESS, harnessStateDirName } from '../../../src/harnesses/names.js';
@@ -88,6 +89,28 @@ describe('T3.1 producer-evaluator-real', () => {
       [T31_APPROVED_HERMES_MODEL_ENV]: 'google/gemini-2.5-flash',
       [T31_APPROVED_HERMES_PROVIDER_ENV]: 'openrouter',
     });
+  });
+
+  it('does not emit a whitespace-only approved override that would shadow an inherited one', () => {
+    const inherited: NodeJS.ProcessEnv = {
+      [T31_APPROVED_HERMES_MODEL_ENV]: 'google/gemini-2.5-flash',
+      [T31_APPROVED_HERMES_PROVIDER_ENV]: 'openrouter',
+    };
+    const approvedHermesOverride = { model: '   ' };
+    const built = buildT31DaemonEnv({
+      hermesModel: 'deepseek/deepseek-v4-flash',
+      onchainTaskId: '4249',
+      approvedHermesOverride,
+    });
+    expect(built).not.toHaveProperty(T31_APPROVED_HERMES_MODEL_ENV);
+
+    // The scenario-side assertion and the daemon-side guard must resolve the same pair
+    // (spawnMultiOpDaemons composes `{ ...process.env, ...extraEnv }`).
+    const childEnv = { ...inherited, ...built };
+    expect(() => assertT31ApprovedHermesOverridePair({ approvedHermesOverride, env: inherited }))
+      .not.toThrow();
+    expect(parseT31ResolvedModelGuardPolicy(childEnv)?.approvedOverride)
+      .toEqual({ model: 'google/gemini-2.5-flash', provider: 'openrouter' });
   });
 
   it('resolves the solver task-local Hermes config from the same symbols the daemon uses', async () => {

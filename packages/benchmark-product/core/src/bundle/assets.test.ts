@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
-import { BUNDLE_FORMAT, BUNDLE_V10_FORMAT } from "@colophon-claims/verify";
+import { BUNDLE_FORMAT, BUNDLE_V10_FORMAT } from "@colophon-claims/check";
 import type { PublicAssetInput } from "./assets.js";
 import { buildPublicAssets } from "./assets.js";
 
@@ -540,11 +540,10 @@ describe("binary qualification public assets", () => {
     // Design §6 H (issue #4191). `binaryFactsHtml` opens with the tail of the sentence
     // `neutralClaimHtml` renders in the header, which is exactly the repetition ruling 1 retires.
     //
-    // UNREACHABLE through a real bundle today: `/10` mirrors `/6`, which is non-qualifying, so no
-    // `/10` bundle renders a binary page. The edit is made because the ruling binds it, and
-    // because the capability entry is what the next qualification-projecting allocation will
-    // register -- at which point the drop becomes live with no further code change. Driven by a
-    // direct call for that reason, and driven HERE because this is where the binary fixture lives.
+    // Written while `/10` was `/6`'s closure and no `/10` bundle could render a binary page.
+    // Reachable since `/10` became the capability generation (issue #3403): a `/10` bundle
+    // declaring `binary-qualification` renders this page. Driven by a direct call, and driven
+    // HERE, because this is where the binary fixture lives.
     const opening = "Qualification facts are presented per instrument without comparative conclusions.";
     const binary = binaryAssetFixture();
     const published = text(buildPublicAssets(binary)["index.html"]);

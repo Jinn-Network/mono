@@ -11,21 +11,29 @@ step 7 unfinished.
 > **Rollback pin (record at PR open, re-check before merge):** `@jinn-network/operator@<version>-canary.sha.<sha40>`
 
 > **Decision (#2472): Option B — human-run evidence.** `e2e:daemon-harness`
-> remains operator-run, non-CI evidence for the one-swap deploy/release cut. It
+> remains operator-run, non-gating evidence for the one-swap deploy/release cut. It
 > is not a PR-blocking gate; the deploy PR body is the required evidence record.
 
 ## Before this deploy PR merges
 
 - [ ] Rollback pin recorded above, verified installable (`npm view` the exact specifier)
 - [ ] Deterministic blocking CI is green on the exact train SHA — **both**
-      required deterministic-suite contexts: `operator-ci-gate` (`cd operator &&
-      yarn test`, the full client suite) and `hermetic-gate` (`cd operator &&
-      yarn test:hermetic`) — green **with the operator lane selected**. Both
-      producing jobs are path-filtered and both gates report success when their
+      deterministic-suite contexts for the operator client (two of the required
+      contexts in `.github/scripts/required-check-set.mjs`): `operator-ci-gate`
+      (aggregates the `ci.yml` jobs, including `cd operator && yarn test`, the
+      full client suite) and `hermetic-gate` (`cd operator && yarn
+      test:hermetic`) — each green **with its suite selected** (the operator
+      lane in `ci.yml`; `.github/scripts/hermetic-selection.mjs` for
+      `hermetic-gate`). Neither workflow has a `paths:` filter; a `changes` job
+      selects each suite from the diff, and both gates report success when their
       suite job is `skipped`, so a green `operator-ci-gate` / `hermetic-gate`
-      over a `skipped` suite job does not satisfy this item: open each gate's run
-      and confirm the suite job itself is non-skipped on that SHA.
-- [ ] Operator-run, non-CI live-fork evidence is green on the exact train SHA in
+      over a `skipped` suite job does not satisfy this item. Confirm a
+      non-skipped suite job (`check` in `ci.yml`, `hermetic` in
+      `hermetic-gate.yml`) for that SHA: `ci.yml` does not run on push to
+      `next`, and the `hermetic-gate` push run skips its suite when the merge
+      queue already ran it, so look at the `merge_group` (queue) run for the
+      train SHA, or any run whose suite job is non-skipped.
+- [ ] Operator-run, non-gating live-fork evidence is green on the exact train SHA in
       **both** modes:
   - legacy: `cd operator && JINN_E2E_MODE=legacy yarn e2e:daemon-harness`
   - native: `cd operator && yarn e2e:daemon-harness:native`

@@ -23,11 +23,12 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import { restoredArtifactNames, uploadedArtifactNames } from './workflow-artifact-steps.mjs';
 import { citedPrecedents, findBrokenCitations } from './workflow-precedent-citations.mjs';
+import { collectRunBlocks } from './workflow-pipefail-lint.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const workflowsDir = resolve(root, '.github/workflows');
@@ -117,6 +118,28 @@ test('a workflow named outside a Precedent line is prose, not a citation', () =>
     '',
   ].join('\n');
 
+  assert.deepEqual(citedPrecedents(source, 'self-ci.yml'), ['plugin-tree-ci.yml']);
+});
+
+// The per-workflow guards name the restore step they protect. A marker on a
+// different download-artifact step of the same workflow must not satisfy them
+// (#3512), while an unscoped lookup still reads the whole workflow.
+test('a step-scoped lookup reads only the named restore step’s marker', () => {
+  const source = [
+    '      - name: Restore first',
+    '        uses: actions/download-artifact@v8',
+    '        with:',
+    '          name: first-dist',
+    '      # Precedent: plugin-tree-ci.yml.',
+    '      - name: Restore second',
+    '        uses: actions/download-artifact@v8',
+    '        with:',
+    '          name: second-dist',
+    '',
+  ].join('\n');
+
+  assert.deepEqual(citedPrecedents(source, 'self-ci.yml', 'Restore first'), []);
+  assert.deepEqual(citedPrecedents(source, 'self-ci.yml', 'Restore second'), ['plugin-tree-ci.yml']);
   assert.deepEqual(citedPrecedents(source, 'self-ci.yml'), ['plugin-tree-ci.yml']);
 });
 
@@ -385,15 +408,19 @@ test('an upload step at the end of a job does not read the next job\'s name', ()
 // no entry.
 const SHARED_MODULE = '.github/scripts/workflow-artifact-steps.mjs';
 
-// Every test file a lane names, literally or by glob. Matching an importer's
-// literal spelling alone skipped a lane that selects its tests by glob and never
-// writes the importing file's name anywhere in its YAML — such a lane could run
+// Every test file a lane runs, literally or by glob. Selectors come from the
+// lane's `run:` command text, not from anything it merely mentions: a test named
+// only in `paths:` or a YAML comment is never executed there (#3873). Matching an
+// importer's literal spelling alone skipped a lane that selects its tests by glob
+// and never writes the importing file's name anywhere in its YAML — such a lane could run
 // a shared-walk importer while its `paths:` filter never named the module, and
 // the gate stayed green (#3538). A selector is a bare basename here because the
 // directory prefix a lane writes (`.github/scripts/…`, or `mono/.github/…` in a
 // subtree lane) says nothing about which file it resolves to.
 function testSelectors(source) {
-  return [...source.matchAll(/[\w.*-]+\.test\.mjs/g)].map((match) => match[0]);
+  return collectRunBlocks(source)
+    .flatMap((block) => block.body)
+    .flatMap(({ text }) => [...text.matchAll(/[\w.*-]+\.test\.mjs/g)].map((match) => match[0]));
 }
 
 function selects(selector, fileName) {
@@ -402,9 +429,13 @@ function selects(selector, fileName) {
 }
 
 export function lanesMissingSharedModule(workflowsRoot = workflowsDir, scriptsRoot = scriptsDir) {
-  const importers = readdirSync(scriptsRoot)
+  // Recursive for the same reason as #3528: an importer one directory down runs the
+  // walk just as surely as one beside it. Sharing `scriptModules` with the redefiner
+  // walk keeps the two scans from disagreeing about which files exist.
+  const importers = scriptModules(scriptsRoot)
     .filter((name) => name.endsWith('.test.mjs'))
-    .filter((name) => readFileSync(join(scriptsRoot, name), 'utf8').includes('./workflow-artifact-steps.mjs'));
+    .filter((name) => readFileSync(join(scriptsRoot, name), 'utf8').includes('./workflow-artifact-steps.mjs'))
+    .map((name) => basename(name));
 
   const missing = [];
   for (const fileName of readdirSync(workflowsRoot).filter((name) => /\.ya?ml$/.test(name))) {
@@ -429,6 +460,7 @@ test('every path-filtered lane that tests the shared walk names it in paths:', (
 function fixtureScripts(files) {
   const scriptsRoot = mkdtempSync(join(tmpdir(), 'jinn-shared-walk-scripts-'));
   for (const [name, contents] of Object.entries(files)) {
+    mkdirSync(dirname(join(scriptsRoot, name)), { recursive: true });
     writeFileSync(join(scriptsRoot, name), contents);
   }
   return scriptsRoot;
@@ -436,13 +468,14 @@ function fixtureScripts(files) {
 
 const IMPORTER = "import { restoredArtifactNames, uploadedArtifactNames } from './workflow-artifact-steps.mjs';\n";
 
-function laneWorkflow(runLine, { namesSharedModule }) {
+function laneWorkflow(runLine, { namesSharedModule, extraPaths = [] }) {
   return [
     'on:',
     '  pull_request:',
     '    paths:',
     '      - "lane/**"',
     ...(namesSharedModule ? [`      - "${SHARED_MODULE}"`] : []),
+    ...extraPaths.map((path) => `      - "${path}"`),
     'jobs:',
     '  a:',
     '    steps:',
@@ -496,6 +529,35 @@ test('a lane whose glob resolves to no shared-walk importer is not reported', ()
   ) => {
     assert.deepEqual(lanesMissingSharedModule(workflowsRoot, scriptsRoot), []);
   });
+});
+
+// A lane is selected by what it runs, not by what it mentions: naming the importer
+// in `paths:` alone runs nothing, so it must not drag the lane in (#3873).
+test('a test named only in paths: is not selected (#3873)', () => {
+  withLaneFixture(
+    'node --test .github/scripts/other.test.mjs',
+    { namesSharedModule: false, extraPaths: ['.github/scripts/lane-ci-workflow.test.mjs'] },
+    (workflowsRoot, scriptsRoot) => {
+      assert.deepEqual(lanesMissingSharedModule(workflowsRoot, scriptsRoot), []);
+    },
+  );
+});
+
+test('a shared-walk importer nested under .github/scripts is found (#3873)', () => {
+  const scriptsRoot = fixtureScripts({
+    'nested/lane-ci-workflow.test.mjs': "import { restoredArtifactNames } from '../workflow-artifact-steps.mjs';\n",
+  });
+  const workflowsRoot = fixtureWorkflows({
+    'lane-ci.yml': laneWorkflow('node --test .github/scripts/nested/lane-ci-workflow.test.mjs', {
+      namesSharedModule: false,
+    }),
+  });
+  try {
+    assert.deepEqual(lanesMissingSharedModule(workflowsRoot, scriptsRoot), [MISSING_ENTRY]);
+  } finally {
+    rmSync(workflowsRoot, { recursive: true, force: true });
+    rmSync(scriptsRoot, { recursive: true, force: true });
+  }
 });
 
 // Each widening of the guard gets its own failing test. Reading the real

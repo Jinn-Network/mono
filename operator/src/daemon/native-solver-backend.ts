@@ -25,6 +25,7 @@ import {
 import { buildInfo } from '../build-info.js';
 import type { NativeLauncherCapabilityPort } from './native-claim-policy.js';
 import type { RoleIdentitySet } from './role-identities.js';
+import { reconcileNonterminalAtBoot } from './task-execution-boot-reconciliation.js';
 
 const META_RESERVE_BYTES = 65_536;
 
@@ -182,6 +183,8 @@ export async function buildNativeSolverBackend(input: NativeSolverBackendInput):
     heartbeatIntervalMs: 10_000,
   };
   const backend = makeLocalTaskExecutionBackend(config);
+  // #4397: converge attempts no coordinator will track, before any coordinator's first recover.
+  await reconcileNonterminalAtBoot(backend, '[native-solver]', console);
   return {
     backend,
     launcher: claimLauncherPort(launcher, deployment),

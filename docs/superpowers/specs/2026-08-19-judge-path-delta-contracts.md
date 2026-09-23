@@ -226,7 +226,7 @@ range is a generation setting nobody can reproduce.
 
 The selection manifest's cross-arm rule is unchanged and still binding: **all arms of one run share
 one identical generation block**
-(`packages/benchmark-product/verify/src/profile/binary-judge-manifest.ts`, the
+(`packages/benchmark-product/check/src/profile/binary-judge-manifest.ts`, the
 `InspectBinaryJudgeSelectionManifestSchema` refinement). The run therefore uses one profile across
 its whole panel, which is exactly the design's "this run isolates the prompt, not the model".
 

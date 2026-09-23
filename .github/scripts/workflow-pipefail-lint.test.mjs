@@ -634,6 +634,25 @@ test('a `run:` written inside a block scalar mints no run block', () => {
   );
 });
 
+test('a dashed block-scalar key masks only its own body, not its sibling keys (#3844)', () => {
+  // Measuring the `- if: |` key by its indent alone, without the dash, would stretch the
+  // mask over the sibling `shell:` and `run:` keys and hide the real finding on line 7.
+  const source = [
+    'jobs:',
+    '  sample:',
+    '    steps:',
+    '      - if: |',
+    '          always()',
+    '        shell: bash',
+    '        run: producer | head -1',
+    '',
+  ].join('\n');
+  assert.deepEqual(
+    analyzeWorkflow('sample.yml', source).map((finding) => `${finding.severity}:${finding.line}`),
+    ['error:7'],
+  );
+});
+
 test('a phantom scope hides a real error as readily as it invents one', () => {
   // The escalation direction is the one the issue reported, but the same phantom read
   // the other way round is worse: the embedded `shell: sh` shadowed the real
@@ -1738,3 +1757,106 @@ test('a definition whose opener line begins inside an enclosing compound is stil
     ['error:head'],
   );
 });
+
+test('a glued `|` in a case-arm pattern is not a command separator (#4546)', () => {
+  // `separatorAt` treated every unquoted `|` as a command separator, so `done|skipped)`
+  // put `done` in command position. `leadsStatement(undefined)` then promoted it to a
+  // `while` closer, the real `done || true` had nothing to retract, and a guarded arm
+  // pipeline reddened. The spaced `done | skipped)` already reported on the pre-#4446
+  // module; this pins the glued form catching up. Unguarded arms still report.
+  const guardedCase = [
+    'while read -r s; do',
+    '  case "$s" in',
+    '    done|skipped) echo ok ;;',
+    '    *) producer | head -1 ;;',
+    '  esac',
+    'done || true',
+  ].join('\n');
+  assert.deepEqual(severities(guardedCase, { shell: 'bash' }), []);
+  assert.deepEqual(
+    severities(
+      [
+        'while read -r s; do',
+        '  case "$s" in',
+        '    done|skipped) echo ok ;;',
+        '    *) producer | head -1 ;;',
+        '  esac',
+        'done',
+      ].join('\n'),
+      { shell: 'bash' },
+    ),
+    ['error:head'],
+  );
+  for (const pattern of ['if|then)', 'fi|other)', 'a|esac|b)']) {
+    assert.deepEqual(
+      severities(
+        [
+          'while true; do',
+          '  case "$s" in',
+          `    ${pattern} echo ok ;;`,
+          '    *) producer | head -1 ;;',
+          '  esac',
+          'done || true',
+        ].join('\n'),
+        { shell: 'bash' },
+      ),
+      [],
+      pattern,
+    );
+  }
+});
+
+test('a `|` or `&` inside `${…}` is not a command separator (#4546)', () => {
+  // `{ echo ${x:-|}; producer | head -1; } || true` split on the expansion's `|`, so the
+  // trailing `}` of `${…}` became a brace closer and the real `}` an unmatched closer.
+  // The body of `${…}` is not shell syntax; a real pipeline next to the expansion still
+  // reports when unguarded.
+  assert.deepEqual(severities('{ echo ${x:-|}; producer | head -1; } || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('{ echo ${x:-|}; producer | head -1; }', { shell: 'bash' }), ['error:head']);
+  assert.deepEqual(severities('{ echo ${x:-&}; producer | head -1; } || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('{ echo ${x:-&}; producer | head -1; }', { shell: 'bash' }), ['error:head']);
+});
+
+test('a guard on a pipeline does not cover a definition in the pipeline head (#4566)', () => {
+  // `{ f () { producer | head -1; }; } || true` unwraps, sees `deferred`, and reports.
+  // `{ f () { producer | head -1; }; } | cat || true` does not end on the closer, so
+  // `compoundBody` never unwraps and `unitGuarded` suppresses the deferred body. The
+  // `|| true` guards `{ … } | cat`, which does not run the function. Spaced and glued
+  // tails both report; the sibling without the pipeline tail still reports.
+  for (const body of [
+    ['{ f () { producer | head -1; }; } | cat || true', 'f'],
+    ['{ f () { producer | head -1; }; }| cat || true', 'f'],
+    ['{ f () { producer | head -1; }; } || true', 'f'],
+  ]) {
+    assert.deepEqual(severities(body.join('\n'), { shell: 'bash' }), ['error:head'], body[0]);
+  }
+  // A pipeline whose head is a group *without* a definition is still guarded.
+  assert.deepEqual(severities('{ producer | head -1; } | cat || true', { shell: 'bash' }), []);
+  assert.deepEqual(severities('{ producer | head -1; } | cat', { shell: 'bash' }), ['error:head']);
+});
+
+test('unwrapping a pipeline-head compound still walks substitutions in the tail', () => {
+  // Review finding #4653: the #4566 path unwraps `{ … }` when it leads a pipeline, then
+  // before `substitutionSpans`. Unguarded `$(producer | head)` in the tail must still
+  // report, matching a substitution that is the whole statement.
+  assert.deepEqual(severities('{ echo hi; } | echo $(producer | head -1)', { shell: 'bash' }), [
+    'error:head',
+  ]);
+  assert.deepEqual(severities('{ echo hi; } | echo "$(producer | head -1)"', { shell: 'bash' }), [
+    'error:head',
+  ]);
+  assert.deepEqual(severities('X="$(producer | head -1)"', { shell: 'bash' }), ['error:head']);
+  // A mixed tail still reports every consumer. Substitutions are walked first, matching
+  // the remainder path, so the inner `grep -q` precedes the outer `head`.
+  assert.deepEqual(severities('{ echo hi; } | head -1 $(producer | grep -q x)', { shell: 'bash' }), [
+    'error:grep -q',
+    'error:head',
+  ]);
+  // Substitution in the unwrapped head was already seen; keep that, and do not treat a
+  // trailing `|| true` as covering a substitution the old `unitGuarded` skip also missed.
+  assert.deepEqual(severities('{ echo $(producer | head -1); } | cat', { shell: 'bash' }), [
+    'error:head',
+  ]);
+  assert.deepEqual(severities('{ echo hi; } | echo $(producer | head -1) || true', { shell: 'bash' }), []);
+});
+

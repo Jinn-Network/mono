@@ -29,9 +29,11 @@
  * - **Any state but `locked`**, and any run whose journal is non-empty. Import is not a merge: a
  *   run that has already been driven (or already imported) has evidence whose lineage this
  *   operation cannot extend without inventing dispatch numbering it never observed.
- * - **An Inspect / binary-judgment adapter.** Materialization demands native Inspect logs,
- *   summaries, and selection manifests for those runs, and a summary synthesized from a foreign
- *   dump would be a fabrication of exactly the artifact a skeptic reads to check the run.
+ * - **An Inspect / binary-judgment adapter, unless this is `--from inspect`.** Materialization
+ *   demands native Inspect logs for those runs. A summary synthesized from a foreign dump would
+ *   be a fabrication of the artifact a skeptic reads. The named Inspect reader brings real
+ *   `.eval` logs and projects sealed scorers; it does not invent inspect-summary. Binary-judgment
+ *   stays refused.
  * - **`policy.evaluation.minVerdicts > 1`.** Fanning one external result into N evaluator legs
  *   would manufacture agreement between evaluators that never independently existed — the
  *   distinct-is-not-independent laundering `PRINCIPLES.md` forbids naming outright.
@@ -50,6 +52,7 @@ import type { ExternalRunRecord } from "../intake/external-run-records.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import {
   assertExternalRunImportSource,
+  dumpIdentityFromRecords,
   preflightExternalRunImport,
   validateExternalRunRecords,
   writeExternalRunImport,
@@ -72,6 +75,14 @@ export interface RunImportInput {
   readonly source: ExternalRunImportSource;
   /** Directory a relative `evidence[].path` resolves against; normally the dump's own directory. */
   readonly evidenceRoot: string;
+  /**
+   * Set only by `run import --from inspect` after `readInspectRunImport`. A generic `--file`
+   * dump must not open an Inspect-bound draft by labeling `source.harness` "inspect".
+   */
+  readonly namedReader?: "inspect";
+  /** Digest of the dump the operator handed the importer. Omitted, the canonical JSON of
+   * `records` is hashed — the in-memory path tests use. */
+  readonly dump?: { readonly sha256: string; readonly byteLength: number };
 }
 
 export interface RunImportResult {
@@ -116,14 +127,20 @@ export function importRunRecords(
       }
       const adapterId = document.spec.evaluationRuntime?.adapterId;
       if (adapterId !== undefined && isInspectRuntimeAdapterId(adapterId)) {
-        refuse(
-          "conflict",
-          `drafts.${input.draftId}.evaluationRuntime`,
-          `draft ${input.draftId} binds the "${adapterId}" runtime, whose bundle requires native `
-            + "Inspect logs, summaries, and selection manifests. Those cannot be synthesized from "
-            + "an external dump without fabricating the very artifacts a reader checks — import is "
-            + "refused rather than approximated.",
-        );
+        // `--from inspect` brings native EvalLogs and projects sealed scorers; it does not
+        // synthesize inspect-summary. Generic dumps — including `--file` with
+        // `--source inspect` — and the binary-judgment adapter still refuse.
+        if (adapterId !== "inspect" || input.namedReader !== "inspect") {
+          refuse(
+            "conflict",
+            `drafts.${input.draftId}.evaluationRuntime`,
+            `draft ${input.draftId} binds the "${adapterId}" runtime, whose bundle requires native `
+              + "Inspect logs, summaries, and selection manifests. Those cannot be synthesized from "
+              + "an external dump without fabricating the very artifacts a reader checks — import is "
+              + "refused rather than approximated. Use `run import --from inspect` for finished "
+              + "Inspect eval logs.",
+          );
+        }
       }
 
       // The harness name, version, and note are sealed VERBATIM into two annotations per cell and
@@ -207,6 +224,7 @@ export function importRunRecords(
         runRecord,
         owner: runState.owner,
         source: input.source,
+        dump: input.dump ?? dumpIdentityFromRecords(input.records),
         preflight,
         at,
       });

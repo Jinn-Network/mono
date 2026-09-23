@@ -1307,7 +1307,14 @@ The kit precedes all real implementations (the CSI discipline, again):
   `unauthorized-signer`), each exercised both from first adoption and against a seeded
   high-water mark, so the kit proves the *preserve* half of §10.3 step 7 — a refused head
   leaves a stored mark neither advanced nor cleared — across all four typed
-  failures; `facts-consistency` (all three outcomes), `derivation-consistency`
+  failures; `source-head-revalidation` outcomes (`ok` for a byte-identical head, `stale`,
+  `refresh-by-ceiling`, `head-issued-ahead`, `unauthorized-signer` both for a key that
+  rotated out before the head was issued and for one that rotated out after,
+  `head-origin-mismatch` for a head naming a source other than the one followed, and
+  `head-payload-mismatch`), each exercised with the procedure handed the followed source's
+  seeded high-water mark store, so the kit proves §10.5's *adopts nothing* property — a
+  revalidated head leaves the stored mark unchanged, whatever the outcome;
+  `facts-consistency` (all three outcomes), `derivation-consistency`
   (present, fabricated, reorged-away); item verification outcomes
   (`content-corruption`; `unauthorized-provenance`, both the never-synced entry and the
   entry that does not announce this item; and `verified`).

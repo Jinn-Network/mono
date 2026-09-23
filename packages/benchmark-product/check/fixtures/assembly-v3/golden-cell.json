@@ -1,0 +1,9 @@
+{
+  "kind": "cell",
+  "cellKey": "cell-a",
+  "armId": "arm-a",
+  "replicate": 1,
+  "taskDigest": "4444444444444444444444444444444444444444444444444444444444444444",
+  "dispatches": 1,
+  "verdicts": []
+}

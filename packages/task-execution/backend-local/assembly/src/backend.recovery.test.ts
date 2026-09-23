@@ -30,9 +30,12 @@ import {
   openAttemptJournal,
   listProcessGroupPids,
   probeShimAlive,
+  ProcessTableProbeError,
+  readProcessGroupTable,
   readShimFingerprint,
   writeOutcomeFile,
   type JournalEvent,
+  type ProcessGroupTable,
 } from "@jinn-network/task-execution-supervisor";
 import type {
   HarvestResult,
@@ -44,6 +47,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   makeLocalTaskExecutionBackend,
   resolveOutcomeAfterShimDeath,
+  type LocalBackendFaults,
   type LocalProvisionerInput,
   type LocalTaskExecutionBackend,
   type LocalTaskExecutionBackendConfig,
@@ -176,6 +180,7 @@ interface BackendFixtureOptions {
   readonly evidenceRepository?: InMemoryEvidenceRepository;
   readonly secretForwards?: readonly { readonly grantKey: string; readonly target: string }[];
   readonly maxConcurrentAttempts?: number;
+  readonly faults?: Pick<LocalBackendFaults, "processGroupTable">;
 }
 
 function fixture(root: string, options: BackendFixtureOptions = {}): LocalTaskExecutionBackend {
@@ -264,6 +269,7 @@ function fixture(root: string, options: BackendFixtureOptions = {}): LocalTaskEx
           },
         }),
     faults: {
+      ...options.faults,
       async onCompletionPhase(phase: CompletionPhase) {
         const selected = options.completionBarrier;
         if (selected?.phase === phase) {
@@ -315,6 +321,27 @@ function harnessGroupEmpty(metaDir: string): boolean {
   const fingerprint = readShimFingerprint(metaDir);
   if (fingerprint?.harnessPid === undefined) return true;
   return listProcessGroupPids(fingerprint.harnessPid).length === 0;
+}
+
+// A process-table seam that counts reads and throws on the chosen ordinals (#4395/#4396).
+function countingProcessGroupTable(): {
+  readonly count: { value: number };
+  readonly throwOn: Set<number>;
+  readonly faults: Pick<LocalBackendFaults, "processGroupTable">;
+} {
+  const count = { value: 0 };
+  const throwOn = new Set<number>();
+  return {
+    count,
+    throwOn,
+    faults: {
+      processGroupTable(): ProcessGroupTable {
+        count.value += 1;
+        if (throwOn.has(count.value)) throw new ProcessTableProbeError("simulated");
+        return readProcessGroupTable();
+      },
+    },
+  };
 }
 
 async function expectRestartBlocked(
@@ -1073,6 +1100,165 @@ describe("restart reconstruction and §6.4 actions", () => {
       category: "backend-unavailable",
       annotations: { capacity: 1, liveAttempts: 1 },
     });
+  });
+
+  // #4395: the two directions of an unreadable process table, made explicit. Rehydration keeps
+  // the slot (an unreadable probe is not proof of death) and says so in the journal.
+  test("a rehydrated nonterminal attempt whose process table cannot be read keeps its slot and journals the degradation", async () => {
+    const root = await stateRoot("capacity-rehydration-probe-failure");
+    const first = fixture(root, { maxConcurrentAttempts: 1 });
+    const { attempt } = await submit(first);
+    await handoffWriter(first);
+    const workspace = paths(root, attempt);
+    await waitFor(
+      () => !probeShimAlive(workspace.meta).alive && harnessGroupEmpty(workspace.meta),
+      "attempt processes did not exit",
+    );
+    await replaceJournal(root, attempt, (events) =>
+      events.filter(({ type }) => type !== "attempt-terminal"));
+
+    const restarted = fixture(root, {
+      maxConcurrentAttempts: 1,
+      faults: { processGroupTable() { throw new ProcessTableProbeError("simulated"); } },
+    });
+    await expect(submit(restarted)).rejects.toMatchObject({
+      category: "backend-unavailable",
+      annotations: { capacity: 1, liveAttempts: 1 },
+    });
+    const degradations = (await journalEvents(root, attempt))
+      .filter((event) => event.type === "progress" && event.details["degradation"] === "liveness-unverifiable");
+    expect(degradations).toHaveLength(1);
+    expect(degradations[0]?.details["reason"]).toBe("process-table-unavailable");
+  });
+
+  // The recovery direction: an unverifiable table is a refusal, never a `lost` terminal.
+  test("recovery never appends a terminal from an unverifiable process table", async () => {
+    const root = await stateRoot("recover-probe-failure");
+    const first = fixture(root, { maxConcurrentAttempts: 1 });
+    const { attempt } = await submit(first);
+    await handoffWriter(first);
+    const workspace = paths(root, attempt);
+    await waitFor(
+      () => !probeShimAlive(workspace.meta).alive && harnessGroupEmpty(workspace.meta),
+      "attempt processes did not exit",
+    );
+    await replaceJournal(root, attempt, (events) =>
+      events.filter(({ type }) => type !== "attempt-terminal"));
+
+    const restarted = fixture(root, {
+      maxConcurrentAttempts: 1,
+      faults: { processGroupTable() { throw new ProcessTableProbeError("simulated"); } },
+    });
+    await expect(restarted.recover(attempt)).rejects.toMatchObject({
+      category: "backend-unavailable",
+      detail: expect.stringMatching(/process table unavailable/u),
+    });
+    expect((await restarted.observe(attempt)).descriptor.derived.terminal).toBe(false);
+    await expect(restarted.recover(attempt)).rejects.toMatchObject({ category: "backend-unavailable" });
+    const degradations = (await journalEvents(root, attempt))
+      .filter((event) => event.type === "progress" && event.details["degradation"] === "liveness-unverifiable");
+    expect(degradations).toHaveLength(1);
+  });
+
+  // A transient failure inside the kill ladder's polls is "not yet empty", not an abort.
+  test("a transient process-table failure mid kill ladder does not abort orphan recovery", async () => {
+    const root = await stateRoot("orphan-probe-flicker");
+    const pause = barrier();
+    const first = fixture(root, {
+      processDelayMs: 30_000,
+      completionBarrier: { phase: "before-outcome-wait", barrier: pause },
+    });
+    const { attempt } = await submit(first);
+    await pause.entered;
+    const workspace = paths(root, attempt);
+    const fingerprint = readShimFingerprint(workspace.meta);
+    if (fingerprint?.harnessPid === undefined) throw new Error("fixture shim did not publish harness PID");
+    process.kill(fingerprint.pid, "SIGKILL");
+    await waitFor(() => !probeShimAlive(workspace.meta).alive, "shim did not die");
+    const probe = countingProcessGroupTable();
+    const recovered = await restartWhilePaused(root, first, pause, attempt, { faults: probe.faults });
+    // Reads from here: 1 = reconcile listing, 2 = kill ladder's initial listing, 3+ = SIGTERM polls.
+    probe.count.value = 0;
+    probe.throwOn.add(3);
+    probe.throwOn.add(4);
+    expect((await recovered.recover(attempt)).detail).toBe("orphaned");
+    expect(await terminalState(recovered, attempt)).toBe("lost");
+    const reconciliation = (await journalEvents(root, attempt))
+      .find(({ type }) => type === "reconciliation");
+    expect(reconciliation?.details["killedPids"]).toContain(fingerprint.harnessPid);
+    expect(probe.count.value).toBeGreaterThanOrEqual(5);
+    pause.release();
+  });
+
+  // #4396: rehydration takes one process-table snapshot per boot, not one per attempt.
+  test("rehydration reads the process table at most once regardless of how many nonterminal attempts are on disk", async () => {
+    const probe = countingProcessGroupTable();
+    fixture(await stateRoot("bound-empty"), { maxConcurrentAttempts: 3, faults: probe.faults });
+    expect(probe.count.value).toBe(0);
+    const root = await stateRoot("bound-three");
+    const first = fixture(root, { maxConcurrentAttempts: 3 });
+    const attempts = [await submit(first), await submit(first), await submit(first)].map(({ attempt }) => attempt);
+    await handoffWriter(first);
+    for (const attempt of attempts) {
+      const workspace = paths(root, attempt);
+      await waitFor(
+        () => !probeShimAlive(workspace.meta).alive && harnessGroupEmpty(workspace.meta),
+        "attempt processes did not exit",
+      );
+      await replaceJournal(root, attempt, (events) =>
+        events.filter(({ type }) => type !== "attempt-terminal"));
+    }
+    probe.count.value = 0;
+    fixture(root, { maxConcurrentAttempts: 3, faults: probe.faults });
+    // Read synchronously by the constructor, before any worker runs.
+    expect(probe.count.value).toBe(1);
+  });
+
+  // #4397: attempts no coordinator will ever `recover` converge at boot through the same
+  // reconciliation, in both directions — a dead one terminals, a live one resumes supervision.
+  test("reconcileNonterminal terminals a nonterminal attempt no caller will recover", async () => {
+    const root = await stateRoot("sweep-absent");
+    const pause = barrier();
+    const first = fixture(root, {
+      maxConcurrentAttempts: 1,
+      completionBarrier: { phase: "after-outcome", barrier: pause },
+    });
+    const { attempt } = await submit(first);
+    await pause.entered;
+    const workspace = paths(root, attempt);
+    await rm(join(workspace.meta, "outcome.json"));
+    const recovered = await restartWhilePaused(root, first, pause, attempt, { maxConcurrentAttempts: 1 });
+    await waitFor(
+      () => !probeShimAlive(workspace.meta).alive && harnessGroupEmpty(workspace.meta),
+      "completed harness did not relinquish its process group",
+    );
+
+    expect(await recovered.reconcileNonterminal()).toEqual([
+      { attempt, outcome: "reconciled", classification: "absent", detail: "absent" },
+    ]);
+    expect((await recovered.observe(attempt)).descriptor.derived).toMatchObject({ terminal: true, state: "lost" });
+    await expect(submit(recovered)).resolves.toBeDefined();
+    pause.release();
+  });
+
+  test("reconcileNonterminal resumes supervision of live work instead of killing it", async () => {
+    const root = await stateRoot("sweep-matching");
+    const pause = barrier();
+    const first = fixture(root, {
+      processDelayMs: 2_000,
+      completionBarrier: { phase: "before-outcome-wait", barrier: pause },
+    });
+    const { attempt } = await submit(first);
+    await pause.entered;
+    const workspace = paths(root, attempt);
+    const recovered = await restartWhilePaused(root, first, pause, attempt, { processDelayMs: 2_000 });
+
+    expect(await recovered.reconcileNonterminal()).toEqual([
+      { attempt, outcome: "reconciled", classification: "matching" },
+    ]);
+    expect(probeShimAlive(workspace.meta).alive).toBe(true);
+    expect(harnessGroupEmpty(workspace.meta)).toBe(false);
+    expect(await terminalState(recovered, attempt)).toBe("delivered");
   });
 });
 

@@ -39,9 +39,6 @@ import {
   UnterminatedTemplateError,
 } from './js-source-scanner.mjs';
 
-/** Re-exported so this guard's own scanner cases keep naming it where they always did. */
-export { stripComments };
-
 const root = resolve(import.meta.dirname, '../..');
 
 /** Directories that never hold a first-party suite this gate governs. */
@@ -138,10 +135,13 @@ function enclosedLiterals(source, key, open, close) {
  * one scope and restores the cross-entry crediting this closes. A regex literal holding a quote is
  * the ordinary construct that used to produce exactly that (issue #3154); `regexStartsAt` and the
  * newline-bounded quote span above are what keep it from doing so. That is the same fallback the other
- * scanners take on an unterminated literal, and it is bounded the same way: a config that does not
- * parse cannot load, so its own package job is red before this gate has an opinion. The quote walk
- * below is what keeps that bound honest — an unpaired `'` inside a regex literal parses and loads
- * fine, so without the newline bound the collapse would happen under a green package job.
+ * scanners take on an unterminated literal, and it has two routes. A config that genuinely does not
+ * parse cannot load, so its own package job is red before this gate has an opinion. A config that
+ * parses, but whose `]`-carrying line `regexStartsAt` still mis-reads, loads fine: that route is
+ * fail-open, bounded only by the scanner's one-line residual (see `regexStartsAt` in
+ * `js-source-scanner.mjs`), and no config in the tree writes that shape. The quote walk below is
+ * what keeps the first route the ordinary one — an unpaired `'` inside a regex literal parses and
+ * loads fine, so without the newline bound the collapse would happen under a green package job.
  *
  * An entry whose own `{` never balances is skipped rather than ending the scan, so the entries
  * after it keep their ranges. `break` here was the amplifier that made a single mis-read line cost

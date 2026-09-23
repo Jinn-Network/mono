@@ -214,6 +214,11 @@ describe('redactValue — recursion into nested structures and arrays', () => {
     expect(String(out.s)).toMatch(/redacted:unserializable/);
   });
 
+  it('markers a bigint rather than passing it through (#3746)', () => {
+    const out = redactValue({ amount: 10n }) as Record<string, unknown>;
+    expect(String(out.amount)).toMatch(/redacted:unserializable/);
+  });
+
   it('recurses without a depth cap so a deeply nested secret is still stripped (#3038)', () => {
     let node: Record<string, unknown> = { privateKey: '0x' + '33'.repeat(32) };
     for (let i = 0; i < 20; i++) node = { nested: node };

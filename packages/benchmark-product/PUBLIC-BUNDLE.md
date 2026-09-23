@@ -507,39 +507,96 @@ bundle verify --bundle <bundle-dir> --json` wraps the same reader; as for v7, it
 is the longer route, and the product [`README.md`](README.md) states how the
 product is obtained.
 
-### Composed presentation bundle v10
+### Composed bundle v10
 
-A bundle whose report page renders the composed presentation generation emits
-`benchmark-product-public-bundle/10`. It is v6's closure exactly --- v2's member
-list, no qualification graph, an anchored trust root, the same **seven checks**,
-and `benchmark-product.claim-package/4` --- differing only in which report page
-the verifier rebuilds and byte-compares. Nothing about what the bundle proves
-moves. A presentation generation that grew a check would be claiming the render
-proves something the records did not already prove.
+`benchmark-product-public-bundle/10` is the composed generation. Every earlier
+closure says what it carries by its format number, so each new pairing of
+features cost a new number, a new member list, a new check array, and a new
+claim-package id. A v10 bundle **states** what it carries instead. Its
+`bundle.json` is v2's --- `format` and `files` --- plus one required member, the
+capability vector:
 
-The page is byte-pinned: `verifyPublicBundleSnapshot` rebuilds every
+```json
+{
+  "capabilities": ["anchoring", "binary-qualification"],
+  "files": [{ "bytes": 0, "path": "...", "sha256": "..." }],
+  "format": "benchmark-product-public-bundle/10"
+}
+```
+
+The vector is a list of lower-kebab tokens, unique and sorted by code unit. It
+may be empty: `"capabilities": []` is the plain base graph, spelled rather than
+omitted. The manifest object is closed, so an unknown top-level member is
+refused. `bundle.json` is the authenticated root, so the vector is exactly as
+tamper-evident as the file list beside it: editing it changes the bundle
+identity.
+
+Every token is **must-understand**. A reader that does not implement a token in
+the vector refuses the bundle whole, naming the token, before it reads any
+member. There is no tier of tokens a reader may ignore.
+
+Four capabilities are registered. Each one's members, checks, and claim section
+are exactly what the closure it came from carries, except `external-import`,
+which is new with this generation:
+
+| Token | Adds | Check it appends | Claim section |
+| --- | --- | --- | --- |
+| `binary-qualification` | `qualification.json`, and the v4 grammar for `evidence.json` and `trust/public-keys.json` | none --- it expands the existing checks, as v4 does | `qualification` |
+| `anchoring` | `anchors/<sha256>.bin`, which may be empty under the declared-but-absent rule stated for v6 | `integrity-anchors` | `anchors` |
+| `disclosure-specification` | no member of its own; the sealed record travels at `records/<sha256>.bin`, named by the Report extension stated for v8 | `disclosure-specification` | `disclosure` |
+| `external-import` | `external-import.json`, the dump digest plus one row per sealed Matrix cell | `external-import` | `externalImport` |
+
+`disclosure-specification` requires `binary-qualification`, because the evidence
+role that carries its record exists only in the v4 grammar. It does not require
+`anchoring`.
+
+Everything else is derived from the vector. The mandatory members are v2's plus
+each declared capability's. The checks are v2's **six**, then each declared
+capability's in the order of the table above --- so `["anchoring"]` runs v6's
+seven and all three pre-composition tokens run v8's eight. The vector naming `anchoring` alone
+is v6's closure exactly, the vector naming `anchoring` and
+`binary-qualification` is v7's, and the vector naming those three is v8's.
+`external-import` is additive and has no pre-composition cell.
+
+Declaration is authoritative, and presence is derived from it, never the
+reverse. A member of a capability the vector does not declare --- an
+`anchors/...` file, a `qualification.json` --- is a non-allowlisted file. A
+declared capability whose members were stripped fails as a missing member.
+Stripping a declaration never produces a quieter bundle that still passes; it
+produces a different bundle identity that is refused.
+
+Its claim package is `benchmark-product.claim-package/7`, one id for every
+vector: `claim-package/1`'s base plus one section per capability, present
+exactly when the capability is declared. `claim-consistency` rebuilds the claim
+from the vector `bundle.json` declares, so a section without its declaration and
+a declaration without its section are both refused on the field that disagrees.
+Section contents are unchanged from the closures they came from, and
+`qualification.json` keeps its frozen `benchmark-product.claim-package/2`
+literal. The claim's `verification.checks` is the derived check list, and its
+reader line is the latest release any declared capability needs.
+
+The report page is byte-pinned: `verifyPublicBundleSnapshot` rebuilds every
 presentation asset and refuses the bundle on any mismatch, and every published
 claim seals the exact reader line that performs that rebuild. Changing a
 rendered string in place would therefore break every already-published bundle
-under the command printed on its own page, which is why a prose revision takes a
+under the command printed on its own page, which is why a prose revision took a
 format number rather than an edit. What v10 renders is the four report-prose
 rulings of issue #3016: each of the page's statements is made once, in the
 highest-priority slot that carries it, and the narrated control above the
 per-cell disclosures is cut. No disclosure the v6 page carries is absent from
-the v10 page.
-
-Later presentation features register as capability entries inside this
-generation rather than taking a further format number.
+the v10 page. Later presentation features register as presentation capability
+entries inside this generation rather than taking a further format number.
 
 v10 cannot pin v6's first public `@0.1` line: no released `0.1` reader
 understands the format, so a claim naming one would be an instruction to fail.
-It pins the same `0.2.1` line v7 and v8 pin, with `@0.2` as the compatible line:
+Every vector registered today pins the same `0.2.1` line v7 and v8 pin, with
+`@0.2` as the compatible line:
 
 ```bash
 npx @colophon-claims/verify@0.2.1 <bundle-dir>
 ```
 
-v10 is anchored, so it takes the trust-material form too:
+A v10 bundle that declares `anchoring` takes the trust-material form too:
 
 ```bash
 npx @colophon-claims/verify@0.2.1 <bundle-dir> \
@@ -550,17 +607,29 @@ npx @colophon-claims/verify@0.2.1 <bundle-dir> \
 `--tsa-root` and `--ots-headers` carry the meaning and the defaults stated for
 v6.
 
-**No run emits v10 yet.** The producer's format selection is unchanged, because
-`0.2.1` is immutable and predates this format, so it refuses v10 at manifest
-parse --- a v10 bundle would be permanently unverifiable under its own
-instruction. The format enters the schema so a bundle can be labeled with it
-and the round trip proven; the producer flips in the change that pins v10 to
-the release serving it.
+**New bundles emit v10.** Decision D1 is a clean cutover: the `report` operation defaults to
+the composed generation, so a run that does not ask otherwise publishes on
+`benchmark-product-public-bundle/10` with the capability vector derived from the run's own
+facts: an anchored run declares `anchoring`, a run projecting a binary qualification
+declares `binary-qualification`, a qualification run with a sealed disclosure
+declaration declares `disclosure-specification`, anchored or not, and a run whose
+evidence was imported (`run import`) declares `external-import`. The enumerated v2, v4,
+v6, v7, and v8 producer paths remain behind `composedFormat: false` on `report` --- that is
+the rollback. The verifier's legacy path for those formats remains forever.
+
+`0.2.1` is immutable and predates this format, so it refuses v10 at manifest parse --- a
+v10 bundle's sealed instruction names that line until a later reader that serves the format
+can be named. One run is treated differently, not only renumbered: a qualification run with
+a sealed disclosure declaration and no anchor is refused at `report` on the rollback path,
+because v8 is the only disclosed enumerated cell and it is anchored, and on the default
+composed path it is admitted and declares `binary-qualification` and
+`disclosure-specification`.
 
 ## Portable verification
 
-Verification with your own tools — no Jinn code at all — is specified in
-[`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md): the check split, the
+Verification with your own tools — no Jinn code at all — for
+`benchmark-product-public-bundle/2` and `benchmark-product-public-bundle/5` is
+specified in [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md): the check split, the
 DSSE and digest rules, the JSON Schemas shipped under the reader package's
 `schemas/`, and the conformance kit under
 `verify/fixtures/public-bundle-conformance-v1/` whose tampered variants an
@@ -584,7 +653,7 @@ out where it applies.
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/8` | `@0.2.1` | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
-| `benchmark-product-public-bundle/10` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
+| `benchmark-product-public-bundle/10` | `@0.2.1` | `@0.2` | six to nine, by declared capability | `--tsa-root`, `--ots-headers`, when `anchoring` is declared |
 
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a
@@ -596,6 +665,10 @@ rather than from the format.
 
 Every row runs as `npx @colophon-claims/verify<line> <bundle-dir>`, with the anchor flags appended
 where the row lists them.
+
+The checker is now published as `@colophon-claims/check`. `@colophon-claims/verify` — the name
+every row above states, because it is the name those formats sealed — stays published permanently
+as a passthrough alias onto it, so each sealed line keeps resolving.
 
 The qualification axis, unlike prompted screening, is not left to the format string's word. Across
 the legacy lineage and v8 — every row above but `.../5`, whose evidence-native closure is read by a
@@ -847,11 +920,13 @@ qualification bundle's freeze artifacts into one, and
 against the bundle it claims to be derived from.
 
 The export accepts the closures that carry the qualification graph, and only those:
-`benchmark-product-public-bundle/4`, `benchmark-product-public-bundle/7`, and
-`benchmark-product-public-bundle/8`. Every other closure is refused rather than
-projected into an empty repository. The accepted set is a table keyed by every
-supported bundle format, so a new closure version cannot land without stating what
-it means to this projection.
+`benchmark-product-public-bundle/4`, `benchmark-product-public-bundle/7`,
+`benchmark-product-public-bundle/8`, and a `benchmark-product-public-bundle/10`
+bundle whose capability vector declares `binary-qualification`. Every other closure
+is refused rather than projected into an empty repository. The accepted set is a
+table keyed by every enumerated bundle format, so a new closure version cannot land
+without stating what it means to this projection; the composed generation has no
+row, because what a v10 bundle means here is read from the vector it declares.
 
 A `/8` bundle's freeze artifacts are a `/7` bundle's exactly. The sealed
 disclosure-specification record that closure adds is claim-side — it states the

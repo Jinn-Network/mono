@@ -39,6 +39,20 @@ jobs:
             echo "OK: hotfix branch prefix detected."
             exit 0
           fi
+          # Same-repo provenance is deliberately not required here (#3666). A fork
+          # can name a branch "next" and pass this arm, but that opens nothing:
+          # this is the only context main requires (MAIN_REQUIRED_CONTEXTS in
+          # .github/scripts/branch-protection-audit.mjs), and the fix(incident)
+          # title arm and the hotfix/ branch arm above already admit any fork PR.
+          # What the name does buy a fork is the release-review lane's thinned
+          # CI: ci.yml, layer-ci.yml, jinn-agent-ci.yml, and
+          # platform-architecture-control.yml skip their heavy work when the head
+          # ref is next, and their gates read that skip as green. That is a
+          # misleading signal, not a merge bypass. PRs to main are rare,
+          # hotfix-shaped, and merged by a maintainer, and a fork's pull_request
+          # run gets a read-only token and no secrets. Requiring provenance would
+          # have to land at every one of those sites and in both shell mirrors at
+          # once, which the signal does not justify.
           if [[ "$HEAD_REF" == "next" ]]; then
             echo "OK: standing release-review PR (next -> main)."
             exit 0

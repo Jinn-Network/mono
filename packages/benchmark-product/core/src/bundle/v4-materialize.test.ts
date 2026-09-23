@@ -12,7 +12,7 @@ import {
   parseReport,
 } from "@jinn-network/benchmarking-records";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
-import { BINARY_INSTRUMENT_REPORT_LIMITATIONS, verifyPublicBundle } from "@colophon-claims/verify";
+import { BINARY_INSTRUMENT_REPORT_LIMITATIONS, verifyPublicBundle } from "@colophon-claims/check";
 import {
   canonicalJsonBytes,
   dssePreAuthEncoding,
@@ -288,7 +288,7 @@ describe("binary public-bundle/4 producer closure", () => {
     // authority-role discriminator (materialize.ts's evidence-role-to-authority-role ternary) and
     // by the input-direction one (materialize.ts:366's or-chain), so `authorities` came out empty
     // and the trust-document schema refused it. This row is the first time any test drives that
-    // round trip through the real production `admitHumanTruth` -> `importBinaryItemBank` ->
+    // round trip through fixture-seeded admission records -> sealed Benchmark ->
     // `runReport` -> `materializePublicBundle` -> `verifyPublicBundle` chain.
     ["screened-operator-sampled", true],
   ] as const)("materializes a complete provider-free %s admission graph", async (truthAdmission, publicationGrade) => {

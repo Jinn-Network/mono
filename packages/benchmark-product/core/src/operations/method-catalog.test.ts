@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { BenchmarkProductError } from "../errors.js";
+import { officialTerminalBench21TaskNames } from "../intake/terminal-bench-2-1.js";
 import {
   HARBOR_SELECTION_SCHEMA,
   INSPECT_SELECTION_SCHEMA,
@@ -372,6 +373,42 @@ describe("resolveMethodOperand", () => {
     const error = refuse(() => resolveMethodOperand({ ref: "apex-agents", cwd: dir, n: "3", hostPath }));
     expect(error.code).toBe("invalid-invocation");
     expect(error.issues[0]?.path).toBe("--n");
+  });
+
+  test("--n 1 on Terminal-Bench 2.1 slices the official slate without a Harbor registry", () => {
+    const dir = cwd();
+    const hostPath = join(dir, "host.json");
+    writeFileSync(hostPath, "{}");
+    const one = resolveMethodOperand({
+      ref: "terminal-bench-2.1",
+      cwd: dir,
+      n: "1",
+      hostPath,
+    });
+    expect(one).toMatchObject({
+      kind: "catalog",
+      catalogId: "terminal-bench-2.1",
+      coverage: "one_task",
+    });
+    if (one.kind !== "catalog") return;
+    expect(one.selectedIds).toBeUndefined();
+
+    const two = resolveMethodOperand({
+      ref: "terminal-bench-2.1",
+      cwd: dir,
+      n: "2",
+      hostPath,
+    });
+    expect(two).toMatchObject({
+      kind: "catalog",
+      coverage: "custom",
+      selectedIds: officialTerminalBench21TaskNames().slice(0, 2),
+    });
+
+    const error = refuse(() => resolveMethodOperand({ ref: "terminal-bench-2.1", cwd: dir, hostPath, n: "90" }));
+    expect(error.code).toBe("invalid-invocation");
+    expect(error.issues[0]?.path).toBe("--n");
+    expect(error.message).toMatch(/official Terminal-Bench 2\.1 slate \(89\)/u);
   });
 
   test("relative file refs resolve from cwd", () => {

@@ -32,6 +32,13 @@ export const ALERT_LABEL = 'automated:post-merge-lane-failure';
 export const CONFIRM_AFTER_FAILURES = 2;
 
 /**
+ * Newest-run page the monitor reads (`per_page` in post-merge-lane-monitor.yml).
+ * A returned list shorter than this is the lane's full history, so counts are exact
+ * even when no success is in it.
+ */
+export const RUN_WINDOW = 100;
+
+/**
  * How long a SINGLE unrecovered failure is tolerated before it alerts anyway.
  * A genuine blip is followed by a green run and never opens an issue; a real break
  * that nothing has pushed over still surfaces well inside one working day, since the
@@ -211,8 +218,10 @@ function isDecisiveRun(run, lane, jobsByRunId) {
  * that proves recovery either, so the driver leaves any open alert alone. It is kept
  * apart from `healthy`, which always names the successful run that earned it.
  *
- * `windowBounded` is whether the window reaches past the failing streak: only then are
- * the streak length, its first failure, and the last success known rather than floors.
+ * `windowBounded` is whether the streak length and its first failure are known rather
+ * than floors: either a success sits behind the streak, or the page is shorter than
+ * `RUN_WINDOW` so the returned list is the whole history. The last-success row still
+ * names a run only when one is in the window.
  *
  * @param {{lane: {branch: string, publishingJob?: string}, runs: ReadonlyArray<object>, now: number,
  *   jobsByRunId?: Map<string|number, ReadonlyArray<object>> | Record<string, ReadonlyArray<object>>}} input
@@ -245,9 +254,10 @@ export function classifyLane({ lane, runs, now, jobsByRunId }) {
   const verdict = {
     consecutiveFailures: streak.length,
     observedRuns,
-    // A success behind the streak proves the window reaches past it. Without one the
-    // streak may continue beyond the page that was read, and every count is a floor.
-    windowBounded: lastSuccess !== undefined,
+    // A success behind the streak, or a short page that is the whole history, makes
+    // the streak length exact. A full page with no success may continue earlier, so
+    // the count is a floor.
+    windowBounded: lastSuccess !== undefined || observedRuns < RUN_WINDOW,
     latestRun,
     firstFailure: streak[streak.length - 1],
     lastSuccess,
@@ -300,15 +310,19 @@ export function renderAlert({ lane, verdict }) {
       : `| Oldest failure in the observed window | ${firstFailure.html_url} (${day(firstFailure)}) — the streak may start earlier |`,
     lastSuccess
       ? `| Last successful run | ${lastSuccess.html_url} (\`${lastSuccess.head_sha.slice(0, 8)}\`, ${day(lastSuccess)}) |`
-      : `| Last successful run | Not in the observed window — ${windowNote} |`,
+      : windowBounded
+        ? `| Last successful run | None — the observed history has no success |`
+        : `| Last successful run | Not in the observed window — ${windowNote} |`,
     '',
     '### What is stale while this is red',
     '',
     lane.staleArtifact,
     lastSuccess
       ? `The newest artifacts this lane published come from \`${lastSuccess.head_sha.slice(0, 8)}\` (${day(lastSuccess)}).`
-      : `The published artifacts are older than the observed window reaches (${windowNote}); find the ` +
-        'last successful run in the Actions tab.',
+      : windowBounded
+        ? 'The observed history has no successful run, so this lane has not published a current artifact.'
+        : `The published artifacts are older than the observed window reaches (${windowNote}); find the ` +
+          'last successful run in the Actions tab.',
     '',
     '### Closing this',
     '',
@@ -380,9 +394,12 @@ export function planLaneReconcile({ lane, verdict, openAlerts, closedAlerts }) {
     // A hand-closed alert whose marker still names the current failing run attempt has
     // already been seen by a human: filing again now would only re-post it every tick. The
     // next failing run, or a failing re-run, changes the marker and files afresh. A
-    // recovery-closed alert matches only when the success that closed it no longer decides,
-    // e.g. its re-run is in progress or was cancelled; staying quiet then is right, because
-    // that success already published.
+    // recovery-closed match is the same contract: the closed issue's marker must name this
+    // tick's failing run attempt. That is not "whenever the success that closed it no longer
+    // decides." If that success is a re-run of the alerted run and is itself re-run (in
+    // progress or cancelled), an older failure can become latest and file a short-lived new
+    // alert; the next healthy tick closes it. Staying quiet is right only when the current
+    // failing attempt is still the one the closed alert named.
     //
     // Only the page of closed alerts the driver read is searched: if more than that were
     // updated after the matching one, the deferral is missed and one extra alert is filed.
