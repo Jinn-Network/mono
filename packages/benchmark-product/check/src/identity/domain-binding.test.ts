@@ -3,7 +3,6 @@
 import { generateKeyPairSync, sign as edSign, type KeyObject } from "node:crypto";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
-import { BenchmarkProductError } from "../profile/errors.js";
 import { expectRefusal } from "../testing/expect-refusal.js";
 import {
   ed25519PublicKeyBytesFromDidKey,
@@ -151,16 +150,8 @@ describe("verifyDomainBinding (issue #2983)", () => {
   test("refuses a signature made by a different key than the one the binding names", () => {
     const other = generateKeyPairSync("ed25519").privateKey;
     const { keyId, bytes } = mintBinding({ signWith: other });
-    const error = (() => {
-      try {
-        verifyDomainBinding(bytes, [keyId]);
-        return undefined;
-      } catch (cause) {
-        return cause as BenchmarkProductError;
-      }
-    })();
-    expect(error).toBeInstanceOf(BenchmarkProductError);
-    expect(error!.code).toBe("record-integrity");
+    const error = expectRefusal(() => verifyDomainBinding(bytes, [keyId]));
+    expect(error.code).toBe("record-integrity");
   });
 
   test("refuses a domain edited after signing", () => {
