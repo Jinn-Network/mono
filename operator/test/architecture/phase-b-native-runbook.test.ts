@@ -113,4 +113,22 @@ describe('Phase B native vertical runbook contract', () => {
     expect(RESTART_DRILL_WORKFLOW).not.toMatch(/^ {2}merge_group:/mu);
     expect(RESTART_DRILL_WORKFLOW).not.toContain('continue-on-error');
   });
+
+  it('builds the operator dependency stack before the drill runs', () => {
+    // The drill's role-host processes import several @jinn-network/* portal packages by their
+    // built dist/index.js entry point; dist/ is gitignored and install alone does not produce it.
+    // build:stack alone is not enough — build:core depends on the plugin package.
+    const buildStep = 'yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core';
+    expect(RESTART_DRILL_WORKFLOW).toContain(buildStep);
+    const installIndex = RESTART_DRILL_WORKFLOW.indexOf('yarn install --immutable');
+    const buildIndex = RESTART_DRILL_WORKFLOW.indexOf(buildStep);
+    // lastIndexOf: the header comment also names the verify command ahead of the actual step.
+    const verifyIndex = RESTART_DRILL_WORKFLOW.lastIndexOf('yarn drill:native-restart:verify');
+    expect(installIndex).toBeGreaterThanOrEqual(0);
+    expect(buildIndex).toBeGreaterThan(installIndex);
+    expect(verifyIndex).toBeGreaterThan(buildIndex);
+    // 60 minutes only covered install + verify; the build step adds real time
+    // on top of the drill's own 900s + 1800s per-case allowance.
+    expect(RESTART_DRILL_WORKFLOW).toContain('timeout-minutes: 120');
+  });
 });

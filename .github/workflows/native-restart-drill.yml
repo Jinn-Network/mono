@@ -13,6 +13,15 @@ name: native-restart-drill
 # drill is hermetic local Anvil pinned to chain id 84532 — no public RPC, no
 # live fork, no skip-if-unreachable. A failure here is a coordinator or
 # harness regression, so the job fails closed rather than exiting 0.
+#
+# WHY the build step: the drill's role-host processes import several
+# @jinn-network/* portal packages (task-execution-protocol, trust-core, and
+# the rest of the chain `yarn typecheck` walks) by their built dist/index.js
+# entry point. dist/ is gitignored and nothing builds it at install time, so
+# without this step the drill fails ERR_MODULE_NOT_FOUND before it runs a
+# single scenario — the same failure native-e2e-rig.yml has hit on every
+# recent scheduled run. `build:stack` alone is not enough: `build:core`
+# depends on the plugin package.
 
 on:
   workflow_dispatch: {}
@@ -31,7 +40,10 @@ jobs:
   native-restart-drill:
     name: Phase B restart drill (hermetic Anvil)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 60 minutes covered only install + verify. The drill's own cases allow up
+    # to 900s + 1800s, and the dependency-stack build below adds real time on
+    # top of that.
+    timeout-minutes: 120
     env:
       # CPU-only runner: keep both onnxruntime installers from pulling CUDA assets.
       ONNXRUNTIME_NODE_INSTALL: skip
@@ -60,6 +72,10 @@ jobs:
       - name: Install client deps
         working-directory: operator
         run: yarn install --immutable
+
+      - name: Build the operator dependency stack
+        working-directory: operator
+        run: yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core
 
       - name: Phase B restart-drill verification
         working-directory: operator
