@@ -82,6 +82,15 @@ export async function broadcastOnce(
   return { txHash, broadcast: true };
 }
 
+/** Count one `broadcastOnce` port call versus an actual chain send (#4195). */
+export function countBroadcast(
+  sent: { readonly broadcast: boolean },
+  counters: { attempts: number; sent: number },
+): void {
+  counters.attempts += 1;
+  if (sent.broadcast) counters.sent += 1;
+}
+
 /**
  * A single port member the drilled phase must never call. Used where a port interface is only
  * partly exercised by a checkpoint and a whole-object proxy would not typecheck.
