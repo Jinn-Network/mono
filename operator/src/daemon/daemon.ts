@@ -17,6 +17,7 @@ import {
   LOOP_REGISTRY,
   type LoopName,
   getDaemonReadiness,
+  getDegradedRecoveryRunning,
   buildLoopMetricsSnapshot,
 } from './loop-heartbeat.js';
 import { emitEvent } from '../observability/emit-event.js';
@@ -468,6 +469,7 @@ export class Daemon {
         // ApiServerConfig in server.ts).
         getDaemonReadiness,
         getLoopSnapshot: () => buildLoopMetricsSnapshot(this.store),
+        getDegradedRecoveryRunning,
       });
       this.ownsApiServer = true;
     }

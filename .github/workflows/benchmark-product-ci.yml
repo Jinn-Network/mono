@@ -1,5 +1,31 @@
 name: Benchmark Product CI
 
+# This lane does NOT run in merge groups, and that is a decision, not an omission (issue #4384).
+#
+# If you arrived here from a red `Benchmark Product CI` on `next` for something that was green on
+# every contributing pull request, you have found the accepted gap rather than a new bug. Two
+# branches can each be correct alone and wrong together -- #4272 is the worked example: PR #3664
+# and PR #3781 both rewrote the verifier CLI and its suite, merged with no textual conflict, and
+# the semantic collision first appeared as a red `push` run here, after the merge.
+#
+# What was weighed. The `product` job took 1h4m on the #4272 fix. Adding `merge_group` and making
+# a job required would put roughly that on the critical path of every queued merge touching the
+# filtered paths above -- a repo-wide stall, not a lane-local cost. The "fast subset" alternative
+# is not actually fast: anything that runs the verifier suite must first build the verifier's own
+# `portal:` closure from source, and that build is most of the job: for scale, the `product` job
+# below prebuilds 35 packages before it reaches the first `yarn test`. No measured number exists
+# for a split lane, and turning an unmeasured guess into a required check is how a merge queue
+# wedges.
+#
+# What was done instead. `packages/benchmark-product/check/tsconfig.tests.json` typechecks the
+# `.mjs` suites against the published surface they exercise, so a stub written against a
+# superseded seam shape now fails to compile at its own line rather than crashing several frames
+# inside the renderer, as #4272 did. Detection stays post-merge; diagnosis stops being an
+# investigation.
+#
+# This is reversible. A second semantic collision landing on `next` is the signal that the
+# measured cost of a split merge-group lane is worth paying.
+
 on:
   pull_request:
     paths:
@@ -203,7 +229,7 @@ jobs:
             packages/task-execution/backend-local/assembly/yarn.lock
             packages/benchmarking/run/yarn.lock
             packages/benchmarking/local/yarn.lock
-            packages/benchmark-product/verify/yarn.lock
+            packages/benchmark-product/check/yarn.lock
             packages/benchmark-product/core/yarn.lock
             packages/benchmark-product/web/yarn.lock
             packages/benchmark-product/cli/yarn.lock
@@ -235,8 +261,8 @@ jobs:
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
-          # The Trust conformance kit -- a devDependency of verify AND core, never a runtime
-          # dependency of either. Verify runs the anchor-proof contract suite against its own
+          # The Trust conformance kit -- a devDependency of check AND core, never a runtime
+          # dependency of either. The checker runs the anchor-proof contract suite against its own
           # node:crypto ports (anchor-evidence design §11); core pins its producer-side `.ots`
           # serializer against the kit's byte-verified builder and its committed real-calendar
           # capture (§6.2). Built here because a portal dependency resolves through its `dist/`.
@@ -275,11 +301,11 @@ jobs:
           (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn vitest run src/backend.shutdown.test.ts && yarn build)
           (cd packages/benchmarking/run && yarn install --immutable && yarn build)
           (cd packages/benchmarking/local && yarn install --immutable && yarn build)
-      # The public family is ordered by its public dependencies: verify is standalone,
-      # core consumes verify, and cli consumes both. The private web is CLI build input,
+      # The public family is ordered by its public dependencies: check is standalone,
+      # core consumes check, and cli consumes both. The private web is CLI build input,
       # so its dependency tree must be installed after core and before the CLI packs it.
-      - name: Verify public bundle verifier
-        working-directory: packages/benchmark-product/verify
+      - name: Verify public bundle checker
+        working-directory: packages/benchmark-product/check
         run: |
           yarn install --immutable
           yarn typecheck

@@ -206,6 +206,12 @@ export interface ApiServerConfig {
    * are simply omitted, never fabricated.
    */
   getLoopSnapshot?: MetricsRoutesConfig['getLoopSnapshot'];
+  /**
+   * Whether the degraded-recovery loops are up, for `GET /metrics`'
+   * `jinn_degraded_recovery_running` gauge (#4311). Same injection rule as the two
+   * above; absent on bare/test servers, where the gauge is omitted.
+   */
+  getDegradedRecoveryRunning?: MetricsRoutesConfig['getDegradedRecoveryRunning'];
 }
 
 export interface ApiServer {
@@ -414,6 +420,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   addMetricsRoutes(app, store, {
     getDaemonReadiness: config.getDaemonReadiness,
     getLoopSnapshot: config.getLoopSnapshot,
+    getDegradedRecoveryRunning: config.getDegradedRecoveryRunning,
   });
 
   // `/v1/status` is operator-class as of spec §14.5 (issue #2404) — the

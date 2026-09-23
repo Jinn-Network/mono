@@ -550,12 +550,22 @@ export function createBaseSepoliaRecordTransport(input: {
   };
 
   return {
-    byLocation: async (location) => fetchBytes(
-      new URL(location),
-      httpTimeoutMs,
-      allowRecordLocation,
-      'any configured record origin (publicBaseUrl / recordSources[].baseUrl)',
-    ),
+    byLocation: async (location) => {
+      // A bare TypeError here is not a refusal `reportRefusedRecordDestination` names, so a
+      // scheme-less peer locator would be dropped without a warning (#3853).
+      let target: URL;
+      try {
+        target = new URL(location);
+      } catch {
+        throw new NativeRecordDestinationError(location, 'it is not a resolvable URL');
+      }
+      return fetchBytes(
+        target,
+        httpTimeoutMs,
+        allowRecordLocation,
+        'any configured record origin (publicBaseUrl / recordSources[].baseUrl)',
+      );
+    },
     byRawCid,
     async byDigest(digest) {
       const bytes = await byRawCid(rawCodecCidFromSha256Digest(digest));

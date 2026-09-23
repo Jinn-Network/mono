@@ -89,7 +89,6 @@ export const DEFAULT_EXCLUSIONS = {
     // Jinn dependency and so cannot import `assertRecordKindUri`).
     'packages/discovery/protocol/src/grammar.test.ts',
     'packages/benchmarking/records/src/identifiers.test.ts',
-    'packages/discovery/facts/benchmarking/src/identifiers.test.ts',
     'packages/environments/chain-record/src/identifiers.test.ts',
     'packages/environments/chain-record/src/primitives.test.ts',
     'packages/environments/information-world/src/identifiers.test.ts',

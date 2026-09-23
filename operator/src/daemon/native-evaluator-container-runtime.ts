@@ -171,7 +171,14 @@ export interface DockerContainerRuntimeOptions {
 
 const DEFAULT_KILL_GRACE_MS = 10_000;
 const DEFAULT_SETTLE_GRACE_MS = 10_000;
-const DEFAULT_MAX_STDOUT_BYTES = 4 * 1024 * 1024;
+/**
+ * OOM bound on the grader's log channel. Exported so the operator suite can assert it equals the
+ * package's `DEFAULT_MAX_GRADER_REPORT_BYTES`: the two channels an untrusted grader container
+ * controls get the same ceiling, and these are two independent literals in two projects, so
+ * without that assertion one could be widened alone and the mirroring both sides document would
+ * silently stop being true.
+ */
+export const DEFAULT_MAX_STDOUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAX_STDERR_BYTES = 64 * 1024;
 
 /** Resolve the host resource + isolation caps from options over {@link DEFAULT_ISOLATION}. */

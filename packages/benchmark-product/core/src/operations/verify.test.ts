@@ -343,7 +343,6 @@ describe("runVerify — happy path", () => {
       expect(outcome.result.matrixSha256).toBe(runState.matrixSha256);
       expect(outcome.result.reportEnvelopeSha256).toBe(runState.reportEnvelopeSha256);
     },
-    30_000,
   );
 
   test(
@@ -359,7 +358,6 @@ describe("runVerify — happy path", () => {
       expect(outcome.result.checks).toEqual(["matrix-rederivation"]);
       expect(outcome.result.reportEnvelopeSha256).toBeUndefined();
     },
-    30_000,
   );
 });
 
@@ -400,7 +398,7 @@ describe("runVerify — pre-report integrity anchors", () => {
       "claim-consistency",
       "integrity-anchors",
     ]);
-  }, 30_000);
+  });
 
   test("does not trust producer bookkeeping to resolve a pending proof", async () => {
     const clock = makeClock();
@@ -455,7 +453,7 @@ describe("runVerify — pre-report integrity anchors", () => {
       }),
     ]));
     expect(outcome.result.anchoringWindow).toEqual({ closingOperation: "report" });
-  }, 30_000);
+  });
 
   test("keeps an upgraded pending record listed without warning that its window is open", async () => {
     const clock = makeClock();
@@ -489,7 +487,7 @@ describe("runVerify — pre-report integrity anchors", () => {
     ]));
     expect(outcome.result.anchors?.anchors).toHaveLength(2);
     expect(outcome.result.anchoringWindow).toBeUndefined();
-  }, 30_000);
+  });
 
   test("reports declared-but-absent anchoring intent before report", async () => {
     const clock = makeClock();
@@ -514,7 +512,7 @@ describe("runVerify — pre-report integrity anchors", () => {
       ],
       invalid: [],
     });
-  }, 30_000);
+  });
 
   test("refuses an anchor the shared evaluator marks invalid", async () => {
     const clock = makeClock();
@@ -546,7 +544,7 @@ describe("runVerify — pre-report integrity anchors", () => {
     expect(outcome.error.code).toBe("record-integrity");
     expect(outcome.error.detail).toContain("carried anchor is invalid");
     expect(outcome.error.detail).toContain("after this run's own pre-registered close instant");
-  }, 30_000);
+  });
 
   test("preserves the legacy unanchored closed result shape", async () => {
     const clock = makeClock();
@@ -560,7 +558,7 @@ describe("runVerify — pre-report integrity anchors", () => {
       checks: ["matrix-rederivation"],
       matrixSha256: readRunState(workspaceDir, "draft-1")?.matrixSha256,
     });
-  }, 30_000);
+  });
 
   test("CLI human and JSON modes expose pending anchors and the report boundary", async () => {
     const clock = makeClock();
@@ -580,7 +578,7 @@ describe("runVerify — pre-report integrity anchors", () => {
     const parsed = JSON.parse(json.stdout) as { result: { anchors?: unknown; anchoringWindow?: unknown } };
     expect(parsed.result.anchors).toBeDefined();
     expect(parsed.result.anchoringWindow).toEqual({ closingOperation: "report" });
-  }, 30_000);
+  });
 
   test("CLI human mode does not render terminal controls from malformed anchor metadata", async () => {
     const clock = makeClock();
@@ -604,7 +602,7 @@ describe("runVerify — pre-report integrity anchors", () => {
     expect(human.exitCode).toBe(1);
     expect(human.stderr).toContain("error (record-integrity)");
     expect(human.stderr).not.toContain(controlSequence);
-  }, 30_000);
+  });
 });
 
 describe("runVerify — matrix tamper detection", () => {
@@ -621,7 +619,6 @@ describe("runVerify — matrix tamper detection", () => {
       expect(outcome.error.code).toBe("record-integrity");
       expect(outcome.error.detail).toMatch(/cancel marker/iu);
     },
-    30_000,
   );
 
   test(
@@ -658,7 +655,6 @@ describe("runVerify — matrix tamper detection", () => {
       expect(outcome.error.issues?.[0]?.path).toBe("matrix-rederivation");
       expect(outcome.error.detail).toContain("matrix-rederivation");
     },
-    30_000,
   );
 
   test(
@@ -681,7 +677,6 @@ describe("runVerify — matrix tamper detection", () => {
       // strong-tamper case above, on purpose (module header: two independent layers).
       expect(outcome.error.detail).toContain("stored bytes do not match their digest");
     },
-    30_000,
   );
 });
 
@@ -719,7 +714,6 @@ describe("runVerify — report tamper detection", () => {
       expect(outcome.error.issues?.[0]?.path).toBe("report-verification");
       expect(outcome.error.detail).toContain("report-authenticity");
     },
-    30_000,
   );
 });
 
@@ -741,7 +735,6 @@ describe("runVerify — claim package tamper detection", () => {
       expect(outcome.error.issues?.[0]?.path).toBe("claim-consistency");
       expect(outcome.error.detail).toContain("records.matrixSha256");
     },
-    30_000,
   );
 
   test(
@@ -763,7 +756,6 @@ describe("runVerify — claim package tamper detection", () => {
       expect(outcome.error.issues?.[0]?.path).toBe("claim-consistency");
       expect(outcome.error.detail).toContain("results");
     },
-    30_000,
   );
 });
 

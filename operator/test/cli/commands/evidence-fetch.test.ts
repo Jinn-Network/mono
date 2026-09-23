@@ -16,6 +16,7 @@ import type { CommandContext } from '../../../src/cli/command.js';
 import type {
   ArtifactAddress,
   ArtifactLocators,
+  FetchVerifiedArtifactFailure,
   FetchVerifiedArtifactResult,
   VerifiedArtifact,
 } from '@jinn-network/core/corpus-read';
@@ -40,12 +41,24 @@ const ARTIFACT_SHA = 'c'.repeat(64);
 const SECOND_SHA = 'd'.repeat(64);
 const ENVELOPE_CID = 'bafy-envelope-001';
 const BYTES = Buffer.from('the delivered artifact', 'utf-8');
+// Deliberately not the schema default: asserting the default would pass for the
+// wrong reason, since a hard-coded constant in the verb would satisfy it just as
+// well as reading config. A non-default value pins the plumbing.
+const GATEWAY = 'https://gateway.test.example';
 
 function artifact(sha256: string, artifactType: string): Record<string, unknown> {
   return {
     artifactType,
     sha256,
     access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+    // The donated mirror is the free public leg the primitive runs first; the
+    // locator assertion below is what keeps the verb handing it over.
+    sources: [{
+      kind: 'ipfs',
+      cid: `bafy-donated-${sha256.slice(0, 8)}`,
+      sha256,
+      encoding: 'jinn.artifact.donation.v1',
+    }],
   };
 }
 
@@ -96,7 +109,11 @@ function withConfig(argv: string[]): string[] {
   const dir = mkdtempSync(join(tmpdir(), 'jinn-evidence-fetch-config-'));
   tempDirs.push(dir);
   const configPath = join(dir, 'config.json');
-  writeFileSync(configPath, JSON.stringify({ network: 'testnet' }), 'utf-8');
+  writeFileSync(
+    configPath,
+    JSON.stringify({ network: 'testnet', ipfsGatewayUrl: GATEWAY }),
+    'utf-8',
+  );
   return [...argv, '--config', configPath];
 }
 
@@ -197,11 +214,42 @@ describe('evidence fetch', () => {
     expect(fetchVerifiedArtifact).toHaveBeenCalledOnce();
     const [address, locators] = fetchVerifiedArtifact.mock.calls[0]!;
     expect(address).toEqual({ sha256: ARTIFACT_SHA, artifactType: 'output.portfolio.v0' });
-    expect(locators).toMatchObject({
+    // toEqual, not toMatchObject: a subset match left `sources` and
+    // `ipfsGatewayUrl` unpinned, so dropping either from the call would have
+    // silently disabled the donated IPFS leg with the suite still green. The
+    // whole-object form also catches a locator field being added without a
+    // decision.
+    expect(locators).toEqual({
+      sources: [{
+        kind: 'ipfs',
+        cid: `bafy-donated-${ARTIFACT_SHA.slice(0, 8)}`,
+        sha256: ARTIFACT_SHA,
+        encoding: 'jinn.artifact.donation.v1',
+      }],
+      ipfsGatewayUrl: GATEWAY,
       endpoint: 'https://op.example.com',
       envelopeCid: ENVELOPE_CID,
       ownerSafe: SAFE,
     });
+  });
+
+  it('will not let a digest_mismatch failure omit its mismatch evidence', () => {
+    // Type-level regression guard for #4361. `refuse()` is the sole producer of
+    // reason: 'digest_mismatch' and always sets `mismatch`, but before this the
+    // invariant lived only in that constructor — so two call sites in
+    // corpus-read/acquire.ts had to assert it with `!`. If the union is ever
+    // loosened again, this directive stops suppressing anything and becomes
+    // TS2578, which `yarn typecheck:test` reports as a new error on this file.
+    // @ts-expect-error a digest_mismatch failure must carry `mismatch`
+    const withoutEvidence: FetchVerifiedArtifactFailure = {
+      ok: false,
+      sha256: ARTIFACT_SHA,
+      reason: 'digest_mismatch',
+      retryable: false,
+      message: 'no evidence attached',
+      attempts: [],
+    };
+    expect(withoutEvidence.reason).toBe('digest_mismatch');
   });
 
   it('--human summarizes the retrieval and never prints the bytes', async () => {
@@ -339,6 +387,29 @@ describe('evidence fetch', () => {
       code: 'transient_error',
       details: { reason: 'timeout', retryable: true },
     });
+  });
+
+  it('exits fatal on a malformed donation payload', async () => {
+    // A decode failure is a terminal property of the fetched bytes, not a
+    // transport unknown, so the verb must not hand back the retry hint.
+    const { command } = commandWith({
+      ok: false,
+      sha256: ARTIFACT_SHA,
+      reason: 'malformed_payload',
+      retryable: false,
+      message: 'the donated payload is not this artifact',
+      attempts: [],
+    });
+    const { ctx, writes, exits } = makeCtx(
+      withConfig(['fetch', '--envelope-cid', ENVELOPE_CID, '--json']),
+    );
+    await command.run(ctx);
+
+    expect(exits).toEqual([50]);
+    const out = JSON.parse(writes[0]!);
+    expect(out.code).toBe('fatal');
+    expect(out.details).toMatchObject({ reason: 'malformed_payload', retryable: false });
+    expect(out.hint).toBe('The source answered, and the answer was final for this address.');
   });
 
   it('requires --envelope-cid', async () => {

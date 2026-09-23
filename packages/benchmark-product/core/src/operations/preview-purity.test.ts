@@ -219,6 +219,5 @@ describe("preview purity — compilation exclusion (AC3)", () => {
       expect(readPreviewLog(workspaceA, "draft-1")?.count).toBe(2);
       expect(readPreviewLog(workspaceB, "draft-1")).toBeUndefined();
     },
-    30_000,
   );
 });

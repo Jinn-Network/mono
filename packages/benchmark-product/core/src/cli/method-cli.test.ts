@@ -1,6 +1,10 @@
-import { describe, expect, test } from "vitest";
-import { runCli } from "./main.js";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { CLI_VERB_NAMES, runCli, USAGE } from "./main.js";
 import type { CliContext } from "./result.js";
+import { STANDALONE_CLI_VERBS } from "./parity-map.js";
 
 function context(): CliContext {
   return { cwd: "/tmp", clock: () => "2026-08-18T00:00:00.000Z" };
@@ -8,12 +12,26 @@ function context(): CliContext {
 
 function parseJson(stdout: string): {
   ok: boolean;
-  result?: { catalog?: ReadonlyArray<{ id: string }> };
+  result?: {
+    catalog?: ReadonlyArray<{ id: string }>;
+    catalogId?: string;
+    official?: boolean;
+    selectionManifestSha256?: string;
+    benchmarkSha256?: string;
+    draft?: { draftId: string };
+  };
   error?: { code: string; detail: string };
 } {
   return JSON.parse(stdout) as {
     ok: boolean;
-    result?: { catalog?: ReadonlyArray<{ id: string }> };
+    result?: {
+      catalog?: ReadonlyArray<{ id: string }>;
+      catalogId?: string;
+      official?: boolean;
+      selectionManifestSha256?: string;
+      benchmarkSha256?: string;
+      draft?: { draftId: string };
+    };
     error?: { code: string; detail: string };
   };
 }
@@ -29,6 +47,7 @@ describe("retired per-suite verbs", () => {
     ["runtime", "apex-agents", "select"],
     ["runtime", "apex-swe-dev", "select"],
     ["runtime", "deep-swe-v1.1", "select"],
+    ["runtime", "terminal-bench", "migrate"],
     ["runtime", "inspect", "eval", "select"],
     ["runtime", "inspect", "eval", "export"],
     ["runtime", "inspect", "bind-judge"],
@@ -37,6 +56,7 @@ describe("retired per-suite verbs", () => {
     ["apex-agents", "export"],
     ["apex-swe", "export"],
     ["deepswe", "export"],
+    ["demo1", "prereg", "verify"],
   ])("unknown command %s", async (...words) => {
     const result = await runCli([...words, "--json"], context());
     expect(result.exitCode).toBe(2);
@@ -44,6 +64,19 @@ describe("retired per-suite verbs", () => {
     expect(body.ok).toBe(false);
     expect(body.error?.code).toBe("invalid-invocation");
     expect(body.error?.detail).toBe(`unknown command "${words.join(" ")}"`);
+  });
+});
+
+describe("Demo-1 / SkillsBench method removal", () => {
+  test("USAGE says the method is gone", () => {
+    expect(USAGE).toContain(
+      "The Demo-1 / SkillsBench method is gone, including demo1 prereg verify. Colophon creates no benchmarks.",
+    );
+  });
+
+  test("the verb is not in the dispatch table or standalone map", () => {
+    expect(CLI_VERB_NAMES).not.toContain("demo1 prereg verify");
+    expect(STANDALONE_CLI_VERBS).not.toHaveProperty("demo1 prereg verify");
   });
 });
 
@@ -121,5 +154,68 @@ describe("method bind", () => {
     const body = parseJson(result.stdout);
     expect(body.ok).toBe(false);
     expect(body.error?.detail).not.toMatch(/unknown flag --n/);
+  });
+});
+
+describe("method bind catalog identity", () => {
+  let root: string;
+  let workspaceDir: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "method-cli-bind-"));
+    workspaceDir = join(root, "workspace");
+    mkdirSync(workspaceDir);
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  test("catalog bind with empty host.json seals identity without a selection hash", async () => {
+    const hostPath = join(root, "host.json");
+    writeFileSync(hostPath, "{}");
+    const ctx: CliContext = { cwd: root, clock: () => "2026-08-18T00:00:00.000Z" };
+    expect((await runCli(["init", "--workspace", workspaceDir, "--principal", "sponsor-1", "--json"], ctx)).exitCode).toBe(0);
+    const created = await runCli(
+      ["draft", "create", "--workspace", workspaceDir, "--principal", "sponsor-1", "--name", "One", "--json"],
+      ctx,
+    );
+    expect(created.exitCode).toBe(0);
+    const draftId = parseJson(created.stdout).result?.draft?.draftId;
+    expect(draftId).toBe("one");
+    const bound = await runCli(
+      [
+        "method", "terminal-bench-2.1",
+        "--workspace", workspaceDir,
+        "--principal", "sponsor-1",
+        "--draft", "one",
+        "--slice", "1",
+        "--host", hostPath,
+        "--json",
+      ],
+      ctx,
+    );
+    expect(bound.exitCode, bound.stdout).toBe(0);
+    const body = parseJson(bound.stdout);
+    expect(body.ok).toBe(true);
+    expect(body.result?.catalogId).toBe("terminal-bench-2.1");
+    expect(body.result?.official).toBe(true);
+    expect(body.result?.selectionManifestSha256).toBeUndefined();
+    expect(body.result?.benchmarkSha256).toMatch(/^[a-f0-9]{64}$/u);
+    const createdTwo = await runCli(
+      ["draft", "create", "--workspace", workspaceDir, "--principal", "sponsor-1", "--name", "Two", "--json"],
+      ctx,
+    );
+    expect(createdTwo.exitCode).toBe(0);
+    const text = await runCli(
+      [
+        "method", "terminal-bench-2.1",
+        "--workspace", workspaceDir,
+        "--principal", "sponsor-1",
+        "--draft", "two",
+        "--slice", "1",
+        "--host", hostPath,
+      ],
+      ctx,
+    );
+    expect(text.exitCode, text.stdout).toBe(0);
+    expect(text.stdout).toBe(`bound official terminal-bench-2.1 method ${body.result?.benchmarkSha256} for draft two\n`);
   });
 });

@@ -106,10 +106,15 @@ in `@noble/hashes` 2.x reach every package, while each committed `yarn.lock` plu
 `yarn install --immutable` keeps each project's resolved artifact reproducible.
 
 Locks resolve per project, so the resolved version may differ between them — `oci-grader`
-currently sits on 2.4.0 while the rest of the tree stays on 2.2.0. Nothing spans that boundary
-today: `oci-grader` hashes with `node:crypto` and imports from this package only as types. Before
-adding a runtime import that produces sealed bytes across such a split, re-mint or re-verify the
-consuming package's pinned digests.
+currently sits on 2.4.0 while the rest of the tree stays on 2.2.0. This package's hashing module
+*is* loaded under 2.4.0 in that project: `oci-grader/src/errors.ts` value-imports from
+`evaluation-harness`, whose barrel loads `launcher.ts`, which value-imports
+`EVALUATION_TASK_PROFILE_URI` from here — and this package's barrel re-exports `bytes.js`. What
+does not span the boundary is the *invocation*, not the load: `oci-grader` seals with
+`node:crypto`, and its one direct import from here (`swe-rebench-source.ts`) is `import type`, so
+no sealed bytes are produced by 2.4.0's `@noble/hashes`. Adding a call — not merely an import —
+that produces sealed bytes across such a split means re-minting or re-verifying the consuming
+package's pinned digests.
 
 No package under `packages/task-execution/` may carry a `@noble/hashes` entry in `resolutions` to
 work around a mismatch; align the declared range instead. Both rules are enforced by

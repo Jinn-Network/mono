@@ -24,8 +24,8 @@ import type { MirrorSourceConfig } from "../config.js";
 import type { RuntimeLogger } from "../logger.js";
 import type { CorpusAdmission } from "./admission.js";
 import { adaptAnnouncementEntry } from "./announcements.js";
-import type { ChainVerification } from "./chain-verification.js";
-import { describeError } from "./errors.js";
+import type { ChainVerification, WalkTruncation } from "./chain-verification.js";
+import { bestEffortLogger, describeError } from "./errors.js";
 import type { CorpusFilesystem } from "./fs.js";
 import { tryAcquireSyncLock } from "./lock.js";
 import { createCorpusRepositoryResolver } from "./repositories.js";
@@ -175,13 +175,15 @@ interface Counters {
  * caller can fire it opportunistically and drop the promise.
  */
 export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMirror {
+  const log = bestEffortLogger(options.log);
+
   async function collect(
     source: MirrorSourceConfig,
     counters: Counters,
     signal: AbortSignal | undefined,
   ): Promise<{
     readonly entries: SyncedEntry[];
-    readonly truncated: boolean;
+    readonly truncation: WalkTruncation;
     readonly head: Awaited<ReturnType<typeof fetchHead>>;
   }> {
     const endpoint: SourceEndpoint = {
@@ -205,17 +207,26 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
 
     const entries: SyncedEntry[] = [];
     // Set only when an entry the walk had already produced is abandoned, so a
-    // walk that simply ran out is never reported as cut (#3252).
-    let truncated = false;
+    // walk that simply ran out is never reported as cut (#3252) -- and set to
+    // WHICH abandonment it was, because a cancellation and a bound need
+    // different operator advice downstream (#3672). The abort is checked first:
+    // an operation cancelled on the same iteration the bound would also have
+    // stopped is still a cancellation, and raising the bound would not have
+    // let it finish.
+    let truncation: WalkTruncation = "none";
     for await (const synced of walk) {
-      if (signal?.aborted === true || counters.entriesWalked >= options.maxEntriesPerSync) {
-        truncated = true;
+      if (signal?.aborted === true) {
+        truncation = "aborted";
+        break;
+      }
+      if (counters.entriesWalked >= options.maxEntriesPerSync) {
+        truncation = "bound";
         break;
       }
       counters.entriesWalked += 1;
       entries.push(synced);
     }
-    return { entries, truncated, head };
+    return { entries, truncation, head };
   }
 
   async function syncSource(
@@ -235,7 +246,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
     try {
       const mark = await options.highWaterMarks.get(identity);
       const firstAdoption = mark === undefined;
-      const { entries, truncated, head } = await collect(source, counters, signal);
+      const { entries, truncation, head } = await collect(source, counters, signal);
 
       // An archive polled more often than it appends re-serves the chain
       // position this mirror already accepted -- byte-identical if the poll
@@ -255,7 +266,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
       // path where the truncation is judged, not on the revalidation one where
       // it would read as a clean no-op (#3252).
       const idle =
-        mark === undefined || entries.length !== 0 || truncated
+        mark === undefined || entries.length !== 0 || truncation !== "none"
           ? undefined
           : classifyIdleHead(head.head, identity, mark);
       if (mark !== undefined && idle !== undefined) {
@@ -283,7 +294,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
             issuedAt: head.head.issuedAt,
           });
         }
-        options.log.debug("corpus.mirror.head-revalidated", {
+        log.debug("corpus.mirror.head-revalidated", {
           source: `${identity.agent}/${identity.name}`,
           sequence: head.head.sequence,
           head: idle,
@@ -296,7 +307,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
         head: head.head,
         ...(head.signature === undefined ? {} : { headSignature: head.signature }),
         entries,
-        truncated,
+        truncation,
         firstAdoption,
       });
       if (verification.status === "rejected") {
@@ -326,9 +337,9 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
             // One unfetchable or nonconforming record must not wedge the rest
             // of a source's entries.
             counters.rejected += 1;
-            options.log.warn("corpus.mirror.index-failed", {
+            log.warn("corpus.mirror.index-failed", {
               announcementId: announcement.announcementId,
-              message: describeError(error),
+              reason: describeError(error),
             });
           }
         }
@@ -360,7 +371,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
       try {
         lock = await tryAcquireSyncLock({ path: options.lockPath, fs: options.fs });
       } catch (error) {
-        options.log.warn("corpus.mirror.lock-failed", { message: describeError(error) });
+        log.warn("corpus.mirror.lock-failed", { reason: describeError(error) });
         return { status: "failed", sources: [] };
       }
       if (lock === undefined) return { status: "skipped-locked", sources: [] };
@@ -387,7 +398,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
           return { status, sources: reports };
         });
       } catch (error) {
-        options.log.error("corpus.mirror.sync-failed", { message: describeError(error) });
+        log.error("corpus.mirror.sync-failed", { reason: describeError(error) });
         return { status: "failed", sources: [] };
       } finally {
         await lock.close();

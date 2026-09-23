@@ -146,6 +146,12 @@ function syntaxMask(text, initial = { quote: null, frames: [] }) {
   const substDepth = new Array(text.length).fill(0);
   const frames = [...initial.frames];
   let quote = initial.quote;
+  // `${…}` interiors are parameter text, not command syntax — a `|` in `${x:-|}`
+  // separates nothing (#4546). Each frame remembers the quote that was active at
+  // `${` so `"${changed}"` still closes on `}` (the `}` sits in those same double
+  // quotes) while `${x:-"}"}` does not close on the quoted `}`. Nested `$(…)` still
+  // opens a command substitution (`frames.length > 0`).
+  const params = initial.params === undefined ? [] : [...initial.params];
 
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
@@ -163,12 +169,29 @@ function syntaxMask(text, initial = { quote: null, frames: [] }) {
       substDepth[index] = frames.length;
       continue;
     }
+    if (quote !== "'" && char === '$' && text[index + 1] === '{') {
+      params.push({ quote, braces: 0 });
+      substDepth[index] = frames.length;
+      index += 1;
+      substDepth[index] = frames.length;
+      continue;
+    }
     if (quote === null && char === ')' && frames.length > 0) {
       quote = frames.pop();
       substDepth[index] = frames.length;
       continue;
     }
     substDepth[index] = frames.length;
+    const param = params.at(-1);
+    if (param !== undefined && quote === param.quote && frames.length === 0 && char === '{') {
+      param.braces += 1;
+      continue;
+    }
+    if (param !== undefined && quote === param.quote && frames.length === 0 && char === '}') {
+      if (param.braces > 0) param.braces -= 1;
+      else params.pop();
+      continue;
+    }
     if (quote === null && (char === "'" || char === '"')) {
       quote = char;
       continue;
@@ -177,9 +200,9 @@ function syntaxMask(text, initial = { quote: null, frames: [] }) {
       quote = null;
       continue;
     }
-    mask[index] = quote === null;
+    mask[index] = quote === null && (params.length === 0 || frames.length > 0);
   }
-  return { mask, substDepth, quote, frames };
+  return { mask, substDepth, quote, frames, params };
 }
 
 // The interiors of `text`'s outermost `$( … )`, as `[start, end)` offsets. A run of
@@ -264,8 +287,8 @@ function scanLine(text, initial) {
     break;
   }
 
-  const { quote, frames } = syntaxMask(code, initial);
-  return { code, heredoc, state: { quote, frames } };
+  const { quote, frames, params } = syntaxMask(code, initial);
+  return { code, heredoc, state: { quote, frames, params } };
 }
 
 // A statement is still open when a quote or `$( … )` is unclosed, or when the line ends
@@ -420,9 +443,26 @@ export function earlyExitConsumer(segment) {
 // Compound statements
 // ---------------------------------------------------------------------------
 
-// One logical line as shell words and the `;` / `&&` / `||` operators between them.
-// A single `|` stays inside its word: the pipeline split is `splitUnquoted`'s job, and
-// only the operators that separate *statements* matter here.
+// The command separator at `index` — `|`, `&` or `|&` — or null when the character
+// there is not one. Only shell syntax counts (a quoted or escaped `|` is an ordinary
+// character), `&&` and `||` are operators rather than separators, and the `|`/`&`
+// inside a redirection — `2>&1`, `<&3`, `>|f`, `&>f`, `&>>f` — separates nothing.
+function separatorAt(text, mask, index) {
+  if (mask[index] !== true) return null;
+  const char = text[index];
+  if (char !== '|' && char !== '&') return null;
+  if (text[index + 1] === char && mask[index + 1] === true) return null;
+  if (mask[index - 1] === true && (text[index - 1] === '>' || text[index - 1] === '<')) return null;
+  if (char === '&' && text[index + 1] === '>') return null;
+  if (char === '|' && text[index + 1] === '&' && mask[index + 1] === true) return '|&';
+  return char;
+}
+
+// One logical line as shell words, the `;` / `&&` / `||` operators that separate
+// *statements*, and the `|` / `&` / `|&` separators that begin a new command without
+// ending the statement. Separators are their own tokens whether or not a space is
+// written around them (#4067, #4165); the pipeline split itself is `splitUnquoted`'s
+// job, and `splitTopLevel` reads operators only.
 function shellTokens(text) {
   const { mask, substDepth } = syntaxMask(text);
   const tokens = [];
@@ -457,6 +497,18 @@ function shellTokens(text) {
         continue;
       }
     }
+    const separator = separatorAt(text, mask, index);
+    if (separator !== null) {
+      tokens.push({
+        type: 'separator',
+        value: separator,
+        start: index,
+        end: index + separator.length,
+        subst: substDepth[index] > 0,
+      });
+      index += separator.length;
+      continue;
+    }
     const start = index;
     while (index < text.length) {
       if (mask[index] !== true) {
@@ -466,6 +518,7 @@ function shellTokens(text) {
       const char = text[index];
       if (/\s/u.test(char) || char === ';') break;
       if ((char === '&' || char === '|') && text[index + 1] === char && mask[index + 1] === true) break;
+      if (separatorAt(text, mask, index) !== null) break;
       index += 1;
     }
     tokens.push({
@@ -479,34 +532,28 @@ function shellTokens(text) {
       // nor closes a compound.
       opensParen: mask[start] === true && text[start] === '(',
       closesParen: mask[index - 1] === true && text[index - 1] === ')',
-      // A shell-syntax `|` or `&` glued to the end of the word. It is a command
-      // separator, so a statement begins right after it — but only when the mask says it
-      // is syntax: a quoted or escaped `|` is an ordinary character.
-      endsSeparator:
-        mask[index - 1] === true && (text[index - 1] === '|' || text[index - 1] === '&'),
     });
   }
   return tokens;
 }
 
 // Words after which the shell begins a new command, so a reserved word standing there
-// is a keyword rather than an argument. `|` and `&` stay inside a word token, only `&&`,
-// `||` and `;` being operators — so a word that merely *ends* in one is matched by
-// `endsSeparator` rather than by this set.
-const COMMAND_POSITION_WORDS = new Set(['(', '|', '&', '!', 'then', 'else', 'elif', 'do', '{', 'time']);
+// is a keyword rather than an argument. A `|` or `&` is never a word — spaced or glued,
+// it is a separator token — so it is matched by `leadsStatement`'s type test rather
+// than by this set.
+const COMMAND_POSITION_WORDS = new Set(['(', '!', 'then', 'else', 'elif', 'do', '{', 'time']);
 
 const BRACE_TOKENS = new Set(['{', '}']);
 
 function leadsStatement(previous) {
   if (previous === undefined) return true;
-  if (previous.type === 'operator') return true;
+  // A statement begins after `;`/`&&`/`||`, and a command begins after `|`/`&`/`|&` —
+  // whether the separator was written spaced or glued to a neighbor (#4067, #4165).
+  if (previous.type === 'operator' || previous.type === 'separator') return true;
   // A `case` arm pattern — `a)`, `*)`, `b|c)` — ends the word it is glued to, and the arm
   // body begins right after it. Without this a compound leading an arm was read as an
   // argument, which is the same false red this positional rule exists to remove.
   if (previous.closesParen === true) return true;
-  // `cat f| while …` tokenizes as one word `cat f|`, so the set lookup below — which
-  // tests the whole value — never sees the pipe that ends it (#4067).
-  if (previous.endsSeparator === true) return true;
   return COMMAND_POSITION_WORDS.has(previous.value);
 }
 
@@ -545,6 +592,44 @@ function tokenCompound(token, previous) {
   return positional ? { role: 'close', kind: closer } : null;
 }
 
+function inCaseArmPattern(tokens, position) {
+  const token = tokens[position];
+  if (token === undefined || (token.type !== 'word' && !(token.type === 'separator' && token.value === '|'))) {
+    return false;
+  }
+  let start = position;
+  while (start > 0) {
+    const previous = tokens[start - 1];
+    const current = tokens[start];
+    if (current.type === 'word' && previous.type === 'separator' && previous.value === '|') {
+      start -= 1;
+      continue;
+    }
+    if (current.type === 'separator' && current.value === '|' && previous.type === 'word') {
+      start -= 1;
+      continue;
+    }
+    break;
+  }
+  let end = position;
+  while (end + 1 < tokens.length) {
+    const next = tokens[end + 1];
+    const current = tokens[end];
+    if (current.type === 'word' && next.type === 'separator' && next.value === '|') {
+      end += 1;
+      continue;
+    }
+    if (current.type === 'separator' && current.value === '|' && next.type === 'word') {
+      end += 1;
+      continue;
+    }
+    break;
+  }
+  const last = tokens[end];
+  const sawPipe = tokens.slice(start, end + 1).some((entry) => entry.type === 'separator' && entry.value === '|');
+  return sawPipe && last.type === 'word' && last.closesParen === true && last.opensParen !== true;
+}
+
 function matchCompounds(tokens) {
   const enclosed = new Array(tokens.length).fill(false);
   /** @type {{position: number, kind: string}[]} */
@@ -552,6 +637,11 @@ function matchCompounds(tokens) {
   /** @type {{kind: string, guarded: boolean}[]} */
   const unmatchedClosers = [];
   for (const [position, token] of tokens.entries()) {
+    // `done|skipped)` is a `case` arm pattern: the `|` joins alternatives and the
+    // closing `)` ends the pattern, so a reserved-word alternative is not a compound
+    // opener or closer. Treating it as one popped the enclosing `while` and lost the
+    // `done || true` guard (#4546).
+    if (inCaseArmPattern(tokens, position)) continue;
     const compound = tokenCompound(token, tokens[position - 1]);
     if (compound === null) continue;
     if (compound.role === 'open') {
@@ -589,13 +679,23 @@ function matchCompounds(tokens) {
  * Whether the opener at `position` is the group of a function *definition* — `f () {`,
  * `f() (`, `function f {`. A `||` written after a definition guards defining the
  * function, which cannot fail; the body runs unguarded whenever the function is later
- * called, so the guard must not reach into it.
+ * called, so the guard must not reach into it. The prefix examined is the *statement the
+ * opener stands in*, cut where `leadsStatement` says a statement begins.
  */
 function opensDefinition(text, tokens, position) {
   let statementStart = 0;
   for (let index = position - 1; index >= 0; index -= 1) {
-    if (tokens[index].type === 'operator') {
-      statementStart = tokens[index].end;
+    // The token at `index` begins the statement the opener stands in when the token before it
+    // is one a statement begins after — an operator, a `case` arm's `a)`, a glued `|`/`&`, or a
+    // command-position word such as `{`, `(`, `then`, `do`. `leadsStatement` is the lint's one
+    // definition of that boundary; stopping only at an operator left `{ f () {` read as a
+    // brace-group argument, and the guard on the enclosing closer reached into the deferred body.
+    // A definition's own parentheses written apart — `f ( ) {` — are the words `(` and `)`, and
+    // the `(` is not a boundary: an empty subshell is a syntax error, so a `)` straight after a
+    // `(` can only be the definition's, and the rewind carries on through it to the name.
+    if (tokens[index].value === ')' && tokens[index - 1]?.value === '(') continue;
+    if (leadsStatement(tokens[index - 1])) {
+      statementStart = tokens[index].start;
       break;
     }
   }
@@ -697,6 +797,24 @@ function compoundBody(statement) {
     };
   }
   return null;
+}
+
+// Top-level pipeline segments, split on unenclosed `|` / `&` / `|&`. Used so a compound
+// that *leads* a pipeline (`{ def; } | cat`) can still be unwrapped: `compoundBody`
+// requires the statement to end on the closer, and without this a `|| true` on the
+// pipeline suppressed a function body that only runs at the call (#4566).
+function splitPipeline(statement) {
+  const tokens = shellTokens(statement);
+  const { enclosed } = matchCompounds(tokens);
+  const parts = [];
+  let start = 0;
+  for (const [position, token] of tokens.entries()) {
+    if (token.type !== 'separator' || enclosed[position] || token.subst) continue;
+    parts.push({ text: statement.slice(start, token.start), offset: start });
+    start = token.end;
+  }
+  parts.push({ text: statement.slice(start), offset: start });
+  return parts;
 }
 
 // ---------------------------------------------------------------------------
@@ -1048,6 +1166,32 @@ function guardFlags(units) {
   return guarded;
 }
 
+function scanStatementRemainder(statement, fragment, offset, context, skipHead) {
+  // A command substitution is its own list: `$( … )` runs in a subshell, so a guard
+  // written inside one covers the inside only, and a `||` written inside one is not a
+  // separator of the statement that holds it. Walking the interior separately keeps
+  // both true while the finding still names the whole statement a reader sees.
+  // skipHead is true for a full statement (first segment is the producer) and false
+  // for a pipeline tail whose producer was already unwrapped.
+  const trimmed = statement.trim();
+  const spans = substitutionSpans(fragment);
+  const report = (consumer) => context.report(trimmed, consumer, offset);
+  for (const span of spans) {
+    scanStatements(
+      fragment.slice(span.start, span.end),
+      false,
+      { ...context, report: (_inner, consumer) => report(consumer) },
+      'sealed',
+    );
+  }
+  const segments = splitUnquoted(blankSpans(fragment, spans), ['|&', '|']);
+  const rest = skipHead ? segments.slice(1) : segments;
+  for (const segment of rest) {
+    const consumer = earlyExitConsumer(segment);
+    if (consumer !== null) report(consumer);
+  }
+}
+
 /**
  * Walk one logical line's statements, honouring nesting: a `||` guard written after a
  * compound guards everything inside it. A compound is unwrapped and re-walked so the
@@ -1096,30 +1240,30 @@ function scanStatements(text, guarded, context, scope = 'top', base = 0) {
       );
       continue;
     }
-    if (unitGuarded) continue;
-
-    // A command substitution is its own list: `$( … )` runs in a subshell, so a guard
-    // written inside one covers the inside only, and a `||` written inside one is not a
-    // separator of the statement that holds it. Walking the interior separately keeps
-    // both true while the finding still names the whole statement a reader sees.
-    const spans = substitutionSpans(statement);
-    for (const span of spans) {
-      const interior = statement.slice(span.start, span.end);
+    const pipes = splitPipeline(statement);
+    const headCompound = pipes.length > 1 ? compoundBody(pipes[0].text) : null;
+    if (headCompound !== null) {
+      const nestedScope = scope !== 'sealed' && headCompound.carries ? 'carry' : 'sealed';
       scanStatements(
-        interior,
-        false,
-        {
-          ...context,
-          report: (_inner, consumer) => context.report(statement.trim(), consumer, offset),
-        },
-        'sealed',
+        headCompound.body,
+        headCompound.deferred ? false : unitGuarded,
+        context,
+        nestedScope,
+        offset + pipes[0].offset + headCompound.offset,
       );
     }
-
-    for (const segment of splitUnquoted(blankSpans(statement, spans), ['|&', '|']).slice(1)) {
-      const consumer = earlyExitConsumer(segment);
-      if (consumer !== null) context.report(statement.trim(), consumer, offset);
-    }
+    if (unitGuarded) continue;
+    // The head is unwrapped so a `||` on the pipeline cannot cover a deferred body
+    // (#4566). The rest of the statement is still a list: `continue` without walking
+    // it dropped `$(producer | head)` in the tail. skipHead is false for that tail
+    // (producer already unwrapped) and true for a full statement.
+    scanStatementRemainder(
+      statement,
+      headCompound !== null ? statement.slice(pipes[1].offset) : statement,
+      offset,
+      context,
+      headCompound === null,
+    );
   }
 }
 

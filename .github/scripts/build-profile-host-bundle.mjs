@@ -46,6 +46,7 @@ import {
 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { hasGitControlSegment } from './public-surface-assets.mjs';
 import { SIGNATURE_FILE_NAME } from './sign-profile-manifest.mjs';
 
 export const HOST_CONFIG_FILE_NAME = 'vercel.json';
@@ -81,6 +82,14 @@ export function assertLiteralRoutePath(path, label = 'served path') {
   }
   if (ROUTE_PATTERN_METACHARACTERS.test(path)) {
     throw new Error(`${label} contains host route-pattern metacharacters: ${path}`);
+  }
+  // The bundle is published by being copied into a Git worktree, so a path Git reads as
+  // control input is not a served document at all -- `.git/...` lands in the host
+  // checkout's real `.git` and `.gitignore` decides which attested bytes get staged. Every
+  // byte the bundle copies passes through here, which makes this the one chokepoint that
+  // sees manifest-declared paths and generated root files alike.
+  if (hasGitControlSegment(path)) {
+    throw new Error(`${label} is a Git control path, which a Git-published host reads as control rather than content: ${path}`);
   }
   return path;
 }

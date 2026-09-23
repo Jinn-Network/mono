@@ -44,7 +44,11 @@ for (const [sliceKey, slice] of Object.entries(slicesManifest.slices)) {
   if (fullAbi === undefined) {
     throw new Error(`Unknown contract for slice ${sliceKey}: ${slice.contract}`);
   }
-  const picked = pickAbiItems(fullAbi, slice.items);
+  const picked = pickAbiItems(
+    fullAbi,
+    slice.items,
+    `slice ${sliceKey} (contract ${slice.contract})`,
+  );
   writeFileSync(
     join(outputRoot, "slices", `${sliceKey}.json`),
     stableStringify({ export: slice.export, items: picked }),

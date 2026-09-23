@@ -40,6 +40,61 @@ const CANDIDATE_IDENTIFIER_HOSTS = new Set([
 ]);
 const GENERATED_PROFILE_ROOT_PATHS = new Set(['manifest.json', 'manifest.dsse.json']);
 
+// Names Git reads as control input rather than as content, so a served document carrying
+// one stops being a document. `.git` is the sharp end: the deploy mirror copies the bundle
+// over the host checkout with `cpSync`, whose `force` default is true, so a bundle path
+// whose first segment is `.git` lands inside the host's REAL `.git` -- and the
+// token-bearing push step then reads whatever `.git/config` it finds there. The
+// `.gitignore` family is the quiet end: `git add -A` honors `.gitignore` and Git applies
+// `.gitattributes` filters, so such a document silently changes which attested bytes get
+// staged and published while every gate still reports success.
+//
+// No canonical identifier can legitimately claim one of these paths, so refusing them
+// costs nothing. The rule is stated once, here, because three layers copy these bytes --
+// the profile-root builder (via jinnIdentifierServedPath), the bundle generator (via
+// assertLiteralRoutePath), and the deploy mirror -- and a restated rule is a rule that
+// drifts.
+const GIT_CONTROL_PATH_SEGMENTS = new Set([
+  '.git',
+  '.gitattributes',
+  '.gitignore',
+  '.gitmodules',
+]);
+
+// Names are not the only spelling of a name. Win32 strips trailing dots and spaces when it
+// opens a path, so `.git.` and `.git ` reach `.git`; NTFS answers the 8.3 short name `git~1`
+// with the same directory; and HFS+ ignores a set of formatting codepoints when it compares
+// names, so `.gi<U+200C>t` is `.git` to the filesystem. Git ships `core.protectNTFS` and
+// `core.protectHFS` on by default for exactly this class, and the reason applies here for
+// the reason the case fold already does: the break-glass mirror recipe is run by hand, on a
+// laptop, whose filesystem may be any of these. Fold the aliases away before comparing, or
+// the rule below is a rule about spellings rather than about what Git will read.
+const HFS_IGNORABLE_CODEPOINTS = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/gu;
+const NTFS_DOTGIT_SHORT_NAME = /^git~[0-9]$/u;
+
+/** A path segment reduced to the name a case-insensitive Win32 or HFS+ host would open. */
+function foldSegmentAliases(segment) {
+  return segment
+    .replaceAll(HFS_IGNORABLE_CODEPOINTS, '')
+    .toLowerCase()
+    .replace(/[. ]+$/u, '');
+}
+
+/**
+ * Whether any segment of a forward-slash path is a name Git reads as control input.
+ * Compared against the folded segment rather than the literal one, so an alias of `.git`
+ * -- a different case, a trailing dot or space, the NTFS short name, an HFS+ ignorable
+ * codepoint -- is refused with the name it aliases.
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function hasGitControlSegment(value) {
+  return String(value).split('/').some((segment) => {
+    const folded = foldSegmentAliases(segment);
+    return GIT_CONTROL_PATH_SEGMENTS.has(folded) || NTFS_DOTGIT_SHORT_NAME.test(folded);
+  });
+}
+
 function toPosix(value) {
   return value.split(sep).join('/');
 }
@@ -107,6 +162,7 @@ export function jinnIdentifierServedPath(identifier, label = 'Jinn identifier') 
     || isAbsolute(servedPath)
     || win32.isAbsolute(servedPath)
     || segments.some((segment) => segment === '' || segment === '.' || segment === '..')
+    || hasGitControlSegment(servedPath)
     || GENERATED_PROFILE_ROOT_PATHS.has(servedPath)) invalid();
   return servedPath;
 }

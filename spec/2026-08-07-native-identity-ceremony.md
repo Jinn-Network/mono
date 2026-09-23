@@ -1,9 +1,13 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.4 (§3.2b amendment — the anchor target policy and anchor digest content,
-per DR-2026-09-06; v0.3 added §3.2a — the authored role → scope map and the #2527
-announce-plane ruling; v0.2 revised v0.1 per independent design review, see §10 review
-record)
+**Version:** 0.5 (sharpens §3.2b's and §10 (e)'s statement of the fresh-anchor coverage gap —
+wholesale across every role, which both left implicit — and points §3.2b and
+§10 (e)/(f) at the proposed successor preimage, trigger, and ruling in
+[`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md); no rule
+here is retired and nothing there is adopted. v0.4 was the §3.2b amendment — the anchor target
+policy and anchor digest content, per DR-2026-09-06; v0.3 added §3.2a — the authored role → scope
+map and the #2527 announce-plane ruling; v0.2 revised v0.1 per independent design review, see §10
+review record)
 
 **Date:** 2026-08-07
 
@@ -626,7 +630,9 @@ existing deployment a re-anchor, and the enumerating check buys most of the evid
 none of that cost wherever it is constructible at all. It belongs to the anchor-locator profile
 document, and changing the preimage twice is worse than once. The defect, the enumerating check
 that partly answers it, and the settlement-free shape that check cannot reach are recorded as
-inputs to that document (§10).
+inputs to that document (§10). A successor preimage that removes the defect and reaches the
+settlement-free shape too is **proposed**, not adopted, in
+[`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §3.
 
 **Re-author (the scope-widening path) recomputes the same digest.**
 [`docs/runbooks/native-trust-reauthor.md`](../docs/runbooks/native-trust-reauthor.md)
@@ -634,15 +640,23 @@ re-signs bindings without touching keys, stores, or Agent IRIs, so none of the f
 terms change and the digest is identical. The anchor MAY therefore be reused; the existing
 anchor already commits to exactly this tuple and there is no evidentiary reason to mint a
 second. Reuse is not automatically correct, and it is also what happens by default: `init`
-refuses outright while the catalog exists (`operator/src/cli/commands/ceremony.ts:949-966`), and
+refuses outright while the catalog exists (`operator/src/cli/commands/ceremony.ts:949-965`), and
 the only way past that guard leaves the run receipt in place, so `reusableAnchor` (`:333-349`)
 resumes onto the already-mined anchor unless the receipt is moved aside too. The runbook states
 this and both options' costs. They differ semantically. Reuse preserves
 the original `validFrom` and effective window, so the *widened* scope is claimed retroactively
 over evidence signed before the widening; a fresh anchor refuses that retroactivity at the cost
-of a coverage gap between the old anchor time and the new one. The reuse-vs-fresh choice is a
-per-widening judgment the runbook MUST state and the operator MUST record with its reason.
-Which is right in general is a retroactive-authority question left open (§10).
+of a coverage gap between the old anchor time and the new one, and that gap is wholesale: the
+re-author rewrites the catalog and §6 law 2 gives every re-authored binding the new anchor's
+block time, so evidence signed inside the window de-attributes for every role. That qualifier is
+more precise than DR-2026-09-06 decision 8's "a coverage gap"; no rule moves. The reuse-vs-fresh
+choice is a per-widening judgment the runbook MUST state and the operator MUST record with its
+reason.
+Which is right in general is a retroactive-authority question left open at §10 (e). A
+mint-fresh ruling is **proposed**, not adopted, in
+[`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §6; if
+adopted it would replace the recorded-reason MUST above with the fixed record contents its §6.4
+names. Both MUSTs above stand until it is.
 
 **Rebind (the rotation path's second half): `ceremony-anchor/v1` over the replacement keys.**
 §3.2's deferred `revokeBinding` surface defines rotation as revoke + `authorRoleBinding` for the
@@ -726,11 +740,11 @@ its rules are checked is how §3.2a's class of drift happens, so the split is st
 | Canonical block re-read | Enforced (`:1473-1477`) |
 | Exact digest bytes at the declared `inputByteOffset` | Enforced (`:1468-1471`) |
 | Every referenced anchor is declared in `anchors[]`; at least one per record | Enforced (`native-trust-catalog.ts:326-343`) |
-| The `ceremony-anchor/v1` preimage and every canonicalization rule above | Authoring convention. Not directly recomputable. Checkable by a third party only by enumerating the ≤12 role assignments the scope map cannot distinguish, and only for a catalog carrying a settlement-scoped binding — per the defect above |
+| The `ceremony-anchor/v1` preimage and every canonicalization rule above | Authoring convention. Not directly recomputable. Checkable by a third party only by enumerating the ≤12 role assignments the scope map cannot distinguish, and only for a catalog carrying a settlement-scoped binding — per the defect above. A directly recomputable successor is proposed, not adopted, in [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §3 |
 | The ASCII-only restriction | Authoring convention |
 | The self-send anchor-target default | A default, not a rule |
 | `inputByteOffset === 0` for anything Jinn composes | Authoring convention (`packages/trust/authoring/src/anchor.ts:129`) |
-| The re-author reuse-vs-fresh choice and its recorded reason | Authoring convention |
+| The re-author reuse-vs-fresh choice and its recorded reason | Authoring convention. A mint-fresh ruling that would replace the recorded reason with fixed record contents is proposed, not adopted, in [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §6 |
 | R4 (`effectiveFrom` at or before the anchor's block time) | Authoring convention. Partially enforceable against the observed anchor time, but not ratified as a check: the clamp already makes the anchor govern, and the only harm is a delay the operator chose |
 | The `revocation-anchor/v1` preimage (R1–R3) | Authoring convention today; recomputation is possible by construction and is named as implementation work in DR-2026-09-06 §Consequences |
 | R5 (anchor first) | Authoring convention, as law 1 is for bindings. Unobservable after the fact: the anchor time is what the record carries either way |
@@ -749,7 +763,7 @@ existing transaction is a preimage problem, so borrowing is the cheap direction.
 **Everything else this document previously claimed as a bound is not one, and saying so is the
 point of this section.** An earlier draft asserted that attaching to someone else's Agent IRI is
 blocked by the §7.4a consent chain "regardless of anchor time". It is not: the consent chain's
-first exit is genesis (`packages/trust/core/src/verify.ts:201`, `if (resolved.isGenesis) return
+first exit is genesis (`packages/trust/core/src/verify.ts:216`, `if (resolved.isGenesis) return
 { ok: true }`), and genesis is decided *by anchor time* — `isGenesisAmong` calls a binding
 founding when its `effectiveStart` is earliest among every binding asserted for that IRI, ties
 broken by digest
@@ -765,8 +779,8 @@ today.
 table above lists the `revocation-anchor/v1` preimage as authoring convention, so borrowing
 applies verbatim to revocation anchors. A revocation declaring a borrowed pre-evidence anchor
 takes effect before the evidence it revokes (`binding-resolver.ts:137-148`,
-`verify.ts:273-296`), and the authorized signer is the operator's own voucher account or
-`bindings`-scoped key (`verify.ts:252-271`) — so an operator can back-date a revocation of their
+`verify.ts:303-325`), and the authorized signer is the operator's own voucher account or
+`bindings`-scoped key (`verify.ts:276-295`) — so an operator can back-date a revocation of their
 own binding and de-attribute their own past evidence, which is exactly the non-retroactivity
 §7.4b forbids and law 6 exists to protect. The rule it breaks is **R1**, which requires an anchor
 "newly submitted for that act" — a pre-existing transaction is exactly not that, so calling such an
@@ -777,7 +791,7 @@ winning binding's digest alone (`binding-resolver.ts:279`), an earlier-anchored 
 binding for the same `(key, agent)` escapes every revocation bound to the record it supersedes —
 revocation defeated, entirely inside the author's own IRI. The actor there is the **catalog
 author**, not the key's thief: a non-genesis replacement still needs §7.4a's self-extension exit,
-which `voucherIdentityEquals` against the incumbent voucher gates (`verify.ts:205-210`). That makes
+which `voucherIdentityEquals` against the incumbent voucher gates (`verify.ts:225-230`). That makes
 the shared-catalog case the sharp one, where whoever holds the file can defeat another party's
 revocation.
 
@@ -786,7 +800,7 @@ attacker's record is `relationship: "controls"` unconditionally
 (`packages/trust/authoring/src/binding.ts:107`) with an earlier `effectiveStart` and no
 `expiresAt`, so `findIncumbentControlVoucher` selects it as the victim's incumbent
 (`binding-resolver.ts:204-212`); the victim's own binding is then non-genesis, carries no matching
-voucher and no `consent`, and fails the consent chain outright (`verify.ts:245-249`). One borrowed
+voucher and no `consent`, and fails the consent chain outright (`verify.ts:267-273`). One borrowed
 anchor buys both takeover and denial of the legitimate key.
 
 **What actually contains all of this is catalog write authority**, and it is procedural, not
@@ -1004,7 +1018,7 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    session tuple, so an interrupted run and a scope re-author both reproduce it, and
    `reusableAnchor` (`operator/src/cli/commands/ceremony.ts:333-349`) resumes onto the
    already-mined transaction rather than orphaning it. That is not merely the interrupted-run
-   case: `init` refuses outright while the catalog exists (`:949-966`), and the only way past
+   case: `init` refuses outright while the catalog exists (`:949-965`), and the only way past
    that guard leaves the run receipt in place, so a re-author reuses automatically too unless
    the receipt is moved aside. **The one act that MUST NOT reuse is a rebind**, whose anchor is
    always freshly submitted (§3.2b) — the narrow rebind preimage makes a cross-act collision
@@ -1077,7 +1091,7 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    index 19 (`Z` = 0x5A > `.` = 0x2E), so a second-precision `effectiveFrom` is selected as
    *greater* than a millisecond-precision anchor time for the same instant. On the revocation
    path that selection costs nothing: `checkRevocation` compares the selected time with
-   `compareCalendarStrictRfc3339Instants` (`packages/trust/core/src/verify.ts:282`,
+   `compareCalendarStrictRfc3339Instants` (`packages/trust/core/src/verify.ts:306`,
    `packages/trust/core/src/rfc3339.ts:96-107`), which handles fractions and calls the two
    spellings **equal**, so no delay materializes and `RevocationSchema` accordingly accepts
    second precision (`packages/trust/core/src/revocation.ts:30`). So the **millisecond form** is
@@ -1085,7 +1099,7 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    do care — rather than a defense against a live harm. The **at-or-before clause is
    substantive**: the clamp is `max()`, so an `effectiveFrom` set materially later than the anchor
    block time clamps *up* to itself and `checkRevocation` skips every `atTime` before it
-   (`verify.ts:282-286`), delaying a security revocation by exactly that margin — the wrong
+   (`verify.ts:306-310`), delaying a security revocation by exactly that margin — the wrong
    direction for a security act. An *earlier* value is harmless, because there the clamp does
    make the anchor govern. Both halves are listed as authoring convention because the verifier
    checks neither, not because neither matters. Law 1's anchor-first ordering extends to
@@ -1219,9 +1233,15 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   state its choice. Reuse preserves the original `validFrom` and effective window, which
   claims the *widened* scope retroactively over evidence signed before the widening; a fresh
   anchor refuses that retroactivity and pays a coverage gap between the old anchor time and
-  the new one. Which is right in general is a retroactive-authority policy question that
-  exceeds an anchor-format ratification, and it is not settled here. Owned by
-  [#4172](https://github.com/Jinn-Network/mono/issues/4172).
+  the new one — and that gap is **wholesale** (left implicit before v0.5), because the
+  re-author rewrites the catalog and §6 law 2 gives every re-authored binding the new anchor's
+  block time, so evidence signed inside the window de-attributes for every role. Which is right
+  in general is a retroactive-authority policy question that exceeds an anchor-format
+  ratification, and it is not settled here. Owned by
+  [#4172](https://github.com/Jinn-Network/mono/issues/4172), whose output
+  [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §6
+  **proposes** mint-fresh whenever a term of its successor preimage changes, and is pending the
+  operator's ruling on the PR that carries it.
 - **(f) Should a successor binding-anchor preimage be *directly* third-party recomputable, and
   when is the re-anchor worth paying?** §3.2b records, as a named defect, that
   `ceremony-anchor/v1` commits to `role` labels no third party can read off a catalog. For a
@@ -1232,7 +1252,12 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   not openable at all, because `settlementSafe` appears nowhere in it; that shape has no check
   short of the successor, which sharpens the question rather than settling it. The corrective is
   a directly recomputable preimage — drop `role`, and commit to terms every catalog carries —
-  and it costs every existing deployment a re-anchor.
+  and it costs every existing deployment a re-anchor. A successor of that shape, named
+  `binding-anchor/v1` and specified byte-exactly, is **proposed** in
+  [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md) §3; it
+  commits to `{protocol, bindings: [{agent, keyId, scope[]}]}`, so it leans on neither the
+  `role` labels nor the Safe and is constructible for the settlement-free shape too. Proposed,
+  not adopted: the question this bullet asks stays open here.
 
   **The trigger is not an evidentiary question alone, and this is the input that was missing.**
   The same recomputation is what shuts the borrowed-anchor residual of §3.2b: a verifier that
@@ -1254,7 +1279,13 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
   published version is right rather than compatible with a mistake. Owned by
   [#4172](https://github.com/Jinn-Network/mono/issues/4172), which carries both this question
   and (e) to that document and states the trigger at which the re-anchor becomes worth paying;
-  until a trigger fires, deployments keep `/v1`.
+  until a trigger fires, deployments keep `/v1`. #4172's output is
+  [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md), a
+  source for that document's normative text rather than the text itself: it proposes the
+  successor preimage (§3), a trigger that is a three-limb disjunction of inspectable events
+  (§5), and a mint-fresh ruling for (e) (§6). Its status is Proposed — nothing there is settled
+  until the operator rules on the PR that carries it, and the profile document is still where
+  the normative text lands.
 
 ### Review record (v0.2)
 
@@ -1266,7 +1297,7 @@ and both `isGenesisAmong` (`:217-223`) and `findIncumbentControlVoucher` (`:201-
 operate only within that per-agent set — so a joiner's fresh `urn:uuid:` Agent IRI gets its
 own genesis binding (equal-`effectiveStart` batch settled by the digest tiebreak,
 `:219-221`), same-session peer bindings pass because the incumbent window admits equality
-(`:150-154`) and the voucher is the same EOA (`verify.ts:176-180`), and the first operator's
+(`:150-154`) and the voucher is the same EOA (`voucherIdentityEquals`, `verify.ts:46-60`, applied at `:225-230`), and the first operator's
 bindings are never anyone else's incumbent. Governance succession was verified against the
 dual-threshold chain (`policy.ts:266-271`); the genesis signer set needs no binding or
 anchor of its own (`policy.ts:247-250`). The v0.2 changes are the review's findings: the

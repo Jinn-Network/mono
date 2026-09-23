@@ -79,6 +79,31 @@ async function compose(options: {
   readonly tamper?: "head" | "entry";
   readonly entryCount?: number;
   readonly maxEntriesPerSync?: number;
+  /**
+   * Wraps the composed transport so a test can cancel the operation at a
+   * deterministic point in the walk and reach the MIRROR's own abort check
+   * (#3672).
+   *
+   * Where the abort LANDS is what decides which of two correct behaviors you
+   * get, and only one of them is this path:
+   *
+   *  - inside an in-flight read, and `createFetchTransport`'s
+   *    `signal.throwIfAborted()` between response chunks rejects it. That is a
+   *    transport failure and is reported as `source-sync-failed` — correctly,
+   *    and not this path;
+   *  - between transport calls, or during the yield phase, and `collect`'s own
+   *    `signal?.aborted` check is what stops the walk. `coldSync` and
+   *    `returningSync` fetch every page BEFORE yielding anything
+   *    (`packages/discovery/client/src/sync.ts`), so the yield phase issues no
+   *    reads at all and is a real window, not a hypothetical one.
+   *
+   * The wrapper fires `afterFetch` once the whole transport call has returned,
+   * which puts the abort in the second window every time instead of racing the
+   * first. It is a determinism device, not a stand-in for an unreachable
+   * branch: the standing sync loop cancels every cycle on a `syncTimeoutMs`
+   * deadline (`sync-loop.ts`, `runCycle`), so production reaches this refusal.
+   */
+  readonly afterFetch?: (url: string) => void;
 } = {}) {
   const { didKey, signer } = archiveSigner();
   const archive = await buildSignedFixtureArchive({
@@ -121,13 +146,24 @@ async function compose(options: {
   // the only way to show that an unchanged head is re-checked for freshness
   // rather than remembered as accepted.
   let clock = NOW;
+  const afterFetch = options.afterFetch;
   const ports = createLocalCorpusPorts({
     config,
     fetchLike: loopbackFetch(archive.routes),
     now: () => clock,
   });
+  const transport =
+    afterFetch === undefined
+      ? ports.corpusTransport
+      : {
+          async fetch(url: string) {
+            const response = await ports.corpusTransport.fetch(url);
+            afterFetch(url);
+            return response;
+          },
+        };
   const capability = createCorpusCapability({
-    transport: ports.corpusTransport,
+    transport,
     fs: ports.corpusFs,
     dsseVerifier: ports.dsseVerifier,
     readPolicyVersions: ports.readPolicyVersions,
@@ -382,6 +418,50 @@ describe("a backlog larger than the per-pass entry bound (#3252)", () => {
     // head signature or entry linkage -- the phantom hunt this refusal exists
     // to prevent (#3252).
     expect(check.remedy).toContain("corpus.maxEntriesPerSync");
+    expect(check.remedy).not.toContain("head signature");
+    expect(check.remedy).not.toContain("entry linkage it served");
+  });
+
+  test("an abort is refused as a cancellation, and never as the bound (#3672)", async () => {
+    // Both abandonments produce a prefix and both are correctly refused under
+    // this posture. What must differ is the reason the operator is shown: the
+    // bound is a number they can raise, and a cancelled pass is not, so sending
+    // them to `corpus.maxEntriesPerSync` here is the same misdirection #3252
+    // was filed to remove -- one field over.
+    const controller = new AbortController();
+    const { capability } = await compose({
+      entryCount: 2,
+      // Deliberately generous: the bound is nowhere near reached, so nothing
+      // but the abort can stop this walk.
+      maxEntriesPerSync: 500,
+      afterFetch: (url) => {
+        if (url.includes("/entries/")) controller.abort();
+      },
+    });
+
+    const outcome = await capability.mirror.syncOnce({ signal: controller.signal });
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.sources[0]!.failure).toEqual({
+      code: "chain-verification-rejected",
+      message: "sync-aborted",
+    });
+    expect(outcome.sources[0]!.indexed).toBe(0);
+
+    const check = await chainVerificationCheck(capability);
+    expect(check.ok).toBe(false);
+    expect(check.detail).toContain(`${source.agent}/${source.name} (sync-aborted)`);
+
+    // The whole point of the member: the remedy names cancellation and does
+    // NOT send the operator to raise a bound that was never the constraint.
+    expect(check.remedy).toContain("CANCELLED");
+    expect(check.remedy).not.toContain("corpus.maxEntriesPerSync");
+    // And it does not stop at naming the cause. The standing sync loop cancels
+    // every cycle on a `syncTimeoutMs` deadline, so that is the knob an
+    // operator whose slow source keeps timing out can actually turn; a remedy
+    // that named none would be a dead end of the same shape the member exists
+    // to remove.
+    expect(check.remedy).toContain("corpus.syncTimeoutMs");
     expect(check.remedy).not.toContain("head signature");
     expect(check.remedy).not.toContain("entry linkage it served");
   });

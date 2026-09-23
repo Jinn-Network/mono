@@ -59,8 +59,22 @@ export interface AnnouncementEdgeIndexReceipt {
  */
 export interface AnnouncementEdgeQuery {
   readonly sourceId?: string;
+  /**
+   * Unindexed on its own: no index leads with this column, so a `recordKind`-only query scans on
+   * its first page. The ordering is still free -- the primary key spells it -- so a resumed page
+   * seeks to its cursor. Rationale in README § The announcement edge index; the plan is pinned in
+   * `announcement-edges.test.ts`.
+   */
   readonly recordKind?: string;
   readonly recordDigest?: Sha256Digest;
+  /**
+   * Unindexed on its own, and unlike `recordKind` the ordering is not free: SQLite drops the
+   * equality-constrained `field` from the ORDER BY, so a `field`-only query sorts every page --
+   * the first and each resumed one -- through a temp b-tree, re-sorting everything still matching
+   * rather than reading a page off the cursor. Narrow with `recordDigest` or `targetDigest` to
+   * reach an indexed shape. Rationale in README § The announcement edge index; the plan is pinned
+   * in `announcement-edges.test.ts`.
+   */
   readonly field?: string;
   readonly targetDigest?: Sha256Digest;
   readonly limit?: number;

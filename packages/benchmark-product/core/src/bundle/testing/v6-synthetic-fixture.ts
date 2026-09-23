@@ -505,7 +505,7 @@ async function applyPlan(
  * `benchmark-product-public-bundle/2` — which is what makes the anchored/unanchored byte-difference
  * testable against one fixture. The caller owns workspace cleanup.
  */
-export async function createSyntheticV6BundleFixture(input: {
+export async function createSyntheticV6BundleFixture<Skip extends true | undefined = undefined>(input: {
   readonly workspaceDir: string;
   readonly plans?: readonly SyntheticV6AnchorPlan[];
   /** §7.3 declared intent, sealed into the Run at lock time. Declaring a profile no plan supplies
@@ -513,7 +513,21 @@ export async function createSyntheticV6BundleFixture(input: {
   readonly declaredProviders?: readonly string[];
   /** #2980 task-selection provenance, sealed into the Run at lock time. */
   readonly taskSelection?: "claimant-chosen" | "fixed-public-set" | "drawn-post-lock";
-}): Promise<SyntheticV6BundleFixture> {
+  /**
+   * Asks `report` for the composed generation (issue #3403 / #3405). OPTIONS-ONLY and defaults
+   * off **in this fixture**, so every existing caller still materializes the enumerated cell it
+   * always did. The production `report` default is the other way: omitted means `/10`. This
+   * fixture passes `composedFormat: false` unless this option is set.
+   */
+  readonly composedFormat?: true;
+  /**
+   * Stops after collect (and post-collect anchor plans), without reporting or materializing.
+   * OPTIONS-ONLY and defaults off. A caller that needs the SAME run published two ways —
+   * `composedFormat: false` and `composedFormat: true` — copies this workspace and reports each
+   * copy (issue #3404). Mutually ignored with `composedFormat`: there is no report to flag.
+   */
+  readonly skipReport?: Skip;
+}): Promise<[Skip] extends [true] ? Omit<SyntheticV6BundleFixture, "bundle"> : SyntheticV6BundleFixture> {
   const context: OperationContext = {
     workspaceDir: input.workspaceDir,
     principal: "synthetic-operator",
@@ -574,7 +588,29 @@ export async function createSyntheticV6BundleFixture(input: {
   for (const plan of plans.filter((entry) => !LOCK_PLANS.has(entry.kind))) {
     await applyPlan(context, plan, anchors);
   }
-  requireOk(await runReport(context, { draftId: DRAFT_ID }), "report");
+
+  const collectedState = readRunState(input.workspaceDir, DRAFT_ID);
+  if (collectedState?.runSha256 === undefined || collectedState.matrixSha256 === undefined) {
+    throw new Error("collected anchored fixture has no sealed Run and Matrix identity");
+  }
+  const collected = {
+    workspaceDir: input.workspaceDir,
+    draftId: DRAFT_ID,
+    benchmarkSha256: imported.benchmarkSha256,
+    runState: collectedState,
+    runSha256: collectedState.runSha256,
+    matrixSha256: collectedState.matrixSha256,
+    authority: anchors.authority,
+    lockOts: anchors.otsFixturesFor(collectedState.runSha256),
+    matrixOts: anchors.otsFixturesFor(collectedState.matrixSha256),
+  };
+  if (input.skipReport === true) {
+    return collected as unknown as [Skip] extends [true] ? Omit<SyntheticV6BundleFixture, "bundle"> : SyntheticV6BundleFixture;
+  }
+  requireOk(
+    await runReport(context, { draftId: DRAFT_ID, composedFormat: input.composedFormat === true }),
+    "report",
+  );
 
   const runState = readRunState(input.workspaceDir, DRAFT_ID);
   if (runState?.runSha256 === undefined || runState.matrixSha256 === undefined) {
@@ -587,15 +623,8 @@ export async function createSyntheticV6BundleFixture(input: {
     runState,
   });
   return {
-    workspaceDir: input.workspaceDir,
-    draftId: DRAFT_ID,
-    benchmarkSha256: imported.benchmarkSha256,
+    ...collected,
     runState,
-    runSha256: runState.runSha256,
-    matrixSha256: runState.matrixSha256,
     bundle,
-    authority: anchors.authority,
-    lockOts: anchors.otsFixturesFor(runState.runSha256),
-    matrixOts: anchors.otsFixturesFor(runState.matrixSha256),
-  };
+  } as unknown as [Skip] extends [true] ? Omit<SyntheticV6BundleFixture, "bundle"> : SyntheticV6BundleFixture;
 }

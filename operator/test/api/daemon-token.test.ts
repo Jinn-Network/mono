@@ -6,7 +6,7 @@
  * stable value.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -108,6 +108,22 @@ describe('resolveDaemonApiToken', () => {
     expect(readDaemonApiToken(path)).toBe(envToken);
     expect(readDaemonApiToken(path)).not.toBe(stale);
     expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it('replaces a loose-mode token file with a fresh 0600 inode on refresh', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    writeFileSync(path, 'c'.repeat(64) + '\n', { mode: 0o644 });
+    const before = statSync(path).ino;
+    const envToken = 'd'.repeat(64);
+
+    expect(resolveDaemonApiToken({ path, envToken }).persisted).toBe('written');
+
+    expect(readDaemonApiToken(path)).toBe(envToken);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    // Written aside and renamed in, so a concurrent reader never sees a truncated file.
+    expect(statSync(path).ino).not.toBe(before);
+    expect(readdirSync(earningDir)).toEqual(['daemon-api-token']);
   });
 
   it('creates the token file when an env token boots against a fresh state dir', () => {

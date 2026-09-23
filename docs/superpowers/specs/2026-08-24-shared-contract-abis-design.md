@@ -19,7 +19,7 @@ Verified by import/search on base `892a10067`. **Out of scope:** legacy subtree,
 | Operator mech | `operator/src/adapters/mech/types.ts`, `contracts.ts` | JinnRouterV3, MechMarketplace, OlasMech, claim-delivery legacy slices | Primary runtime adapter |
 | Marketplace binding | `packages/marketplace/binding/src/abis/` | JinnRouterV3, JinnRouterV4, TaskCoordinator, MechMarketplace, OlasMech | Published `@jinn-network/marketplace-binding` |
 | Marketplace projector | `packages/marketplace/projector/src/events.ts` | Imports binding ABIs; V4 event slices verified against artifacts today | Revised V4 slices stay projector-owned (Addendum §7.28–7.29 freeze); verified via shared full ABI + existing parity tests |
-| Marketplace venue-base | imports from `@jinn-network/marketplace-binding` | — | No direct ABI copies |
+| Marketplace venue-base | `packages/marketplace/venue-base/src/writers/settlement.ts` | JinnRouterV3 `claimed`, TaskCoordinator `getRequestRef`/`getAttempt`, JinnRouterV4 `solutionReservations`/`tokenPaymentType`, MechMarketplace `mapNonces`/`getRequestId` | Migrated to the binding slices in #4285. Gnosis Safe MultiSend stays local — not a `contracts/` artifact. |
 | SDK | `packages/sdk/src/contracts.ts` | SolverNet schemas only | **No** Jinn router/coordinator ABI consumption |
 | Broadcast-bot | `apps/broadcast-bot` | — | **No** matches for router/coordinator ABIs |
 

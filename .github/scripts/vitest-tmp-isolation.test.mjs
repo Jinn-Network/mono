@@ -27,7 +27,8 @@
 // attached, rather than at whichever job happens to run that package: see
 // `configs that cannot reach the seam they name` below.
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 import {
@@ -35,10 +36,8 @@ import {
   regexLiteralEnd,
   regexStartsAt,
   stripComments,
+  UnterminatedTemplateError,
 } from './js-source-scanner.mjs';
-
-/** Re-exported so this guard's own scanner cases keep naming it where they always did. */
-export { stripComments };
 
 const root = resolve(import.meta.dirname, '../..');
 
@@ -126,7 +125,7 @@ function enclosedLiterals(source, key, open, close) {
 }
 
 /**
- * The offset range of each object literal that is a direct element of a `projects` array.
+ * The offset range of each object literal the reader can see a `{` for inside a `projects` array.
  *
  * Vitest gives every `projects` entry its own Vite config, so `server.fs.allow` under one entry
  * says nothing about a seam path named under another. These ranges are how the reachability check
@@ -136,10 +135,13 @@ function enclosedLiterals(source, key, open, close) {
  * one scope and restores the cross-entry crediting this closes. A regex literal holding a quote is
  * the ordinary construct that used to produce exactly that (issue #3154); `regexStartsAt` and the
  * newline-bounded quote span above are what keep it from doing so. That is the same fallback the other
- * scanners take on an unterminated literal, and it is bounded the same way: a config that does not
- * parse cannot load, so its own package job is red before this gate has an opinion. The quote walk
- * below is what keeps that bound honest — an unpaired `'` inside a regex literal parses and loads
- * fine, so without the newline bound the collapse would happen under a green package job.
+ * scanners take on an unterminated literal, and it has two routes. A config that genuinely does not
+ * parse cannot load, so its own package job is red before this gate has an opinion. A config that
+ * parses, but whose `]`-carrying line `regexStartsAt` still mis-reads, loads fine: that route is
+ * fail-open, bounded only by the scanner's one-line residual (see `regexStartsAt` in
+ * `js-source-scanner.mjs`), and no config in the tree writes that shape. The quote walk below is
+ * what keeps the first route the ordinary one — an unpaired `'` inside a regex literal parses and
+ * loads fine, so without the newline bound the collapse would happen under a green package job.
  *
  * An entry whose own `{` never balances is skipped rather than ending the scan, so the entries
  * after it keep their ranges. `break` here was the amplifier that made a single mis-read line cost
@@ -150,13 +152,16 @@ function enclosedLiterals(source, key, open, close) {
  * narrows a scope, which withholds crediting rather than granting it: a false red, never a false
  * green.
  *
- * The closure is literal-shaped, and that is the larger hole. A range exists only where the reader
- * can see a `{` as a direct element of the array, so an entry held in a variable — `projects:
- * [allowProject, seamProject]` — produces no ranges at all and every allowance and seam path falls
- * back to root scope, reading green on the very shape #3123 closes. The same holds for an `fs.allow`
- * living in a module-scope object spread into one entry. This is inherent to a text scanner over a
- * checkout with no dependencies installed, which is this file's stated posture, and it is no worse
- * than the pre-#3123 behavior; it is just wider than the unterminated-literal fallback above.
+ * The closure is brace-shaped, and that is the larger hole. A range exists wherever a `{` is
+ * textually visible inside the array literal, which is looser than "a direct element of the array":
+ * a call-wrapped entry is read straight through its wrapper, as the `defineProject` case in
+ * `projectEntryRanges finds one range per object entry` asserts. What produces no range is an entry
+ * the reader can see no brace for at all — one held in a variable, `projects: [allowProject,
+ * seamProject]` — which yields no ranges and drops every allowance and seam path back to root
+ * scope, reading green on the very shape #3123 closes. The same holds for an `fs.allow` living in a
+ * module-scope object spread into one entry. This is inherent to a text scanner over a checkout
+ * with no dependencies installed, which is this file's stated posture, and it is no worse than the
+ * pre-#3123 behavior; it is just wider than the unterminated-literal fallback above.
  *
  * The `projects:` key match is unanchored. `arrayLiterals(source, 'projects')` matches any
  * `projects:` key, not only Vitest's — an asymmetry with `fsAllowPaths`, which is deliberately
@@ -381,6 +386,24 @@ export function wiredPaths(rawSource, configPath, base = root) {
   return paths;
 }
 
+/**
+ * `wiredPaths` over the config at `base`/`config`, read from disk. Held apart from the seam loop
+ * so the path attachment below is reachable from a fixture (#4401).
+ */
+function readWiredPaths(config, base = root) {
+  // The scanner knows the source but never the path, so the file name is attached here (#3088).
+  try {
+    return wiredPaths(readFileSync(resolve(base, config), 'utf8'), config, base);
+  } catch (error) {
+    if (!(error instanceof UnterminatedTemplateError)) throw error;
+    assert.fail(
+      `${config}:${error.line}: backtick pairing ran to the end of the file from here — ` +
+        'either that literal is unterminated, or an earlier mis-read swallowed a backtick. ' +
+        'Either way every wiring read from this config is worthless.',
+    );
+  }
+}
+
 for (const seam of SEAMS) {
   test(`every Vitest config under ${seam.root}/ wires the temp-directory sweep seam`, () => {
     const configs = findVitestConfigs(seam.root);
@@ -388,7 +411,7 @@ for (const seam of SEAMS) {
 
     const unwired = [];
     for (const config of configs) {
-      const wired = wiredPaths(readFileSync(resolve(root, config), 'utf8'), config);
+      const wired = readWiredPaths(config);
       const missing = [];
       if (!wired.some((entry) => entry.key === 'setupFiles' && entry.resolved === seam.setup)) {
         missing.push(`setupFiles must include a path resolving to ${seam.setup}`);
@@ -548,6 +571,10 @@ test('configs that cannot reach the seam they name', () => {
   const unreachable = [];
   for (const seam of SEAMS) {
     for (const config of findVitestConfigs(seam.root)) {
+      // No path attachment here, deliberately: the seam-wiring test above registers first, walks
+      // this same `findVitestConfigs(seam.root)` set, and node:test runs a file's top-level tests
+      // serially in registration order, so an unclosed backtick has already been reported with
+      // its config name by the time this read reaches it. Still fail-closed either way (#4401).
       const source = readFileSync(resolve(root, config), 'utf8');
       if (!webTransformShaped(source)) continue;
       const configDir = relative(root, dirname(resolve(root, config))).split('\\').join('/');
@@ -567,6 +594,24 @@ test('configs that cannot reach the seam they name', () => {
       `them fails at import:\n  ${unreachable.join('\n  ')}\n` +
       'Add a server.fs.allow entry covering the seam — see packages/indexer/explorer/vitest.config.ts.',
   );
+});
+
+// The scanner's refusal carries a line but never a path; `readWiredPaths` attaches the config name.
+// That attachment was unpinned — a bare `throw error;` in its place left the suite green while the
+// message named no config (#4401). The fixture lives in the OS tmpdir, never in the checkout: an
+// in-tree config would be walked by the live seam test above.
+test('an unterminated template literal is reported with the config name and line', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'vitest-tmp-isolation-unterminated-'));
+  try {
+    writeFileSync(join(fixture, 'vitest.config.ts'), 'export default {}\nconst s = `\n');
+    const configs = findVitestConfigs('.', fixture);
+    assert.deepEqual(configs, ['vitest.config.ts']);
+    for (const config of configs) {
+      assert.throws(() => readWiredPaths(config, fixture), { message: /^vitest\.config\.ts:2: backtick pairing/u });
+    }
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
 });
 
 test('the seam files every config points at exist', () => {
@@ -926,7 +971,12 @@ test('an environment named in a comment does not shadow the declared one', () =>
 });
 
 test('stripComments leaves comment markers inside strings alone', () => {
-  const source = "url: 'https://example.test/a', pattern: '/* not a comment */', real: 1 /* gone */";
+  // The block comment carries an astral character on purpose. Blanking is by UTF-16 code unit,
+  // which is the unit every offset in this module is expressed in, so a surrogate pair must become
+  // two spaces and not one — otherwise the length assertion below is short by one and every offset
+  // past the comment is shifted, contradicting this function's stated offset-preserving contract
+  // (#3089).
+  const source = "url: 'https://example.test/a', pattern: '/* not a comment */', real: 1 /* gone 😀 */";
   const stripped = stripComments(source);
   assert.ok(stripped.includes("'https://example.test/a'"));
   assert.ok(stripped.includes("'/* not a comment */'"));
@@ -942,6 +992,31 @@ test('stripComments leaves comment markers inside strings alone', () => {
   // The same, where the quote is not in a regex literal at all: `regexStartsAt` reads a `/` after
   // an operand as division, so only the newline bound stops the span here.
   assert.ok(!stripComments("a: b '\n// setupFiles: ['isolate-tmp.ts']").includes('isolate-tmp'));
+});
+
+// A template literal that never closes is the one mis-read this scanner cannot bound. A `'`/`"`
+// span stops at the newline, so its worst case is the rest of one line; only a backtick crosses
+// lines, so only a backtick's failure runs to the end of the file — and everything past it comes
+// back with strings and code swapped. `stripComments` is where that damage shows up, as comment
+// prose returned to a reader as live source (#3027), so it is where the walk refuses instead
+// (#3088). Refusing is worth more than a bounded guess here: the readers cannot tell a desynced
+// read from a clean one, and a guard that reads the wrong half of a file is green for the wrong
+// reason.
+test('stripComments refuses a file whose template literal never closes', () => {
+  // Asserted as the class, not as `{ name: ... }`. Both guards branch on
+  // `instanceof UnterminatedTemplateError` to attach the file path, so a plain Error carrying that
+  // `name` would satisfy a name-shaped assertion while both of them silently fall back to a bare
+  // rethrow — the path attachment this refusal exists to carry, lost with the suite still green.
+  assert.throws(
+    () => stripComments('a: b `\n// setupFiles: isolate-tmp.ts'),
+    UnterminatedTemplateError,
+  );
+
+  // Valid nesting is not a failure. Both fixtures are the shipped shapes from #3088, and pinning
+  // them here is what keeps the refusal narrow — a detector that also refused these would take
+  // every file in the tree that interpolates.
+  assert.doesNotThrow(() => stripComments("return `'${s.replace(/'/g, `'\\\\''`)}'`;"));
+  assert.doesNotThrow(() => stripComments('href={`/workspace/${draftId}/results`}'));
 });
 
 // A `projects` config gives each entry its own Vite root, so an `fs.allow` under one entry says
@@ -1083,6 +1158,10 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
     `x: /a\\/'b/u, `,
     // A brace or bracket inside the literal must not be read as structure.
     `x: /[{}\\]]/u, `,
+    // An arrow body opens where a value may begin, so the `/` after `=>` is a regex. The `>` of the
+    // arrow is the reason `valueMayBeginAfter` still reads a `>` as a position a value may follow;
+    // without it this reads as a division and consumes the entry's braces (#3170).
+    `x: (s) => /['"]/u.test(s), `,
   ];
   for (const property of properties) {
     // Through `stripComments`, the way every production caller reaches this reader.
@@ -1157,6 +1236,22 @@ test('a regex literal holding a quote does not swallow a projects entry', () => 
   assert.equal(projectEntryRanges(stripComments(`projects: [ /'/u, { a: 1 }, { b: 2 } ]`)).length, 2);
 });
 
+// A JSX closing tag writes `</`, and reading that `/` as a regex opener is what desynced the
+// scanner across two shipped `.tsx` files: the phantom literal ran to the end of its line and
+// swallowed the opening backtick of the template beside it, after which every backtick pairing in
+// the file was off by one (#3170). `<` used to sit in `valueMayBeginAfter`'s operator set, which is
+// what made the `/` of `</Link>` look like a position a value may begin.
+test('a JSX closing tag does not open a regex literal', () => {
+  assert.equal(regexStartsAt('const a = <p>x</p>;', 15), false);
+
+  // What dropping `<` costs, pinned so it reads as a stated residual rather than a hole this gate
+  // closes: a TypeScript generic close is the same character as a comparison, so the division in
+  // `a<b> / 2` still reads as a regex and takes its line — comment prose included. Separating the
+  // two needs matched `<`/`>` pairs, which is a parser's job, and nothing in the tree writes the
+  // shape. This assertion is green before and after the `<` drop; it documents, it does not guard.
+  assert.ok(stripComments('x: a<b> / 2, // setupFiles: isolate-tmp.ts').includes('isolate-tmp'));
+});
+
 // The newline bound above is deliberately not applied to a template literal, and that exemption is
 // the one span rule the fixtures around it do not reach: a `'`/`"` span is bounded at the line, and
 // every backtick a config writes today closes on the line it opens. A template that genuinely spans
@@ -1175,6 +1270,24 @@ test('a template literal spanning lines does not lose its projects entries', () 
   ]) {
     assert.equal(projectEntryRanges(stripComments(source)).length, 2, source);
   }
+});
+
+// An interpolation body is ordinary code, and a template literal is the one construct that can hold
+// another one inside itself. Reading the body as span text made the inner template's opening
+// backtick close the outer span, after which every backtick in the file paired off by one and the
+// scanner was walking the file's strings and code inverted (#3088). Both shapes below are real:
+// the shell-quoting helper in the swe-rebench evaluator and a `next/link` href in the Colophon web
+// app, and each one desynced the scanner over the whole rest of its file.
+test('a nested template literal does not close the span that encloses it', () => {
+  const nested = 'const q = `a${f(`y`)}c`;';
+  assert.equal(quotedSpanEnd(nested, 10), 22);
+
+  // The two shipped shapes, pinned as themselves rather than as a reduction of themselves. Each
+  // span must end at the literal's own closing backtick, which is the last one in the fixture.
+  const shellQuote = "return `'${s.replace(/'/g, `'\\\\''`)}'`;";
+  assert.equal(quotedSpanEnd(shellQuote, shellQuote.indexOf('`')), shellQuote.lastIndexOf('`'));
+  const href = 'href={`/workspace/${draftId}/results`}';
+  assert.equal(quotedSpanEnd(href, href.indexOf('`')), href.lastIndexOf('`'));
 });
 
 // `stripComments` passes regex literals through verbatim, and that branch is not redundant with the
