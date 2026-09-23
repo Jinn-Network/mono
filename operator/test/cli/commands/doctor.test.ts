@@ -54,7 +54,7 @@ const fakeDeps = {
   getConfigPathFromArgs: () => undefined,
   checkClaudeBinary: async () => ({ ok: true, detail: 'fake claude binary' } as any),
   checkRpcNetwork: async () => ({
-    ok: true,
+    ok: true as const,
     network: 'testnet' as const,
     expectedChainId: 84532,
     actualChainId: 84532,
