@@ -18,6 +18,7 @@ import {
   fetchTrajectoryFromIpfs,
   fetchSourceBundleFromIpfs,
 } from '../adapters/mech/ipfs.js';
+import { classifyIpfsFetchFailure } from '@jinn-network/core/corpus-read';
 import { parseTask } from '../types/task.js';
 import { checkEnvelopeSchema } from './checks/envelope-schema.js';
 import { checkPayload } from './checks/payload.js';
@@ -164,9 +165,22 @@ export async function runConformance(args: RunConformanceArgs): Promise<Conforma
     if (taskCid) {
       try {
         ctx.task = parseTask(await fetchFromIpfs(options.ipfsGatewayUrl ?? '', taskCid));
-      } catch {
+      } catch (err) {
         // Leave undefined — task CID resolution is optional in V1 because many
         // envelope fixtures use stub CIDs. Checks that need the Task skip/fail.
+        // Only a gateway that answers 404/410 stays silent; a malformed stub CID
+        // draws 400 or 5xx from a real gateway and so warns as `unavailable`,
+        // which is one truthful line rather than a silent skip. Classifying
+        // surfaces what the bare catch never contemplated: a cap refusal, a
+        // blocked redirect, a transport failure (#3758).
+        const classification = classifyIpfsFetchFailure(err);
+        if (classification !== 'not-found') {
+          console.warn(
+            `[conformance] task ${taskCid} could not be read `
+              + `(${classification}); checks that need the Task will skip or fail: `
+              + `${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
     }
   }
@@ -183,8 +197,19 @@ export async function runConformance(args: RunConformanceArgs): Promise<Conforma
           options.ipfsGatewayUrl ?? '',
           trajCid,
         );
-      } catch {
-        /* leave undefined — trajectory checks will skip */
+      } catch (err) {
+        // Leave undefined — trajectory checks will skip. But a skipped check
+        // caused by a byte-cap refusal or a blocked redirect is not the same
+        // thing as a trajectory that is genuinely not on IPFS (#3441), and the
+        // report cannot tell them apart, so say so here.
+        const classification = classifyIpfsFetchFailure(err);
+        if (classification !== 'not-found') {
+          console.warn(
+            `[conformance] trajectory ${trajCid} could not be read `
+              + `(${classification}); trajectory checks will skip: `
+              + `${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
     }
   }
@@ -209,7 +234,12 @@ export async function runConformance(args: RunConformanceArgs): Promise<Conforma
           ctx.solutionEnvelopeBytes = await fetchEnvelopeBytes(refCid, options);
           ctx.restorationEnvelopeBytes = ctx.solutionEnvelopeBytes;
         } catch {
-          /* leave undefined — checkVerdictBackReference captures */
+          // Left alone deliberately (#3758): `checkVerdictBackReference` records
+          // a missing `solutionEnvelopeBytes` as a FAILED check, so this failure
+          // is already visible in the report. Steps 3, 4 and 6 instead produce a
+          // *skipped* check that looks identical whether the content was absent
+          // or refused — that invisibility is what the classification fixes, and
+          // it is not present here.
         }
       }
     }
@@ -232,8 +262,21 @@ export async function runConformance(args: RunConformanceArgs): Promise<Conforma
             options.ipfsGatewayUrl ?? '',
             bundleCid,
           );
-        } catch {
-          /* leave undefined — static checks will skip */
+        } catch (err) {
+          // Leave undefined — Layer 2 static checks will skip. But a skip caused
+          // by a byte-cap refusal or a blocked redirect is not the same thing as
+          // a bundle that is genuinely not on IPFS, and the report cannot tell
+          // them apart, so say so here (#3758).
+          const classification = classifyIpfsFetchFailure(err);
+          if (classification !== 'not-found') {
+            console.warn(
+              `[conformance] source bundle ${bundleCid} could not be read `
+                + `(${classification}); Layer 2 static checks will skip. The read covers the `
+                + `manifest and every file it lists, so the failure may be in the manifest or in `
+                + `a listed file: `
+                + `${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
         }
       }
     }

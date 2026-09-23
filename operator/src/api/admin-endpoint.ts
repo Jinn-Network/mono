@@ -10,6 +10,7 @@
 import type { Hono } from 'hono';
 import { claimRewardsIntent, type ClaimRewardsIntentInput } from '../intents/claim-rewards.js';
 import { restartDaemonIntent } from '../intents/restart.js';
+import { sanitizeErrorText } from '../rpc/transport.js';
 
 export interface AdminRestartOptions {
   /**
@@ -104,7 +105,7 @@ export function addAdminRoutes(app: Hono, cfg: AdminEndpointConfig): void {
       return c.json(
         {
           ok: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: sanitizeErrorText(err),
         },
         500,
       );

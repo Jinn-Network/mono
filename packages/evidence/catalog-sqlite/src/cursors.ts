@@ -72,7 +72,12 @@ function invalid(message: string): never {
   throw new EvidenceCatalogError("INVALID_QUERY", message);
 }
 
-function snapshotQuery(
+/**
+ * Takes a safe own-property snapshot of a caller's query object, refusing any field this
+ * binding does not serve. A typo must not silently drop a filter; every read surface here
+ * routes its query through this.
+ */
+export function snapshotQuery(
   input: unknown,
   allowed: readonly string[],
   role: string,

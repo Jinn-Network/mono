@@ -34,7 +34,8 @@ import type {
 import type { FixtureRoleKey } from './identity.js';
 
 const CATALOG_CHAIN_ID = NATIVE_ANCHOR_CHAIN_ID;
-const CATALOG_REFRESH_BY = '2027-01-01T00:00:00.000Z';
+/** Read by native-fleet-runtime-clock-seam.test.ts to place an instant past the chain window. */
+export const CATALOG_REFRESH_BY = '2027-01-01T00:00:00.000Z';
 
 /** A viem-account-shaped signer for the EOA key-binding ceremony (address + `signMessage`). */
 export interface CeremonyAccount {

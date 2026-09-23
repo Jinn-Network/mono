@@ -10,7 +10,7 @@ Operators who want to run locally should use `jinn run` directly (see `operator/
 container-native base, #988):
 
 ```dockerfile
-ARG BASE_TAG=latest
+ARG BASE_TAG=next
 FROM ghcr.io/jinn-network/operator:${BASE_TAG}
 RUN npm install -g @openai/codex@0.133.0
 ENV JINN_CONFIG=/data/config.json
@@ -25,7 +25,8 @@ VOLUME. `seed.sh` is **seeding-only**: it writes the codex auth file, sets the
 git identity, seeds `/data/config.json` on first boot, then
 `exec node dist/bin/jinn.js`.
 
-`BASE_TAG` must point to a base release that includes #988. See
+`BASE_TAG` must point to a base build that includes #988. It defaults to
+`next`, the rolling tag the canary lane republishes on every push. See
 [`../README.md`](../README.md) for the full deploy path (the public-GHCR ops
 step, the deploy contract, OLAS earning via the daemon `reward-claim` loop,
 and the consolidation checklist).

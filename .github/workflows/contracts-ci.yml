@@ -1,15 +1,26 @@
 name: Contracts CI
 
 on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
   pull_request:
-    paths: ['contracts/**']
+    paths:
+      - 'contracts/**'
+      - 'packages/contract-abis/**'
   push:
     branches: [next, main]
-    paths: ['contracts/**']
+    paths:
+      - 'contracts/**'
+      - 'packages/contract-abis/**'
 
-concurrency:
-  group: contracts-ci-${{ github.ref }}
-  cancel-in-progress: true
+# No `concurrency:` block. A cancel-in-progress group shared with the
+# pull_request trigger would cancel platform-verification's workflow_call of
+# this same lane (platform-verification-workflow.test.mjs pins this).
+permissions:
+  contents: read
 
 defaults:
   run:
@@ -21,9 +32,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            contracts/yarn.lock
+            packages/evidence/protocol/yarn.lock
+            packages/evidence/repository/yarn.lock
+            packages/evidence/discovery/yarn.lock
+            packages/evidence/execution-evidence-builder/yarn.lock
+            packages/evidence/execution-recorder/yarn.lock
+            packages/task-execution/protocol/yarn.lock
+            packages/task-execution/backend/yarn.lock
+            packages/task-execution/profiles/yarn.lock
+            packages/task-execution/backend-local/supervisor/yarn.lock
+            packages/task-execution/backend-local/workspace/yarn.lock
+            packages/task-execution/backend-local/launchers/yarn.lock
+            packages/task-execution/backend-local/assembly/yarn.lock
+            packages/task-execution/testing/yarn.lock
+            packages/trust/core/yarn.lock
+            packages/trust/resolve/yarn.lock
+            packages/discovery/protocol/yarn.lock
+            packages/discovery/serve/yarn.lock
+            packages/discovery/testing/yarn.lock
+            packages/trust/testing/yarn.lock
+            packages/marketplace/binding/yarn.lock
+            packages/marketplace/projector/yarn.lock
+            packages/marketplace/venue-base/yarn.lock
+            packages/marketplace/testing/yarn.lock
+            packages/contract-abis/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       # Foundry provides `forge`, required by test/storage-layout.test.ts, which
@@ -38,6 +83,12 @@ jobs:
         with:
           version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
       - run: yarn compile
+      - name: Verify contract-abis drift gate (#1577)
+        working-directory: ${{ github.workspace }}/packages/contract-abis
+        run: |
+          yarn install --immutable
+          yarn check-drift
+          yarn test
       - name: Build marketplace-testing adapter dependency from source (§7.8)
         working-directory: ${{ github.workspace }}
         run: |
@@ -62,6 +113,7 @@ jobs:
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
           (cd packages/discovery/testing && yarn install --immutable && yarn build)
           (cd packages/trust/testing && yarn install --immutable && yarn build)
+          (cd packages/contract-abis && yarn install --immutable && yarn build:dist)
           (cd packages/marketplace/binding && yarn install --immutable && yarn build)
           (cd packages/marketplace/projector && yarn install --immutable && yarn build)
           (cd packages/marketplace/venue-base && yarn install --immutable && yarn build)

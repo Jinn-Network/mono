@@ -11,10 +11,11 @@
  * through the serialized `/v1/status` HTTP payload.
  *
  * **`restart_required` mechanism (review finding F1).** NOT config-file-mtime — that fires
- * permanently for onboarding-complete / pricing writes, which hot-apply while still bumping the
- * file's mtime. Reads the explicit `isRestartRequired()` flag (`restart-required-state.ts`),
- * set only by the three write paths the daemon never hot-applies (claim-policy, joinedSolverNets
- * join-failure-or-absent-applier / leave, rpcUrl).
+ * permanently for onboarding-complete writes, which hot-apply while still bumping the file's
+ * mtime, and mtime cannot tell those apart from writes that genuinely need a restart. Reads the
+ * explicit `isRestartRequired()` flag (`restart-required-state.ts`), set only by the write paths
+ * the daemon never hot-applies (claim-policy, execution wiring, rpcUrl, and — since issue
+ * #2427 — pricing).
  *
  * **`rpc_all_failed` / `rpc_primary_degraded` (review finding F2).** The boot-time RPC
  * fallback-chain probe is captured ONCE at startup (`retryCount: 0`) and never re-probed —

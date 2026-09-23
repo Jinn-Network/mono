@@ -135,6 +135,15 @@ function extensionValue(extensions: readonly DerElement[], oid: string): Uint8Ar
   return undefined;
 }
 
+function extensionCritical(extensions: readonly DerElement[], oid: string): boolean {
+  for (const extension of extensions) {
+    const parts = children(extension);
+    if (readDerOid(parts[0]!) !== oid) continue;
+    return parts[1]?.identifier === DER_TAG.BOOLEAN && parts[1].content[0] === 0xff;
+  }
+  return false;
+}
+
 function readCertificateStructurally(certificateDer: Uint8Array): AnchorCertificateFacts {
   const tbs = readTbsCertificate(certificateDer);
   const extendedKeyUsage = extensionValue(tbs.extensions, OID_EXT_EXTENDED_KEY_USAGE);
@@ -155,6 +164,10 @@ function readCertificateStructurally(certificateDer: Uint8Array): AnchorCertific
     extendedKeyUsageOids: extendedKeyUsage === undefined
       ? []
       : children(decodeDer(extendedKeyUsage)).map((element) => readDerOid(element)),
+    extendedKeyUsageCritical: extensionCritical(
+      tbs.extensions,
+      OID_EXT_EXTENDED_KEY_USAGE,
+    ),
     // The certificate's own `directoryName` GeneralName, plus every name it
     // presents through subjectAltName -- exact DER either way, because §6.1
     // rule 10 compares bytes.
@@ -259,6 +272,7 @@ describe("the pure kit ports", () => {
     expect(facts.notBefore).toBe(authority.notBefore);
     expect(facts.notAfter).toBe(authority.notAfter);
     expect(facts.extendedKeyUsageOids).toEqual([OID_ID_KP_TIME_STAMPING]);
+    expect(facts.extendedKeyUsageCritical).toBe(true);
     expect(bytesToHex(facts.subjectNames[0]!)).toBe(bytesToHex(authority.subjectGeneralNameDer));
     expect(facts.sid.map((form) => form.kind))
       .toEqual(["issuerAndSerialNumber", "subjectKeyIdentifier"]);

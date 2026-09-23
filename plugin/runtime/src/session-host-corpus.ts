@@ -94,6 +94,12 @@ async function readPolicyVersions(directory: string): Promise<readonly Uint8Arra
  * Authority is per agent rather than per source because that is the question
  * `KeyResolver.resolve(agent, at)` asks — an agent that publishes two archives
  * signs both with the same working keys.
+ *
+ * De-duplicating on `keyid` alone is safe rather than order-dependent (#3444):
+ * `resolveCorpusConfig` rejects two declarations of one `(agent, keyid)` that
+ * disagree on `validFrom`, so by the time a `RuntimeConfig` exists every
+ * surviving duplicate carries the same instant, and which one is kept cannot
+ * change when the key is admitted.
  */
 function declaredSigningKeys(
   config: RuntimeConfig,

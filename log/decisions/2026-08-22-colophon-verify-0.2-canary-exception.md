@@ -39,3 +39,31 @@ The publish transform selects a receipt by exact product name and version and
 rejects any other 0.2 candidate. A later product pin change again requires the
 first stable stack receipt after green live-host verification, unless a new
 named operator decision explicitly amends that rule.
+
+## Amendment (2026-09-18) — cli and core first-cut receipts
+
+Issue #3989. DR-2026-09-03 has not opened stable publication (#3910, #3911,
+and #3912 remain open). `@colophon-claims/cli@0.1.0` and
+`@colophon-claims/core@0.1.0` therefore take the same named canary-exception
+route as verify 0.2.
+
+Only those two product versions, in addition to the verify 0.2 receipts
+already named above and the 0.2.1 operator authorization of 2026-08-26, MAY
+pin `@jinn-network/*` to the exact already-attested platform version
+`0.1.0-canary.sha.0533a224cf99f06d7facf0c23455f2781a5b9e62` (the verify 0.2.1
+stack-canary receipt; run 33517790412 attempt 2). The receipts live in
+`packages/benchmark-product/product-release-platform-pins.json` under the
+existing verifier 0.2 receipt shape. This does not relabel the historical
+first-cut or 0.2.0 receipts. It does not permit a floating `@canary`, a mixed
+SHA closure, `@colophon-claims/web`, another product or product version, an
+implicit future exception, or a stable-stack claim.
+
+The demand-gated trusted-publisher workflow remains the only publisher.
+`npm publish` is a public-surface act and is not dispatched by the change
+that records this route.
+
+Checker rename coordination: #3292 and #3315 closed on 2026-09-07 because
+PR #3285 never merged; the rename is re-filed as #4188. This amendment does
+not introduce `@colophon-claims/check` and does not turn
+`@colophon-claims/verify@0.2` into an alias. The published verify 0.2 line
+remains the checker itself.

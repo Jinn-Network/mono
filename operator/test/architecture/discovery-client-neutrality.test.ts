@@ -2,7 +2,7 @@
  * `discovery-client/` must survive the D-wave deletion of `discovery/`.
  *
  * One-swap R3b (issue #2494, DR-2026-08-05 addendum 2026-08-10 Decision 2)
- * relocated the four HTTP-indexer methods the surviving consumers drive
+ * relocated the HTTP-indexer methods the surviving consumers drive
  * (`getAutopilotDeliveryCandidates`, `listLaunchedSolverNets`, `queryEnvelopes`,
  * `getCodeDigestRewards`) onto `operator/src/discovery-client/`. That carve only
  * buys anything if the new module has NO path back into the legacy tree — a

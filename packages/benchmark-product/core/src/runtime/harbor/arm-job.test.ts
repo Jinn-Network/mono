@@ -69,7 +69,12 @@ describe("Harbor 0.21 trial identity", () => {
       jobName: "job",
       jobRoot,
       fallbackTaskDigest: taskDigest,
-      timeoutMs: 250,
+      // Give-up deadline only; the subject is the attempt-1-to-5 mapping below. #3354 did not
+      // list this one, but it is the same class as its siblings further down and it is the
+      // instance that was actually observed going red — `timed out observing Harbor Trials for
+      // the planned Job` at 250ms, on a loaded run of this file, with every trial already on
+      // disk before the observer started.
+      timeoutMs: 20_000,
     });
 
     const docs = mappingDocs(root);
@@ -98,8 +103,15 @@ describe("Harbor 0.21 trial identity", () => {
       jobName: "job",
       jobRoot,
       fallbackTaskDigest: taskDigest,
-      timeoutMs: 400,
+      // The observer's give-up deadline, not the subject of this test — the subject is that it
+      // keeps polling while `finished_at` is null. It was 400ms, which a descheduled worker can
+      // spend without the test doing anything (#3354). 20s leaves the observer's own
+      // `timed out waiting …` error room to surface before Vitest's 30s bound, so a real hang
+      // still reads as a hang rather than as an opaque test timeout.
+      timeoutMs: 20_000,
     });
+    // The negative-assertion window. A longer one under load only makes the assertion below more
+    // true, so this stays where it is.
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(existsSync(join(artifactsDir(root), "harbor", "mappings", "by-dispatch"))).toBe(false);
     const dir = "adaptive-rejection-sampler__late1";
@@ -141,7 +153,8 @@ describe("Harbor 0.21 trial identity", () => {
       jobName: "job",
       jobRoot,
       fallbackTaskDigest: taskDigest,
-      timeoutMs: 500,
+      // Give-up deadline only, raised off 500ms for the reason above (#3354).
+      timeoutMs: 20_000,
     });
     await new Promise((resolve) => setTimeout(resolve, 80));
     writeFileSync(configPath, JSON.stringify({

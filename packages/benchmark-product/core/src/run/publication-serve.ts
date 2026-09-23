@@ -15,6 +15,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { assertWorkspace } from "../workspace/workspace.js";
 import {
   createWorkspacePublicationHttpHandler,
   refreshWorkspacePublicationWellKnown,
@@ -38,6 +39,13 @@ export interface PublicationArchiveServerOptions {
    * silence is broken for the operator watching it.
    */
   readonly onError?: (cause: unknown) => void;
+  /**
+   * Receives human-readable progress lines emitted before the bind. The start-time refresh takes
+   * the source lock, whose acquire waits out a 30-second timeout when another product process is
+   * mid-announce; without a line the operator's first output is `serving ...` long after they
+   * expected a socket, with nothing to distinguish the wait from a hang.
+   */
+  readonly onProgress?: (line: string) => void;
 }
 
 export type PublicationWellKnownOutcome = "published" | "not-announced" | "refresh-failed";
@@ -98,6 +106,16 @@ async function respond(response: ServerResponse, produced: Response, method: str
 export async function startPublicationArchiveServer(
   options: PublicationArchiveServerOptions,
 ): Promise<PublicationArchiveServer> {
+  const progress = (line: string): void => {
+    // A diagnostic sink that throws must not fail the serve it was only describing.
+    try { options.onProgress?.(line); } catch { /* nothing to report to */ }
+  };
+  // First, and before anything that touches the directory. `createWorkspacePublicationSource`
+  // reaches `loadOrCreateReportSigningKey`, which is load-OR-CREATE: without this a mistyped or
+  // stale `--workspace` minted a fresh signing identity and a serving root at the wrong path,
+  // then bound a socket over an empty archive and exited 0 -- a typo indistinguishable from
+  // success. Every other publication verb already refuses first, because it needs a draft.
+  assertWorkspace(options.workspaceDir);
   const host = options.host ?? DEFAULT_PUBLICATION_SERVE_HOST;
   const port = options.port ?? DEFAULT_PUBLICATION_SERVE_PORT;
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) throw new TypeError("port must be an integer from 0 to 65535");
@@ -109,8 +127,15 @@ export async function startPublicationArchiveServer(
   // about a source that has announced, so the failure is carried out separately.
   let wellKnown: PublicationWellKnownOutcome;
   let refreshFailure: unknown;
+  progress(`refreshing the well-known document for source ${options.sourceName}`);
   try {
-    wellKnown = await refreshWorkspacePublicationWellKnown(options.workspaceDir, options.sourceName)
+    wellKnown = await refreshWorkspacePublicationWellKnown(
+      options.workspaceDir,
+      options.sourceName,
+      // The expected cause of a long wait, and the one that resolves on its own -- said plainly
+      // so the operator neither kills the process nor mistakes the wait for a hang.
+      () => progress("waiting on the publication source lock (another process is mid-announce); this clears on its own"),
+    )
       ? "published"
       : "not-announced";
   } catch (cause) {

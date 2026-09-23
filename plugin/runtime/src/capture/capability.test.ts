@@ -1,4 +1,4 @@
-import { copyFile, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -225,6 +225,30 @@ describe("openSession", () => {
     expect(withArchive).toHaveBeenCalledTimes(1);
     expect(seen.busyTimeoutMs).toBe(1_000);
     expect(ctx.log.info).not.toHaveBeenCalled();
+  });
+
+  test("names why a stranded feed could not be sealed instead of discarding the reason", async () => {
+    const capture = createCaptureCapability({
+      producerVersion: "0.1.0",
+      signer: testSigner,
+      withArchive: (async (
+        _options: unknown,
+        run: (runtime: unknown) => Promise<unknown>,
+      ) => run({ catalog: undefined, repository: {} })) as never,
+    });
+    const ctx = context();
+    await capture.start!(ctx);
+    // A feed the parser refuses: recovery throws rather than returning diagnostics, and without
+    // a named reason the session is later deleted with no record of why it was unsealable.
+    const { sessionId, feedPath } = await capture.openSession({ sessionId: "s-broken" });
+    expect(sessionId).toBe("s-broken");
+    await writeFile(feedPath, "{not json}\n");
+
+    await capture.openSession({ sessionId: "s-new" });
+    expect(ctx.log.warn).toHaveBeenCalledWith(
+      "capture recovery failed",
+      expect.objectContaining({ sessionId: "s-broken" }),
+    );
   });
 
   test("logs one line only when recovery actually seals something", async () => {

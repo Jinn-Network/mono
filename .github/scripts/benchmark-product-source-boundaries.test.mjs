@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { stripComments, UnterminatedTemplateError } from './js-source-scanner.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const packageRoot = join(root, 'packages', 'benchmark-product');
@@ -21,11 +22,11 @@ const PRIVATE_RUNTIME_IDENTIFIERS = [
 const CORE_JINN = [
   '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evaluation', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-native-capture', '@jinn-network/benchmarking-protocol', '@jinn-network/benchmarking-publication', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run', '@jinn-network/evidence-protocol', '@jinn-network/execution-evidence-builder', '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication', '@jinn-network/task-admission', '@jinn-network/task-execution-backend', '@jinn-network/task-execution-backend-local', '@jinn-network/task-execution-evaluation-harness', '@jinn-network/task-execution-evaluator-adapters', '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-oci-grader', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace', '@jinn-network/trust-core', '@jinn-network/trust-testing',
 ];
-const VERIFY_JINN = [
+const CHECK_JINN = [
   '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-protocol', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run', '@jinn-network/task-admission', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/trust-core', '@jinn-network/trust-testing',
 ];
 // `@jinn-network/trust-testing` is the Trust layer's conformance kit and a
-// devDependency only, in BOTH `verify` and `core`: verify runs the anchor-proof
+// devDependency only, in BOTH `check` and `core`: the checker runs the anchor-proof
 // contract suite (anchor-evidence design §11) against its own `node:crypto` ports,
 // and core pins its producer-side `.ots` serializer against the kit's byte-verified
 // builder and committed real-calendar capture (§6.2). It is admitted in both member
@@ -41,9 +42,9 @@ const VERIFY_JINN = [
 const TEST_ONLY_JINN = ['@jinn-network/trust-testing'];
 const isTestSource = (file) => /\.test\.[cm]?[jt]sx?$/.test(file) || /(?:^|\/)testing\//.test(file);
 const MEMBER_ALLOWED = new Map([
-  ['core', [...CORE_JINN, '@colophon-claims/verify']],
-  ['cli', ['@colophon-claims/core', '@colophon-claims/verify']],
-  ['verify', VERIFY_JINN],
+  ['core', [...CORE_JINN, '@colophon-claims/check']],
+  ['cli', ['@colophon-claims/check', '@colophon-claims/core']],
+  ['check', CHECK_JINN],
   ['web', ['@colophon-claims/core']],
 ]);
 const WEB_CORE = '@colophon-claims/core';
@@ -82,7 +83,9 @@ function privateRuntimeViolations(roots) {
   }).sort();
 }
 function specifiers(source) {
-  const trivia = String.raw`(?:(?:\s+)|(?:\/\*[\s\S]*?\*\/)|(?:\/\/[^\r\n]*(?:\r?\n|$)))*`;
+  // Linear: one character or one comment per iteration. `(?:\\s+)*` split whitespace runs
+  // exponentially, and a prose `from` before a run of `//` lines took 74 minutes in CI.
+  const trivia = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n|$))*`;
   return [new RegExp(String.raw`\bfrom${trivia}["']([^"']+)["']`, 'g'), new RegExp(String.raw`\bimport${trivia}["']([^"']+)["']`, 'g'), new RegExp(String.raw`\bimport${trivia}\(${trivia}["']([^"']+)["']${trivia}\)`, 'g'), new RegExp(String.raw`\brequire${trivia}\(${trivia}["']([^"']+)["']${trivia}\)`, 'g')]
     .flatMap((pattern) => [...source.matchAll(pattern)].map((match) => match[1]));
 }
@@ -216,6 +219,107 @@ test('Tier 1-3 packages do not normalize Colophon-private runtime interfaces', (
   for (const identifier of PRIVATE_RUNTIME_IDENTIFIERS) assert.ok(productSource.includes(identifier), `private runtime guard is vacuous for ${identifier}`);
 });
 
+// `jinn.benchmarking.method/` is the §9.2 registry's namespace: an identifier under it names an
+// implementation in `packages/benchmarking/aggregate`. Shipped product source that hand-types one
+// of those strings asserts "this is the method that ran" without going anywhere near the code that
+// would make it true -- which is how Demo-1's sealed analysis plan came to cite `paired-delta@1`, a
+// clustered BCa bootstrap over binary pass rates, for numbers a local paired Student-t module had
+// computed, and to cite `manipulation-check` and `variance-decomposition` under a namespace that
+// registers neither (issue #2973). Source that genuinely delegates to a registered method imports
+// `BENCHMARKING_METHOD_IDS` from `@jinn-network/benchmarking-records` and cites the constant, so a
+// rename of the thing it names cannot pass silently; a product-local analysis owns its own
+// identifier namespace instead. Test sources are exempt: their literals are fixtures for the
+// registry's own methods, not published citations.
+const REGISTERED_METHOD_NAMESPACE = 'jinn.benchmarking.method/';
+const REGISTERED_METHOD_IDS_SOURCE = join(root, 'packages', 'benchmarking', 'records', 'src', 'identifiers.ts');
+function registeredMethodIds() {
+  const block = readFileSync(REGISTERED_METHOD_IDS_SOURCE, 'utf8').match(/BENCHMARKING_METHOD_IDS = \{([\s\S]*?)\} as const;/);
+  assert.ok(block, 'BENCHMARKING_METHOD_IDS is no longer readable from the records identifiers module');
+  const ids = [...block[1].matchAll(/["']([^"']+)["']/g)].map((match) => match[1]);
+  assert.ok(ids.length > 0, 'the registered method identifier list parsed empty');
+  return ids;
+}
+function hardcodedMethodIds(sourceFiles) {
+  const pattern = new RegExp(`${REGISTERED_METHOD_NAMESPACE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[A-Za-z0-9._-]*`, 'g');
+  return sourceFiles.filter((file) => !isTestSource(file)).flatMap((file) => {
+    // The scanner knows the source but never the path, so the file name is attached here (#3088).
+    let code;
+    try {
+      code = stripComments(readFileSync(file, 'utf8'));
+    } catch (error) {
+      if (!(error instanceof UnterminatedTemplateError)) throw error;
+      assert.fail(
+        `${relative(root, file)}:${error.line}: backtick pairing ran to the end of the file from ` +
+          'here — either that literal is unterminated, or an earlier mis-read swallowed a ' +
+          'backtick. Either way the method-identifier read of this file is worthless.',
+      );
+    }
+    return [...new Set(code.match(pattern) ?? [])].map((id) => `${relative(root, file)} -> ${id}`);
+  }).sort();
+}
+
+test('method-identifier scanner reads code and ignores comments', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'colophon-method-id-'));
+  try {
+    mkdirSync(join(fixture, 'src'));
+    writeFileSync(join(fixture, 'src', 'cited.ts'), 'export const plan = [{ id: "jinn.benchmarking.method/paired-delta" }];\n');
+    writeFileSync(join(fixture, 'src', 'described.ts'), '// not jinn.benchmarking.method/paired-delta\n/* nor jinn.benchmarking.method/wilson */\nexport const x = 1;\n');
+    writeFileSync(join(fixture, 'src', 'cited.test.ts'), 'const id = "jinn.benchmarking.method/wilson";\n');
+    assert.deepEqual(
+      hardcodedMethodIds(files(join(fixture, 'src'))),
+      [`${relative(root, join(fixture, 'src', 'cited.ts'))} -> jinn.benchmarking.method/paired-delta`],
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('method-identifier scanner does not read a quote inside a regex literal as opening a string', () => {
+  // The over-report direction, and the reason this guard reads through the shared scanner rather
+  // than a local copy of it: a quote-first scanner enters string mode at the apostrophe of
+  // `/['"]/`, consumes to the next apostrophe anywhere in the file, and hands the intervening
+  // comment back as live code -- reddening the guard on a comment. The shared scanner resolves the
+  // `/` as a regex literal first, so the comment after it is still a comment.
+  const fixture = mkdtempSync(join(tmpdir(), 'colophon-method-id-regex-'));
+  try {
+    mkdirSync(join(fixture, 'src'));
+    writeFileSync(
+      join(fixture, 'src', 'described.ts'),
+      'const quoted = /[\'"]/u;\n// cites jinn.benchmarking.method/paired-delta in prose\nexport const x = quoted;\n',
+    );
+    assert.deepEqual(hardcodedMethodIds(files(join(fixture, 'src'))), []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+// The scanner's refusal carries a line but never a path; the catch above attaches the file name.
+// That attachment was unpinned: a bare `throw error;` in its place left the suite green while the
+// message named no file (#4401). The fixture is shipped-shaped (not `*.test.*`, not under
+// `testing/`) so the test-source filter does not skip it before the scanner runs.
+test('an unterminated template literal is reported with the file name and line', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'colophon-method-id-unterminated-'));
+  try {
+    mkdirSync(join(fixture, 'src'));
+    const broken = join(fixture, 'src', 'broken.ts');
+    writeFileSync(broken, 'export const x = 1;\nconst s = `never closed\n');
+    const path = relative(root, broken).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.throws(
+      () => hardcodedMethodIds(files(join(fixture, 'src'))),
+      { message: new RegExp(`^${path}:2: backtick pairing`) },
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('shipped product source cites a §9.2 method identifier only through the records constant', () => {
+  const ids = registeredMethodIds();
+  assert.ok(ids.includes(`${REGISTERED_METHOD_NAMESPACE}paired-delta`), 'the identifier from issue #2973 is no longer registered');
+  const outsideNamespace = ids.filter((id) => !id.startsWith(REGISTERED_METHOD_NAMESPACE));
+  assert.deepEqual(outsideNamespace, [], 'the registry moved off the namespace this guard polices');
+  assert.deepEqual(
+    sourceRoots().flatMap((directory) => hardcodedMethodIds(files(directory))),
+    [],
+    'shipped source hand-types a §9.2 method identifier instead of citing the registry constant',
+  );
+});
+
 test('the live sweep covers all four product members', () => {
-  assert.deepEqual(sourceRoots().map((directory) => relative(packageRoot, directory)).sort(), ['cli/src', 'core/src', 'verify/src', 'web/src']);
+  // The alias at packages/benchmark-product/verify has no src tree; it is six files of re-export.
+  assert.deepEqual(sourceRoots().map((directory) => relative(packageRoot, directory)).sort(), ['check/src', 'cli/src', 'core/src', 'web/src']);
 });

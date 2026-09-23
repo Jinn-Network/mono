@@ -23,6 +23,15 @@ const TASK_EXECUTION_PACKAGES = [
   ['oci-grader', '@jinn-network/task-execution-oci-grader'],
 ];
 
+// This guard owns only the declared range and the absence of resolution overrides; the decision
+// behind the range is recorded in packages/task-execution/profiles/README.md.
+const NOBLE_HASHES_RANGE = '^2.2.0';
+const HASH_PRODUCERS = [
+  'packages/task-execution/profiles',
+  'packages/task-execution/protocol',
+  'packages/evidence/protocol',
+];
+
 // Packages OUTSIDE the task-execution tree that a task-execution package may legitimately
 // portal-resolve (backend plan program §7.7: the assembly consumes the evidence CONTRACT
 // packages + the I/O-free execution-recorder producer only — never evidence-local-runtime or
@@ -248,6 +257,32 @@ test('task-execution package Jinn dependencies and portal resolutions match the 
       assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
         `${directory} must resolve ${dependencyName} through its matching portal`);
     }
+  }
+});
+
+test('@noble/hashes uses one v2 compatibility range', () => {
+  for (const directory of HASH_PRODUCERS) {
+    const manifest = JSON.parse(readFileSync(join(root, directory, 'package.json'), 'utf8'));
+    assert.equal(
+      manifest.dependencies?.['@noble/hashes'],
+      NOBLE_HASHES_RANGE,
+      `${directory} must declare the shared @noble/hashes v2 compatibility range`,
+    );
+  }
+});
+
+test('no manifest overrides the @noble/hashes resolution', () => {
+  const directories = [
+    ...TASK_EXECUTION_PACKAGES.map(([directory]) => join('packages', 'task-execution', directory)),
+    ...HASH_PRODUCERS,
+  ];
+  for (const directory of new Set(directories)) {
+    const manifest = JSON.parse(readFileSync(join(root, directory, 'package.json'), 'utf8'));
+    assert.equal(
+      Object.hasOwn(manifest.resolutions ?? {}, '@noble/hashes'),
+      false,
+      `${directory} must select @noble/hashes through its dependency range and committed lock`,
+    );
   }
 });
 

@@ -5,6 +5,9 @@ at a real, digest-pinned production module. Target audience: you are filling in 
 `evaluator` block of `native-config.json` (`operator/src/daemon/native-product-config.ts:88-93`)
 for a `role: "evaluator"` deployment.
 
+The sibling block, `sources`, and the origin-containment requirement it imposes on every peer are
+covered in [`native-record-sources.md`](native-record-sources.md).
+
 ## What ships
 
 `operator/deployments/evaluator/` holds two committed, digest-pinnable artifacts:

@@ -143,6 +143,7 @@ import {
   createRegistryPinPort,
   deriveMarketplaceAttemptUri,
   keccakEvidenceHash,
+  TASK_COORDINATOR_ABI,
 } from '@jinn-network/marketplace-binding';
 import {
   CLAIM_NOTHING,
@@ -255,6 +256,7 @@ import {
 } from './native-solution-corrections.js';
 import { NativeMarketplaceEventRepository } from './native-canonical-observations.js';
 import { buildNativeSolutionSettlementPort } from './native-solution-settlement.js';
+import { reconcileNonterminalAtBoot } from './task-execution-boot-reconciliation.js';
 import {
   createNativeRequesterSubmissionResolver,
   type NativeRequesterSubmissionLookup,
@@ -427,6 +429,21 @@ export interface CompositionRootInput {
    * assemble a real `ProjectorLoop`/`ClaimGate`/`EngagementLedger` rather than stubs.
    */
   readonly store: Store;
+  /**
+   * Host-supplied launchers considered alongside `ALL_LAUNCHERS` when resolving this
+   * composition's `executionWiring`. Each entry carries the executable its own `plan()` argv
+   * spawns, because `resolveLauncherCommand` only knows the shipped launcher ids.
+   *
+   * The seam exists so a hermetic rig can dispatch a work kind the shipped registry has no
+   * launcher for (the swe-rebench-v2 e2e's canned-patch stub) without a test stub — or an
+   * env-gated branch selecting one — landing in the production launcher list. Omitted by
+   * `main.ts` and every production host: the shipped registry is then the whole set, exactly
+   * as before.
+   *
+   * An entry whose id collides with a shipped launcher (or another entry) is refused at
+   * composition build time — see `buildLaunchers`.
+   */
+  readonly extraLaunchers?: readonly { readonly launcher: LauncherContract; readonly command: string }[];
   /** Projector poll interval (ms). Defaults to 5000, matching `LOOP_REGISTRY`'s entry. */
   readonly projectorPollIntervalMs?: number;
   readonly logger?: { info(m: string): void; warn(m: string): void };
@@ -569,24 +586,50 @@ function buildVerifiedExecutable(command: string): VerifiedExecutable {
   return { path, digest };
 }
 
-function buildLaunchers(
+/**
+ * Selects the launchers this composition's `executionWiring` names, out of the shipped
+ * `ALL_LAUNCHERS` plus any host-supplied `extraLaunchers`. An extra is selected only when a
+ * wiring entry names its id, so passing extras a wiring never asks for is inert.
+ *
+ * Exported for test only (the seam decides *whether* an injected launcher is selected at all;
+ * `buildOperatorComposition` is too heavy a fixture to assert that through). Production callers
+ * reach it through `buildOperatorComposition`.
+ */
+export function buildLaunchers(
   wiring: readonly ExecutionWiringEntry[],
   mode: CompositionRootInput['mode'],
+  extra: CompositionRootInput['extraLaunchers'] = [],
 ): readonly LauncherContract[] {
   const aliases = mode === 'legacy' ? LEGACY_HARNESS_TO_LAUNCHER_ID : HARNESS_TO_LAUNCHER_ID;
   const wanted = new Set(
     wiring.map((entry) => aliases[entry.harness] ?? entry.harness),
   );
-  return ALL_LAUNCHERS.filter((launcher) => wanted.has(launcher.id));
+  const available = [...ALL_LAUNCHERS, ...extra.map((entry) => entry.launcher)];
+  // Refuse a duplicate id loudly rather than carrying both contracts: the downstream consumers
+  // disagree about which one wins (`buildLauncherDeployments` keys by id, so the injected
+  // command wins for both iterations, while `buildNativeLauncherCapabilityPort`'s `find` hits
+  // whichever contract comes first — the shipped one, since `ALL_LAUNCHERS` is prepended). A
+  // collision therefore pairs a shipped launcher's `capabilities()`/`plan()` with an injected
+  // executable. A host that reuses an id has a wiring bug; say so at composition build time.
+  const seen = new Set<string>();
+  for (const launcher of available) {
+    if (seen.has(launcher.id)) {
+      throw new Error(`extraLaunchers id "${launcher.id}" collides with another launcher; use a distinct id`);
+    }
+    seen.add(launcher.id);
+  }
+  return available.filter((launcher) => wanted.has(launcher.id));
 }
 
 export function buildLauncherDeployments(
   launchers: readonly LauncherContract[],
   config: JinnConfig,
+  extra: CompositionRootInput['extraLaunchers'] = [],
 ): Readonly<Record<string, LauncherDeployment>> {
+  const extraCommands = new Map(extra.map((entry) => [entry.launcher.id, entry.command]));
   const deployments: Record<string, LauncherDeployment> = {};
   for (const launcher of launchers) {
-    const command = resolveLauncherCommand(launcher.id, config);
+    const command = extraCommands.get(launcher.id) ?? resolveLauncherCommand(launcher.id, config);
     if (command === undefined) continue;
     const executable = buildVerifiedExecutable(command);
     deployments[launcher.id] = {
@@ -750,115 +793,6 @@ export function buildLegacyDeliveryExtensions(input: {
 }
 
 // ── Projector wiring (CLOSED at C8 — see file header items 1, a, b, c, d) ────────────────────
-//
-// `TaskCoordinator.getRequestRef` / `getAttempt` — mirrors
-// `packages/marketplace/venue-base/src/writers/settlement.ts`'s (non-exported)
-// `readRouterDeliveryFacts` today-generation read exactly, per that module's own doc comment
-// directing a host-injected port to do this read rather than duplicate it inside the enrich
-// module itself.
-//
-// PRODUCER/VERIFIER PARITY (defect #47): the producing side registers a SOLUTION request and a
-// VERDICT request in two disjoint on-chain maps — `TaskCoordinator._requestRefs` (written by
-// `registerRequest`, read by `getRequestRef`) and `TaskCoordinator._verdictRequestRefs` (written
-// by `registerVerdictRequest`, read by `getVerdictRequestRef`, `TaskCoordinator.sol:359/458`).
-// A verifier that consults only `getRequestRef` therefore reports "no on-chain request reference"
-// for every verdict delivery that ever settled, and enrich drops the Mech `Deliver` that carries
-// the evaluator's verdict — the reason the round-28 verdict announcement never projected. The
-// verdict maps' own anchor is `VerdictRecord.verdictCidDigest` (`getVerdict`), the exact analogue
-// of `AttemptRecord.solutionCidDigest` for the solution leg.
-const REQUEST_REF_VIEW_ABI = [{
-  name: 'getRequestRef', type: 'function', stateMutability: 'view',
-  inputs: [{ name: 'requestId', type: 'bytes32' }],
-  outputs: [
-    { name: 'taskId', type: 'uint256' },
-    { name: 'attemptIndex', type: 'uint32' },
-    { name: 'exists', type: 'bool' },
-  ],
-}] as const;
-
-const GET_ATTEMPT_VIEW_ABI = [{
-  name: 'getAttempt', type: 'function', stateMutability: 'view',
-  inputs: [
-    { name: 'taskId', type: 'uint256' },
-    { name: 'attemptIndex', type: 'uint32' },
-  ],
-  outputs: [{
-    name: 'attempt', type: 'tuple',
-    components: [
-      { name: 'taskId', type: 'uint256' },
-      { name: 'attemptIndex', type: 'uint32' },
-      { name: 'operator', type: 'address' },
-      { name: 'requestId', type: 'bytes32' },
-      { name: 'solutionCidDigest', type: 'bytes32' },
-      { name: 'solutionWeight', type: 'uint256' },
-      { name: 'verdictCount', type: 'uint32' },
-      { name: 'status', type: 'uint8' },
-    ],
-  }],
-}] as const;
-
-const VERDICT_REQUEST_REF_VIEW_ABI = [{
-  name: 'getVerdictRequestRef', type: 'function', stateMutability: 'view',
-  inputs: [{ name: 'requestId', type: 'bytes32' }],
-  outputs: [
-    { name: 'taskId', type: 'uint256' },
-    { name: 'attemptIndex', type: 'uint32' },
-    { name: 'verdictIndex', type: 'uint32' },
-    { name: 'exists', type: 'bool' },
-  ],
-}] as const;
-
-/**
- * `TaskCoordinator.getVerdict` — `verdictCidDigest` is the exact digest argument the evaluator's
- * `claimVerdictDelivery(verdictRequestId, verdictDigest, verdictCode)` wrote through
- * `recordVerdict` (`TaskCoordinator.sol:403`), the verdict-leg counterpart of the solution leg's
- * `AttemptRecord.solutionCidDigest`.
- */
-const GET_VERDICT_VIEW_ABI = [{
-  name: 'getVerdict', type: 'function', stateMutability: 'view',
-  inputs: [
-    { name: 'taskId', type: 'uint256' },
-    { name: 'attemptIndex', type: 'uint32' },
-    { name: 'verdictIndex', type: 'uint32' },
-  ],
-  outputs: [{
-    name: 'verdict', type: 'tuple',
-    components: [
-      { name: 'taskId', type: 'uint256' },
-      { name: 'attemptIndex', type: 'uint32' },
-      { name: 'verdictIndex', type: 'uint32' },
-      { name: 'evaluator', type: 'address' },
-      { name: 'requestId', type: 'bytes32' },
-      { name: 'verdictCidDigest', type: 'bytes32' },
-      { name: 'verdictCode', type: 'uint8' },
-      { name: 'status', type: 'uint8' },
-    ],
-  }],
-}] as const;
-
-/**
- * `TaskCoordinator.getTask` — read directly off the coordinator this composition already holds,
- * not through `getTaskCidDigest`'s router→`taskCoordinator()`→`getTask` two-hop (that indirection
- * exists only for the legacy adapter, which is handed a router address).
- */
-const GET_TASK_VIEW_ABI = [{
-  name: 'getTask', type: 'function', stateMutability: 'view',
-  inputs: [{ name: 'taskId', type: 'uint256' }],
-  outputs: [{
-    name: 'task', type: 'tuple',
-    components: [
-      { name: 'creator', type: 'address' },
-      { name: 'taskCidDigest', type: 'bytes32' },
-      { name: 'manifestDigest', type: 'bytes32' },
-      { name: 'status', type: 'uint8' },
-      { name: 'policy', type: 'uint8' },
-      { name: 'claimCount', type: 'uint32' },
-      { name: 'submittedCount', type: 'uint32' },
-      { name: 'finalizedAttemptCount', type: 'uint32' },
-      { name: 'creatorCredited', type: 'bool' },
-    ],
-  }],
-}] as const;
 
 /**
  * Why a fetch produced no bytes. FAILURE IS NOT ABSENCE (#2647), applied to the IPFS leg (#3451):
@@ -956,17 +890,32 @@ export function buildReadTodayDeliveryFacts(
 ): ProjectorEnrichPorts['readTodayDeliveryFacts'] {
   return async (requestId) => {
     let solutionLegFailed = false;
+    // `TaskCoordinator.getRequestRef` / `getAttempt` — mirrors
+    // `packages/marketplace/venue-base/src/writers/settlement.ts`'s (non-exported)
+    // `readRouterDeliveryFacts` today-generation read exactly, per that module's own doc comment
+    // directing a host-injected port to do this read rather than duplicate it inside the enrich
+    // module itself.
+    //
+    // PRODUCER/VERIFIER PARITY (defect #47): the producing side registers a SOLUTION request and a
+    // VERDICT request in two disjoint on-chain maps — `TaskCoordinator._requestRefs` (written by
+    // `registerRequest`, read by `getRequestRef`) and `TaskCoordinator._verdictRequestRefs` (written
+    // by `registerVerdictRequest`, read by `getVerdictRequestRef`, `TaskCoordinator.sol:359/458`).
+    // A verifier that consults only `getRequestRef` therefore reports "no on-chain request reference"
+    // for every verdict delivery that ever settled, and enrich drops the Mech `Deliver` that carries
+    // the evaluator's verdict — the reason the round-28 verdict announcement never projected. The
+    // verdict maps' own anchor is `VerdictRecord.verdictCidDigest` (`getVerdict`), the exact analogue
+    // of `AttemptRecord.solutionCidDigest` for the solution leg.
     try {
       const [taskId, attemptIndex, exists] = await publicClient.readContract({
         address: taskCoordinator,
-        abi: REQUEST_REF_VIEW_ABI,
+        abi: TASK_COORDINATOR_ABI,
         functionName: 'getRequestRef',
         args: [requestId],
       });
       if (exists) {
         const attempt = await publicClient.readContract({
           address: taskCoordinator,
-          abi: GET_ATTEMPT_VIEW_ABI,
+          abi: TASK_COORDINATOR_ABI,
           functionName: 'getAttempt',
           args: [taskId, attemptIndex],
         });
@@ -982,14 +931,18 @@ export function buildReadTodayDeliveryFacts(
     try {
       const [taskId, attemptIndex, verdictIndex, exists] = await publicClient.readContract({
         address: taskCoordinator,
-        abi: VERDICT_REQUEST_REF_VIEW_ABI,
+        abi: TASK_COORDINATOR_ABI,
         functionName: 'getVerdictRequestRef',
         args: [requestId],
       });
       if (!exists) return solutionLegFailed ? 'unavailable' : undefined;
+      // `getVerdict`'s `verdictCidDigest` is the exact digest argument the evaluator's
+      // `claimVerdictDelivery(verdictRequestId, verdictDigest, verdictCode)` wrote through
+      // `recordVerdict` (`TaskCoordinator.sol:403`), the verdict-leg counterpart of the solution
+      // leg's `AttemptRecord.solutionCidDigest`.
       const verdict = await publicClient.readContract({
         address: taskCoordinator,
-        abi: GET_VERDICT_VIEW_ABI,
+        abi: TASK_COORDINATOR_ABI,
         functionName: 'getVerdict',
         args: [taskId, attemptIndex, verdictIndex],
       });
@@ -1033,9 +986,12 @@ export function buildReadOnChainTaskDigest(
     if (memoized !== undefined) return memoized;
     let digest: `sha256:${string}` | undefined;
     try {
+      // `getTask` read directly off the coordinator this composition already holds, not through
+      // `getTaskCidDigest`'s router→`taskCoordinator()`→`getTask` two-hop (that indirection exists
+      // only for the legacy adapter, which is handed a router address).
       const task = await publicClient.readContract({
         address: taskCoordinator,
-        abi: GET_TASK_VIEW_ABI,
+        abi: TASK_COORDINATOR_ABI,
         functionName: 'getTask',
         args: [taskId],
       });
@@ -2403,8 +2359,8 @@ export async function buildOperatorComposition(
   const evidence = await openOperatorEvidence({ rootDir: input.evidenceRoot });
 
   const wiring = toPipelineWiring(config.executionWiring ?? []);
-  const launchers = buildLaunchers(wiring, input.mode);
-  const launcherDeployments = buildLauncherDeployments(launchers, config);
+  const launchers = buildLaunchers(wiring, input.mode, input.extraLaunchers);
+  const launcherDeployments = buildLauncherDeployments(launchers, config, input.extraLaunchers);
   const workspaceRuntime = buildWorkspaceRuntimePorts();
 
   const backendConfig: LocalTaskExecutionBackendConfig = {
@@ -2449,6 +2405,8 @@ export async function buildOperatorComposition(
           }),
   };
   const backend = new LocalTaskExecutionBackend(backendConfig);
+  // #4397: converge attempts no coordinator will track, before any coordinator's first recover.
+  await reconcileNonterminalAtBoot(backend, '[task-execution]', input.logger);
   // Finding E31: completes the mutable slot `verifySettlementGrade` (built above, before
   // `backend` existed) closes over.
   backendForDeliverySignatures = backend;

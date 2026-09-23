@@ -21,6 +21,7 @@ import {
 import {
   authenticateRequester,
   parseExactDsseEnvelope,
+  resolveBindingForAgent,
   verifyEnvelopeBinding,
   type BindingResolver,
   type DsseChainVerifier,
@@ -311,8 +312,11 @@ async function requireBinding(input: {
   readonly effectiveTime: string;
   readonly ports: ConsumerTrustPorts;
 }): Promise<NativeVerticalVerificationReport['bindings'][number]> {
-  const resolved = await input.ports.bindingResolver.resolveBinding(
-    { key: input.key, agent: input.agent }, input.effectiveTime,
+  // `resolveBindingForAgent`, not the bare resolver: the report echoes
+  // `input.agent` next to the resolved `bindingDigest`, so a key-only
+  // resolver could attribute another agent's binding to the claimed one.
+  const resolved = await resolveBindingForAgent(
+    input.ports.bindingResolver, { key: input.key, agent: input.agent }, input.effectiveTime,
   );
   if (resolved === null) throw new NativeVerificationError('binding-not-resolved', input.role);
   return {

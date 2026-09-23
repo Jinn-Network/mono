@@ -1,5 +1,12 @@
 # Failure classification
 
+> **Superseded run-role, retained contract prose.** The release-prep skill's
+> mechanical run-role is retired (see `.claude/skills/release-prep/SKILL.md`);
+> the publish gate is the two SHA-bound check-runs `hermetic-gate` and
+> `environment-suite`. This file is retained because it is the only prose
+> documenting the fail-class taxonomy (`FailClassSchema` / `classifyFailure`) that
+> those workflows still map scenario exit codes onto.
+
 Every `fail` verdict has a `failClass` — release-readiness uses it to decide whether a fail blocks ship.
 
 ## Classes
@@ -17,7 +24,7 @@ Every `fail` verdict has a `failClass` — release-readiness uses it to decide w
 
 ## Adding patterns
 
-When a real infrastructure issue keeps showing up as `real-bug`, extend the `FLAKE_INFRA_PATTERNS` or `FLAKE_TIMING_PATTERNS` lists in `scenario-types.ts`. Each addition should be accompanied by a regression test in `scenario-types.test.ts` so the classification is durable.
+When a real infrastructure issue keeps showing up as `real-bug`, extend the `patterns` array of the matching `FLAKE_RULES` entry (`klass: 'flake-infra'` or `'flake-timing'`) in `operator/scripts/release/scenario-types.ts`; rule order is precedence and an unmatched failure defaults to `real-bug`. Each addition should be accompanied by a regression test in `operator/test/release/scenario-types.test.ts` so the classification is durable.
 
 ## What release-readiness does with each class
 

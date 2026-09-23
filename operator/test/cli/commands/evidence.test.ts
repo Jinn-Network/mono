@@ -161,7 +161,7 @@ describe('evidence command', () => {
     await evidence.run(bogus.ctx);
     expect(JSON.parse(bogus.writes[0]!)).toMatchObject({
       code: 'invalid_invocation',
-      details: { expected: 'show|find' },
+      details: { expected: 'show|find|fetch' },
     });
     expect(bogus.exits).toEqual([11]);
   });

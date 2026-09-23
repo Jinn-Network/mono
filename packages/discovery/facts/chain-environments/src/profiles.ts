@@ -28,7 +28,7 @@ export const informationWorldFactsProfile: FactsProfileDocument =
 // amendment 2026-08-28). Each coexists with its v1; v1 bytes and meaning stay frozen.
 
 /**
- * Adds the thirteen components a chain world pins by digest that v1 left unnamed — the pinned
+ * Adds the twelve components a chain world pins by digest that v1 left unnamed — the pinned
  * simulator binary, the multi-arch index, the header proof, the materializer, the source
  * proofs, the fixture-coverage manifest, the fixture modules, the tool-interface schemas, the
  * probe suite, the observation schema, the baseline observation and the comparator — plus the

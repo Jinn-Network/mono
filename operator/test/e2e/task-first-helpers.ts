@@ -1551,6 +1551,21 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
     const operatorWallet = walletClient(anvil.rpcUrl, operatorAccount, baseSepolia);
     const evaluatorAccount = privateKeyToAccount(evaluatorOperator.agentPrivateKey);
     const evaluatorWallet = walletClient(anvil.rpcUrl, evaluatorAccount, baseSepolia);
+    // One broadcaster per Safe (finding E5 / composition design §6.1): every legacy Safe write in
+    // this leg is threaded the SAME instance for a given Safe, so the two never open independent
+    // nonce stacks against it. Issue #2665: these calls previously omitted the `broadcaster`
+    // parameter entirely, which does not drop an optional tail argument -- it is the 3rd of 7-9
+    // positional parameters, so every later argument was shifted one place left.
+    const operatorBroadcaster = createDirectSafeBroadcaster(
+      publicClient,
+      operatorWallet,
+      operator.safeAddress,
+    );
+    const evaluatorBroadcaster = createDirectSafeBroadcaster(
+      publicClient,
+      evaluatorWallet,
+      evaluatorOperator.safeAddress,
+    );
 
     const isOperator = await publicClient.readContract({
       address: operator.mechAddress,
@@ -1639,6 +1654,7 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
     const claim = await claimTask(
       publicClient,
       operatorWallet,
+      operatorBroadcaster,
       operator.safeAddress,
       deployment.router,
       taskId,
@@ -1676,27 +1692,25 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
     await callDeliverToMarketplace(
       publicClient,
       operatorWallet,
+      operatorBroadcaster,
       operator.safeAddress,
       operator.mechAddress,
       [requestId],
-      [solutionEnvelope.signature.hash],
+      [solutionEnvelope.signature.hash as Hex],
     );
     await claimDelivery(
       publicClient,
       operatorWallet,
+      operatorBroadcaster,
       operator.safeAddress,
       deployment.router,
       requestId,
-      { variant: 'v3', kind: 'solution', evidenceHash: solutionEnvelope.signature.hash },
+      { variant: 'v3', kind: 'solution', evidenceHash: solutionEnvelope.signature.hash as Hex },
     );
 
     const verdictClaim = await createVerdictPorts({
       publicClient,
-      broadcaster: createDirectSafeBroadcaster(
-        publicClient,
-        evaluatorWallet,
-        evaluatorOperator.safeAddress as Address,
-      ) as never,
+      broadcaster: evaluatorBroadcaster,
       safeAddress: evaluatorOperator.safeAddress as Address,
       routerAddress: deployment.router as Address,
       mechAddress: evaluatorOperator.mechAddress as Address,
@@ -1759,18 +1773,20 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
     await callDeliverToMarketplace(
       publicClient,
       evaluatorWallet,
+      evaluatorBroadcaster,
       evaluatorOperator.safeAddress,
       evaluatorOperator.mechAddress,
       [verdictRequestId],
-      [verdictEnvelope.signature.hash],
+      [verdictEnvelope.signature.hash as Hex],
     );
     await claimDelivery(
       publicClient,
       evaluatorWallet,
+      evaluatorBroadcaster,
       evaluatorOperator.safeAddress,
       deployment.router,
       verdictRequestId,
-      { variant: 'v3', kind: 'verdict', evidenceHash: verdictEnvelope.signature.hash, verdictCode: 1 },
+      { variant: 'v3', kind: 'verdict', evidenceHash: verdictEnvelope.signature.hash as Hex, verdictCode: 1 },
     );
 
     const verdictRef = await publicClient.readContract({
@@ -2065,6 +2081,21 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     const operatorWallet = walletClient(anvil.rpcUrl, operatorAccount, baseSepolia);
     const evaluatorAccount = privateKeyToAccount(evaluatorOperator.agentPrivateKey);
     const evaluatorWallet = walletClient(anvil.rpcUrl, evaluatorAccount, baseSepolia);
+    // One broadcaster per Safe (finding E5 / composition design §6.1): every legacy Safe write in
+    // this leg is threaded the SAME instance for a given Safe, so the two never open independent
+    // nonce stacks against it. Issue #2665: these calls previously omitted the `broadcaster`
+    // parameter entirely, which does not drop an optional tail argument -- it is the 3rd of 7-9
+    // positional parameters, so every later argument was shifted one place left.
+    const operatorBroadcaster = createDirectSafeBroadcaster(
+      publicClient,
+      operatorWallet,
+      operator.safeAddress,
+    );
+    const evaluatorBroadcaster = createDirectSafeBroadcaster(
+      publicClient,
+      evaluatorWallet,
+      evaluatorOperator.safeAddress,
+    );
 
     const isOperator = await publicClient.readContract({
       address: operator.mechAddress,
@@ -2126,6 +2157,7 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     const claim = await claimTask(
       publicClient,
       operatorWallet,
+      operatorBroadcaster,
       operator.safeAddress,
       deployment.router,
       taskId,
@@ -2152,27 +2184,25 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     await callDeliverToMarketplace(
       publicClient,
       operatorWallet,
+      operatorBroadcaster,
       operator.safeAddress,
       operator.mechAddress,
       [requestId],
-      [solutionEnvelope.signature.hash],
+      [solutionEnvelope.signature.hash as Hex],
     );
     await claimDelivery(
       publicClient,
       operatorWallet,
+      operatorBroadcaster,
       operator.safeAddress,
       deployment.router,
       requestId,
-      { variant: 'v3', kind: 'solution', evidenceHash: solutionEnvelope.signature.hash },
+      { variant: 'v3', kind: 'solution', evidenceHash: solutionEnvelope.signature.hash as Hex },
     );
 
     const verdictClaim = await createVerdictPorts({
       publicClient,
-      broadcaster: createDirectSafeBroadcaster(
-        publicClient,
-        evaluatorWallet,
-        evaluatorOperator.safeAddress as Address,
-      ) as never,
+      broadcaster: evaluatorBroadcaster,
       safeAddress: evaluatorOperator.safeAddress as Address,
       routerAddress: deployment.router as Address,
       mechAddress: evaluatorOperator.mechAddress as Address,
@@ -2235,18 +2265,20 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     await callDeliverToMarketplace(
       publicClient,
       evaluatorWallet,
+      evaluatorBroadcaster,
       evaluatorOperator.safeAddress,
       evaluatorOperator.mechAddress,
       [verdictRequestId],
-      [verdictEnvelope.signature.hash],
+      [verdictEnvelope.signature.hash as Hex],
     );
     await claimDelivery(
       publicClient,
       evaluatorWallet,
+      evaluatorBroadcaster,
       evaluatorOperator.safeAddress,
       deployment.router,
       verdictRequestId,
-      { variant: 'v3', kind: 'verdict', evidenceHash: verdictEnvelope.signature.hash, verdictCode: 1 },
+      { variant: 'v3', kind: 'verdict', evidenceHash: verdictEnvelope.signature.hash as Hex, verdictCode: 1 },
     );
 
     const taskRecordPostFinalize = await publicClient.readContract({

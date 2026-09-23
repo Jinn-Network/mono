@@ -33,8 +33,9 @@ const ALL_SCOPES = [
 
 function resolver(): BindingResolver {
   return {
-    resolveBinding: vi.fn(async (query: { key: string }) => ({
+    resolveBinding: vi.fn(async (query: { key: string; agent: string }) => ({
       binding: {
+        agent: query.agent,
         key: { didKey: query.key, keyid: query.key },
         scope: ALL_SCOPES,
         validFrom: '2026-08-01T00:00:00.000Z',

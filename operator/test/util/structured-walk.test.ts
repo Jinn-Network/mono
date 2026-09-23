@@ -95,11 +95,34 @@ describe('walkStructured', () => {
     expect(out).toEqual({ secret: '<masked>', keep: { nested: 2 } });
   });
 
-  it('applies the entry policy only inside records, not array elements', () => {
+  it('applies the entry policy to a record nested inside an array', () => {
     const out = walkStructured({ list: [{ secret: 1 }] }, {
       leaf: (v) => v,
       entry: (key) => (key === 'secret' ? { value: '<masked>' } : undefined),
     });
     expect(out).toEqual({ list: [{ secret: '<masked>' }] });
+  });
+
+  it('never passes an array element to the entry policy (#3549)', () => {
+    const keys: string[] = [];
+    const out = walkStructured({ list: ['a', { secret: 1 }] }, {
+      leaf: (v) => v,
+      entry: (key) => {
+        keys.push(key);
+        return undefined;
+      },
+    });
+    // Only the record keys are offered to `entry`; array elements have no key.
+    expect(keys).toEqual(['list', 'secret']);
+    expect(out).toEqual({ list: ['a', { secret: 1 }] });
+  });
+
+  it('keeps a JSON-derived __proto__ key as an ordinary own property (#3119)', () => {
+    const input = JSON.parse('{"__proto__": {"a": 1}, "b": 2}') as Record<string, unknown>;
+    const out = walkStructured(input, identity) as Record<string, unknown>;
+    expect(Object.keys(out)).toEqual(['__proto__', 'b']);
+    expect(Object.getOwnPropertyDescriptor(out, '__proto__')?.value).toEqual({ a: 1 });
+    // Assigning through the setter would have re-parented the output object.
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
   });
 });

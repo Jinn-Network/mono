@@ -6,8 +6,15 @@ describe("public surface", () => {
   test("exports exactly the runtime's public names", () => {
     expect(Object.keys(runtime).sort()).toEqual([
       "ARCHIVE_BUSY_ERROR_CODE",
+      "BASE_COMMIT_PROPERTY",
+      "BASE_TREE_PROPERTY",
       "BODY_TERM_WEIGHT",
+      "BRANCH_PROPERTY",
       "CAPTURE_LICENSE",
+      "CONTROLLED_INPUT_MAX_BYTES",
+      "CONTROLLED_INPUT_MAX_COUNT",
+      "CONTROLLED_INPUT_ROLES",
+      "CONTROLLED_INPUT_ROLE_PROPERTY",
       "CORPUS_ERROR_CODES",
       "CORPUS_PROJECTOR_VERSION",
       "CORPUS_SYNC_LOCK_FORMAT",
@@ -27,6 +34,7 @@ describe("public surface", () => {
       "MAX_INDEXED_EXCERPTS",
       "MAX_SUMMARY_CHARS",
       "MIRROR_REPOSITORY_ID",
+      "MODEL_SERVICE_ENTITY_ID",
       "PLANES",
       "PRODUCER_IRI",
       "PRODUCER_NAME",
@@ -34,6 +42,8 @@ describe("public surface", () => {
       "PluginRuntimeError",
       "QUOTE_PREFIX",
       "RELEVANCE_FLOOR",
+      "REPOSITORY_BASE_STATE_ENTITY_ID",
+      "REPOSITORY_STATE_ENTITY_ID",
       "RETENTION_POLICY_STATEMENT",
       "RUNTIME_ERROR_CODES",
       "RUNTIME_VERSION",
@@ -46,6 +56,9 @@ describe("public surface", () => {
       "SESSION_ID_PROPERTY",
       "STOPWORDS",
       "SUMMARY_TERM_WEIGHT",
+      "SYNC_ABORTED_REASON",
+      "SYNC_TRUNCATED_REASON",
+      "TARGET_BASE_PROPERTY",
       "TRACE_ARTIFACT_MEDIA_TYPE",
       "TRACE_BUILDER_ID",
       "TRACE_BUILDER_VERSION",
@@ -60,6 +73,7 @@ describe("public surface", () => {
       "buildTraceSpans",
       "comparePlanes",
       "composeAdmission",
+      "controlledInputEntityId",
       "createCaptureCapability",
       "createCorpusAdmissionFilter",
       "createCorpusCapability",
@@ -129,6 +143,16 @@ describe("public surface", () => {
   test("does not export the binary's entry point", () => {
     expect("main" in runtime).toBe(false);
     expect("BinIo" in runtime).toBe(false);
+  });
+
+  test("the chain-verification truncation vocabulary is reachable from the root (#4481)", () => {
+    // `ChainVerificationInput.truncation` is typed as `WalkTruncation`; a
+    // consumer naming that field needs the type and its reason constants
+    // from the same surface. The type-level reference is proven by `tsc`.
+    const truncation: runtime.WalkTruncation = "bound";
+    expect(truncation).toBe("bound");
+    expect(runtime.SYNC_TRUNCATED_REASON).toBe("sync-truncated");
+    expect(runtime.SYNC_ABORTED_REASON).toBe("sync-aborted");
   });
 
   test("a consumer can build and run a runtime from the public surface alone", async () => {

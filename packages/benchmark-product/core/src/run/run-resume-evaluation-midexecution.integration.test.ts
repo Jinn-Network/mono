@@ -21,7 +21,8 @@
  * only for a replayed leg — see the comment at that call site for why the seam cannot be the
  * solve leg's (`runResume`, before any evaluation cell is prepared).
  *
- * The interruption technique: the abandonment shim of the #3068 test leaves the evaluation
+ * The interruption technique: the shared abandonment shim
+ * (`./testing/evaluation-resume-abandonment.ts`, also used by the #3068 test) leaves the evaluation
  * Submission accepted, its Delivery durably checkpointed, and no journal entry for that leg.
  * A kill an instant EARLIER — before the backend appends the attempt's own `attempt-terminal`
  * event — is then reproduced by rewinding that attempt's backend journal past the terminal, the
@@ -35,39 +36,16 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import {
-  expectedCellCount,
-  parseBenchmark,
-  parseMatrix,
-  parseRun,
-} from "@jinn-network/benchmarking-records";
-import { launchAndWatch, MAX_CONCURRENT_CELLS } from "@jinn-network/benchmarking-run";
-import { armAdd } from "../operations/arms.js";
+import { parseMatrix } from "@jinn-network/benchmarking-records";
 import type { OperationContext } from "../operations/context.js";
-import { createDraft, readDraftDocument } from "../operations/drafts.js";
-import { initWorkspace } from "../operations/init.js";
 import { runCollect } from "../operations/run-collect.js";
-import { runLock } from "../operations/run-lock.js";
-import { runQuote } from "../operations/run-quote.js";
 import { runResume } from "../operations/run-launch.js";
-import { sampleInit } from "../operations/sample.js";
-import {
-  createLocalVenue,
-  EVALUATION_HARNESS_PIN,
-  SOLVE_HARNESS_PINS,
-  type LocalVenue,
-} from "../venue/venue.js";
-import { atomicWriteFileSync } from "../fs/atomic.js";
-import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
-import { transition } from "../domain/lifecycle.js";
-import { createRecordingProxy, driveCellEvents, type DriveDeps, type ProxiedBackend } from "./drive.js";
+import { readRunJournalEntries, type RunJournalEntry } from "./journal.js";
 import {
-  appendRunJournalEntry,
-  readRunJournalEntries,
-  type RunJournalEntry,
-} from "./journal.js";
-import { requireRunState, writeRunState } from "./state.js";
+  driveUntilEvaluationDelivered,
+  setUpLockedDraft,
+} from "./testing/evaluation-resume-abandonment.js";
 
 let workspaceDir: string;
 
@@ -87,126 +65,6 @@ function makeClock(): () => string {
 
 function contextFor(clock: () => string, principal = "sponsor-1"): OperationContext {
   return { workspaceDir, principal, clock };
-}
-
-async function setUpLockedDraft(clock: () => string, draftId: string): Promise<void> {
-  expect(initWorkspace(contextFor(clock)).ok).toBe(true);
-  expect(createDraft(contextFor(clock), { draftId, name: "Eval Mid-Execution" }).ok).toBe(true);
-  expect((await sampleInit(contextFor(clock), { draftId })).ok).toBe(true);
-  expect(armAdd(contextFor(clock), {
-    draftId,
-    armId: "baseline",
-    pinning: { harness: SOLVE_HARNESS_PINS["prediction-v1-baseline"] },
-  }).ok).toBe(true);
-  expect(armAdd(contextFor(clock), {
-    draftId,
-    armId: "sample-uniform",
-    pinning: { harness: SOLVE_HARNESS_PINS["sample-uniform"] },
-  }).ok).toBe(true);
-  expect((await runQuote(contextFor(clock), { draftId })).ok).toBe(true);
-  expect(runLock(contextFor(clock), { draftId }).ok).toBe(true);
-}
-
-function isEvaluationSubmission(submissionBytes: Uint8Array): boolean {
-  try {
-    const doc = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(submissionBytes)) as {
-      readonly requirements?: { readonly harness?: { readonly id?: string } };
-    };
-    return doc.requirements?.harness?.id === EVALUATION_HARNESS_PIN.id;
-  } catch {
-    return false;
-  }
-}
-
-/** See `./run-resume-evaluation-replay.integration.test.ts` — identical abandonment shim: the
- * evaluation attempt's Delivery is proven durably readable through the backend, then the
- * `fetchDelivery` that would have produced the verdict never resolves. */
-function hangBeforeFirstVerdict(
-  backend: ProxiedBackend,
-  armed: { value: boolean; resolveArmed?: () => void },
-): ProxiedBackend {
-  return {
-    capabilities: () => backend.capabilities(),
-    submit: async (taskBytes, submissionBytes, engagement) => {
-      const ack = await backend.submit(taskBytes, submissionBytes, engagement);
-      if (ack.accepted && isEvaluationSubmission(submissionBytes)) armed.value = true;
-      return ack;
-    },
-    observe: (ref) => backend.observe(ref),
-    ...(backend.watch === undefined ? {} : { watch: (ref, cursor) => backend.watch!(ref, cursor) }),
-    ...(backend.cancel === undefined ? {} : { cancel: (a, r) => backend.cancel!(a, r) }),
-    recover: (ref) => backend.recover(ref),
-    deliveries: (attempt) => backend.deliveries(attempt),
-    fetchDelivery: async (ref) => {
-      if (!armed.value) return backend.fetchDelivery(ref);
-      await backend.fetchDelivery(ref);
-      armed.resolveArmed?.();
-      return new Promise<Uint8Array>(() => {});
-    },
-    ...(backend.fetchArtifact === undefined
-      ? {}
-      : { fetchArtifact: (d) => backend.fetchArtifact!(d) }),
-    ...(backend.pinningEvidenceForSubmission === undefined
-      ? {}
-      : { pinningEvidenceForSubmission: (ref) => backend.pinningEvidenceForSubmission!(ref) }),
-    drain: () => backend.drain(),
-  };
-}
-
-/** Mirrors `runLaunch`'s own `run` closure and abandons the drive the moment the first evaluation
- * Submission has been accepted and its Delivery is durably readable. */
-async function driveUntilEvaluationDelivered(clock: () => string, draftId: string): Promise<void> {
-  const at = clock();
-  const document = readDraftDocument(workspaceDir, draftId);
-  const transitioned = transition("locked", "launch");
-  if (!transitioned.ok) throw new Error("unreachable");
-  atomicWriteFileSync(
-    draftPath(workspaceDir, draftId),
-    JSON.stringify({ ...document, state: transitioned.state, updatedAt: at }, null, 2),
-  );
-
-  const runState = requireRunState(workspaceDir, draftId);
-  if (runState.runSha256 === undefined) throw new Error("unreachable");
-  writeRunState(workspaceDir, draftId, { ...runState, launchedAt: at });
-  appendRunJournalEntry(workspaceDir, draftId, { kind: "launched", at: clock() });
-
-  const runRecord = parseRun(getSealedBytes(workspaceDir, runState.runSha256));
-  if (document.spec.taskSet.kind !== "benchmark") throw new Error("unreachable: no benchmark");
-  const benchRecord = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
-
-  const venue: LocalVenue = createLocalVenue({ workspaceDir, now: clock });
-  const armed: { value: boolean; resolveArmed?: () => void } = { value: false };
-  const evaluationDelivered = new Promise<void>((resolve) => {
-    armed.resolveArmed = resolve;
-  });
-  try {
-    const backend = createRecordingProxy(
-      hangBeforeFirstVerdict(venue.backend, armed),
-      { workspaceDir, draftId, liveClock: clock },
-    );
-    const driveDeps: DriveDeps = {
-      workspaceDir,
-      draftId,
-      venue,
-      backend,
-      runSha256: runState.runSha256,
-      owner: runState.owner,
-      cellWindowMs: runRecord.policy.cellWindow,
-      minVerdicts: runRecord.policy.evaluation?.minVerdicts ?? 1,
-      liveClock: clock,
-    };
-    const events = launchAndWatch(benchRecord, runRecord, backend, {
-      runDigest: `sha256:${runState.runSha256}`,
-      taskBytesFor: (taskDigestHex) => getSealedBytes(workspaceDir, taskDigestHex),
-      clock: { now: () => new Date(clock()) },
-    });
-
-    const abandoned = driveCellEvents(driveDeps, events);
-    abandoned.catch(() => undefined);
-    await evaluationDelivered;
-  } finally {
-    await venue.shutdown();
-  }
 }
 
 interface AttemptJournalEvent {
@@ -263,9 +121,9 @@ describe("resume reconciles an evaluation attempt killed mid-execution", () => {
     async () => {
       const clock = makeClock();
       const draftId = "draft-1";
-      await setUpLockedDraft(clock, draftId);
+      await setUpLockedDraft(workspaceDir, clock, draftId, "Eval Mid-Execution");
 
-      await driveUntilEvaluationDelivered(clock, draftId);
+      await driveUntilEvaluationDelivered(workspaceDir, clock, draftId);
 
       // ── the interrupted state is exactly what a mid-execution kill leaves ───────────────
       const interrupted = readRunJournalEntries(workspaceDir, draftId);
@@ -288,46 +146,26 @@ describe("resume reconciles an evaluation attempt killed mid-execution", () => {
       const journalPath = rewindAttemptPastTerminal(accepted.submissionSha256);
       expect(readFileSync(journalPath, "utf8")).not.toContain("attempt-terminal");
 
-      // The ceiling below only takes capacity off the table while it actually exceeds the
-      // attempts this run can hold live at once — one solve leg and one evaluation leg per cell.
-      // Both halves of that are constants owned elsewhere (`MAX_CONCURRENT_CELLS` in
-      // `@jinn-network/benchmarking-run`, the cell count in this file's own fixture), so assert
-      // the relation rather than restate it in prose: lowering the platform maximum or widening
-      // the fixture then fails here, loudly and immediately, instead of returning this test to
-      // the machine-speed-dependent flake the ceiling was raised to cure.
-      const spec = readDraftDocument(workspaceDir, draftId).spec;
-      if (spec.taskSet.kind !== "benchmark") throw new Error("unreachable: no benchmark");
-      const runSha256 = requireRunState(workspaceDir, draftId).runSha256;
-      if (runSha256 === undefined) throw new Error("unreachable: no run record");
-      const liveAttemptCeiling = expectedCellCount(
-        parseBenchmark(getSealedBytes(workspaceDir, spec.taskSet.benchmarkSha256)),
-        parseRun(getSealedBytes(workspaceDir, runSha256)),
-      ) * 2;
-      expect(
-        MAX_CONCURRENT_CELLS,
-        `the platform ceiling no longer covers this run's ${liveAttemptCeiling} live attempts`,
-      ).toBeGreaterThanOrEqual(liveAttemptCeiling);
-
       // ── resume through the PUBLIC operation, on a fresh venue ───────────────────────────
-      // Capacity is deliberately taken OFF the table: the ceiling is the platform maximum, well
-      // above the twelve attempts this run can ever hold live at once (six cells, each a solve
-      // leg and an evaluation leg). A smaller ceiling makes the test's own crash a race.
-      // `LocalBackend`'s rehydration calls `capacity.restore(live)` over every attempt on disk
-      // that has no `attempt-terminal` event, and the abandoned drive above leaves a
-      // TIMING-DEPENDENT number of those: the interrupted evaluation attempt always (it is
-      // rewound past its terminal on purpose), plus however many solve legs happened not to have
-      // terminaled at the instant the drive was abandoned — more of them on a slower or busier
-      // machine. Each holds a slot, and the evaluation one holds its until that leg reaches
-      // `dispatchEvaluation` (its own defect, issue #3192). Whenever the held count exceeds the
-      // headroom, an unrelated cell loses its dispatch to "local backend capacity exhausted" and
-      // expires — collateral of the crash, not the verdict-recovery question under test. A fixed
-      // small headroom cannot bound a count that varies with machine speed, so this does not use
-      // one: verified by sweeping the ceiling down, which reproduces exactly the CI failure
-      // (a cell `expired` at `dispatches: 1`, no attempt, no verdict) at and below 5.
-      const resumed = await runResume(contextFor(clock), {
-        draftId,
-        maxConcurrentCells: MAX_CONCURRENT_CELLS,
-      });
+      // `maxConcurrentCells` is left at its default of 1 on purpose, and that is the assertion:
+      // this run must not starve at the narrowest concurrency the product ships. It used to need
+      // the platform maximum, because `LocalBackend`'s rehydration reserved a capacity slot for
+      // every attempt on disk without an `attempt-terminal` event — the interrupted evaluation
+      // attempt (rewound past its terminal above) plus a machine-speed-dependent number of solve
+      // legs abandoned mid-flight — and a cell that lost its dispatch to "local backend capacity
+      // exhausted" expired as collateral of the crash rather than of the question under test.
+      // #3192 made rehydration restore a slot only for an attempt whose processes actually exist.
+      // Note what that does and does not buy here. It is NOT that the held count is zero by
+      // construction: `venue.shutdown()` drains the backend's in-process workers, not the shims
+      // they spawned, so an abandoned attempt whose shim is still exiting legitimately keeps its
+      // slot for that window. What bounds this run is narrower and holds regardless. The
+      // interrupted evaluation attempt — the one this test rewinds, and the one that used to hold
+      // its slot for the whole solve phase — has a long-dead shim, because its worker ran to
+      // completion before the rewind. And every solve leg abandoned mid-flight is captured in
+      // `outstanding` and recovered by `runResume` before `resumeRun`, which terminals and
+      // releases it. What is left over is only an attempt in neither set, still inside its own
+      // exit window: rare, self-clearing, and no longer the systematic wedge the ceiling cured.
+      const resumed = await runResume(contextFor(clock), { draftId });
       expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
 
       const final = readRunJournalEntries(workspaceDir, draftId);

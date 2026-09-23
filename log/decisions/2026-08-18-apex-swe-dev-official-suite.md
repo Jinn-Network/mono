@@ -3,6 +3,7 @@
 - **Date:** 2026-08-18
 - **Status:** **Accepted 2026-08-18.** Ratified by operator instruction to
   implement the APEX-SWE-dev official-suite train.
+- **Superseded in part by [DR-2026-09-04](./2026-09-04-colophon-surrounds-the-run.md) at its ratification:** running decisions superseded; named protocol, comparability, export-as-derived and score stand.
 - **Owning docs:** the publication interoperability profile; Colophon
   self-serve; the benchmark-product GTM plan (copy); product-design pointer
   addendum.

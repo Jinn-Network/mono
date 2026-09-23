@@ -4,6 +4,7 @@
 - **Status:** **Accepted 2026-08-17.** Ratified by operator instruction to
   implement the engine integration contract (issue
   [#2733](https://github.com/Jinn-Network/mono/issues/2733)).
+- **Superseded in part by [DR-2026-09-04](./2026-09-04-colophon-surrounds-the-run.md) at its ratification:** decision 1 re-scoped to the service venue; decision 6 reversed (foreign-run import is the product path).
 - **Owning docs:** the publication interoperability profile (operational form);
   the benchmark-product GTM plan (copy); Colophon self-serve §5.5 and
   [`packages/benchmark-product/INSPECT-RUNTIME.md`](../../packages/benchmark-product/INSPECT-RUNTIME.md)

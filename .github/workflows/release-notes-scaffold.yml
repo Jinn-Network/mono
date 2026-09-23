@@ -54,6 +54,8 @@ jobs:
           fi
           if [ -z "$PREV_TAG" ]; then
             # First release ever — use repo root commit.
+            # pipefail-lint: allow -- `--max-parents=0` lists root commits only, so the
+            # producer writes a line or two and exits before `head` can close the pipe.
             PREV_SHA="$(git rev-list --max-parents=0 HEAD | head -1)"
             PREV_TAG="(repo root)"
           else

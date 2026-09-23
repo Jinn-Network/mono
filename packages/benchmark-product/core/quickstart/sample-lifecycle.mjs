@@ -249,7 +249,7 @@ export function runSampleLifecycle({
       "--pinning", JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } }),
     ]);
     const quote = step("quote", ["quote", ...forDraft]);
-    const lock = step("lock", ["lock", ...forDraft]);
+    const lock = step("lock", ["lock", "--ack-sample-size", ...forDraft]);
     step("launch", ["launch", ...forDraft]);
     step("status after launch", ["status", ...forDraft]);
     const resume = step("resume", ["resume", ...forDraft]);

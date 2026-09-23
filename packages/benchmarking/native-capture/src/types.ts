@@ -13,6 +13,8 @@ import type {
   ExecutionEvidenceBuilderInput,
 } from "@jinn-network/execution-evidence-builder";
 
+import type { NativeCommissioningLineage } from "./commissioning.js";
+
 export type NativeIdentifier = NonNullable<ExecutionBatchCapture["nativeGroup"]>;
 
 export interface NativeSource {
@@ -61,6 +63,12 @@ export interface NativeAtomDraft {
   readonly unitKey: string;
   readonly status: "captured" | "failed" | "tombstone" | "excluded";
   readonly evidence?: ExecutionEvidenceBuilderInput;
+  /**
+   * Optional commissioning lineage for this unit (issue #3339). When present on a captured unit,
+   * the coordinator dual-writes an `ExecutionCommissioningLink` beside the execution evidence.
+   * Adding it changes no evidence byte -- the link is a separate record.
+   */
+  readonly commissioning?: NativeCommissioningLineage;
   readonly artifacts: readonly {
     readonly source: ExecutionEvidenceArtifactSource;
     readonly bytes: Uint8Array;

@@ -817,6 +817,20 @@ describe('maskUrlsInMessage', () => {
     expect(masked).not.toContain('/v2/');
   });
 
+  // Issue #4426: the pattern is now the shared `EMBEDDED_URL_RE` constant
+  // (also used by the debug-bundle redactor). These pin that sharing kept the
+  // transport dialect — host-only mask — for the two inputs the redactor's
+  // old private regex got wrong: a bracketed-IPv6 host and an uppercase
+  // scheme.
+  it('masks a bracketed-IPv6 URL and an uppercase-scheme URL down to their host', () => {
+    expect(
+      maskUrlsInMessage('probe wss://u:SECRETKEY123@[2001:db8::1]:8546/v2/SECRETKEY123 failed'),
+    ).toBe('probe [2001:db8::1] failed');
+    expect(maskUrlsInMessage('probe HTTPS://u:SECRETKEY123@rpc.example/v3/SECRETKEY123 failed')).toBe(
+      'probe rpc.example failed',
+    );
+  });
+
   // Decision recorded for #3035: protocol-relative `//host/path` is out of
   // scope. A bare `//` in free text is not reliably a URL (doubled path
   // separators, comment markers), it has no scheme for `new URL` to parse
@@ -897,6 +911,28 @@ describe('sanitizeErrorText (#642)', () => {
     expect(sanitized).not.toContain(SECRET);
   });
 
+  // #3109: the wss:// dialect (#3035) is pinned on maskUrlsInMessage only; the cause walk and the
+  // structured leaf reach it by construction today, so pin that inheritance here too. A plain
+  // Error cause, not viem's WebSocketRequestError: viem 2.55 strips userinfo from the URL it
+  // composes into the message, which would let the library do the masking this test pins on the walk.
+  it('masks a wss:// URL carrying a credential reached through the Error.cause walk (#3109)', () => {
+    const err = new Error('subscription failed');
+    err.cause = new Error('socket wss://operator:SECRETKEY123@rpc.example/v2/SECRETKEY123 closed');
+
+    const sanitized = sanitizeErrorText(err);
+    expect(sanitized).toBe('subscription failed caused by: socket rpc.example closed');
+  });
+
+  it('sanitizeStructuredValue masks a wss:// URL on a nested Error.cause inside a payload (#3109)', () => {
+    const err = new Error('subscription failed');
+    err.cause = new Error('socket wss://operator:SECRETKEY123@rpc.example/v2/SECRETKEY123 closed');
+
+    expect(sanitizeStructuredValue({ details: { err }, tries: 2 })).toEqual({
+      details: { err: 'subscription failed caused by: socket rpc.example closed' },
+      tries: 2,
+    });
+  });
+
   it('sanitizePersistedText and sanitizeStructuredValue reuse the host-only dialect', () => {
     const url = 'https://user:SECRETKEY123@rpc.example/v2/SECRETKEY123?k=SECRETKEY123#f=SECRETKEY123';
     expect(sanitizePersistedText(url)).toBe('rpc.example');
@@ -915,6 +951,25 @@ describe('sanitizeErrorText (#642)', () => {
     // alone — previously they came back as the string '[truncated]'.
     const deepPrimitives = { a: { b: { c: { d: { e: { f: { count: 3, ok: false } } } } } } };
     expect(sanitizeStructuredValue(deepPrimitives)).toEqual(deepPrimitives);
+  });
+
+  it('still host-masks a credential-bearing URL nested past the depth cap (#3548)', () => {
+    // The cap is container-scoped, so this string survives instead of becoming
+    // '[truncated]' — which only stays safe while the leaf policy keeps masking
+    // it. Pin the masking half, not just the type-preservation half.
+    const url = 'https://user:SECRETKEY123@rpc.example/v2/SECRETKEY123';
+    const deep = { a: { b: { c: { d: { e: { f: { url } } } } } } };
+    expect(sanitizeStructuredValue(deep)).toEqual({
+      a: { b: { c: { d: { e: { f: { url: 'rpc.example' } } } } } },
+    });
+  });
+
+  it('markers a bigint rather than emitting a value JSON.stringify rejects (#3120)', () => {
+    const sanitized = sanitizeStructuredValue({ block: 123n, tries: 2 });
+    expect(sanitized).toEqual({ block: '[unserializable]', tries: 2 });
+    // The ring buffer is JSON-serialized on the way out of the notifications
+    // endpoint, so every sanitized value must survive JSON.stringify.
+    expect(() => JSON.stringify(sanitized)).not.toThrow();
   });
 
   it('represents non-plain values honestly instead of collapsing them to {} (#3038)', () => {

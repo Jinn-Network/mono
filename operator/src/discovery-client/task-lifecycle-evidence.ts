@@ -128,6 +128,10 @@ export type RawTaskRow = AuthoritativeTaskRow;
 export type RawAttemptRow = Omit<AuthoritativeAttemptRow, 'verdicts' | 'attemptEnvelopeCandidates'>;
 export type RawVerdictRow = Omit<AuthoritativeVerdictRow, 'verdictEnvelopeCandidates'>;
 
+// The chainId part of `attemptKey` and `verdictKey` mirrors the indexer primary
+// key but never tells two keys apart: an attempt whose chainId differs from its
+// task's is withdrawn before it is keyed, so each taskId carries one chainId.
+// `reqKey`'s chainId part does matter, because a requestId is not task-scoped.
 function attemptKey(taskId: string, attemptIndex: number, chainId: number): string {
   return `${taskId}|${attemptIndex}|${chainId}`;
 }
@@ -144,7 +148,17 @@ function pushInto<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 }
 
 /** The leg an unplaceable authoritative row arrived on. */
-export type UnplaceableLifecycleLeg = 'attempts' | 'verdicts';
+export type UnplaceableLifecycleLeg = 'tasks' | 'attempts' | 'verdicts';
+
+/** The verdict primary key: `(taskId, attemptIndex, verdictIndex, chainId)`. */
+function verdictKey(
+  taskId: string,
+  attemptIndex: number,
+  verdictIndex: number,
+  chainId: number,
+): string {
+  return `${taskId}|${attemptIndex}|${verdictIndex}|${chainId}`;
+}
 
 export function assembleTaskLifecycleEvidence(input: {
   tasks: RawTaskRow[];
@@ -155,16 +169,20 @@ export function assembleTaskLifecycleEvidence(input: {
   /**
    * Called with the leg and identity of the first authoritative row that has
    * no place on the spine, immediately before the whole result is withdrawn.
+   * The identity ends in `reason=unplaceable` or `reason=duplicate-key`, so the
+   * two causes print differently.
    * Kept as a callback so this module stays `console`-free; the reader wires
    * it to the same warning its own row rejections emit.
    */
   onUnplaceableRow?: (leg: UnplaceableLifecycleLeg, identity: string) => void;
 }): Map<string, TaskLifecycleEvidence> {
   /**
-   * Absence beats a partial lie. An attempt or verdict row the read cannot
-   * place is an AUTHORITATIVE row going missing — the caller would be handed a
-   * spine that looks complete and is not, with no marker saying otherwise — so
-   * the whole result is withdrawn rather than answered in part.
+   * Absence beats a partial lie. A task, attempt or verdict row the read cannot
+   * place — because it has no home on the spine, or because its primary key
+   * already arrived on the same leg — is an AUTHORITATIVE row going missing:
+   * the caller would be handed a spine that looks complete and is not, with no
+   * marker saying otherwise, so the whole result is withdrawn rather than
+   * answered in part.
    */
   function withdraw(
     leg: UnplaceableLifecycleLeg,
@@ -174,27 +192,47 @@ export function assembleTaskLifecycleEvidence(input: {
     return new Map();
   }
 
+  // A primary key repeated INSIDE one leg is the same authoritative loss the
+  // cross-leg guards below catch, and it is the cheaper of the two to produce:
+  // two identical attempt rows build two spine rows, `attemptIndex` keeps the
+  // second, and every verdict attaches to that copy while the first shows none —
+  // a duplicated attempt stripped of its verdicts, with no warning. A repeated
+  // task id is worse still: the second `out.set` silently drops the first row's
+  // facts. Reachability is a nonconforming indexer, the same class every other
+  // guard here exists for (#3116). Keys are the real primary keys from
+  // `packages/indexer/ponder.schema.ts`.
   const out = new Map<string, TaskLifecycleEvidence>();
   for (const task of input.tasks) {
+    if (out.has(task.taskId)) {
+      return withdraw(
+        'tasks',
+        `taskId=${task.taskId} chainId=${task.chainId} reason=duplicate-key`,
+      );
+    }
     out.set(task.taskId, {
       taskId: task.taskId,
       authoritative: { task: { ...task }, attempts: [] },
     });
   }
 
-  // Attempts land straight on the task they belong to. Two rows have no place:
-  // one whose task is absent from the spine, and one whose chainId contradicts
-  // its own task's — `out` is keyed by taskId ALONE (task's primary key is `id`
-  // alone), so without the second check a chain-B attempt would attach to a
-  // chain-A task and the result would claim a cross-chain lifecycle.
+  // Attempts land straight on the task they belong to. Three rows have no
+  // place: one whose task is absent from the spine, one whose chainId
+  // contradicts its own task's — `out` is keyed by taskId ALONE (task's primary
+  // key is `id` alone), so without that check a chain-B attempt would attach to
+  // a chain-A task and the result would claim a cross-chain lifecycle — and one
+  // repeating a primary key this leg already delivered.
+  const seenAttempts = new Set<string>();
   for (const a of input.attempts) {
     const evidence = out.get(a.taskId);
+    const key = attemptKey(a.taskId, a.attemptIndex, a.chainId);
+    const identity = `taskId=${a.taskId} attemptIndex=${a.attemptIndex} chainId=${a.chainId}`;
     if (!evidence || evidence.authoritative.task.chainId !== a.chainId) {
-      return withdraw(
-        'attempts',
-        `taskId=${a.taskId} attemptIndex=${a.attemptIndex} chainId=${a.chainId}`,
-      );
+      return withdraw('attempts', `${identity} reason=unplaceable`);
     }
+    if (seenAttempts.has(key)) {
+      return withdraw('attempts', `${identity} reason=duplicate-key`);
+    }
+    seenAttempts.add(key);
     evidence.authoritative.attempts.push({
       ...a,
       requestId: a.requestId.toLowerCase() as `0x${string}`,
@@ -223,15 +261,19 @@ export function assembleTaskLifecycleEvidence(input: {
   // read and the verdicts read returns a verdict for an attempt this spine
   // never saw.
   const verdictsByAttempt = new Map<string, AuthoritativeVerdictRow[]>();
+  const seenVerdicts = new Set<string>();
   for (const v of input.verdicts) {
     const key = attemptKey(v.taskId, v.attemptIndex, v.chainId);
+    const pk = verdictKey(v.taskId, v.attemptIndex, v.verdictIndex, v.chainId);
+    const identity = `taskId=${v.taskId} attemptIndex=${v.attemptIndex} `
+      + `verdictIndex=${v.verdictIndex} chainId=${v.chainId}`;
     if (!attemptIndex.has(key)) {
-      return withdraw(
-        'verdicts',
-        `taskId=${v.taskId} attemptIndex=${v.attemptIndex} `
-          + `verdictIndex=${v.verdictIndex} chainId=${v.chainId}`,
-      );
+      return withdraw('verdicts', `${identity} reason=unplaceable`);
     }
+    if (seenVerdicts.has(pk)) {
+      return withdraw('verdicts', `${identity} reason=duplicate-key`);
+    }
+    seenVerdicts.add(pk);
     pushInto(verdictsByAttempt, key, {
       ...v,
       requestId: v.requestId.toLowerCase() as `0x${string}`,

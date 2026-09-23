@@ -32,6 +32,7 @@ COPY packages/layer/package.json packages/layer/yarn.lock packages/layer/.yarnrc
 # Composition-stack portal manifests (cutover stage 1). The operator daemon resolves the
 # merged marketplace / task-execution / evidence / discovery / trust trees through Yarn
 # portals, so every one of their manifests must land before `yarn install --immutable`.
+COPY packages/contract-abis/package.json packages/contract-abis/yarn.lock packages/contract-abis/.yarnrc.yml ./packages/contract-abis/
 COPY packages/evidence/protocol/package.json packages/evidence/protocol/yarn.lock packages/evidence/protocol/.yarnrc.yml ./packages/evidence/protocol/
 COPY packages/evidence/repository/package.json packages/evidence/repository/yarn.lock packages/evidence/repository/.yarnrc.yml ./packages/evidence/repository/
 COPY packages/evidence/discovery/package.json packages/evidence/discovery/yarn.lock packages/evidence/discovery/.yarnrc.yml ./packages/evidence/discovery/
@@ -96,6 +97,7 @@ COPY packages/layer/src/ ./packages/layer/src/
 
 # Composition-stack portal sources, in dependency order; `yarn build:stack` compiles them
 # before the client’s own `tsc` run.
+COPY packages/contract-abis/tsconfig.json ./packages/contract-abis/
 COPY packages/evidence/protocol/tsconfig.json packages/evidence/protocol/tsconfig.build.json ./packages/evidence/protocol/
 COPY packages/evidence/repository/tsconfig.json packages/evidence/repository/tsconfig.build.json ./packages/evidence/repository/
 COPY packages/evidence/discovery/tsconfig.json packages/evidence/discovery/tsconfig.build.json ./packages/evidence/discovery/
@@ -153,6 +155,7 @@ COPY packages/discovery/transport-http/tsconfig.json packages/discovery/transpor
 COPY packages/discovery/testing/tsconfig.json packages/discovery/testing/tsconfig.build.json ./packages/discovery/testing/
 COPY packages/lifecycle-notifications/tsconfig.json packages/lifecycle-notifications/tsconfig.build.json ./packages/lifecycle-notifications/
 COPY packages/read-plane/tsconfig.json packages/read-plane/tsconfig.build.json ./packages/read-plane/
+COPY packages/contract-abis/src/ ./packages/contract-abis/src/
 COPY packages/evidence/protocol/src/ ./packages/evidence/protocol/src/
 COPY packages/evidence/repository/src/ ./packages/evidence/repository/src/
 COPY packages/evidence/discovery/src/ ./packages/evidence/discovery/src/
@@ -221,6 +224,8 @@ COPY packages/task-supply/admission/README.md ./packages/task-supply/admission/R
 # Publish-file payloads the bundled stack packages declare in their `files` arrays
 # (profiles, fixtures, schemas, READMEs). They must exist before
 # `materialize-bundled-workspaces.mjs prepare` copies each portal into node_modules.
+COPY packages/contract-abis/generated/ ./packages/contract-abis/generated/
+COPY packages/contract-abis/contracts.manifest.json packages/contract-abis/slices.manifest.json packages/contract-abis/README.md ./packages/contract-abis/
 COPY packages/evidence/local-runtime/README.md ./packages/evidence/local-runtime/README.md
 COPY packages/marketplace/binding/README.md ./packages/marketplace/binding/README.md
 COPY packages/marketplace/binding/fixtures/ ./packages/marketplace/binding/fixtures/

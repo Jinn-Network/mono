@@ -9,11 +9,18 @@ import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../seal
 import { isCalendarStrictRfc3339 } from "../rfc3339.js";
 import { ArmIdSchema, ReplicateSchema } from "./cells.js";
 import { exactDecimalInUnitInterval } from "../decimal.js";
-import { ANCHOR_INTENT_EXTENSION, BEACON_SOURCE_EXTENSION, BENCHMARK_PUBLICATION_EXTENSION, TASK_SELECTION_EXTENSION } from "../identifiers.js";
+import {
+  ANCHOR_INTENT_EXTENSION,
+  BEACON_SOURCE_EXTENSION,
+  BENCHMARK_PUBLICATION_EXTENSION,
+  SAMPLE_SIZE_ADVISORY_EXTENSION,
+  TASK_SELECTION_EXTENSION,
+} from "../identifiers.js";
 import { RunPublicationExtensionSchema } from "../publication-extension.js";
 import { RunAnchorIntentExtensionSchema } from "../anchor-intent-extension.js";
 import { RunTaskSelectionExtensionSchema } from "../task-selection.js";
 import { RunBeaconSourceExtensionSchema } from "../beacon-source.js";
+import { RunSampleSizeAdvisoryExtensionSchema } from "../sample-size-advisory.js";
 
 const Rfc3339 = z.string().refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
 
@@ -137,6 +144,20 @@ export const RunRecordSchema = topLevelRecordSchema({
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
           ctx.addIssue({ ...issue, path: [BEACON_SOURCE_EXTENSION, ...issue.path] });
+        }
+      }
+    }
+
+    // The acknowledged sample-size advisory (#2978) gets the same treatment for the same reason.
+    // Only the shape is checked: whether the recorded width is the one this n implies is the
+    // producer's arithmetic, and re-deriving it here would put a second implementation of the
+    // interval in the record layer.
+    const sampleSizeAdvisoryExtension = run[SAMPLE_SIZE_ADVISORY_EXTENSION];
+    if (sampleSizeAdvisoryExtension !== undefined) {
+      const parsed = RunSampleSizeAdvisoryExtensionSchema.safeParse(sampleSizeAdvisoryExtension);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({ ...issue, path: [SAMPLE_SIZE_ADVISORY_EXTENSION, ...issue.path] });
         }
       }
     }

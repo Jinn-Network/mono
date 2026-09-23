@@ -51,12 +51,25 @@ const FactsProfileDocumentSchema = z.looseObject({
 
 /**
  * Parses and validates a facts-profile document (§12): `kind` must be a
- * conforming record-kind URI, and every field's `cloudEvents.attribute` (if
- * present) must conform to the CloudEvents 1.0 attribute-naming rule.
+ * conforming record-kind URI, every field's `cloudEvents.attribute` (if
+ * present) must conform to the CloudEvents 1.0 attribute-naming rule, and no
+ * field name may repeat.
+ *
+ * A repeated name describes one field twice with two possibly contradictory
+ * labelings, and a consumer that reads the list literally -- the announcement
+ * edge index is one -- emits the same edge twice. Refusing it here is where
+ * the mistake is legible.
  */
 export function parseFactsProfile(json: unknown): FactsProfileDocument {
   const parsed = FactsProfileDocumentSchema.parse(json);
   assertRecordKindUri(parsed.kind);
+  const seen = new Set<string>();
+  for (const field of parsed.fields) {
+    if (seen.has(field.name)) {
+      throw new Error(`Facts profile declares field more than once: ${field.name}`);
+    }
+    seen.add(field.name);
+  }
   return parsed as FactsProfileDocument;
 }
 

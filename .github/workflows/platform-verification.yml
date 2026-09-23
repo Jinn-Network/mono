@@ -46,11 +46,11 @@ jobs:
           test "${#digest}" -eq 64
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
 
-  benchmarking:
+  contracts:
     needs: catalog
     permissions:
       contents: read
-    uses: ./.github/workflows/benchmarking-ci.yml
+    uses: ./.github/workflows/contracts-ci.yml
     with:
       source_sha: ${{ inputs.source_sha }}
 
@@ -278,7 +278,7 @@ jobs:
   verification_receipt:
     needs:
       - catalog
-      - benchmarking
+      - contracts
       - discovery
       - evidence
       - marketplace
@@ -313,7 +313,7 @@ jobs:
           CATALOG_DIGEST: ${{ needs.catalog.outputs.catalog_digest }}
           LANE: ${{ inputs.lane }}
           CATALOG_RESULT: ${{ needs.catalog.result }}
-          BENCHMARKING_RESULT: ${{ needs.benchmarking.result }}
+          CONTRACTS_RESULT: ${{ needs.contracts.result }}
           DISCOVERY_RESULT: ${{ needs.discovery.result }}
           EVIDENCE_RESULT: ${{ needs.evidence.result }}
           MARKETPLACE_RESULT: ${{ needs.marketplace.result }}
@@ -343,7 +343,7 @@ jobs:
               --public-manifest ".platform-verification/${group}/public-surface-manifest.json" \
               --profile-manifest ".platform-verification/${group}/profile-root/manifest.json" \
               --gate "catalog=${CATALOG_RESULT}" \
-              --gate "benchmarking=${BENCHMARKING_RESULT}" \
+              --gate "contracts=${CONTRACTS_RESULT}" \
               --gate "record-discovery=${DISCOVERY_RESULT}" \
               --gate "evidence=${EVIDENCE_RESULT}" \
               --gate "marketplace=${MARKETPLACE_RESULT}" \

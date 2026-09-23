@@ -358,7 +358,8 @@ the sealed Run at lock.
 ```bash
 node "$COLOPHON" quote --workspace "$WS" --principal operator --draft "$DRAFT" --json \
   | tee "$WS/quote.json"
-node "$COLOPHON" lock --workspace "$WS" --principal operator --draft "$DRAFT" --json \
+node "$COLOPHON" lock --workspace "$WS" --principal operator --draft "$DRAFT" \
+  --ack-sample-size --json \
   | tee "$WS/lock.json"
 LOCK_DIGEST=$(node --input-type=module - <<JS
 import { readFileSync } from "node:fs";
@@ -373,6 +374,14 @@ JS
 
 `--ack-provider-network-costs` is required only when a draft arm is a
 Claude Code or Codex agent. This judge bind does not use those harnesses.
+
+`--ack-sample-size` is required on every lock. Run the command once without
+it first: the refusal prints the widest 95% interval this run's per-arm n can
+produce, alongside the widths at roughly double and half that n. Read those
+widths, decide whether the declared n is the sample size this claim needs,
+and only then repeat the command with the flag. The acknowledged n and width
+are sealed into the Run, so the report can show the tradeoff was made
+knowingly.
 
 Success (`--json` envelope): quote `ok` is true, `result.quote.ok` is true,
 and `result.quote.expectedCellCount` is inside the authorized budget. Lock

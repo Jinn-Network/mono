@@ -146,7 +146,7 @@ describe("CLI lifecycle — init through verify, runCli only, real local venue (
 
       // ── 6. lock ──────────────────────────────────────────────────────────────────────────
       const lock = await runCli(
-        ["lock", "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", draftId, "--json"],
+        ["lock", "--ack-sample-size", "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", draftId, "--json"],
         context,
       );
       expect(lock.exitCode).toBe(0);
@@ -333,7 +333,7 @@ describe("CLI lifecycle — init through verify, runCli only, real local venue (
       expect(quote.stdout).not.toContain("estimated wall time");
 
       const lock = await runCli(
-        ["lock", "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", draftId],
+        ["lock", "--ack-sample-size", "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", draftId],
         context,
       );
       expect(lock.exitCode).toBe(0);

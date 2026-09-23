@@ -10,15 +10,17 @@ import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "../errors.js";
 import type { HealthCheck } from "../health.js";
 import type { RuntimeLogger } from "../logger.js";
 import { sanitizeUntrustedText } from "../mcp/untrusted.js";
+import { endsWithHighSurrogate } from "../projection/truncate.js";
 import { indexPublicPlane } from "../relevance/indexing.js";
 import type { RelevanceIndex } from "../relevance/index-store.js";
 import type { TraceSpanSource } from "../relevance/trace-decode-adapter.js";
-import { describeError } from "./errors.js";
+import { bestEffortLogger, describeError } from "./errors.js";
 import type { CorpusFilesystem } from "./fs.js";
 import type { CorpusMirror, MirrorSyncOutcome, MirrorSyncStatus } from "./mirror.js";
 import type { CorpusReader } from "./read.js";
 import type { CorpusRetrieval } from "./retrieve.js";
 import {
+  FAILURE_TRUNCATION_MARKER,
   MAX_FAILURE_CHARS,
   MIRROR_SYNC_STATUS_FILENAME,
   MIRROR_SYNC_STATUS_FORMAT,
@@ -128,6 +130,7 @@ export function createCorpusSyncCapability(
     name: "corpus-sync",
 
     async start(context: CapabilityContext): Promise<void> {
+      const log = bestEffortLogger(context.log);
       const statusStore = createFileMirrorSyncStatusStore({
         // Derived from the home directory rather than carried on
         // `RuntimeConfig`: this file is the sync SERVICE's report, and no
@@ -136,18 +139,26 @@ export function createCorpusSyncCapability(
         // consumer's benefit.
         filePath: join(context.config.homeDirectory, MIRROR_SYNC_STATUS_FILENAME),
         fs: options.fs,
-        log: context.log,
+        log,
       });
       const seed = await statusStore.read();
 
       const state: Started = {
         config: context.config,
         corpus: context.config.corpus,
-        log: context.log,
+        log,
         index: await options.openIndex(context.config),
         statusStore,
         ...(seed?.lastCycle === undefined ? {} : { lastCycle: seed.lastCycle }),
-        sources: { ...seed?.sources },
+        // Seeded ONLY for sources this install still follows. Dropping a
+        // source from `corpus.sources` is the documented way to stop
+        // following an archive, and the runbook points operators at this
+        // file; a key kept past its config entry shows them archives this
+        // install does not follow beside ones it does. Pruned here rather
+        // than at write because `start` is exactly when the followed set can
+        // have changed -- the config is read once -- so a source removed and
+        // later restored starts its history clean.
+        sources: followedOnly(context.config.corpus, seed?.sources),
         lifetime: new AbortController(),
         current: Promise.resolve(),
         indexedOnce: false,
@@ -237,7 +248,18 @@ export function createCorpusSyncCapability(
             // red freshness row on disk that the next process seeds and shows
             // until its own first cycle completes. A pass abandoned by the
             // cycle DEADLINE is a real fault and is recorded.
-            if (!state.lifetime.signal.aborted) indexError = describeError(caught);
+            // Through `recordable` for the same reason the failure halves
+            // beside it are: this text reaches a durable file whose read
+            // schema bounds it, and an operator-facing row. Written raw, an
+            // error longer than that bound writes a document the very next
+            // `read()` rejects as unrecognized -- discarding the seeded
+            // `lastCycle`, including the `indexError` that explains the row.
+            if (!state.lifetime.signal.aborted) {
+              indexError = recordable(
+                describeError(caught),
+                "the index pass failed with no detail",
+              );
+            }
           }
         }
       }
@@ -245,15 +267,37 @@ export function createCorpusSyncCapability(
       error = describeError(caught);
     } finally {
       clearTimeout(timer);
-      if (status !== "skipped-locked" || state.lastCycle === undefined) {
-        state.lastCycle = {
-          completedAt: now().toISOString(),
-          status,
-          ...(indexError === undefined ? {} : { indexError }),
-        };
+      try {
+        if (status !== "skipped-locked" || state.lastCycle === undefined) {
+          state.lastCycle = {
+            completedAt: now().toISOString(),
+            status,
+            ...(indexError === undefined ? {} : { indexError }),
+          };
+        }
+        await writeStatus(state);
+        await reportCycle(state, { status, indexed, error, indexError });
+      } catch (caught) {
+        // Recording and reporting are what this cycle has to say; the
+        // reschedule below is whether there is ever another one. Everything
+        // above runs on injected dependencies that can throw -- the clock,
+        // and a logger whose stderr can EPIPE -- and unguarded, any of them
+        // exits this block early, stopping the loop permanently and silently
+        // while the process stays alive holding the exclusive sync lock. That
+        // is the failure this file argues against one line below, where the
+        // NEXT cycle's rejection is already guarded for the same reason.
+        //
+        // Reported best-effort rather than swallowed outright: the logger is
+        // only one candidate for what just threw, and when it is not the
+        // culprit -- a clock that threw stamping the record -- this is the
+        // sole signal the cycle produced at all. Nested, because the case
+        // where it IS the culprit must still reach the reschedule.
+        try {
+          state.log.warn("corpus.mirror.cycle.unreported", { reason: describeError(caught) });
+        } catch {
+          // The logger itself. Nothing is left to report it to.
+        }
       }
-      await writeStatus(state);
-      await reportCycle(state, { status, indexed, error, indexError });
       if (!state.lifetime.signal.aborted) {
         state.timer = setTimeout(() => {
           // Guarded because everything below the `try` in this function --
@@ -357,11 +401,35 @@ export function createCorpusSyncCapability(
    * `min(1)` on the read schema, so an empty one would write a document the
    * next read rejects as unrecognized, quietly costing the freshness history
    * that document exists to keep.
+   *
+   * A half the ceiling actually cut says so — see `FAILURE_TRUNCATION_MARKER`
+   * for why (#3822). What is local to this function: the truncation FLAG is
+   * what decides, not the length, so a value that arrives at exactly the
+   * ceiling was not cut and is not marked.
    */
   function recordable(value: string | undefined, fallback: string): string {
-    const sanitized =
-      value === undefined ? "" : sanitizeUntrustedText(value, MAX_FAILURE_CHARS).text;
-    return sanitized === "" ? fallback : sanitized;
+    const { text, truncated } =
+      value === undefined
+        ? { text: "", truncated: false }
+        : sanitizeUntrustedText(value, MAX_FAILURE_CHARS);
+    if (text === "") return fallback;
+    if (!truncated) return text;
+    // One code unit further in than the sanitizer cut, so a surrogate pair it
+    // left whole can be split here. Dropping the orphaned high surrogate costs
+    // one more character and keeps the recorded value well-formed —
+    // `truncateLineBoundary` guards the identical hazard the same way.
+    let cut = text.slice(0, MAX_FAILURE_CHARS - FAILURE_TRUNCATION_MARKER.length);
+    if (endsWithHighSurrogate(cut)) cut = cut.slice(0, -1);
+    return `${cut}${FAILURE_TRUNCATION_MARKER}`;
+  }
+
+  function followedOnly(
+    corpus: CorpusConfig,
+    seeded: Readonly<Record<string, MirrorSourceSyncStatus>> | undefined,
+  ): Record<string, MirrorSourceSyncStatus> {
+    if (seeded === undefined) return {};
+    const followed = new Set(corpus.sources.map((source) => `${source.agent}/${source.name}`));
+    return Object.fromEntries(Object.entries(seeded).filter(([key]) => followed.has(key)));
   }
 
   async function writeStatus(state: Started): Promise<void> {

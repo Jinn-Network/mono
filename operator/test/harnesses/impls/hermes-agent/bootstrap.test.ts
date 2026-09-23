@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse as yamlParse } from 'yaml';
 import {
   writePerTaskHermesConfig,
@@ -18,6 +18,28 @@ function readConfig(home: string): Record<string, any> {
 }
 
 describe('writePerTaskHermesConfig', () => {
+  // `buildHermesConfig` gives `JINN_HERMES_MODEL` / `JINN_HERMES_PROVIDER`
+  // precedence over the per-task inputs (bootstrap.ts), and both are
+  // documented operator overrides in CLAUDE.md, so a contributor may
+  // legitimately have them exported. Isolate them per test so the suite never
+  // reads ambient state (#3112, same shape as adapter.test.ts's fix).
+  const AMBIENT_ENV_KEYS = ['JINN_HERMES_MODEL', 'JINN_HERMES_PROVIDER'] as const;
+  const ambientSaved: Partial<Record<(typeof AMBIENT_ENV_KEYS)[number], string | undefined>> = {};
+
+  beforeEach(() => {
+    for (const key of AMBIENT_ENV_KEYS) {
+      ambientSaved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of AMBIENT_ENV_KEYS) {
+      if (ambientSaved[key] === undefined) delete process.env[key];
+      else process.env[key] = ambientSaved[key];
+    }
+  });
+
   it('writes config.yaml with mcp_servers, skills, terminal, and toolset allowlist (no operator config)', () => {
     const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
     try {

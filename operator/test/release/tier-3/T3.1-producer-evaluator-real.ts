@@ -76,12 +76,15 @@ import {
 import { getChainConfig } from '../../../src/earning/contracts.js';
 import { JINN_ROUTER_ABI } from '../../../src/adapters/mech/types.js';
 import {
+  RESOLVED_HERMES_MODEL_MISMATCH_MARKER,
+  readResolvedHermesModelFromConfig,
   T31_APPROVED_HERMES_MODEL_ENV,
   T31_APPROVED_HERMES_PROVIDER_ENV,
   T31_EXPECTED_HERMES_MODEL_ENV,
   T31_EXPECTED_HERMES_PROVIDER_ENV,
 } from '../../../src/harnesses/impls/hermes-agent/resolved-model-guard.js';
-import { resolveDefaultStateDir } from '../../../src/state-dir.js';
+import { HERMES_AGENT_HARNESS, harnessStateDirName } from '../../../src/harnesses/names.js';
+import { defaultImplStateDirRoot, resolveDefaultStateDir } from '../../../src/state-dir.js';
 import {
   KNOWN_INSTANCE_ID,
   KNOWN_REPO,
@@ -145,6 +148,22 @@ const PORT_BASE = 7360;
 interface ScenarioOptionsT3 extends ScenarioOptions {
   mode?: 'human-invoked' | 'autonomous';
   hermesModel?: string;
+  /**
+   * Provider the solver daemon must resolve alongside `hermesModel`. Defaults to
+   * `JINN_HERMES_PROVIDER` and then to `openrouter`, so a run can declare a
+   * provider from the outside instead of editing this file.
+   */
+  hermesProvider?: string;
+  /**
+   * A model/provider swap the operator has explicitly sanctioned for this run.
+   * The solver's spend guard accepts a resolved pair matching either the
+   * requested pair or this one. Defaults to `JINN_T31_APPROVED_HERMES_MODEL` /
+   * `JINN_T31_APPROVED_HERMES_PROVIDER`.
+   */
+  approvedHermesOverride?: {
+    model: string;
+    provider?: string;
+  };
 }
 
 export function buildT31DaemonEnv(args: {
@@ -165,18 +184,197 @@ export function buildT31DaemonEnv(args: {
     [T31_EXPECTED_HERMES_MODEL_ENV]: args.hermesModel,
     [T31_EXPECTED_HERMES_PROVIDER_ENV]: provider,
   };
-  if (args.approvedHermesOverride?.model) {
+  if (args.approvedHermesOverride?.model?.trim()) {
     env[T31_APPROVED_HERMES_MODEL_ENV] = args.approvedHermesOverride.model;
   }
-  if (args.approvedHermesOverride?.provider) {
+  if (args.approvedHermesOverride?.provider?.trim()) {
     env[T31_APPROVED_HERMES_PROVIDER_ENV] = args.approvedHermesOverride.provider;
   }
   return env;
 }
 
-export function resolveT31SolverHermesConfigPath(homeDir: string): string {
-  const stateDir = resolveDefaultStateDir({ home: homeDir });
-  return path.join(stateDir, 'engine', 'impl-state', 'hermes-agent', 'config.yaml');
+/**
+ * Refuse to spawn when the approved-override pair is half-declared.
+ *
+ * `parseT31ResolvedModelGuardPolicy` already rejects an approved provider with
+ * no approved model, but it does so inside the solver daemon's harness adapter,
+ * and its message carries no `RESOLVED_HERMES_MODEL_MISMATCH_MARKER` — so
+ * `createT31GuardMismatchScanner` cannot see it and the run presents as the
+ * observe loop exhausting its whole shared deadline. Checking here costs
+ * nothing and fails before any daemon starts.
+ *
+ * The check reads the inherited environment as well as the scenario's own
+ * override: `spawnMultiOpDaemons` builds each child env as
+ * `{ ...process.env, ...extraEnv }`, so a stray `JINN_T31_APPROVED_HERMES_PROVIDER`
+ * in the operator's shell reaches the daemon even though `buildT31DaemonEnv`
+ * emits neither half for a scenario that declares no override.
+ */
+export function assertT31ApprovedHermesOverridePair(args: {
+  approvedHermesOverride?: { model: string; provider?: string };
+  env?: NodeJS.ProcessEnv;
+}): void {
+  const env = args.env ?? process.env;
+  const model =
+    args.approvedHermesOverride?.model?.trim() ||
+    env[T31_APPROVED_HERMES_MODEL_ENV]?.trim() ||
+    undefined;
+  const provider =
+    args.approvedHermesOverride?.provider?.trim() ||
+    env[T31_APPROVED_HERMES_PROVIDER_ENV]?.trim() ||
+    undefined;
+  if (provider && !model) {
+    throw new Error(
+      `${T31_APPROVED_HERMES_PROVIDER_ENV} declares an approved provider ` +
+        `(${provider}) without an approved model (${T31_APPROVED_HERMES_MODEL_ENV} ` +
+        `is unset); set both or neither. Refusing to spawn the Tier-3 daemons: the ` +
+        `solver's spend guard rejects the same pairing after boot, where it reads as ` +
+        `the observe loop timing out minutes later.`,
+    );
+  }
+}
+
+/**
+ * Where a Tier-3 daemon rooted at `homeDir` writes the task-local Hermes
+ * `config.yaml` the solver's spend guard reads.
+ *
+ * Every segment is taken from the symbol the daemon itself resolves it from, so
+ * a move in the daemon's layout moves this resolver too: `resolveDefaultStateDir`
+ * for the state dir, `defaultImplStateDirRoot` for the impl-state root, and
+ * `harnessStateDirName` for the per-harness leaf. `JINN_ENGINE_IMPL_STATE_DIR_ROOT`
+ * is honoured because `spawnMultiOpDaemons` spreads `process.env` into each
+ * daemon, so a root set for the scenario is inherited by the daemon it observes.
+ */
+export function resolveT31SolverHermesConfigPath(
+  homeDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const implStateDirRoot =
+    env['JINN_ENGINE_IMPL_STATE_DIR_ROOT']?.trim() ||
+    defaultImplStateDirRoot(resolveDefaultStateDir({ home: homeDir, env }));
+  return path.join(
+    implStateDirRoot,
+    harnessStateDirName(HERMES_AGENT_HARNESS),
+    'config.yaml',
+  );
+}
+
+export interface T31GuardMismatchHit {
+  logPath: string;
+  line: string;
+}
+
+/**
+ * Leading bytes remembered per log to notice an in-place truncation the size
+ * check misses. A restarted daemon's first line differs from the previous run's,
+ * so comparing the head of the file is enough to spot the replacement.
+ */
+const SIGNATURE_BYTES = 64;
+
+interface T31ScanState {
+  offset: number;
+  /** Leading bytes of the file as of the previous scan, hex; empty before the first. */
+  signature: string;
+}
+
+/**
+ * Incremental scanner for the resolved-model guard's mismatch line in the
+ * spawned daemons' stdio capture.
+ *
+ * The guard trips inside the solver daemon, which the scenario only observes
+ * through on-chain events — so without this a mismatch presents as the observe
+ * loop exhausting its whole shared deadline, 5-23 minutes of wall clock before
+ * anything is reported. The returned scan is cheap enough to call on every
+ * observe poll: it reads only the bytes appended since the previous call, and
+ * never advances past the last complete line, so a marker split across two
+ * reads is still seen whole.
+ *
+ * What it guarantees about a truncated log: the offset resets when the file
+ * shrinks below the remembered offset, and when its leading bytes change over
+ * the `SIGNATURE_BYTES` the two polls have in common — which is what a
+ * restarted or rotated daemon writes. Both resets are
+ * persisted before any early-out, so a truncation observed while the
+ * replacement still has no complete line is not forgotten on the next poll. It
+ * cannot detect an in-place truncation whose replacement reproduces the same
+ * leading bytes and regrows past the old offset entirely between two polls;
+ * `spawnMultiOpDaemons` opens these logs append-only and nothing truncates
+ * them, so that sequence does not arise in a real Tier-3 run.
+ */
+export function createT31GuardMismatchScanner(
+  logPaths: readonly (string | null | undefined)[],
+): () => Promise<T31GuardMismatchHit | null> {
+  const paths = [...new Set(logPaths.filter((p): p is string => Boolean(p)))];
+  const states = new Map<string, T31ScanState>(
+    paths.map((p) => [p, { offset: 0, signature: '' }]),
+  );
+
+  return async function scan(): Promise<T31GuardMismatchHit | null> {
+    for (const logPath of paths) {
+      let handle: fs.FileHandle;
+      try {
+        handle = await fs.open(logPath, 'r');
+      } catch {
+        continue; // the daemon may not have opened its log yet
+      }
+      try {
+        const { size } = await handle.stat();
+        const state = states.get(logPath) ?? { offset: 0, signature: '' };
+        const sigBuf = Buffer.alloc(Math.min(SIGNATURE_BYTES, size));
+        // An empty log has no signature to compare; `read` is skipped rather
+        // than issued with a zero-length buffer.
+        const signatureBytes =
+          sigBuf.length === 0 ? 0 : (await handle.read(sigBuf, 0, sigBuf.length, 0)).bytesRead;
+        const signature = sigBuf.subarray(0, signatureBytes).toString('hex');
+
+        // Log rotated or truncated under us: it shrank, or it was replaced in
+        // place with different leading bytes. Either way the remembered offset
+        // points into content that no longer exists. The signatures are compared
+        // over their common prefix, so a log that was shorter than
+        // `SIGNATURE_BYTES` on an earlier poll and has since grown is not
+        // mistaken for a replacement.
+        const shared = Math.min(state.signature.length, signature.length);
+        const truncated =
+          size < state.offset ||
+          (shared > 0 && state.signature.slice(0, shared) !== signature.slice(0, shared));
+        const from = truncated ? 0 : state.offset;
+        // Persist the reset (and the signature) before either early-out below,
+        // so a truncation observed on this poll survives into the next one.
+        states.set(logPath, { offset: from, signature });
+
+        if (size <= from) continue;
+        const buf = Buffer.alloc(size - from);
+        const { bytesRead } = await handle.read(buf, 0, buf.length, from);
+        const chunk = buf.subarray(0, bytesRead).toString('utf8');
+        const lastNewline = chunk.lastIndexOf('\n');
+        if (lastNewline < 0) continue; // no complete line yet; re-read next pass
+        states.set(logPath, {
+          offset: from + Buffer.byteLength(chunk.slice(0, lastNewline + 1), 'utf8'),
+          signature,
+        });
+        const hit = chunk
+          .slice(0, lastNewline)
+          .split('\n')
+          .find((line) => line.includes(RESOLVED_HERMES_MODEL_MISMATCH_MARKER));
+        if (hit !== undefined) return { logPath, line: hit.trim() };
+      } finally {
+        await handle.close();
+      }
+    }
+    return null;
+  };
+}
+
+/**
+ * The solver's own view of what it resolved, read scenario-side from the config
+ * the guard compared against. Best-effort: the guard's log line already carries
+ * the detail, this is corroboration from the file itself.
+ */
+function describeSolverResolvedModel(configPath: string): string {
+  try {
+    const resolved = readResolvedHermesModelFromConfig(configPath);
+    return `resolved model=${resolved.model ?? '(unset)'} provider=${resolved.provider ?? '(unset)'} (read from ${configPath})`;
+  } catch (err) {
+    return `could not read ${configPath}: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }
 
 // ── Generic poll helper ──────────────────────────────────────────────────────
@@ -597,6 +795,31 @@ export async function runT31ProducerEvaluatorReal(
   let specFilePath: string | null = null;
   let specDir: string | null = null;
   const hermesModel = opts.hermesModel ?? 'deepseek/deepseek-v4-flash';
+  // Provider and approved override are declarable from the outside — as options
+  // or, for a bare `run-tier-3` invocation, through the env names the guard
+  // already owns — so an operator can sanction a one-off swap for a real run
+  // without editing this scenario.
+  // `||`, not `??`: an env var set to the empty string is an unset provider, not
+  // a provider named ''. With `??` it would survive into the evidence log as a
+  // blank `hermesProvider=` while the daemon actually ran the openrouter default.
+  const hermesProvider =
+    opts.hermesProvider || process.env['JINN_HERMES_PROVIDER']?.trim() || undefined;
+  const approvedOverrideModel = process.env[T31_APPROVED_HERMES_MODEL_ENV]?.trim();
+  const approvedOverrideProvider = process.env[T31_APPROVED_HERMES_PROVIDER_ENV]?.trim();
+  const approvedHermesOverride =
+    opts.approvedHermesOverride ??
+    (approvedOverrideModel
+      ? {
+          model: approvedOverrideModel,
+          ...(approvedOverrideProvider ? { provider: approvedOverrideProvider } : {}),
+        }
+      : undefined);
+  // Before anything is spawned or spent: a half-declared approved pair is a
+  // one-line config error, and the daemon-side guard can only report it as a
+  // multi-minute observe-loop timeout.
+  assertT31ApprovedHermesOverridePair({
+    ...(approvedHermesOverride ? { approvedHermesOverride } : {}),
+  });
   const budgetMs = opts.wallClockBudgetMs ?? WALL_CLOCK_BUDGET_MS;
   // Reserve a slice of the budget for setup + teardown so the on-chain polls
   // do not consume the entire window and leave nothing for cleanup.
@@ -606,7 +829,13 @@ export async function runT31ProducerEvaluatorReal(
     const mode = opts.mode ?? 'human-invoked';
     const { producer: producerOp, solver: solverOp } = tierOpNames();
     log(
-      `1. prepare Tier 3 task (mode=${mode}, hermesModel=${hermesModel}, budgetMs=${budgetMs})`,
+      `1. prepare Tier 3 task (mode=${mode}, hermesModel=${hermesModel}, ` +
+        `hermesProvider=${hermesProvider ?? '(default openrouter)'}` +
+        (approvedHermesOverride
+          ? `, approvedOverride=${approvedHermesOverride.model}` +
+            `/${approvedHermesOverride.provider ?? '(requested provider)'}`
+          : '') +
+        `, budgetMs=${budgetMs})`,
     );
     if (await isDailyDriverRunning()) {
       throw new Error(
@@ -743,6 +972,8 @@ export async function runT31ProducerEvaluatorReal(
       extraEnv: buildT31DaemonEnv({
         hermesModel,
         onchainTaskId,
+        ...(hermesProvider ? { hermesProvider } : {}),
+        ...(approvedHermesOverride ? { approvedHermesOverride } : {}),
       }),
       // The Tier-3 helper appends `${scenarioId}-daemons/` so each spawned
       // daemon's stdout/stderr lands in a sibling subdir of the evidence file.
@@ -761,6 +992,14 @@ export async function runT31ProducerEvaluatorReal(
     if (opALogPath || opBLogPath) {
       log(`   daemon logs: ${producerOp} → ${opALogPath ?? '(disabled)'}, ${solverOp} → ${opBLogPath ?? '(disabled)'}`);
     }
+    // The spend guard runs inside the solver daemon and compares against this
+    // file. Naming it up front gives the post-mortem the exact artifact, and
+    // the fail-fast path below reads it for scenario-side corroboration.
+    const solverHermesConfigPath = resolveT31SolverHermesConfigPath(
+      resolveGoldDaemonHome(solverOp),
+    );
+    log(`   solver Hermes config (resolved-model guard subject): ${solverHermesConfigPath}`);
+    const scanForGuardMismatch = createT31GuardMismatchScanner([opALogPath, opBLogPath]);
 
     // ── Steps 3+4: observe the Solution + Verdict settle on-chain ────────────
     //
@@ -788,6 +1027,19 @@ export async function runT31ProducerEvaluatorReal(
     const offCodeVerdicts: VerdictDelivery[] = [];
     const verdict = await waitFor<VerdictDelivery>(
       async () => {
+        // Fail fast on a resolved-model guard trip. The guard throws inside the
+        // solver daemon before any spend, and every claim retry fails the same
+        // way, so waiting out the shared deadline can only turn a precise
+        // model-mismatch into a bare timeout 5-23 minutes later.
+        const guardHit = await scanForGuardMismatch();
+        if (guardHit !== null) {
+          log(`   ${describeSolverResolvedModel(solverHermesConfigPath)}`);
+          throw new Error(
+            `Hermes resolved-model guard tripped in ${guardHit.logPath} before solve ` +
+              `spend; abandoning the observe loop rather than waiting out its deadline. ` +
+              guardHit.line,
+          );
+        }
         // Cheap incremental progress signal: log the Solution the first time
         // it is observed, so the evidence log distinguishes "solve never
         // delivered" from "solve delivered, verdict never settled".

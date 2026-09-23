@@ -58,17 +58,29 @@ describe("sealOfferPayload", () => {
     }
   });
 
-  test.each([
-    ["a non-integral number", 1.5],
-    ["a non-finite number", 1e400],
-    ["a non-safe-integer number", Number.MAX_SAFE_INTEGER + 1],
-  ])("refuses %s in an extension value as an invalid document", (_label, value) => {
+  test.each([1.5, 1e400, Number.MAX_SAFE_INTEGER + 1])(
+    "refuses the extension value %s, outside the I-JSON subset, as an invalid document",
+    (value) => {
+      try {
+        sealOfferPayload(offer({ "com.example.x": value }));
+        expect.unreachable("a value outside the I-JSON subset must throw");
+      } catch (error) {
+        expect(error).toBeInstanceOf(InvalidOfferError);
+        expect((error as InvalidOfferError).category).toBe("invalid-document");
+      }
+    },
+  );
+
+  // The shaping pass throws this module's own per-path error. Wrapping it again would
+  // replace a located diagnostic with a pathless one whose message names nothing.
+  test("keeps the per-path issue for an undefined array element in an extension value", () => {
     try {
-      sealOfferPayload(offer({ "com.example.x": value }));
-      expect.unreachable("a value outside the I-JSON subset must throw");
+      sealOfferPayload(offer({ "com.example.x": [undefined] }));
+      expect.unreachable("an undefined array element must throw");
     } catch (error) {
-      expect(error).toBeInstanceOf(InvalidOfferError);
       expect((error as InvalidOfferError).category).toBe("invalid-document");
+      expect((error as InvalidOfferError).errors[0]!.path).toBe("com.example.x.0");
+      expect((error as InvalidOfferError).errors[0]!.message).toContain("must not be undefined");
     }
   });
 
@@ -173,6 +185,9 @@ describe("parseOfferEnvelope", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(InvalidOfferError);
       expect((error as InvalidOfferError).category).toBe("invalid-document");
+      // Without this, a valid-but-re-spelled payload satisfies the assertions above just
+      // as well, and the test cannot tell which branch refused the envelope.
+      expect((error as InvalidOfferError).errors[0]!.message).toContain("not canonicalizable");
     }
   });
 

@@ -11,6 +11,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // marketplace-packed-types / marketplace-testing pack-smoke, trimmed to this package's runtime
 // boundary (no record-discovery, task-execution-testing, or trust-testing).
 const dependencyChain = [
+  ["@jinn-network/contract-abis", join(packageRoot, "..", "..", "contract-abis")],
   ["@jinn-network/evidence-protocol", join(packageRoot, "..", "..", "evidence", "protocol")],
   ["@jinn-network/evidence-repository", join(packageRoot, "..", "..", "evidence", "repository")],
   ["@jinn-network/evidence-discovery", join(packageRoot, "..", "..", "evidence", "discovery")],

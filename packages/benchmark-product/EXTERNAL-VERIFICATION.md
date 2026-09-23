@@ -6,6 +6,16 @@ installing or running any Jinn code. The record formats are frozen; everything
 below is checkable from the bundle's own bytes. [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md)
 is the format reference; this document is the verification path.
 
+Scope. The claims table below, [The record family](#the-record-family), [The
+walkthrough](#the-walkthrough), and `external-verify.py` describe
+`benchmark-product-public-bundle/2`. `benchmark-product-public-bundle/5` has its
+own section, [Evidence-native bundle v5](#evidence-native-bundle-v5). For
+`benchmark-product-public-bundle/4`, `benchmark-product-public-bundle/6`,
+`benchmark-product-public-bundle/7`, `benchmark-product-public-bundle/8`, and
+`benchmark-product-public-bundle/10`, run the reader line the bundle's claim
+package pins, as [`PUBLIC-BUNDLE.md` §Portable verification](PUBLIC-BUNDLE.md#portable-verification)
+states; `external-verify.py` does not read those layouts.
+
 ## What verification proves, and what it does not
 
 Read this table first. It is the whole point of the document.
@@ -20,6 +30,9 @@ Read this table first. It is the whole point of the document.
 | The full evidence graph closes (submissions, deliveries, evaluation tasks, roles) | | yes | |
 | Every verdict is a DSSE-signed in-toto statement verifying against its named evaluator key | yes | | |
 | `did:key` and evaluator key ids derive from the carried public keys | yes | | |
+| A supplied domain binding was signed by the key that signed this bundle | yes | | |
+| The bound domain actually publishes that binding | | | needs a DNS or HTTPS lookup you make yourself |
+| The party controlling the bound domain's zone is the party it appears to be | | | correct — no tool |
 | The claim package's stored headline mirrors the signed report's results (headline-shaped claims; a comparison-shaped claim has no headline to mirror and the check reports `skipped`) | yes | | |
 | The matrix is the correct aggregation of the evidence graph (re-derivation, byte-exact) | | yes | |
 | The report's statistics are the correct output of its named method (recompute) | | yes | |
@@ -204,6 +217,84 @@ Digest rules:
 - `bundle.json` lists every file except itself. The bundle identity is the
   SHA-256 of `bundle.json`'s own bytes.
 
+## Reader-legible identity: `colophon-domain-binding/1`
+
+A bundle's publisher is a signing key, and a key is not an organization. A
+domain binding is how a publisher offers a name a reader can act on. It is
+**not carried in the bundle** — like an RFC 3161 trust root, it is trust
+material you supply:
+
+```bash
+npx @colophon-claims/check@0.2 <bundle-dir> --identity-binding ./binding.json
+```
+
+The document is small and self-describing:
+
+```json
+{
+  "format": "colophon-domain-binding/1",
+  "domain": "example.com",
+  "keyId": "did:key:z...",
+  "mechanism": "dns-txt",
+  "statedAt": "2026-09-02T00:00:00.000Z",
+  "signature": "<base64 Ed25519 over the canonical statement without `signature`>"
+}
+```
+
+**The proof location is derived, never asserted.** The document carries no
+"look here" field. Reader and producer both compute it from `domain`, `keyId`
+and `mechanism`:
+
+| `mechanism` | Where to look | What must be there |
+| --- | --- | --- |
+| `dns-txt` | TXT at `_colophon.<domain>` | `colophon-domain-binding=1; key=<keyId>` |
+| `well-known-url` | `https://<domain>/.well-known/colophon-domain-binding.txt` | the same line |
+
+Without that rule a publisher could point you at a host they control instead of
+the domain they claim.
+
+**What the verifier checks, offline:** that the document is well-formed, that
+`keyId` is an Ed25519 `did:key` (so the public key is in the identifier itself,
+with nothing to fetch), that the signature verifies under that key, and that the
+key is one that actually signed the bundle in hand. That establishes that *the
+key* named the domain.
+
+**What is left to you:** whether *the domain* names the key. Resolve the TXT
+record or fetch the URL and compare it to the derived value above. Trusting the
+answer means trusting DNS resolution, whoever controls that domain's zone, and
+its registrar — anyone who can change the zone can create the binding or remove
+it, and a lookup made now says nothing about what the zone held on the date the
+statement carries. That date is the statement's own field: the check establishes
+that the key signed a statement bearing it, not that it signed at it. The
+verifier says exactly this on its own report face rather than leaving you to
+infer it.
+
+Because only that first half was checked, the report face is **attributive**,
+never assertive, and always shows the key's own fingerprint beside the claim:
+
+```
+Signed by
+  publisher · 1 key
+    key sha256:fbf961e0…
+    claims publication by example.com — unconfirmed here; check the DNS TXT record at _colophon.example.com
+    expect: colophon-domain-binding=1; key=did:key:z6MknAAT…
+```
+
+With no binding supplied the second and third lines are replaced by
+`— no domain bound` on the fingerprint line. The `--json` surface carries the
+binding under `identityBinding` (never `identity`, which is the bundle's own
+digest) with `confirmation: "key-signature-only"` naming what was established.
+
+A binding is only ever read against the bundle's single publisher key. One
+naming a grader or reviewer key is refused, as is any bundle without exactly one
+publisher: there is no "published by" for such a binding to qualify.
+
+A binding that does not check out exits 2 and is not rendered; the bundle's own
+verdict is still reported, because a bad binding says nothing about the bundle.
+
+A publisher mints one with `colophon identity bind --domain <domain>
+[--mechanism dns-txt|well-known-url]`, which prints the exact record to publish.
+
 ## DSSE envelopes and keys
 
 Signed material uses [DSSE v1](https://github.com/secure-systems-lab/dsse)
@@ -292,19 +383,60 @@ openssl subprocess calls — read it, or reimplement it; it holds no secrets.
 The reference verifier covers the remaining rows of the table:
 
 ```bash
-npx @colophon-claims/verify@1 <bundle-dir>
+npx @colophon-claims/check@0.2 <bundle-dir>
 ```
 
-Exit 0 with `Verified: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
+A bundle sealed before the checker was renamed names `@colophon-claims/verify`
+there. That name stays published permanently as a passthrough alias onto
+`@colophon-claims/check`, so the command the bundle itself pins keeps resolving.
+
+Exit 0 with `Recomputed: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
 `trust`, `matrix-rederivation`, `report-verification`, `claim-consistency`);
 exit 1 invalid; exit 2 usage. It opens no network connection and uploads
 nothing. Every bundle names its own compatible command in
 `claim-package.json` `verification.compatibleCommand`.
 
+## Evidence-native bundle v5
+
+A `benchmark-product-public-bundle/5` bundle's claim is
+`benchmark-product.claim-package/3`, and its closure is manifest-relative:
+`bundle.json` declares every member, rather than this document fixing a list.
+Its seven checks split as follows.
+
+| Check | Who can prove it | Why |
+| --- | --- | --- |
+| `manifest` | Your own tools | SHA-256 and byte length of every file `bundle.json` declares, and no undeclared file present |
+| `evidence-closure` | Reference verifier | Interprets the evidence-native record families to close the graph |
+| `artifact-integrity` | Your own tools | SHA-256 of each `artifacts/<sha256>.bin` against `benchmark-product.claim-package/3` `records.artifacts` |
+| `signature-validity` | Reference verifier | Binding a signature to its signer identity and purpose requires parsing those record families; this document publishes no v5 key-format or binding recipe |
+| `matrix-rederivation` | Reference verifier | Re-derives the matrix from the evidence graph |
+| `report-verification` | Reference verifier | Recomputes the report from the matrix |
+| `claim-consistency` | Reference verifier | Checks the claim package against the verified records |
+
+The reference verifier runs all seven. The line a full-evidence v5 claim pins is:
+
+```bash
+npx @colophon-claims/check@0.2 <bundle-dir>
+```
+
+A metadata-first bundle omits the evidence artifact bodies. There,
+`artifact-integrity` reports **not fetched**, which is neither a pass nor a
+fail; a body that is carried is still digest-checked, and a mismatch still fails
+the whole verification. The carried artifact set must be exactly the declared
+signer public keys. The other six checks are unchanged: they read records and
+fixed members, never artifact bodies. The `@0.1` line refuses a metadata-first
+bundle at manifest parse; `@colophon-claims/check@0.2` lists the
+metadata-first profile among the ones it accepts, and `@0.2.0` and every earlier
+line refuse it. Read a metadata-first bundle with:
+
+```bash
+npx @colophon-claims/check@0.2 <bundle-dir>
+```
+
 ## The conformance kit
 
 The kit is the self-test corpus for external implementations. It lives in the
-source repository at `packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/`;
+source repository at `packages/benchmark-product/check/fixtures/public-bundle-conformance-v1/`;
 it is deliberately not in the npm tarball, because it is roughly 10 MB of bundle
 bytes that a reader verifying one bundle does not need.
 

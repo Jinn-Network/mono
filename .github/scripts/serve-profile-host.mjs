@@ -315,7 +315,17 @@ const der = (tag, content) => Buffer.concat([Buffer.from([tag]), derLength(conte
 const derSequence = (...parts) => der(0x30, Buffer.concat(parts));
 const derSet = (...parts) => der(0x31, Buffer.concat(parts));
 const derOid = (hex) => der(0x06, Buffer.from(hex, 'hex'));
-const derInteger = (bytes) => der(0x02, bytes[0] & 0x80 ? Buffer.concat([Buffer.from([0]), bytes]) : bytes);
+// DER integers obey two rules at once: they are two's-complement, so a value
+// whose top bit is set needs a leading 0x00 to stay positive, and they are
+// minimally encoded, so a leading 0x00 is illegal unless the byte after it has
+// its top bit set. Random serials supply redundant leading zeros on their own,
+// which OpenSSL rejects as `illegal padding`, so trim before padding.
+export const derInteger = (bytes) => {
+  let start = 0;
+  while (start + 1 < bytes.length && bytes[start] === 0 && !(bytes[start + 1] & 0x80)) start += 1;
+  const trimmed = bytes.subarray(start);
+  return der(0x02, trimmed[0] & 0x80 ? Buffer.concat([Buffer.from([0]), trimmed]) : trimmed);
+};
 const derBitString = (content, unusedBits = 0) => der(0x03, Buffer.concat([Buffer.from([unusedBits]), content]));
 const derBoolean = (value) => der(0x01, Buffer.from([value ? 0xff : 0x00]));
 const derUtcTime = (date) => {

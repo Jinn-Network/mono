@@ -3,7 +3,6 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { spawnMultiOpDaemons, type MultiOpHandle } from './multi-op-daemon';
-import { allocateAnvilPort } from '@test/chain/port-allocator.js';
 
 /**
  * Source of a tiny dummy node script that satisfies the multi-op helper's
@@ -88,13 +87,15 @@ describe('spawnMultiOpDaemons', () => {
     // allocate-then-rebind window that the dummy daemon — no `'error'` handler —
     // would lose as a child crash surfacing as a 30s readiness timeout.
     //
-    // The discriminator is WINDOW LENGTH, not the technique. Here the window
-    // would span the whole of `beforeAll` and the hook-to-test transition
-    // before the child even spawns, which is why these stay fixed; the
-    // allocator IS the right call in the second describe below, where the
-    // allocation happens inside the test body — one statement before the spawn
-    // in two of the three, a `path.join` and a `writeFile` before it in the
-    // third. Both beat the `pickPort()` blind random guess they replaced, which
+    // The second describe below reserves its three ports the same way, for the
+    // same reason: the registry's ordering puts a below-band reservation ahead
+    // of `allocateAnvilPort()` for a child-process bind unconditionally, and
+    // three sequential single-port call sites are not the "many ports, or
+    // several instances inside one file" case that makes a fixed reservation
+    // impractical (#3582). A shorter allocate-then-rebind window is still a
+    // window, and this dummy daemon has no `'error'` handler, so losing that
+    // race surfaces as a 30s readiness timeout rather than as an EADDRINUSE.
+    // Both forms beat the `pickPort()` blind random guess they replaced, which
     // sat inside the band and never checked the port was free at all.
     //
     // Registered in the port registry in
@@ -151,6 +152,16 @@ describe('spawnMultiOpDaemons', () => {
  * bootstrap window, which is the exact behaviour the lifetime log is
  * supposed to capture (the load-bearing assertion of this fix).
  */
+// Fixed and below the ephemeral band, on the same reasoning as the first
+// describe: a child process binds these, so `listen(0)` is unavailable, and a
+// below-band reservation has no allocate-then-rebind window at all. One per
+// test — the three run sequentially today, and a number each keeps that true
+// if one ever becomes concurrent. Registered in
+// test/release/tier-1/T1.2-harness-readiness-contract.ts.
+const LOG_CAPTURE_PORT = 7735;
+const NO_LOG_DIR_PORT = 7736;
+const FATAL_HANDSHAKE_PORT = 7737;
+
 describe('spawnMultiOpDaemons — lifetime log capture', () => {
   let tmpRoot: string;
   let dummyBinPath: string;
@@ -169,7 +180,7 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
   });
 
   it('streams stdout + stderr to the per-daemon log file for the full lifetime', async () => {
-    const apiPort = await allocateAnvilPort();
+    const apiPort = LOG_CAPTURE_PORT;
     const logDir = path.join(tmpRoot, 'logs');
     const handle = await spawnMultiOpDaemons({
       ops: [{ name: 'op-a', home: opAHome, apiPort }],
@@ -214,7 +225,7 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
   }, 30000);
 
   it('does not write a log file when logDir is omitted (back-compat)', async () => {
-    const apiPort = await allocateAnvilPort();
+    const apiPort = NO_LOG_DIR_PORT;
     const handle = await spawnMultiOpDaemons({
       ops: [{ name: 'op-a', home: opAHome, apiPort }],
       readyTimeoutMs: 10000,
@@ -230,7 +241,7 @@ describe('spawnMultiOpDaemons — lifetime log capture', () => {
   }, 30000);
 
   it('keeps the fatal daemon envelope in the readiness error after handshake output', async () => {
-    const apiPort = await allocateAnvilPort();
+    const apiPort = FATAL_HANDSHAKE_PORT;
     const fatalBinPath = path.join(tmpRoot, 'fatal-after-handshake.cjs');
     await fs.writeFile(fatalBinPath, HANDSHAKE_THEN_FATAL_SOURCE);
 

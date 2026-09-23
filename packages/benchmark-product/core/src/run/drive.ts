@@ -57,6 +57,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import { isEvaluationOperationalError } from "@jinn-network/task-execution-evaluation-harness";
 import { refuse } from "../errors.js";
+import { reconcileReplayedSubmission } from "./replayed-submission-recovery.js";
 import {
   EVALUATION_HARNESS_PIN,
   EVALUATOR_REQUIREMENT_KEY,
@@ -492,18 +493,25 @@ function requireEvaluatorCoverage(deps: DriveDeps): void {
  * Whether the backend still retains a durable record for this Submission ref — and therefore still
  * holds its idempotency key.
  *
- * `recover`'s `absent` does not answer that on its own. The local backend returns `absent` from
- * two places: an unresolvable ref (nothing is retained, the key is free) and an attempt it fully
- * remembers whose spawn intent left no recoverable shim or outcome (the key is HELD, and
- * submitting different bytes under it is refused `submission-conflict`, which carries no retryable
- * category and so completes the evalIndex could-not-grade forever).
+ * `recover`'s `classification` does not answer that on its own. The local backend returns `absent`
+ * from two opposite places: an unresolvable ref (nothing is retained, the key is free) and an
+ * attempt it fully remembers whose spawn intent left no recoverable shim or outcome (the key is
+ * HELD, and submitting different bytes under it is refused `submission-conflict`, which carries no
+ * retryable category and so completes the evalIndex could-not-grade forever).
  *
- * `observe` is not an exact test of that — it needs the attempt index too, which a crash can leave
- * behind the submission-scope index that `submit`'s idempotency check actually reads. The warrant
- * is one-sided instead, which is all this branch needs: `observe` succeeding proves the replay is
- * viable, and `observe` failing means the replay would have died at this leg's own post-submit
- * `observe` regardless — so re-sealing there can only help, while every genuinely retained key
- * stays on the byte-exact replay.
+ * `ReconciliationReport.retained` is now that exact answer (#3634), so a backend that reports it is
+ * believed and this probe is never reached. This function is the FALLBACK for backends that do not,
+ * and remains a one-sided warrant rather than an exact test: `observe` needs the attempt index too,
+ * which a crash can leave behind the submission-scope index that `submit`'s idempotency check
+ * actually reads.
+ *
+ * That leaves the same disclosed false negative it always had, now scoped to non-reporting
+ * backends: with the submission scope durable but the attempt index missing, `observe` throws
+ * `attempt-not-found`, this reports the key free, and the re-seal draws `submission-conflict`.
+ * No worse than keeping the replay, which in that same state reaches an idempotent `submit` hit and
+ * then dies at this leg's own post-submit `observe` — both sides lose the leg identically, and
+ * every genuinely retained key that `observe` CAN see stays on the byte-exact replay.
+ * `./drive.test.ts` pins both halves of that equivalence.
  *
  * Fail-safe by construction: anything but `attempt-not-found` — a snapshot, or any other error —
  * reports retained, which keeps that replay.
@@ -518,6 +526,22 @@ async function backendRetainsSubmission(
   } catch (cause) {
     return !(cause instanceof TaskExecutionError && cause.category === "attempt-not-found");
   }
+}
+
+/**
+ * The retention answer for one `absent` reconciliation: the backend's own typed `retained` when it
+ * reports one, else the `observe` probe above.
+ *
+ * `undefined` means "not reported", never "not retained" — so an unreporting backend falls back to
+ * the probe rather than being read as free, and the probe's own fail-safe direction is unchanged.
+ */
+async function submissionKeyStillHeld(
+  backend: ProxiedBackend,
+  ref: SubmissionUri,
+  report: ReconciliationReport,
+): Promise<boolean> {
+  if (report.retained !== undefined) return report.retained;
+  return backendRetainsSubmission(backend, ref);
 }
 
 /** Seals + submits + watches ONE evaluation leg (`evalIndex`, 1-based) for a prepared evaluation
@@ -573,24 +597,27 @@ async function dispatchEvaluation(
     // evalIndex and loses the verdict for good. Exact resubmission is idempotent, never the
     // backend's recovery operation: `recover` is. It settles the attempt (durable delivery
     // checkpoint -> delivered; orphaned/absent -> an infrastructure terminal the retry ladder can
-    // classify) BEFORE `observe` reads it. Mirrors the solve leg's reconciliation in
-    // `../operations/run-launch.ts`, including its ref discipline — the recovery ref is read out of
-    // the replayed bytes, never recomputed from the idempotency key, so a drift between the two
-    // refuses here rather than reconciling nothing and silently degrading to the loss above.
+    // classify) BEFORE `observe` reads it. Shares one preamble with the solve leg's reconciliation
+    // (`./replayed-submission-recovery.ts`, called from `../operations/run-launch.ts`), so the ref
+    // discipline cannot drift between them — the recovery ref is read out of the replayed bytes,
+    // never recomputed from the idempotency key, so a drift refuses here rather than reconciling
+    // nothing and silently degrading to the loss above.
     //
     // The seam is HERE, not beside that solve loop in `runResume`: `recover` can re-enter
     // `completeAttempt` -> the evaluation provisioner's `harvest()` (it does so for every
     // completion-capable row carrying no journaled `harvested` event -- `harvesting-resume`,
-    // `matching-late`, `corrected`; `recording-resume` is classified only WITH a durable delivery
-    // checkpoint, and that returns earlier and never reaches harvest). That harvest binds its
-    // evaluator and its evaluation-cell materials from the venue registry, which recovery
-    // cannot populate: `reconstructRecoveryContext` hands `createLocalProvisioner` a FRESH
-    // contract and never re-runs its `setup`. In a fresh process the registry stays empty until
-    // `venue.prepareEvaluationCell()` fills it, and `prepareAndDispatchEvaluation` calls that once
-    // per cell before dispatching its legs -- so called any earlier, recovery of one of those rows
-    // refuses with "no registered evaluation-cell materials" (`../venue/provisioner.ts`). A
-    // never-submitted leg has no attempt to reconcile, so the launch path stays byte-identically
-    // untouched.
+    // `matching-late`, `corrected`, and a live-shim `matching` row, which reaches it through
+    // `waitForOutcome(...).then(...)` on the same fresh contract; `recording-resume` is classified
+    // only WITH a durable delivery checkpoint, and that returns earlier and never reaches
+    // harvest). That harvest resolves its evaluator from the Submission's evaluator requirement
+    // against the configured evaluators, and binds its evaluation-cell materials from the venue
+    // registry, which recovery cannot populate: `reconstructRecoveryContext` hands
+    // `createLocalProvisioner` a FRESH contract and never re-runs its `setup`. In a fresh process
+    // the registry stays empty until `venue.prepareEvaluationCell()` fills it, and
+    // `prepareAndDispatchEvaluation` calls that once per cell before dispatching its legs -- so
+    // called any earlier, recovery of one of those rows refuses with "no registered
+    // evaluation-cell materials" (`../venue/provisioner.ts`). A never-submitted leg has no attempt
+    // to reconcile, so the launch path stays byte-identically untouched.
     //
     // Both refusals below are contained PER LEG, not run-fatal like the solve leg's:
     // `prepareAndDispatchEvaluation`'s catch encloses them, and a `BenchmarkProductError` is no
@@ -609,34 +636,18 @@ async function dispatchEvaluation(
     // in that residual: the recovered harvest binds its materials lazily and re-seals the raw
     // statement it stashed under the attempt's meta/, so the verdict survives — see
     // `./run-resume-evaluation-harvest.integration.test.ts`.
-    const replayedSubmission = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
-      replayed,
-    )) as { readonly submission?: unknown };
-    if (
-      typeof replayedSubmission.submission !== "string"
-      || !replayedSubmission.submission.startsWith("urn:uuid:")
-    ) {
-      refuse(
-        "record-integrity",
-        `runs.${deps.draftId}.${cellKey}.${dispatch}`,
-        `replayed evaluation Submission carries no valid Submission URI (e${evalIndex}, `
-          + `attempt ${evaluationAttempt})`,
-      );
-    }
-    const reconciliation = await deps.backend.recover(replayedSubmission.submission as SubmissionUri);
-    if (reconciliation.classification === "contradictory") {
-      refuse(
-        "record-integrity",
-        `runs.${deps.draftId}.${cellKey}.${dispatch}`,
-        `backend recovery contradicted the accepted evaluation Submission (e${evalIndex}, `
-          + `attempt ${evaluationAttempt})${
-            reconciliation.detail === undefined ? "" : `: ${reconciliation.detail}`
-          }`,
-      );
-    }
+    const { submissionUri: replayedUri, reconciliation } = await reconcileReplayedSubmission({
+      backend: deps.backend,
+      submissionBytes: replayed,
+      refusalPath: `runs.${deps.draftId}.${cellKey}.${dispatch}`,
+      invalidUriMessage: `replayed evaluation Submission carries no valid Submission URI (e${evalIndex}, `
+        + `attempt ${evaluationAttempt})`,
+      contradictionMessage: `backend recovery contradicted the accepted evaluation Submission (e${evalIndex}, `
+        + `attempt ${evaluationAttempt})`,
+    });
     if (
       reconciliation.classification === "absent"
-      && !(await backendRetainsSubmission(deps.backend, replayedSubmission.submission as SubmissionUri))
+      && !(await submissionKeyStillHeld(deps.backend, replayedUri, reconciliation))
     ) {
       // The backend retains no record of this Submission, so it never accepted these bytes: the
       // capture below is written before `submit`, so a kill in that gap leaves a capture the

@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 42 parity operations over the operations facade, plus the path-oriented
+ * 41 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -36,15 +36,12 @@ import {
   authorityRevoke,
   authorityShow,
   anchoringConfigure,
+  identityBind,
   runBind,
   createDraft,
   getDraft,
-  importBinaryItemBank,
   importRunRecords,
   importSweBenchRows,
-  admitHumanTruth,
-  createHumanReviewPackets,
-  signHumanReviewResponse,
   initWorkspace,
   inspectDraft,
   listDrafts,
@@ -53,6 +50,7 @@ import {
   runCancel,
   runLaunch,
   runLock,
+  draftSampleSizeAdvisory,
   publicationAccounting,
   publicationConfigure,
   publicationRegister,
@@ -69,19 +67,14 @@ import {
   sampleInit,
   selectMethod,
   exportDerivedBundle,
-  migrateTerminalBenchLegacyTask,
   updateDraft,
   type ArmWarning,
   type AnchorSubject,
   type OperationContext,
   type OperationResult,
   type QuotePresentation,
+  type RunBindResult,
   type RunLaunchDeps,
-  type MigrateTerminalBenchLegacyTaskInput,
-  type AdmitHumanTruthInput,
-  type CreateHumanReviewPacketsInput,
-  type ImportBinaryItemBankInput,
-  type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
 import { dirname } from "node:path";
@@ -91,14 +84,23 @@ import {
   readExternalRunRecords,
   type ExternalRunRecordFormat,
 } from "../intake/external-run-records.js";
+import { readHarborRunImport } from "../intake/harbor-run-records.js";
+import { readInspectRunImport } from "../intake/inspect-run-records.js";
+import { dumpIdentityFromPath } from "../run/external-import.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
-import type { BeaconReference } from "@colophon-claims/verify";
-import { exportFreezeRepo, summarizeVerificationOutcome, verifyFreezeRepo } from "@colophon-claims/verify";
+import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/check";
+import {
+  DOMAIN_BINDING_MECHANISM_NAMES,
+  beaconIndexWord,
+  exportFreezeRepo,
+  summarizeVerificationOutcome,
+  verifyFreezeRepo,
+} from "@colophon-claims/check";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
-import { readRunJournalEntries } from "../run/journal.js";
-import { DEFAULT_PUBLICATION_SOURCE_NAME, requireRunState } from "../run/state.js";
+import { formatSampleSizeAdvisory } from "../run/sample-size-advisory.js";
+import { requireRunState } from "../run/state.js";
+import { resolveWorkspacePublicationSourceName } from "../run/publication-source.js";
 import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
 import { readDraftDocument } from "../operations/drafts.js";
 import { listMethodCatalog } from "../operations/method-catalog.js";
@@ -121,19 +123,6 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--name <name>] [--description <text>] [--version <ver>]
                    [--provenance-timestamp <rfc3339>]
                    (homemade instance rows, not official SWE-bench Verified)
-  import item-bank --workspace <dir> --principal <id> --profile binary-judgment@2
-                   --draft <draftId> --items <items.jsonl> --sources <sources.jsonl>
-                   --admissions <admissions.jsonl>
-                   [--name <name>] [--description <text>] [--version <ver>]
-                   [--license <spdx-id>] [--citation <text>]
-                   [--parser-invalid-policy reject|abstain]
-  human-review packet create --workspace <dir> --principal <id> --draft <draftId>
-                   --file <packet-request.json>
-  human-review response sign --workspace <dir> --principal <id> --draft <draftId>
-                   --file <response.json> --signer <configured-signer.json>
-  human-review admit --workspace <dir> --principal <id> --draft <draftId>
-                   --file <admission-manifest.json>
-  runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
                    [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
                    (catalog id or method-document file; omit ref to list)
@@ -158,13 +147,15 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   quote            --workspace <dir> --principal <id> --draft <draftId>
                    [--ack-provider-network-costs]
   lock             --workspace <dir> --principal <id> --draft <draftId>
-                   [--ack-provider-network-costs] [--no-anchor]
+                   --ack-sample-size [--ack-provider-network-costs] [--no-anchor]
   anchor           --workspace <dir> --principal <id> --draft <draftId>
                    --subject lock|matrix [--provider <profileUri>] [--endpoint <url>]
   bind             --workspace <dir> --principal <id> --draft <draftId>
                    --beacon-source <id> --beacon-round <n> --beacon-value <64 hex>
   anchoring configure --workspace <dir> --principal <id>
                    (--provider <profileUri> --endpoint <url> | --file <anchoring.json> | --clear)
+  identity bind    --workspace <dir> --principal <id> --domain <domain>
+                   [--mechanism dns-txt|well-known-url]
   disclosure declare --workspace <dir> --principal <id> --draft <draftId>
                    --file <disclosure.json>
   disclosure show    --workspace <dir> --principal <id> --draft <draftId>
@@ -178,6 +169,10 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   run import       --workspace <dir> --principal <id> --draft <draftId>
                    --file <records.jsonl|records.csv> --source <harness>
                    [--format jsonl|csv]
+                   --from harbor <jobs-dir> instead of --file reads Harbor 0.21
+                   jobs and trials into the same per-attempt records
+                   --from inspect <eval-log-or-dir> instead of --file reads
+                   Inspect read_eval_log JSON (.eval / EvalLog dump)
                    --template instead of --file/--source prints the sealed
                    slate as a skeleton to fill in
   launch           --workspace <dir> --principal <id> --draft <draftId>
@@ -199,12 +194,10 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   freeze-repo verify --bundle <dir> --repo <dir> [--json]
                    (re-renders from the bundle and compares the published tree byte for byte;
                    a drifted tree exits 1 and names every drifted member)
-  demo1 prereg verify --workspace <dir> --draft <draftId> --witness <witness.json>
-                   --method-summary-sha256 <sha256> --grader-program-sha256 <sha256>
-                   --source-commit <full-git-oid> [--json]
   help                  (also: --help, or no arguments)
 
 Exit codes: 0 success, 2 invalid-invocation, 3 authority-denied, 1 any other typed error.
+The Demo-1 / SkillsBench method is gone, including demo1 prereg verify. Colophon creates no benchmarks.
 `;
 
 function methodHelp(): string {
@@ -253,17 +246,9 @@ const SAMPLE_INIT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const IMPORT_SWEBENCH_FLAGS = [
   "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
 ] as const;
-const IMPORT_ITEM_BANK_FLAGS = [
-  "workspace", "principal", "json", "profile", "draft", "items", "sources", "admissions",
-  "name", "description", "version", "license", "citation", "parser-invalid-policy",
-] as const;
-const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
-const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "n", "host"] as const;
 const METHOD_LIST_FLAGS = ["json"] as const;
 const EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
-const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -279,11 +264,15 @@ const PREVIEW_FLAGS = ["workspace", "principal", "json", "draft", "items"] as co
 const PROVIDER_ACK_FLAG = "ack-provider-network-costs" as const;
 const QUOTE_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
 const NO_ANCHOR_FLAG = "no-anchor" as const;
-const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG, NO_ANCHOR_FLAG] as const;
+const SAMPLE_SIZE_ACK_FLAG = "ack-sample-size" as const;
+const LOCK_FLAGS = [
+  "workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG, NO_ANCHOR_FLAG, SAMPLE_SIZE_ACK_FLAG,
+] as const;
 const ANCHOR_FLAGS = ["workspace", "principal", "json", "draft", "subject", "provider", "endpoint"] as const;
 const BIND_FLAGS = ["workspace", "principal", "json", "draft", "beacon-source", "beacon-round", "beacon-value"] as const;
 const ANCHORING_CONFIGURE_FLAGS = ["workspace", "principal", "json", "provider", "endpoint", "file", "clear"] as const;
 const DISCLOSURE_DECLARE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const IDENTITY_BIND_FLAGS = ["workspace", "principal", "json", "domain", "mechanism"] as const;
 const DISCLOSURE_SHOW_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
@@ -291,7 +280,7 @@ const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as 
 const PUBLICATION_SERVE_FLAGS = ["workspace", "principal", "json", "source", "host", "port"] as const;
 const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const RUN_IMPORT_FLAGS = ["workspace", "principal", "json", "draft", "file", "format", "source", "template"] as const;
+const RUN_IMPORT_FLAGS = ["workspace", "principal", "json", "draft", "file", "format", "source", "template", "from"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const RESUME_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const CANCEL_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -304,9 +293,6 @@ const PUBLISH_FLAGS = ["workspace", "principal", "json", "draft", "include-nativ
 const BUNDLE_VERIFY_FLAGS = ["bundle", "json"] as const;
 const FREEZE_REPO_EXPORT_FLAGS = ["bundle", "out", "json"] as const;
 const FREEZE_REPO_VERIFY_FLAGS = ["bundle", "repo", "json"] as const;
-const DEMO1_PREREG_VERIFY_FLAGS = [
-  "workspace", "draft", "witness", "method-summary-sha256", "grader-program-sha256", "source-commit", "json",
-] as const;
 
 /** Exit-code table (spec §4.3, §5.2): distinct codes so a caller can branch without parsing stdout. */
 function exitCodeFor(code: ProductErrorCode): number {
@@ -402,6 +388,44 @@ function requireProviderNetworkCostAcknowledgement(
   return true;
 }
 
+/**
+ * The seal-time sample-size advisory gate (issue #2978).
+ *
+ * The lock is irreversible and, until this gate, accepted any replicate and item count without
+ * comment — while the interval those counts imply was computable before a single cell was
+ * dispatched. Refusing until the operator repeats the command with the flag is the same shape as
+ * the provider-cost gate above, and for the same reason: this CLI is non-interactive, so a flag is
+ * the only honest way to ask a question and get an answer. The refusal detail carries the whole
+ * advisory, so the first refused invocation is where the operator reads the width.
+ *
+ * Returns the acknowledged advisory line, or `undefined` when there is none to acknowledge. The
+ * caller prints it on the success path rather than this gate streaming it: `--json` already
+ * carries the advisory in the lock envelope, and stdout — beside the `locked draft ...` receipt —
+ * is that field's human analogue. `context.progress` is the launch verb's channel (nothing else
+ * streams before launch), and the width an operator sealed belongs in the same captured output as
+ * the digest they sealed it into.
+ */
+function requireSampleSizeAdvisoryAcknowledgement(
+  args: ParsedArgs,
+  workspaceDir: string,
+  draftId: string,
+): string | undefined {
+  const planned = draftSampleSizeAdvisory(workspaceDir, draftId);
+  // No advisory means no lock could seal this draft right now; `runLock` below says why, and
+  // demanding an acknowledgement of a width that does not exist would bury that answer.
+  if (planned === undefined) return undefined;
+  const advisory = formatSampleSizeAdvisory(planned);
+  if (!present(args, SAMPLE_SIZE_ACK_FLAG)) {
+    refuse(
+      "invalid-invocation",
+      `--${SAMPLE_SIZE_ACK_FLAG}`,
+      `${advisory}\nThe lock is irreversible. Change the sample size now, or repeat the command with `
+        + `--${SAMPLE_SIZE_ACK_FLAG} to seal at this n.`,
+    );
+  }
+  return advisory;
+}
+
 function withProviderAcknowledgement<T>(
   outcome: OperationResult<T>,
   acknowledged: boolean,
@@ -429,6 +453,41 @@ function parseItemsFlag(raw: string): number {
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 1) {
     refuse("invalid-invocation", "--items", "--items must be a positive integer");
+  }
+  return value;
+}
+
+/**
+ * Parses `--beacon-round`; refuses `"invalid-invocation"` naming `--beacon-round` unless the text
+ * is decimal digits denoting a positive round (issue #3332).
+ *
+ * The shape check is on the TEXT, before conversion, because `Number` is a coercion rather than a
+ * parse: it reads `"1e3"`, `"0x10"`, `"+1"`, `"1."` and `"  1000  "` as integers, and `""` as
+ * zero. `Number.isInteger` then passes and the schema's bound admits the result, so the operator
+ * who mistyped a round is not refused by name -- they get a successfully bound run at a round they
+ * never typed. `bind` is write-once by design (a run binds once, because re-binding is re-drawing),
+ * so a coerced round cannot be corrected by rebinding; and a coerced value that happens to land
+ * after the seal binds cleanly to the wrong round. The web action applies the same rule at its own
+ * entry point (`web/src/app/actions.ts`).
+ *
+ * Leading zeros are admitted: `007` denotes 7 unambiguously, and refusing it would only reject a
+ * spelling the operator meant.
+ */
+function parseBeaconRoundFlag(raw: string): number {
+  if (!/^[0-9]+$/u.test(raw)) {
+    refuse(
+      "invalid-invocation",
+      "--beacon-round",
+      `--beacon-round must be decimal digits denoting a round or block height, got ${JSON.stringify(raw)}`,
+    );
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    refuse(
+      "invalid-invocation",
+      "--beacon-round",
+      `--beacon-round must be a positive round or block height, got ${JSON.stringify(raw)}`,
+    );
   }
   return value;
 }
@@ -542,140 +601,6 @@ function handleImportSweBench(args: ParsedArgs, context: CliContext, jsonMode: b
   );
 }
 
-function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, IMPORT_ITEM_BANK_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const profile = required(args, "profile");
-  if (profile !== "binary-judgment@2") {
-    refuse("invalid-invocation", "--profile", "--profile must be binary-judgment@2");
-  }
-  const name = optional(args, "name");
-  const description = optional(args, "description");
-  const version = optional(args, "version");
-  const license = optional(args, "license");
-  if (license !== undefined && !/^[A-Za-z0-9][A-Za-z0-9.+-]*$/u.test(license)) {
-    // The same SPDX 2.3 Annex A short-identifier grammar the freeze-repository export applies when
-    // it renders `SPDX-License-Identifier:`. Refusing here makes free text a one-second failure at
-    // the flag rather than a refusal after the record is sealed and published.
-    refuse(
-      "invalid-invocation",
-      "--license",
-      "--license must be an SPDX short identifier (SPDX 2.3 Annex A grammar), not free text",
-    );
-  }
-  const citation = optional(args, "citation");
-  const parserInvalidPolicy = optional(args, "parser-invalid-policy");
-  if (
-    parserInvalidPolicy !== undefined
-    && parserInvalidPolicy !== "reject"
-    && parserInvalidPolicy !== "abstain"
-  ) {
-    refuse(
-      "invalid-invocation",
-      "--parser-invalid-policy",
-      "--parser-invalid-policy must be reject or abstain",
-    );
-  }
-  const input: ImportBinaryItemBankInput = {
-    profile,
-    draftId: required(args, "draft"),
-    itemBankJsonl: readTextFile(pathFrom(context.cwd, required(args, "items"))),
-    sourceManifestJsonl: readTextFile(pathFrom(context.cwd, required(args, "sources"))),
-    admissionIndexJsonl: readTextFile(pathFrom(context.cwd, required(args, "admissions"))),
-    ...(name === undefined ? {} : { name }),
-    ...(description === undefined ? {} : { description }),
-    ...(version === undefined ? {} : { version }),
-    ...(license === undefined ? {} : { license }),
-    ...(citation === undefined ? {} : { citation }),
-    ...(parserInvalidPolicy === undefined ? {} : { parserInvalidPolicy }),
-  };
-  const operation = importBinaryItemBank(opContext, input);
-  return renderResult(
-    operation,
-    jsonMode,
-    (value) => `imported ${value.taskSha256s.length} admitted binary item(s) as benchmark ${value.benchmarkSha256} into draft ${value.draft.draftId}; excluded ${value.excludedItemSha256s.length}, held back ${value.nonAdmittedItemSha256s.length}\n`,
-  );
-}
-
-function handleHumanReviewPacketCreate(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, HUMAN_REVIEW_PACKET_CREATE_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const request = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
-    CreateHumanReviewPacketsInput,
-    "draftId"
-  >;
-  const result = createHumanReviewPackets(opContext, {
-    draftId: required(args, "draft"),
-    item: request.item,
-    evaluatorIds: request.evaluatorIds,
-  });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `created ${value.packets.length} blind review packets for ${value.itemSha256}\n`,
-  );
-}
-
-async function handleHumanReviewResponseSign(
-  args: ParsedArgs,
-  context: CliContext,
-  jsonMode: boolean,
-): Promise<CliResult> {
-  assertKnownFlags(args, HUMAN_REVIEW_RESPONSE_SIGN_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const response = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
-    SignHumanReviewResponseInput,
-    "draftId" | "configuredEvaluatorIds" | "activeEvaluatorId"
-  >;
-  const signer = readJsonFile(pathFrom(context.cwd, required(args, "signer"))) as Pick<
-    SignHumanReviewResponseInput,
-    "configuredEvaluatorIds" | "activeEvaluatorId"
-  >;
-  const result = await signHumanReviewResponse(opContext, {
-    draftId: required(args, "draft"),
-    configuredEvaluatorIds: signer.configuredEvaluatorIds,
-    activeEvaluatorId: signer.activeEvaluatorId,
-    packetSha256: response.packetSha256,
-    visibilityReceiptSha256: response.visibilityReceiptSha256,
-    label: response.label,
-    complete: response.complete,
-    completedAt: response.completedAt,
-  });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `signed human review ${value.verdictSha256} as configured evaluator ${value.evaluatorId}\n`,
-  );
-}
-
-function handleHumanReviewAdmit(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, HUMAN_REVIEW_ADMIT_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const request = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
-    AdmitHumanTruthInput,
-    "draftId"
-  >;
-  const result = admitHumanTruth(opContext, {
-    draftId: required(args, "draft"),
-    truthAdmission: request.truthAdmission,
-    candidates: request.candidates,
-    ...(request.evidenceEnvelopesBase64 === undefined
-      ? {}
-      : { evidenceEnvelopesBase64: request.evidenceEnvelopesBase64 }),
-    // H-6 (packet P6): a new top-level field on AdmitHumanTruthInput is silently dropped here
-    // unless explicitly forwarded — this handler reads the whole request object from a file but
-    // only ever spreads the fields named below.
-    ...(request.screening === undefined
-      ? {}
-      : { screening: request.screening }),
-  });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `admitted ${value.resolutions.length} truth resolution(s); publication-grade=${value.publicationGrade}\n`,
-  );
-}
-
 function renderMethodCatalogTable(
   catalog: ReturnType<typeof listMethodCatalog>,
 ): string {
@@ -714,16 +639,17 @@ async function handleMethodBind(
   return renderResult(
     result,
     jsonMode,
-    (value) => `bound ${value.official ? "official" : "custom"} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`,
+    (value) => {
+      const kind = value.official ? "official" : "custom";
+      if (value.selectionManifestSha256 !== undefined) {
+        return `bound ${kind} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`;
+      }
+      if (value.benchmarkSha256 !== undefined) {
+        return `bound ${kind} ${value.documentKind} method ${value.benchmarkSha256} for draft ${draftId}\n`;
+      }
+      return `bound ${kind} ${value.catalogId ?? value.documentKind} catalog identity for draft ${draftId}\n`;
+    },
   );
-}
-
-async function handleTerminalBenchMigration(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as MigrateTerminalBenchLegacyTaskInput;
-  const result = await migrateTerminalBenchLegacyTask(opContext, configuration);
-  return renderResult(result, jsonMode, (value) => `migrated legacy Terminal-Bench task as ${value.manifestSha256}\n`);
 }
 
 function handleDerivedExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -1048,13 +974,24 @@ async function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boole
   const acknowledged = requireProviderNetworkCostAcknowledgement(
     args, context, opContext.workspaceDir, draftId, jsonMode,
   );
+  // Only an advisory the operator was actually shown is sealed as acknowledged; when there was
+  // none to show, the lock below refuses and nothing is sealed either way.
+  const sampleSizeAdvisory = requireSampleSizeAdvisoryAcknowledgement(
+    args, opContext.workspaceDir, draftId,
+  );
 
-  const locked = runLock(opContext, { draftId });
+  const locked = runLock(opContext, {
+    draftId,
+    acknowledgedSampleSizeAdvisory: sampleSizeAdvisory !== undefined,
+  });
   const result = withProviderAcknowledgement(locked, acknowledged);
   const rendered = renderResult(
     result,
     jsonMode,
-    (value) => `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
+    // The acknowledged width prints above the receipt, so human-mode stdout says at what n the
+    // digest below it was sealed. `--json` carries the same pair in the envelope.
+    (value) => (sampleSizeAdvisory === undefined ? "" : `${sampleSizeAdvisory}\n`)
+      + `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
   );
   if (!locked.ok || present(args, NO_ANCHOR_FLAG)) return rendered;
 
@@ -1076,10 +1013,7 @@ function assertAnchorSubject(value: string): AnchorSubject {
  */
 function handleBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
   assertKnownFlags(args, BIND_FLAGS);
-  const round = Number(required(args, "beacon-round"));
-  if (!Number.isInteger(round)) {
-    refuse("invalid-invocation", "bind", "--beacon-round must be an integer round or block height");
-  }
+  const round = parseBeaconRoundFlag(required(args, "beacon-round"));
   const result = runBind(buildOperationContext(args, context), {
     draftId: required(args, "draft"),
     // Source and value are validated by the operation against the beacon registry and the hex
@@ -1090,12 +1024,18 @@ function handleBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): C
       value: required(args, "beacon-value"),
     },
   });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `bound run ${value.binding.sealDigest} to ${value.binding.beacon.source} round `
-      + `${value.binding.beacon.round}: ${value.recordSha256}\n${value.statement}\n`,
-  );
+  return renderResult(result, jsonMode, renderBindLine);
+}
+
+/**
+ * The `bind` human line (issue #3871). The index word follows the source's time basis through the
+ * same helper the reader's report face uses, so a height-indexed beacon is never called a round
+ * here while the report calls it a height.
+ */
+export function renderBindLine(value: RunBindResult): string {
+  const { beacon } = value.binding;
+  return `bound run ${value.binding.sealDigest} to ${beacon.source} ${beaconIndexWord(beacon.source)} `
+    + `${beacon.round}: ${value.recordSha256}\n${value.statement}\n`;
 }
 
 async function handleAnchor(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -1165,6 +1105,29 @@ function handleAnchoringConfigure(args: ParsedArgs, context: CliContext, jsonMod
       + `${value.anchoring.map((entry) => `  ${entry.providerProfile}\t${entry.endpoint}`).join("\n")}\n`);
 }
 
+
+/**
+ * `identity bind` (issue #2983). The mechanism defaults rather than being required: `dns-txt` needs
+ * no web host and survives one moving, so it is the answer for a claimant who has not thought about
+ * it. The printed proof is the whole point of the verb — the document this writes is inert until the
+ * operator publishes that record at the domain themselves.
+ */
+function handleIdentityBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, IDENTITY_BIND_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const mechanism = optional(args, "mechanism");
+  const result = identityBind(opContext, {
+    domain: required(args, "domain"),
+    ...(mechanism === undefined ? {} : { mechanism: mechanism as DomainBindingMechanism }),
+  });
+  return renderResult(result, jsonMode, (value) => `bound ${value.keyId}\n`
+    + `  to ${value.domain} by ${DOMAIN_BINDING_MECHANISM_NAMES[value.mechanism]}\n`
+    + `  document ${value.documentPath}\n`
+    + `Publish this at ${value.proof.location}:\n`
+    + `  ${value.proof.expectedValue}\n`
+    + `Until it is published the binding names a domain that has not answered; a reader who supplies\n`
+    + `the document to colophon-check is told exactly that.\n`);
+}
 
 /**
  * `disclosure declare` (issue #2839). The declaration always comes from a file: six honest sentences
@@ -1272,16 +1235,23 @@ async function handlePublicationServe(args: ParsedArgs, context: CliContext, jso
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
     refuse("invalid-invocation", "--port", "--port must be an integer from 0 to 65535");
   }
-  // Present-but-empty is a typo, not an omission, so it falls back to the default exactly as an
-  // absent flag does rather than binding to the empty string.
+  // Present-but-empty is a typo, not an omission, so it is resolved from the workspace exactly as
+  // an absent flag is rather than binding to the empty string. An explicit name always wins:
+  // `resolveWorkspacePublicationSourceName` refuses a workspace whose runs disagree, and passing
+  // the name is how an operator settles that.
   const sourceName = optional(args, "source");
   const host = optional(args, "host");
   const server = await startPublicationArchiveServer({
     workspaceDir,
-    sourceName: sourceName === undefined || sourceName === "" ? DEFAULT_PUBLICATION_SOURCE_NAME : sourceName,
+    sourceName: sourceName === undefined || sourceName === ""
+      ? resolveWorkspacePublicationSourceName(workspaceDir)
+      : sourceName,
     ...(host === undefined || host === "" ? {} : { host }),
     port,
-    ...(context.progress === undefined ? {} : { onError: (cause: unknown) => context.progress?.(`server error: ${cause instanceof Error ? cause.message : String(cause)}`) }),
+    ...(context.progress === undefined ? {} : {
+      onError: (cause: unknown) => context.progress?.(`server error: ${cause instanceof Error ? cause.message : String(cause)}`),
+      onProgress: (line: string) => context.progress?.(line),
+    }),
   });
   try {
     // Taken after the bind so a failure to serve is not preceded by hijacking the process's
@@ -1427,14 +1397,14 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
   assertKnownFlags(args, RUN_IMPORT_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
-  const format = importFormat(args);
 
   if (present(args, "template")) {
-    for (const flag of ["file", "source"] as const) {
+    for (const flag of ["file", "source", "from"] as const) {
       if (optional(args, flag) !== undefined) {
         refuse("invalid-invocation", flag, `run import --template prints a skeleton and reads nothing; --${flag} is not accepted with it`);
       }
     }
+    const format = importFormat(args);
     const rendered = renderImportTemplate(opContext.workspaceDir, draftId, format);
     if (jsonMode) {
       return {
@@ -1446,6 +1416,63 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
     return { exitCode: 0, stdout: rendered.template, stderr: "" };
   }
 
+  if (present(args, "from")) {
+    const reader = required(args, "from");
+    if (reader !== "inspect" && reader !== "harbor") {
+      refuse("invalid-invocation", "from", `--from must be "harbor" or "inspect", got "${reader}"`);
+    }
+    for (const flag of ["file", "format", "source"] as const) {
+      if (optional(args, flag) !== undefined) {
+        refuse(
+          "invalid-invocation",
+          flag,
+          reader === "inspect"
+            ? `run import --from inspect reads an eval log or directory; --${flag} is not accepted with it`
+            : `run import --from harbor reads a jobs directory; --${flag} is not accepted with it`,
+        );
+      }
+    }
+    const extra = args.words.slice(2);
+    const pathWord = extra[0];
+    if (extra.length !== 1 || pathWord === undefined || pathWord === "") {
+      refuse(
+        "invalid-invocation",
+        "from",
+        reader === "inspect"
+          ? "run import --from inspect requires <eval-log-or-dir>"
+          : "run import --from harbor requires <jobs-dir>",
+      );
+    }
+    const resolvedPath = pathFrom(context.cwd, pathWord);
+    const dump = reader === "inspect"
+      ? readInspectRunImport({
+        workspaceDir: opContext.workspaceDir,
+        draftId,
+        evalLogOrDir: resolvedPath,
+      })
+      : readHarborRunImport({
+        workspaceDir: opContext.workspaceDir,
+        draftId,
+        jobsDir: resolvedPath,
+      });
+    const imported = await importRunRecords(opContext, {
+      draftId,
+      records: dump.records,
+      source: dump.source,
+      evidenceRoot: dump.evidenceRoot,
+      dump: dumpIdentityFromPath(resolvedPath, dump.records),
+      ...(reader === "inspect" ? { namedReader: "inspect" as const } : {}),
+    });
+    return renderResult(
+      imported,
+      jsonMode,
+      (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
+        + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `
+        + `${value.written.notDelivered} not delivered\n`,
+    );
+  }
+
+  const format = importFormat(args);
   // Relative `evidence[].path` entries resolve against the dump's own directory, so a dump and the
   // artifacts it names move together as one tree.
   const file = pathFrom(context.cwd, required(args, "file"));
@@ -1455,19 +1482,14 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
     records,
     source: { harness: required(args, "source") },
     evidenceRoot: dirname(file),
+    dump: dumpIdentityFromPath(file, records),
   });
   return renderResult(
     result,
     jsonMode,
-    // The second line is not decoration. `publish` refuses an imported run (operator ruling, issue
-    // #3417), and an operator who learns that only after collect and report has spent the whole
-    // chain to find out. The `--json` envelope is unchanged: machine callers branch on the
-    // publication refusal's own typed code and path, not on this prose.
     (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
       + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `
-      + `${value.written.notDelivered} not delivered\n`
-      + "note: publication of an imported run is refused pending issue #3417 — collect and report "
-      + "work, publish does not (see EXTERNAL-RUN-IMPORT.md)\n",
+      + `${value.written.notDelivered} not delivered\n`,
   );
 }
 
@@ -1530,6 +1552,15 @@ function handleStatus(args: ParsedArgs, context: CliContext, jsonMode: boolean):
       `expected ${value.counts.expected}, dispatched ${value.counts.dispatched}, delivered ${value.counts.delivered}, `
         + `judged ${value.counts.judged}, failed ${value.counts.failed}, `
         + `awaiting evaluation ${value.counts.awaitingEvaluation}`,
+      // The binding halves, which `--json` has always carried and this surface did not (issue
+      // #3428). Exactly one can apply: `bindableBeaconRounds` is present only while the run is
+      // locked, unlaunched and unbound, and `binding` only once it has bound.
+      ...(value.binding === undefined ? [] : [`binding ${value.binding.class}: ${value.binding.statement}`]),
+      // Naming the round is the point: an operator who guesses one too low is refused for
+      // postdating, and that refusal does not name the round the seal requires.
+      ...(value.bindableBeaconRounds ?? []).map(
+        (entry) => `bindable\t${entry.source}\tround ${entry.round}\tpublished ${entry.publishedAt}`,
+      ),
     ];
     return `${lines.join("\n")}\n`;
   });
@@ -1573,7 +1604,20 @@ async function handleVerify(args: ParsedArgs, context: CliContext, jsonMode: boo
   const draftId = required(args, "draft");
 
   const result = await runVerify(opContext, { draftId });
-  return renderResult(result, jsonMode, (value) => `verified draft ${value.draftId}: ${value.checks.join(", ")}\n`);
+  return renderResult(result, jsonMode, (value) => {
+    const lines = [`verified draft ${value.draftId}: ${value.checks.join(", ")}`];
+    for (const anchor of value.anchors?.anchors ?? []) {
+      const basis = [anchor.provider, anchor.timeBasis].filter((part) => part !== undefined).join(", ");
+      lines.push(
+        `anchor ${anchor.subject ?? "unknown"}: ${basis.length === 0 ? "unknown provider/time basis" : basis}, `
+        + `${anchor.status}, record ${anchor.recordSha256}`,
+      );
+    }
+    if (value.anchoringWindow !== undefined) {
+      lines.push("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
+    }
+    return `${lines.join("\n")}\n`;
+  });
 }
 
 async function handlePublish(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -1595,15 +1639,25 @@ async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMod
   assertKnownFlags(args, BUNDLE_VERIFY_FLAGS);
   const bundleDir = pathFrom(context.cwd, required(args, "bundle"));
   const result = await verifyPublicBundle(bundleDir);
-  return renderResult(
-    { ok: true, result },
-    jsonMode,
-    // A deferred check is never printed as a bare check name: a metadata-first bundle carries its
-    // artifact digests without their bytes (issue #2986).
-    (value) => `verified public bundle ${value.identity}: ${summarizeVerificationOutcome(value).outcomes
-      .map(({ check, state }) => (state === "passed" ? check : `${check} (${state})`))
-      .join(", ")}\n`,
-  );
+  return renderResult({ ok: true, result }, jsonMode, renderBundleVerifyLine);
+}
+
+/**
+ * The human line for `bundle verify`. It names the operation rather than asserting a verified
+ * result: "verified" claims more than this does, which is to recompute the arithmetic, closure, and
+ * consistency of bytes it was handed (issue #2982, ruled for the standalone reader; issue #3689 for
+ * this third reader surface). `--json` is untouched -- it carries the checks, not a verb.
+ *
+ * A deferred check is never printed as a bare check name: a metadata-first bundle carries its
+ * artifact digests without their bytes (issue #2986).
+ *
+ * The check names print bare, without the glosses `colophon-check` prints beside its own list;
+ * the reader-facing vocabulary spec records why under §4.2 (issue #3918).
+ */
+export function renderBundleVerifyLine(value: PublicBundleVerificationResult): string {
+  return `recomputed public bundle ${value.identity}: ${summarizeVerificationOutcome(value).outcomes
+    .map(({ check, state }) => (state === "passed" ? check : `${check} (${state})`))
+    .join(", ")}\n`;
 }
 
 async function handleFreezeRepoExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -1619,6 +1673,23 @@ async function handleFreezeRepoExport(args: ParsedArgs, context: CliContext, jso
   );
 }
 
+/**
+ * A match that rested on bytes and entry type alone says so. The mode dimension is consulted only
+ * where the filesystem records an executable bit, and `PUBLIC-BUNDLE.md` states that a dropped one
+ * is reported -- so this reader surface must give the signal the standalone verifier gives, or the
+ * specification promises it on one surface and withholds it on the other (issue #3608). It names
+ * only what the probe established (issue #3604).
+ */
+function skippedModeNote(value: FreezeRepoVerificationResult): string {
+  if (value.executableBitChecked) return "";
+  const reason = value.executableBitSkipped === "not-recorded"
+    ? " (this filesystem does not record an executable bit)"
+    : value.executableBitSkipped === "not-probed"
+      ? " (the filesystem could not be probed)"
+      : "";
+  return `  note: file modes were not checked${reason}\n`;
+}
+
 async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, FREEZE_REPO_VERIFY_FLAGS);
   const result = await verifyFreezeRepo(
@@ -1629,57 +1700,34 @@ async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jso
     return renderResult(
       { ok: true, result },
       jsonMode,
-      (value) => `freeze repository matches ${value.bundleIdentity}: ${value.fileCount} files, commit ${value.commitId}\n`,
+      (value) => `freeze repository matches ${value.bundleIdentity}: ${value.fileCount} files, commit ${value.commitId}\n${skippedModeNote(value)}`,
     );
   }
   // A drifted tree must not exit 0. `check && publish` is exactly how this verb gets used, and a
   // zero exit there publishes the drift. The typed envelope still carries every difference, so a
   // machine caller reads WHICH members drifted from `issues`, not from prose.
-  const detail = `freeze repository does not match ${result.bundleIdentity}: ${result.differences
+  // The commit id is reported on this path too, not only on the matching one: a drift report whose
+  // reader is deciding whether the tree they hold is the one an announcement pinned needs the oid
+  // the bundle renders to in order to answer that at all.
+  const detail = `freeze repository does not match ${result.bundleIdentity} (bundle renders commit ${result.commitId}): ${result.differences
     .map((difference) => `${difference.path} (${difference.kind})`)
     .join(", ")}`;
-  return renderResult(
-    {
-      ok: false,
-      error: {
-        code: "record-integrity",
-        detail,
-        issues: result.differences.map((difference) => ({ path: difference.path, message: difference.kind })),
-      },
-    } as OperationResult<never>,
-    jsonMode,
-    () => "",
-  );
-}
-
-function handleDemo1PreregistrationVerify(
-  args: ParsedArgs,
-  context: CliContext,
-  jsonMode: boolean,
-): CliResult {
-  assertKnownFlags(args, DEMO1_PREREG_VERIFY_FLAGS);
-  const workspaceDir = pathFrom(context.cwd, required(args, "workspace"));
-  const draftId = required(args, "draft");
-  const runState = requireRunState(workspaceDir, draftId);
-  if (runState.runSha256 === undefined) {
-    refuse("illegal-transition", `runs.${draftId}`, "Demo-1 preregistration verification requires a sealed Run");
-  }
-  const result = verifyDemo1PreregistrationPreDispatch({
-    commitment: {
-      runSha256: runState.runSha256,
-      methodSummarySha256: required(args, "method-summary-sha256"),
-      graderProgramSha256: required(args, "grader-program-sha256"),
-      sourceCommit: required(args, "source-commit"),
-    },
-    witness: readJsonFile(pathFrom(context.cwd, required(args, "witness"))),
-    runState,
-    journal: readRunJournalEntries(workspaceDir, draftId),
-  });
-  return renderResult(
-    { ok: true, result },
-    jsonMode,
-    (value) => `Demo-1 preregistration ready (${value.stage}): ${value.manifestCid} / ${value.transactionHash}\n`,
-  );
+  const error: ProductErrorEnvelope = {
+    code: "record-integrity",
+    detail,
+    issues: result.differences.map((difference) => ({ path: difference.path, message: difference.kind })),
+  };
+  // The skipped-mode note (issue #3608) and the result it is read from are carried on this path
+  // too, not only on the matching one (issue #3997): a drift report that is silent about whether
+  // the mode dimension was read leaves its reader unable to tell whether a second, mode-only drift
+  // went unlooked-for. The standalone verifier reports both on both paths, and `PUBLIC-BUNDLE.md`
+  // promises the signal without qualifying the path. The envelope is built here rather than through
+  // `renderResult` because `OperationResult`'s failure half has no `result` slot and is not widened
+  // for one verb: `error` is unchanged, `result` is additive, and a machine caller reads
+  // `executableBitChecked` / `executableBitSkipped` from the same key on both paths.
+  const exitCode = exitCodeFor(error.code);
+  if (jsonMode) return { exitCode, stdout: `${JSON.stringify({ ok: false, error, result })}\n`, stderr: "" };
+  return { exitCode, stdout: "", stderr: `${renderHumanError(error)}${skippedModeNote(result)}` };
 }
 
 type VerbHandler = (args: ParsedArgs, context: CliContext, jsonMode: boolean) => CliResult | Promise<CliResult>;
@@ -1693,13 +1741,8 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["inspect", handleInspect],
   ["sample init", handleSampleInit],
   ["import swebench", handleImportSweBench],
-  ["import item-bank", handleImportItemBank],
-  ["human-review packet create", handleHumanReviewPacketCreate],
-  ["human-review response sign", handleHumanReviewResponseSign],
-  ["human-review admit", handleHumanReviewAdmit],
   ["method", handleMethodBind],
   ["export", handleDerivedExport],
-  ["runtime terminal-bench migrate", handleTerminalBenchMigration],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],
@@ -1717,6 +1760,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["anchor", handleAnchor],
   ["bind", handleBind],
   ["anchoring configure", handleAnchoringConfigure],
+  ["identity bind", handleIdentityBind],
   ["disclosure declare", handleDisclosureDeclare],
   ["disclosure show", handleDisclosureShow],
   ["publication configure", handlePublicationConfigure],
@@ -1738,7 +1782,6 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["bundle verify", handleBundleVerify],
   ["freeze-repo export", handleFreezeRepoExport],
   ["freeze-repo verify", handleFreezeRepoVerify],
-  ["demo1 prereg verify", handleDemo1PreregistrationVerify],
 ]);
 
 /** The complete verb surface, derived from `VERBS` — the parity anchor `./parity.test.ts` checks

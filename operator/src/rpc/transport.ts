@@ -36,6 +36,7 @@ import {
   type Transport,
 } from 'viem';
 
+import { EMBEDDED_URL_RE } from '../util/embedded-url-pattern.js';
 import { walkStructured } from '../util/structured-walk.js';
 
 /**
@@ -258,7 +259,7 @@ export function maskRpcHost(url: string): string {
  * false-positive rate against a leak that cannot occur.
  */
 export function maskUrlsInMessage(message: string): string {
-  return message.replace(/(?:https?|wss?):\/\/[^\s"'<>]+/gi, (url) => maskRpcHost(url));
+  return message.replace(EMBEDDED_URL_RE, (url) => maskRpcHost(url));
 }
 
 /**
@@ -315,6 +316,11 @@ function sanitizeStructuredLeaf(value: unknown): unknown {
   // walk. Say so rather than emitting a misleading `{}`.
   if (typeof value === 'object' && value !== null) return UNSERIALIZABLE_MARKER;
   if (typeof value === 'function' || typeof value === 'symbol') return UNSERIALIZABLE_MARKER;
+  // A bigint is the one remaining primitive `JSON.stringify` throws on, and
+  // the event ring is JSON-serialized on the way out of the notifications
+  // endpoint. Marker it, matching `redactLeaf`'s treatment of the same value
+  // in the debug bundle (#3120).
+  if (typeof value === 'bigint') return UNSERIALIZABLE_MARKER;
   return value;
 }
 

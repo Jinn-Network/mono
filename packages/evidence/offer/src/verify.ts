@@ -21,7 +21,12 @@ export interface VerifyOfferInput {
   readonly key: string;
   /** The Agent IRI the offer claims to be signed on behalf of — the holder. */
   readonly holder: string;
-  /** The offer's effective time; binding resolution and the validity window apply at it. */
+  /**
+   * The offer's effective time; binding resolution and the validity window apply at it. Like
+   * `holder`, it is an input the record cannot vouch for, so it must not come from the same
+   * feed that supplied the envelope — see the README on why a fed `atTime` re-validates a
+   * revoked key.
+   */
   readonly atTime: string;
 }
 

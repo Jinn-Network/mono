@@ -180,9 +180,12 @@ const LOCAL_FINALITY_DEPTH = 64n;
  * Every scope a native evaluator role can require. The rig resolves bindings deterministically:
  * the DSSE ceremony behind a real catalog is a serving-plane leg this gate seeds (see header).
  */
-function binding(key: string): ResolvedBinding {
+// A conforming `BindingResolver` never resolves by key alone, so the fixture echoes
+// the queried Agent IRI back on the binding it returns (issue #3629).
+function binding(key: string, agent: string): ResolvedBinding {
   return {
     binding: {
+      agent,
       key: { didKey: key, keyid: key },
       scope: [
         'authorizations', 'observations', 'deliveries', 'verdicts', 'settlements',
@@ -540,7 +543,7 @@ async function buildNativeEvaluatorRig(input: NativeEvaluatorRigInput) {
   const publicClient = fixture.publicClient;
 
   // ── LEG 3: real native identity stores for the evaluator role family ───────────────────
-  const bindingResolver: BindingResolver = { resolveBinding: async (query) => binding(query.key) };
+  const bindingResolver: BindingResolver = { resolveBinding: async (query) => binding(query.key, query.agent) };
   const roles = await openRoleIdentitySet({
     agent: EVALUATOR_AGENT,
     requiredRoles: ['evaluator-verdict', 'evaluator-settlement', 'evaluator-discovery'],

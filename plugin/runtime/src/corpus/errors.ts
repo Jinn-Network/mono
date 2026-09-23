@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PluginRuntimeError } from "../errors.js";
+import type { RuntimeLogger } from "../logger.js";
 
 /**
  * C3 declares `PluginRuntimeError.code` as a plain string precisely so a
@@ -36,6 +37,36 @@ export function nodeErrorCode(error: unknown): string | undefined {
     : undefined;
 }
 
+/**
+ * Peer-influenced. Terminal-control sequences are stripped at the log
+ * boundary, not per site: `createLineLogger` (`logger.ts`) removes DEL and
+ * C1 (U+007F-U+009F) from every emitted string value and message, and the
+ * JSON it emits escapes C0 (ESC lands as the six-character backslash-u-001b
+ * escape). `sanitizeUntrustedText` still owns the durable-file and
+ * rendered-row boundaries.
+ * Accepted (#4482); the logger-level strip landed as the follow-up (#4552).
+ */
 export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * A logger that faults is not allowed to become the fault. `sync-loop.ts`
+ * guards its `cycle.unreported` warn this way (see the comment there) because
+ * a stderr EPIPE must not stop the loop; the same rule holds module-wide,
+ * where a throw from a warn inside a catch changes the CODE a source's
+ * failure is reported under (#4482). The line is the accepted loss; the
+ * verdict is not.
+ */
+export function bestEffortLogger(log: RuntimeLogger): RuntimeLogger {
+  const guard =
+    (level: keyof RuntimeLogger) =>
+    (message: string, fields?: Readonly<Record<string, unknown>>): void => {
+      try {
+        log[level](message, fields);
+      } catch {
+        // The logger itself. Nothing is left to report it to.
+      }
+    };
+  return { debug: guard("debug"), info: guard("info"), warn: guard("warn"), error: guard("error") };
 }

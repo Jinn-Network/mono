@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { accessSync, constants, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ import {
   spawnShim,
   writeShimCancellationCommand,
 } from "./shim.js";
+import { REMOVE_BUDGET_MS, removeAttemptTree } from "./attempt-tree-teardown.js";
 
 const dirs: string[] = [];
 const residualPids: number[] = [];
@@ -27,7 +28,8 @@ const waitFor = async <T>(fn: () => T | undefined, label: string): Promise<T> =>
 
 afterEach(() => {
   for (const pid of residualPids.splice(0)) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  const deadline = Date.now() + REMOVE_BUDGET_MS;
+  for (const dir of dirs.splice(0)) removeAttemptTree(dir, deadline);
 });
 
 describe.runIf(linux)("Linux native custody shim", () => {
@@ -181,9 +183,11 @@ describe.runIf(linux)("Linux native custody shim", () => {
       argv: [process.execPath, "-e", "setInterval(()=>{},1000)"], env: {}, cwd: root,
     });
     const fingerprint = await waitFor(() => readShimFingerprint(meta) ?? undefined, "ready fingerprint");
+    // A nonzero grace: at graceMs 0 the shim sends SIGKILL right behind SIGTERM, so which signal
+    // the child reports is a scheduling race (#4600). The SIGTERM assertion needs the grace window.
     writeFileSync(
       join(meta, "cancellation-command.json"),
-      '{"nonce":"nul-\\u0000-control-\\u0001-quote-\\"-slash-\\\\-supplementary-\\ud83d\\ude00","graceMs":0,"killPollCeilingMs":500}',
+      '{"nonce":"nul-\\u0000-control-\\u0001-quote-\\"-slash-\\\\-supplementary-\\ud83d\\ude00","graceMs":1000,"killPollCeilingMs":2000}',
     );
     expect(requestShimCancellation(meta, fingerprint)).toBe(true);
     const outcome = await waitFor(() => readOutcome(meta, nonce) ?? undefined, "unicode cancellation outcome");

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import type { VerifiedPublicBundleSnapshot } from "@colophon-claims/verify";
+import type { VerifiedPublicBundleSnapshot } from "@colophon-claims/check";
 import { createVerifiedBundleViewer, type VerifiedBundleViewer } from "./viewer.js";
 
 const roots: string[] = [];
@@ -108,7 +108,8 @@ function metadataFirstSnapshot(notFetchedDigests: readonly string[]): VerifiedPu
         "matrix-rederivation", "report-verification", "claim-consistency",
       ],
       artifactContent: {
-        status: "not-fetched",
+        // The status the verifier itself derives: `verified` exactly when no body was deferred.
+        status: notFetchedDigests.length === 0 ? "verified" : "not-fetched",
         verified: 2,
         notFetched: notFetchedDigests.length,
         notFetchedDigests,
@@ -154,6 +155,30 @@ describe("verified bundle viewer", () => {
     expect(page).toContain("3 artifact bodies were not fetched.");
     // No released npx reader understands this profile, so the page must not hand out one.
     expect(page).not.toContain("npx @colophon-claims/verify@0.1");
+    expect(page).toContain("colophon bundle verify --bundle");
+  });
+
+  test("offers the profile-aware command for a metadata-first bundle that deferred nothing, and names its scope without a verdict word", async () => {
+    const root = mkdtempSync(join(tmpdir(), "colophon-viewer-metadata-first-complete-"));
+    roots.push(root);
+    writeFileSync(join(root, "report.json"), "{}");
+    // A metadata-first bundle whose declared artifacts are only signer public keys defers no body,
+    // so `artifactContent.status` reads `verified`. The declared profile is still metadata-first,
+    // and no released npx reader line understands it (issue #3313).
+    const snapshot = metadataFirstSnapshot([]);
+    const viewer = await createVerifiedBundleViewer(root, 0, { verify: async () => snapshot });
+    viewers.push(viewer);
+    const session = await claim(viewer);
+    const page = await (await fetch(session.base, { headers: { cookie: session.cookie } })).text();
+
+    expect(page).toContain("7 of 7 bundle checks passed.");
+    // The v5 heading branch, guarded the same way as the v4 one below (#4262). This is the
+    // fixture where the word is actually in the input: `artifactContent.status` reads `verified`
+    // exactly when no body was deferred, so a page that ever printed that value verbatim would
+    // fail here rather than ship.
+    expect(page).toContain("Evidence-native benchmark");
+    expect(page).not.toMatch(/verified|certified|validated|audited/i);
+    expect(page).not.toContain("npx @colophon-claims/verify@");
     expect(page).toContain("colophon bundle verify --bundle");
   });
 
@@ -274,7 +299,12 @@ describe("verified bundle viewer", () => {
     viewers.push(viewer);
     const session = await claim(viewer);
     const html = await (await fetch(session.base, { headers: { cookie: session.cookie } })).text();
-    expect(html).toContain("Verified binary qualification");
+    // Pinned as the `<h1>` element, not as bare text: the qualification section's `<h2>` carries
+    // the same words, so a text-only match survives a rename of the heading branch above it.
+    expect(html).toContain("<h1>Binary qualification</h1>");
+    // #4262 extended the #2982 ruling to this surface; the whole response is the guard because the
+    // word reached the page through a heading, an eyebrow, and the document title.
+    expect(html).not.toMatch(/verified|certified|validated|audited/i);
     expect(html).toContain("two-human-unanimous");
     expect(html).toContain("factuality");
     expect(html).toContain("@colophon-claims/verify@0.1");

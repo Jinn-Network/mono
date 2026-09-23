@@ -59,11 +59,19 @@ COPY benchmarking/records/scripts ./scripts
 COPY benchmarking/records/src ./src
 RUN yarn build
 
+WORKDIR /app/contract-abis
+COPY contract-abis/package.json contract-abis/yarn.lock contract-abis/.yarnrc.yml ./
+RUN corepack enable && yarn install --immutable
+COPY contract-abis/tsconfig.json ./
+COPY contract-abis/generated ./generated
+COPY contract-abis/src ./src
+RUN yarn build
+
 # The worker portal-links @jinn-network/indexer and consumes its TS source via
 # the indexer's exports map (./enrichment-parse, ./ipfs). The indexer install
 # resolves its portal siblings (task-execution-protocol, trust-core,
-# benchmarking-records), so copy the indexer's manifest + the source files the
-# files the worker imports. No indexer build is needed — esbuild (Bundler
+# benchmarking-records, contract-abis), so copy the indexer's manifest + the
+# source files the worker imports. No indexer build is needed — esbuild (Bundler
 # resolution) reads the .ts sources directly through the portal and inlines them.
 WORKDIR /app/indexer
 COPY indexer/package.json indexer/yarn.lock ./

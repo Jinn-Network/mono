@@ -6,14 +6,11 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'benchmarking');
-const benchmarkingDirectories = ['protocol', 'evidence', 'evaluation', 'native-capture', 'records', 'testing', 'aggregate', 'run', 'publication', 'interop', 'marketplace', 'local'];
+const benchmarkingDirectories = ['protocol', 'evidence', 'evaluation', 'native-capture', 'records', 'testing', 'aggregate', 'run', 'publication', 'interop', 'local'];
 
 // The whole benchmarking tree is forbidden to import any evidence-tree package, the two
-// I/O-free evidence producer packages, any record-discovery package, and — critically — every
-// marketplace package (program §10 extension: benchmarking/marketplace is the sole
-// marketplace-importing package, and it lands only at M7, last). `records`/`aggregate`/`run`/
-// `interop` NEVER import a marketplace package; only the M7 `marketplace` package carves out
-// those imports when it registers.
+// I/O-free evidence producer packages, any record-discovery package, and every marketplace
+// package. `records`/`aggregate`/`run`/`interop`/`local` never import a marketplace package.
 const BENCHMARKING_FOREIGN_PACKAGES = [
   '@jinn-network/evidence-protocol',
   '@jinn-network/evidence-repository',
@@ -38,9 +35,8 @@ const BENCHMARKING_FOREIGN_PACKAGES = [
   '@jinn-network/record-discovery-facts-trust',
   '@jinn-network/record-discovery-facts-task-execution',
   '@jinn-network/record-discovery-source-evidence-journal',
-  // No `@jinn-network/marketplace-*` package exists yet (M7 is last, program §10 extension); the
-  // family is banned by prefix so the ban holds the moment any such package registers.
-  // The M7 `marketplace` package carves out binding + projector only (see MARKETPLACE_ALLOWED).
+  // The marketplace family is banned by prefix so no benchmarking package can grow a
+  // venue-binding import without a reviewed inventory change.
   '@jinn-network/marketplace-*',
   'viem',
   'better-sqlite3',
@@ -106,25 +102,6 @@ const INTEROP_FORBIDDEN_EXTRA = [
   '@jinn-network/task-execution-supervisor',
 ];
 
-// marketplace (M7) is the sole carve-out for marketplace binding + projector (program §7.140).
-const MARKETPLACE_ALLOWED = [
-  '@jinn-network/marketplace-binding',
-  '@jinn-network/marketplace-projector',
-];
-
-const MARKETPLACE_FORBIDDEN_EXTRA = [
-  '@jinn-network/benchmarking-aggregate',
-  '@jinn-network/benchmarking-interop',
-  '@jinn-network/benchmarking-testing',
-  '@jinn-network/marketplace-pipeline',
-  '@jinn-network/marketplace-testing',
-  '@jinn-network/task-execution-testing',
-  '@jinn-network/task-execution-backend-local',
-  '@jinn-network/task-execution-workspace',
-  '@jinn-network/task-execution-launchers',
-  '@jinn-network/task-execution-supervisor',
-];
-
 // local (C4) is the local-venue port bundle. It carries the treatment-fidelity bridge, which
 // reads local admission-gate results and Evidence Runtime Observations — and reads them as
 // *injected values*, never by importing the backend or an evidence package. Those shapes are
@@ -134,7 +111,6 @@ const MARKETPLACE_FORBIDDEN_EXTRA = [
 const LOCAL_FORBIDDEN_EXTRA = [
   '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-interop',
-  '@jinn-network/benchmarking-marketplace',
   '@jinn-network/benchmarking-testing',
   '@jinn-network/task-execution-testing',
   '@jinn-network/task-execution-backend-local',
@@ -144,7 +120,7 @@ const LOCAL_FORBIDDEN_EXTRA = [
 ];
 const PUBLICATION_FORBIDDEN_EXTRA = [
   '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-interop',
-  '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-marketplace',
+  '@jinn-network/benchmarking-local',
   '@jinn-network/benchmarking-run', '@jinn-network/benchmarking-testing',
   '@jinn-network/task-execution-backend', '@jinn-network/task-execution-profiles',
   '@jinn-network/marketplace-*',
@@ -299,7 +275,9 @@ function files(directory) {
 }
 
 function specifiers(source) {
-  const trivia = String.raw`(?:(?:\s+)|(?:\/\*[\s\S]*?\*\/)|(?:\/\/[^\r\n]*(?:\r?\n|$)))*`;
+  // Linear: one character or one comment per iteration. `(?:\\s+)*` split whitespace runs
+  // exponentially, and a prose `from` before a run of `//` lines took 74 minutes in CI.
+  const trivia = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n|$))*`;
   return [
     new RegExp(String.raw`\bfrom${trivia}["']([^"']+)["']`, 'g'),
     new RegExp(String.raw`\bimport${trivia}["']([^"']+)["']`, 'g'),
@@ -379,7 +357,7 @@ test('the import scanner catches static, export, dynamic, require, and local-pat
 });
 
 test('the marketplace-family wildcard bans any future @jinn-network/marketplace-* package', () => {
-  const fixture = mkdtempSync(join(tmpdir(), 'jinn-benchmarking-marketplace-wildcard-'));
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-marketplace-family-wildcard-'));
   try {
     const source = join(fixture, 'src');
     mkdirSync(source);
@@ -389,34 +367,6 @@ test('the marketplace-family wildcard bans any future @jinn-network/marketplace-
     ].join('\n'));
     const findings = forbiddenImports(source, ['@jinn-network/marketplace-*']);
     assert.equal(findings.length, 2);
-  } finally { rmSync(fixture, { recursive: true, force: true }); }
-});
-
-test('marketplace may import binding and projector; other benchmarking packages may not', () => {
-  const fixture = mkdtempSync(join(tmpdir(), 'jinn-benchmarking-marketplace-allowed-'));
-  try {
-    const source = join(fixture, 'src');
-    mkdirSync(source);
-    const allowedFile = join(source, 'allowed.ts');
-    writeFileSync(allowedFile, [
-      'import { selectGeneration } from "@jinn-network/marketplace-binding";',
-      'import { reduceMarketplaceProjection } from "@jinn-network/marketplace-projector";',
-    ].join('\n'));
-    const foreignForMarketplace = [
-      ...BENCHMARKING_FOREIGN_PACKAGES.filter((pkg) => pkg !== '@jinn-network/marketplace-*'),
-      '@jinn-network/marketplace-pipeline',
-      '@jinn-network/marketplace-testing',
-    ];
-    assert.deepEqual(
-      forbiddenImportsInFiles([allowedFile], foreignForMarketplace, FORBIDDEN_ROOTS),
-      [],
-    );
-    const forbiddenFile = join(source, 'forbidden.ts');
-    writeFileSync(forbiddenFile, 'import "@jinn-network/marketplace-pipeline";');
-    assert.deepEqual(
-      forbiddenImportsInFiles([forbiddenFile], ['@jinn-network/marketplace-pipeline']),
-      [relative(root, forbiddenFile) + ' -> @jinn-network/marketplace-pipeline'],
-    );
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
@@ -457,7 +407,6 @@ test('benchmarking source boundaries remain one-way across the approved graph', 
       '@jinn-network/benchmarking-run',
       '@jinn-network/benchmarking-publication',
       '@jinn-network/benchmarking-interop',
-      '@jinn-network/benchmarking-marketplace',
       '@jinn-network/benchmarking-local',
       '@jinn-network/task-execution-*',
       '@jinn-network/trust-resolve',
@@ -487,7 +436,6 @@ test('benchmarking source boundaries remain one-way across the approved graph', 
       '@jinn-network/benchmarking-aggregate',
       '@jinn-network/benchmarking-publication',
       '@jinn-network/benchmarking-interop',
-      '@jinn-network/benchmarking-marketplace',
       '@jinn-network/benchmarking-local',
       '@jinn-network/task-execution-*',
       '@jinn-network/trust-resolve',
@@ -519,7 +467,6 @@ test('benchmarking source boundaries remain one-way across the approved graph', 
       '@jinn-network/benchmarking-aggregate',
       '@jinn-network/benchmarking-publication',
       '@jinn-network/benchmarking-interop',
-      '@jinn-network/benchmarking-marketplace',
       '@jinn-network/benchmarking-local',
       '@jinn-network/task-execution-*',
       '@jinn-network/trust-resolve',
@@ -572,18 +519,6 @@ test('benchmarking source boundaries remain one-way across the approved graph', 
   assertBoundary(
     join(packages, 'interop', 'src'),
     [...BENCHMARKING_FOREIGN_PACKAGES, ...INTEROP_FORBIDDEN_EXTRA],
-    FORBIDDEN_ROOTS,
-  );
-  // marketplace imports binding + projector only; never pipeline / aggregate / evidence.
-  const marketplaceForeign = [
-    ...BENCHMARKING_FOREIGN_PACKAGES.filter((pkg) => pkg !== '@jinn-network/marketplace-*'),
-    '@jinn-network/marketplace-pipeline',
-    '@jinn-network/marketplace-testing',
-    ...MARKETPLACE_FORBIDDEN_EXTRA,
-  ];
-  assertBoundary(
-    join(packages, 'marketplace', 'src'),
-    marketplaceForeign,
     FORBIDDEN_ROOTS,
   );
   // local imports records + run only; never a concrete backend, never an evidence package,

@@ -5,14 +5,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { EvidenceCatalogError, type Sha256Digest } from "@jinn-network/evidence-discovery";
+import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
+import {
+  ANNOUNCEMENT_EDGE_CURSOR_CLAUSE,
+  announcementEdgeSelectSql,
+} from "./announcement-edges.js";
 import {
   ANNOUNCEMENT_EDGE_MAX_LIMIT,
   announcementEdgesFromCard,
   createSqliteEvidenceCatalog,
 } from "./index.js";
-import type { AnnouncementEdgeIndexInput, SqliteEvidenceCatalog } from "./types.js";
+import type {
+  AnnouncementEdgeIndexInput,
+  AnnouncementEdgeQuery,
+  SqliteEvidenceCatalog,
+} from "./types.js";
 
 const generation = {
   catalogSchemaVersion: "1.0.0",
@@ -150,6 +159,29 @@ describe("announcementEdgesFromCard", () => {
     expect(() => announcementEdgesFromCard(announcement(
       "", "ann-1", EXECUTION_KIND, EXECUTION_ONE, ["taskDigest"], { taskDigest: TASK },
     ))).toThrow(EvidenceCatalogError);
+  });
+
+  test("reads a repeated field name once, rather than emitting a duplicate primary key", () => {
+    // A field named twice describes one edge twice. Emitted literally, the two rows collide on
+    // `(source_id, record_digest, field, ordinal)` and the constraint surfaces as IO_FAILURE --
+    // an infrastructure fault standing in for a caller-shaped mistake.
+    const edges = announcementEdgesFromCard(announcement(
+      HOLDER, "ann-1", EXECUTION_KIND, EXECUTION_ONE,
+      ["taskDigest", "resultDigests", "taskDigest"],
+      { taskDigest: TASK, resultDigests: [RESULT_A] },
+    ));
+    expect(edges.map((edge) => [edge.field, edge.ordinal])).toEqual([
+      ["taskDigest", 0],
+      ["resultDigests", 0],
+    ]);
+  });
+
+  test("persists a repeated field name without a constraint failure", async () => {
+    const repeated = digest("f1");
+    await expect(catalog.indexAnnouncementEdges(announcement(
+      HOLDER, "ann-repeat", EXECUTION_KIND, repeated, ["taskDigest", "taskDigest"],
+      { taskDigest: TASK },
+    ))).resolves.toMatchObject({ indexed: 1 });
   });
 });
 
@@ -368,5 +400,113 @@ describe("paging a heavily referenced target", () => {
       targetDigest: popular,
       limit: ANNOUNCEMENT_EDGE_MAX_LIMIT + 1,
     })).rejects.toThrow(EvidenceCatalogError);
+  });
+
+  test("refuses a query field it does not serve rather than dropping the filter", async () => {
+    // `sourceID` is a typo for `sourceId`. Ignored, it would drop the isolation filter and return
+    // every source's edges under a query that reads as scoped to one.
+    await expect(catalog.queryAnnouncementEdges(
+      { sourceID: HOLDER, targetDigest: TASK } as unknown as AnnouncementEdgeQuery,
+    )).rejects.toMatchObject({ code: "INVALID_QUERY" });
+  });
+});
+
+describe("announcement-edge index coverage", () => {
+  // The plan is asserted over the statement the binding itself builds, so a change to the SELECT
+  // or the ORDER BY moves this assertion with it. A temp b-tree here means the page cost is
+  // quadratic in the page depth even though the results stay correct.
+  const planFor = (where: string): string[] => {
+    // The real catalog file, so the plan is taken against the schema this package creates.
+    const database = new Database(catalog.databasePath, { readonly: true });
+    // One binding per filter placeholder, plus the LIMIT the statement always carries. The
+    // values are irrelevant to the plan; SQLite only needs the statement to be fully bound.
+    const bindings = Array.from({ length: (where.match(/\?/gu) ?? []).length + 1 }, () => "x");
+    try {
+      return (database
+        .prepare(`EXPLAIN QUERY PLAN ${announcementEdgeSelectSql(where)}`)
+        .all(...bindings) as { detail: string }[]).map((row) => row.detail);
+    } finally {
+      database.close();
+    }
+  };
+
+  // Every shape is asserted twice: once as the first page, and once resumed. The resumed form is
+  // the one the graph walk spends most of its time in -- every page after the first appends the
+  // cursor comparison -- and it is a different plan question, because the comparison is a range
+  // term over the ordering key rather than another equality. Asserting only the first page would
+  // leave a reordered index column able to regress paging while the suite stayed green.
+  const shapes = [
+    {
+      name: "the referrers shape the README advertises: target plus one field",
+      where: "target_digest = ? AND field = ?",
+      index: "announcement_edges_target_field_idx",
+    },
+    {
+      name: "the target-only referrers shape",
+      where: "target_digest = ?",
+      index: "announcement_edges_target_idx",
+    },
+    {
+      name: "the outbound shape narrowed to one field, which the graph walk pages through",
+      where: "record_digest = ? AND field = ?",
+      index: "announcement_edges_record_field_idx",
+    },
+    {
+      name: "the record-only outbound shape",
+      where: "record_digest = ?",
+      index: "announcement_edges_record_idx",
+    },
+  ] as const;
+
+  for (const shape of shapes) {
+    test(`covers ${shape.name}`, () => {
+      const plan = planFor(shape.where);
+      expect(plan.join("\n")).toContain(shape.index);
+      expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+    });
+
+    test(`covers ${shape.name}, resumed from a cursor`, () => {
+      // The clause comes from the binding, so a change to the cursor key moves this with it.
+      const plan = planFor(`${shape.where} AND ${ANNOUNCEMENT_EDGE_CURSOR_CLAUSE}`);
+      expect(plan.join("\n")).toContain(shape.index);
+      expect(plan.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+    });
+  }
+
+  // Neither of the next two is a covered shape, and deliberately so -- see the README's note on
+  // the two unindexed served filters. Each asserts the conclusion that note records, so a change
+  // that moved either plan fails here rather than leaving the prose to drift.
+  //
+  // recordKind alone: no index of its own, but the primary key already matches the ORDER BY
+  // exactly, so the page ordering is free and a resumed page seeks rather than re-scanning. A
+  // change that cost the ordering a temp b-tree fails here.
+  test("has no index of its own for the recordKind-only filter, but orders for free", () => {
+    const firstPage = planFor("record_kind = ?");
+    expect(firstPage.join("\n")).toContain("SCAN announcement_edges");
+    expect(firstPage.join("\n")).toContain("sqlite_autoindex_announcement_edges_1");
+    expect(firstPage.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+
+    const resumed = planFor(`record_kind = ? AND ${ANNOUNCEMENT_EDGE_CURSOR_CLAUSE}`);
+    expect(resumed.join("\n")).toContain("SEARCH announcement_edges");
+    expect(resumed.join("\n")).toContain("sqlite_autoindex_announcement_edges_1");
+    expect(resumed.some((detail) => detail.includes("TEMP B-TREE"))).toBe(false);
+  });
+
+  // field alone: the same missing index, but the ordering is not free. SQLite treats the
+  // equality-constrained field as constant and drops it from the ORDER BY, which leaves ordinal
+  // out of index order, so both pages sort through a temp b-tree. That cost is accepted rather
+  // than indexed away -- nothing in-tree queries the shape -- and pinning it keeps the acceptance
+  // a decision rather than an oversight: an index that removed the temp b-tree fails here too,
+  // and should be landed with the note above updated.
+  test("has no index of its own for the field-only filter, and pays a temp b-tree to order", () => {
+    const firstPage = planFor("field = ?");
+    expect(firstPage.join("\n")).toContain("SCAN announcement_edges");
+    expect(firstPage.join("\n")).toContain("sqlite_autoindex_announcement_edges_1");
+    expect(firstPage.some((detail) => detail.includes("TEMP B-TREE"))).toBe(true);
+
+    const resumed = planFor(`field = ? AND ${ANNOUNCEMENT_EDGE_CURSOR_CLAUSE}`);
+    expect(resumed.join("\n")).toContain("SEARCH announcement_edges");
+    expect(resumed.join("\n")).toContain("sqlite_autoindex_announcement_edges_1");
+    expect(resumed.some((detail) => detail.includes("TEMP B-TREE"))).toBe(true);
   });
 });

@@ -10,13 +10,22 @@ const archive = join(temporary, "package.tgz");
 const protocolArchive = join(temporary, "protocol.tgz");
 const serveArchive = join(temporary, "serve.tgz");
 const trustArchive = join(temporary, "trust.tgz");
-function run(command, args, cwd) { return new Promise((resolve, reject) => { const child = spawn(command, args, { cwd, stdio: "inherit" }); child.once("error", reject); child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`))); }); }
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {string} cwd
+ */
+function run(command, args, cwd) { return new Promise((resolve, reject) => { const child = spawn(command, args, { cwd, stdio: "inherit" }); child.once("error", reject); child.once("exit", (code) => code === 0 ? resolve(undefined) : reject(new Error(`${command} exited ${code}`))); }); }
 try {
   await run("npm", ["pack", "--ignore-scripts", "--pack-destination", temporary], join(root, "../../trust/core"));
   await run("npm", ["pack", "--ignore-scripts", "--pack-destination", temporary], join(root, "../protocol"));
   await run("npm", ["pack", "--ignore-scripts", "--pack-destination", temporary], join(root, "../serve"));
   const packed = await (await import("node:fs/promises")).readdir(temporary);
-  const archiveNamed = (needle) => join(temporary, packed.find((name) => name.includes(needle) && name.endsWith(".tgz")));
+  const archiveNamed = (/** @type {string} */ needle) => {
+    const found = packed.find((name) => name.includes(needle) && name.endsWith(".tgz"));
+    if (found === undefined) throw new Error(`no packed archive matches ${needle}`);
+    return join(temporary, found);
+  };
   await (await import("node:fs/promises")).rename(archiveNamed("trust-core"), trustArchive);
   await (await import("node:fs/promises")).rename(archiveNamed("record-discovery-protocol"), protocolArchive);
   await (await import("node:fs/promises")).rename(archiveNamed("record-discovery-serve"), serveArchive);

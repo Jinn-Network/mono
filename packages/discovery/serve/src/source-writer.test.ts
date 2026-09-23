@@ -339,6 +339,25 @@ describe("durable Record Discovery source writer", () => {
     await expect(writer(harness).recover()).rejects.toThrow("signature is not valid");
   });
 
+  // The command's timestamp becomes the head's `issuedAt` verbatim, so a
+  // timestamp the head schema will refuse (#3482) has to be refused HERE:
+  // admitting it signs a head and persists the append intent before the
+  // schema sees it, and the claimed intent then replays the same failure on
+  // every recover, wedging the source permanently.
+  it.each([
+    ["offset-less", "2026-08-03T12:00:00"],
+    ["a day the calendar does not have", "2026-02-30T00:00:00Z"],
+  ])("refuses %s timestamp before anything is signed or persisted", async (_label, timestamp) => {
+    const harness = makeHarness();
+    const sourceWriter = writer(harness);
+
+    await expect(sourceWriter.append({ ...command(), timestamp })).rejects.toBeInstanceOf(SourceWriterIntegrityError);
+    expect(await harness.intents.read("any")).toBeUndefined();
+    expect(harness.signCount()).toBe(0);
+
+    await expect(sourceWriter.append(command())).resolves.toBeDefined();
+  });
+
   it("requires exact record bytes and source-local available withdrawal targets", async () => {
     const harness = makeHarness();
     const sourceWriter = writer(harness);
@@ -460,6 +479,42 @@ describe("durable Record Discovery source writer", () => {
     expect(receipt).toMatchObject({ announcementId: "ann-1", sequence: "0000000000000001" });
   });
 
+  // #3569: the bound governs minting a new head, never acknowledging one that already
+  // exists. A backwards clock correction of more than one window (an NTP fix on a host
+  // that was badly fast -- exactly the population this bound exists for) must not stop a
+  // durably committed announcement from returning its receipt, or the publish path's
+  // unconditional-append-plus-idempotency contract retries a committed publication until
+  // wall clock catches up.
+  it("returns a committed announcement's receipt however far ahead of the clock its timestamp is", async () => {
+    const harness = makeHarness();
+    const first = await writer(harness).append(command());
+    const signCount = harness.signCount();
+
+    // Two days behind command()'s timestamp -- past the 24h window, so minting is refused.
+    const replay = await writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).append(command());
+
+    expect(replay).toEqual(first);
+    expect(harness.signCount()).toBe(signCount);
+  });
+
+  // The carve-out is idempotency, not a clock special case: a writer whose window has
+  // since collapsed refuses to mint, but must still acknowledge what it already minted.
+  it("returns a committed announcement's receipt from a writer whose window now collapses", async () => {
+    const harness = makeHarness();
+    const first = await writer(harness).append(command());
+    const collapsed = createDurableSourceWriter({
+      source: SOURCE,
+      signer: harness.signer,
+      blobs: harness.blobs,
+      states: harness.states,
+      intents: harness.intents,
+      clock: DEFAULT_TEST_CLOCK,
+      refreshWithinMs: 0.5,
+    });
+
+    await expect(collapsed.append(command())).resolves.toEqual(first);
+  });
+
   it("accepts a past-dated timestamp however far behind its own clock", async () => {
     const harness = makeHarness();
     const receipt = await writer(harness, undefined, clockAt("2031-01-01T00:00:00.000Z")).append(command());
@@ -476,18 +531,29 @@ describe("durable Record Discovery source writer", () => {
       blobs: harness.blobs,
       states: harness.states,
       intents: harness.intents,
+      clock: DEFAULT_TEST_CLOCK,
       refreshWithinMs: 0.5,
     });
 
     await expect(collapsed.append(command())).rejects.toThrow(/no consumer accepts/);
   });
 
-  it("refuses a timestamp whose freshness window overflows the representable range", async () => {
+  // Was "refuses a timestamp whose freshness window overflows the representable
+  // range": an extended-year spelling near the ECMAScript time-value limit used to
+  // reach the window arithmetic and needed its own guard there. Reading the §5.2
+  // grammar (#3482) refuses it one step earlier, as invalid -- a four-digit year plus
+  // the 24h `refreshWithinMs` clamp cannot overflow -- so the assertion moves to the
+  // refusal that now happens, and the refusal is still checked to land before the
+  // writer signs or persists anything.
+  it("refuses an extended-year timestamp before anything is signed or persisted", async () => {
     const harness = makeHarness();
     const extreme: AppendAnnouncementCommand = { ...command(), timestamp: "+275760-09-13T00:00:00.000Z" };
 
     await expect(writer(harness).append(extreme)).rejects.toThrow(SourceWriterIntegrityError);
-    await expect(writer(harness).append(extreme)).rejects.toThrow(/out of representable range/);
+    await expect(writer(harness).append(extreme)).rejects.toThrow(/timestamp is invalid/);
+    expect(harness.blobs.values.size).toBe(0);
+    expect(await harness.intentCas.read()).toBeUndefined();
+    expect(harness.signCount()).toBe(0);
   });
 
   it("does not re-bound an already-signed recovery intent against the clock", async () => {
@@ -498,7 +564,45 @@ describe("durable Record Discovery source writer", () => {
     // Recovery replays frozen, already-signed bytes. Re-bounding here would strand a head
     // that was in-window when it was minted, and `recover()` runs at the top of every
     // append, so the source would be wedged rather than merely delayed.
-    await expect(writer(harness, undefined, clockAt("2031-01-01T00:00:00.000Z")).recover())
+    //
+    // The clock must be *behind* the intent's timestamp for this to discriminate (#3570):
+    // `checkRefreshWindow` rule 3 only refuses a head issued ahead of `now`, so a clock
+    // ahead of it passes the bound whether or not recovery applies it. Two days behind
+    // command()'s 2026-08-03T12:00:00Z stamp is past the 24h window, so an implementation
+    // that re-bounded during recovery fails here.
+    await expect(writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).recover())
       .resolves.toMatchObject({ status: "recovered" });
+  });
+
+  // The two guards above replay an announcement already committed in STATE, which the
+  // append path answers from its idempotency lookup before reaching the window check.
+  // This replays a durable INTENT instead -- signed, not yet in state -- which is what
+  // the carve-out at the top of the CAS loop is actually justified by: `recover()` runs
+  // unconditionally there, ahead of the window refusal, precisely so an out-of-window
+  // writer still finishes work that is already durable. Nothing covered that, so
+  // gating the recovery on `windowFailure === undefined` left the whole suite green
+  // while breaking exactly that: the intent can only be cleared by the recovery the
+  // gate now skips, so that command keeps refusing until the writer's clock catches up.
+  // The stall is bounded, not permanent -- an in-window append runs the recovery and
+  // clears the intent -- but it is a real refusal of durable work, which is what the
+  // carve-out exists to prevent.
+  //
+  // The clock must be BEHIND the intent's timestamp, as in the case above (#3570):
+  // `checkRefreshWindow` rule 3 only refuses a head issued ahead of `now`, so a clock
+  // set forward never produces the `windowFailure` the gate reads and the case would
+  // not discriminate at all.
+  it("finishes a durable intent on append from a writer whose clock is now out of window", async () => {
+    const harness = makeHarness();
+    await expect(writer(harness, "after-intent-before-page").append(command())).rejects.toThrow();
+    expect(await harness.intentCas.read()).toBeDefined();
+    const signCount = harness.signCount();
+
+    const replay = await writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).append(command());
+
+    expect(replay).toMatchObject({ announcementId: "ann-1", sequence: "0000000000000001" });
+    // Together these say the receipt came from finishing the frozen intent, not from
+    // minting a second head: nothing re-signed, and the intent is durably cleared.
+    expect(harness.signCount()).toBe(signCount);
+    expect(await harness.intentCas.read()).toBeUndefined();
   });
 });

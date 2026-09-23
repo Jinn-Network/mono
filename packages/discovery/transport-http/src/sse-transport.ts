@@ -1,6 +1,7 @@
 import type { StreamSubscription, StreamTransport } from "@jinn-network/record-discovery-client";
 
 import type { FetchLike } from "./ports.js";
+import { requestWithinOrigin } from "./redirect-guard.js";
 import type { SseColdSyncHint, SseTerminalEventType } from "./sse.js";
 
 // The client-side `StreamTransport` plug (spec §6.2). One of the three
@@ -139,7 +140,14 @@ export function createSseStreamTransport(
           accept: "text/event-stream",
           ...(lastEventId === undefined ? {} : { "last-event-id": lastEventId }),
         };
-        const response = await fetchLike(target, { method: "GET", headers, signal: controller.signal });
+        // The same per-hop origin guard the archive path uses (#3432). PR
+        // #3414 closed the redirect half on one of this package's three
+        // transports; a tail URL is peer-served too, so the relay on the other
+        // end of an operator-configured `sseUrl` can post a forwarding address
+        // exactly as an archive host can. `requestWithinOrigin` hands back the
+        // 3xx-resolved `Response`, which is precisely what the stream reader
+        // below needs, so enforcing here costs nothing but the call.
+        const response = await requestWithinOrigin(fetchLike, target, headers, controller.signal);
         if (response.body === null) return "ended";
         if (stopped) return "ended";
 

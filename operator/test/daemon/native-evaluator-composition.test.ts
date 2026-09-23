@@ -48,9 +48,12 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-function binding(key: string): ResolvedBinding {
+// A conforming `BindingResolver` never resolves by key alone, so the fixture echoes
+// the queried Agent IRI back on the binding it returns (issue #3629).
+function binding(key: string, agent: string): ResolvedBinding {
   return {
     binding: {
+      agent,
       key: { didKey: key, keyid: key },
       // Every scope a native role can require, including the announce-plane scope the three
       // `*-discovery` roles gained in issue #2525 and the admission-receipt scope the `admission`
@@ -113,7 +116,7 @@ async function fixture(input: {
   const root = await mkdtemp(join(tmpdir(), "jinn-native-evaluator-composition-"));
   roots.push(root);
   const resolver: BindingResolver = {
-    resolveBinding: vi.fn(async (query) => binding(query.key)),
+    resolveBinding: vi.fn(async (query) => binding(query.key, query.agent)),
   };
   const roles = await openRoleIdentitySet({
     storePath: join(root, "identity", "roles.enc.json"),
@@ -143,6 +146,7 @@ async function fixture(input: {
   const backend = {
     shutdown: vi.fn(async () => { lifecycle.push("backend"); }),
     getDeliverySignature: vi.fn(),
+    reconcileNonterminal: vi.fn(async () => []),
   } as unknown as LocalTaskExecutionBackend;
   const evidence = {
     repository: {
@@ -210,6 +214,9 @@ describe("native evaluator production composition", () => {
   it("selects evaluator custody and the exact prediction deployment without solver runtime fallbacks", async () => {
     const value = await fixture();
     const composition = await buildNativeEvaluatorComposition(value.config);
+    // #4397: untracked nonterminal attempts converge at boot, before any coordinator runs.
+    expect((value.backend as unknown as { reconcileNonterminal: ReturnType<typeof vi.fn> }).reconcileNonterminal)
+      .toHaveBeenCalledTimes(1);
     const config = value.backendConfigs[0]!;
     expect(config.launchers).toHaveLength(1);
     expect(config.launchers[0]!.capabilities().taskProfiles).toEqual([

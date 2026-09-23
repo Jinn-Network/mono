@@ -29,7 +29,7 @@ export default function Page() {
 
       <Card className="rounded-none border-0 border-b bg-transparent py-8 shadow-none md:border-b-0 md:border-r">
         <CardHeader><p className="colophon-eyebrow text-[var(--vermilion)]">02 · Reader only</p><CardTitle className="mt-5 text-3xl">Verify a bundle</CardTitle></CardHeader>
-        <CardContent><ActionForm action={guidedVerifyBundleAction} submitLabel="Run all six checks"><div><Label htmlFor="bundle">Bundle directory on this machine</Label><Input id="bundle" name="bundle" placeholder="/absolute/path/to/bundle" required /></div><p className="text-sm text-muted-foreground">The reader opens this directory read-only. It needs no runner, account, key, funds, or Docker.</p></ActionForm></CardContent>
+        <CardContent><ActionForm action={guidedVerifyBundleAction} submitLabel="Run the bundle checks"><div><Label htmlFor="bundle">Bundle directory on this machine</Label><Input id="bundle" name="bundle" placeholder="/absolute/path/to/bundle" required /></div><p className="text-sm text-muted-foreground">The reader opens this directory read-only. It needs no runner, account, key, funds, or Docker.</p></ActionForm></CardContent>
       </Card>
 
       <Card className="rounded-none border-0 bg-transparent py-8 shadow-none">

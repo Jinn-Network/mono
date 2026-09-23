@@ -15,6 +15,9 @@ const BOOT_TIME = '2026-08-02T12:00:00.000Z';
 
 function resolvedBinding(input: {
   readonly key: string;
+  // A conforming `BindingResolver` never resolves by key alone, so the fixture
+  // echoes the queried Agent IRI back on the binding it returns (issue #3629).
+  readonly agent: string;
   readonly scopes: readonly string[];
   readonly effectiveStart?: string;
   readonly expiresAt?: string;
@@ -22,6 +25,7 @@ function resolvedBinding(input: {
 }): ResolvedBinding {
   return {
     binding: {
+      agent: input.agent,
       key: { didKey: input.key, keyid: input.key },
       scope: input.scopes,
       validFrom: input.effectiveStart ?? '2026-08-01T00:00:00.000Z',
@@ -82,7 +86,7 @@ describe('native persistent role identities', () => {
   it('opens only explicitly owned roles and subjects every family to the full authority gate', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-scoped-'));
     const resolver: BindingResolver = {
-      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })),
+      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, agent: query.agent, scopes: ALL_NATIVE_SCOPES })),
     };
     const verifyRoleBinding = vi.fn(async () => ({ bindingDigest: `sha256:${'1'.repeat(64)}` as const }));
     const identities = await openRoleIdentitySet({
@@ -120,7 +124,7 @@ describe('native persistent role identities', () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-requester-custody-'));
     const path = join(root, 'identity', 'requester.enc.json');
     const resolver: BindingResolver = {
-      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })),
+      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, agent: query.agent, scopes: ALL_NATIVE_SCOPES })),
     };
     await openRoleIdentitySet({
       storePath: path,
@@ -145,7 +149,7 @@ describe('native persistent role identities', () => {
     const admissionAgent = 'urn:jinn:admission:stable';
     const resolver: BindingResolver = {
       resolveBinding: vi.fn(async (query) => query.agent === admissionAgent
-        ? resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })
+        ? resolvedBinding({ key: query.key, agent: query.agent, scopes: ALL_NATIVE_SCOPES })
         : null),
     };
     const common = {
@@ -179,7 +183,7 @@ describe('native persistent role identities', () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-'));
     const resolver: BindingResolver = {
       resolveBinding: vi.fn(async (query) =>
-        resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES }),
+        resolvedBinding({ key: query.key, agent: query.agent, scopes: ALL_NATIVE_SCOPES }),
       ),
     };
 
@@ -195,7 +199,7 @@ describe('native persistent role identities', () => {
   it('verifies signed discovery material with the persisted public key', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-verify-'));
     const resolver: BindingResolver = {
-      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })),
+      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, agent: query.agent, scopes: ALL_NATIVE_SCOPES })),
     };
     const identities = await openAt(root, resolver);
     const identity = identities.get('solver-discovery');
@@ -209,7 +213,7 @@ describe('native persistent role identities', () => {
   it('stores encrypted key material with owner-only directory and file permissions', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-permissions-'));
     const resolver: BindingResolver = {
-      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })),
+      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, agent: query.agent, scopes: ALL_NATIVE_SCOPES })),
     };
     const identities = await openAt(root, resolver);
     const path = join(root, 'identity', 'roles.enc.json');
@@ -224,7 +228,7 @@ describe('native persistent role identities', () => {
   it('fails closed when an existing identity store is corrupted instead of generating a replacement key', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-corrupt-'));
     const resolver: BindingResolver = {
-      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })),
+      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, agent: query.agent, scopes: ALL_NATIVE_SCOPES })),
     };
     await openAt(root, resolver);
     const path = join(root, 'identity', 'roles.enc.json');
@@ -244,12 +248,50 @@ describe('native persistent role identities', () => {
     await expect(openAt(root, resolver)).rejects.toThrow(/no effective binding/i);
   });
 
+  /**
+   * A key-only resolver: it ignores `query.agent` and returns a binding carrying a
+   * FOREIGN Agent IRI, otherwise fully authorized. `BindingResolver` is contracted
+   * never to resolve by key alone, so this stands in for a realistic cache bug.
+   * Both boot and `resolveEffective` must refuse it as unresolved -- not as a key
+   * mismatch, which is what a check placed below the key guard would report
+   * (issue #3629).
+   */
+  const keyOnlyResolver = (): BindingResolver => ({
+    resolveBinding: vi.fn(async (query) => resolvedBinding({
+      key: query.key, agent: 'urn:jinn:agent:someone-else', scopes: ALL_NATIVE_SCOPES,
+    })),
+  });
+
+  it('rejects a role whose binding a key-only resolver returned for another agent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-foreign-agent-'));
+
+    await expect(openAt(root, keyOnlyResolver()))
+      .rejects.toThrow(/no effective binding at boot/u);
+  });
+
+  it('refuses effective authority for a binding a key-only resolver returned for another agent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-foreign-agent-effective-'));
+    let foreign = false;
+    const resolver: BindingResolver = {
+      resolveBinding: vi.fn(async (query) => resolvedBinding({
+        key: query.key,
+        agent: foreign ? 'urn:jinn:agent:someone-else' : query.agent,
+        scopes: ALL_NATIVE_SCOPES,
+      })),
+    };
+    const identities = await openAt(root, resolver);
+    foreign = true;
+
+    await expect(identities.resolveEffective('solver-delivery', '2026-08-02T12:05:00.000Z'))
+      .resolves.toEqual({ ok: false, reason: 'binding-not-resolved' });
+  });
+
   it('rejects a role whose binding is not yet effective at native boot', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-future-'));
     const resolver: BindingResolver = {
       resolveBinding: vi.fn(async (query) =>
         resolvedBinding({
-          key: query.key,
+          key: query.key, agent: query.agent,
           scopes: ALL_NATIVE_SCOPES,
           effectiveStart: '2026-08-02T12:00:01.000Z',
         }),
@@ -264,7 +306,7 @@ describe('native persistent role identities', () => {
     const resolver: BindingResolver = {
       resolveBinding: vi.fn(async (query) =>
         resolvedBinding({
-          key: query.key,
+          key: query.key, agent: query.agent,
           scopes: ALL_NATIVE_SCOPES,
           expiresAt: '2026-08-02T11:59:59.000Z',
         }),
@@ -279,7 +321,7 @@ describe('native persistent role identities', () => {
     const resolver: BindingResolver = {
       resolveBinding: vi.fn(async (query) =>
         resolvedBinding({
-          key: query.key,
+          key: query.key, agent: query.agent,
           scopes: ALL_NATIVE_SCOPES,
           revocations: [{ effectiveTime: BOOT_TIME }],
         }),
@@ -296,7 +338,7 @@ describe('native persistent role identities', () => {
       resolveBinding: vi.fn(async (query) => {
         const role = NATIVE_ROLE_IDENTITY_ROLES[bindingIndex++];
         return resolvedBinding({
-          key: query.key,
+          key: query.key, agent: query.agent,
           scopes: role === 'evaluator-verdict'
             ? ['authorizations', 'observations', 'verdicts']
             : ALL_NATIVE_SCOPES,
@@ -312,7 +354,7 @@ describe('native persistent role identities', () => {
     const deliveryTime = '2026-08-02T12:05:00.000Z';
     const resolver: BindingResolver = {
       resolveBinding: vi.fn(async (query, atTime) => resolvedBinding({
-        key: query.key,
+        key: query.key, agent: query.agent,
         scopes: ALL_NATIVE_SCOPES,
         ...(atTime === deliveryTime
           ? { revocations: [{ effectiveTime: '2026-08-02T12:04:00.000Z' }] }
@@ -334,7 +376,7 @@ describe('native persistent role identities', () => {
   it('never exposes evaluator private custody through a child-process secret resolver', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-host-signing-'));
     const resolver: BindingResolver = {
-      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })),
+      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, agent: query.agent, scopes: ALL_NATIVE_SCOPES })),
     };
     const identities = await openAt(root, resolver);
     expect('createEvaluatorHostSecretResolver' in identities).toBe(false);

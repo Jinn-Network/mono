@@ -1,0 +1,1 @@
+{"description":"One-subject reduction of the #2706 golden lifecycle.","items":[{"identifiers":[],"task":{"digest":{"sha256":"0000000000000000000000000000000000000000000000000000000000000014"},"name":"memory-task"}}],"name":"Memory qualification","protocol":"https://spec.jinn.network/protocols/benchmarking/v2","reveal":{"policy":"immediate"},"version":"1.0.0"}

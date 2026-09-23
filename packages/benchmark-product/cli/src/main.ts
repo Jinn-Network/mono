@@ -13,7 +13,7 @@ import {
   type CredentialGrant,
 } from "@colophon-claims/core";
 import { runSampleLifecycle, SAMPLE_LIFECYCLE_MODES, type SampleLifecycleEvent } from "@colophon-claims/core/sample-lifecycle";
-import { BUNDLE_FORMAT } from "@colophon-claims/verify";
+import { BUNDLE_V10_FORMAT } from "@colophon-claims/check";
 import { createVerifiedBundleViewer } from "./viewer.js";
 import { startLocalWorkspaceApp } from "./local-app.js";
 import {
@@ -26,18 +26,38 @@ import { firstCommand, usesPrimaryWrapperHelp } from "./help-routing.js";
 
 export const USAGE = `Colophon — Publish benchmark claims people can check.
 
+Published claimant verbs:
+  method, arm add, lock, anchor, run import, collect, report, publish, results, status
+
 Primary commands:
   colophon                         Run the bundled sample and open its verified local viewer
   colophon demo [--output <dir>] [--no-open] [--json]
   colophon open --bundle <dir> [--port <n>] [--no-browser]
   colophon open [--workspace <dir>] [--port <n>] [--no-browser]
+  colophon method --help
+  colophon arm add --help
+  colophon lock --help
+  colophon anchor --help
+  colophon run import --help
+  colophon collect --help
+  colophon report --help
+  colophon publish --help
+  colophon results --help
+  colophon status --help
   colophon import swebench ...     Import your own SWE-bench tasks
-  colophon import item-bank ...    Import admitted binary-judgment item manifests
   colophon bundle verify ...       Verify through the full product
-  colophon help --advanced         Show the explicit lifecycle commands
-  colophon method --help           Named suites, --host keys, and --n
+  colophon help --advanced         Show the explicit lifecycle library
+
+launch, resume, preview, quote, and the other venue-orchestration verbs are the
+service's machinery on a venue Colophon controls. They remain in the advanced
+library; they are not the claimant path. A claimant brings a finished run with
+\`run import\`.
 
 No account, API key, funds, or Docker are needed for the bundled sample.
+
+Protocol identifiers in the installed platform packages are names, not addresses.
+This CLI fetches nothing from them. Checks run against the exact platform bytes
+installed from npm.
 `;
 
 function result(exitCode: number, stdout = "", stderr = ""): CliResult {
@@ -115,7 +135,7 @@ export interface QuickstartReceipt {
   readonly architecture: string;
   readonly bundlePath: string;
   readonly bundleIdentity: string;
-  readonly bundleFormat: typeof BUNDLE_FORMAT;
+  readonly bundleFormat: typeof BUNDLE_V10_FORMAT;
   readonly checks: readonly string[];
   readonly sourceCommit: string;
 }
@@ -137,7 +157,7 @@ export function writeQuickstartCompanions(
     architecture: process.arch,
     bundlePath,
     bundleIdentity: `sha256:${bundleIdentity}`,
-    bundleFormat: BUNDLE_FORMAT,
+    bundleFormat: BUNDLE_V10_FORMAT,
     checks: [...checks],
     sourceCommit: buildMetadata.sourceCommit,
   };
@@ -146,7 +166,7 @@ export function writeQuickstartCompanions(
     flag: "wx",
     mode: 0o600,
   });
-  writeFileSync(join(outputRoot, "NEXT-STEPS.md"), `# Your Colophon sample\n\nThe bundle in \`./bundle\` passed all six verification checks. Nothing was uploaded.\n\nVerify it again without the full product:\n\n\`\`\`sh\nnpx @colophon-claims/verify@0.1 ./bundle\n\`\`\`\n\nUse your own work:\n\n\`\`\`sh\ncolophon open\n\`\`\`\n\nReal agent arms use credentials you explicitly grant and may make paid provider calls. Colophon shows that boundary before launch.\n`, {
+  writeFileSync(join(outputRoot, "NEXT-STEPS.md"), `# Your Colophon sample\n\nThe bundle in \`./bundle\` passed all six verification checks. Nothing was uploaded.\n\nVerify it again without the full product:\n\n\`\`\`sh\nnpx @colophon-claims/check@0.2 ./bundle\n\`\`\`\n\nUse your own work:\n\n\`\`\`sh\ncolophon open\n\`\`\`\n\nReal agent arms use credentials you explicitly grant and may make paid provider calls. Colophon shows that boundary before launch.\n`, {
     encoding: "utf8",
     flag: "wx",
     mode: 0o600,
@@ -204,6 +224,26 @@ async function keepViewerOpen(
   return result(0, `Viewer: ${visibleUrl}\nStopped the viewer; bundle files were retained.\n`);
 }
 
+/**
+ * The local-publish answer. Its check line says `Recomputed:`, the verb issue #2982 ruled for the
+ * standalone reader: this tool recomputes the arithmetic, closure, and consistency of the bytes it
+ * just wrote, and establishes nothing about whether the recorded outcomes reflect real executions.
+ * Reading `Verified:` here while the reader printed `Recomputed:` left the two Colophon CLIs
+ * disagreeing about what the same six checks establish, on the surface a claim's own author reads
+ * first (issue #3674).
+ *
+ * The sample publishes the fixed six-check closure -- `quickstart/sample-lifecycle.mjs` pins those
+ * six as `expectedBundleChecks` -- so the denominator is that closure's, not the passed count's.
+ */
+export function localPublishAnswer(published: {
+  readonly bundle: string;
+  readonly receipt: string;
+  readonly identity: string;
+  readonly checksPassed: number;
+}): string {
+  return `Published locally; nothing was uploaded.\nBundle: ${published.bundle}\nReceipt: ${published.receipt}\nIdentity: sha256:${published.identity}\nRecomputed: ${published.checksPassed} of 6 checks passed\nComplete comparison; no comparative winner stated.\n`;
+}
+
 async function runDemo(
   argv: readonly string[],
   cwd: string,
@@ -240,7 +280,12 @@ async function runDemo(
       buildMetadata,
     );
     if (json) return result(0, `${JSON.stringify({ ok: true, result: evidence })}\n`);
-    const answer = `Published locally; nothing was uploaded.\nBundle: ${evidence.output.bundle}\nReceipt: ${join(evidence.output.root, "quickstart-receipt.json")}\nIdentity: sha256:${evidence.digests.bundleIdentity}\nVerified: ${evidence.portableChecks.length} of 6 checks passed\nComplete comparison; no comparative winner stated.\n`;
+    const answer = localPublishAnswer({
+      bundle: evidence.output.bundle,
+      receipt: join(evidence.output.root, "quickstart-receipt.json"),
+      identity: evidence.digests.bundleIdentity,
+      checksPassed: evidence.portableChecks.length,
+    });
     if (noOpen) return result(0, answer);
     const viewer = await createVerifiedBundleViewer(evidence.output.bundle, 0, {
       ...(agentDataDir === undefined ? {} : {

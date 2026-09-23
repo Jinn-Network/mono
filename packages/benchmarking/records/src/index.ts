@@ -7,6 +7,7 @@ export {
   ANCHOR_INTENT_EXTENSION,
   TASK_SELECTION_EXTENSION,
   BEACON_SOURCE_EXTENSION,
+  SAMPLE_SIZE_ADVISORY_EXTENSION,
   ASSEMBLY_PROCEDURE,
   ASSEMBLY_PROCEDURE_VERSION,
   BENCHMARK_ACCOUNTING_MEDIA_TYPE,
@@ -136,6 +137,14 @@ export {
   withRunBeaconSourceExtension,
 } from "./beacon-source.js";
 export type { RunBeaconSourceExtension } from "./beacon-source.js";
+
+export {
+  RunSampleSizeAdvisoryExtensionSchema,
+  readRunSampleSizeAdvisory,
+  runSampleSizeAdvisoryExtension,
+  withRunSampleSizeAdvisoryExtension,
+} from "./sample-size-advisory.js";
+export type { RunSampleSizeAdvisoryExtension } from "./sample-size-advisory.js";
 
 export type {
   MatrixPublicationExtension,

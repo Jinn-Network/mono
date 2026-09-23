@@ -16,9 +16,9 @@ import { resolve } from 'node:path';
 import { test } from 'node:test';
 
 import {
-  artifactValue,
   restoredArtifactNames,
   restoredArtifacts,
+  uploadedArtifactNames,
 } from './workflow-artifact-steps.mjs';
 import { citedPrecedents } from './workflow-precedent-citations.mjs';
 
@@ -27,23 +27,6 @@ const workflow = readFileSync(
   resolve(root, '.github/workflows/policy-ci.yml'),
   'utf8',
 );
-
-function uploadedArtifactNames(source) {
-  const names = [];
-  const lines = source.split('\n');
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!lines[index].includes('uses: actions/upload-artifact')) continue;
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      const name = artifactValue(lines[cursor], 'name');
-      if (name) {
-        names.push(name);
-        break;
-      }
-      if (/^\s+- /.test(lines[cursor])) break;
-    }
-  }
-  return names;
-}
 
 test('every uploaded distribution is restored by name, never by pattern', () => {
   const uploaded = uploadedArtifactNames(workflow);
@@ -108,12 +91,13 @@ test('each package distribution is restored straight into its package', () => {
 // comment block fails here instead of silently leaving the repository-wide
 // gate with nothing to enforce.
 test('the restore step carries a comment citing a precedent workflow', () => {
+  const stepName = 'Restore Policy Identity distribution';
   const lines = workflow.split('\n');
-  const restoreStep = lines.findIndex((line) => line.includes('- name: Restore Policy Identity distribution'));
+  const restoreStep = lines.findIndex((line) => line.includes(`- name: ${stepName}`));
   assert.ok(restoreStep > 0, 'the identity restore step must exist');
 
   assert.ok(
-    citedPrecedents(workflow, 'policy-ci.yml').length > 0,
+    citedPrecedents(workflow, 'policy-ci.yml', stepName).length > 0,
     'the restore step must carry a `# Precedent: <workflow>.yml` marker in its attached comment',
   );
 });

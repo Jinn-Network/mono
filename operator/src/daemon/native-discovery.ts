@@ -13,7 +13,7 @@ import type {
   SourceHead,
   SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
-import { compareCodeUnitStrings, headPath, sealJson } from '@jinn-network/record-discovery-protocol';
+import { compareCodeUnitStrings, headPath, parseHeadTimestamp, sealJson } from '@jinn-network/record-discovery-protocol';
 import {
   coldSync,
   fetchHead,
@@ -28,6 +28,11 @@ import {
 } from '@jinn-network/record-discovery-client';
 import type { Store } from '../store/store.js';
 import type { AnnouncedSubmissionCard } from './native-submission-facts.js';
+import {
+  NATIVE_DISCOVERY_QUARANTINE_SCHEMA,
+  preparePoisonProbes,
+  recordPoisonFailure,
+} from './native-discovery-quarantine.js';
 
 const BIGINT_TAG = '$bigint';
 
@@ -93,7 +98,7 @@ CREATE TABLE IF NOT EXISTS native_discovery_withdrawals (
 );
 CREATE INDEX IF NOT EXISTS idx_native_discovery_withdrawals_pending
   ON native_discovery_withdrawals (acknowledged_at, id);
-`;
+${NATIVE_DISCOVERY_QUARANTINE_SCHEMA}`;
 
 export interface SignedSourceHighWater {
   readonly sequence: string;
@@ -237,13 +242,32 @@ export interface NativeDiscoveryDecodeInput {
  *   the operator's OWN source that would abort `WorkLoop.initialize` over its own clock error, so
  *   it degrades on exactly the #2547 reasoning: a self-hosted source cannot equivocate against
  *   itself. A PEER's future-dated head still refuses, fail-closed.
+ * - `refused-destination` — the source named a destination outside the serving root the operator
+ *   configured, or moved a request off that origin with a redirect (#3433). This one is NOT a
+ *   softening: the source is refused exactly as before — it yields nothing, advances no
+ *   checkpoint, queues no card, and is reported loudly. What changes is only the blast radius.
+ *
+ *   The #2529 discriminator below draws its line at "did the source make a statement that failed a
+ *   check?", and a destination refusal plainly did. But the MECHANISM that implemented "refuse"
+ *   was `throw` out of `sync()`, which escapes the `for...of` over sources and so also refuses
+ *   every source AFTER this one in the list — and on the startup path
+ *   (`native-operator-host.ts`) fails the boot. That conflated "this source is not to be trusted"
+ *   with "no source is to be polled", which was never the intent: a statement about where THIS
+ *   peer's archive lives is a statement about this peer alone. One hostile — or merely
+ *   https-upgrading — peer must not deny discovery to every other peer configured.
+ *
+ *   Scoped to destination refusals only, and by construction: exactly two error shapes qualify
+ *   (`ContainedOriginError`, `TransportRedirectError`). Every trust, identity, freshness and
+ *   ordering refusal still propagates out of `sync()` untouched, so the fail-closed default is
+ *   unchanged for every shape nobody anticipated.
  */
 export type NativeDiscoveryDegradedReason =
   | 'unpublished'
   | 'unreachable'
   | 'undecodable'
   | 'self-source-stale'
-  | 'self-source-future-head';
+  | 'self-source-future-head'
+  | 'refused-destination';
 
 export interface NativeDiscoveryDegradedSource {
   readonly source: SourceIdentity;
@@ -260,6 +284,19 @@ export interface NativeDiscoverySyncReport {
    * neither `accepted` nor `verifiedSources`, and are retried on the next poll.
    */
   readonly degraded: readonly NativeDiscoveryDegradedSource[];
+  /**
+   * Announcements this pass stepped past by crossing the poison-quarantine threshold (#2473).
+   * The CROSSING only: an announcement quarantined by an earlier pass is skipped at the top of
+   * the loop and counts nothing, so this stays 0 once the wedge has cleared rather than reading
+   * non-zero forever. A crossing counts even when a LATER announcement degrades that same
+   * source in the same pass (#4394) -- the crossing is durable and is skipped from then on, so
+   * dropping it with the discarded source result would report it zero times, ever. The durable
+   * `native_discovery_quarantine` row and the `native_discovery_poison_quarantined` event are
+   * the authority for what is quarantined; this is a per-pass summary, not a running total.
+   * Withdrawal-scope quarantine is not a sync-pass event and is not counted here --
+   * `drainNativeDiscoveryWithdrawals` owns that lane.
+   */
+  readonly quarantined: number;
 }
 
 export interface NativeDiscoveryConsumer<Card = AnnouncedSubmissionCard> {
@@ -399,17 +436,30 @@ function sameHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): bool
  * `source-head-revalidation`, which re-checks signature, currently-valid key, the §5.2
  * `refreshBy` window and freshness on every call. That window check is `checkRefreshWindow`
  * inside `verifySourceHead` (#3467): it returns `refresh-by-ceiling` or `head-issued-ahead`
- * when the head breaks the published-source profile's §5.2 rules, and this path throws on
- * every status but `ok` and `stale`, so both are hard refusals here. The far-future
- * `refreshBy` a re-sign could otherwise install at an unchanged position is therefore refused
- * rather than admitted: what this predicate opens is bounded, not a widening. The plugin
- * runtime's mirror documents the same property the same way (`classifyIdleHead`,
- * `plugin/runtime/src/corpus/mirror.ts`).
+ * when the head breaks the published-source profile's §5.2 rules. `refresh-by-ceiling` is a hard
+ * refusal on this path for every source — it is a writer fault, not a clock one.
+ * `head-issued-ahead` is a hard refusal for a PEER, and for a SELF-HOSTED source it degrades
+ * instead: the `self-source-future-head` branch below returns before the throw, on the #2547
+ * reasoning that a source this operator serves cannot equivocate against itself (see
+ * `NativeDiscoveryDegradedReason`). Neither is ADMITTED, which is the property that matters
+ * here: the degrade also returns before the checkpoint write, so no instant and no `refreshBy`
+ * is persisted. The far-future `refreshBy` a re-sign could otherwise install at an unchanged
+ * position is therefore refused rather than admitted: what this predicate opens is bounded, not
+ * a widening. The plugin runtime's mirror documents the same property the same way
+ * (`classifyIdleHead`, `plugin/runtime/src/corpus/mirror.ts`).
  */
 function reSignedIdleHead(checkpoint: NativeDiscoveryCheckpoint, head: SyncedHead): boolean {
   const held = checkpoint.signedHighWater;
   if (held.sequence !== head.head.sequence || held.entry !== head.head.entry) return false;
-  return new Date(head.head.issuedAt).getTime() > new Date(held.issuedAt).getTime();
+  // Read both instants with the protocol package's one strict helper (#3482,
+  // #4096) rather than a bare `new Date`. The two readings differ on exactly one
+  // input class the schema now admits -- a leap second, `NaN` under `new Date`
+  // and `23:59:59.999` under `parseHeadTimestamp`. `NaN` kept the refusal, so
+  // this was never a fail-open; what it was is a second answer to a question the
+  // protocol package already owns. An instant that is genuinely unreadable still
+  // yields `NaN` here and still refuses, so a rollback, a backdated re-sign and a
+  // malformed head keep the treatment the comment above describes.
+  return parseHeadTimestamp(head.head.issuedAt) > parseHeadTimestamp(held.issuedAt);
 }
 
 function deduplicateEntries(entries: readonly SyncedEntry[]): SyncedEntry[] {
@@ -508,7 +558,51 @@ function degradedReason(cause: unknown): NativeDiscoveryDegradedReason | undefin
     && (cause as { readonly name?: unknown }).name !== 'NativeDiscoverySourceResolutionError'
     && isTransportSilence(cause)
   ) return 'unreachable';
+  // A destination refusal isolates to its own source rather than aborting the pass (#3433). Named
+  // by `name` along the `cause` chain, for the two reasons this module duck-types everything else:
+  // it is written against injected ports and must not import a transport implementation's types,
+  // and the containment refusal arrives WRAPPED — `native-discovery-trust.ts` re-throws it as a
+  // `NativeDiscoverySourceResolutionError` so the failure names agent/name/baseUrl.
+  // The two classes that MEAN "refused" are excluded first, exactly as the status-less-transport
+  // branch above excludes them. Without that, a genuine trust or local-authority refusal that
+  // happened to wrap a destination error anywhere in its `cause` chain would degrade instead of
+  // propagating — the chain walk is what makes the wrapped containment refusal reachable, and it
+  // is also what would make that mistake reachable.
+  if (
+    !(cause instanceof NativeDiscoverySyncError)
+    && !(cause instanceof NativeDiscoveryLocalAuthorityError)
+    && namedInCauseChain(cause, DESTINATION_REFUSAL_ERROR_NAMES)
+  ) return 'refused-destination';
   return undefined;
+}
+
+/**
+ * The two error names that mean "the source named a destination the operator did not choose".
+ *
+ * - `ContainedOriginError` — a peer-introduced `archiveRoot` (or locator) that does not resolve
+ *   inside the configured serving root (`discovery/client`'s `origin-policy`).
+ * - `TransportRedirectError` — a redirect hop that leaves the origin the request started on
+ *   (`transport-http`'s per-hop guard).
+ */
+const DESTINATION_REFUSAL_ERROR_NAMES: readonly string[] = [
+  'ContainedOriginError',
+  'TransportRedirectError',
+];
+
+/** Does `cause`, or anything it wraps, carry one of `names` as its `name`? */
+function namedInCauseChain(cause: unknown, names: readonly string[]): boolean {
+  // Bounded rather than merely cycle-guarded: a `cause` chain is built by the throwers in this
+  // repository and is a handful of links deep, so a depth ceiling is both sufficient and cheaper
+  // than tracking visited objects.
+  for (let current = cause, depth = 0; depth < 8; depth += 1) {
+    if (typeof current !== 'object' || current === null) return false;
+    const name = (current as { readonly name?: unknown }).name;
+    if (typeof name === 'string' && names.includes(name)) return true;
+    const inner: unknown = (current as { readonly cause?: unknown }).cause;
+    if (inner === current) return false;
+    current = inner;
+  }
+  return false;
 }
 
 /**
@@ -653,7 +747,18 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
     | { readonly accepted: number }
     | { readonly reason: NativeDiscoveryDegradedReason; readonly detail: string };
 
-  async function pollSource(configured: NativeDiscoverySource): Promise<SourcePollOutcome> {
+  /**
+   * The pass-scoped quarantine count (#4394). It is NOT on the success arm above and NOT
+   * closure state: `sync()` allocates one per call and every `pollSource` in that pass
+   * shares it. A crossing is durable the moment the ledger row is written, so it must
+   * survive a later announcement degrading the same source — which discards the outcome.
+   */
+  interface SyncPass { quarantined: number }
+
+  async function pollSource(
+    configured: NativeDiscoverySource,
+    pass: SyncPass,
+  ): Promise<SourcePollOutcome> {
     const source = configured.identity;
     const prior = checkpoint(source);
     // Poll-time introduction resolution (#2521). A source that cannot be resolved — 404, or
@@ -745,8 +850,14 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       if (revalidated.status !== 'ok' && revalidated.status !== 'stale') {
         throw new NativeDiscoverySyncError(source, revalidated.status);
       }
+      // `parseHeadTimestamp` (#3482, #4096): the second operand is this module's own
+      // reading of the same `refreshBy` the trust adapter's `isFresh` reads for the
+      // first, and the two must not disagree. Before #3603 both answered `NaN` for a
+      // leap second -- `isFresh` reporting `stale` (so the `||` short-circuited true)
+      // while this operand read `NaN <= now` as `false`, i.e. never-stale. Now both
+      // read the instant, so which operand answers no longer changes the verdict.
       const stale = revalidated.status === 'stale'
-        || new Date(syncedHead.head.refreshBy).getTime() <= (input.now ?? (() => new Date()))().getTime();
+        || parseHeadTimestamp(syncedHead.head.refreshBy) <= (input.now ?? (() => new Date()))().getTime();
       if (stale) {
         // ## A self-hosted source's lapsed head degrades; a peer's still refuses (#2547)
         //
@@ -933,6 +1044,8 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       entryDigest: `sha256:${string}`;
       announcement: WithdrawnAnnouncement;
     }> = [];
+    // Prepared once per pass; every announcement below probes the ledger (#4294).
+    const poison = preparePoisonProbes(input.store);
     for (const item of fetched) {
       const entryDigest = sealJson(item.entry).digest;
       for (const announcement of item.entry.announcements) {
@@ -940,18 +1053,32 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           withdrawals.push({ sequence: item.entry.sequence, entryDigest, announcement });
           continue;
         }
-        // ## An announcement this consumer cannot decode degrades the SOURCE (#2529 F1)
+        // ## An announcement this consumer cannot decode degrades the SOURCE (#2529 F1),
+        // ## and after N consecutive polls it is quarantined and stepped past (#2473)
         //
-        // It does not kill the pass, and it equally does not get skipped past: nothing is
-        // queued and — because this returns before `queue()` — the durable high-water does NOT
-        // advance over it. A signed announcement this consumer failed to understand stays
-        // exactly where it is, to be re-read at the next poll or by a consumer that
-        // understands it. Advancing past it would silently drop signed history on a reader
-        // bug, which is the failure mode that produced #2529 in the first place.
+        // #2529 chose to degrade rather than skip: nothing is queued and — because the throw
+        // returns before `queue()` — the durable high-water does NOT advance over it. That
+        // kept a reader bug from silently dropping signed history, and its stated trade was
+        // "loud and stuck beats silent and lossy". #2473 keeps the first half and bounds the
+        // second: stuck was FOREVER, so the same bytes were re-fetched and re-thrown at every
+        // poll and that source's queue never recovered.
         //
-        // The trade this makes is explicit: a permanently-undecodable announcement wedges that
-        // one source's queue rather than that operator's daemon. Loud and stuck beats silent
-        // and lossy — and beats dead.
+        // So the #2529 behaviour is unchanged for the first
+        // `NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD - 1` consecutive polls — long enough
+        // for any transient decode fault to clear without losing a byte. The Nth records the
+        // announcement in the durable quarantine ledger, announces it under the named event
+        // code, and steps past it: sibling announcements in this entry still queue, `queue()`
+        // still runs, and the checkpoint advances. Nothing is silent — the quarantine row
+        // names the sequence, entry digest and failure, and survives restarts.
+        //
+        // A quarantined announcement re-served on a later cold re-adoption is skipped here
+        // rather than re-decoded, so re-adopting a source cannot resurrect the wedge.
+        if (poison.isQuarantined({
+          scope: 'announcement',
+          source,
+          entryDigest,
+          announcementId: announcement.announcementId,
+        })) continue;
         let decoded: Card | undefined;
         try {
           decoded = await input.decode({
@@ -962,13 +1089,37 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
             signedHighWater: highWater,
           });
         } catch (cause) {
+          // A local-authority fault is THIS machine's, never the source's: it must stay fatal
+          // and must never be counted against the announcement.
           if (cause instanceof NativeDiscoveryLocalAuthorityError) throw cause;
-          throw new NativeDiscoveryUndecodableAnnouncementError(
+          const undecodable = new NativeDiscoveryUndecodableAnnouncementError(
             source,
             announcement.announcementId,
             { cause },
           );
+          const poisoned = recordPoisonFailure({
+            store: input.store,
+            scope: 'announcement',
+            source,
+            sequence: item.entry.sequence,
+            entryDigest,
+            announcementId: announcement.announcementId,
+            detail: undecodable.message,
+            ...(input.now === undefined ? {} : { now: input.now }),
+          });
+          if (!poisoned.quarantined) throw undecodable;
+          // Counted on the pass, not the outcome: the throw above, reached again on a LATER
+          // announcement, would discard an outcome-carried count even though this is durable and
+          // is skipped from the next poll on — reporting it zero times, ever (#4394).
+          pass.quarantined += 1;
+          continue;
         }
+        poison.clear({
+          scope: 'announcement',
+          source,
+          entryDigest,
+          announcementId: announcement.announcementId,
+        });
         if (decoded === undefined) continue;
         cards.push({
           sequence: item.entry.sequence,
@@ -994,12 +1145,14 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
     async sync() {
       let accepted = 0;
       let verifiedSources = 0;
+      // Per-pass, never a running total: allocated here, on every call.
+      const pass: SyncPass = { quarantined: 0 };
       const degraded: NativeDiscoveryDegradedSource[] = [];
       for (const configured of sources) {
         const source = configured.identity;
         let outcome: SourcePollOutcome;
         try {
-          outcome = await pollSource(configured);
+          outcome = await pollSource(configured, pass);
         } catch (cause) {
           // Fail-CLOSED: only the shapes `degradedReason` recognises as "unavailable or
           // unintelligible" are isolated to their source. Everything else — every trust, identity,
@@ -1022,7 +1175,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         accepted += outcome.accepted;
         verifiedSources += 1;
       }
-      return { accepted, verifiedSources, degraded };
+      return { accepted, verifiedSources, degraded, quarantined: pass.quarantined };
     },
 
     takePending() {

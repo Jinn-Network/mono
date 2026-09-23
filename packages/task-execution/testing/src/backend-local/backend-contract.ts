@@ -147,7 +147,7 @@ export function describeLocalBackendContract(
       );
       await (scenario.backend as LocalBackendConformanceSubject).shutdown();
       const recovered = scenario.restart();
-      expect(await recovered.recover(attempt)).toEqual({ classification: "matching" });
+      expect(await recovered.recover(attempt)).toEqual({ classification: "matching", retained: true });
       const refs = await recovered.deliveries(attempt);
       expect(refs).toHaveLength(1);
       expect(refs[0]?.digest).toBe(documentDigest(delivery));

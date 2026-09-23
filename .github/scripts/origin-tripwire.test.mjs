@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +14,7 @@ import { test } from 'node:test';
 
 import {
   DEFAULT_EXCLUSIONS,
+  ENFORCED_SCOPE_PREFIXES,
   findEnforcedScopeViolations,
   findLegacyOriginOccurrences,
   isEnforcedPath,
@@ -158,6 +160,8 @@ test('isEnforcedPath covers the source scopes an identifier can be minted from',
   for (const enforced of [
     '.github/scripts/build-profile-root.mjs',
     'operator/src/daemon/native.ts',
+    'operator/deployments/evaluator/prediction-market-deployment.mjs',
+    'operator/deployments/evaluator/prediction-market-evaluation-method.v1.json',
     'plugin/runtime/src/index.ts',
     'packages/discovery/protocol/src/identifiers.ts',
     'packages/evidence/protocol/schemas/task.schema.json',
@@ -198,6 +202,26 @@ test('a violation inside an enforced scope is reported; the same string outside 
   });
 });
 
+test('every enforced scope prefix resolves to a real directory, so a rename cannot silently drop enforcement', () => {
+  // The prefixes are literal path spellings. A rename that leaves one behind turns the guard
+  // into a no-op over that tree, with a green build as its only signal (issue #4061).
+  for (const prefix of ENFORCED_SCOPE_PREFIXES) {
+    assert.equal(existsSync(join(repoRoot, prefix)), true, prefix);
+    assert.equal(statSync(join(repoRoot, prefix)).isDirectory(), true, prefix);
+  }
+});
+
+test('the enforced scope list is closed: widening it is a reviewed edit', () => {
+  // Named here so that adding or renaming an enforced prefix means touching this assertion
+  // too. Each entry's reason lives beside it in origin-tripwire.mjs.
+  assert.deepEqual(ENFORCED_SCOPE_PREFIXES, [
+    '.github/scripts/',
+    'operator/src/',
+    'operator/deployments/',
+    'plugin/runtime/src/',
+  ]);
+});
+
 test('every excluded exact path exists, so the list cannot rot into a silent blanket', () => {
   for (const path of DEFAULT_EXCLUSIONS.paths) {
     assert.equal(existsSync(join(repoRoot, path)), true, path);
@@ -214,7 +238,6 @@ test('the exclusion list is closed: widening it is a reviewed edit', () => {
     '.github/scripts/public-surface-assets.test.mjs',
     'operator/src/daemon/bridge-legacy-delivery.ts',
     'packages/benchmarking/records/src/identifiers.test.ts',
-    'packages/discovery/facts/benchmarking/src/identifiers.test.ts',
     'packages/discovery/protocol/src/grammar.test.ts',
     'packages/environments/chain-record/src/identifiers.test.ts',
     'packages/environments/chain-record/src/primitives.test.ts',
@@ -231,6 +254,36 @@ test('the exclusion list is closed: widening it is a reviewed edit', () => {
     'docs/superpowers/',
     'legacy/',
   ]);
+});
+
+test('a retired-origin literal under operator/deployments/ fails the guard', () => {
+  withTempRepo((root) => {
+    // The deployment artifacts mint evaluation-method URIs that flow into sealed records; the
+    // near-miss on PR #2439 landed one of these on the retired origin (issue #2459).
+    mkdirSync(join(root, 'operator', 'deployments', 'evaluator'), { recursive: true });
+    writeFileSync(
+      join(root, 'operator', 'deployments', 'evaluator', 'some-deployment.mjs'),
+      "  uri: 'https://jinn.network/evaluation-methods/prediction-market/v1',\n",
+    );
+
+    assert.deepEqual(
+      findEnforcedScopeViolations({ repoRoot: root }).map(({ path }) => path),
+      ['operator/deployments/evaluator/some-deployment.mjs'],
+    );
+
+    assert.throws(
+      () => execFileSync(
+        process.execPath,
+        [join(repoRoot, '.github/scripts/origin-tripwire.mjs'), '--root', root],
+        { encoding: 'utf8', stdio: 'pipe' },
+      ),
+      (error) => {
+        assert.equal(error.status, 1);
+        assert.match(error.stderr, /operator\/deployments\/evaluator\/some-deployment\.mjs:1/u);
+        return true;
+      },
+    );
+  });
 });
 
 test('this repository is clean: the CLI exits zero on the real tree', () => {

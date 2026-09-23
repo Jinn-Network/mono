@@ -5,6 +5,7 @@ import type { AnnouncedItem, AnnouncementEntry } from "@jinn-network/record-disc
 import { parseAnnouncementEntry } from "@jinn-network/record-discovery-protocol";
 
 import type { StreamSubscription, StreamTransport, Transport, TransportResponse } from "./ports.js";
+import { ContainedOriginError, resolveContainedUrl } from "./origin-policy.js";
 import {
   classifyCursor,
   classifyWithdrawal,
@@ -260,6 +261,19 @@ describe("kit conformance", () => {
   runConsumerConformance({
     async checkLocator(location: unknown) {
       return checkLocator(location as { profile: string; locator: string }, { transport: makeRoutedTransport(locatorRoutes), maxBytes: 1 << 20 });
+    },
+    // §7 item 3 containment (#3434). This package owns `resolveContainedUrl`,
+    // so it is the layer that can answer the well-known `archiveRoot` vectors;
+    // no fetch is involved, which is why the surface is a URL pair rather than
+    // a locator.
+    async checkArchiveRoot(servingRoot: string, archiveRoot: string) {
+      try {
+        resolveContainedUrl(servingRoot, archiveRoot);
+        return { rejected: false };
+      } catch (cause) {
+        if (cause instanceof ContainedOriginError) return { rejected: true, reason: "outside-serving-root" };
+        throw cause;
+      }
     },
   });
 });

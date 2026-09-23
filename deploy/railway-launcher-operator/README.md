@@ -15,7 +15,7 @@ Run locally with `jinn run`; this directory is only for the headless hosted depl
 container-native base, #988):
 
 ```dockerfile
-ARG BASE_TAG=latest
+ARG BASE_TAG=next
 FROM ghcr.io/jinn-network/operator:${BASE_TAG}
 RUN if ! command -v gosu >/dev/null 2>&1 || [ ! -f /etc/ssl/certs/ca-certificates.crt ]; then \
       apt-get update \
@@ -49,7 +49,8 @@ the source tree, it also overlays the current learner `session-start` hook and
 applies a generic Codex adapter bridge so Claude-style `SessionStart` hook
 `additionalContext` reaches the Codex prompt.
 
-`BASE_TAG` must point to a base release that includes #988. See
+`BASE_TAG` must point to a base build that includes #988. It defaults to
+`next`, the rolling tag the canary lane republishes on every push. See
 [`../README.md`](../README.md) for the full deploy path (the public-GHCR ops
 step, the deploy contract, OLAS earning via the daemon `reward-claim` loop,
 and the consolidation checklist).

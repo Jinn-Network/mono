@@ -8,5 +8,5 @@ await rm(join(root, "dist"), { recursive: true, force: true });
 await new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.build.json"], { cwd: root, stdio: "inherit" });
   child.once("error", reject);
-  child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`tsc exited with ${code}`)));
+  child.once("exit", (code) => code === 0 ? resolve(undefined) : reject(new Error(`tsc exited with ${code}`)));
 });

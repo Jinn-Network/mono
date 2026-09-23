@@ -23,7 +23,8 @@
  * Because the encoder shares the reader's primitives, a kit-minted token cannot
  * be treated as independent evidence that the reader is right; §11 closes that
  * with a one-time cross-validation against an independent RFC 3161 verifier,
- * recorded in `fixtures/anchor-kit-v1/cross-validation.md`.
+ * recorded in `fixtures/anchor-kit-v1/cross-validation-2026-09-06.md` (which
+ * supersedes `cross-validation.md`, retained unedited at its published bytes).
  *
  * Test-only: nothing in this module is a production encoder, and no production
  * package imports it.

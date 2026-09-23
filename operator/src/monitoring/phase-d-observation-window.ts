@@ -182,11 +182,7 @@ export function deriveInstanceEntry(input: {
  *  a fleet that was scraped once and never again. */
 export const DEFAULT_MAX_COVERAGE_GAP_MS = 2 * 24 * 60 * 60 * 1000;
 
-/** A real approved observation window must span at least a full day — the collector runs daily,
- *  so anything shorter can never have even one legitimate collection cycle. Below this (including
- *  a zero-length or inverted `startedAt >= endedAt` window), `hasCoverageGap` refuses to certify
- *  coverage regardless of how many snapshots exist — review #2380 rereview: a single lucky reading
- *  against a degenerate window must not be able to certify it. */
+/** Rejects windows shorter than one day, including zero-length and inverted windows. */
 export const MIN_WINDOW_SPAN_MS = 24 * 60 * 60 * 1000;
 
 /**

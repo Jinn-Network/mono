@@ -18,8 +18,10 @@ See the design: `docs/superpowers/specs/2026-07-27-task-execution-protocol-and-s
   backend supports, including the `runPinning` block (profiles §5.2: supported pinning keys,
   their inventories, and the `enforced` | `attested` enforcement posture).
 - **Supporting types** — `SubmissionAck`, `ObservationSnapshot`, `ObservationCursor`,
-  `ReconciliationReport` (`matching | absent | contradictory`), `CancelAck`
-  (terminal-state-aware), `DeliveryRef`, `PreflightRequest` / `PreflightReport`.
+  `ReconciliationReport` (`matching | absent | contradictory`, plus an optional `retained`
+  flag saying whether the backend still holds the ref's idempotency key — `absent` alone
+  cannot distinguish an unresolvable ref from a remembered-but-unrecoverable attempt),
+  `CancelAck` (terminal-state-aware), `DeliveryRef`, `PreflightRequest` / `PreflightReport`.
 - **Policy-neutral preclaim helpers** — `validateRequirementsAgainstRunPinning` and
   `verifyPreclaim` establish only whether a backend can honor a requested profile, requirements,
   isolation pin and preflight. Product claim, spend and prioritisation policy stays above this

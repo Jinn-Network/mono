@@ -945,8 +945,10 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
     const resamples = requireIntegerParam(input.parameters, "resamples");
     // Redundant with parameterSchema's minimum/maximum, and deliberately kept (#2583): compute is
     // a public entry point callers may reach without validateParameters, and the inner bootstrap
-    // guard is not a substitute -- it only runs on two or more source clusters, so without this an
-    // out-of-range resamples can reach the emitted bootstrap field of a successful result.
+    // guard is not a substitute -- the `clusteredRates.length > 0 && clusterCount >= 2` gate below
+    // is what gates the `clusteredPairedRateDiffBca` call, so its `assertResamples` is only
+    // reached for two or more source clusters, and without this an out-of-range resamples can
+    // reach the emitted bootstrap field of a successful result.
     if (resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
       throw new MethodInputError("method-parameter-out-of-range", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
     }
@@ -1139,8 +1141,12 @@ const pairedDeltaMethod: SingleSubjectMethod = {
     const alpha = Number(requireStringParam(input.parameters, "alpha"));
     // Redundant with parameterSchema's minimum/maximum, and deliberately kept (#2583): compute is
     // a public entry point callers may reach without validateParameters, and the inner bootstrap
-    // guard is not a substitute -- it only runs on two or more source clusters, so without this an
-    // out-of-range resamples can reach the emitted bootstrap field of a successful result.
+    // guard is not a substitute -- the `reasons.length === 0` gate below (at least
+    // MIN_PAIRED_DELTA_TASKS paired tasks AND two or more source clusters) is what gates the
+    // `clusteredPairedDeltaInterval` call, so the `assertResamples` inside its
+    // `clusteredPairedRateDiffBca` passes is only reached when both withholding gates clear, and
+    // without this an out-of-range resamples can reach the emitted bootstrap field of a
+    // successful result.
     if (resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
       throw new MethodInputError("method-parameter-out-of-range", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
     }

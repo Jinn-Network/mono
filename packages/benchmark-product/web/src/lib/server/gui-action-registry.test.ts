@@ -18,18 +18,10 @@ import { GUI_SERVER_ACTIONS } from "./gui-action-registry";
 const EXPECTED_UNAVAILABLE_REASONS = {
   importRunRecords:
     "reads a local run dump and every evidence file it names by relative path; browser upload of a path-rooted evidence tree is intentionally unavailable",
-  importBinaryItemBank:
-    "requires local licensed item, source/license, and human-admission manifests; browser upload is intentionally unavailable",
-  createHumanReviewPackets:
-    "requires local licensed item files and evaluator packet custody; browser upload is intentionally unavailable",
-  signHumanReviewResponse:
-    "requires a machine-local configured signer key; browser key custody is forbidden",
-  admitHumanTruth:
-    "requires local signed-review, roster, and licensed truth evidence files",
-  migrateTerminalBenchLegacyTask:
-    "requires server-configured migration input paths; browser-supplied paths are forbidden",
   exportDerivedBundle:
     "copies a machine-local job or log directory; browser path-based export is forbidden",
+  identityBind:
+    "the operator publishes the proof at their own domain, outside any Colophon surface",
   disclosureDeclare:
     "requires a locally composed six-variable declaration file",
   disclosureShow:

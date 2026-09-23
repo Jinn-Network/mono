@@ -35,6 +35,13 @@ async function tabTo(page: Page, target: Locator): Promise<void> {
   throw new Error(`keyboard traversal did not reach ${await target.evaluate((node) => node.outerHTML)}`);
 }
 
+async function acknowledgeByKeyboard(page: Page, form: Locator, name: string): Promise<void> {
+  const box = form.locator(`input[name="${name}"]`);
+  await tabTo(page, box);
+  await page.keyboard.press("Space");
+  await expect(box).toBeChecked();
+}
+
 async function typeByKeyboard(page: Page, target: Locator, value: string): Promise<void> {
   await tabTo(page, target);
   await page.keyboard.press("ControlOrMeta+A");
@@ -143,7 +150,7 @@ test("the local home runs the zero-key sample to a verified report and verifies 
 
   await auditedGoto(page, "/");
   await typeByKeyboard(page, page.getByLabel("Bundle directory on this machine"), bundle);
-  await submitAction(page, "Run all six checks", /6 of 6 checks passed/u);
+  await submitAction(page, "Run the bundle checks", /6 of 6 checks passed/u);
   await expect(page.getByText("claim-consistency", { exact: false })).toBeVisible();
   await auditState(page, "reader-only bundle verification");
 });
@@ -188,10 +195,11 @@ test("the guided own-work journey imports tasks, selects two agents, and enforce
   await expect(quoteForm.getByRole("checkbox")).toBeChecked();
   await submitAction(page, "Quote", /solveCells/u);
 
+  // Lock carries both boundaries: the provider one this draft's real agents require, and the
+  // sample-size one every lock requires (issue #2978). Name each box — the form has two.
   const lockForm = actionForm(page, "Lock run");
-  await tabTo(page, lockForm.getByRole("checkbox"));
-  await page.keyboard.press("Space");
-  await expect(lockForm.getByRole("checkbox")).toBeChecked();
+  await acknowledgeByKeyboard(page, lockForm, "ack-provider-network-costs");
+  await acknowledgeByKeyboard(page, lockForm, "ack-sample-size");
   await submitAction(page, "Lock run", /locked/u);
   await expect(page.getByRole("button", { name: "Quote", exact: true })).toBeDisabled();
   await auditState(page, "guided own-work locked method");
@@ -279,6 +287,10 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   await submitAction(page, "Quote", /solveCells/u);
   await expect(lock).toBeEnabled();
   await auditState(page, "quoted draft");
+  // Every lock is sample-size gated, real agents or not (issue #2978). The refuse-then-read-then-
+  // acknowledge exchange is proven at the action layer; what this keyboard-only walk owes it is
+  // that the box is reachable and operable by keyboard alone.
+  await acknowledgeByKeyboard(page, actionForm(page, "Lock run"), "ack-sample-size");
   await submitAction(page, "Lock run", /locked/u);
   await expect(page.getByRole("button", { name: "Quote", exact: true })).toBeDisabled();
   await auditState(page, "locked draft");
@@ -335,6 +347,7 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   await typeByKeyboard(page, cancelledArm.getByLabel("Pinning JSON"), JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } }));
   await submitAction(page, "Add raw-pinned arm", /sample/u);
   await submitAction(page, "Quote", /solveCells/u);
+  await acknowledgeByKeyboard(page, actionForm(page, "Lock run"), "ack-sample-size");
   await submitAction(page, "Lock run", /locked/u);
   await auditedGoto(page, `/workspace/${CANCELLED_DRAFT_ID}/run`);
   await submitAction(page, "Launch", /scheduled/u);

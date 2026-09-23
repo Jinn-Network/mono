@@ -70,6 +70,18 @@ identifier for this archive within this install. It must be unique across the
 followed sources, and it is what orders retrieval fallback after the local
 mirror.
 
+Write the `servingRoot` with the scheme and port the archive actually answers
+on. Everything the source introduces — its `archiveRoot`, and every redirect it
+posts — is held inside the origin of this value, because that origin is the one
+thing about the destination that you chose rather than the peer. A scheme or
+port that differs from where the archive really lives is therefore a refusal,
+not a redirect the client will chase. The single exception is the shape a real
+host almost always presents: a plain `http://<host>` that answers `301` up to
+`https://<host>`, both on their default ports, resolves — the hostname is
+unchanged and the peer picks neither host nor port, so the upgrade can only
+increase assurance. An explicit non-default port on either side is outside that
+exception; name the final origin and you never meet it.
+
 The trust-policy anchor — `trust.genesisDigest` and the signed version chain
 that goes in `trust.policyDirectory` — is not published on the serving plane.
 Get it from the source's publisher and store the chain as one file per version,
@@ -197,7 +209,9 @@ that mirrored but whose index pass failed carries `indexError`, and keeps
 `status: "synced"` — the mirror succeeded, the pass that makes what it
 mirrored searchable did not. `freshness` is the `corpus-mirror-freshness`
 verdict for that cycle, `ok` or `stale`. The same facts, plus per-source
-timestamps, are in `mirror-sync-status.json`.
+timestamps, are in `mirror-sync-status.json`. That file lists only the sources
+this install currently follows: drop a source from `corpus.sources` and its
+entry goes with it at the next start.
 
 A `stale` verdict is also written on its own line, at `warn`, carrying the
 row's full detail and remedy:
@@ -205,6 +219,43 @@ row's full detail and remedy:
 ```json
 {"detail":"1 of 1 followed archive(s) have not synced …","remedy":"…","level":"warn","message":"corpus-mirror-freshness"}
 ```
+
+Four more lines are documented here: `corpus.mirror.cycle.unreported` and
+`corpus.mirror.status.unwritable` at `warn`, `corpus.mirror.skipped` and
+`corpus.mirror.freshness.unavailable` at `debug`. The rest reach the same
+stderr and are read through the health rows below:
+`corpus.mirror.sync-failed` (`error`, the only error-level line the mirror
+emits), `corpus.mirror.lock-failed` and `corpus.mirror.index-failed` (`warn`),
+`corpus.mirror.status.unreadable` (`warn`), and
+`corpus.mirror.head-revalidated` (`debug`, which reports a successful sync
+rather than a fault).
+
+Both `warn` lines mean a channel degraded while the sync itself did not:
+
+- **`corpus.mirror.cycle.unreported`** — the cycle ran, but recording or
+  reporting it threw; the injected clock, or a stderr sink that EPIPEd, are the
+  candidates, and they differ. A clock that throws costs both the
+  `corpus.mirror.cycle` line and the `mirror-sync-status.json` update, and
+  stalls the per-source timestamps with them. A logger that throws costs the
+  reporting alone — the sync, the status file and the timestamps are already
+  written. Neither costs the loop, which reschedules regardless. This line is
+  itself emitted best-effort inside a nested guard, so when the logger is the
+  fault no line appears at all: a silent gap in cycle lines carries the same
+  reading. Either way `corpus-mirror-freshness` is emitted from inside the same
+  guarded block that failed, so no health row marks it — a restart is the
+  remedy.
+- **`corpus.mirror.status.unwritable`** — `mirror-sync-status.json` could not
+  be written: permissions, or a full or read-only volume. The sync is
+  unaffected and the stderr cycle line stays authoritative; the file channel is
+  what degraded. An operator reading the file rather than stderr sees
+  per-source timestamps that no longer reflect reality. Fix the path or its
+  permissions.
+
+`corpus.mirror.skipped` is the line behind the `skipped-locked` reading given
+below. `corpus.mirror.freshness.unavailable` is
+why a `corpus.mirror.cycle` line can arrive without a `freshness` key: the
+verdict could not be computed for that cycle, which is supplementary and never
+costs the cycle line.
 
 The health rows are contributed by the capabilities that are actually
 composed, so where you read one depends on which process holds it. The

@@ -9,6 +9,8 @@ interface RunOptions {
   candidateVersion?: string;
   mode?: 'human-invoked' | 'autonomous';
   hermesModel?: string;
+  hermesProvider?: string;
+  approvedHermesOverride?: { model: string; provider?: string };
 }
 
 export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: ScenarioVerdict[]; allPassed: boolean }> {
@@ -25,12 +27,16 @@ export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: Scena
     evidencePath: path.join(outputDir, 'T3.1.log'),
     mode,
     hermesModel: opts.hermesModel,
+    hermesProvider: opts.hermesProvider,
+    approvedHermesOverride: opts.approvedHermesOverride,
     wallClockBudgetMs: 25 * 60 * 1000,   // real solve (~6 min) + Docker verdict eval — see T3.1 WALL_CLOCK_BUDGET_MS
   });
 
   ScenarioVerdictSchema.parse(verdict);
   const verdicts = [verdict];
-  const allPassed = verdict.verdict === 'pass';
+  // fail is the only blocking verdict — skip is non-blocking, as run-tier-2.ts
+  // and exitCodeForVerdicts.
+  const allPassed = verdict.verdict !== 'fail';
 
   const summary = {
     candidateVersion,
@@ -41,10 +47,24 @@ export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: Scena
   };
   await fs.writeFile(path.join(outputDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
+  // Marker block — the marker.txt diagnostic artifact (dated tier-3-* keys). It
+  // is a separate artifact from the release-readiness handoff doc's block
+  // (environment-suite key, release-readiness.ts) and nothing parses it: the
+  // two-gate guard in npm-publish.yml queries check-runs and executes no tests.
+  const markerValue = (v: ScenarioVerdict): string => {
+    switch (v.verdict) {
+      case 'pass':
+        return 'passed';
+      case 'skip':
+        return `skipped:${v.failNotes ?? 'no-reason'}`;
+      case 'fail':
+        return `failed:${v.failClass}`;
+    }
+  };
   const markerLines = [
     '<!-- jinn-release-evidence:v1',
     `release-candidate=${candidateVersion}`,
-    `tier-3-t3-1=${verdict.verdict === 'pass' ? 'passed' : `failed:${verdict.failClass}`}`,
+    `tier-3-t3-1=${markerValue(verdict)}`,
     `tier-3-overall=${allPassed ? 'passed' : 'failed'}`,
     '-->',
   ];

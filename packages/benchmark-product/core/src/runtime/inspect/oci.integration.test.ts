@@ -1,10 +1,11 @@
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { parseMatrix, parseReport, sealMatrix } from "@jinn-network/benchmarking-records";
+import type { MatrixCell } from "@jinn-network/benchmarking-records";
 import { createDraft, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { selectInspectEvaluation } from "../../operations/inspect-runtime.js";
@@ -22,9 +23,11 @@ import type { OperationContext } from "../../operations/context.js";
 import { verifyPublicBundle } from "../../bundle/verify.js";
 import { createDefaultBenchmarkRuntimeHost } from "../host-port.js";
 import { readRunJournalEntries } from "../../run/journal.js";
+import type { RunJournalEntry } from "../../run/journal.js";
 import { readRunState, writeRunState } from "../../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../../workspace/sealed-store.js";
 import { createRuntimeVenue } from "../adapter.js";
+import { expectEvery, expectOk, expectRefused, leakMarkers } from "./testing/assertions.js";
 
 const imageDigest = process.env.JINN_INSPECT_OCI_IMAGE;
 const datasetCacheDir = process.env.JINN_INSPECT_OCI_DATASET_CACHE;
@@ -33,16 +36,120 @@ const dockerPath = process.env.JINN_DOCKER_PATH ?? "/usr/local/bin/docker";
 const fixtureDir = dirname(fileURLToPath(new URL("../../../test/fixtures/inspect-project/hermetic_eval.py", import.meta.url)));
 const workspaces: string[] = [];
 
-function retainedBytes(root: string): Buffer[] {
+type EvaluationEntry = Extract<RunJournalEntry, { kind: "evaluation" }>;
+
+/**
+ * Every retained file paired with its bundle-relative path. The path is what the leak assertion at
+ * the call site needs and a bare `Buffer[]` discards: without it a failure names neither the file
+ * that leaked nor, once both markers are collected together, which marker leaked into it.
+ */
+function retainedBytes(root: string, base: string = root): { path: string; bytes: Buffer }[] {
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const path = join(root, entry.name);
-    return entry.isDirectory() ? retainedBytes(path) : [readFileSync(path)];
+    return entry.isDirectory()
+      ? retainedBytes(path, base)
+      : [{ path: relative(base, path), bytes: readFileSync(path) }];
   });
 }
 
 afterEach(() => {
   if (process.env.JINN_KEEP_INSPECT_WORKSPACE === "1") return;
   for (const workspace of workspaces.splice(0)) rmSync(workspace, { recursive: true, force: true });
+});
+
+const INSPECT_CONTAINER_FILTER = "name=jinn-inspect-";
+
+function listInspectContainers(): string {
+  return execFileSync(dockerPath, [
+    "ps", "-a", "--filter", INSPECT_CONTAINER_FILTER, "--format", "{{.Names}}\t{{.Status}}",
+  ], { encoding: "utf8" }).trim();
+}
+
+const CONTAINER_REAP_BUDGET_MS = 30_000;
+
+/**
+ * Docker Engine removes a `--rm` container asynchronously, so a container the runtime has already
+ * released can still be listed for a while on a loaded runner. Poll to a bounded deadline instead
+ * of sleeping a fixed interval, and report what survived it: a bare `expected 'jinn-inspect-…' to
+ * be ''` cannot tell an environment that was merely slow from a reap path that is genuinely broken.
+ */
+async function expectNoInspectContainers(): Promise<void> {
+  const deadline = Date.now() + CONTAINER_REAP_BUDGET_MS;
+  let remaining = listInspectContainers();
+  while (remaining !== "" && Date.now() < deadline) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+    remaining = listInspectContainers();
+  }
+  expect(
+    remaining,
+    `Inspect containers survived ${String(CONTAINER_REAP_BUDGET_MS)}ms of polling after the run released them:\n${remaining}`,
+  ).toBe("");
+}
+
+/**
+ * Identity plus the asserted fact, not the whole cell: `checksFailed` is what separates the two
+ * hypotheses a failure here has to choose between -- a loaded environment, which reports a
+ * non-judged outcome with the failed check named, and a runtime defect, which reports a judged
+ * cell whose axis is pinned wrong.
+ */
+function projectCell(cell: MatrixCell): unknown {
+  return {
+    cellKey: cell.cellKey,
+    armId: cell.armId,
+    replicate: cell.replicate,
+    outcome: cell.outcome,
+    isolation: cell.verification.isolation,
+    checksFailed: cell.verification.checksFailed,
+  };
+}
+
+/**
+ * Presence booleans, not values: the predicate asserts that each provenance digest exists, so the
+ * booleans say which of its conjuncts failed while the 64-char digests would only pad the line.
+ */
+function projectEvaluation(entry: EvaluationEntry, index: number): unknown {
+  return {
+    index,
+    evaluator: entry.evaluator,
+    hasEvalTaskSha256: entry.evalTaskSha256 !== undefined,
+    hasEvalDeliverySha256: entry.evalDeliverySha256 !== undefined,
+    hasEvalAttempt: entry.evalAttempt !== undefined,
+  };
+}
+
+/**
+ * A container one test leaks is visible to every later test's global assertion, which reports the
+ * leak against whichever test happens to run next. Sweep after each test so a single reap failure
+ * fails the test that caused it and no other. The assertions above have already run, so detection
+ * is unaffected.
+ *
+ * Every docker call here is best effort and must never be the thing that fails a test. The two
+ * ways it could: `docker ps` failing on a wedged daemon, and -- the race this whole helper exists
+ * because of -- Docker Engine finishing its own asynchronous `--rm` removal between the listing
+ * and the `docker rm`, which then exits non-zero on a name that no longer resolves. Either would
+ * turn a green test red from inside cleanup, which is exactly the misattribution the sweep was
+ * added to stop.
+ */
+afterEach(() => {
+  if (imageDigest === undefined || datasetCacheDir === undefined) return;
+  let leaked: string;
+  try {
+    leaked = listInspectContainers();
+  } catch (error) {
+    console.warn(`could not list Inspect containers to sweep: ${String(error)}`);
+    return;
+  }
+  if (leaked === "") return;
+  console.warn(`sweeping leaked Inspect containers:\n${leaked}`);
+  for (const line of leaked.split("\n")) {
+    const [name] = line.split("\t");
+    if (name === undefined || name === "") continue;
+    try {
+      execFileSync(dockerPath, ["rm", "--force", name], { stdio: "ignore" });
+    } catch (error) {
+      console.warn(`could not sweep Inspect container ${name}: ${String(error)}`);
+    }
+  }
 });
 
 describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("real OCI Inspect runtime", () => {
@@ -57,12 +164,12 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       principal: "sponsor-1",
       clock: () => new Date().toISOString(),
     };
-    expect(initWorkspace(context).ok).toBe(true);
-    expect(createDraft(context, { draftId: "inspect-sandbox", name: "OCI Inspect sandbox fixture" }).ok).toBe(true);
-    expect(updateDraft(context, {
+    expectOk(initWorkspace(context), "init");
+    expectOk(createDraft(context, { draftId: "inspect-sandbox", name: "OCI Inspect sandbox fixture" }), "create-draft");
+    expectOk(updateDraft(context, {
       draftId: "inspect-sandbox",
       patch: { assurance: { preset: "separate-evaluator" } },
-    }).ok).toBe(true);
+    }), "update-draft");
     const selected = await selectInspectEvaluation(context, {
       draftId: "inspect-sandbox",
       execution: "oci",
@@ -94,10 +201,10 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) throw new Error("unreachable");
     expect(selected.result.draft.spec.evaluationRuntime?.isolationPolicy).toBe("oci-container");
-    expect((await runPreview(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
-    expect((await runQuote(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
-    expect(runLock(context, { draftId: "inspect-sandbox" }).ok).toBe(true);
-    expect((await runLaunch(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
+    expectOk(await runPreview(context, { draftId: "inspect-sandbox" }), "preview");
+    expectOk(await runQuote(context, { draftId: "inspect-sandbox" }), "quote");
+    expectOk(runLock(context, { draftId: "inspect-sandbox" }), "lock");
+    expectOk(await runLaunch(context, { draftId: "inspect-sandbox" }), "launch");
     const collected = await runCollect(context, { draftId: "inspect-sandbox" });
     expect(collected.ok, JSON.stringify(collected)).toBe(true);
     if (!collected.ok) throw new Error("unreachable");
@@ -106,7 +213,12 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       matrix.completeness,
       JSON.stringify({ matrix, journal: readRunJournalEntries(workspaceDir, "inspect-sandbox") }),
     ).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
-    expect(matrix.cells.every((cell) => cell.verification.isolation === "unverifiable")).toBe(true);
+    expectEvery(
+      matrix.cells,
+      (cell) => cell.verification.isolation === "unverifiable",
+      projectCell,
+      "every cell reports unverifiable isolation",
+    );
     const journal = readRunJournalEntries(workspaceDir, "inspect-sandbox");
     const deliveries = journal.filter((entry) => entry.kind === "delivery");
     expect(deliveries).toHaveLength(2);
@@ -138,13 +250,17 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     }
     const evaluations = journal.filter((entry) => entry.kind === "evaluation");
     expect(evaluations).toHaveLength(2);
-    expect(evaluations.every((entry) =>
-      entry.evalTaskSha256 !== undefined
-      && entry.evalDeliverySha256 !== undefined
-      && entry.evalAttempt !== undefined
-      && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer"
-    )).toBe(true);
-    expect((await runReport(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
+    expectEvery(
+      evaluations,
+      (entry) =>
+        entry.evalTaskSha256 !== undefined
+        && entry.evalDeliverySha256 !== undefined
+        && entry.evalAttempt !== undefined
+        && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer",
+      projectEvaluation,
+      "evaluation entries carry eval provenance from a distinct evaluator",
+    );
+    expectOk(await runReport(context, { draftId: "inspect-sandbox" }), "report");
     const verified = await runVerify(context, { draftId: "inspect-sandbox" });
     expect(verified.ok, JSON.stringify(verified)).toBe(true);
     const published = await runPublish(context, { draftId: "inspect-sandbox", includeNativeArtifacts: true });
@@ -177,8 +293,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       "--entrypoint=inspect", imageDigest!, "view", "bundle", "--log-dir=/logs", "--output-dir=/output/inspect-view-bundle",
     ], { encoding: "utf8" });
     expect(readdirSync(join(viewerOutputRoot, "inspect-view-bundle")).length).toBeGreaterThan(0);
-    const remaining = execFileSync(dockerPath, ["ps", "-a", "--filter", "name=jinn-inspect-", "--format", "{{.Names}}"], { encoding: "utf8" }).trim();
-    expect(remaining).toBe("");
+    await expectNoInspectContainers();
   }, 300_000);
 
   test.skipIf(humanEvalCacheDir === undefined)("runs one unmodified Inspect Evals HumanEval sample in the hosted sandbox", async () => {
@@ -189,8 +304,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       principal: "sponsor-1",
       clock: () => new Date().toISOString(),
     };
-    expect(initWorkspace(context).ok).toBe(true);
-    expect(createDraft(context, { draftId: "inspect-humaneval", name: "Inspect Evals HumanEval sandbox proof" }).ok).toBe(true);
+    expectOk(initWorkspace(context), "init");
+    expectOk(createDraft(context, { draftId: "inspect-humaneval", name: "Inspect Evals HumanEval sandbox proof" }), "create-draft");
     const selected = await selectInspectEvaluation(context, {
       draftId: "inspect-humaneval",
       execution: "oci",
@@ -209,18 +324,23 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) throw new Error("unreachable");
-    expect((await runPreview(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
-    expect((await runQuote(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
-    expect(runLock(context, { draftId: "inspect-humaneval" }).ok).toBe(true);
-    expect((await runLaunch(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
+    expectOk(await runPreview(context, { draftId: "inspect-humaneval" }), "preview");
+    expectOk(await runQuote(context, { draftId: "inspect-humaneval" }), "quote");
+    expectOk(runLock(context, { draftId: "inspect-humaneval" }), "lock");
+    expectOk(await runLaunch(context, { draftId: "inspect-humaneval" }), "launch");
     const collected = await runCollect(context, { draftId: "inspect-humaneval" });
     expect(collected.ok, JSON.stringify(collected)).toBe(true);
     if (!collected.ok) throw new Error("unreachable");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     expect(matrix.completeness).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
-    expect(matrix.cells.every((cell) => cell.outcome === "judged" && cell.verification.isolation === "unverifiable")).toBe(true);
-    expect((await runReport(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
-    expect((await runVerify(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
+    expectEvery(
+      matrix.cells,
+      (cell) => cell.outcome === "judged" && cell.verification.isolation === "unverifiable",
+      projectCell,
+      "every cell is judged with unverifiable isolation",
+    );
+    expectOk(await runReport(context, { draftId: "inspect-humaneval" }), "report");
+    expectOk(await runVerify(context, { draftId: "inspect-humaneval" }), "verify");
     const published = await runPublish(context, { draftId: "inspect-humaneval", includeNativeArtifacts: true });
     expect(published.ok, JSON.stringify(published)).toBe(true);
     if (!published.ok) throw new Error("unreachable");
@@ -251,8 +371,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       "--entrypoint=inspect", imageDigest!, "view", "bundle", "--log-dir=/logs", "--output-dir=/output/inspect-view-bundle",
     ], { encoding: "utf8" });
     expect(readdirSync(join(viewerOutputRoot, "inspect-view-bundle")).length).toBeGreaterThan(0);
-    const remaining = execFileSync(dockerPath, ["ps", "-a", "--filter", "name=jinn-inspect-", "--format", "{{.Names}}"], { encoding: "utf8" }).trim();
-    expect(remaining).toBe("");
+    await expectNoInspectContainers();
   }, 300_000);
 
   test("runs one exact sample across two arms through preview and the official lifecycle", async () => {
@@ -263,8 +382,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       principal: "sponsor-1",
       clock: () => new Date().toISOString(),
     };
-    expect(initWorkspace(context).ok).toBe(true);
-    expect(createDraft(context, { draftId: "inspect-oci", name: "OCI Inspect fixture" }).ok).toBe(true);
+    expectOk(initWorkspace(context), "init");
+    expectOk(createDraft(context, { draftId: "inspect-oci", name: "OCI Inspect fixture" }), "create-draft");
     const selected = await selectInspectEvaluation(context, {
       draftId: "inspect-oci",
       execution: "oci",
@@ -293,18 +412,23 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     } finally {
       await venue.shutdown();
     }
-    expect((await runPreview(context, { draftId: "inspect-oci" })).ok).toBe(true);
-    expect((await runQuote(context, { draftId: "inspect-oci" })).ok).toBe(true);
-    expect(runLock(context, { draftId: "inspect-oci" }).ok).toBe(true);
-    expect((await runLaunch(context, { draftId: "inspect-oci" })).ok).toBe(true);
+    expectOk(await runPreview(context, { draftId: "inspect-oci" }), "preview");
+    expectOk(await runQuote(context, { draftId: "inspect-oci" }), "quote");
+    expectOk(runLock(context, { draftId: "inspect-oci" }), "lock");
+    expectOk(await runLaunch(context, { draftId: "inspect-oci" }), "launch");
     const collected = await runCollect(context, { draftId: "inspect-oci" });
     expect(collected.ok, JSON.stringify(collected)).toBe(true);
     if (!collected.ok) throw new Error("unreachable");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     expect(matrix.completeness).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
     expect(matrix.cells).toHaveLength(2);
-    expect(matrix.cells.every((cell) => cell.outcome === "judged")).toBe(true);
-    expect(matrix.cells.every((cell) => cell.verification.isolation === "unverifiable")).toBe(true);
+    expectEvery(matrix.cells, (cell) => cell.outcome === "judged", projectCell, "every cell is judged");
+    expectEvery(
+      matrix.cells,
+      (cell) => cell.verification.isolation === "unverifiable",
+      projectCell,
+      "every cell reports unverifiable isolation",
+    );
 
     const runState = readRunState(workspaceDir, "inspect-oci");
     expect(runState?.matrixSha256).toBe(collected.result.matrixSha256);
@@ -322,11 +446,13 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       ...runState,
       matrixSha256: putSealedBytes(workspaceDir, dishonest.bytes),
     });
-    const rejected = await runVerify(context, { draftId: "inspect-oci" });
-    expect(rejected.ok).toBe(false);
-    if (rejected.ok) throw new Error("unreachable");
+    const rejected = expectRefused(await runVerify(context, { draftId: "inspect-oci" }), "verify of a tampered matrix");
     expect(rejected.error).toMatchObject({ code: "record-integrity" });
     expect(rejected.error.issues?.[0]?.path).toBe("matrix-rederivation");
+    // The sweeping `afterEach` below removes a leaked container and only warns, so without this
+    // assertion a leak from this test leaves no red anywhere -- and container leaks are what this
+    // suite exists to catch. Every other test in the file asserts the same thing.
+    await expectNoInspectContainers();
   }, 180_000);
 
   test("cancellation reaps the OCI worker without leaving a container", async () => {
@@ -337,8 +463,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       principal: "sponsor-1",
       clock: () => new Date().toISOString(),
     };
-    expect(initWorkspace(context).ok).toBe(true);
-    expect(createDraft(context, { draftId: "inspect-oci-cancel", name: "OCI cancellation fixture" }).ok).toBe(true);
+    expectOk(initWorkspace(context), "init");
+    expectOk(createDraft(context, { draftId: "inspect-oci-cancel", name: "OCI cancellation fixture" }), "create-draft");
     const selected = await selectInspectEvaluation(context, {
       draftId: "inspect-oci-cancel",
       execution: "oci",
@@ -356,8 +482,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       runOptions: { sampleId: "alpha", maxSamples: 1, retryOnError: 0 },
     });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
-    expect((await runQuote(context, { draftId: "inspect-oci-cancel" })).ok).toBe(true);
-    expect(runLock(context, { draftId: "inspect-oci-cancel" }).ok).toBe(true);
+    expectOk(await runQuote(context, { draftId: "inspect-oci-cancel" }), "quote");
+    expectOk(runLock(context, { draftId: "inspect-oci-cancel" }), "lock");
     let cancellation: ReturnType<typeof runCancel> | undefined;
     const launched = await runLaunch(context, { draftId: "inspect-oci-cancel" }, {
       onSolveAttemptNonterminal() {
@@ -367,12 +493,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     expect(launched.ok, JSON.stringify(launched)).toBe(true);
     expect(cancellation).toBeDefined();
     if (cancellation === undefined) throw new Error("unreachable");
-    expect((await cancellation).ok).toBe(true);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
-    const remaining = execFileSync(dockerPath, ["ps", "-a", "--filter", "name=jinn-inspect-", "--format", "{{.Names}}"], {
-      encoding: "utf8",
-    }).trim();
-    expect(remaining).toBe("");
+    expectOk(await cancellation, "cancel");
+    await expectNoInspectContainers();
   }, 180_000);
 
   test("preserves a fake Responses call as a genuine Inspect transcript through detached verification", async () => {
@@ -434,8 +556,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       clock: () => new Date().toISOString(),
       runtimeHost,
     };
-    expect(initWorkspace(context).ok).toBe(true);
-    expect(createDraft(context, { draftId: "inspect-broker", name: "OCI Inspect broker fixture" }).ok).toBe(true);
+    expectOk(initWorkspace(context), "init");
+    expectOk(createDraft(context, { draftId: "inspect-broker", name: "OCI Inspect broker fixture" }), "create-draft");
     const provider = {
       surface: "openai-responses" as const,
       upstreamModel: "gpt-5.6-luna" as const,
@@ -475,15 +597,20 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     expect(preview.ok, JSON.stringify(preview)).toBe(true);
     const quote = await runQuote(context, { draftId: "inspect-broker" });
     expect(quote.ok, JSON.stringify(quote)).toBe(true);
-    expect(runLock(context, { draftId: "inspect-broker" }).ok).toBe(true);
-    expect((await runLaunch(context, { draftId: "inspect-broker" })).ok).toBe(true);
+    expectOk(runLock(context, { draftId: "inspect-broker" }), "lock");
+    expectOk(await runLaunch(context, { draftId: "inspect-broker" }), "launch");
     const collected = await runCollect(context, { draftId: "inspect-broker" });
     expect(collected.ok, JSON.stringify(collected)).toBe(true);
     if (!collected.ok) throw new Error("unreachable");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     const journal = readRunJournalEntries(workspaceDir, "inspect-broker");
     expect(matrix.completeness, JSON.stringify({ matrix, journal })).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
-    expect(matrix.cells.every((cell) => cell.verification.isolation === "unverifiable")).toBe(true);
+    expectEvery(
+      matrix.cells,
+      (cell) => cell.verification.isolation === "unverifiable",
+      projectCell,
+      "every broker cell reports unverifiable isolation",
+    );
     const results = runResults(context, { draftId: "inspect-broker" });
     expect(results.ok, JSON.stringify(results)).toBe(true);
     if (!results.ok) throw new Error("unreachable");
@@ -529,7 +656,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     expect(reported.result.claimPackage.limitations).toContainEqual(expect.stringContaining(
       "admits both unrestricted and OCI-container execution",
     ));
-    expect((await runVerify(context, { draftId: "inspect-broker" })).ok).toBe(true);
+    expectOk(await runVerify(context, { draftId: "inspect-broker" }), "verify");
     const published = await runPublish(context, { draftId: "inspect-broker", includeNativeArtifacts: true });
     expect(published.ok, JSON.stringify(published)).toBe(true);
     if (!published.ok) throw new Error("unreachable");
@@ -537,7 +664,10 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     workspaces.push(detachedRoot);
     const detachedBundle = join(detachedRoot, "bundle");
     cpSync(join(workspaceDir, published.result.bundleRelativePath), detachedBundle, { recursive: true });
-    expect(JSON.stringify(readRunJournalEntries(workspaceDir, "inspect-broker"))).not.toContain(keySentinel);
+    expect(leakMarkers(
+      Buffer.from(JSON.stringify(readRunJournalEntries(workspaceDir, "inspect-broker"))),
+      { "key-sentinel": keySentinel },
+    )).toEqual([]);
     rmSync(workspaceDir, { recursive: true, force: true });
     expect((await verifyPublicBundle(detachedBundle)).checks).toContain("report-verification");
     const evidenceCatalog = JSON.parse(readFileSync(join(detachedBundle, "evidence.json"), "utf8")) as {
@@ -574,13 +704,11 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       "--entrypoint=inspect", imageDigest!, "view", "bundle", "--log-dir=/logs", "--output-dir=/output/inspect-view-bundle",
     ], { encoding: "utf8" });
     expect(readdirSync(viewerDir).length).toBeGreaterThan(0);
-    for (const bytes of retainedBytes(detachedBundle)) {
-      expect(bytes.includes(Buffer.from(keySentinel))).toBe(false);
-      expect(bytes.includes(Buffer.from(keyPath))).toBe(false);
-    }
-    expect(readFileSync(responsePath, "utf8")).not.toContain(keySentinel);
-    const remaining = execFileSync(dockerPath, ["ps", "-a", "--filter", "name=jinn-inspect-", "--format", "{{.Names}}"], { encoding: "utf8" }).trim();
-    expect(remaining).toBe("");
+    expect(retainedBytes(detachedBundle).flatMap(({ path, bytes }) =>
+      leakMarkers(bytes, { "key-sentinel": keySentinel, "key-file-path": keyPath }).map((marker) => ({ path, marker })),
+    )).toEqual([]);
+    expect(leakMarkers(readFileSync(responsePath), { "key-sentinel": keySentinel })).toEqual([]);
+    await expectNoInspectContainers();
     const networks = execFileSync(dockerPath, ["network", "ls", "--filter", "name=jinn-inspect-", "--format", "{{.Name}}"], { encoding: "utf8" }).trim();
     const volumes = execFileSync(dockerPath, ["volume", "ls", "--filter", "name=jinn-inspect-", "--format", "{{.Name}}"], { encoding: "utf8" }).trim();
     expect({ networks, volumes }).toEqual({ networks: "", volumes: "" });

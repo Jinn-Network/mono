@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.1 |
-| **Date** | 2026-08-29 |
+| **Version** | 0.3 |
+| **Date** | 2026-08-29 (v0.2 2026-09-16 settles two registry-shape questions raised by the review of PR #4109; v0.3 2026-09-18 re-pins §6's two-way-closure citation) |
 | **Author** | Autopilot design session (Claude Opus 5); seam citations read against the attempt base of `autopilot/2889` |
 | **Shape** | `design`. Output is this spec; implementation lands as a separate packet (§13) |
 | **Status** | proposed — needs operator decision on D1–D4 (§14) |
@@ -11,6 +11,8 @@
 | **Depends on** | [benchmark product design](./2026-08-05-benchmark-product-design.md); [publication interoperability profile](./2026-08-13-benchmark-publication-interoperability-profile.md); [pluggable integrity providers](./2026-08-17-pluggable-integrity-providers-design.md); [disclosure specification record](./2026-08-19-disclosure-specification-record.md) §12.2, which records the exclusion this design removes |
 | **Pairs with** | [#2869](https://github.com/Jinn-Network/mono/issues/2869) (neutral freeze-announcement surface / anchored lock registry) — that design adds a capability; this one decides how capabilities are carried |
 | **Does not do** | It defines no new evidence record, no new check semantics, and no new claim content. Every capability named here already exists or is already designed elsewhere; this design changes only how a bundle *declares* which of them it carries and how a verifier *derives* what to check |
+| **v0.2 changes** | Settles two registry-shape questions the review of PR #4109 raised while the dispatch-timestamps design registered an entry. (1) `refines` arity. §4 said "zero or one" target while §4.1 gave `binary-qualification` two (the evidence-catalog grammar and the trust grammar). The field is now a set of targets, and §5.2's invariant stays keyed per target, so `binary-qualification` is expressible as written. (2) Role-derivation contributions. `disclosure-specification` adds an evidence-catalog role that only a derivation can confer, but §4 had no field for it. §4 gains `roleDerivations`, §5.1 classifies a contribution as additive, and §6 and §9 gain the matching closure step and tests. No D1–D4 decision (§14) and no capability's semantics move. |
+| **v0.3 changes** | §6 step 3's two-way file-closure citation named `verify.ts:464-465`, which at that pin was a disclosure-format comment. The loops are the non-allowlisted-file and missing-expected-path refusals in `verifyPublicBundleSnapshot` (`verify/src/verify.ts:578-579` on this change). No contract, allowlist, denylist, or §13-ruled item moves. |
 
 ## 0. Decision in plain language
 
@@ -212,7 +214,8 @@ Each entry declares:
 | `requires` / `conflicts` | tokens that must / must not co-occur |
 | `mandatoryFiles` | exact member paths this capability adds |
 | `memberPatterns` | path shapes this capability allowlists (e.g. `anchors/<sha256>.bin`), with a `mayBeEmpty` flag |
-| `refines` | zero or one *refinement target* (§5.2): a named member whose grammar this capability replaces |
+| `refines` | a set, possibly empty, of *refinement targets* (§5.2); each target is a named grammar this capability replaces |
+| `roleDerivations` | a set, possibly empty, of evidence-catalog role-derivation contributions. Each names an evidence role and the authenticated fact that derives that role for a record, and is applied only when the capability is declared |
 | `claimSection` | the claim-package section key this capability adds, present iff declared |
 | `checks` | ordered check names this capability appends |
 | `minimumReaderRelease` | first `@colophon-claims/verify` release implementing this token |
@@ -224,8 +227,9 @@ Each entry declares:
 evidence-catalog grammar (`BundleV4EvidenceCatalogSchema` for
 `BundleEvidenceCatalogSchema`) and the trust grammar, and extends the mandatory
 member list (`PUBLIC_BUNDLE_V4_FILES`). Adds the `qualification` claim section.
-Adds **no** top-level check: "v4 expands those checks internally rather than
-adding a seventh top-level result" (`PUBLIC-BUNDLE.md`). Activation: the run
+Its `refines` set therefore has two targets. Adds **no** top-level check: "v4
+expands those checks internally rather than adding a seventh top-level result"
+(`PUBLIC-BUNDLE.md`). Activation: the run
 projects a binary qualification. Minimum reader: `0.1.0`.
 
 **`anchoring`** — from `/6`. Allowlists `anchors/<sha256>.bin`, `mayBeEmpty:
@@ -238,7 +242,10 @@ it. Minimum reader: `0.1.0`.
 **`disclosure-specification`** — designed, unallocated
 ([disclosure record](./2026-08-19-disclosure-specification-record.md)). Adds the
 sealed six-variable record as an evidence-catalog role and a claim-package
-section, and adds the `disclosure-specification` check. Refines nothing.
+section, and adds the `disclosure-specification` check. `roleDerivations`: the
+Report extension derives the `disclosure-specification` role for the record it
+names, which is the `addRole` the verifier already performs
+(`verify/src/verify.ts:793-794` at `6cad987b6`). Refines nothing.
 Activation: the draft carries a disclosure declaration; opt-in, so a bundle
 without one is byte-identical to the bundle it is today. Minimum reader: the
 release that implements it. **This capability is the first that costs one
@@ -267,8 +274,13 @@ composition model becomes less safe than the enumeration it replaced. Two
 kinds exist.
 
 - **Additive** (`anchoring`, `disclosure-specification`): contribute members,
-  claim sections, and checks. Touch nothing that already exists. Any two
-  additive capabilities compose unconditionally.
+  claim sections, checks, and role derivations. Touch nothing that already
+  exists. Any two additive capabilities compose unconditionally.
+  A role derivation is additive, not a refinement. It widens the set of
+  authenticated facts that can confer an existing role name, and it replaces no
+  grammar. It is therefore never a `refines` target. A capability of either
+  kind may carry role derivations, and carrying one never changes its
+  classification: `dispatch-boundaries` is refining and also contributes one.
 - **Refining** (`binary-qualification`): replace an existing member's grammar
   with a narrower one, and extend the mandatory member list.
 
@@ -318,10 +330,14 @@ Each step names the property it preserves.
 2. **Compose the expected closure.** `mandatoryFiles` = base ∪ each capability's
    contribution. `allowlist` = base patterns ∪ each declared capability's
    `memberPatterns`. Grammars = base, with each `refines` target replaced by its
-   single declared refiner.
+   single declared refiner. Evidence-catalog role derivations = base ∪ each
+   declared capability's `roleDerivations`. The closed-world `evidence-closure`
+   compare runs over that composed derivation, so a record carrying a role that
+   only an undeclared capability can derive is refused as unreachable.
 3. **Two-way closure (P2, P3).** Every expected path must be present; every
    manifest path must be expected. This is today's rule at
-   `verify/src/verify.ts:464-465`, unchanged in mechanism and computed over the
+   `verify/src/verify.ts:578-579` (`verifyPublicBundleSnapshot`'s non-allowlisted-file
+   and missing-expected-path loops), unchanged in mechanism and computed over the
    composed sets rather than a per-format constant. Because the allowlist is
    built only from *declared* capabilities, an `anchors/…` member in a bundle
    that did not declare `anchoring` is non-allowlisted — P3, preserved exactly.
@@ -395,14 +411,23 @@ that certainty without reproducing that labor.
   and, for each, asserts: the composed member list, the composed check list, the
   claim section set, the derived minimum release, and — for every capability *not*
   in the subset — that planting one of its members is refused as non-allowlisted
-  and that declaring it without members is refused as a missing member. That is
-  2^n generated cases for n capabilities, and it covers the cells nobody
+  and that declaring it without members is refused as a missing member. For
+  each capability with `roleDerivations`, the test asserts both halves: declared,
+  a record reachable only through the contribution verifies; undeclared, the
+  same record is refused as unreachable by `evidence-closure`. A capability
+  whose record needs a derivation but whose entry omits it fails the first half
+  at a named case, not at an unrelated base-check refusal in a later fixture.
+  A refining capability that adds no member path has no member to plant; its
+  undeclared-case refusal is the refined grammar's own, as the
+  dispatch-timestamps design's §11 states for its entry. That is 2^n generated
+  cases for n capabilities, and it covers the cells nobody
   hand-wrote fixtures for, which is precisely where the enumeration model was
   weakest: `/7` needed a new fixture family before its combination could be
   tested at all.
 - **Registry invariants** run in the same suite: unique tokens, total `order`,
-  at most one refiner per target (§5.2), `requires` closure acyclic, every
-  `minimumReaderRelease` a real published release.
+  at most one refiner per target across every capability's `refines` set
+  (§5.2), `requires` closure acyclic, every `minimumReaderRelease` a real
+  published release.
 - **Legacy pinning** stays: the existing conformance kit under
   `verify/fixtures/public-bundle-conformance-v1/` and every tampered variant
   continue to run against the legacy path unchanged, and the golden `/2`, `/4`,

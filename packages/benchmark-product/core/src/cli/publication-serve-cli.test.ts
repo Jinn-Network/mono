@@ -4,7 +4,7 @@
  * proved over a real socket in `../run/publication-serve.test.ts`.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -49,8 +49,12 @@ describe("publication serve", () => {
     // The verb only reports its bound URL once it is listening, so polling for that line is what
     // makes the abort below prove the loop is the signal's rather than a timer's. A fixed sleep
     // would race the bind on a loaded machine.
-    await waitFor(() => progress.length > 0);
-    expect(progress.join("\n")).toMatch(/^serving http:\/\/127\.0\.0\.1:\d+ /);
+    await waitFor(() => progress.some((line) => line.startsWith("serving ")));
+    // The refresh line comes first and names the source: the refresh takes the source lock, and
+    // under contention that acquire waits out a 30-second timeout before the bind, which used to
+    // be a completely silent window (#3293).
+    expect(progress[0]).toMatch(/^refreshing the well-known document for source colophon-benchmarks$/);
+    expect(progress[progress.length - 1]).toMatch(/^serving http:\/\/127\.0\.0\.1:\d+ /);
     expect(installed).toBe(1);
     shutdown.abort();
 
@@ -79,6 +83,19 @@ describe("publication serve", () => {
       createShutdownSignal: () => { installed += 1; return AbortSignal.abort(); },
     }));
     expect(installed).toBe(0);
+  });
+
+  test("refuses a --workspace that is not a Colophon workspace, creating nothing in it", async () => {
+    const stale = join(workspaceDir, "typo");
+    const result = await runCli(
+      ["publication", "serve", "--workspace", "./typo", "--principal", "sponsor-1", "--port", "0"],
+      contextFor({ createShutdownSignal: () => AbortSignal.abort() }),
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toMatch(/not a workspace/);
+    // The refusal has to precede `loadOrCreateReportSigningKey`, which would otherwise mint a
+    // signing identity and a serving root at the mistyped path (#3290).
+    expect(existsSync(stale)).toBe(false);
   });
 
   test("refuses an out-of-range port and an unknown flag", async () => {

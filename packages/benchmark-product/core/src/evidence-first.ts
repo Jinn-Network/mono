@@ -8,22 +8,27 @@
 export {
   NativeCaptureCoordinator,
   NativeCaptureError,
+  backfillExecutionCommissioningLinks,
   createHarborNativeAdapter,
   createInspectNativeAdapter,
+  writeExecutionCommissioningLink,
 } from "@jinn-network/benchmarking-native-capture";
 export type {
   CapturePrivacyPolicy,
+  CommissionableCapture,
   FixedNativeInvocation,
   IdempotentNativeLauncher,
   ImportNativeCaptureInput,
   NativeCaptureSession,
   NativeCaptureStore,
   NativeCaptureVerification,
+  NativeCommissioningLineage,
   NativeExecutionAdapter,
   NativeRunInventory,
   NativeSnapshotPort,
   PlanNativeCaptureInput,
   SnapshotPolicy,
+  WrittenCommissioningLink,
 } from "@jinn-network/benchmarking-native-capture";
 
 export {

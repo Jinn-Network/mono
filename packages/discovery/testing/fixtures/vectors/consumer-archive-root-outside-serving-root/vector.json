@@ -1,0 +1,13 @@
+{
+  "name": "consumer-archive-root-outside-serving-root",
+  "kind": "consumer",
+  "description": "§7 item 3: a well-known archiveRoot on a different origin is refused, not fetched. The path deliberately matches the serving root's own prefix, so only the origin rule can refuse it.",
+  "input": {
+    "servingRoot": "https://peer.example/archive",
+    "archiveRoot": "https://cdn.example/archive/entries/0000000000000001.json"
+  },
+  "expect": {
+    "rejected": true,
+    "reason": "outside-serving-root"
+  }
+}

@@ -1,8 +1,12 @@
-import { mkdtempSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import { WELL_KNOWN_PATH } from "@jinn-network/record-discovery-protocol";
+import { parseWellKnownDocument } from "@jinn-network/record-discovery-serve";
+import { createFsBlobStore } from "@jinn-network/record-discovery-transport-http";
 import { createWorkspaceLayout } from "../workspace/workspace.js";
+import { publicationServeRoot } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import { createPublicationState } from "./state.js";
 import {
@@ -10,8 +14,40 @@ import {
   createWorkspacePublicationSource,
   normalizePublicArchiveBaseUrl,
   publicArchiveUrl,
+  refreshWorkspacePublicationWellKnown,
   withWorkspacePublicationSourceLock,
 } from "./publication-source.js";
+
+async function announceWellKnownSource(
+  workspaceDir: string,
+  sourceName: string,
+  label: string,
+  timestamp: string,
+): Promise<void> {
+  await withWorkspacePublicationSourceLock(workspaceDir, async () => {
+    const source = createWorkspacePublicationSource(workspaceDir, sourceName);
+    await source.writer.recover();
+    const bytes = new TextEncoder().encode(label);
+    await source.writer.append({
+      timestamp,
+      announcement: {
+        announcementId: label,
+        action: "available",
+        record: { kind: "https://spec.jinn.network/records/task/v1", digest: `sha256:${sha256Hex(bytes)}`, mediaType: "text/plain" },
+      },
+      record: { bytes, contentType: "text/plain" },
+    });
+  });
+}
+
+async function readWellKnownSourceNames(workspaceDir: string): Promise<readonly string[]> {
+  const stored = await createFsBlobStore(publicationServeRoot(workspaceDir)).get(WELL_KNOWN_PATH);
+  const document = parseWellKnownDocument(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stored!.bytes)));
+  return document.sources.map((entry) => entry.name);
+}
+
+// Permission bits do not stop root, so the unreadable-document case only means something as non-root.
+const asNonRoot = typeof process.getuid === "function" && process.getuid() !== 0 ? test : test.skip;
 
 describe("workspace public source composition", () => {
   test("joins root and nested archive mounts without discarding the mount", () => {
@@ -137,6 +173,53 @@ describe("workspace public source composition", () => {
       const observed = new Uint8Array(await response.arrayBuffer());
       expect(observed).not.toEqual(secret);
       if (response.status === 200) expect(observed).toEqual(inside);
+    }
+  });
+
+
+  test("a second source name joins the well-known document instead of hiding the first", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "publication-well-known-merge-"));
+    createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
+    const announce = (sourceName: string, label: string, timestamp: string) =>
+      announceWellKnownSource(workspaceDir, sourceName, label, timestamp);
+    await announce("house-benchmarks", "house", "2026-08-13T12:00:00Z");
+    await announce("guest-benchmarks", "guest", "2026-08-13T12:01:00Z");
+
+    const read = () => readWellKnownSourceNames(workspaceDir);
+    // The second source must not have made the first undiscoverable.
+    expect(await read()).toEqual(["guest-benchmarks", "house-benchmarks"]);
+
+    // A refresh for one source is likewise a merge, not a rewrite of the whole document.
+    expect(await refreshWorkspacePublicationWellKnown(workspaceDir, "house-benchmarks")).toBe(true);
+    expect(await read()).toEqual(["guest-benchmarks", "house-benchmarks"]);
+  });
+
+  asNonRoot("a well-known document that cannot be read is not replaced by one source's entry (issue #3847)", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "publication-well-known-unreadable-"));
+    createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
+    await announceWellKnownSource(workspaceDir, "house-benchmarks", "house", "2026-08-13T12:00:00Z");
+    await announceWellKnownSource(workspaceDir, "guest-benchmarks", "guest", "2026-08-13T12:01:00Z");
+
+    const file = join(publicationServeRoot(workspaceDir), WELL_KNOWN_PATH);
+    chmodSync(file, 0o000);
+    try {
+      await expect(refreshWorkspacePublicationWellKnown(workspaceDir, "house-benchmarks")).rejects.toThrow();
+    } finally {
+      chmodSync(file, 0o644);
+    }
+    expect(await readWellKnownSourceNames(workspaceDir)).toEqual(["guest-benchmarks", "house-benchmarks"]);
+  });
+
+  test("a well-known document that does not parse is rebuilt", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "publication-well-known-unparseable-"));
+    createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
+    await announceWellKnownSource(workspaceDir, "house-benchmarks", "house", "2026-08-13T12:00:00Z");
+
+    const file = join(publicationServeRoot(workspaceDir), WELL_KNOWN_PATH);
+    for (const garbage of [Buffer.from("not json"), Buffer.from([0xff, 0xfe])]) {
+      writeFileSync(file, garbage);
+      expect(await refreshWorkspacePublicationWellKnown(workspaceDir, "house-benchmarks")).toBe(true);
+      expect(await readWellKnownSourceNames(workspaceDir)).toEqual(["house-benchmarks"]);
     }
   });
 

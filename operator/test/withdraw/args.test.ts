@@ -121,6 +121,89 @@ describe('parseWithdrawArgv', () => {
     ).toThrow();
   });
 
+  // #2393: both --config forms must be accepted wherever --config is parsed.
+  // The equals form previously survived the splice and hit the
+  // `Unexpected arguments:` throw.
+  it('accepts the --config equals form', () => {
+    expect(() =>
+      parseWithdrawArgv([
+        '--config=/etc/jinn/op-b.json',
+        '--to',
+        '0x000000000000000000000000000000000000dEaD',
+        '--dry-run',
+      ]),
+    ).not.toThrow();
+  });
+
+  it('accepts the --config space-separated form', () => {
+    expect(() =>
+      parseWithdrawArgv([
+        '--config',
+        '/etc/jinn/op-b.json',
+        '--to',
+        '0x000000000000000000000000000000000000dEaD',
+        '--dry-run',
+      ]),
+    ).not.toThrow();
+  });
+
+  it('still rejects a bare --config with no value', () => {
+    expect(() =>
+      parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--config']),
+    ).toThrow('Missing value for --config');
+  });
+
+  it('still rejects an empty --config= value', () => {
+    expect(() =>
+      parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--config=']),
+    ).toThrow('Missing value for --config');
+  });
+
+  it('rejects an empty --config value in the space form', () => {
+    expect(() =>
+      parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--config', '']),
+    ).toThrow('Missing value for --config');
+  });
+
+  // #4375: the stripper matched the two-token form only, so
+  // `--password-fd=3` survived the splice and tripped `Unexpected arguments:`,
+  // and an empty value was consumed silently.
+  it('accepts the --password-fd equals form leading and trailing', () => {
+    expect(() =>
+      parseWithdrawArgv([
+        '--password-fd=3',
+        '--to',
+        '0x000000000000000000000000000000000000dEaD',
+        '--dry-run',
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      parseWithdrawArgv([
+        '--to',
+        '0x000000000000000000000000000000000000dEaD',
+        '--dry-run',
+        '--password-fd=3',
+      ]),
+    ).not.toThrow();
+  });
+
+  it('rejects an empty --password-fd= value', () => {
+    expect(() =>
+      parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--password-fd=']),
+    ).toThrow('Missing value for --password-fd');
+  });
+
+  it('rejects an empty bare --password-fd value', () => {
+    expect(() =>
+      parseWithdrawArgv([
+        '--to',
+        '0x000000000000000000000000000000000000dEaD',
+        '--password-fd',
+        '',
+      ]),
+    ).toThrow('Missing value for --password-fd');
+  });
+
   it('rejects unknown tokens', () => {
     expect(() => parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--what'])).toThrow();
   });
