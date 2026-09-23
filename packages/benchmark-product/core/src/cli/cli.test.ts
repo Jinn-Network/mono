@@ -180,11 +180,15 @@ describe("launch and resume concurrency flag", () => {
 
 /**
  * Issue #3332. `Number` coerces rather than parses, so `"1e3"`, `"0x10"`, `"+1"` and a
- * whitespace-padded number all became integers `Number.isInteger` accepted and the schema's bound
+ * whitespace-padded coercion all became integers `Number.isInteger` accepted and the schema's bound
  * admitted -- an operator who mistyped a round got a successfully bound run at a round they never
  * typed, and `bind` is write-once, so rebinding cannot correct it. The refusals below happen on the
- * flag, before any workspace state is read, which is why they need no locked draft; the two cases
+ * flag, before any workspace state is read, which is why they need no locked draft; the cases
  * that do reach the operation assert only that they were not refused for their spelling.
+ *
+ * Issue #4133: surrounding whitespace is stripped before the digit check, matching the web
+ * `field()` helper, so `"  1000  "` is the round 1000, not a refusal. `"  1e3  "` is still a
+ * coercion and still refused.
  */
 describe("bind --beacon-round", () => {
   const bind = (round: string): Promise<{ exitCode: number; stdout: string }> => runCli([
@@ -207,6 +211,7 @@ describe("bind --beacon-round", () => {
     ["0", "round zero"],
     ["Infinity", "a non-finite literal"],
     ["9007199254740993", "a round past the safe-integer range"],
+    ["  1e3  ", "exponent notation with surrounding whitespace"],
   ])("refuses %s (%s) by name", async (round) => {
     const result = await bind(round);
     expect(result.exitCode).toBe(2);
@@ -226,6 +231,11 @@ describe("bind --beacon-round", () => {
 
   test("leading zeros denote the same round rather than a refusal", async () => {
     const result = await bind("0001000");
+    expect(parseJson<never>(result.stdout).error?.code).not.toBe("invalid-invocation");
+  });
+
+  test("surrounding whitespace is stripped rather than refused", async () => {
+    const result = await bind("  1000  ");
     expect(parseJson<never>(result.stdout).error?.code).not.toBe("invalid-invocation");
   });
 });
