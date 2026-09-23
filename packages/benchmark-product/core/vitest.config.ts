@@ -19,9 +19,10 @@ export default defineConfig({
     globalSetup: ["../../../test-support/tmp-isolation/global-tmp-root.ts"],
     // The suite performs crypto/key generation and temporary-workspace I/O, and 18 of its files
     // write fake harness executables and spawn them as real subprocesses. Two workers retain
-    // file-level parallel coverage while bounding that shared-resource pressure under the 30s
-    // `testTimeout`/`hookTimeout` (#3330, #3703). Raising workers needs a measured product-job
-    // pair; until that measurement exists, keep two.
+    // file-level parallel coverage while bounding that shared-resource pressure; four workers
+    // still starved unrelated sub-second cases outright on the shared local/CI-class runner.
+    // That four-worker measurement was taken against the 5s default below, so it is the reason
+    // this stayed at 2, not a current argument that 2 is still the right number.
     maxWorkers: 2,
     // Vitest's per-test bound is wall clock, so a descheduled worker spends it without doing work.
     // That is what this suite hands it: the file count went 68 (ship) → 135 → 185, and

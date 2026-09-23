@@ -545,9 +545,9 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     // fully synthetic and needs none of that, so moving it there would quietly redefine what the
     // opt-in means.
     //
-    // The starvation it causes is now bounded by the 30s `testTimeout`/`hookTimeout` that #3330
-    // and #3703 hoisted. `maxWorkers: 2` stays because two workers bound the shared-resource
-    // pressure of this file holding one worker for most of a run; raising workers needs a
-    // measured product-job pair rather than a change to what this gate covers.
+    // The starvation it causes is now bounded by the 30s `testTimeout` that #3330 hoisted. The
+    // lever left is `maxWorkers: 2`, whose own comment records that the 2 was chosen against the
+    // old 5s default and is not a current argument for 2. That is the next thing to revisit, and
+    // it is a measured CI change rather than a change to what this gate covers.
   }, 7_200_000);
 });

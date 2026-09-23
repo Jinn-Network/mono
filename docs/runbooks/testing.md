@@ -492,10 +492,10 @@ Two real test bounds at 5000ms were found. Classification per site:
   formerly `}, 5_000)`) — **deliberate-for-speed, wall-clock-exposed;
   exposure accepted, override removed.** Its comment names the mutation it
   guards: clear the transport timer at the response headers again and the
-  guarded call never settles, so the test "hangs to the vitest timeout rather
-  than rejecting" (the suite's 30s `testTimeout`). That is still true at that
-  bound — the mutation
-  check goes red either way; the 5s override only made it go red 25s sooner.
+  guarded call never settles, so the test "hangs to the suite's 30s
+  `testTimeout` rather than rejecting". That is still true at that bound — the
+  mutation check goes red either way; the 5s override only made it go red 25s
+  sooner.
   There is no clock-free mechanism for detecting "this promise never
   settles": every hang detector is a deadline, and fake timers do not help
   because the thing under test is a real `fetch` body read. The choice was
