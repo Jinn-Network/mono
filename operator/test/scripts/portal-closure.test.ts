@@ -209,6 +209,28 @@ describe('shared portal-closure walk', () => {
     ]);
   });
 
+  it('sees a cache-mount yarn install even when a later plain yarn install also exists (#4635)', () => {
+    const dockerfile = [
+      'FROM node:22-slim AS build',
+      'COPY app/package.json app/yarn.lock ./app/',
+      'RUN --mount=type=cache,target=/root/.yarn yarn install --immutable',
+      'COPY lib/package.json ./lib/',
+      'RUN corepack enable && yarn install --immutable',
+      'FROM node:22-slim',
+      'COPY --from=build /app ./',
+    ].join('\n');
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      "@x/lib (lib): not copied before app's install in its build stage",
+    ]);
+  });
+
+  it('does not treat yarn test as an install', () => {
+    const dockerfile = GOOD.replace('RUN corepack enable && yarn install --immutable', 'RUN yarn test');
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      'app: no yarn install follows a COPY of its manifest',
+    ]);
+  });
+
   it('keeps a continued instruction whole across a comment line', () => {
     const dockerfile = GOOD.replace(
       'COPY lib/package.json ./lib/',

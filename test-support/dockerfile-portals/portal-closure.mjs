@@ -136,9 +136,32 @@ const YARN_NON_INSTALL = new Set([
   'workspaces',
 ]);
 
-/** True when a Dockerfile `RUN` resolves packages the way a `yarn install` does. */
+// A `RUN` instruction can carry BuildKit options (`--mount=...`, `--network=...`, `--security=...`)
+// before the actual command; strip them so the command check below sees the real first token
+// (#4635 forms like `RUN --mount=type=cache,target=/root/.yarn yarn install --immutable`).
+const RUN_OPTION_PREFIX = /^--(?:mount|network|security)=\S*\s*/u;
+
+function stripRunOptions(args) {
+  let rest = args;
+  for (let match = RUN_OPTION_PREFIX.exec(rest); match !== null; match = RUN_OPTION_PREFIX.exec(rest)) {
+    rest = rest.slice(match[0].length);
+  }
+  return rest;
+}
+
+/**
+ * True when a Dockerfile `RUN` resolves packages the way a `yarn install` does. The literal-text
+ * check is next's original regex, kept as a disjunct: it alone covers forms the token-first-word
+ * parse below can miss because the install sits inside a wrapper (`sh -c "yarn install"`, `env
+ * CI=1 yarn install`, `if ...; then yarn install; fi`) or a non-assignment prefix
+ * (`/usr/local/bin/yarn install`) (#4635).
+ */
 function runResolvesYarnInstall(args) {
-  return args.split(/\s*(?:&&|\|\||;)\s*/u).some(commandResolvesYarnInstall);
+  const body = stripRunOptions(args);
+  return (
+    /\byarn\s+install\b/u.test(body) ||
+    body.split(/\s*(?:&&|\|\||;)\s*/u).some(commandResolvesYarnInstall)
+  );
 }
 
 function commandResolvesYarnInstall(command) {
