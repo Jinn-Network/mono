@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.2 (2026-09-23: §6.3 board key revised to one board per official suite, on the operator's direction on #4715) |
+| **Version** | 0.3 (2026-09-24: §11.5 and §12 record that the published checker does not yet carry `suiteComparability`, a prerequisite of suite boards; wording corrections). 0.2 (2026-09-23: §6.3 board key revised to one board per official suite, on the operator's direction on #4715) |
 | **Date** | 2026-09-21 |
 | **Author** | Autopilot design session (issue #3993); citations read against this attempt's supplied worktree |
 | **Shape** | `design`; no build in this issue |
@@ -11,7 +11,7 @@
 | **Parent** | [#3973](https://github.com/Jinn-Network/mono/issues/3973) item 4 |
 | **Depends on** | [DR-2026-09-04](../../../log/decisions/2026-09-04-colophon-surrounds-the-run.md) (ratified; decision 7 names this fork); [colophon self-serve](../../../spec/2026-08-13-colophon-self-serve.md) §4 (site mutation is a separate gate; no API; reader path); [public bundle](../../../packages/benchmark-product/PUBLIC-BUNDLE.md); [external verification](../../../packages/benchmark-product/EXTERNAL-VERIFICATION.md); [suite comparability](../../../packages/benchmark-product/core/src/runtime/suite-protocol/comparability.ts); [DR-2026-08-18-f](../../../log/decisions/2026-08-18-colophon-method-cli.md) (officialness is a property of the sealed document) |
 | **Does not do** | implement the site, the workflow, the CLI submit verb, a registry service, blob hosting, or the Colophon venue-independence service (named by DR-2026-09-04, not designed here) |
-| **Lands in** | this document in `Jinn-Network/mono`. Follow-on **build** issues are filed on `Jinn-Network/mono` as sub-issues of #3973 and name that their code lands in `colophon-claims/site` (and, for the optional CLI, in `packages/benchmark-product`). This DR, once Stage 2 writes it, is the design artifact those issues consume. |
+| **Lands in** | this document in `Jinn-Network/mono`. Follow-on **build** issues are filed on `Jinn-Network/mono` as sub-issues of #3973 and name that their code lands in `colophon-claims/site` (and, for the checker prerequisite 11.5 and the optional CLI, in `packages/benchmark-product`). This DR, once Stage 2 writes it, is the design artifact those issues consume. |
 
 ## 0. Decision in plain language
 
@@ -23,7 +23,7 @@ A listing is a row, not a rank. It shows the claim's own score as the bundle sta
 
 ## 1. Context
 
-Boards are the display: one per sealed method, listing every checked bundle that sealed it. Today two reports reached `colophon-claims/site` by hand, through pull requests. A claimant who has published a bundle has no way to get it onto the board for its method. Step 8 of the claimant's path — lock, run, bring back, bundle, publish, anyone verifies, **list** — does not exist.
+Boards are the display: one per official suite, or per method where there is no suite, listing every checked bundle for it. Two reports reached `colophon-claims/site` by hand, through pull requests, and one of them, the LoCoMo judge report, is listed today. A claimant who has published a bundle has no way to get it onto a board. Step 8 of the claimant's path does not exist: lock, run, bring back, bundle, publish, anyone verifies, **list**.
 
 `publish` in [`PUBLIC-BUNDLE.md`](../../../packages/benchmark-product/PUBLIC-BUNDLE.md) means local immutable emission, not hosting. It does not upload. A "bundle URL" is therefore something the claimant hosted after local publish: an HTTP directory, a zip or tarball, a GitHub release asset, or a repository tree.
 
@@ -148,7 +148,7 @@ Locator policy, fail-closed:
 
 1. Fetch the locator into an ephemeral workspace (not the site git tree yet).
 2. Read `claim-package.json` `verification.command` from those bytes. If that file is absent or the command does not parse, refuse `unknown-format` before npx.
-3. Run that exact command against the fetched directory, with `--yes` because this is CI, and with `npx --cache` pointed at an empty temp directory so the install is cold. Do not rewrite the sealed package name; if the line names `@colophon-claims/verify`, that alias is the pin the bundle sealed. `--yes` is the self-serve exception for non-interactive callers, not a change to the human quickstart.
+3. Run that exact command against the fetched directory, with `--yes` because this is CI, and with `npx --cache` pointed at an empty temp directory so the install is cold. `<bundle-dir>` in the sealed line is a placeholder: replace that one token with the fetched directory's path, passed as a single argument and not through a shell. A line without exactly one `<bundle-dir>` does not parse (step 2). Do not rewrite the sealed package name; if the line names `@colophon-claims/verify`, that alias is the pin the bundle sealed. `--yes` is the self-serve exception for non-interactive callers, not a change to the human quickstart.
 4. Success (process exits 0, and the tool's own report says the checks passed) is the listing gate.
 5. On success, run existing ingest as the **projector** into `data/reports/<slug>.json` plus byte-exact `public/reports/<slug>/bundle/`. Ingest may still locally sanity-check the manifest. If ingest then refuses, that is a projector bug: fail closed, comment both the checker pass and the ingest refusal, do not list. Do not skip the checker because ingest would have passed. Do not skip ingest because the checker passed.
 6. Open an ingest PR. Required checks: the cold-verify job (already green on this run; re-run on the PR against the committed copy) and the site build. When those are green and the diff is append-only listing files (new `data/reports/<slug>.json`, new `public/reports/<slug>/`, no edits to existing report URLs), auto-merge. Listing is the merge.
@@ -184,14 +184,14 @@ The 0.1 draft took option A. The operator's direction of 2026-09-23 on #4715 tak
 
 | Option | Official suite, named slice (`one_task` / `ten_task` / `full`) | Official suite, `custom` coverage | No suite protocol object |
 |---|---|---|---|
-| A. Split key | `(suiteProtocolId, coverage)` | SHA-256 of the locked method document bytes | SHA-256 of the locked method document bytes |
+| A. Split key | (suite protocol id, coverage) | SHA-256 of the locked method document bytes | SHA-256 of the locked method document bytes |
 | B. Always method digest | One board per exact locked document | Same | Same |
-| **C (taken). Suite key, coverage on the row** | `suiteProtocolId`; the row shows the coverage | The same suite board; the row shows `custom` | SHA-256 of the locked method document bytes |
+| **C (taken). Suite key, coverage on the row** | The suite protocol id; the row shows the coverage | The same suite board; the row shows `custom` | SHA-256 of the locked method document bytes |
 | D. Operator registers boards | A human creates the board, then listings attach | Same | Same |
 
 **Taken: C.** Extraction:
 
-- If the sealed method carries a conforming suite protocol object, the board key is its `suiteProtocolId`, whatever the coverage. Catalog ids are exactly `SUITE_PROTOCOL_IDS`. One board lists every checked bundle for that suite: `full`, `ten_task`, `one_task`, and `custom`.
+- If the sealed method carries a conforming suite protocol object, the board key is its suite protocol id, whatever the coverage. The key is read from the `protocol` field of the sealed suite-protocol selection object (`packages/benchmark-product/core/src/runtime/suite-protocol/manifest.ts`); the claim package's `suiteComparability` carries no protocol id. Catalog ids are exactly `SUITE_PROTOCOL_IDS`. One board lists every checked bundle for that suite: `full`, `ten_task`, `one_task`, and `custom`.
 - If there is no suite protocol object, the board key is the method-document digest. A homemade method has no suite id; its digest **is** the method.
 - The first successfully checked bundle whose key is not yet present **is** that board's creation. No operator registration. Permissionless: an outsider's custom method gets a board by listing, the same way an official suite does.
 - Coverage is a row fact, like `execution_conformance`. Every row on a suite board shows both (and the claim already carries `leaderboardSubmitReady` plus the limitation sentence), and any row short of `full` carries a visible marker. Neither splits a board. Hiding non-conforming runs or subset runs from a suite board would be a ranking choice: only show "valid" or "complete" scores. Neutral display lists every checked bundle for the suite, limitation attached.
@@ -207,7 +207,7 @@ Board URL: `/boards/<protocol>` for official suites (example `/boards/terminal-b
 
 Bundles that wear an official suite but do not project `suiteComparability` refuse listing (`unknown-format`) rather than guess. Every row on a suite board shows its coverage; a guessed coverage would be a false row fact, and a missing one would drop the marker.
 
-Existing two hand-ingested reports: re-project board keys, and for a suite its coverage, from the byte-exact `public/reports/<slug>/bundle/` already in git. Do not re-fetch. If a grandfathered bundle cannot project a key, or a suite bundle cannot project its coverage, it stays on `/reports/<slug>/` and does not appear on a board until a human resolves it. Fail closed, not a guessed suite or coverage.
+The one hand-ingested report listed today, the LoCoMo judge report: re-project its board key, and for a suite its coverage, from the byte-exact `public/reports/<slug>/bundle/` already in git. Do not re-fetch. Re-projection reads the reports `data/reports/` lists, not every directory under `public/reports/`: the Demo-1 report page was unpublished (`colophon-claims/site` PR #15, 2026-09-04) while its bundle bytes remain under `public/reports/`, and re-projection must not bring that page back or put it on a board. If a grandfathered bundle cannot project a key, or a suite bundle cannot project its coverage, it stays on `/reports/<slug>/` and does not appear on a board until a human resolves it. Fail closed, not a guessed suite or coverage.
 
 ### 6.4 What a listing shows, and in what order
 
@@ -222,7 +222,7 @@ Existing two hand-ingested reports: re-project board keys, and for a suite its c
 **Taken: A.** Row fields, all copied or projected from sealed bytes, never recomputed as a second opinion:
 
 - **Score.** Whatever the claim package already presents as the result of this method: `headline` for a headline-shaped claim, `comparison` for a comparison-shaped claim, `qualification` for `binary-instrument@1`. Do not invent a single numeric "board score." A comparison-shaped claim has no headline; the row shows the comparison, not a dash pretending to be a rankable number. Attach the claim's own limitations on the row (truncated to the limitation sentences; full text lives on the report page).
-- **Date.** `reportedAt` from the ingest JSON (today's sort key). This is listing time in the projector, which must continue to be a fact about when the site ingested, or a timestamp the bundle itself seals — the follow-on ingest change must pick one and document it on the row. Taken: prefer a timestamp the bundle seals (`report.json` / claim package) when present; fall back to ingest time and label it "listed at" so the site does not imply the run happened then.
+- **Date.** `reportedAt` from the ingest JSON is today's sort key, and it is listing time in the projector. The listed LoCoMo bundle seals no timestamp in `report.json` or in its claim package (`claim-package/5`); its `run.json` carries `closeAt`, the run's pre-registered close instant, not its lock or report time (`packages/benchmark-product/check/src/profile/task-selection.ts`). Taken, in this field order: the sealed `run.json` `closeAt` when present, labeled as the run's close; else the listing time, labeled "listed at", so the site does not imply the run happened then. The follow-on ingest change names which field it emitted (11.1), and the row names it on its label (11.3).
 - **Coverage and execution conformance.** On a suite board, `suiteComparability.coverage` and `suiteComparability.executionConformance` from the claim package, on every row. Any row short of `full` coverage carries a visible marker. These are facts, not filters: no row is hidden or demoted for either. A method-digest board shows neither: a method with no suite protocol object seals no `suiteComparability`, and its rows share one locked method document.
 - **Venue.** `venueHonesty.venue` from the claim package. Today that is `"self-run"`. When a Colophon-controlled venue exists, that sealed value is what the row shows. Who filed the GitHub issue is not venue.
 - **Three pinning / independence lines**, DR-2026-09-04's names, projected from the sealed disclosure / `venueHonesty.limits`, not rewritten:
@@ -322,7 +322,7 @@ Board pages are a new product component on `colophon-claims/site`. This section 
 - **State.** Key (suite protocol id, or method digest); derived title; count of listed bundles; on a suite board, the two-axis comparability reminder.
 - **State messages.** Empty board does not exist (a board is created by its first listing). A grandfathered report that cannot project a key (or, for a suite, its coverage) is not on any board; that is reported on the report page, not as a board message.
 - **Collections.** Listings, in default order by sealing time, newest first (§6.4). No pagination required at first ship; add only if a board's row count is measured as a problem.
-- **Actions.** `re-sort by column`: by any column except the score, in the reader's browser, with the page's own script and keyboard-operable column headers. Action states: `default order → sorted by <column> (ascending | descending)`. No request, no mutation, no failure state; without script the action is absent and the default order stands. A board is otherwise read-only display. Submit lives on GitHub, not on the page.
+- **Actions.** `re-sort by column`: by any column except the score, in the reader's browser, with the page's own script and keyboard-operable column headers. Action states: `default order → sorted by <column> (ascending | descending) → default order`; sorting the date column newest first, or reloading the page, returns to the default order. No request, no mutation, no failure state; without script the action is absent and the default order stands. A board is otherwise read-only display. Submit lives on GitHub, not on the page.
 
 ### Listing (row)
 
@@ -334,6 +334,8 @@ Board pages are a new product component on `colophon-claims/site`. This section 
 ### Submission
 
 - **State.** Not a site-page component. The GitHub issue form is the action surface. Issue states: open → workflow running → refused (comment + close or leave open for retry) → ingest PR → listed (issue closed with the `/reports/<slug>/` URL).
+- **State messages.** A named refusal (§6.2 codes) commented on the submission issue; its optional action is `submit locator` again, by a comment that re-runs the workflow or by a new issue (§7). An ingest PR whose auto-merge failed; its optional action is a repair merge of the already-green append-only PR by a human on the site repo, which is not a second gate (§7).
+- **Collections.** None.
 - **Actions.** `submit locator` (human on GitHub, or CLI that opens the issue). Action states: `idle → submitted → checking → listed | refused`.
 
 No helper-text cruft on board pages. A label plus its value is enough. The non-ranking sentence is not cruft: it is the claim boundary, the same class as `/reports` already prints. Tooltips may explain "self-run" and the three lines; they must not narrate the numbers.
@@ -363,7 +365,7 @@ Do not implement them in #3993.
 - **Acceptance.**
   - [ ] An issue form on `colophon-claims/site` accepts one locator and an optional slug; no file upload.
   - [ ] A workflow fetches the locator under §6.1 destination policy, runs a cold `npx --yes` of the claim package's `verification.command` against an empty npx cache, and on success runs `scripts/ingest-report.mjs` without replacing existing slugs.
-  - [ ] `data/reports/<slug>.json` carries `bundleSha256` (lowercase SHA-256 of `bundle.json`), board key fields, venue projection, locator provenance, and resolved git OID when the locator was `owner/repo@ref:path`.
+  - [ ] `data/reports/<slug>.json` carries `bundleSha256` (lowercase SHA-256 of `bundle.json`), board key fields, venue projection, locator provenance, the row date under a name that says which field it is (the sealed `run.json` `closeAt` when present, else the listing time; §6.4), and resolved git OID when the locator was `owner/repo@ref:path`.
   - [ ] Duplicate `bundleSha256` refuses with `duplicate-identity` and comments the existing `/reports/<slug>/` URL.
   - [ ] Checker failure comments stdout/stderr and does not open an ingest PR.
   - [ ] Green append-only ingest PRs auto-merge without a human click. Existing report URLs cannot be mutated by this workflow.
@@ -373,6 +375,7 @@ Do not implement them in #3993.
 ### 11.2 feat(site): board pages keyed by suite, or by method digest
 
 - **Repo.** `colophon-claims/site`. Tracking issue on `Jinn-Network/mono`, sub-issue of #3973, label `human-surface`.
+- **Prerequisite.** 11.5. Until it lands, every suite-bound bundle refuses `check-failed`, so no suite board can get its first row.
 - **Context.** `/reports` is a flat newest-first ledger. DR-2026-09-04 keys a board on suite identity; custom methods have no suite id.
 - **Impact.** Every checked bundle for one suite, or for one method with no suite, is visible in one place without ranking.
 - **Acceptance.**
@@ -383,7 +386,7 @@ Do not implement them in #3993.
   - [ ] A suite board's header carries the two-axis comparability reminder.
   - [ ] The default order (sealing time, newest first) renders without script. A reader may re-sort by any column except the score, in the browser, using the page's own script, which makes no external requests; the sortable column headers are keyboard-operable.
   - [ ] First listing whose key is new creates the board. No registration UI, no operator catalog of boards.
-  - [ ] Grandfathered reports re-project from existing `public/reports/<slug>/bundle/` bytes. A bundle that cannot project a key, or for a suite its coverage, stays on `/reports/<slug>/` only.
+  - [ ] Grandfathered reports re-project from existing `public/reports/<slug>/bundle/` bytes, only for reports `data/reports/` lists; the unpublished Demo-1 bundle under `public/reports/` gains no page and no row. A bundle that cannot project a key, or for a suite its coverage, stays on `/reports/<slug>/` only.
   - [ ] `/reports` remains the chronological ledger. Board pages sit above it.
   - [ ] Exported site remains static; board pages are built from `data/reports/*.json` at `npm run build`.
 - **Files (site repo).** `lib/reports.ts` (key derivation, board grouping); `app/boards/` (index, suite and method routes, and the board page's own sort script); existing `app/reports/` retained.
@@ -394,7 +397,7 @@ Do not implement them in #3993.
 - **Context.** A board row must show the claim's own result, date, coverage and conformance on a suite board, venue, the three independence lines, and a bundle link, without looking like a leaderboard.
 - **Impact.** The display matches PRODUCT.md (no ranking) and DR-2026-09-04 (venue lines from the sealed disclosure).
 - **Acceptance.**
-  - [ ] Each row shows: the claim's own result projection (`headline` or `comparison` or `qualification`, not a synthesized board score); date labeled as sealed report time or "listed at" per §6.4; on a suite board, coverage and execution conformance from `suiteComparability`, with a visible marker on any row short of `full`; venue from `venueHonesty.venue`; the three independence lines quoted from the sealed disclosure; link to `/reports/<slug>/bundle/`.
+  - [ ] Each row shows: the claim's own result projection (`headline` or `comparison` or `qualification`, not a synthesized board score); date labeled by its field per §6.4 (the sealed `run.json` `closeAt` as the run's close, or the listing time as "listed at"); on a suite board, coverage and execution conformance from `suiteComparability`, with a visible marker on any row short of `full`; venue from `venueHonesty.venue`; the three independence lines quoted from the sealed disclosure; link to `/reports/<slug>/bundle/`.
   - [ ] Default order is sealing time, newest first (the row's date, §6.4). No control sorts by score. No control sorts by run count.
   - [ ] Board header may show the count of checked bundles as a fact. That count does not order rows.
   - [ ] The non-ranking sentence already on `/reports` appears on each board page.
@@ -414,7 +417,19 @@ Do not implement them in #3993.
   - [ ] Skill-text / USAGE pins in the CLI package include `board submit` and do not mention a site API.
 - **Files.** `packages/benchmark-product/cli/` USAGE / verbs; operations facade if one already owns GitHub-opening helpers; tests that the command only opens the issue.
 
-### 11.5 Not filed from this design
+### 11.5 fix(benchmark-product): the published checker carries `suiteComparability`
+
+- **Repo.** `Jinn-Network/mono`, `packages/benchmark-product/check`. Sub-issue of #3973. Prerequisite of 11.2.
+- **Context.** `report` seals `suiteComparability` into the claim package whenever a suite protocol is bound (`packages/benchmark-product/core/src/operations/report.ts`; the schema is `packages/benchmark-product/core/src/report/claim.ts`). The published checker's claim schema (`packages/benchmark-product/check/src/profile/claim.ts`) has no such key, zod strips it on parse, and `packages/benchmark-product/check/src/verify.ts` then refuses the claim package as not the exact canonical encoding. `publish` runs that same checker on its own output (`packages/benchmark-product/core/src/operations/publish.ts`, through `core/src/bundle/verify.ts`).
+- **Impact.** Today a suite-bound bundle can be neither published nor passed through the cold listing gate. Until this lands, suite-bound bundles refuse `check-failed` (§6.2) and no suite board can get its first row. A checker that merely tolerated the key would leave the coverage marker, the one on-page guard between a subset row and a full row, unchecked.
+- **Acceptance.**
+  - [ ] The checker's claim schema carries `suiteComparability` (`executionConformance`, `coverage`, `leaderboardSubmitReady`), matching core's.
+  - [ ] Claim-consistency (`packages/benchmark-product/check/src/profile/claim-consistency.ts`) re-derives `suiteComparability` from the sealed suite-protocol selection the bundle carries and the Matrix, never from the claim under test. A claim whose coverage or conformance differs from that derivation refuses, as does a claim that carries the key where no suite protocol is bound or omits it where one is.
+  - [ ] Regression test first: a suite-bound run publishes, and its bundle passes the published checker.
+  - [ ] A suite-bound bundle sealed after this lands pins, in its `verification.command`, a published checker line that carries the field.
+- **Files.** `packages/benchmark-product/check/src/profile/claim.ts`; `check/src/profile/claim-consistency.ts`; `check/src/verify.ts` (passes the re-derived value); tests.
+
+### 11.6 Not filed from this design
 
 - Colophon venue independence service (DR-2026-09-04). Named, not designed.
 - Blob-hosting or Git LFS for large `public/reports/` trees. File only after git pain is measured.
@@ -427,6 +442,7 @@ Do not implement them in #3993.
 - That a Colophon-controlled venue will exist, or what bytes it will seal into the three lines. Rows are shaped for it; the service is not designed.
 - That npm will be available at listing time. `npm-unavailable` refuses rather than falling back to ingest-only.
 - That the claimant's locator remains up. The site's byte-exact copy is what remains checkable.
+- That a suite-bound bundle can be listed today. The published checker does not carry `suiteComparability`: its claim schema (`packages/benchmark-product/check/src/profile/claim.ts`) has no such key, zod strips unknown keys, and `packages/benchmark-product/check/src/verify.ts` then refuses a `claim-package.json` that carries the key as not the exact canonical encoding. `publish` runs that same checker on its own output (`packages/benchmark-product/core/src/operations/publish.ts`), so a suite-bound bundle can be neither published nor passed through the cold listing gate, and no suite board can get its first row. A checker that merely tolerated the key would leave the coverage marker, the one on-page guard between a subset row and a full row, unchecked. 11.5 is the prerequisite of 11.2; until it lands, suite-bound bundles refuse `check-failed`.
 - That a reader will not take a subset row for a full-suite result. One board per suite puts them side by side; the header reminder and the row marker state the difference, and they cannot make a reader read it.
 
 ## 13. Mapping to issue #3993 acceptance
@@ -436,7 +452,7 @@ Do not implement them in #3993.
 
 ## 14. Headless decisions log
 
-No human was present. HARD-GATE approval was overwritten by the session prompt. Decisions made from the files rather than from asking:
+The 0.1 session ran with no human present; HARD-GATE approval was overwritten by the session prompt. The operator has since given one direction, on §6.3 (2026-09-23 on #4715), and the entries below note where it reaches. Decisions made from the files rather than from asking:
 
 1. **Revised the recommended-direction equivalence in §6.3.** Method-document digest is not equivalent to suite×coverage: the document also names solver, host, and arms (`claim.ts` method block; DR-2026-08-18-f officialness vs homemade). DR-2026-09-04 decision 5 keys boards on suite identity. Taken in 0.1: split key. Declined: universal digest. Superseded in part by the operator's direction of 2026-09-23 on #4715, which takes option C: one board per suite, coverage a row fact. The split key is now declined; the refusal of the universal digest stands.
 2. **Auto-merge of append-only ingest PRs.** Permissionless forbids a silent human filter on green listings. Repair merges remain allowed.
@@ -446,4 +462,3 @@ No human was present. HARD-GATE approval was overwritten by the session prompt. 
 6. **Did not file the §11 issues.** No `gh` credentials in this stage; the documents are the filing payload for after the DR.
 7. **The score is not a reader sort key.** The operator's direction lets a reader re-sort by column and says rows are never ranked by score. A row's score is the claim's own projection, not one number (§6.4), so a score sort would need the single board score this design declines. Taken: every column except the score sorts. The operator may rule otherwise.
 8. **Sealing time falls back to listing time.** Where a bundle seals no timestamp, the default order uses the listing time, labeled "listed at", by the date rule §6.4 already states.
-)

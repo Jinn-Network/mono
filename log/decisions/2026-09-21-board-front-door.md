@@ -14,7 +14,8 @@ owning-docs: packages/benchmark-product/PUBLIC-BUNDLE.md, EXTERNAL-VERIFICATION.
 A claimant who has locally published a public bundle still cannot list it.
 Step 8 of the path — lock, run, bring back, bundle, publish, anyone verifies,
 **list** — is operator-only: two reports reached `colophon-claims/site` by
-hand. `publish` in `PUBLIC-BUNDLE.md` is local immutable emission, not
+hand, and one of them, the LoCoMo judge report, is listed today. `publish`
+in `PUBLIC-BUNDLE.md` is local immutable emission, not
 hosting; a bundle URL is something the claimant hosted afterwards. The site
 is a Next.js App Router static export. No API, no runtime fetch, no
 transformation of bundle bytes. Ingest today is a local manifest walk, not a
@@ -82,8 +83,10 @@ resolving.
    `mutation-refused`, `npm-unavailable` (no fallback to ingest-only).
 
 4. **One board per official suite.** A bundle whose sealed method carries a
-   conforming suite protocol object keys on `suiteProtocolId`, whatever its
-   coverage. Catalog ids are exactly `SUITE_PROTOCOL_IDS`. Every coverage
+   conforming suite protocol object keys on its suite protocol id, whatever
+   its coverage, read from the `protocol` field of the sealed suite-protocol
+   selection object; the claim package's `suiteComparability` carries no
+   protocol id. Catalog ids are exactly `SUITE_PROTOCOL_IDS`. Every coverage
    (`full`, `ten_task`, `one_task`, `custom`) is listed on that one board.
    Coverage is a row fact, like `execution_conformance`: every row shows
    both, and any row short of `full` carries a visible marker. Neither axis
@@ -102,23 +105,30 @@ resolving.
    A human title derived from `suiteProtocolDisplayName` or the claim's
    method id is paint, not the key. Bundles that wear an official suite but
    do not project `suiteComparability` refuse `unknown-format` rather than
-   guess a coverage. Grandfathered reports re-project from existing
-   `public/reports/<slug>/bundle/` bytes; a bundle that cannot project a
-   key, or for a suite its coverage, stays on `/reports/<slug>/` until a
-   human resolves it. The reason for one board per suite is usability: one
-   place per suite for a reader to look (the operator's direction of
-   2026-09-23 on #4715). The split key this record first proposed is under
-   Alternatives rejected.
+   guess a coverage. The one report listed today, the LoCoMo judge report,
+   re-projects from its existing `public/reports/<slug>/bundle/` bytes; a
+   bundle that cannot project a key, or for a suite its coverage, stays on
+   `/reports/<slug>/` until a human resolves it. Re-projection reads only the
+   reports `data/reports/` lists: the unpublished Demo-1 report's bundle
+   bytes remain under `public/reports/`, and re-projection must not bring
+   its page back or put it on a board. The reason for one board per suite
+   is usability: one place per suite for a reader to look (the operator's
+   direction of 2026-09-23 on #4715). The split key this record first
+   proposed is under Alternatives rejected.
 
 5. **A listing is a fact row, newest first.** The row copies what the bundle
    already seals. Score is whatever the claim package presents
    (`headline`, `comparison`, or `qualification`); do not invent a single
    numeric board score. A comparison-shaped claim has no headline; the row
    shows the comparison. Attach the claim's own limitation sentences on the
-   row; full text lives on the report page. Date prefers a timestamp the
-   bundle seals; fall back to ingest time labeled "listed at". On a suite
-   board the row shows coverage and execution conformance from
-   `suiteComparability`, with a visible marker on any row short of `full`.
+   row; full text lives on the report page. Date is the sealed `run.json`
+   `closeAt` when present, labeled as the run's close (the listed LoCoMo
+   bundle seals no timestamp in `report.json` or its claim package); else
+   ingest time labeled "listed at". On a suite board the row shows coverage
+   and execution conformance from `suiteComparability`, with a visible
+   marker on any row short of `full`. The published checker does not yet
+   carry that field, so until follow-on 11.5 lands a suite-bound bundle
+   refuses `check-failed` (decision 8; What this does not yet prove).
    Venue is `venueHonesty.venue` from the
    sealed disclosure, not who filed the GitHub issue. Today's value is
    `"self-run"`. The three DR-2026-09-04 independence lines are quoted from
@@ -187,13 +197,19 @@ resolving.
      ingest-on-success PR. Lands in `colophon-claims/site`. Label
      `human-surface`.
    - **11.2** `feat(site)`: board pages keyed by suite, or by method digest.
-     Lands in `colophon-claims/site`. Label `human-surface`.
+     Lands in `colophon-claims/site`. Label `human-surface`. Prerequisite:
+     11.5.
    - **11.3** `feat(site)`: listing row fields as ruled. Lands in
      `colophon-claims/site`. Label `human-surface`.
    - **11.4** `feat(benchmark-product)`: `colophon board submit <locator>`
      opens the GitHub door. Lands in `packages/benchmark-product`. File after
      11.1 is listed-on-the-board in production, not in parallel as a second
      door. It does not upload bytes, run ingest, or write the site repo.
+   - **11.5** `fix(benchmark-product)`: the published checker carries
+     `suiteComparability` in its claim schema and re-derives it in
+     claim-consistency from the sealed suite-protocol selection and the
+     Matrix. Lands in `packages/benchmark-product/check`. Prerequisite of
+     11.2: until it lands, suite-bound bundles refuse `check-failed`.
 
    Not filed from this design: the Colophon venue independence service
    (DR-2026-09-04 decision 2; named so row fields are ready, not designed);
@@ -227,6 +243,19 @@ resolving.
   rather than falling back to ingest-only.
 - That the claimant's locator remains up. The site's byte-exact copy is what
   remains checkable.
+- That a suite-bound bundle can be listed today. The published checker does
+  not carry `suiteComparability`: its claim schema
+  (`packages/benchmark-product/check/src/profile/claim.ts`) has no such key,
+  zod strips unknown keys, and `packages/benchmark-product/check/src/verify.ts`
+  then refuses a `claim-package.json` that carries the key as not the exact
+  canonical encoding. `publish` runs that same checker on its own output
+  (`packages/benchmark-product/core/src/operations/publish.ts`), so a
+  suite-bound bundle can be neither published nor passed through the cold
+  listing gate, and no suite board can get its first row. A checker that
+  merely tolerated the key would leave the coverage marker, the one on-page
+  guard between a subset row and a full row, unchecked. Follow-on 11.5
+  (decision 8) is the prerequisite of 11.2; until it lands, suite-bound
+  bundles refuse `check-failed`.
 - That a reader will not take a subset row for a full-suite result. One board
   per suite puts them side by side; the header reminder and the row marker
   state the difference, and they cannot make a reader read it.
@@ -265,7 +294,7 @@ resolving.
 - **Trust the claimant's pasted verify receipt.** Anyone can paste.
 - **Always key boards on method-document digest.** Fragments official suites
   per solver. Contradicts DR-2026-09-04 decision 5.
-- **Split key: `(suiteProtocolId, coverage)` for official named slices,
+- **Split key: (suite protocol id, coverage) for official named slices,
   method digest for official `custom` coverage.** Considered and declined.
   It was this record's decision 4 as first proposed (spec §6.3 option A).
   The operator's direction of 2026-09-23 on #4715 declined it for
@@ -307,7 +336,9 @@ Proposed 2026-09-21 from design issue #3993. Stage 1 ruled the forks in
 `docs/superpowers/specs/2026-09-21-board-front-door-design.md`. This record
 condenses those rulings. Revised 2026-09-23 to the operator's direction
 on #4715: decision 4 keys a board on the suite alone, and the split key is
-recorded under Alternatives rejected. Ratified on code-owner approval of
+recorded under Alternatives rejected. Revised 2026-09-24 to record that the
+published checker does not yet carry `suiteComparability` (decision 8,
+follow-on 11.5). Ratified on code-owner approval of
 this record by the operator credential that did not author it.
 
 ## Amends
