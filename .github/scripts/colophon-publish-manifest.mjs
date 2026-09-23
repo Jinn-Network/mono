@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { DEPENDENCY_SECTIONS } from './stack-package-graph.mjs';
 
@@ -748,7 +748,11 @@ function parseArgs(argv) {
   return { mode: argv[0], manifestPath: argv[1] };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
     const { mode, manifestPath } = parseArgs(process.argv.slice(2));

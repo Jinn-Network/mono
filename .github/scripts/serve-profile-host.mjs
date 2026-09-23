@@ -30,11 +30,11 @@
 // guarded so `import` is side-effect-free.
 
 import { X509Certificate, createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import {
   IMMUTABLE_CACHE_CONTROL,
@@ -481,7 +481,11 @@ export function parseArgs(argv) {
   return { ...parsed, port: Number(parsed.port) };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const { bundleDir, port, fault } = parseArgs(process.argv.slice(2));
     const server = await startProfileHost({ bundleDir, port, fault });
