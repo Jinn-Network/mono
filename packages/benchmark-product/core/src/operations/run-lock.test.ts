@@ -11,6 +11,7 @@ import {
   readRunAnchorIntentExtension,
   readRunSampleSizeAdvisory,
   sealRun,
+  withRunSampleSizeAdvisoryExtension,
 } from "@jinn-network/benchmarking-records";
 import { PREDICTION_FORECAST_PROFILE_DIGEST_HEX } from "@jinn-network/task-execution-profiles";
 import { readAuditEntries } from "../audit/journal.js";
@@ -408,21 +409,140 @@ describe("runLock — acknowledged sample-size advisory", () => {
     expect(readRunSampleSizeAdvisory(sealedRun())).toBeUndefined();
   });
 
-  test("an unacknowledged lock seals byte-identically to a lock before the advisory existed", async () => {
+  /**
+   * "Byte-identical to a lock before the advisory existed" is a claim about ONE key, so the test
+   * has to add that key and take it away again. Comparing an unacknowledged seal with itself
+   * (issue #3802) cannot fail for the reason it names and would keep passing if the extension ever
+   * started leaking into unacknowledged seals.
+   */
+  test("acknowledging adds one key and nothing else: strip it and the bytes come back exactly", async () => {
     const clock = makeClock();
     await setUpQuotedDraft(clock);
     expect(runLock(contextFor(clock), { draftId: "draft-1" }).ok).toBe(true);
     const plain = sealedRun();
-    // Sealing the same record with the extension removed is the only difference the acknowledgement
-    // makes: it does not re-shape the record.
-    const acknowledged = { ...plain };
     expect(Object.keys(plain)).not.toContain(SAMPLE_SIZE_ADVISORY_EXTENSION);
-    expect(Buffer.from(sealRun(acknowledged).bytes).toString("hex"))
-      .toBe(Buffer.from(sealRun(plain).bytes).toString("hex"));
+    const plainHex = Buffer.from(sealRun(plain).bytes).toString("hex");
+
+    const acknowledged = withRunSampleSizeAdvisoryExtension(plain, { n: 24, expectedIntervalWidth: "0.3928" });
+    expect(Buffer.from(sealRun(acknowledged).bytes).toString("hex")).not.toBe(plainHex);
+
+    const stripped = { ...acknowledged };
+    delete (stripped as Record<string, unknown>)[SAMPLE_SIZE_ADVISORY_EXTENSION];
+    expect(Buffer.from(sealRun(stripped).bytes).toString("hex")).toBe(plainHex);
+  });
+
+  /**
+   * Issue #3908. The claim is about `runLock`'s own acknowledged branch — "acknowledging adds one
+   * key and nothing else" — so both sides have to be real seals that operation produced. Attaching
+   * the extension with `withRunSampleSizeAdvisoryExtension` and stripping it again round-trips a
+   * records helper whose implementation is `{...record, [KEY]: ext}`, which cannot catch `runLock`
+   * gaining a second mutation on that branch. Two locks of identical specs, one acknowledged and
+   * one not, can.
+   */
+  test("two real locks of the same spec differ by exactly the one key", async () => {
+    const setupClock = makeClock();
+    await setUpQuotedDraft(setupClock, "plain-draft");
+    // `setUpQuotedDraft` already created the workspace; the acknowledging draft joins it with the
+    // same spec, the way the anchoring suite's two-draft comparison does.
+    createDraft(contextFor(setupClock), { draftId: "ack-draft", name: "Lock Test" });
+    await sampleInit(contextFor(setupClock), { draftId: "ack-draft" });
+    armAdd(contextFor(setupClock), { draftId: "ack-draft", armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
+    armAdd(contextFor(setupClock), { draftId: "ack-draft", armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+    expect((await runQuote(contextFor(setupClock), { draftId: "ack-draft" })).ok).toBe(true);
+
+    // One frozen instant for both locks, so `closeAt` is identical in both records.
+    const lockClock = () => "2026-08-05T09:00:00Z";
+    const plainLock = runLock(contextFor(lockClock), { draftId: "plain-draft" });
+    const ackLock = runLock(contextFor(lockClock), { draftId: "ack-draft", acknowledgedSampleSizeAdvisory: true });
+    expect(plainLock.ok && ackLock.ok, JSON.stringify({ plainLock, ackLock })).toBe(true);
+    if (!plainLock.ok || !ackLock.ok) return;
+
+    const plainHex = Buffer.from(getSealedBytes(workspaceDir, plainLock.result.runSha256)).toString("hex");
+    const ackBytes = getSealedBytes(workspaceDir, ackLock.result.runSha256);
+    expect(Buffer.from(ackBytes).toString("hex")).not.toBe(plainHex);
+
+    const acknowledged = JSON.parse(new TextDecoder().decode(ackBytes)) as Record<string, unknown>;
+    expect(acknowledged).toHaveProperty(SAMPLE_SIZE_ADVISORY_EXTENSION);
+    delete acknowledged[SAMPLE_SIZE_ADVISORY_EXTENSION];
+    expect(Buffer.from(sealRun(acknowledged).bytes).toString("hex")).toBe(plainHex);
+  }, 60_000);
+
+  /**
+   * Issue #3832. The advisory names the declared readouts its per-arm width does not bound, and
+   * that naming reaches the operator surfaces through the same object `runLock` returns — while the
+   * SEALED extension stays exactly the two fields it always carried.
+   */
+  test("names a declared comparison readout without sealing it", async () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(clock));
+    expect(createDraft(contextFor(clock), { draftId: "paired", name: "Paired" }).ok).toBe(true);
+    await sampleInit(contextFor(clock), { draftId: "paired" });
+    armAdd(contextFor(clock), { draftId: "paired", armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
+    armAdd(contextFor(clock), { draftId: "paired", armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+    expect(updateDraft(contextFor(clock), {
+      draftId: "paired",
+      patch: {
+        analysis: {
+          method: "jinn.benchmarking.method/paired-delta",
+          version: "1",
+          baseline: "baseline",
+          candidate: "sample",
+          parameters: { seed: 1, resamples: 10, alpha: "0.05" },
+        },
+      },
+    }).ok).toBe(true);
+    const quoted = await runQuote(contextFor(clock), { draftId: "paired" });
+    expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
+
+    const planned = draftSampleSizeAdvisory(workspaceDir, "paired");
+    expect(planned?.unboundedReadouts).toEqual(["paired-delta@1"]);
+
+    const outcome = runLock(contextFor(clock), { draftId: "paired", acknowledgedSampleSizeAdvisory: true });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    if (!outcome.ok) return;
+    // The surfaces show exactly what the draft advised, scope line included...
+    expect(outcome.result.sampleSizeAdvisory).toEqual(planned);
+    // ...and the seal still carries the two fields `sample-size-advisory/v1` admits, no more.
+    expect(readRunSampleSizeAdvisory(sealedRun("paired")))
+      .toEqual({ n: planned?.n, expectedIntervalWidth: planned?.expectedIntervalWidth });
   });
 });
 
 describe("draftSampleSizeAdvisory", () => {
+  /**
+   * Issue #3908. `declaredAnalyses` spreads `spec.additionalAnalyses` after `spec.analysis`, and
+   * nothing exercised that spread from a draft: the unit tests pass `declaredAnalyses` straight in
+   * and the integration case declares only `spec.analysis`, so dropping the spread passed the whole
+   * suite. This is the case that fails when it is dropped.
+   */
+  test("names the readouts additionalAnalyses declares, after the primary one", async () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(clock));
+    expect(createDraft(contextFor(clock), { draftId: "plan", name: "Plan" }).ok).toBe(true);
+    await sampleInit(contextFor(clock), { draftId: "plan" });
+    armAdd(contextFor(clock), { draftId: "plan", armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
+    armAdd(contextFor(clock), { draftId: "plan", armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+    expect(updateDraft(contextFor(clock), {
+      draftId: "plan",
+      patch: {
+        analysis: {
+          method: "jinn.benchmarking.method/paired-delta",
+          version: "1",
+          baseline: "baseline",
+          candidate: "sample",
+          parameters: { seed: 1, resamples: 10, alpha: "0.05" },
+        },
+        additionalAnalyses: [{ method: "jinn.benchmarking.method/avg-at-k", version: "1" }],
+      },
+    }).ok).toBe(true);
+    const quoted = await runQuote(contextFor(clock), { draftId: "plan" });
+    expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
+
+    // Primary first, then the additional entry -- the order `buildAnalysisPlan` seals them in.
+    expect(draftSampleSizeAdvisory(workspaceDir, "plan")?.unboundedReadouts)
+      .toEqual(["paired-delta@1", "avg-at-k@1"]);
+  });
+
   test("is undefined for a draft no lock could seal yet, so the lock's own refusal is the answer", async () => {
     const clock = makeClock();
     initWorkspace(contextFor(clock));

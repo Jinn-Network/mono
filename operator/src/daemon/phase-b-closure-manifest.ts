@@ -186,25 +186,34 @@ export interface ValidatedPhaseBClosureManifest {
 const FORBIDDEN_KEY = /(private|password|secret|token|credential|stateDir|identityStore|trustRoots|producerPath)/iu;
 const PRIVATE_PATH = /(?:^|["'])\s*(?:\/Users\/|\/home\/|\/var\/lib\/|file:|\.\.?\/)/u;
 
-function rejectPrivateMaterial(value: unknown, path = '$'): void {
+/**
+ * Fail-closed sanitizer for any public Phase B artifact. Exported so the sibling artifacts the
+ * manifest cites -- today the restart-drill recovery reports (#2434) -- are held to the exact same
+ * forbidden-key and private-path rule rather than a second, drifting copy of it.
+ */
+export function assertNoPrivateMaterial(
+  value: unknown,
+  artifact = 'Phase B closure manifest',
+  path = '$',
+): void {
   if (Array.isArray(value)) {
-    value.forEach((item, index) => rejectPrivateMaterial(item, `${path}[${index}]`));
+    value.forEach((item, index) => assertNoPrivateMaterial(item, artifact, `${path}[${index}]`));
     return;
   }
   if (value !== null && typeof value === 'object') {
     for (const [key, item] of Object.entries(value)) {
-      if (FORBIDDEN_KEY.test(key)) throw new Error(`Phase B closure manifest contains forbidden field ${path}.${key}`);
-      rejectPrivateMaterial(item, `${path}.${key}`);
+      if (FORBIDDEN_KEY.test(key)) throw new Error(`${artifact} contains forbidden field ${path}.${key}`);
+      assertNoPrivateMaterial(item, artifact, `${path}.${key}`);
     }
     return;
   }
   if (typeof value === 'string' && PRIVATE_PATH.test(value)) {
-    throw new Error(`Phase B closure manifest contains a private producer path at ${path}`);
+    throw new Error(`${artifact} contains a private producer path at ${path}`);
   }
 }
 
 export function buildPhaseBClosureManifest(input: PhaseBClosureManifest): Uint8Array {
-  rejectPrivateMaterial(input);
+  assertNoPrivateMaterial(input);
   const parsed = PhaseBClosureManifestSchema.parse(input);
   return serializeCanonicalJson(parsed as Parameters<typeof serializeCanonicalJson>[0]);
 }
@@ -216,7 +225,7 @@ export function parseValidatedPhaseBClosureManifest(bytes: Uint8Array): Validate
   } catch (cause) {
     throw new Error(`Phase B closure manifest is not UTF-8 JSON: ${String(cause)}`);
   }
-  rejectPrivateMaterial(decoded);
+  assertNoPrivateMaterial(decoded);
   const manifest = PhaseBClosureManifestSchema.parse(decoded);
   const canonical = buildPhaseBClosureManifest(manifest);
   if (!Buffer.from(canonical).equals(Buffer.from(bytes))) {

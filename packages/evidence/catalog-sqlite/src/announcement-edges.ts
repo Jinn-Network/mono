@@ -143,6 +143,16 @@ export function announcementEdgesFromCard(
 }
 
 /**
+ * The clause a resumed page appends to its filters. Exported for the same reason
+ * `announcementEdgeSelectSql` is: the index-coverage test asserts the plan for the paged form of
+ * each shape, and the paged form has to be the one the binding really builds rather than a
+ * transcription of it that could drift from this line. Package-internal; `index.ts` exports an
+ * explicit list and does not include it.
+ */
+export const ANNOUNCEMENT_EDGE_CURSOR_CLAUSE =
+  "(source_id, record_digest, field, ordinal) > (?, ?, ?, ?)";
+
+/**
  * The exact page statement one filter shape reads through. Exported so an index-coverage test can
  * take `EXPLAIN QUERY PLAN` over the statement the binding really runs, rather than over a
  * restatement of it that could drift. It is package-internal: `index.ts` exports an explicit list
@@ -275,7 +285,7 @@ export class SqliteAnnouncementEdgeIndex {
     const resume = decodeCursor(query.cursor, queryHash);
     if (resume !== undefined) {
       // Row-value comparison resumes exactly at the ordering key the last page ended on.
-      clauses.push("(source_id, record_digest, field, ordinal) > (?, ?, ?, ?)");
+      clauses.push(ANNOUNCEMENT_EDGE_CURSOR_CLAUSE);
       parameters.push(...resume);
     }
 

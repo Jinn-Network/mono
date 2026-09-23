@@ -14,6 +14,10 @@
       "sha256": "dec5318fce424506a2a6bdb6c8e35b4199a6be6b7e6215fd4e9404f71efc232b"
     },
     {
+      "id": "anchor-kit-v1/cross-validation-2026-09-06.md",
+      "sha256": "6bfe38d3d87dff5bad7f2183ad15bba4ff378bc66f72cab9f4b6d2d541bf57f3"
+    },
+    {
       "id": "anchor-kit-v1/cross-validation.md",
       "sha256": "35557993ad049fdecbb262b9499cf4f4f092025b07f265172cc2f2295d00d147"
     },
@@ -118,5 +122,12 @@
       "sha256": "4b982ac96647b1b3924758fe8d5b376a5ac335fe256f0b03c3c13463c5747374"
     }
   ],
-  "errata": []
+  "errata": [
+    {
+      "id": "anchor-kit-v1/cross-validation.md",
+      "supersededBy": "anchor-kit-v1/cross-validation-2026-09-06.md",
+      "date": "2026-09-06",
+      "reason": "The 2026-08-17 transcript predates the criticality half of anchor-evidence design §6.1 rule 9, so its counts (twenty-nine RFC 3161 negatives, twenty-three independently refused) describe a kit that now carries thirty and twenty-four, and it records no OpenSSL row for the non-critical timeStamping extended key usage. The superseding file adds that row, explains why all three extended-key-usage rows report a chain error rather than a purpose error, and carries an anchor-swapped run that reaches the purpose check itself. The original is retained unedited at its published bytes; its 2026-08-17 OpenSSL runs are reproduced unchanged in the superseding file."
+    }
+  ]
 }

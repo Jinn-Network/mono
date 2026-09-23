@@ -838,7 +838,7 @@ describe("seal-once Delivery checkpoint (C1)", () => {
     await backend.shutdown();
     crash = false;
     backend = fixture(root);
-    expect(await backend.recover(attempt)).toEqual({ classification: "matching" });
+    expect(await backend.recover(attempt)).toEqual({ classification: "matching", retained: true });
     const refs = await backend.deliveries(attempt);
     expect(refs).toHaveLength(1);
     expect(await backend.fetchDelivery(refs[0]!)).toEqual(delivery);

@@ -2,6 +2,8 @@ import type {
   AnnouncementEntry,
   AnnouncedItem,
   SourceHead,
+  SourceIdentity,
+  WireDsseEnvelope,
 } from "@jinn-network/record-discovery-protocol";
 // DsseEnvelope is trust-core's type (verifySourceChain's declaration file
 // references it from there, not re-exported through protocol's own index);
@@ -18,6 +20,38 @@ import type { Vector } from "./vectors.js";
 /** Wraps a plain array as the AsyncIterable `verifySourceChain` expects for `entries`. */
 export async function* toAsyncIterable<T>(items: readonly T[]): AsyncIterable<T> {
   for (const item of items) yield item;
+}
+
+// -- vector envelope -> wire form -----------------------------------------
+
+function base64Utf8(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/**
+ * The checked-in §18 corpus predates the published wire profile and stores legible canonical
+ * payload/signature text. Conformance explicitly serializes that abstract fixture form into the
+ * sole strict wire representation before invoking production verification; production never
+ * accepts or guesses the old raw-string form.
+ *
+ * This is the one place that rule lives. Every consumer that hands a corpus envelope to
+ * production parsing (`parseWireDsseEnvelope`, `verifySourceChain`, `verifyHead`, a verify
+ * driver) must route it through this function: the raw fixture form is refused by design, and
+ * `verifySignedBy` reports that refusal as `unauthorized-signer` -- indistinguishable from the
+ * rule a test may believe it is exercising (#4436).
+ */
+export function vectorEnvelopeToWire(envelope: DsseEnvelope): WireDsseEnvelope {
+  return {
+    payloadType: envelope.payloadType,
+    payload: base64Utf8(envelope.payload),
+    signatures: envelope.signatures.map((signature) => ({
+      ...(signature.keyid === undefined ? {} : { keyid: signature.keyid }),
+      sig: base64Utf8(signature.sig),
+    })),
+  };
 }
 
 // -- source-chain vector shape recognition --------------------------------
@@ -48,6 +82,21 @@ export function isRunnableSourceChainInput(input: unknown): input is RunnableSou
     Array.isArray(record["entries"]) &&
     typeof record["firstAdoption"] === "boolean"
   );
+}
+
+// -- source-head vector shape -------------------------------------------------
+
+/**
+ * A `source-head-revalidation` vector (§10.5): everything `verifySourceHead`
+ * needs in one call. `source` is the source the consumer follows, which the
+ * head's own `origin` may deliberately fail to name; `seed.hwm` is the mark the
+ * consumer already holds for it, which the procedure must leave unchanged.
+ */
+export interface SourceHeadVectorInput {
+  seed: { now: string; keys: unknown[]; hwm: unknown };
+  source: SourceIdentity;
+  head: SourceHead;
+  headSignature: DsseEnvelope;
 }
 
 /** Vectors whose `input` intentionally fails Announcement Entry *parsing* before source-chain-verification even runs (§18 corpus completeness; primary coverage is M1's entry.test.ts). */

@@ -3,16 +3,6 @@
   "generatedFrom": "@colophon-claims/core@0.1.0",
   "entries": [
     {
-      "operation": "admitHumanTruth",
-      "cliVerb": "human-review admit",
-      "authorityGated": false,
-      "description": "Validates two-person unanimous truth, explicit operator-only truth, or screened-operator-sampled truth and derives resolution and analysis records.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires local signed-review, roster, and licensed truth evidence files"
-      }
-    },
-    {
       "operation": "anchoringConfigure",
       "cliVerb": "anchoring configure",
       "authorityGated": true,
@@ -103,16 +93,6 @@
       }
     },
     {
-      "operation": "createHumanReviewPackets",
-      "cliVerb": "human-review packet create",
-      "authorityGated": false,
-      "description": "Creates blind, digest-bound binary-judgment review packets and visibility receipts.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires local licensed item files and evaluator packet custody; browser upload is intentionally unavailable"
-      }
-    },
-    {
       "operation": "disclosureDeclare",
       "cliVerb": "disclosure declare",
       "authorityGated": false,
@@ -163,16 +143,6 @@
       }
     },
     {
-      "operation": "importBinaryItemBank",
-      "cliVerb": "import item-bank",
-      "authorityGated": false,
-      "description": "Imports admitted binary-judgment items from exact local JSONL manifests as a sealed benchmark.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires local licensed item, source/license, and human-admission manifests; browser upload is intentionally unavailable"
-      }
-    },
-    {
       "operation": "importRunRecords",
       "cliVerb": "run import",
       "authorityGated": true,
@@ -220,16 +190,6 @@
       "gui": {
         "status": "shipped",
         "action": "draft.list"
-      }
-    },
-    {
-      "operation": "migrateTerminalBenchLegacyTask",
-      "cliVerb": "runtime terminal-bench migrate",
-      "authorityGated": false,
-      "description": "Transforms a legacy Terminal-Bench task through the pinned Harbor mapper and seals both byte histories.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires server-configured migration input paths; browser-supplied paths are forbidden"
       }
     },
     {
@@ -443,16 +403,6 @@
       }
     },
     {
-      "operation": "signHumanReviewResponse",
-      "cliVerb": "human-review response sign",
-      "authorityGated": false,
-      "description": "Signs one human response with a configured evaluator identity and stores compact Result Evaluation evidence.",
-      "gui": {
-        "status": "unavailable",
-        "reason": "requires a machine-local configured signer key; browser key custody is forbidden"
-      }
-    },
-    {
       "operation": "updateDraft",
       "cliVerb": "draft update",
       "authorityGated": false,
@@ -483,10 +433,6 @@
     {
       "name": "freeze-repo verify",
       "reason": "standalone byte-for-byte comparison of a published tree against the bundle it claims to be derived from; reads only what the caller names"
-    },
-    {
-      "name": "demo1 prereg verify",
-      "reason": "read-only post-lock/pre-dispatch gate verifies the exact local E4 witness without credentials or network access"
     },
     {
       "name": "agent add",

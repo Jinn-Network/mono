@@ -32,7 +32,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "prepack": "yarn build"
+    "prepack": "yarn build",
+    "generate:fixtures": "node scripts/write-golden-lifecycle-digests.mjs"
   },
   "dependencies": {
     "@jinn-network/benchmarking-aggregate": "0.1.0",

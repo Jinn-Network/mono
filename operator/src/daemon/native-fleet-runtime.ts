@@ -367,6 +367,22 @@ export interface FleetNativeRuntimeInput {
    * the operator through `NativeAnnouncementRecordError`, but not what was rejected or why.
    */
   readonly logger?: { warn(message: string): void };
+  /**
+   * The effective time this boot proves its trust-policy and role-binding windows against. TEST
+   * SEAM ONLY: production omits it, and every consumer then falls back to its own `new Date()` —
+   * the exact wall-clock behavior this boot had before the seam existed (#2490).
+   *
+   * It exists because a fork-based rig cannot use wall-clock. `native-fleet-loop.ts` forks Base
+   * Sepolia and authors its trust catalog against a real on-chain anchor, whose block time drifts
+   * ahead of the host clock; booting at the anchor's `validFrom` is what keeps the §7.4a window
+   * checks self-consistent. Without this the rig could only open the identity sets by hand and
+   * stopped short of the real `buildFleetNativeRuntime` boot.
+   *
+   * Threaded to the three effective-time readers this function owns and nowhere else: the trust
+   * catalog open, the merged solver+requester role-identity opens, and the admission role-identity
+   * open. Nothing downstream of the returned runtime reads it — the loops keep their own clocks.
+   */
+  readonly now?: () => Date;
 }
 
 function required<T>(value: T | undefined, key: string): T {
@@ -436,6 +452,8 @@ export async function buildFleetNativeRuntime(
     expectedPolicyGenesisDigest: trustPolicyGenesisDigest,
     anchorClient: createBaseSepoliaFinalizedAnchorClient(trustReads.anchor),
     settlementOwnershipClient: trustReads.settlementOwnership,
+    // `openNativeTrustCatalog` takes an instant, not a clock; omitted, it reads `new Date()` itself.
+    ...(input.now === undefined ? {} : { now: input.now() }),
   });
 
   // Two stores, one Agent, one merged set — see RoleIdentitySet.merge. Every key still proved its
@@ -451,6 +469,7 @@ export async function buildFleetNativeRuntime(
       password: input.password,
       bindingResolver: trust.bindingResolver,
       verifyRoleBinding: trust.verifyRoleBinding,
+      ...(input.now === undefined ? {} : { now: input.now }),
     }))),
   );
 
@@ -609,6 +628,7 @@ export async function buildFleetNativeRuntime(
     nativeRequesterStateDir,
     authorityTime: createBaseSepoliaAuthorityTime(input.publicClient).latestFinalized,
     canonicalTaskCreated: (expected) => solverReads.canonicalTaskCreated(expected),
+    ...(input.now === undefined ? {} : { now: input.now }),
   });
 
   return {
@@ -648,6 +668,8 @@ async function buildFleetRequesterWriteAuthority(input: {
   readonly nativeRequesterStateDir: string;
   readonly authorityTime: () => Promise<NativeAuthorityTimeAnchor>;
   readonly canonicalTaskCreated: CanonicalTaskCreatedReader;
+  /** See {@link FleetNativeRuntimeInput.now}. Omitted in production. */
+  readonly now?: () => Date;
 }): Promise<FleetRequesterWriteAuthority | undefined> {
   const admissionAgent = input.config.admissionAgent;
   const admissionStore = input.config.identityStores?.admission;
@@ -674,6 +696,7 @@ async function buildFleetRequesterWriteAuthority(input: {
     password: input.password,
     bindingResolver: input.trust.bindingResolver,
     verifyRoleBinding: input.trust.verifyRoleBinding,
+    ...(input.now === undefined ? {} : { now: input.now }),
   });
 
   const roles: NativeRequesterRoles = {

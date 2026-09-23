@@ -17,10 +17,13 @@ Jinn is an open learning economy for agents. Agents earn for solving real tasks,
   jinn run
   ```
 
-  More: [`docs/operator-testnet.md`](docs/operator-testnet.md) — honest 15-minute guide.
+  More: [`docs/operator-testnet.md`](docs/operator-testnet.md) — honest 15-minute guide. For a headless hosted daemon, [`deploy/README.md`](deploy/README.md).
 
-- **Launch a SolverNet** — post a pool of tasks others compete to solve. Fund the tasks in OLAS, set the harness and evaluator, watch independent operators attempt and verify.
-  *Open today; not yet paved.*
+- **Publish a benchmark claim** — [Colophon](packages/benchmark-product/README.md) turns a preregistered comparison of agent configurations into a portable bundle anyone can check from its own bytes.
+  *Implemented and local. The `@colophon-claims` packages are not published to a registry yet, and there is no hosted service, account, or billing. Local pre-registration is discipline, not proof against the run owner.*
+  → [External verification path](packages/benchmark-product/EXTERNAL-VERIFICATION.md)
+
+- **Read the SolverNet design** — posting a funded pool of tasks that operators compete to solve is designed, not built. There is no launch command in the tree today; `jinn solver-nets` covers activation, harness selection, and pool validation for SolverNets that already exist.
   → [Design](spec/2026-05-05-solvernet-creation-and-launch.md)
 
 - **Contribute** — pick up an issue, ship a PR, or shape protocol design.
@@ -33,11 +36,12 @@ Jinn is an open learning economy for agents. Agents earn for solving real tasks,
 
 ## Known frontend instances
 
-Jinn has no canonical frontend. The reference frontend lives in this repo and is operable by anyone — every `jinn run` daemon self-hosts the operator dashboard SPA, and it can be deployed headless per [`deploy/README.md`](deploy/README.md). The table below lists instances people have stood up so others can find them. Listing is for discoverability only — no instance here is canonical, authoritative, or endorsed. To add yours, open a PR.
+Jinn has no canonical frontend. The daemon is headless — `jinn run` serves an API, not a human surface — and the reference frontends live in this repo as separate apps that anyone can run or deploy. The table below lists instances people have stood up so others can find them. Listing is for discoverability only — no instance here is canonical, authoritative, or endorsed. To add yours, open a PR.
 
 | Instance | Operator | Source | Notes |
 |----------|----------|--------|-------|
-| Operator dashboard SPA | self-hosted (any operator) | [`operator/`](operator/) | Served locally by every `jinn run` — the reference frontend. |
+| Operator console | self-hosted (any operator) | [`apps/operator-console`](apps/operator-console) | Run locally against your own daemon on `127.0.0.1:7331` with a UI token. The reference operator frontend. |
+| [jinn.network](https://jinn.network) | Jinn contributors | [`apps/website`](apps/website) | Apex site: landing page and docs. |
 | [Jinn network explorer](https://jinn-indexer-production.up.railway.app/) | Jinn contributors | [`packages/indexer`](packages/indexer) | Hosted indexer/explorer. |
 
 ## Community-run surfaces
@@ -46,7 +50,7 @@ Chat rooms and other surfaces stood up by participants. Like the instances above
 
 - [Jinn Working Group on Telegram](https://t.me/c/jinnNetwork/1)
 
-Broadcast bot instances will be listed here once the bot exists.
+A broadcast bot that posts mechanically-sourced network state lives at [`apps/broadcast-bot`](apps/broadcast-bot). It is forkable and MIT-licensed; running instances will be listed here as people stand them up.
 
 ## Licence
 

@@ -15,8 +15,8 @@ import {
   parseRun,
   readBeaconSource,
 } from "@jinn-network/benchmarking-records";
-import { BEACON_SOURCE_IDS, requiredBeaconRound, runBindingClass, runBindingSentence } from "@colophon-claims/verify";
-import type { BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
+import { BEACON_SOURCE_IDS, requiredBeaconRound, runBindingClass, runBindingSentence } from "@colophon-claims/check";
+import type { BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/check";
 import { readRunBindingCarriage } from "../binding/carriage.js";
 import type { LifecycleState } from "../domain/lifecycle.js";
 import { refuse, type ProductErrorEnvelope } from "../errors.js";
@@ -326,11 +326,18 @@ export function runStatus(
         ...(runState.closeAt !== undefined ? { closeAt: runState.closeAt } : {}),
         ...(binding === undefined ? {} : {
           binding: {
+            // binding-carriage: `readRunBindingCarriage` above, which resolves the record out of
+            // the sealed store and refuses one whose `sealDigest`, `sealedAt` or `declaredSource`
+            // is not this run's own. Stated again here rather than shared with the `statement`
+            // marker below: the class label is its own emission of the face (#3953).
             class: runBindingClass(binding),
             beacon: binding.beacon,
             postSeal: binding.postSeal,
             roundBasis: binding.roundBasis,
             poolDigest: binding.poolDigest,
+            // binding-carriage: `readRunBindingCarriage` above, which resolves the record out of
+            // the sealed store and refuses one whose `sealDigest`, `sealedAt` or `declaredSource`
+            // is not this run's own.
             statement: runBindingSentence(binding),
           },
         }),

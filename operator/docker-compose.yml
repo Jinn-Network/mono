@@ -18,7 +18,11 @@ version: '3.8'
 
 services:
   jinn-daemon:
-    image: ghcr.io/jinn-network/operator:latest
+    # `:next` is the rolling tag the canary lane republishes on every push to
+    # `next`. Pin `:canary-<short>` (or a digest) for a reproducible deploy.
+    # The stable `:latest` / `:<version>` tags come from the release lane
+    # (.github/workflows/docker.yml) and are not published here yet (#2811).
+    image: ghcr.io/jinn-network/operator:next
     container_name: jinn-daemon
     restart: unless-stopped
     env_file:

@@ -31,8 +31,8 @@ const codeEntrypoints = [
 ];
 
 // Cross-tree Jinn dependencies each *then-present* marketplace package references, packed as
-// file: deps so NodeNext resolves them (program §7.8). M0-M1: binding's five direct deps
-// (task-execution-{protocol,backend,profiles}, trust-{core,resolve}); projector adds
+// file: deps so NodeNext resolves them (program §7.8). M0-M1: binding's six direct deps (contract-abis, plus
+// task-execution-{protocol,backend,profiles}, trust-{core,resolve}); projector adds
 // record-discovery-{protocol,serve} + their own trust-core/record-discovery-testing shadow
 // deps; testing adds task-execution-testing + record-discovery-testing, then trust-testing for
 // M5.3's real sealed binding fixtures and evidence-protocol for §7.55 exact family validation.
@@ -40,6 +40,7 @@ const codeEntrypoints = [
 // launchers,assembly} plus the assembly's evidence contract deps — packed before testing.
 // Pipeline and testing's shadow closures are covered below.
 const CROSS_TREE_PACKAGES = [
+  ['@jinn-network/contract-abis', join(root, 'packages', 'contract-abis')],
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],

@@ -1,0 +1,62 @@
+{
+  "name": "source-head-revalidation-head-origin-mismatch",
+  "kind": "source-head",
+  "description": "The consumer follows `did:key:zAgentSourceOne/feed`, but the presented head names `did:key:zAgentSourceTwo/feed` and carries a valid signature by `did:key:zAgentSourceTwo`'s own current key. Keys are resolved from the head, so without the origin binding that signature would satisfy this source's poll; revalidation must refuse it `head-origin-mismatch` (§10.5 \"Two fail-closed properties\"). The followed source's high-water mark is seeded at the same chain position, and the harness asserts it is identical after the call: the procedure adopts nothing, so no outcome -- `ok` included -- may advance or clear it (§10.5).",
+  "input": {
+    "seed": {
+      "now": "2026-07-28T12:00:00.000Z",
+      "keys": [
+        {
+          "agent": "did:key:zAgentSourceOne",
+          "keyid": "key-1",
+          "validFrom": "2026-06-01T00:00:00.000Z",
+          "validTo": null,
+          "scope": "jinn:discovery-announcements"
+        },
+        {
+          "agent": "did:key:zAgentSourceTwo",
+          "keyid": "key-2",
+          "validFrom": "2026-01-01T00:00:00.000Z",
+          "validTo": null,
+          "scope": "jinn:discovery-announcements"
+        }
+      ],
+      "hwm": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "cursor": {
+          "sequence": "0000000000000001",
+          "entry": "sha256:cabc9380a6f78d7b00c35cca00f9efb4721106faf86a8a94ec27420eece1db0c",
+          "issuedAt": "2026-07-28T00:00:00.000Z"
+        }
+      }
+    },
+    "source": {
+      "agent": "did:key:zAgentSourceOne",
+      "name": "feed"
+    },
+    "head": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "origin": "did:key:zAgentSourceTwo/feed",
+      "sequence": "0000000000000001",
+      "entry": "sha256:cabc9380a6f78d7b00c35cca00f9efb4721106faf86a8a94ec27420eece1db0c",
+      "issuedAt": "2026-07-28T00:00:00.000Z",
+      "refreshBy": "2026-07-29T00:00:00.000Z"
+    },
+    "headSignature": {
+      "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
+      "payload": "{\"entry\":\"sha256:cabc9380a6f78d7b00c35cca00f9efb4721106faf86a8a94ec27420eece1db0c\",\"issuedAt\":\"2026-07-28T00:00:00.000Z\",\"origin\":\"did:key:zAgentSourceTwo/feed\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"refreshBy\":\"2026-07-29T00:00:00.000Z\",\"sequence\":\"0000000000000001\"}",
+      "signatures": [
+        {
+          "keyid": "key-2",
+          "sig": "bc1964a662a02a21937e91a8ebdb7778d26eab609d0b5fee87a48f138898b205:key-2"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "status": "head-origin-mismatch"
+  }
+}

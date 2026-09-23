@@ -80,12 +80,6 @@ function packStubWithOperatorBins(): { consumerDir: string } {
 }
 
 describe('public @jinn-network/operator npx invocation', () => {
-  let consumerDir: string;
-
-  beforeAll(() => {
-    ({ consumerDir } = packStubWithOperatorBins());
-  });
-
   it('declares an operator bin alias of the jinn CLI and keeps jinn-stop-hook', () => {
     expect(pkg.name).toBe('@jinn-network/operator');
     expect(pkg.bin.jinn).toBe('./dist/bin/jinn.js');
@@ -102,20 +96,31 @@ describe('public @jinn-network/operator npx invocation', () => {
     expect(testnetRunbook).not.toMatch(/@jinn-network\/client/);
   });
 
-  it('runs the public no-install command against a packed tarball', () => {
-    const result = run('npx', ['--no-install', '@jinn-network/operator', 'doctor'], consumerDir);
-    expect(result.stderr ?? '').not.toMatch(/could not determine executable/);
-    expect(result.status, result.stderr || result.stdout).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ bin: 'jinn', argv: ['doctor'] });
-  });
+  // The packed-tarball fixture costs an `npm pack` plus an `npm install`. Only
+  // the two tests below need it, so it is scoped here rather than to the outer
+  // describe — a `-t` filter on either pin above must stay free (#3107).
+  describe('against a packed tarball', () => {
+    let consumerDir: string;
 
-  it('keeps jinn-stop-hook invocable by name from the packed tarball', () => {
-    const result = run(
-      'npx',
-      ['--no-install', '-p', '@jinn-network/operator', 'jinn-stop-hook'],
-      consumerDir,
-    );
-    expect(result.status, result.stderr || result.stdout).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ bin: 'jinn-stop-hook' });
+    beforeAll(() => {
+      ({ consumerDir } = packStubWithOperatorBins());
+    });
+
+    it('runs the public no-install command against a packed tarball', () => {
+      const result = run('npx', ['--no-install', '@jinn-network/operator', 'doctor'], consumerDir);
+      expect(result.stderr ?? '').not.toMatch(/could not determine executable/);
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({ bin: 'jinn', argv: ['doctor'] });
+    });
+
+    it('keeps jinn-stop-hook invocable by name from the packed tarball', () => {
+      const result = run(
+        'npx',
+        ['--no-install', '-p', '@jinn-network/operator', 'jinn-stop-hook'],
+        consumerDir,
+      );
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({ bin: 'jinn-stop-hook' });
+    });
   });
 });

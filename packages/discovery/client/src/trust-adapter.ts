@@ -1,6 +1,6 @@
 import { resolveBindingForAgent } from "@jinn-network/trust-core";
 import type { BindingResolver } from "@jinn-network/trust-core";
-import { DISCOVERY_SIGNING_SCOPE } from "@jinn-network/record-discovery-protocol";
+import { DISCOVERY_SIGNING_SCOPE, parseHeadTimestamp } from "@jinn-network/record-discovery-protocol";
 import type { FreshnessPolicy, KeyResolver, ResolvedKey, SignatureVerifier } from "@jinn-network/record-discovery-protocol";
 
 // Verification driver, trust-adapter half (design §10.1/§10.3, program
@@ -116,7 +116,14 @@ export function createTrustAdapter(deps: TrustAdapterDeps): TrustAdapter {
 
   const fresh: FreshnessPolicy = {
     isFresh(refreshBy: string, now: Date): boolean {
-      return new Date(refreshBy).getTime() > now.getTime();
+      // `parseHeadTimestamp` is the protocol package's one strict reading of a
+      // head timestamp (#3482). A `FreshnessPolicy` is a consumer-supplied port
+      // and so is not covered by the schema, but this is discovery's own
+      // implementation of it and has no reason to answer differently: under
+      // `new Date` a leap-second `refreshBy` read as `NaN` and the head was
+      // judged stale, which is benign but is a different answer than the shared
+      // helper gives (#3603).
+      return parseHeadTimestamp(refreshBy) > now.getTime();
     },
   };
 

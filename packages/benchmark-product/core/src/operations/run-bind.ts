@@ -64,8 +64,8 @@ import {
   requiredBeaconRound,
   runBindingSentence,
   verifyRunBinding,
-} from "@colophon-claims/verify";
-import type { BeaconReference, VerifiedRunBinding } from "@colophon-claims/verify";
+} from "@colophon-claims/check";
+import type { BeaconReference, VerifiedRunBinding } from "@colophon-claims/check";
 import { readRunDeclaredBeaconSource } from "../binding/carriage.js";
 import { refuse } from "../errors.js";
 import { requireRunState, writeRunState } from "../run/state.js";
@@ -218,6 +218,9 @@ export function runBind(context: OperationContext, input: RunBindInput): Operati
         binding: { recordSha256, boundAt: at },
       });
 
+      // binding-carriage: the three fields a carriage read cross-checks are not read back here,
+      // they are WRITTEN here -- `sealDigest` and `sealedAt` from this run's own sealed identity and
+      // `declaredSource` from its sealed bytes -- so the record cannot name another run's seal.
       return { recordSha256, boundAt: at, binding, statement: runBindingSentence(binding) };
     },
   });

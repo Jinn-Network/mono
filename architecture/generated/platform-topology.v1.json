@@ -2,11 +2,11 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalPolicy": 2,
-    "implementationsV1": 61,
-    "inventory": 98,
-    "otherPackagesRootEntries": 15,
-    "packagesRootEntries": 92,
-    "sealedPlatformV1": 14
+    "implementationsV1": 53,
+    "inventory": 99,
+    "otherPackagesRootEntries": 27,
+    "packagesRootEntries": 93,
+    "sealedPlatformV1": 11
   },
   "graph": {
     "edgeSections": {
@@ -16,19 +16,74 @@
     },
     "edges": [
       {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-aggregate"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-evidence"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-interop"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-local"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-protocol"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-records"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-run"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/task-admission"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-profiles"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
+      },
+      {
+        "from": "@colophon-claims/cli",
+        "kind": "runtime",
+        "to": "@colophon-claims/check"
+      },
+      {
         "from": "@colophon-claims/cli",
         "kind": "runtime",
         "to": "@colophon-claims/core"
       },
       {
-        "from": "@colophon-claims/cli",
-        "kind": "runtime",
-        "to": "@colophon-claims/verify"
-      },
-      {
         "from": "@colophon-claims/core",
         "kind": "runtime",
-        "to": "@colophon-claims/verify"
+        "to": "@colophon-claims/check"
       },
       {
         "from": "@colophon-claims/core",
@@ -168,57 +223,7 @@
       {
         "from": "@colophon-claims/verify",
         "kind": "runtime",
-        "to": "@jinn-network/benchmarking-aggregate"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-evidence"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-interop"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-local"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-protocol"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-records"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-run"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/task-admission"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-profiles"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-protocol"
-      },
-      {
-        "from": "@colophon-claims/verify",
-        "kind": "runtime",
-        "to": "@jinn-network/trust-core"
+        "to": "@colophon-claims/check"
       },
       {
         "from": "@colophon-claims/web",
@@ -314,31 +319,6 @@
         "from": "@jinn-network/benchmarking-local",
         "kind": "runtime",
         "to": "@jinn-network/benchmarking-run"
-      },
-      {
-        "from": "@jinn-network/benchmarking-marketplace",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-records"
-      },
-      {
-        "from": "@jinn-network/benchmarking-marketplace",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-run"
-      },
-      {
-        "from": "@jinn-network/benchmarking-marketplace",
-        "kind": "runtime",
-        "to": "@jinn-network/marketplace-binding"
-      },
-      {
-        "from": "@jinn-network/benchmarking-marketplace",
-        "kind": "runtime",
-        "to": "@jinn-network/marketplace-projector"
-      },
-      {
-        "from": "@jinn-network/benchmarking-marketplace",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-protocol"
       },
       {
         "from": "@jinn-network/benchmarking-native-capture",
@@ -526,6 +506,21 @@
         "to": "@jinn-network/evidence-repository"
       },
       {
+        "from": "@jinn-network/evidence-gate",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-offer"
+      },
+      {
+        "from": "@jinn-network/evidence-gate",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-repository"
+      },
+      {
+        "from": "@jinn-network/evidence-gate",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
+      },
+      {
         "from": "@jinn-network/evidence-local-runtime",
         "kind": "runtime",
         "to": "@jinn-network/evidence-catalog-sqlite"
@@ -651,6 +646,11 @@
         "to": "@jinn-network/benchmarking-records"
       },
       {
+        "from": "@jinn-network/indexer",
+        "kind": "runtime",
+        "to": "@jinn-network/contract-abis"
+      },
+      {
         "from": "@jinn-network/indexer-enrichment",
         "kind": "runtime",
         "to": "@jinn-network/indexer"
@@ -664,6 +664,11 @@
         "from": "@jinn-network/jinn-layer",
         "kind": "runtime",
         "to": "@jinn-network/plugin"
+      },
+      {
+        "from": "@jinn-network/marketplace-binding",
+        "kind": "runtime",
+        "to": "@jinn-network/contract-abis"
       },
       {
         "from": "@jinn-network/marketplace-binding",
@@ -789,6 +794,11 @@
         "from": "@jinn-network/operator",
         "kind": "runtime",
         "to": "@jinn-network/attestation-issuer"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/contract-abis"
       },
       {
         "from": "@jinn-network/operator",
@@ -1157,21 +1167,6 @@
       },
       {
         "from": "@jinn-network/record-discovery-client",
-        "kind": "runtime",
-        "to": "@jinn-network/trust-core"
-      },
-      {
-        "from": "@jinn-network/record-discovery-facts-benchmarking",
-        "kind": "runtime",
-        "to": "@jinn-network/benchmarking-records"
-      },
-      {
-        "from": "@jinn-network/record-discovery-facts-benchmarking",
-        "kind": "runtime",
-        "to": "@jinn-network/record-discovery-protocol"
-      },
-      {
-        "from": "@jinn-network/record-discovery-facts-benchmarking",
         "kind": "runtime",
         "to": "@jinn-network/trust-core"
       },
@@ -1572,6 +1567,7 @@
       }
     ],
     "nodes": [
+      "@colophon-claims/check",
       "@colophon-claims/cli",
       "@colophon-claims/core",
       "@colophon-claims/verify",
@@ -1582,7 +1578,6 @@
       "@jinn-network/benchmarking-evidence",
       "@jinn-network/benchmarking-interop",
       "@jinn-network/benchmarking-local",
-      "@jinn-network/benchmarking-marketplace",
       "@jinn-network/benchmarking-native-capture",
       "@jinn-network/benchmarking-protocol",
       "@jinn-network/benchmarking-publication",
@@ -1595,6 +1590,7 @@
       "@jinn-network/chain-only-gate-harness",
       "@jinn-network/chain-scenarios",
       "@jinn-network/chain-state-extraction",
+      "@jinn-network/contract-abis",
       "@jinn-network/core",
       "@jinn-network/environment-record",
       "@jinn-network/environment-verification",
@@ -1602,6 +1598,7 @@
       "@jinn-network/evidence-contribution",
       "@jinn-network/evidence-derivation",
       "@jinn-network/evidence-discovery",
+      "@jinn-network/evidence-gate",
       "@jinn-network/evidence-local-runtime",
       "@jinn-network/evidence-offer",
       "@jinn-network/evidence-protocol",
@@ -1635,7 +1632,6 @@
       "@jinn-network/policy-outcomes",
       "@jinn-network/read-plane",
       "@jinn-network/record-discovery-client",
-      "@jinn-network/record-discovery-facts-benchmarking",
       "@jinn-network/record-discovery-facts-chain-environments",
       "@jinn-network/record-discovery-facts-environments",
       "@jinn-network/record-discovery-facts-evidence",
@@ -1677,34 +1673,6 @@
           "@jinn-network/attestation-issuer": [
             "@jinn-network/evidence-repository"
           ],
-          "@jinn-network/benchmarking-aggregate": [],
-          "@jinn-network/benchmarking-evaluation": [
-            "@jinn-network/attestation-issuer",
-            "@jinn-network/evidence-repository"
-          ],
-          "@jinn-network/benchmarking-evidence": [
-            "@jinn-network/benchmarking-aggregate"
-          ],
-          "@jinn-network/benchmarking-interop": [],
-          "@jinn-network/benchmarking-local": [
-            "@jinn-network/benchmarking-run"
-          ],
-          "@jinn-network/benchmarking-marketplace": [
-            "@jinn-network/benchmarking-run",
-            "@jinn-network/marketplace-binding",
-            "@jinn-network/marketplace-projector",
-            "@jinn-network/record-discovery-serve",
-            "@jinn-network/task-execution-backend",
-            "@jinn-network/trust-resolve"
-          ],
-          "@jinn-network/benchmarking-native-capture": [
-            "@jinn-network/execution-evidence-builder"
-          ],
-          "@jinn-network/benchmarking-publication": [
-            "@jinn-network/record-discovery-serve",
-            "@jinn-network/record-publication"
-          ],
-          "@jinn-network/benchmarking-run": [],
           "@jinn-network/chain-environment-verification": [],
           "@jinn-network/chain-scenarios": [
             "@jinn-network/task-admission",
@@ -1713,6 +1681,7 @@
           "@jinn-network/chain-state-extraction": [
             "@jinn-network/chain-environment-verification"
           ],
+          "@jinn-network/contract-abis": [],
           "@jinn-network/environment-verification": [],
           "@jinn-network/evidence-catalog-sqlite": [
             "@jinn-network/evidence-discovery",
@@ -1727,6 +1696,9 @@
           ],
           "@jinn-network/evidence-derivation": [],
           "@jinn-network/evidence-discovery": [
+            "@jinn-network/evidence-repository"
+          ],
+          "@jinn-network/evidence-gate": [
             "@jinn-network/evidence-repository"
           ],
           "@jinn-network/evidence-local-runtime": [
@@ -1764,16 +1736,19 @@
           ],
           "@jinn-network/information-world": [],
           "@jinn-network/marketplace-binding": [
+            "@jinn-network/contract-abis",
             "@jinn-network/task-execution-backend",
             "@jinn-network/trust-resolve"
           ],
           "@jinn-network/marketplace-projector": [
+            "@jinn-network/contract-abis",
             "@jinn-network/marketplace-binding",
             "@jinn-network/record-discovery-serve",
             "@jinn-network/task-execution-backend",
             "@jinn-network/trust-resolve"
           ],
           "@jinn-network/marketplace-testing": [
+            "@jinn-network/contract-abis",
             "@jinn-network/evidence-discovery",
             "@jinn-network/evidence-repository",
             "@jinn-network/execution-evidence-builder",
@@ -1792,6 +1767,7 @@
             "@jinn-network/trust-testing"
           ],
           "@jinn-network/marketplace-venue-base": [
+            "@jinn-network/contract-abis",
             "@jinn-network/marketplace-binding",
             "@jinn-network/marketplace-projector",
             "@jinn-network/record-discovery-serve",
@@ -1799,7 +1775,6 @@
             "@jinn-network/trust-resolve"
           ],
           "@jinn-network/record-discovery-client": [],
-          "@jinn-network/record-discovery-facts-benchmarking": [],
           "@jinn-network/record-discovery-facts-chain-environments": [
             "@jinn-network/information-world"
           ],
@@ -1888,6 +1863,7 @@
           ],
           "@jinn-network/task-execution-workspace": [],
           "@jinn-network/task-posting": [
+            "@jinn-network/contract-abis",
             "@jinn-network/marketplace-binding",
             "@jinn-network/task-execution-backend",
             "@jinn-network/trust-resolve"
@@ -1900,10 +1876,8 @@
         },
         "waves": [
           [
-            "@jinn-network/benchmarking-aggregate",
-            "@jinn-network/benchmarking-interop",
-            "@jinn-network/benchmarking-run",
             "@jinn-network/chain-environment-verification",
+            "@jinn-network/contract-abis",
             "@jinn-network/environment-verification",
             "@jinn-network/evidence-derivation",
             "@jinn-network/evidence-repository",
@@ -1911,7 +1885,6 @@
             "@jinn-network/execution-evidence-builder",
             "@jinn-network/information-world",
             "@jinn-network/record-discovery-client",
-            "@jinn-network/record-discovery-facts-benchmarking",
             "@jinn-network/record-discovery-facts-environments",
             "@jinn-network/record-discovery-facts-offers",
             "@jinn-network/record-discovery-facts-task-execution",
@@ -1926,11 +1899,9 @@
           ],
           [
             "@jinn-network/attestation-issuer",
-            "@jinn-network/benchmarking-evidence",
-            "@jinn-network/benchmarking-local",
-            "@jinn-network/benchmarking-native-capture",
             "@jinn-network/chain-state-extraction",
             "@jinn-network/evidence-discovery",
+            "@jinn-network/evidence-gate",
             "@jinn-network/evidence-repository-ipfs",
             "@jinn-network/evidence-repository-oci",
             "@jinn-network/execution-recorder",
@@ -1943,8 +1914,6 @@
             "@jinn-network/trust-testing"
           ],
           [
-            "@jinn-network/benchmarking-evaluation",
-            "@jinn-network/benchmarking-publication",
             "@jinn-network/chain-scenarios",
             "@jinn-network/evidence-catalog-sqlite",
             "@jinn-network/evidence-publication",
@@ -1957,7 +1926,6 @@
             "@jinn-network/task-posting"
           ],
           [
-            "@jinn-network/benchmarking-marketplace",
             "@jinn-network/evidence-contribution",
             "@jinn-network/evidence-local-runtime",
             "@jinn-network/marketplace-venue-base",
@@ -1976,19 +1944,6 @@
       },
       "sealed-platform-v1": {
         "closure": {
-          "@jinn-network/benchmarking-protocol": [
-            "@jinn-network/evidence-protocol"
-          ],
-          "@jinn-network/benchmarking-records": [
-            "@jinn-network/task-execution-protocol",
-            "@jinn-network/trust-core"
-          ],
-          "@jinn-network/benchmarking-testing": [
-            "@jinn-network/benchmarking-records",
-            "@jinn-network/task-execution-profiles",
-            "@jinn-network/task-execution-protocol",
-            "@jinn-network/trust-core"
-          ],
           "@jinn-network/chain-environment-record": [],
           "@jinn-network/environment-record": [],
           "@jinn-network/evidence-offer": [
@@ -2024,8 +1979,6 @@
             "@jinn-network/trust-core"
           ],
           [
-            "@jinn-network/benchmarking-protocol",
-            "@jinn-network/benchmarking-records",
             "@jinn-network/evidence-offer",
             "@jinn-network/evidence-trace",
             "@jinn-network/record-discovery-protocol",
@@ -2033,7 +1986,6 @@
             "@jinn-network/trust-authoring"
           ],
           [
-            "@jinn-network/benchmarking-testing",
             "@jinn-network/record-discovery-testing"
           ]
         ]
@@ -2196,6 +2148,7 @@
           "@hono/node-server",
           "@huggingface/transformers",
           "@jinn-network/attestation-issuer",
+          "@jinn-network/contract-abis",
           "@jinn-network/core",
           "@jinn-network/environment-record",
           "@jinn-network/evidence-catalog-sqlite",
@@ -2320,8 +2273,58 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@fontsource-variable/newsreader",
+          "@fontsource-variable/public-sans",
+          "@fontsource/ibm-plex-mono",
+          "@jinn-network/benchmarking-aggregate",
+          "@jinn-network/benchmarking-evidence",
+          "@jinn-network/benchmarking-interop",
+          "@jinn-network/benchmarking-local",
+          "@jinn-network/benchmarking-protocol",
+          "@jinn-network/benchmarking-records",
+          "@jinn-network/benchmarking-run",
+          "@jinn-network/task-admission",
+          "@jinn-network/task-execution-profiles",
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core",
+          "zod"
+        ]
+      },
+      "domain": "benchmark-product",
+      "name": "@colophon-claims/check",
+      "ownerGroup": "architecture-control",
+      "path": "packages/benchmark-product/check",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "independent",
+      "releaseGroup": "colophon-claims-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "role": "standalone Colophon public-bundle reader checker",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 4,
+      "transition": null,
+      "version": "0.2.1"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "classification": "product",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "@colophon-claims/check",
           "@colophon-claims/core",
-          "@colophon-claims/verify",
           "next",
           "react",
           "react-dom"
@@ -2337,8 +2340,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "never",
-      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "independent",
+      "releaseGroup": "colophon-claims-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmark-product-ci"
@@ -2360,7 +2363,7 @@
         "optional": [],
         "peer": [],
         "runtime": [
-          "@colophon-claims/verify",
+          "@colophon-claims/check",
           "@fontsource-variable/newsreader",
           "@fontsource-variable/public-sans",
           "@fontsource/ibm-plex-mono",
@@ -2404,8 +2407,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "never",
-      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "independent",
+      "releaseGroup": "colophon-claims-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmark-product-ci"
@@ -2427,21 +2430,7 @@
         "optional": [],
         "peer": [],
         "runtime": [
-          "@fontsource-variable/newsreader",
-          "@fontsource-variable/public-sans",
-          "@fontsource/ibm-plex-mono",
-          "@jinn-network/benchmarking-aggregate",
-          "@jinn-network/benchmarking-evidence",
-          "@jinn-network/benchmarking-interop",
-          "@jinn-network/benchmarking-local",
-          "@jinn-network/benchmarking-protocol",
-          "@jinn-network/benchmarking-records",
-          "@jinn-network/benchmarking-run",
-          "@jinn-network/task-admission",
-          "@jinn-network/task-execution-profiles",
-          "@jinn-network/task-execution-protocol",
-          "@jinn-network/trust-core",
-          "zod"
+          "@colophon-claims/check"
         ]
       },
       "domain": "benchmark-product",
@@ -2456,16 +2445,22 @@
       },
       "publishPolicy": "independent",
       "releaseGroup": "colophon-claims-v1",
-      "replacedBy": [],
+      "replacedBy": [
+        "@colophon-claims/check"
+      ],
       "requiredGateIds": [
         "benchmark-product-ci"
       ],
-      "role": "standalone Colophon public-bundle reader verifier",
-      "stability": "experimental",
+      "role": "deprecated passthrough alias for @colophon-claims/check",
+      "stability": "deprecated",
       "supersedes": [],
       "tier": 4,
-      "transition": null,
-      "version": "0.2.1"
+      "transition": {
+        "reason": "The checker publishes as @colophon-claims/check; this name stays as a permanent passthrough alias so sealed bundle instructions never 404 (issue #4188).",
+        "status": "permanent passthrough alias re-released with every checker version",
+        "sunsetCondition": "none planned"
+      },
+      "version": "0.2.2"
     },
     {
       "boundaryPolicy": {
@@ -2520,7 +2515,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2539,8 +2534,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2548,7 +2543,7 @@
       "role": "aggregation capability",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2557,7 +2552,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [
@@ -2581,8 +2576,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2590,7 +2585,7 @@
       "role": "TEP-free exact subject evaluation issuance",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2599,7 +2594,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [
@@ -2622,8 +2617,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2631,7 +2626,7 @@
       "role": "evidence-native cohort verification and matrix assembly",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2640,7 +2635,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2662,8 +2657,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2671,7 +2666,7 @@
       "role": "task-execution import and export",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2680,7 +2675,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2699,8 +2694,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2708,7 +2703,7 @@
       "role": "local venue adapter",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2717,49 +2712,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
-      "dependencies": {
-        "optional": [],
-        "peer": [],
-        "runtime": [
-          "@jinn-network/benchmarking-records",
-          "@jinn-network/benchmarking-run",
-          "@jinn-network/marketplace-binding",
-          "@jinn-network/marketplace-projector",
-          "@jinn-network/task-execution-protocol"
-        ]
-      },
-      "domain": "benchmarking",
-      "name": "@jinn-network/benchmarking-marketplace",
-      "ownerGroup": "architecture-control",
-      "path": "packages/benchmarking/marketplace",
-      "publicSurface": {
-        "conformance": [],
-        "fixtures": [
-          "fixtures"
-        ],
-        "profiles": [],
-        "schemas": []
-      },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
-      "replacedBy": [],
-      "requiredGateIds": [
-        "benchmarking-ci"
-      ],
-      "role": "marketplace adapter",
-      "stability": "candidate",
-      "supersedes": [],
-      "tier": 3,
-      "transition": null,
-      "version": "0.1.0"
-    },
-    {
-      "boundaryPolicy": {
-        "kind": "source-boundary",
-        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
-      },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [
@@ -2781,8 +2734,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2790,7 +2743,7 @@
       "role": "resumable native execution capture coordinator",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2799,7 +2752,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [
@@ -2821,8 +2774,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "sealed-platform-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2830,7 +2783,7 @@
       "role": "evidence-native benchmarking record protocol",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 2,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2839,7 +2792,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2859,8 +2812,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2868,7 +2821,7 @@
       "role": "benchmark publication planning and accounting verification",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2877,7 +2830,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2902,8 +2855,8 @@
           "schemas"
         ]
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "sealed-platform-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2911,7 +2864,7 @@
       "role": "benchmark record family",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 2,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2920,7 +2873,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [],
@@ -2940,8 +2893,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2949,7 +2902,7 @@
       "role": "benchmark orchestration",
       "stability": "candidate",
       "supersedes": [],
-      "tier": 3,
+      "tier": 4,
       "transition": null,
       "version": "0.1.0"
     },
@@ -2958,7 +2911,7 @@
         "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
-      "classification": "platform-support",
+      "classification": "product",
       "dependencies": {
         "optional": [],
         "peer": [
@@ -2984,8 +2937,8 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "sealed-platform-v1",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "benchmarking-product-v1",
       "replacedBy": [],
       "requiredGateIds": [
         "benchmarking-ci"
@@ -2993,7 +2946,41 @@
       "role": "benchmarking conformance kit",
       "stability": "candidate",
       "supersedes": [],
-      "tier": null,
+      "tier": 4,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/contracts-ci.yml"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": []
+      },
+      "domain": "contracts",
+      "name": "@jinn-network/contract-abis",
+      "ownerGroup": "architecture-control",
+      "path": "packages/contract-abis",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "implementations-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "contracts-ci"
+      ],
+      "role": "authoritative generated contract ABIs and consumer slices",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 2,
       "transition": null,
       "version": "0.1.0"
     },
@@ -3079,46 +3066,6 @@
         "record-discovery-ci"
       ],
       "role": "discovery client and resolution",
-      "stability": "candidate",
-      "supersedes": [],
-      "tier": 3,
-      "transition": null,
-      "version": "0.1.0"
-    },
-    {
-      "boundaryPolicy": {
-        "kind": "source-boundary",
-        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
-      },
-      "classification": "platform",
-      "dependencies": {
-        "optional": [],
-        "peer": [],
-        "runtime": [
-          "@jinn-network/benchmarking-records",
-          "@jinn-network/record-discovery-protocol",
-          "@jinn-network/trust-core"
-        ]
-      },
-      "domain": "discovery",
-      "name": "@jinn-network/record-discovery-facts-benchmarking",
-      "ownerGroup": "architecture-control",
-      "path": "packages/discovery/facts/benchmarking",
-      "publicSurface": {
-        "conformance": [],
-        "fixtures": [],
-        "profiles": [
-          "profiles"
-        ],
-        "schemas": []
-      },
-      "publishPolicy": "canary-and-stable",
-      "releaseGroup": "implementations-v1",
-      "replacedBy": [],
-      "requiredGateIds": [
-        "record-discovery-ci"
-      ],
-      "role": "benchmarking facts projection",
       "stability": "candidate",
       "supersedes": [],
       "tier": 3,
@@ -4212,6 +4159,49 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
+        "peer": [
+          "vitest"
+        ],
+        "runtime": [
+          "@jinn-network/evidence-offer",
+          "@jinn-network/evidence-repository",
+          "@jinn-network/trust-core",
+          "zod"
+        ]
+      },
+      "domain": "evidence",
+      "name": "@jinn-network/evidence-gate",
+      "ownerGroup": "architecture-control",
+      "path": "packages/evidence/gate",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "implementations-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "role": "paid retrieval gate",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
         "peer": [],
         "runtime": [
           "@jinn-network/evidence-catalog-sqlite",
@@ -4643,6 +4633,7 @@
         "runtime": [
           "@hono/node-server",
           "@jinn-network/benchmarking-records",
+          "@jinn-network/contract-abis",
           "drizzle-orm",
           "hono",
           "ponder",
@@ -4851,6 +4842,7 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/contract-abis",
           "@jinn-network/task-execution-backend",
           "@jinn-network/task-execution-profiles",
           "@jinn-network/task-execution-protocol",
@@ -6499,24 +6491,6 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/benchmarking-marketplace",
-        "packedTargets": [],
-        "path": "packages/benchmarking/marketplace/fixtures/manifest.sha256.json",
-        "relativeSource": "fixtures/manifest.sha256.json"
-      },
-      {
-        "claim": null,
-        "export": null,
-        "kind": "fixtures",
-        "package": "@jinn-network/benchmarking-marketplace",
-        "packedTargets": [],
-        "path": "packages/benchmarking/marketplace/fixtures/projector/golden-events/revised-task-created.json",
-        "relativeSource": "fixtures/projector/golden-events/revised-task-created.json"
-      },
-      {
-        "claim": null,
-        "export": null,
-        "kind": "fixtures",
         "package": "@jinn-network/benchmarking-records",
         "packedTargets": [],
         "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-authorization-after-close.json",
@@ -7497,136 +7471,6 @@
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://spec.jinn.network/facts/benchmark-accounting/v1",
-          "servedPath": "facts/benchmark-accounting/v1"
-        },
-        "export": null,
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json",
-        "relativeSource": "profiles/benchmark-accounting.v1.json"
-      },
-      {
-        "claim": {
-          "field": "profile",
-          "identifier": "https://spec.jinn.network/facts/benchmark-accounting/v2",
-          "servedPath": "facts/benchmark-accounting/v2"
-        },
-        "export": null,
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v2.json",
-        "relativeSource": "profiles/benchmark-accounting.v2.json"
-      },
-      {
-        "claim": {
-          "field": "profile",
-          "identifier": "https://spec.jinn.network/facts/benchmark/v1",
-          "servedPath": "facts/benchmark/v1"
-        },
-        "export": null,
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/benchmark.v1.json",
-        "relativeSource": "profiles/benchmark.v1.json"
-      },
-      {
-        "claim": {
-          "field": "profile",
-          "identifier": "https://spec.jinn.network/facts/benchmark/v2",
-          "servedPath": "facts/benchmark/v2"
-        },
-        "export": null,
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/benchmark.v2.json",
-        "relativeSource": "profiles/benchmark.v2.json"
-      },
-      {
-        "claim": {
-          "field": "profile",
-          "identifier": "https://spec.jinn.network/facts/benchmark-matrix/v1",
-          "servedPath": "facts/benchmark-matrix/v1"
-        },
-        "export": null,
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/matrix.v1.json",
-        "relativeSource": "profiles/matrix.v1.json"
-      },
-      {
-        "claim": {
-          "field": "profile",
-          "identifier": "https://spec.jinn.network/facts/benchmark-matrix/v2",
-          "servedPath": "facts/benchmark-matrix/v2"
-        },
-        "export": null,
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/matrix.v2.json",
-        "relativeSource": "profiles/matrix.v2.json"
-      },
-      {
-        "claim": {
-          "field": "profile",
-          "identifier": "https://spec.jinn.network/facts/benchmark-report/v1",
-          "servedPath": "facts/benchmark-report/v1"
-        },
-        "export": null,
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/report.v1.json",
-        "relativeSource": "profiles/report.v1.json"
-      },
-      {
-        "claim": {
-          "field": "profile",
-          "identifier": "https://spec.jinn.network/facts/benchmark-report/v2",
-          "servedPath": "facts/benchmark-report/v2"
-        },
-        "export": null,
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/report.v2.json",
-        "relativeSource": "profiles/report.v2.json"
-      },
-      {
-        "claim": {
-          "field": "profile",
-          "identifier": "https://spec.jinn.network/facts/benchmark-run/v1",
-          "servedPath": "facts/benchmark-run/v1"
-        },
-        "export": null,
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/run.v1.json",
-        "relativeSource": "profiles/run.v1.json"
-      },
-      {
-        "claim": {
-          "field": "profile",
-          "identifier": "https://spec.jinn.network/facts/benchmark-run/v2",
-          "servedPath": "facts/benchmark-run/v2"
-        },
-        "export": null,
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/run.v2.json",
-        "relativeSource": "profiles/run.v2.json"
-      },
-      {
-        "claim": {
-          "field": "profile",
           "identifier": "https://spec.jinn.network/facts/chain-environment/v1",
           "servedPath": "facts/chain-environment/v1"
         },
@@ -8446,6 +8290,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/record-discovery-testing",
         "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/forked-chain-seeded-mark/vector.json",
+        "relativeSource": "fixtures/vectors/forked-chain-seeded-mark/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/forked-chain-shared-previous/vector.json",
         "relativeSource": "fixtures/vectors/forked-chain-shared-previous/vector.json"
       },
@@ -8617,6 +8470,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/record-discovery-testing",
         "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/refresh-by-ceiling-exceeds-window/vector.json",
+        "relativeSource": "fixtures/vectors/refresh-by-ceiling-exceeds-window/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/refresh-by-ceiling-inverted-window/vector.json",
         "relativeSource": "fixtures/vectors/refresh-by-ceiling-inverted-window/vector.json"
       },
@@ -8691,6 +8553,87 @@
         "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/source-conformance-unpublished-profile/vector.json",
         "relativeSource": "fixtures/vectors/source-conformance-unpublished-profile/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-head-issued-ahead/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-head-issued-ahead/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-head-origin-mismatch/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-head-origin-mismatch/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-head-payload-mismatch/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-head-payload-mismatch/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-identical-head-ok/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-identical-head-ok/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-refresh-by-ceiling/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-refresh-by-ceiling/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-signer-rotated-since-issue/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-signer-rotated-since-issue/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-stale/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-stale/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-unauthorized-signer/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-unauthorized-signer/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/stale-head-seeded-mark/vector.json",
+        "relativeSource": "fixtures/vectors/stale-head-seeded-mark/vector.json"
       },
       {
         "claim": null,
@@ -8844,6 +8787,15 @@
         "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/withdrawal-of-withdrawal/vector.json",
         "relativeSource": "fixtures/vectors/withdrawal-of-withdrawal/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/wrong-signing-scope-seeded-mark/vector.json",
+        "relativeSource": "fixtures/vectors/wrong-signing-scope-seeded-mark/vector.json"
       },
       {
         "claim": null,
@@ -10375,6 +10327,18 @@
       },
       {
         "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/evidence-gate",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/evidence/gate/src/testing.ts",
+        "relativeSource": "src/testing.ts"
+      },
+      {
+        "claim": null,
         "export": null,
         "kind": "fixtures",
         "package": "@jinn-network/evidence-offer",
@@ -10514,6 +10478,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/evidence-offer",
         "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/invalid-tag-carrier-rail-destination.json",
+        "relativeSource": "fixtures/offer/invalid-tag-carrier-rail-destination.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
         "path": "packages/evidence/offer/fixtures/offer/invalid-unnormalized-rail-identifier.json",
         "relativeSource": "fixtures/offer/invalid-unnormalized-rail-identifier.json"
       },
@@ -10588,6 +10561,33 @@
         "packedTargets": [],
         "path": "packages/evidence/offer/fixtures/offer/superseding.sha256",
         "relativeSource": "fixtures/offer/superseding.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/unsealable-non-finite-extension-number.json",
+        "relativeSource": "fixtures/offer/unsealable-non-finite-extension-number.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/unsealable-non-integral-extension-number.json",
+        "relativeSource": "fixtures/offer/unsealable-non-integral-extension-number.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/evidence-offer",
+        "packedTargets": [],
+        "path": "packages/evidence/offer/fixtures/offer/unsealable-unpaired-surrogate-extension-string.json",
+        "relativeSource": "fixtures/offer/unsealable-unpaired-surrogate-extension-string.json"
       },
       {
         "claim": null,
@@ -15420,6 +15420,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/trust-testing",
         "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/anchor-kit-v1/cross-validation-2026-09-06.md",
+        "relativeSource": "fixtures/anchor-kit-v1/cross-validation-2026-09-06.md"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
         "path": "packages/trust/testing/fixtures/anchor-kit-v1/cross-validation.md",
         "relativeSource": "fixtures/anchor-kit-v1/cross-validation.md"
       },
@@ -15723,10 +15732,19 @@
       {
         "conformance": [],
         "fixtures": [],
+        "name": "@colophon-claims/check",
+        "path": "packages/benchmark-product/check",
+        "profiles": [],
+        "releaseGroup": "colophon-claims-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [],
         "name": "@colophon-claims/cli",
         "path": "packages/benchmark-product/cli",
         "profiles": [],
-        "releaseGroup": "transitional-or-private",
+        "releaseGroup": "colophon-claims-v1",
         "schemas": []
       },
       {
@@ -15735,7 +15753,7 @@
         "name": "@colophon-claims/core",
         "path": "packages/benchmark-product/core",
         "profiles": [],
-        "releaseGroup": "transitional-or-private",
+        "releaseGroup": "colophon-claims-v1",
         "schemas": []
       },
       {
@@ -15762,7 +15780,7 @@
         "name": "@jinn-network/benchmarking-aggregate",
         "path": "packages/benchmarking/aggregate",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15771,7 +15789,7 @@
         "name": "@jinn-network/benchmarking-evaluation",
         "path": "packages/benchmarking/evaluation",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15780,7 +15798,7 @@
         "name": "@jinn-network/benchmarking-evidence",
         "path": "packages/benchmarking/evidence",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15791,7 +15809,7 @@
         "name": "@jinn-network/benchmarking-interop",
         "path": "packages/benchmarking/interop",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15800,18 +15818,7 @@
         "name": "@jinn-network/benchmarking-local",
         "path": "packages/benchmarking/local",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
-        "schemas": []
-      },
-      {
-        "conformance": [],
-        "fixtures": [
-          "fixtures"
-        ],
-        "name": "@jinn-network/benchmarking-marketplace",
-        "path": "packages/benchmarking/marketplace",
-        "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15820,7 +15827,7 @@
         "name": "@jinn-network/benchmarking-native-capture",
         "path": "packages/benchmarking/native-capture",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15829,7 +15836,7 @@
         "name": "@jinn-network/benchmarking-protocol",
         "path": "packages/benchmarking/protocol",
         "profiles": [],
-        "releaseGroup": "sealed-platform-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15838,7 +15845,7 @@
         "name": "@jinn-network/benchmarking-publication",
         "path": "packages/benchmarking/publication",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15849,7 +15856,7 @@
         "name": "@jinn-network/benchmarking-records",
         "path": "packages/benchmarking/records",
         "profiles": [],
-        "releaseGroup": "sealed-platform-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": [
           "schemas"
         ]
@@ -15860,7 +15867,7 @@
         "name": "@jinn-network/benchmarking-run",
         "path": "packages/benchmarking/run",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
+        "releaseGroup": "benchmarking-product-v1",
         "schemas": []
       },
       {
@@ -15873,7 +15880,16 @@
         "name": "@jinn-network/benchmarking-testing",
         "path": "packages/benchmarking/testing",
         "profiles": [],
-        "releaseGroup": "sealed-platform-v1",
+        "releaseGroup": "benchmarking-product-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [],
+        "name": "@jinn-network/contract-abis",
+        "path": "packages/contract-abis",
+        "profiles": [],
+        "releaseGroup": "implementations-v1",
         "schemas": []
       },
       {
@@ -15891,17 +15907,6 @@
         "name": "@jinn-network/record-discovery-client",
         "path": "packages/discovery/client",
         "profiles": [],
-        "releaseGroup": "implementations-v1",
-        "schemas": []
-      },
-      {
-        "conformance": [],
-        "fixtures": [],
-        "name": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking",
-        "profiles": [
-          "profiles"
-        ],
         "releaseGroup": "implementations-v1",
         "schemas": []
       },
@@ -16201,6 +16206,17 @@
         "fixtures": [],
         "name": "@jinn-network/execution-recorder-bridge",
         "path": "packages/evidence/execution-recorder-bridge",
+        "profiles": [],
+        "releaseGroup": "implementations-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "name": "@jinn-network/evidence-gate",
+        "path": "packages/evidence/gate",
         "profiles": [],
         "releaseGroup": "implementations-v1",
         "schemas": []
@@ -16761,76 +16777,6 @@
       },
       {
         "field": "profile",
-        "identifier": "https://spec.jinn.network/facts/benchmark-accounting/v1",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://spec.jinn.network/facts/benchmark-accounting/v2",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v2.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://spec.jinn.network/facts/benchmark-matrix/v1",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/matrix.v1.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://spec.jinn.network/facts/benchmark-matrix/v2",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/matrix.v2.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://spec.jinn.network/facts/benchmark-report/v1",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/report.v1.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://spec.jinn.network/facts/benchmark-report/v2",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/report.v2.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://spec.jinn.network/facts/benchmark-run/v1",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/run.v1.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://spec.jinn.network/facts/benchmark-run/v2",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/run.v2.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://spec.jinn.network/facts/benchmark/v1",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/benchmark.v1.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://spec.jinn.network/facts/benchmark/v2",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/benchmark.v2.json"
-      },
-      {
-        "field": "profile",
         "identifier": "https://spec.jinn.network/facts/chain-environment/v1",
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-chain-environments",
@@ -17260,23 +17206,16 @@
         "implementations-v1": {
           "packages": [
             "@jinn-network/attestation-issuer",
-            "@jinn-network/benchmarking-aggregate",
-            "@jinn-network/benchmarking-evaluation",
-            "@jinn-network/benchmarking-evidence",
-            "@jinn-network/benchmarking-interop",
-            "@jinn-network/benchmarking-local",
-            "@jinn-network/benchmarking-marketplace",
-            "@jinn-network/benchmarking-native-capture",
-            "@jinn-network/benchmarking-publication",
-            "@jinn-network/benchmarking-run",
             "@jinn-network/chain-environment-verification",
             "@jinn-network/chain-scenarios",
             "@jinn-network/chain-state-extraction",
+            "@jinn-network/contract-abis",
             "@jinn-network/environment-verification",
             "@jinn-network/evidence-catalog-sqlite",
             "@jinn-network/evidence-contribution",
             "@jinn-network/evidence-derivation",
             "@jinn-network/evidence-discovery",
+            "@jinn-network/evidence-gate",
             "@jinn-network/evidence-local-runtime",
             "@jinn-network/evidence-publication",
             "@jinn-network/evidence-repository",
@@ -17293,7 +17232,6 @@
             "@jinn-network/marketplace-testing",
             "@jinn-network/marketplace-venue-base",
             "@jinn-network/record-discovery-client",
-            "@jinn-network/record-discovery-facts-benchmarking",
             "@jinn-network/record-discovery-facts-chain-environments",
             "@jinn-network/record-discovery-facts-environments",
             "@jinn-network/record-discovery-facts-evidence",
@@ -17333,9 +17271,6 @@
         },
         "sealed-platform-v1": {
           "packages": [
-            "@jinn-network/benchmarking-protocol",
-            "@jinn-network/benchmarking-records",
-            "@jinn-network/benchmarking-testing",
             "@jinn-network/chain-environment-record",
             "@jinn-network/environment-record",
             "@jinn-network/evidence-offer",
@@ -17361,28 +17296,18 @@
       },
       "packages": [
         "@jinn-network/attestation-issuer",
-        "@jinn-network/benchmarking-aggregate",
-        "@jinn-network/benchmarking-evaluation",
-        "@jinn-network/benchmarking-evidence",
-        "@jinn-network/benchmarking-interop",
-        "@jinn-network/benchmarking-local",
-        "@jinn-network/benchmarking-marketplace",
-        "@jinn-network/benchmarking-native-capture",
-        "@jinn-network/benchmarking-protocol",
-        "@jinn-network/benchmarking-publication",
-        "@jinn-network/benchmarking-records",
-        "@jinn-network/benchmarking-run",
-        "@jinn-network/benchmarking-testing",
         "@jinn-network/chain-environment-record",
         "@jinn-network/chain-environment-verification",
         "@jinn-network/chain-scenarios",
         "@jinn-network/chain-state-extraction",
+        "@jinn-network/contract-abis",
         "@jinn-network/environment-record",
         "@jinn-network/environment-verification",
         "@jinn-network/evidence-catalog-sqlite",
         "@jinn-network/evidence-contribution",
         "@jinn-network/evidence-derivation",
         "@jinn-network/evidence-discovery",
+        "@jinn-network/evidence-gate",
         "@jinn-network/evidence-local-runtime",
         "@jinn-network/evidence-offer",
         "@jinn-network/evidence-protocol",
@@ -17402,7 +17327,6 @@
         "@jinn-network/marketplace-testing",
         "@jinn-network/marketplace-venue-base",
         "@jinn-network/record-discovery-client",
-        "@jinn-network/record-discovery-facts-benchmarking",
         "@jinn-network/record-discovery-facts-chain-environments",
         "@jinn-network/record-discovery-facts-environments",
         "@jinn-network/record-discovery-facts-evidence",
@@ -17454,138 +17378,6 @@
           ],
           "environment": "npm-publish",
           "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-aggregate",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-evaluation",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-evidence",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-interop",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-local",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-marketplace",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-native-capture",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-protocol",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-publication",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-records",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-run",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/benchmarking-testing",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
           "package": "@jinn-network/chain-environment-record",
           "provider": "GitHub Actions",
           "repository": "mono",
@@ -17620,6 +17412,17 @@
           "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/chain-state-extraction",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
+          "package": "@jinn-network/contract-abis",
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
@@ -17686,6 +17489,17 @@
           "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-discovery",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
+          "package": "@jinn-network/evidence-gate",
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
@@ -17895,17 +17709,6 @@
           "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-client",
-          "provider": "GitHub Actions",
-          "repository": "mono",
-          "workflow": "stack-npm-publish.yml"
-        },
-        {
-          "allowedActions": [
-            "npm publish"
-          ],
-          "environment": "npm-publish",
-          "organization": "Jinn-Network",
-          "package": "@jinn-network/record-discovery-facts-benchmarking",
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
@@ -18266,18 +18069,55 @@
     }
   },
   "releaseGroups": {
+    "benchmarking-product-v1": {
+      "allowedClassifications": [
+        "product"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
+        "implementations-v1",
+        "sealed-platform-v1"
+      ],
+      "canary": true,
+      "expectedPackageCount": 11,
+      "packages": [
+        "@jinn-network/benchmarking-aggregate",
+        "@jinn-network/benchmarking-evaluation",
+        "@jinn-network/benchmarking-evidence",
+        "@jinn-network/benchmarking-interop",
+        "@jinn-network/benchmarking-local",
+        "@jinn-network/benchmarking-native-capture",
+        "@jinn-network/benchmarking-protocol",
+        "@jinn-network/benchmarking-publication",
+        "@jinn-network/benchmarking-records",
+        "@jinn-network/benchmarking-run",
+        "@jinn-network/benchmarking-testing"
+      ],
+      "publishPolicies": [
+        "canary-only"
+      ],
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "stable": false,
+      "stackPublished": false
+    },
     "colophon-claims-v1": {
       "allowedClassifications": [
         "product"
       ],
       "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
         "colophon-claims-v1",
         "implementations-v1",
         "sealed-platform-v1"
       ],
       "canary": false,
-      "expectedPackageCount": 1,
+      "expectedPackageCount": 4,
       "packages": [
+        "@colophon-claims/check",
+        "@colophon-claims/cli",
+        "@colophon-claims/core",
         "@colophon-claims/verify"
       ],
       "publishPolicies": [
@@ -18369,26 +18209,19 @@
         "sealed-platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 61,
+      "expectedPackageCount": 53,
       "packages": [
         "@jinn-network/attestation-issuer",
-        "@jinn-network/benchmarking-aggregate",
-        "@jinn-network/benchmarking-evaluation",
-        "@jinn-network/benchmarking-evidence",
-        "@jinn-network/benchmarking-interop",
-        "@jinn-network/benchmarking-local",
-        "@jinn-network/benchmarking-marketplace",
-        "@jinn-network/benchmarking-native-capture",
-        "@jinn-network/benchmarking-publication",
-        "@jinn-network/benchmarking-run",
         "@jinn-network/chain-environment-verification",
         "@jinn-network/chain-scenarios",
         "@jinn-network/chain-state-extraction",
+        "@jinn-network/contract-abis",
         "@jinn-network/environment-verification",
         "@jinn-network/evidence-catalog-sqlite",
         "@jinn-network/evidence-contribution",
         "@jinn-network/evidence-derivation",
         "@jinn-network/evidence-discovery",
+        "@jinn-network/evidence-gate",
         "@jinn-network/evidence-local-runtime",
         "@jinn-network/evidence-publication",
         "@jinn-network/evidence-repository",
@@ -18405,7 +18238,6 @@
         "@jinn-network/marketplace-testing",
         "@jinn-network/marketplace-venue-base",
         "@jinn-network/record-discovery-client",
-        "@jinn-network/record-discovery-facts-benchmarking",
         "@jinn-network/record-discovery-facts-chain-environments",
         "@jinn-network/record-discovery-facts-environments",
         "@jinn-network/record-discovery-facts-evidence",
@@ -18437,7 +18269,7 @@
         "canary-and-stable"
       ],
       "requiredGateIds": [
-        "benchmarking-ci",
+        "contracts-ci",
         "environments-ci",
         "evidence-ci",
         "marketplace-ci",
@@ -18496,11 +18328,8 @@
         "sealed-platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 14,
+      "expectedPackageCount": 11,
       "packages": [
-        "@jinn-network/benchmarking-protocol",
-        "@jinn-network/benchmarking-records",
-        "@jinn-network/benchmarking-testing",
         "@jinn-network/chain-environment-record",
         "@jinn-network/environment-record",
         "@jinn-network/evidence-offer",
@@ -18517,7 +18346,6 @@
         "canary-and-stable"
       ],
       "requiredGateIds": [
-        "benchmarking-ci",
         "environments-ci",
         "evidence-ci",
         "record-discovery-ci",
@@ -18535,6 +18363,7 @@
         "transitional"
       ],
       "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
         "colophon-claims-v1",
         "experimental-lifecycle-notifications",
         "experimental-policy",
@@ -18545,10 +18374,8 @@
         "transitional-or-private"
       ],
       "canary": false,
-      "expectedPackageCount": 12,
+      "expectedPackageCount": 10,
       "packages": [
-        "@colophon-claims/cli",
-        "@colophon-claims/core",
         "@colophon-claims/web",
         "@jinn-network/broadcast-bot",
         "@jinn-network/chain-only-gate-harness",
@@ -18599,6 +18426,22 @@
         "reason": "The operator is being recomposed onto cataloged platform applications.",
         "status": "independently published during recomposition",
         "sunsetCondition": "The operator-daemon cutover is complete and the legacy release coupling is retired."
+      }
+    },
+    {
+      "name": "@colophon-claims/verify",
+      "path": "packages/benchmark-product/verify",
+      "publishPolicy": "independent",
+      "releaseGroup": "colophon-claims-v1",
+      "replacedBy": [
+        "@colophon-claims/check"
+      ],
+      "stability": "deprecated",
+      "supersedes": [],
+      "transition": {
+        "reason": "The checker publishes as @colophon-claims/check; this name stays as a permanent passthrough alias so sealed bundle instructions never 404 (issue #4188).",
+        "status": "permanent passthrough alias re-released with every checker version",
+        "sunsetCondition": "none planned"
       }
     },
     {

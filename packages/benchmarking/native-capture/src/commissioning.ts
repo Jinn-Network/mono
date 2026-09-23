@@ -26,6 +26,7 @@ import {
 import { recordDigest } from "@jinn-network/evidence-protocol";
 
 import { NativeCaptureError } from "./errors.js";
+import { sortedUnique as sortedUniqueOrThrow } from "./order.js";
 import type { CaptureClock, NativeCaptureStore } from "./types.js";
 
 /**
@@ -48,12 +49,9 @@ export interface WrittenCommissioningLink {
   readonly reference: TypedRecordReference;
 }
 
+/** The commissioning path's duplicate classification over the shared helper. */
 function sortedUnique<T>(values: readonly T[], key: (value: T) => string, what: string): T[] {
-  const sorted = [...values].sort((left, right) => (key(left) < key(right) ? -1 : key(left) > key(right) ? 1 : 0));
-  if (sorted.some((value, index) => index > 0 && key(sorted[index - 1]!) === key(value))) {
-    throw new NativeCaptureError("CAPTURE_NONCONFORMING", `commissioning ${what} contain a duplicate`);
-  }
-  return sorted;
+  return sortedUniqueOrThrow(values, key, "CAPTURE_NONCONFORMING", `commissioning ${what} contain a duplicate`);
 }
 
 /**

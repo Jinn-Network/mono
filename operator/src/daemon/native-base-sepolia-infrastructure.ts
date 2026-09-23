@@ -433,7 +433,7 @@ export function createBaseSepoliaRecordTransport(input: {
    * The per-hop half is not belt-and-braces: a destination guard that inspects only the requested
    * URL is worth nothing if the server at that URL can then post a forwarding address. The default
    * `redirect: "follow"` let a contained locator answer `302 Location: http://127.0.0.1:8545/` and
-   * walked the daemon there. Same shape as `transport-http`'s `fetchWithinOrigin` on the archive
+   * walked the daemon there. Same shape as `transport-http`'s `requestWithinOrigin` on the archive
    * path, with containment in place of same-origin because containment is what a locator has.
    *
    * Two consequences of that substitution, stated rather than left to be inferred:
@@ -550,12 +550,22 @@ export function createBaseSepoliaRecordTransport(input: {
   };
 
   return {
-    byLocation: async (location) => fetchBytes(
-      new URL(location),
-      httpTimeoutMs,
-      allowRecordLocation,
-      'any configured record origin (publicBaseUrl / recordSources[].baseUrl)',
-    ),
+    byLocation: async (location) => {
+      // A bare TypeError here is not a refusal `reportRefusedRecordDestination` names, so a
+      // scheme-less peer locator would be dropped without a warning (#3853).
+      let target: URL;
+      try {
+        target = new URL(location);
+      } catch {
+        throw new NativeRecordDestinationError(location, 'it is not a resolvable URL');
+      }
+      return fetchBytes(
+        target,
+        httpTimeoutMs,
+        allowRecordLocation,
+        'any configured record origin (publicBaseUrl / recordSources[].baseUrl)',
+      );
+    },
     byRawCid,
     async byDigest(digest) {
       const bytes = await byRawCid(rawCodecCidFromSha256Digest(digest));

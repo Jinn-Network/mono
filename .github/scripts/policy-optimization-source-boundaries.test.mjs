@@ -68,7 +68,6 @@ const HOST_LOCAL_ALLOWED_JINN_PACKAGES = [
 // Named so the denial is a positive assertion rather than a consequence of the allow-list, and so
 // a reader can see which families were considered and refused.
 const EXPLICITLY_DENIED = [
-  '@jinn-network/benchmarking-marketplace',
   '@jinn-network/marketplace-*',
   '@jinn-network/evidence-retrieval',
   '@jinn-network/task-execution-backend-local',
@@ -227,7 +226,9 @@ function files(directory) {
 }
 
 function specifiers(source) {
-  const trivia = String.raw`(?:(?:\s+)|(?:\/\*[\s\S]*?\*\/)|(?:\/\/[^\r\n]*(?:\r?\n|$)))*`;
+  // Linear: one character or one comment per iteration. `(?:\\s+)*` split whitespace runs
+  // exponentially, and a prose `from` before a run of `//` lines took 74 minutes in CI.
+  const trivia = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n|$))*`;
   return [
     new RegExp(String.raw`\bfrom${trivia}["']([^"']+)["']`, 'g'),
     new RegExp(String.raw`\bimport${trivia}["']([^"']+)["']`, 'g'),

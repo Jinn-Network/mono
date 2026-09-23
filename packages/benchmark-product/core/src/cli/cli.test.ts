@@ -178,6 +178,58 @@ describe("launch and resume concurrency flag", () => {
   });
 });
 
+/**
+ * Issue #3332. `Number` coerces rather than parses, so `"1e3"`, `"0x10"`, `"+1"` and a
+ * whitespace-padded number all became integers `Number.isInteger` accepted and the schema's bound
+ * admitted -- an operator who mistyped a round got a successfully bound run at a round they never
+ * typed, and `bind` is write-once, so rebinding cannot correct it. The refusals below happen on the
+ * flag, before any workspace state is read, which is why they need no locked draft; the two cases
+ * that do reach the operation assert only that they were not refused for their spelling.
+ */
+describe("bind --beacon-round", () => {
+  const bind = (round: string): Promise<{ exitCode: number; stdout: string }> => runCli([
+    "bind",
+    "--workspace", workspaceDir,
+    "--principal", "sponsor-1",
+    "--draft", "draft-1",
+    "--beacon-source", "drand/quicknet",
+    "--beacon-round", round,
+    "--beacon-value", "b".repeat(64),
+    "--json",
+  ], contextFor(workspaceDir));
+
+  test.each([
+    ["1e3", "exponent notation"],
+    ["0x10", "hexadecimal"],
+    ["+1", "an explicit sign"],
+    ["1.0", "a decimal point"],
+    ["-1", "a negative round"],
+    ["0", "round zero"],
+    ["Infinity", "a non-finite literal"],
+    ["9007199254740993", "a round past the safe-integer range"],
+  ])("refuses %s (%s) by name", async (round) => {
+    const result = await bind(round);
+    expect(result.exitCode).toBe(2);
+    const body = parseJson<never>(result.stdout);
+    expect(body.ok).toBe(false);
+    expect(body.error?.code).toBe("invalid-invocation");
+    expect(body.error?.detail).toContain("--beacon-round");
+  });
+
+  test("a decimal round passes the flag check and reaches the operation", async () => {
+    // Refused for a real reason -- there is no draft here -- rather than for its spelling, which
+    // is what separates the shape check from the operation's own refusals.
+    const result = await bind("1000");
+    expect(result.exitCode).not.toBe(0);
+    expect(parseJson<never>(result.stdout).error?.code).not.toBe("invalid-invocation");
+  });
+
+  test("leading zeros denote the same round rather than a refusal", async () => {
+    const result = await bind("0001000");
+    expect(parseJson<never>(result.stdout).error?.code).not.toBe("invalid-invocation");
+  });
+});
+
 describe("unknown verb", () => {
   test("--json: exit 2, envelope {ok:false, error:{code:'invalid-invocation'}}", async () => {
     const result = await runCli(["frobnicate", "--json"], contextFor(workspaceDir));

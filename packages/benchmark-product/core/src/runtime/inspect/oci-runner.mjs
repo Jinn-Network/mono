@@ -390,26 +390,51 @@ if (command === "probe-broker") {
     });
     let frameBuffer = "";
     let frameChain = Promise.resolve();
+    let relayFailed = false;
+    const pushFrame = (line, afterClose = false) => {
+      frameChain = frameChain.then(async () => {
+        const frame = JSON.parse(line);
+        if (frame?.channel === "sandbox") {
+          // #4024: a sandbox request that arrives in the post-close flush has no client left to
+          // answer. `child.stdin.write` on a closed stdin goes nowhere and throws nothing, so
+          // relaying it would leave this process exiting 0 with an empty stdout -- the exact
+          // shape #3720 set out to eliminate, reached by the one frame kind that fix did not
+          // cover. A request nobody can answer is a relay failure, and takes the same exit-1
+          // path a trailing unparseable frame takes.
+          if (afterClose) throw new Error("worker requested a sandbox operation after its client closed");
+          const response = await sandboxController.handle(frame);
+          child.stdin.write(`${JSON.stringify(response)}\n`);
+        } else if (typeof frame?.ok === "boolean") {
+          process.stdout.write(`${JSON.stringify(frame)}\n`);
+        } else {
+          throw new Error("worker emitted an unknown protocol frame");
+        }
+      }).catch(() => {
+        relayFailed = true;
+        child.kill("SIGKILL");
+      });
+    };
     if (sandboxMode) {
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk) => {
         frameBuffer += chunk;
-        if (Buffer.byteLength(frameBuffer) > 24 * 1024 * 1024) child.kill("SIGKILL");
+        // #4026: drop the residue when the cap trips. Before the `close` handler below flushed it,
+        // an oversized buffer was simply never emitted, because a frame was emitted only on a
+        // newline; keeping it now would hand tens of megabytes to `JSON.parse` on the final flush
+        // and, if it happened to parse, relay a frame that blew the very cap this guard enforces.
+        // The SIGKILL cannot reach a client that has already exited, so record the refusal too:
+        // a frame this process would not relay is its own failure, not the worker's success.
+        if (Buffer.byteLength(frameBuffer) > 24 * 1024 * 1024) {
+          frameBuffer = "";
+          relayFailed = true;
+          child.kill("SIGKILL");
+          return;
+        }
         while (frameBuffer.includes("\n")) {
           const newline = frameBuffer.indexOf("\n");
           const line = frameBuffer.slice(0, newline);
           frameBuffer = frameBuffer.slice(newline + 1);
-          frameChain = frameChain.then(async () => {
-            const frame = JSON.parse(line);
-            if (frame?.channel === "sandbox") {
-              const response = await sandboxController.handle(frame);
-              child.stdin.write(`${JSON.stringify(response)}\n`);
-            } else if (typeof frame?.ok === "boolean") {
-              process.stdout.write(`${JSON.stringify(frame)}\n`);
-            } else {
-              throw new Error("worker emitted an unknown protocol frame");
-            }
-          }).catch(() => child.kill("SIGKILL"));
+          pushFrame(line);
         }
       });
     }
@@ -425,9 +450,32 @@ if (command === "probe-broker") {
       process.stderr.write(`OCI runtime could not start: ${error instanceof Error ? error.name : "unknown error"}\n`);
       process.exitCode = 1;
     });
-    child.once("exit", async (code, signal) => {
+    // `exit` settles the termination ladder as early as possible -- `finishTermination` waits on
+    // `childSettled` to decide whether it still has to SIGKILL the client -- but it is NOT the
+    // point at which this process may stop relaying. Node emits `exit` when the child ends, with
+    // its stdio streams possibly still open; `close` is emitted once they have closed, and is
+    // documented to always follow `exit` (or `error`, when the child never spawned).
+    let exitStatus;
+    child.once("exit", (code, signal) => {
       settled = true;
       settleChild();
+      exitStatus = { code, signal };
+    });
+    child.once("close", async () => {
+      // The `error` path above already cleaned up and set an exit code for a child that never ran.
+      if (exitStatus === undefined) return;
+      const { code, signal } = exitStatus;
+      // #3720: a frame was emitted only on a newline, so a final chunk the worker did not
+      // terminate -- because its stdout was truncated on the way through a loaded Docker Engine,
+      // for instance -- was dropped silently and this process still exited 0 having relayed
+      // nothing. The caller then parsed an empty stdout and reported V8's
+      // `Unexpected end of JSON input` with no subject. Everything the worker wrote has now been
+      // read, so flush whatever is left as the frame it is and let it fail as a frame.
+      if (frameBuffer !== "") {
+        const line = frameBuffer;
+        frameBuffer = "";
+        pushFrame(line, true);
+      }
       await frameChain;
       await cleanup();
       if (terminating) {
@@ -435,8 +483,22 @@ if (command === "probe-broker") {
         return;
       }
       for (const terminationSignalName of terminationSignals) process.removeAllListeners(terminationSignalName);
-      if (signal !== null) process.kill(process.pid, signal);
-      else process.exitCode = code ?? 1;
+      if (signal !== null) {
+        process.kill(process.pid, signal);
+        return;
+      }
+      // A frame this process could not relay is this process's failure, not the worker's success.
+      // Before #3720 the only way a relay failure surfaced was the SIGKILL above, which cannot
+      // reach a client that has already exited -- so a frame that failed during the final flush
+      // left an exit code of 0 and an empty stdout, indistinguishable from a worker that answered
+      // nothing. Say so instead. The frame itself is never echoed: only stdout is contractually
+      // the machine envelope, and a frame that failed to parse is not known to be one.
+      if (relayFailed) {
+        process.stderr.write("OCI runner could not relay a worker protocol frame\n");
+        process.exitCode = 1;
+        return;
+      }
+      process.exitCode = code ?? 1;
     });
   }
   await runWorker();

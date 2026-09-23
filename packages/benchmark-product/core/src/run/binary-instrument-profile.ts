@@ -60,13 +60,9 @@ import {
   type TaskSpecification,
 } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes, recordDigest } from "@jinn-network/trust-core";
-import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../human-review/verification-workspace.js";
+import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "./admission-workspace.js";
 import { resolveAssurance, type Analysis, type DraftDocument, type DraftSpec } from "../domain/draft.js";
-import { refuse } from "../errors.js";
-import {
-  BINARY_ITEM_BANK_INTAKE_EXTENSION,
-  parseBinaryItemBankIntakeExtension,
-} from "../intake/binary-item-bank.js";
+import { refuse, refuseWithIssues } from "../errors.js";
 import {
   INSPECT_BINARY_JUDGE_ADAPTER_ID,
   INSPECT_BINARY_JUDGE_LAUNCHER_ID,
@@ -78,7 +74,12 @@ import {
   BINARY_INSTRUMENT_REPORT_LIMITATIONS,
   PROMPTED_SCREENING_PROFILE,
   binaryInstrumentReportLimitations,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
+import {
+  BINARY_ITEM_BANK_INTAKE_EXTENSION,
+  BinaryItemBankIntakeExtensionSchema,
+  type BinaryItemBankIntakeExtension,
+} from "@colophon-claims/check/admission";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
 export {
@@ -88,6 +89,22 @@ export {
   INSPECT_BINARY_JUDGE_LAUNCHER_VERSION,
   INSPECT_BINARY_JUDGE_SELECTION_SCHEMA,
 };
+
+/** Read-only parser for the binary-judgment item-bank intake extension on a sealed Benchmark. */
+export function parseBinaryItemBankIntakeExtension(
+  benchmark: BenchmarkRecord,
+): BinaryItemBankIntakeExtension {
+  const parsed = BinaryItemBankIntakeExtensionSchema.safeParse(
+    benchmark[BINARY_ITEM_BANK_INTAKE_EXTENSION],
+  );
+  if (!parsed.success) {
+    refuseWithIssues("validation", parsed.error.issues.map((issue) => ({
+      path: `${BINARY_ITEM_BANK_INTAKE_EXTENSION}${issue.path.length === 0 ? "" : `.${issue.path.join(".")}`}`,
+      message: issue.message,
+    })));
+  }
+  return parsed.data;
+}
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const BARE_DIGEST = /^[0-9a-f]{64}$/u;

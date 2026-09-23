@@ -231,6 +231,18 @@ CREATE INDEX announcement_edges_target_idx
 -- on field, so it needs the ordering the index above gives it.
 CREATE INDEX announcement_edges_target_field_idx
   ON announcement_edges(target_digest, field, source_id, record_digest, ordinal);
+-- Two served filter shapes get no index of their own, deliberately: record_kind alone and field
+-- alone. Nothing leads with either column -- the four indexes above lead with record_digest or
+-- target_digest, and the primary-key autoindex leads with source_id -- so each scans its first
+-- page and seeks to its cursor on a resumed one. The ordering is where they part. record_kind
+-- alone gets it free, because the primary key already spells the ORDER BY exactly, so SQLite
+-- reads in key order and the page ordering costs nothing extra. field alone does not: SQLite
+-- treats the equality-constrained field as constant and drops it from the ordering, which leaves
+-- ordinal out of index order, so both of its pages add a temp b-tree for the last term. Indexing
+-- either would buy a first-page seek at the cost of write amplification on every indexed card,
+-- and nothing in-tree queries either shape; they stay as they are until something does. The temp
+-- b-tree is the sharper cost and the one to revisit first. Both plans are pinned in
+-- announcement-edges.test.ts.
 `;
 
 interface MetadataRow {

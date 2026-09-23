@@ -1,5 +1,6 @@
 import type { Hono } from 'hono';
 import type { Store } from '../store/store.js';
+import { sanitizeErrorText } from '../rpc/transport.js';
 import {
   gatherGatheredStatusRaw,
   sumPendingStakingRewards,
@@ -57,7 +58,7 @@ export function addRewardsRoutes(app: Hono, deps: RewardsRoutesDeps): void {
           lastClaimAt: null,
           lastClaimTickAt: null,
           nextCheckpointAt: null,
-          error: err instanceof Error ? err.message : String(err),
+          error: sanitizeErrorText(err),
           services: [],
         },
         500,

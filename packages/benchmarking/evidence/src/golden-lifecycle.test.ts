@@ -7,7 +7,7 @@ import {
   verify as verifyEd25519,
   type KeyObject,
 } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import {
   BENCHMARKING_PROTOCOL_V2,
   EXECUTION_BATCH_CAPTURE_RECORD_KIND,
@@ -40,7 +40,7 @@ import {
   type ExecutionEvidenceBuilderInput,
 } from "@jinn-network/execution-evidence-builder";
 import { dssePreAuthEncoding, sealSignedPayload, type DsseSigner } from "@jinn-network/trust-core";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   assembleEvidenceMatrix,
@@ -987,10 +987,10 @@ describe("Harbor → Inspect → human evidence-first golden lifecycle", () => {
     // which shows the D append leaves the A/B/C artifacts alone but not that either matches a
     // value fixed outside the run. These are that value: a serialization change applied uniformly
     // across both the A/B/C build and the D append moves them, and this assertion is the only
-    // thing that notices. Regenerate by running this test and copying the values vitest prints in
-    // the diff into `packages/benchmarking/protocol/fixtures/golden-lifecycle/digests.json` --
-    // that file is an append-only pinned fixture, so a change there needs a dated erratum.
-    expect({
+    // thing that notices. Regenerate with `yarn generate:fixtures` in this package (issue #3818);
+    // `fixtures/golden-lifecycle/digests.json` is an append-only pinned fixture, so a change there
+    // needs a dated erratum.
+    expectGoldenLifecycleDigests({
       benchmark: benchmarkRecord.digest,
       manifest: manifest.digest,
       cohortAbc: cohortABC.digest,
@@ -1004,20 +1004,52 @@ describe("Harbor → Inspect → human evidence-first golden lifecycle", () => {
       claimPackage: claim.digest,
       bundleManifest: documentDigest(bundleFiles.get("bundle.json")!),
       metadataFirstBundleManifest: documentDigest(metadataFirstFiles.get("bundle.json")!),
-    }).toEqual(loadGoldenLifecycleDigests());
+    });
+  });
+});
+
+const GOLDEN_LIFECYCLE_DIGESTS_FIXTURE = new URL("../fixtures/golden-lifecycle/digests.json", import.meta.url);
+
+describe("golden-lifecycle digest regeneration", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // Issue #3919: in write mode the assertion is trivially true, so if the regeneration flag ever
+  // reached a CI runner the test would go green against whatever the code currently computes,
+  // and the repo-wide fixture drift guard (a separate job, separate checkout) would never see the
+  // rewritten file. A CI runner has no legitimate reason to regenerate a pinned fixture.
+  test("refuses to regenerate the pinned digests on a CI runner, leaving the fixture untouched", () => {
+    const before = readFileSync(GOLDEN_LIFECYCLE_DIGESTS_FIXTURE);
+    vi.stubEnv("CI", "true");
+    vi.stubEnv("JINN_WRITE_GOLDEN_LIFECYCLE_DIGESTS", "1");
+    expect(() => expectGoldenLifecycleDigests({})).toThrow(/CI/);
+    expect(readFileSync(GOLDEN_LIFECYCLE_DIGESTS_FIXTURE).equals(before)).toBe(true);
   });
 });
 
 /**
- * The pinned tier-2 digests of this lifecycle, read from `fixtures/` rather than recomputed. The
- * file is covered by the repo-wide fixture drift and immutability guards, so changing a pinned
- * value takes a dated erratum, not an edit.
+ * Asserts the tier-2 digests of this lifecycle against `fixtures/`, rather than against values the
+ * same run recomputed. The file is covered by the repo-wide fixture drift and immutability guards,
+ * so changing a pinned value takes a dated erratum, not an edit.
  */
-function loadGoldenLifecycleDigests(): Record<string, string> {
-  const { digests } = JSON.parse(
-    readFileSync(new URL("../fixtures/golden-lifecycle/digests.json", import.meta.url), "utf8"),
-  ) as { digests: Record<string, string> };
-  return digests;
+function expectGoldenLifecycleDigests(actual: Record<string, string>): void {
+  if (process.env.JINN_WRITE_GOLDEN_LIFECYCLE_DIGESTS === "1") {
+    // Regeneration mode, driven by `scripts/write-golden-lifecycle-digests.mjs`. These digests are
+    // only computable by running the lifecycle, so the script runs this test with the flag set and
+    // the test writes what it computed. The assertion below is then trivially true; the fixture
+    // immutability guard, not this expectation, is what refuses an unintended change. A CI runner
+    // has no legitimate reason to regenerate a pinned fixture, so the flag reaching one is refused
+    // loudly rather than silently passing against whatever was just computed (issue #3919).
+    if (process.env.CI !== undefined && process.env.CI !== "") {
+      throw new Error(
+        "refusing to regenerate fixtures/golden-lifecycle/digests.json on a CI runner (CI is set); unset JINN_WRITE_GOLDEN_LIFECYCLE_DIGESTS",
+      );
+    }
+    writeFileSync(GOLDEN_LIFECYCLE_DIGESTS_FIXTURE, `${JSON.stringify({ version: 1, digests: actual }, null, 2)}\n`);
+  }
+  const { digests } = JSON.parse(readFileSync(GOLDEN_LIFECYCLE_DIGESTS_FIXTURE, "utf8")) as { digests: Record<string, string> };
+  expect(actual).toEqual(digests);
 }
 
 function claimRecordsArtifactDigests(claimBytes: Uint8Array): readonly string[] {

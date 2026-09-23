@@ -30,6 +30,28 @@ describe("record publication", () => {
     expect(calls).toEqual(["verify", "mirror"]);
   });
 
+  it("refuses an announcement timestamp the durable writer would refuse (#4095)", () => {
+    // The plan's `announcementTimestamp` becomes the entry `timestamp`, which
+    // `assertIntentOwnership` pins equal to the head's `issuedAt` -- strict,
+    // offset-bearing, calendar-real RFC 3339 since #3482. A plan that validates
+    // must be a plan the writer accepts.
+    for (const invalid of [
+      "2026-08-13T00:00:00.000",  // offset-less: host-LOCAL by definition
+      "2026-02-30T00:00:00.000Z", // silently rolled forward to March by Date.parse
+      "August 13, 2026",          // legacy host-parser spelling
+      "2026-08-13",               // date only
+    ]) {
+      const invalidPlan = plan();
+      (invalidPlan.stages[0]!.members[0]! as any).announcementTimestamp = invalid;
+      expect(() => validatePublicationPlan(invalidPlan), invalid).toThrow("immutable announcement timestamp");
+    }
+
+    // A leap second is admitted by §5.2 and so is admitted here.
+    const leap = plan();
+    (leap.stages[0]!.members[0]! as any).announcementTimestamp = "2026-06-30T23:59:60Z";
+    expect(() => validatePublicationPlan(leap)).not.toThrow();
+  });
+
   it("refuses an origin reference that asks to announce", () => {
     const invalid = plan("origin-reference");
     const member = invalid.stages[0]!.members[0]! as any; member.actions = ["announce", "verify-origin"];

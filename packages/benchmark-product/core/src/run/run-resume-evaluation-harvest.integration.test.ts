@@ -24,7 +24,8 @@
  * could-not-grade for that leg — which writes the evalIndex into `completedEvalIndexes`
  * (`./journal.js`), losing a verdict the harness had already produced, permanently.
  *
- * Interruption technique: the same abandonment shim as the #3183 test drives to a durably
+ * Interruption technique: the shared abandonment shim
+ * (`./testing/evaluation-resume-abandonment.ts`, also used by the #3183 test) drives to a durably
  * delivered evaluation attempt, then the attempt's backend journal is rewound past its `harvested`
  * event and its Delivery checkpoint is deleted — the crash simulation
  * `packages/task-execution/backend-local/assembly/src/backend.recovery.test.ts` uses. Nothing is
@@ -42,33 +43,18 @@ import {
   parseMatrix,
   parseRun,
 } from "@jinn-network/benchmarking-records";
-import { launchAndWatch, MAX_CONCURRENT_CELLS } from "@jinn-network/benchmarking-run";
-import { armAdd } from "../operations/arms.js";
+import { MAX_CONCURRENT_CELLS } from "@jinn-network/benchmarking-run";
 import type { OperationContext } from "../operations/context.js";
-import { createDraft, readDraftDocument } from "../operations/drafts.js";
-import { initWorkspace } from "../operations/init.js";
+import { readDraftDocument } from "../operations/drafts.js";
 import { runCollect } from "../operations/run-collect.js";
-import { runLock } from "../operations/run-lock.js";
-import { runQuote } from "../operations/run-quote.js";
 import { runResume } from "../operations/run-launch.js";
-import { sampleInit } from "../operations/sample.js";
-import {
-  createLocalVenue,
-  EVALUATION_HARNESS_PIN,
-  SOLVE_HARNESS_PINS,
-  type LocalVenue,
-} from "../venue/venue.js";
-import { atomicWriteFileSync } from "../fs/atomic.js";
-import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
-import { transition } from "../domain/lifecycle.js";
-import { createRecordingProxy, driveCellEvents, type DriveDeps, type ProxiedBackend } from "./drive.js";
+import { readRunJournalEntries, type RunJournalEntry } from "./journal.js";
+import { requireRunState } from "./state.js";
 import {
-  appendRunJournalEntry,
-  readRunJournalEntries,
-  type RunJournalEntry,
-} from "./journal.js";
-import { requireRunState, writeRunState } from "./state.js";
+  driveUntilEvaluationDelivered,
+  setUpLockedDraft,
+} from "./testing/evaluation-resume-abandonment.js";
 
 let workspaceDir: string;
 
@@ -88,126 +74,6 @@ function makeClock(): () => string {
 
 function contextFor(clock: () => string, principal = "sponsor-1"): OperationContext {
   return { workspaceDir, principal, clock };
-}
-
-async function setUpLockedDraft(clock: () => string, draftId: string): Promise<void> {
-  expect(initWorkspace(contextFor(clock)).ok).toBe(true);
-  expect(createDraft(contextFor(clock), { draftId, name: "Eval Harvest Resume" }).ok).toBe(true);
-  expect((await sampleInit(contextFor(clock), { draftId })).ok).toBe(true);
-  expect(armAdd(contextFor(clock), {
-    draftId,
-    armId: "baseline",
-    pinning: { harness: SOLVE_HARNESS_PINS["prediction-v1-baseline"] },
-  }).ok).toBe(true);
-  expect(armAdd(contextFor(clock), {
-    draftId,
-    armId: "sample-uniform",
-    pinning: { harness: SOLVE_HARNESS_PINS["sample-uniform"] },
-  }).ok).toBe(true);
-  expect((await runQuote(contextFor(clock), { draftId })).ok).toBe(true);
-  expect(runLock(contextFor(clock), { draftId }).ok).toBe(true);
-}
-
-function isEvaluationSubmission(submissionBytes: Uint8Array): boolean {
-  try {
-    const doc = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(submissionBytes)) as {
-      readonly requirements?: { readonly harness?: { readonly id?: string } };
-    };
-    return doc.requirements?.harness?.id === EVALUATION_HARNESS_PIN.id;
-  } catch {
-    return false;
-  }
-}
-
-/** See `./run-resume-evaluation-replay.integration.test.ts` — identical abandonment shim: the
- * evaluation attempt's Delivery is proven durably readable through the backend, then the
- * `fetchDelivery` that would have produced the verdict never resolves. */
-function hangBeforeFirstVerdict(
-  backend: ProxiedBackend,
-  armed: { value: boolean; resolveArmed?: () => void },
-): ProxiedBackend {
-  return {
-    capabilities: () => backend.capabilities(),
-    submit: async (taskBytes, submissionBytes, engagement) => {
-      const ack = await backend.submit(taskBytes, submissionBytes, engagement);
-      if (ack.accepted && isEvaluationSubmission(submissionBytes)) armed.value = true;
-      return ack;
-    },
-    observe: (ref) => backend.observe(ref),
-    ...(backend.watch === undefined ? {} : { watch: (ref, cursor) => backend.watch!(ref, cursor) }),
-    ...(backend.cancel === undefined ? {} : { cancel: (a, r) => backend.cancel!(a, r) }),
-    recover: (ref) => backend.recover(ref),
-    deliveries: (attempt) => backend.deliveries(attempt),
-    fetchDelivery: async (ref) => {
-      if (!armed.value) return backend.fetchDelivery(ref);
-      await backend.fetchDelivery(ref);
-      armed.resolveArmed?.();
-      return new Promise<Uint8Array>(() => {});
-    },
-    ...(backend.fetchArtifact === undefined
-      ? {}
-      : { fetchArtifact: (d) => backend.fetchArtifact!(d) }),
-    ...(backend.pinningEvidenceForSubmission === undefined
-      ? {}
-      : { pinningEvidenceForSubmission: (ref) => backend.pinningEvidenceForSubmission!(ref) }),
-    drain: () => backend.drain(),
-  };
-}
-
-/** Mirrors `runLaunch`'s own `run` closure and abandons the drive the moment the first evaluation
- * Submission has been accepted and its Delivery is durably readable. */
-async function driveUntilEvaluationDelivered(clock: () => string, draftId: string): Promise<void> {
-  const at = clock();
-  const document = readDraftDocument(workspaceDir, draftId);
-  const transitioned = transition("locked", "launch");
-  if (!transitioned.ok) throw new Error("unreachable");
-  atomicWriteFileSync(
-    draftPath(workspaceDir, draftId),
-    JSON.stringify({ ...document, state: transitioned.state, updatedAt: at }, null, 2),
-  );
-
-  const runState = requireRunState(workspaceDir, draftId);
-  if (runState.runSha256 === undefined) throw new Error("unreachable");
-  writeRunState(workspaceDir, draftId, { ...runState, launchedAt: at });
-  appendRunJournalEntry(workspaceDir, draftId, { kind: "launched", at: clock() });
-
-  const runRecord = parseRun(getSealedBytes(workspaceDir, runState.runSha256));
-  if (document.spec.taskSet.kind !== "benchmark") throw new Error("unreachable: no benchmark");
-  const benchRecord = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
-
-  const venue: LocalVenue = createLocalVenue({ workspaceDir, now: clock });
-  const armed: { value: boolean; resolveArmed?: () => void } = { value: false };
-  const evaluationDelivered = new Promise<void>((resolve) => {
-    armed.resolveArmed = resolve;
-  });
-  try {
-    const backend = createRecordingProxy(
-      hangBeforeFirstVerdict(venue.backend, armed),
-      { workspaceDir, draftId, liveClock: clock },
-    );
-    const driveDeps: DriveDeps = {
-      workspaceDir,
-      draftId,
-      venue,
-      backend,
-      runSha256: runState.runSha256,
-      owner: runState.owner,
-      cellWindowMs: runRecord.policy.cellWindow,
-      minVerdicts: runRecord.policy.evaluation?.minVerdicts ?? 1,
-      liveClock: clock,
-    };
-    const events = launchAndWatch(benchRecord, runRecord, backend, {
-      runDigest: `sha256:${runState.runSha256}`,
-      taskBytesFor: (taskDigestHex) => getSealedBytes(workspaceDir, taskDigestHex),
-      clock: { now: () => new Date(clock()) },
-    });
-
-    const abandoned = driveCellEvents(driveDeps, events);
-    abandoned.catch(() => undefined);
-    await evaluationDelivered;
-  } finally {
-    await venue.shutdown();
-  }
 }
 
 interface AttemptJournalEvent {
@@ -278,9 +144,9 @@ describe("resume recovers an evaluation attempt killed during harvest", () => {
     async () => {
       const clock = makeClock();
       const draftId = "draft-1";
-      await setUpLockedDraft(clock, draftId);
+      await setUpLockedDraft(workspaceDir, clock, draftId, "Eval Harvest Resume");
 
-      await driveUntilEvaluationDelivered(clock, draftId);
+      await driveUntilEvaluationDelivered(workspaceDir, clock, draftId);
 
       // ── the interrupted state is exactly what a mid-execution kill leaves ───────────────
       const interrupted = readRunJournalEntries(workspaceDir, draftId);
@@ -330,19 +196,26 @@ describe("resume recovers an evaluation attempt killed during harvest", () => {
       // ── resume through the PUBLIC operation, on a fresh venue ───────────────────────────
       // Capacity is deliberately taken OFF the table: the ceiling is the platform maximum, well
       // above the twelve attempts this run can ever hold live at once (six cells, each a solve
-      // leg and an evaluation leg). A smaller ceiling makes the test's own crash a race.
-      // `LocalBackend`'s rehydration calls `capacity.restore(live)` over every attempt on disk
-      // that has no `attempt-terminal` event, and the abandoned drive above leaves a
+      // leg and an evaluation leg). Everything from here to the end of this comment is
+      // retrospective — it records why the ceiling was raised, not behavior that still exists.
+      // `LocalBackend`'s rehydration used to call `capacity.restore(live)` over every attempt on
+      // disk that had no `attempt-terminal` event, and the abandoned drive above left a
       // TIMING-DEPENDENT number of those: the interrupted evaluation attempt always (it is
       // rewound past its terminal on purpose), plus however many solve legs happened not to have
       // terminaled at the instant the drive was abandoned — more of them on a slower or busier
-      // machine. Each holds a slot, and the evaluation one holds its until that leg reaches
-      // `dispatchEvaluation` (its own defect, issue #3192). Whenever the held count exceeds the
-      // headroom, an unrelated cell loses its dispatch to "local backend capacity exhausted" and
-      // expires — collateral of the crash, not the verdict-recovery question under test. A fixed
-      // small headroom cannot bound a count that varies with machine speed, so this does not use
-      // one: verified by sweeping the ceiling down, which reproduces exactly the CI failure
-      // (a cell `expired` at `dispatches: 1`, no attempt, no verdict) at and below 5.
+      // machine. Each held a slot, and whenever the held count exceeded the headroom an unrelated
+      // cell lost its dispatch to "local backend capacity exhausted" and expired — collateral of
+      // the crash, not the verdict-recovery question under test. A fixed small headroom could not
+      // bound a count that varied with machine speed, so this did not use one: verified by
+      // sweeping the ceiling down, which reproduced exactly the CI failure (a cell `expired` at
+      // `dispatches: 1`, no attempt, no verdict) at and below 5.
+      // #3192 fixed that starvation at its source — rehydration now restores a slot only for an
+      // attempt whose shim or harness group actually still exists, and the attempts the abandoned
+      // drive left behind have neither once their shims finish exiting. That is a bound on the
+      // steady state rather than on the instant this venue happens to boot (`venue.shutdown()`
+      // drains in-process workers, not the shims they spawned), which is precisely why the ceiling
+      // below is kept: this test's subject is harvest recovery, not capacity, so taking capacity
+      // off the table costs it nothing, and belt-and-braces beats re-tuning it.
       const resumed = await runResume(contextFor(clock), {
         draftId,
         maxConcurrentCells: MAX_CONCURRENT_CELLS,

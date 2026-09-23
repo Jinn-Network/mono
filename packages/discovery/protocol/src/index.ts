@@ -9,6 +9,7 @@ export * from "./origins.js";
 export * from "./grammar.js";
 export * from "./order.js";
 export * from "./hashing.js";
+export * from "./timestamps.js";
 export * from "./sealing.js";
 export * from "./dsse.js";
 export * from "./item.js";

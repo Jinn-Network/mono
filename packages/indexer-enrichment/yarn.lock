@@ -863,6 +863,12 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/contract-abis@portal:../contract-abis::locator=%40jinn-network%2Findexer%40portal%3A..%2Findexer%3A%3Alocator%3D%2540jinn-network%252Findexer-enrichment%2540workspace%253A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/contract-abis@portal:../contract-abis::locator=%40jinn-network%2Findexer%40portal%3A..%2Findexer%3A%3Alocator%3D%2540jinn-network%252Findexer-enrichment%2540workspace%253A."
+  languageName: node
+  linkType: soft
+
 "@jinn-network/indexer-enrichment@workspace:.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/indexer-enrichment@workspace:."
@@ -888,6 +894,7 @@ __metadata:
   dependencies:
     "@hono/node-server": "npm:^2.0.11"
     "@jinn-network/benchmarking-records": "portal:../benchmarking/records"
+    "@jinn-network/contract-abis": "portal:../contract-abis"
     drizzle-orm: "npm:^0.45.2"
     hono: "npm:^4.12.31"
     ponder: "npm:^0.17.1"

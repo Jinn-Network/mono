@@ -9,8 +9,8 @@ runtime for an individual stage.
 
 ## Finite-session invariant
 
-The coordinator and every root stage run through Jinn's stateless Hermes
-launcher. It binds `async_delivery=False`, so top-level delegation uses
+The coordinator and every root stage run through the package-owned stateless
+Hermes launcher. It binds `async_delivery=False`, so top-level delegation uses
 Hermes's existing synchronous aggregation path. A batch may fan out
 concurrently, but all results return in the current turn.
 
@@ -24,19 +24,9 @@ SESSION_REPORT_DIR="$(dirname -- "$JINN_AUTOPILOT_SESSION_MANIFEST")/reports"
 STAGE_PROMPT="$(mktemp "$SESSION_REPORT_DIR/stage-${STAGE_NUMBER}-${STAGE_NAME}.md.XXXXXX")"
 chmod 600 "$STAGE_PROMPT"
 # Write only this stage's curated prompt to "$STAGE_PROMPT".
-if [ -z "${JINN_AUTOPILOT_PACKAGE_DIR:-}" ]; then
-  echo "error: stage:run requires JINN_AUTOPILOT_PACKAGE_DIR (standalone Autopilot checkout)" >&2
-  exit 1
-fi
-case "${JINN_AUTOPILOT_PACKAGE_DIR%/}" in
-  */packages/autopilot|packages/autopilot)
-    echo "error: JINN_AUTOPILOT_PACKAGE_DIR must not point at the retired vendored tree" >&2
-    exit 1
-    ;;
-esac
-(cd "$JINN_AUTOPILOT_PACKAGE_DIR" && yarn stage:run \
+autopilot internal run-stage \
   --prompt-file "$STAGE_PROMPT" \
-  --worktree "$WORKTREE_PATH")
+  --worktree "$WORKTREE_PATH"
 rm -f -- "$STAGE_PROMPT"
 ```
 
@@ -47,7 +37,7 @@ each receive their own `mktemp` result.
 Each invocation is a new depth-0 Hermes process, so the stage may use its own
 depth-1 fan-out internally. Do not raise Hermes's default spawn depth to
 compensate for launching depth-needing work as a child.
-`stage:run` removes the coordinator's GitHub credentials, Git/SSH publication
+`autopilot internal run-stage` removes the coordinator's GitHub credentials, Git/SSH publication
 paths, and session manifest before spawning the root while retaining the
 configured Hermes runtime/model/provider. Do not launch a fresh root directly
 in a way that bypasses that environment boundary.

@@ -68,6 +68,16 @@ not flip them.
    those identifiers from the live origin will not retrieve them. That is the
    named gap, not a defect to paper over.
 
+   *Amended 2026-09-02 (issue #2981).* Reader surfaces discharge this decision
+   without naming the unresolvable origin: they state that protocol identifiers
+   are names rather than addresses, that the verifier fetches nothing from them,
+   and that checks run against the exact platform bytes installed from npm. The
+   disclosed host gap and the underlying protocol identifiers are unchanged.
+   Current authenticated `/2`, `/4`, `/5`, `/6`, `/7`, and `/8` `index.html`,
+   `README.md`, and raw records remain byte-frozen; the origin-free policy applies
+   to the CLI, npm README, and current human-rendered errors, with forward
+   presentation changes allocated to the next format.
+
 6. **Do not vendor the platform.** Colophon still imports `@jinn-network/*`. It
    does not copy, fork, or relabel tier-1–3 schemas, fixtures, or source as
    Colophon-owned. The reader may keep those installed bytes for offline use

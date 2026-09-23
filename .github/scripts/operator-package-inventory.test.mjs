@@ -34,6 +34,7 @@ test('operator workspaces are exactly the nested packages glob', () => {
 // three-package sketch in the stage-5 plan.
 const EXPECTED_JINN_DEPENDENCIES = {
   "@jinn-network/attestation-issuer": "0.1.0",
+  "@jinn-network/contract-abis": "0.1.0",
   "@jinn-network/core": "0.1.2",
   "@jinn-network/environment-record": "0.1.0",
   "@jinn-network/evidence-catalog-sqlite": "0.1.0",
@@ -78,6 +79,7 @@ const EXPECTED_JINN_DEV_DEPENDENCIES = {
 };
 const EXPECTED_JINN_RESOLUTIONS = {
   "@jinn-network/attestation-issuer": "portal:../packages/evidence/attestation-issuer",
+  "@jinn-network/contract-abis": "portal:../packages/contract-abis",
   "@jinn-network/core": "portal:../packages/core",
   "@jinn-network/environment-record": "portal:../packages/environments/record",
   "@jinn-network/evidence-catalog-sqlite": "portal:../packages/evidence/catalog-sqlite",

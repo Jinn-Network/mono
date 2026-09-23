@@ -74,7 +74,13 @@ describe("attaching and reading the advisory", () => {
 
   test("an unacknowledged Run seals byte-identical bytes to before the extension existed", () => {
     expect(Object.keys(minimalRun())).not.toContain(SAMPLE_SIZE_ADVISORY_EXTENSION);
-    expect(sealRun(minimalRun()).digest).toBe(sealRun(minimalRun()).digest);
+    // The literal is what "before the extension existed" means: it is the digest this fixture
+    // sealed to at 70bf2098c^, the commit before the advisory shipped. Re-sealing the fixture and
+    // comparing it with itself (issue #3802) only proves `sealRun` is deterministic; it would keep
+    // passing if the extension ever acquired a default and started leaking into unacknowledged
+    // seals. Moving this literal means an existing Run record's digest moved, which is a break.
+    expect(sealRun(minimalRun()).digest)
+      .toBe("sha256:cf9266be44722aa97a2da6d461ae761445022e6fafdd2d709bbeaeb6a69b5ed5");
   });
 
   test("acknowledging changes the sealed bytes, so the width is fixed at the lock", () => {

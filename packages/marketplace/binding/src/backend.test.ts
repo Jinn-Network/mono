@@ -1,4 +1,4 @@
-import { TaskExecutionError } from "@jinn-network/task-execution-backend";
+import { TaskExecutionError, type SubmissionUri } from "@jinn-network/task-execution-backend";
 import { documentDigest, sealSubmission, sealTask, sha256Hex, type SubmissionRecord } from "@jinn-network/task-execution-protocol";
 import { describe, expect, test, vi } from "vitest";
 import { BASE_SEPOLIA_TODAY } from "./addresses.js";
@@ -103,6 +103,19 @@ describe("makeMarketplaceBackend -- submit", () => {
     const submissionUri = (JSON.parse(text(submission)) as SubmissionRecord).submission;
 
     await expect(backend.post(task, submission)).rejects.toThrow(/after WAL resolution/u);
+    // The pending scope already holds the exact bytes even though no attempt is resolvable.
+    const changed = sealSubmission({
+      ...JSON.parse(text(submission)),
+      nonce: "changed-after-crash",
+    });
+    await expect(backend.submit(task, changed)).resolves.toMatchObject({
+      accepted: false,
+      error: { category: "submission-conflict" },
+    });
+    await expect(backend.recover(submissionUri as SubmissionUri)).resolves.toMatchObject({
+      classification: "absent",
+      retained: true,
+    });
     await expect(backend.recoverPosting()).resolves.toMatchObject({
       resolvedScopes: [submissionUri],
       uncertainScopes: [],

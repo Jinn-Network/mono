@@ -726,6 +726,7 @@ describe("evaluationLauncher", () => {
     });
     expect(await recovered.backend.recover(attempt)).toEqual({
       classification: "matching",
+      retained: true,
     });
     const refs = await recovered.backend.deliveries(attempt);
     expect(refs).toHaveLength(1);

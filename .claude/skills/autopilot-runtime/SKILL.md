@@ -18,6 +18,7 @@ Read `JINN_AUTOPILOT_RUNTIME` before dispatching any child or fresh-root stage:
 - `claude` → read [`references/claude.md`](references/claude.md) completely.
 - `hermes` → read [`references/hermes.md`](references/hermes.md) completely.
 - `cursor` → read [`references/cursor.md`](references/cursor.md) completely.
+- `codex` → read [`references/codex.md`](references/codex.md) completely.
 - unset → use Claude and read the Claude reference.
 - any other value → stop with an invalid-runtime error.
 

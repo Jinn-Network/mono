@@ -41,13 +41,19 @@ import {
   parseRun,
   type ReportRecord,
 } from "@jinn-network/benchmarking-records";
-import { evaluateIntegrityAnchors } from "@colophon-claims/verify";
+import {
+  DISCLOSURE_SPECIFICATION_CAPABILITY,
+  EXTERNAL_IMPORT_CAPABILITY,
+  activeCapabilityVector,
+  evaluateIntegrityAnchors,
+  type IntegrityAnchorsReport,
+} from "@colophon-claims/check";
 import { verifyMatrix } from "@jinn-network/benchmarking-run";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { refuse } from "../errors.js";
-import { additionalClaimPackagePath, ClaimPackageSchema } from "../report/claim.js";
+import { additionalClaimPackagePath, ClaimPackageSchema, COMPOSED_CLAIM_PACKAGE_SCHEMA_ID } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
 import {
   inspectRuntimeMethodForBinding,
@@ -78,6 +84,7 @@ import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receip
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
 import { foldRunJournal, readRunJournalEntries } from "../run/journal.js";
 import { readPreviewLog } from "../run/preview-log.js";
+import { loadPublicExternalImport } from "../run/imported-run.js";
 import { requireRunState } from "../run/state.js";
 import { artifactsDir, claimPackageArtifactPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
@@ -117,10 +124,17 @@ export interface AdditionalRunVerifyResult {
 
 export interface RunVerifyResult {
   readonly draftId: string;
-  /** The checks actually performed, in order — `["matrix-rederivation"]` for a closed-but-not-yet-
-   * reported run, all three for a reported one. */
+  /** The checks actually performed, in order — legacy unanchored runs retain their existing list;
+   * anchored or anchor-intent runs also include `integrity-anchors`. */
   readonly checks: readonly RunVerifyCheck[];
   readonly matrixSha256: string;
+  /** The shared portable-verifier result for every stored anchor and declared subject. Absent for
+   * legacy runs that neither carry anchor evidence nor declare anchoring intent. */
+  readonly anchors?: IntegrityAnchorsReport;
+  /** Present only while at least one pending proof has no completed successor. */
+  readonly anchoringWindow?: {
+    readonly closingOperation: "report";
+  };
   /** The CANONICAL first Report's envelope identity — the one this operation always verified
    * before `additionalAnalyses` existed. */
   readonly reportEnvelopeSha256?: string;
@@ -186,6 +200,41 @@ export async function verifyRunWorkspace(
       }
       checks.push("matrix-rederivation");
 
+      // Anchor evidence is useful before Report sealing, while a pending OpenTimestamps proof can
+      // still be upgraded. Evaluate it in the same no-trust-material mode as portable bundle
+      // verification: producer roots or Bitcoin headers would let the producer grade itself.
+      const anchorCarriage = readRunAnchorCarriage(context.workspaceDir, runState);
+      const anchorReport = anchorCarriage.anchoredClosure
+        ? evaluateIntegrityAnchors({
+          records: anchorCarriage.records,
+          runSha256,
+          matrixSha256,
+          closeAt: runRecord.closeAt,
+          declaredProfiles: anchorCarriage.declaredProfiles,
+        })
+        : undefined;
+      const firstInvalidAnchor = anchorReport?.invalid[0];
+      if (firstInvalidAnchor !== undefined) {
+        refuse(
+          "record-integrity",
+          `anchors/${firstInvalidAnchor.recordSha256}.bin`,
+          `carried anchor is invalid: ${firstInvalidAnchor.reason ?? "the proof does not verify"}`,
+        );
+      }
+      // Resolve upgrades from the shared sealed-byte projection, not RunState's producer
+      // bookkeeping. The projection emits this edge only for a pending/completed pair over the
+      // same actual subject and provider; a mislabeled state entry must not suppress the warning.
+      const resolvedPendingDigests = new Set(
+        anchorCarriage.anchors.flatMap((anchor) =>
+          anchor.upgradesRecordSha256 === undefined ? [] : [anchor.upgradesRecordSha256],
+        ),
+      );
+      const anchoringWindow = anchorReport?.anchors.some(
+        (anchor) => anchor.status === "pending" && !resolvedPendingDigests.has(anchor.recordSha256),
+      ) === true
+        ? { closingOperation: "report" as const }
+        : undefined;
+
       // ── 2 & 3. report-verification + claim-consistency (only alongside a sealed Report) ──
       if (runState.reportEnvelopeSha256 === undefined) {
         if (document.state === "reported" || document.state === "published-bundle") {
@@ -195,10 +244,13 @@ export async function verifyRunWorkspace(
             `draft ${input.draftId} is "${document.state}" but its RunState has no sealed Report envelope`,
           );
         }
+        if (anchorReport !== undefined) checks.push("integrity-anchors");
         return {
           draftId: input.draftId,
           checks,
           matrixSha256: runState.matrixSha256,
+          ...(anchorReport === undefined ? {} : { anchors: anchorReport }),
+          ...(anchoringWindow === undefined ? {} : { anchoringWindow }),
           ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
         };
       }
@@ -211,17 +263,18 @@ export async function verifyRunWorkspace(
         );
       }
 
-      // Shared, method-independent context (anchors validity, rehearsal disclosure, runtime/suite
-      // limitations) is computed exactly once — during the canonical Report's own verification, in
-      // the SAME relative position it always ran in — and reused unchanged for every additional
-      // Report this run carries (packet P5, spec §8.3 option 5): none of it depends on WHICH
-      // Report is being checked, only on the Run and Matrix both share.
+      // Shared, method-independent context (anchor carriage, rehearsal disclosure, runtime/suite
+      // limitations) is computed once and reused unchanged for every additional Report this run
+      // carries (packet P5, spec §8.3 option 5): none of it depends on WHICH Report is being
+      // checked, only on the Run and Matrix both share. Anchor validity was already evaluated
+      // above so closed runs receive the same pre-report surface.
       let sharedContext: {
         readonly previewLog: ReturnType<typeof readPreviewLog>;
         readonly carriage: ReturnType<typeof readRunAnchorCarriage>;
         /** issue #2839: the disclosure section re-derived from the sealed record's own bytes, so
          * this workspace-side rebuild compares the same projection the portable reader does. */
         readonly disclosureCarriage: ReturnType<typeof readRunDisclosureCarriage>;
+        readonly importedCarriage: ReturnType<typeof loadPublicExternalImport>;
         readonly additionalLimitations: readonly string[];
         readonly suiteComparability?: {
           readonly executionConformance: boolean;
@@ -287,30 +340,9 @@ export async function verifyRunWorkspace(
           // anchor, and an anchored claim whose section drifted from its own records, both fail
           // below. Computed once — the anchors are a property of the Run/Matrix, not of any one
           // Report.
-          const carriage = readRunAnchorCarriage(context.workspaceDir, runState);
+          const carriage = anchorCarriage;
           const disclosureCarriage = readRunDisclosureCarriage(context.workspaceDir, runState);
-          // The same shared check the portable reader runs, over the workspace's own sealed bytes
-          // and with no trust material — roots and headers are verifier-side configuration, and a
-          // producer that supplied its own here would be grading its own homework. `invalid`
-          // refuses; every other status, including a declared-but-absent subject, is a disclosed
-          // fact.
-          if (carriage.anchoredClosure) {
-            const anchorReport = evaluateIntegrityAnchors({
-              records: carriage.records,
-              runSha256: runState.runSha256!,
-              matrixSha256: runState.matrixSha256!,
-              closeAt: runRecord.closeAt,
-              declaredProfiles: carriage.declaredProfiles,
-            });
-            const firstInvalid = anchorReport.invalid[0];
-            if (firstInvalid !== undefined) {
-              refuse(
-                "record-integrity",
-                `anchors/${firstInvalid.recordSha256}.bin`,
-                `carried anchor is invalid: ${firstInvalid.reason ?? "the proof does not verify"}`,
-              );
-            }
-          }
+          const importedCarriage = loadPublicExternalImport(context.workspaceDir, input.draftId, runState);
           const inspectAdditional = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
             && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
             ? [...INSPECT_SEPARATE_ASSURANCE_LIMITATIONS]
@@ -381,6 +413,7 @@ export async function verifyRunWorkspace(
             previewLog,
             carriage,
             disclosureCarriage,
+            importedCarriage,
             additionalLimitations: [
               ...inspectAdditional,
               ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),
@@ -394,7 +427,19 @@ export async function verifyRunWorkspace(
             }),
           };
         }
-        const { previewLog, carriage, disclosureCarriage, additionalLimitations, suiteComparability } = sharedContext;
+        const { previewLog, carriage, disclosureCarriage, importedCarriage, additionalLimitations, suiteComparability } = sharedContext;
+        // Which generation `report` was asked for is the one fact taken from the stored claim: it is
+        // the operator's choice, recorded nowhere else, and no record could contradict it.
+        // Everything the choice implies -- the vector, and through it the id, the sections, the
+        // check list, and the reader line -- is re-derived from the run's own facts (issue #3403).
+        const composedCapabilities = claim.claimSchema === COMPOSED_CLAIM_PACKAGE_SCHEMA_ID
+          ? activeCapabilityVector({
+            anchoredClosure: carriage.anchoredClosure,
+            projectsBinaryQualification: reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument,
+            declaresDisclosure: disclosureCarriage !== undefined,
+            importedRun: importedCarriage !== undefined,
+          })
+          : undefined;
 
         assertClaimConsistency({
           claim,
@@ -418,11 +463,21 @@ export async function verifyRunWorkspace(
           // binary-qualification entry carries the section, because `/8` is the one disclosed cell.
           // A run's sibling analyses project no qualification, so rebuilding THEIR claim with a
           // disclosure would be rebuilding a claim no closure could have published.
+          //
+          // The composed generation scopes it by its own vector instead, exactly as `report` does.
           ...(disclosureCarriage === undefined
-            || !carriage.anchoredClosure
-            || reportRecord.method.id !== BENCHMARKING_METHOD_IDS.binaryInstrument
+            || (composedCapabilities !== undefined
+              ? !composedCapabilities.includes(DISCLOSURE_SPECIFICATION_CAPABILITY)
+              : !carriage.anchoredClosure
+                || reportRecord.method.id !== BENCHMARKING_METHOD_IDS.binaryInstrument)
             ? {}
             : { disclosure: disclosureCarriage.disclosure }),
+          ...(importedCarriage === undefined
+            || composedCapabilities === undefined
+            || !composedCapabilities.includes(EXTERNAL_IMPORT_CAPABILITY)
+            ? {}
+            : { externalImport: importedCarriage.claim }),
+          ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
           ...(previewLog === undefined
             ? {}
             : {
@@ -461,6 +516,7 @@ export async function verifyRunWorkspace(
         checks,
         matrixSha256: runState.matrixSha256,
         reportEnvelopeSha256: runState.reportEnvelopeSha256,
+        ...(anchorReport === undefined ? {} : { anchors: anchorReport }),
         ...(additionalReports.length === 0 ? {} : { additionalReports }),
         ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       };

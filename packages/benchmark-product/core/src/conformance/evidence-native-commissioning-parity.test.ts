@@ -186,7 +186,7 @@ describe("optional TEP commissioning parity", () => {
   });
 
   test("the operational backfill path reaches the same conclusion over the same TEP records", () => {
-    const { evidenceBytes, evidenceDigestBeforeCommissioning, attempt, lineage } = commissionedEvaluatorD();
+    const { evidenceBytes, evidenceDigestBeforeCommissioning, attempt, link, lineage } = commissionedEvaluatorD();
     const { store, written, evidence } = commissioningStore(evidenceBytes);
     const execution: EvidenceRecordReference = {
       family: "execution-evidence",
@@ -207,6 +207,14 @@ describe("optional TEP commissioning parity", () => {
     expect(parsed.execution.record.digest.sha256).toBe(evidenceDigestBeforeCommissioning.slice(7));
     expect(parsed.attempts).toEqual([attempt]);
     expect(parsed.deliveries).toHaveLength(1);
+
+    // Parity is byte-identity, not field-by-field agreement (issue #3819). The lineage carries the
+    // same publisher, submission, attempts and deliveries as the hand-sealed link, and the clock is
+    // pinned to the same `linkedAt`, so the two documents must seal to the same digest. Without
+    // this, a change to how `writeExecutionCommissioningLink` normalizes lineage into a sealed
+    // document -- a reordering, a dropped optional, a canonicalization difference -- would keep
+    // every assertion above green while breaking the parity this test is named for.
+    expect(documentDigest(result!.link.bytes)).toBe(documentDigest(link.bytes));
 
     // The evidence the store holds is byte-identical to what it held before the backfill ran.
     expect(evidence.get(evidenceDigestBeforeCommissioning.slice(7))).toEqual(evidenceBytes);

@@ -25,7 +25,8 @@ import { homedir, hostname, userInfo } from 'node:os';
 import { randomBytes as cryptoRandomBytes, randomUUID as cryptoRandomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { loadConfig, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { requireConfigPathFromArgs } from './config/path-args.js';
 import { writeConfigFileAtomic } from './config/atomic-write.js';
 import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
@@ -35,7 +36,7 @@ import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.j
 // (jinn-mono-u34i). No direct import needed.
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import { ensureUiTokenRecord, defaultTokenPath } from './api/ui-token.js';
-import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
+import { daemonApiTokenPath, resolveDaemonApiToken } from './api/daemon-token.js';
 import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
@@ -54,12 +55,14 @@ import { applyDeploymentReadinessGate } from './preflight/deployment-readiness.j
 import { ensureStableCwd } from './preflight/stable-cwd.js';
 import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
-import { runFleetBootstrap, runBootstrapWithDegradeOpen } from './earning/bootstrap-run.js';
+import { runFleetBootstrap, runBootstrapWithDegradeOpen, resolveDegradedStart } from './earning/bootstrap-run.js';
 import { isEconomicBootstrapHalt, isPendingMasterFundingHalt } from './earning/bootstrap-halt-classification.js';
 import { startDegradedRecoveryLoops } from './daemon/degraded-recovery.js';
 import {
   setDaemonReadiness,
   getDaemonReadiness,
+  setDegradedRecoveryRunning,
+  getDegradedRecoveryRunning,
   buildLoopMetricsSnapshot,
 } from './daemon/loop-heartbeat.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
@@ -226,7 +229,18 @@ if (passwordResolution.source === 'generated') {
 
 // ── Load config ─────────────────────────────────────────────────────────────
 
-const CONFIG_PATH = getConfigPathFromArgs();
+let CONFIG_PATH: string | undefined;
+try {
+  CONFIG_PATH = requireConfigPathFromArgs();
+} catch (err) {
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message: err instanceof Error ? err.message : String(err),
+    hint: 'Pass a config path or omit --config.',
+    exampleCli: 'jinn run --config ~/.jinn-operator/config.json',
+    details: { field: 'config' },
+  });
+}
 const config = loadConfig(CONFIG_PATH);
 /**
  * One-swap M2 (#2461): the network AS WRITTEN, captured before the pre-launch clamp below rewrites
@@ -364,18 +378,25 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // 8-char prefix. The token is forwarded to the MCP subprocess via
   // `DAEMON_API_TOKEN` env so `acquire_artifact` and
   // `submit_restoration_result` can authenticate their calls back to the
-  // daemon.
-  const envToken = process.env['DAEMON_API_TOKEN']?.trim();
+  // daemon. An env-supplied token is written to the same file (issue #2418)
+  // so the hook never resolves a token this daemon has stopped accepting.
   const daemonApiTokenFilePath = daemonApiTokenPath(config.earningDir);
-  let apiToken: string;
-  if (envToken && envToken.length > 0) {
-    apiToken = envToken;
-  } else {
-    const resolved = ensureDaemonApiToken(daemonApiTokenFilePath);
-    apiToken = resolved.token;
-    const verb = resolved.source === 'generated' ? 'Generated' : 'Loaded';
-    console.log(`[main] ${verb} DAEMON_API_TOKEN at ${daemonApiTokenFilePath} (prefix=${apiToken.slice(0, 8)}...)`);
-  }
+  const resolvedApiToken = resolveDaemonApiToken({
+    path: daemonApiTokenFilePath,
+    envToken: process.env['DAEMON_API_TOKEN'],
+    warn: (message) => {
+      console.warn(`[main] ${message}`);
+    },
+  });
+  const apiToken = resolvedApiToken.token;
+  // An 8-char prefix identifies a >=32-char token without disclosing it. A
+  // shorter operator-supplied token is redacted outright: 8 characters of it
+  // could be the whole credential.
+  const tokenPrefix = apiToken.length >= 32 ? `${apiToken.slice(0, 8)}...` : '<redacted>';
+  console.log(
+    `[main] DAEMON_API_TOKEN source=${resolvedApiToken.source} file=${daemonApiTokenFilePath} ` +
+    `(${resolvedApiToken.persisted}, prefix=${tokenPrefix})`,
+  );
 
   // The keystore-presence probe happens twice: once now (to decide initial
   // setup-mode) and once after we run init below (to flip the controller).
@@ -658,6 +679,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // on ApiServerConfig in server.ts.
       getDaemonReadiness,
       getLoopSnapshot: () => buildLoopMetricsSnapshot(sharedStore),
+      getDegradedRecoveryRunning,
       hermesDoctor: {
         hermesPath: config.hermesPath,
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
@@ -718,9 +740,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       operatorArtifacts: {
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
         operatorConfig: operatorArtifactsConfig,
-        onOperatorConfigUpdated: (operator) => {
-          config.operator = operator;
-        },
       },
       // Issue #420: one-click operator debug report. The bundle assembler
       // reads the live resolved `config` so the download reflects env
@@ -1113,6 +1132,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     bootstrapResult = await runBootstrapWithDegradeOpen({
       runBootstrap: () => runFleetBootstrap({ config, password: PASSWORD, network: NETWORK_CHAIN, emitProgress }),
       setReadiness: setDaemonReadiness,
+      setDegradedRecoveryRunning,
       // #2407 / spec §5: degrade-open boot. An economic-class halt (funding
       // shortfall, incomplete fleet, a recoverable on-chain error) must not
       // leave the daemon fully dark while the caller awaits the retry signal
@@ -1127,12 +1147,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // mechAddress/safeAddress/composition/adapter resolved from a
       // COMPLETED bootstrap, none of which exist mid-halt — see
       // degraded-recovery.ts's docstring.
-      startDegraded: (envelope) => {
-        if (!isEconomicBootstrapHalt(envelope)) {
-          console.log('[main] Halt cause is integrity-class — staying fail-closed (no degraded recovery loops).');
-          return null;
-        }
-        try {
+      //
+      // #2425: the classify-then-start decision lives in
+      // `resolveDegradedStart` (bootstrap-run.ts) so it is unit-testable and
+      // so an economic halt whose loops FAIL to start is reported as
+      // `'start-failed'` rather than being flattened into the integrity
+      // halt's `'fail-closed'` — the latter left `/ready` at 503 and
+      // restart-looped a funding-halted daemon.
+      startDegraded: (envelope) => resolveDegradedStart(envelope, {
+        isEconomic: isEconomicBootstrapHalt,
+        start: () => {
           const handle = startDegradedRecoveryLoops({
             earningDir: config.earningDir,
             network: NETWORK_CHAIN,
@@ -1167,14 +1191,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               (isPendingMasterFundingHalt(envelope) ? ' balance-topup omitted (pending master-EOA funding halt).' : ''),
           );
           return handle;
-        } catch (degradedErr) {
-          console.error(
-            '[main] Failed to start degraded recovery loops (non-fatal — still waiting for retry):',
-            degradedErr instanceof Error ? degradedErr.message : degradedErr,
-          );
-          return null;
-        }
-      },
+        },
+      }),
       // hjex.6: Auto-resume funding poller. When the halt is a funding
       // shortfall, poll the master EOA balance every
       // JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance meets

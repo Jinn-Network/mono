@@ -13,13 +13,14 @@
  *
  * ## What this file proves, and what it deliberately does not
  *
- * The first test materializes the bundle DIRECTLY. That is not an accident of convenience: by
- * operator ruling (issue #3417) an imported run is refused at PUBLICATION, because the Report's
- * sealed local-venue disclosure asserts an admission gate at dispatch time that no imported run
- * ever passed through. Materializing here keeps the structural claim — the bundle an imported run
- * produces is the ordinary frozen format, and every reader check including matrix re-derivation
- * accepts it — provable, while the second describe block pins the refusal that keeps that bundle
- * from ever reaching an operator through a supported path.
+ * The first test materializes the bundle DIRECTLY so the structural claim is independent of
+ * `publish`: the bundle an imported run produces is composed `/10` declaring `external-import`,
+ * the public reader accepts it (matrix re-derivation included), the claim carries the marker
+ * projection, and the sealed disclosure names the import rather than an admission gate. The
+ * second describe block pins that `runPublish` now succeeds on that same chain (issue #3417),
+ * that a half-written journal marker is still enough to declare the capability, that
+ * `composedFormat: false` is refused, and that managed signed-Report publication no longer
+ * fails closed on the import itself.
  */
 
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -27,10 +28,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { expectedCellSet, parseBenchmark, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
+import { IMPORTED_RUN_PINNING_LIMIT } from "@colophon-claims/check";
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
 import { materializePublicBundle } from "../bundle/materialize.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { BUNDLE_FORMAT } from "../legacy-closures.js";
+import { BUNDLE_V10_FORMAT } from "../bundle/manifest.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { publicBundlesDir } from "../workspace/layout.js";
 import { externalRunImportMarker } from "../run/imported-run.js";
@@ -202,11 +204,14 @@ describe("run.import — the imported bundle passes the public reader", () => {
 
       const verified = await verifyPublicBundle(copied);
       expect(verified.identity).toBe(materialized.identity);
-      expect(verified.format).toBe(BUNDLE_FORMAT);
+      expect(verified.format).toBe(BUNDLE_V10_FORMAT);
+      if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
+      expect(verified.capabilities).toEqual(["external-import"]);
       // `matrix-rederivation` is the load-bearing one: it recomputes the Matrix from the bundle's
       // own evidence closure and byte-compares it against the carried Matrix. Its passing is what
       // proves the imported outcomes are the honest aggregation of the imported evidence rather
-      // than numbers the importer asserted.
+      // than numbers the importer asserted. `external-import` is the capability check: the marker
+      // is a mandatory member, the claim section is its projection, and the rows cover the slate.
       expect(verified.checks).toEqual([
         "manifest",
         "evidence-closure",
@@ -214,7 +219,24 @@ describe("run.import — the imported bundle passes the public reader", () => {
         "matrix-rederivation",
         "report-verification",
         "claim-consistency",
+        "external-import",
       ]);
+
+      const claim = JSON.parse(readFileSync(join(copied, "claim-package.json"), "utf8")) as {
+        readonly externalImport?: { readonly dumpSha256: string; readonly rows: readonly { readonly cellKey: string }[] };
+        readonly venueHonesty: { readonly limits: readonly string[] };
+      };
+      expect(claim.externalImport?.dumpSha256).toMatch(/^[a-f0-9]{64}$/u);
+      expect(claim.externalImport?.rows.map((row) => row.cellKey).sort())
+        .toEqual([...cellKeys].sort());
+      expect(claim.venueHonesty.limits[2]).toBe(IMPORTED_RUN_PINNING_LIMIT);
+
+      const marker = JSON.parse(readFileSync(join(copied, "external-import.json"), "utf8")) as {
+        readonly dump: { readonly sha256: string };
+        readonly rows: readonly { readonly cellKey: string }[];
+      };
+      expect(marker.dump.sha256).toBe(claim.externalImport!.dumpSha256);
+      expect(marker.rows).toHaveLength(cellKeys.length);
 
       // The reader accepted a run whose cells span all three derived outcomes.
       const byCellKey = new Map(matrix.cells.map((cell) => [cell.cellKey, cell]));
@@ -242,18 +264,11 @@ describe("run.import — the imported bundle passes the public reader", () => {
 });
 
 /**
- * The operator ruling on #3314: an imported run does not publish, pending issue **#3417**.
- *
- * The bundle above is structurally sound, and that is exactly what makes the refusal necessary
- * rather than cosmetic. The Report it carries states, verbatim and in a SIGNED disclosure, that
- * "Run pinning on the harness, model, and loadout axes is enforced by an admission gate at
- * dispatch time" — while its own cells report every pinning axis as `unverifiable`, because no
- * venue dispatched anything and no admission gate existed. Both the workspace verifier and the
- * shipped reader derive that expected disclosure from `localVenueLimitsForRun(runRecord)`, a pure
- * function of a Run record sealed at `lock`, so nothing the importer writes can correct it. The
- * fix is a bundle-VISIBLE import marker, which is #3417's format work.
+ * Issue #3417: the public marker makes the sealed disclosure honest, so publication is no longer
+ * refused. The journal-first ordering still matters: a half-written import whose RunState field
+ * never landed is still recognized as imported, and still publishes as `/10` with the capability.
  */
-describe("run.import — publication of an imported run is refused (#3417)", () => {
+describe("run.import — publication of an imported run (issue #3417)", () => {
   /** The full chain up to `reported`, which is the exact state `publish` accepts from a driven run. */
   async function reportedImportedRun(clock: () => string, draftId: string): Promise<void> {
     const cellKeys = await lockedRun(clock, draftId);
@@ -268,80 +283,65 @@ describe("run.import — publication of an imported run is refused (#3417)", () 
     expect(readDraftDocument(workspaceDir, draftId).state).toBe("reported");
   }
 
-  test("runPublish refuses, names the reason and the issue, and leaves nothing behind", async () => {
+  test("runPublish succeeds and the public reader accepts the published bundle", async () => {
     const clock = makeClock();
     const draftId = "draft-1";
     await reportedImportedRun(clock, draftId);
 
     const published = await runPublish(contextFor(clock), { draftId });
-    expect(published.ok).toBe(false);
-    if (published.ok) return;
-    expect(published.error.code).toBe("conflict");
-    expect(published.error.issues?.map((issue) => issue.path)).toEqual([`runs.${draftId}.externalImport`]);
-    // The refusal has to be actionable on its own: WHY (the disclosure the bundle would seal is
-    // false), WHAT the operator can do about it (nothing here — it is a format change), and WHERE
-    // that work lives.
-    expect(published.error.detail).toMatch(/imported its results/u);
-    expect(published.error.detail).toMatch(/admission gate/u);
-    expect(published.error.detail).toMatch(/unverifiable/u);
-    expect(published.error.detail).toMatch(/#3417/u);
-
-    // Refused BEFORE a staging directory exists, so there is no half-shippable directory an
-    // operator could collect by path, no bundle identity in RunState, and no lifecycle advance.
-    expect(existsSync(publicBundlesDir(workspaceDir, draftId))).toBe(false);
-    const runState = readRunState(workspaceDir, draftId)!;
-    expect(runState.bundleIdentity).toBeUndefined();
-    expect(runState.publishedAt).toBeUndefined();
-    expect(readDraftDocument(workspaceDir, draftId).state).toBe("reported");
-
-    // Idempotent: a second attempt refuses identically rather than finding a different path in.
-    const again = await runPublish(contextFor(clock), { draftId });
-    expect(again.ok).toBe(false);
-    if (again.ok) return;
-    expect(again.error.code).toBe("conflict");
+    expect(published.ok, JSON.stringify(published)).toBe(true);
+    if (!published.ok) return;
+    expect(readDraftDocument(workspaceDir, draftId).state).toBe("published-bundle");
+    expect(existsSync(publicBundlesDir(workspaceDir, draftId))).toBe(true);
+    expect(published.result.checks).toContain("external-import");
   }, 180_000);
 
-  test("still refuses when only the journal marker survived", async () => {
+  test("still publishes when only the journal marker survived", async () => {
     const clock = makeClock();
     const draftId = "draft-1";
     await reportedImportedRun(clock, draftId);
 
-    // The half-written import a crash between the journal append and the final RunState write
-    // leaves behind. `writeExternalRunImport` orders the marker first precisely so this case
-    // stays recognizable; the gate has to actually look.
     const { externalImportSha256: _dropped, ...withoutField } = readRunState(workspaceDir, draftId)!;
     writeRunState(workspaceDir, draftId, withoutField);
     expect(readRunState(workspaceDir, draftId)?.externalImportSha256).toBeUndefined();
     expect(externalRunImportMarker(workspaceDir, draftId)?.source).toBe("run-journal");
 
     const published = await runPublish(contextFor(clock), { draftId });
-    expect(published.ok).toBe(false);
-    if (published.ok) return;
-    expect(published.error.code).toBe("conflict");
-    expect(published.error.detail).toMatch(/#3417/u);
-    expect(existsSync(publicBundlesDir(workspaceDir, draftId))).toBe(false);
+    expect(published.ok, JSON.stringify(published)).toBe(true);
+    if (!published.ok) return;
+    expect(published.result.checks).toContain("external-import");
   }, 180_000);
 
-  test("managed signed-Report publication refuses on the import, not on staging state", async () => {
+  test("composedFormat: false is refused on an imported run", async () => {
     const clock = makeClock();
     const draftId = "draft-1";
-    await reportedImportedRun(clock, draftId);
+    const cellKeys = await lockedRun(clock, draftId);
+    const imported = await importRunRecords(contextFor(clock), {
+      draftId, records: mixedRows(cellKeys), source: SOURCE, evidenceRoot,
+    });
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    const collected = await runCollect(contextFor(clock), { draftId });
+    expect(collected.ok, JSON.stringify(collected)).toBe(true);
 
-    // `publication report` seals the identical `LOCAL_VENUE_LIMITS` into a signed record it
-    // announces publicly, WITHOUT materializing a bundle — so closing only `publish` would leave
-    // the same contradiction one verb away. What this pins is which refusal comes back: this
-    // draft has no managed publication stage either, so it would earn the generic "a managed Run
-    // ... is required" refusal on the very next line. Getting the import refusal instead is the
-    // evidence that the gate is decided from the run itself and ahead of every stage check, so an
-    // imported run cannot advance the managed chain far enough to be refused for a reason an
-    // operator could then go and satisfy.
-    const reported = await publicationReport(contextFor(clock), { draftId });
+    const reported = await runReport(contextFor(clock), { draftId, composedFormat: false });
     expect(reported.ok).toBe(false);
     if (reported.ok) return;
     expect(reported.error.code).toBe("conflict");
     expect(reported.error.issues?.map((issue) => issue.path)).toEqual([`runs.${draftId}.externalImport`]);
-    expect(reported.error.detail).toMatch(/admission gate/u);
-    expect(reported.error.detail).toMatch(/#3417/u);
-    expect(reported.error.detail).not.toMatch(/managed Run/u);
+    expect(reported.error.detail).toMatch(/composedFormat: false/u);
+  }, 180_000);
+
+  test("managed signed-Report publication is refused on staging state, not on the import", async () => {
+    const clock = makeClock();
+    const draftId = "draft-1";
+    await reportedImportedRun(clock, draftId);
+
+    const reported = await publicationReport(contextFor(clock), { draftId });
+    expect(reported.ok).toBe(false);
+    if (reported.ok) return;
+    expect(reported.error.code).toBe("conflict");
+    expect(reported.error.issues?.map((issue) => issue.path)).not.toEqual([`runs.${draftId}.externalImport`]);
+    expect(reported.error.detail).toMatch(/managed Run/u);
+    expect(reported.error.detail).not.toMatch(/#3417/u);
   }, 180_000);
 });

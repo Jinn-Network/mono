@@ -15,7 +15,6 @@ on:
       # Transitive `portal:` closure of the workspaces above (#3573). Each is built
       # from source into this lane, so a change confined to one of them changes what
       # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
-      - "packages/benchmarking/records/**"
       - "packages/environments/chain-record/**"
       - "packages/environments/chain-verification/**"
       - "packages/environments/information-world/**"
@@ -41,7 +40,6 @@ on:
       # Transitive `portal:` closure of the workspaces above (#3573). Each is built
       # from source into this lane, so a change confined to one of them changes what
       # this lane verifies. Enforced by .github/scripts/portal-path-filters.test.mjs.
-      - "packages/benchmarking/records/**"
       - "packages/environments/chain-record/**"
       - "packages/environments/chain-verification/**"
       - "packages/environments/information-world/**"
@@ -92,6 +90,10 @@ jobs:
         run: node --test .github/scripts/record-discovery-package-inventory.test.mjs
       - name: Verify source boundaries and canaries
         run: node --test .github/scripts/record-discovery-source-boundaries.test.mjs
+      - name: Verify the §12 join-edge audit table
+        run: node --test .github/scripts/record-discovery-audit-table.test.mjs
+      - name: Verify §18 ↔ golden-vector correspondence
+        run: node --test .github/scripts/record-discovery-conformance-coverage.test.mjs
 
   packages:
     name: Record Discovery packages
@@ -103,9 +105,39 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22.23.1
+          cache: yarn
+          cache-dependency-path: |
+            packages/trust/core/yarn.lock
+            packages/discovery/protocol/yarn.lock
+            packages/discovery/testing/yarn.lock
+            packages/discovery/serve/yarn.lock
+            packages/discovery/publication/yarn.lock
+            packages/discovery/client/yarn.lock
+            packages/discovery/transport-http/yarn.lock
+            packages/evidence/protocol/yarn.lock
+            packages/evidence/repository/yarn.lock
+            packages/evidence/discovery/yarn.lock
+            packages/task-execution/protocol/yarn.lock
+            packages/task-execution/profiles/yarn.lock
+            packages/environments/record/yarn.lock
+            packages/environments/chain-record/yarn.lock
+            packages/environments/information-world/yarn.lock
+            packages/evidence/offer/yarn.lock
+            packages/discovery/facts/evidence/yarn.lock
+            packages/discovery/facts/trust/yarn.lock
+            packages/discovery/facts/task-execution/yarn.lock
+            packages/discovery/facts/environments/yarn.lock
+            packages/discovery/facts/chain-environments/yarn.lock
+            packages/discovery/facts/offers/yarn.lock
+            packages/discovery/sources/evidence-journal/yarn.lock
       # A freshly rolled runner image can regress the packed-consumer smoke:
       # node 22.23.2's bundled npm dies with "Cannot read properties of null
       # (reading 'edgesOut')" on yarn-packed tarballs (first seen on the
@@ -195,11 +227,6 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
-      - name: Build cross-tree portal dependency from source (benchmarking-records, §7.8)
-        working-directory: packages/benchmarking/records
-        run: |
-          yarn install --immutable
-          yarn build
       - name: Build cross-tree portal dependency from source (environment-record, §7.8)
         working-directory: packages/environments/record
         run: |
@@ -238,14 +265,6 @@ jobs:
           yarn pack:smoke
       - name: Verify Record Discovery Facts (Task Execution)
         working-directory: packages/discovery/facts/task-execution
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-      - name: Verify Record Discovery Facts (Benchmarking)
-        working-directory: packages/discovery/facts/benchmarking
         run: |
           yarn install --immutable
           yarn typecheck

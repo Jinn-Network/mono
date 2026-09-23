@@ -85,6 +85,10 @@ jobs:
         run: node --test .github/scripts/autopilot-skill-contracts.test.mjs
       - name: Every script test is workflow-wired
         run: node --test .github/scripts/workflow-script-tests.test.mjs
+      - name: Post-merge lane monitor decision logic
+        run: node --test .github/scripts/post-merge-lane-health.test.mjs
+      - name: Yarn dependency cache contract
+        run: node --test .github/scripts/workflow-yarn-cache.test.mjs
       - name: Published-artifacts-smoke workflow shape
         run: node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs
       - name: Vitest temp-directory sweep seam is wired everywhere
@@ -165,10 +169,12 @@ jobs:
     # Unguarded early-exit pipe consumers regrow as workflows are edited, and both known
     # instances were caught by review rather than by a run: PR #2821 (fail-open on a
     # required gate) and PR #2857 (spurious red). Like `workflow-selection` above, the
-    # lint reads every workflow, so it cannot sit behind any lane's diff-based selection
-    # — an edit to one workflow would otherwise go unchecked on the diffs that leave its
-    # own lane unselected. The one gate it sits behind is this workflow's SHA-identity
-    # push dedup probe (#2996).
+    # lint reads every workflow — and, since #3808, every composite `action.y*ml` in the
+    # tree, whose `run:` steps are required to declare `shell:` and are therefore
+    # pipefail-in-scope by construction. So it cannot sit behind any lane's diff-based
+    # selection: an edit to one workflow would otherwise go unchecked on the diffs that
+    # leave its own lane unselected. The one gate it sits behind is this workflow's
+    # SHA-identity push dedup probe (#2996).
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest

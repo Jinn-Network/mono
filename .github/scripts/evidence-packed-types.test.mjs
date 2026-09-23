@@ -30,6 +30,7 @@ const packages = [
   ['trace', '@jinn-network/evidence-trace'],
   ['trace-decode', '@jinn-network/evidence-trace-decode'],
   ['offer', '@jinn-network/evidence-offer'],
+  ['gate', '@jinn-network/evidence-gate'],
 ];
 
 const trustCoreArchiveName = '@jinn-network/trust-core';
@@ -83,6 +84,8 @@ const codeEntrypoints = [
   '@jinn-network/evidence-trace-decode/testing',
   '@jinn-network/evidence-offer',
   '@jinn-network/evidence-offer/testing',
+  '@jinn-network/evidence-gate',
+  '@jinn-network/evidence-gate/testing',
 ];
 
 function run(command, args, options = {}) {
