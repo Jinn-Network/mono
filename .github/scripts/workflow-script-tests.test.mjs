@@ -497,7 +497,23 @@ test('every .github/scripts/*.test.mjs is referenced by at least one workflow', 
 });
 
 test('findOrphanedScriptTests detects a planted orphan', () => {
-  assert.deepEqual(findOrphanedScriptTests(scriptsDir, workflowsDir), []);
+  const scriptsRoot = mkdtempSync(join(tmpdir(), 'jinn-planted-orphan-scripts-'));
+  const workflowsRoot = mkdtempSync(join(tmpdir(), 'jinn-planted-orphan-workflows-'));
+  try {
+    writeFileSync(join(scriptsRoot, 'wired.test.mjs'), '');
+    writeFileSync(join(scriptsRoot, 'orphan.test.mjs'), '');
+    writeFileSync(join(workflowsRoot, 'w.yml'), [
+      'jobs:',
+      '  verify:',
+      '    steps:',
+      '      - run: node --test .github/scripts/wired.test.mjs',
+      '',
+    ].join('\n'));
+    assert.deepEqual(findOrphanedScriptTests(scriptsRoot, workflowsRoot), ['orphan.test.mjs']);
+  } finally {
+    rmSync(scriptsRoot, { recursive: true, force: true });
+    rmSync(workflowsRoot, { recursive: true, force: true });
+  }
 });
 
 // The harvest matched `*.test.mjs` over raw workflow source, comments included, so a suite named
