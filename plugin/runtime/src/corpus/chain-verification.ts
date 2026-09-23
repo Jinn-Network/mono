@@ -5,7 +5,7 @@ import type { SourceHead, SourceIdentity } from "@jinn-network/record-discovery-
 import type { DsseEnvelope } from "@jinn-network/trust-core";
 
 import type { RuntimeLogger } from "../logger.js";
-import { describeError } from "./errors.js";
+import { bestEffortLogger, describeError } from "./errors.js";
 
 export interface ChainVerificationInput {
   readonly source: SourceIdentity;
@@ -155,8 +155,10 @@ export function createUnverifiedChainVerification(
  */
 export function createDriverChainVerification(
   driver: VerifyDriver,
-  log: RuntimeLogger,
+  rawLog: RuntimeLogger,
 ): ChainVerification {
+  const log = bestEffortLogger(rawLog);
+
   function reportDriverFailure(
     source: SourceIdentity,
     operation: "verify" | "revalidate-head",
@@ -166,7 +168,7 @@ export function createDriverChainVerification(
       agent: source.agent,
       name: source.name,
       operation,
-      message: describeError(error),
+      reason: describeError(error),
     });
   }
 

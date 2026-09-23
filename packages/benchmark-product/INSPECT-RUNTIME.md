@@ -1,5 +1,32 @@
 # Inspect runtime adapter
 
+Bringing a finished Inspect evaluation is the product path
+([DR-2026-09-04](../../log/decisions/2026-09-04-colophon-surrounds-the-run.md)
+decision 3). A claimant runs Inspect on their own machine (or already has
+logs) and Colophon reads the finished output into sealed evidence:
+
+```bash
+colophon run import --from inspect <eval-log-or-dir> \
+  --workspace ./ws --principal me --draft draft-1
+```
+
+The reader consumes Inspect's official `read_eval_log` JSON shape (an EvalLog
+dump, including Inspect `log_format=json`). One sample becomes one
+execution-evidence record. Scorer outputs are projected into the
+pre-registered measurements the same way this adapter already does for
+orchestrated cells. Slate validation is the `#2979` rule: every expected slot
+once, missing / duplicate / unknown / extra refused together, a missing slot
+is `error` / `timeout` / `unrun` with a reason and stays in the denominator,
+and there is no exclude flag. `--from inspect` pointing at an eval-log file
+hashes those file bytes into the public `external-import` marker; a directory
+hashes the canonical JSON of the normalized records. The published bundle is
+composed `/10` declaring `external-import`.
+
+Orchestrating Inspect per cell — spawning Inspect, pinning the runtime, writing
+native logs — is the **service's** machinery on a venue Colophon controls. It
+is not the claimant product path. The rest of this page describes that service
+adapter.
+
 Inspect is a **framework a sealed method may name**, not a Colophon product
 mode and not an alternative to Harbor
 ([DR-2026-08-18-f](../../log/decisions/2026-08-18-colophon-method-cli.md)).
@@ -30,12 +57,12 @@ The supported first slice is deliberately narrow:
   `read_eval_log` API.
 
 That per-cell grain is the evidence-atom rule: each Execution Evidence record
-keeps an exclusive native `.eval` log, not a Harbor-copy habit. Selecting a
-supported Inspect **task** is the integration; bringing a completed Inspect
-evaluation is not ([DR-2026-08-17](../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)).
-Batching many samples into one Inspect evaluation waits on a specified per-sample
-artifact rule (or an honest shared-log Collection-input rule) and is not
-scheduled here.
+keeps an exclusive native `.eval` log, not a Harbor-copy habit. Bringing a
+completed Inspect evaluation is the product path
+([DR-2026-09-04](../../log/decisions/2026-09-04-colophon-surrounds-the-run.md)
+decision 3); selecting a supported Inspect **task** and running it cell by
+cell is the service's. Batching many samples into one Inspect evaluation is
+read by splitting the log: one sample, one record.
 
 ## Official suite protocol (Inspect eval)
 
@@ -530,9 +557,9 @@ refused because Inspect's suffixed output-key allocation is not a stable public
 identity API.
 
 Deferred rescoring, configurable epochs, multi-epoch reduction, eval-set
-orchestration, resume/reuse, and ingestion of already-completed logs remain
-follow-up capabilities rather than being silently coerced into this execution
-claim.
+orchestration, and resume/reuse remain follow-up capabilities rather than
+being silently coerced into this execution claim. Ingestion of already-
+completed logs is the product path above (`run import --from inspect`).
 
 The worker invokes Inspect once for a cell. A `success` log is scored only when
 the observed sample count equals Inspect's expected count, no sample has an

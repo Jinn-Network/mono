@@ -6,6 +6,7 @@ import {
   NativeProductionDeploymentError,
   preflightNativeRequesterCommand,
 } from '@/daemon/native-production-deployment.js';
+import { resolveDefaultStateDir } from '@/state-dir.js';
 
 /**
  * #2393: the native production deployment path scanned `process.argv` for the
@@ -52,5 +53,42 @@ describe('native production deployment config path (#2393)', () => {
   it('resolves the --config space-separated form to the same path', async () => {
     const path = missingConfigPath();
     expect(await resolvedPathFrom(['native-vertical', 'request', '--config', path])).toBe(path);
+  });
+});
+
+/**
+ * #4376: an empty `--config` value resolved to undefined, indistinguishable
+ * from no flag at all, so this chain-touching path silently validated funding
+ * and escrow against the default state-dir config instead of the file the
+ * operator named.
+ */
+describe('native production deployment config path (#4376)', () => {
+  const originalArgv = process.argv;
+
+  afterEach(() => {
+    process.argv = originalArgv;
+  });
+
+  async function rejectionFrom(argv: readonly string[]): Promise<Error> {
+    process.argv = ['node', 'jinn', ...argv];
+    const error = await preflightNativeRequesterCommand({
+      network: 'base-sepolia',
+      fixture: 'prediction-forecast-golden.json',
+      runId: 'issue-4376',
+    }).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(NativeProductionDeploymentError);
+    return error as Error;
+  }
+
+  it('rejects an empty --config= value instead of falling back to the default', async () => {
+    const error = await rejectionFrom(['native-vertical', 'request', '--config=']);
+    expect(error.message).toContain('--config was given with an empty value');
+    expect(error.message).not.toContain(join(resolveDefaultStateDir(), 'config.json'));
+  });
+
+  it('rejects a trailing bare --config instead of falling back to the default', async () => {
+    const error = await rejectionFrom(['native-vertical', 'request', '--config']);
+    expect(error.message).toContain('--config was given with an empty value');
+    expect(error.message).not.toContain(join(resolveDefaultStateDir(), 'config.json'));
   });
 });

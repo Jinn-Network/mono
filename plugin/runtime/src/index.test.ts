@@ -56,6 +56,8 @@ describe("public surface", () => {
       "SESSION_ID_PROPERTY",
       "STOPWORDS",
       "SUMMARY_TERM_WEIGHT",
+      "SYNC_ABORTED_REASON",
+      "SYNC_TRUNCATED_REASON",
       "TARGET_BASE_PROPERTY",
       "TRACE_ARTIFACT_MEDIA_TYPE",
       "TRACE_BUILDER_ID",
@@ -141,6 +143,16 @@ describe("public surface", () => {
   test("does not export the binary's entry point", () => {
     expect("main" in runtime).toBe(false);
     expect("BinIo" in runtime).toBe(false);
+  });
+
+  test("the chain-verification truncation vocabulary is reachable from the root (#4481)", () => {
+    // `ChainVerificationInput.truncation` is typed as `WalkTruncation`; a
+    // consumer naming that field needs the type and its reason constants
+    // from the same surface. The type-level reference is proven by `tsc`.
+    const truncation: runtime.WalkTruncation = "bound";
+    expect(truncation).toBe("bound");
+    expect(runtime.SYNC_TRUNCATED_REASON).toBe("sync-truncated");
+    expect(runtime.SYNC_ABORTED_REASON).toBe("sync-aborted");
   });
 
   test("a consumer can build and run a runtime from the public surface alone", async () => {

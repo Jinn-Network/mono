@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import * as verifier from "@colophon-claims/verify";
+import * as verifier from "@colophon-claims/check";
 import * as producer from "./legacy-closures.js";
 
 /**

@@ -12,6 +12,7 @@ import {
 import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
+import { CapabilityVectorSchema, composeClosure } from "@colophon-claims/check";
 import { refuse } from "../errors.js";
 import {
   BUNDLE_FORMAT,
@@ -35,18 +36,16 @@ export const BUNDLE_V3_FORMAT = "benchmark-product-public-bundle/3" as const;
  */
 export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
 /**
- * The composed presentation generation (issue #4191): `/6`'s closure exactly, rendering the report
- * page the four report-prose rulings direct. A SECOND, independent copy of the verifier's own
- * constant, for the same reason `/8`'s is -- both packages must carry it or the producer cannot
- * emit what the verifier accepts.
+ * The composed generation (bundle-capability-composition design §3, issue #3403): its manifest
+ * carries an explicit, canonically ordered, must-understand capability vector, and everything else
+ * about the closure is derived from that vector by the registry in `@colophon-claims/check`. It
+ * renders the report page the four report-prose rulings direct (issue #4191). A SECOND,
+ * independent copy of the verifier's own constant, for the same reason `/8`'s is -- both packages
+ * must carry it or the producer cannot emit what the verifier accepts.
  *
- * **No run emits it.** `materialize.ts`'s format selection is unchanged and does not name this
- * constant: a `/10` claim seals `PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND`, a released and immutable
- * reader that predates `/10` and refuses it at manifest parse, so the bundle would be permanently
- * unverifiable under its own instruction. `/10` enters this schema so a bundle can be LABELLED
- * with it -- which is what lets `v10-verify.test.ts` round-trip one through the portable reader --
- * never so one can be produced. The producer flips in the change that pins `/10` to the release
- * serving it.
+ * **New bundles emit it by default** (issue #3405, D1 clean cutover). `report` omitted or
+ * `composedFormat: true` seals the composed claim; `composedFormat: false` is the rollback onto
+ * the enumerated cells. The verifier's legacy path for `/2` `/4` `/6` `/7` `/8` remains forever.
  */
 export const BUNDLE_V10_FORMAT = "benchmark-product-public-bundle/10" as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
@@ -59,7 +58,7 @@ export const BundleManifestFileSchema = z.object({
   bytes: z.number().int().nonnegative(),
 });
 
-export const BundleManifestSchema = z.object({
+const EnumeratedBundleManifestSchema = z.object({
   format: z.union([
     z.literal(BUNDLE_FORMAT),
     z.literal(BUNDLE_V3_FORMAT),
@@ -67,10 +66,23 @@ export const BundleManifestSchema = z.object({
     z.literal(BUNDLE_V6_FORMAT),
     z.literal(BUNDLE_V7_FORMAT),
     z.literal(BUNDLE_V8_FORMAT),
-    z.literal(BUNDLE_V10_FORMAT),
   ]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
+
+/**
+ * `/2`'s manifest plus one member, the capability vector (design §3.2). Required, so that "no
+ * capabilities" is the spelled statement `[]` rather than an absence; and closed, so an unknown
+ * top-level member is refused. Mirrors `@colophon-claims/check`'s `manifest.ts` exactly; the two
+ * copies must agree.
+ */
+const ComposedBundleManifestSchema = z.strictObject({
+  format: z.literal(BUNDLE_V10_FORMAT),
+  capabilities: CapabilityVectorSchema,
+  files: z.array(BundleManifestFileSchema).min(1),
+});
+
+export const BundleManifestSchema = z.union([EnumeratedBundleManifestSchema, ComposedBundleManifestSchema]);
 
 export type BundleManifest = z.infer<typeof BundleManifestSchema>;
 
@@ -90,16 +102,32 @@ export interface VerifyBundleSnapshotDeps {
   readonly afterManifestValidated?: () => void;
 }
 
-export interface BuildBundleManifestOptions {
+export type BuildBundleManifestOptions =
   /** Defaults to v2 so every existing materializer keeps byte-identical behavior. */
-  readonly format?:
-    | typeof BUNDLE_FORMAT
-    | typeof BUNDLE_V3_FORMAT
-    | typeof BUNDLE_V4_FORMAT
-    | typeof BUNDLE_V6_FORMAT
-    | typeof BUNDLE_V7_FORMAT
-    | typeof BUNDLE_V8_FORMAT
-    | typeof BUNDLE_V10_FORMAT;
+  | {
+    readonly format?:
+      | typeof BUNDLE_FORMAT
+      | typeof BUNDLE_V3_FORMAT
+      | typeof BUNDLE_V4_FORMAT
+      | typeof BUNDLE_V6_FORMAT
+      | typeof BUNDLE_V7_FORMAT
+      | typeof BUNDLE_V8_FORMAT;
+  }
+  /** The composed generation states its vector; there is no default, because `[]` is a statement. */
+  | { readonly format: typeof BUNDLE_V10_FORMAT; readonly capabilities: readonly string[] };
+
+/**
+ * Resolve, or refuse (design §6 step 1). Every token is must-understand, so a vector naming
+ * anything this build does not implement -- or a combination the registry does not admit -- is
+ * refused whole. Re-raised as this package's own typed refusal: the registry lives in the reader
+ * package, and a core caller branches on core's error class.
+ */
+function resolveCapabilities(capabilities: readonly string[]): void {
+  try {
+    composeClosure(capabilities);
+  } catch (cause) {
+    refuse("record-integrity", "bundle.manifest.capabilities", cause instanceof Error ? cause.message : String(cause));
+  }
 }
 
 function sha256(bytes: Uint8Array): string {
@@ -226,7 +254,13 @@ export function buildBundleManifest(
       return { path, sha256: sha256(bytes), bytes: bytes.length };
     })
     .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
-  const manifest = BundleManifestSchema.parse({ format: options.format ?? BUNDLE_FORMAT, files });
+  // Both ends read one registry: a vector this build could not verify is not one it will seal.
+  if ("capabilities" in options) resolveCapabilities(options.capabilities);
+  const manifest = BundleManifestSchema.parse({
+    format: options.format ?? BUNDLE_FORMAT,
+    ...("capabilities" in options ? { capabilities: options.capabilities } : {}),
+    files,
+  });
   const bytes = canonicalJsonBytes(manifest);
   return { manifest, bytes, identity: sha256(bytes) };
 }
@@ -273,6 +307,8 @@ export function verifyBundleSnapshot(
   if (!equalBytes(bytes, canonical)) {
     refuse("record-integrity", BUNDLE_MANIFEST_FILENAME, "bundle.json bytes are not the exact canonical manifest encoding");
   }
+  // Before any member is read.
+  if (parsed.data.format === BUNDLE_V10_FORMAT) resolveCapabilities(parsed.data.capabilities);
 
   const seen = new Set<string>();
   let previous = "";

@@ -231,14 +231,19 @@ describe('fetchBytesFromIpfs response byte cap (#3438)', () => {
   });
 
   it('keeps the query string out of the error message', async () => {
-    // `normalizeIpfsGatewayBase` appends `/ipfs/` after the query rather than
-    // before it, so this base normalizes to `…/ipfs?apiKey=…/ipfs/<cid>` — the
-    // CID lands inside the query and the request could never resolve. That is
-    // a separate normalization defect; what is pinned here is only that
-    // `displayUrl` drops the query before the message is built.
+    // Since #3452 the candidate actually reaches the gateway — the query is
+    // sent as a query and the CID lands on the path — so this now pins the
+    // live path rather than a candidate the prefix guard had already killed.
+    // `displayUrl` is still `origin + pathname`, and that is what keeps an
+    // operator's gateway credential out of every aggregated message now that
+    // the request genuinely carries it.
+    const requested: string[] = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response('nope', { status: 404, statusText: 'Not Found' })),
+      vi.fn(async (input: RequestInfo | URL) => {
+        requested.push(String(input));
+        return new Response('nope', { status: 404, statusText: 'Not Found' });
+      }),
     );
 
     const failure = await fetchBytesFromIpfs(
@@ -247,6 +252,7 @@ describe('fetchBytesFromIpfs response byte cap (#3438)', () => {
       { fallbackGatewayBase: false },
     ).catch((error: unknown) => error as Error);
 
+    expect(requested).toEqual([`https://gateway.example/ipfs/${CID}?apiKey=SUPERSECRET`]);
     expect(failure.message).not.toContain('SUPERSECRET');
   });
 });

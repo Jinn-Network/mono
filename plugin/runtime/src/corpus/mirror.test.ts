@@ -8,7 +8,7 @@ import {
   sealJson,
 } from "@jinn-network/record-discovery-protocol";
 import type { Transport, TransportResponse, VerifyDriver } from "@jinn-network/record-discovery-client";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -242,6 +242,24 @@ describe("mirror sync", () => {
       expect(await marks.get({ agent: AGENT, name: NAME })).toEqual(before);
     });
 
+    test("a logger that throws on the revalidation line does not fail a clean revalidation (#4482)", async () => {
+      const marks = await seeded();
+
+      const second = await mirror({
+        highWaterMarks: marks,
+        chainVerification: spyPosture(),
+        log: {
+          ...log(),
+          debug: vi.fn(() => {
+            throw new Error("EPIPE: broken pipe");
+          }),
+        },
+      }).syncOnce();
+
+      expect(second.status).toBe("synced");
+      expect(second.sources[0]!.failure).toBeUndefined();
+    });
+
     test("a head whose issuedAt REGRESSED is a chain claim and keeps the chain path", async () => {
       const marks = await seeded();
       const posture = spyPosture();
@@ -451,6 +469,133 @@ describe("mirror sync", () => {
     }).syncOnce();
     expect(outcome.status).toBe("failed");
     expect(outcome.sources[0]!.failure?.message).toContain("network down");
+  });
+
+  // #4482: the driver posture warns from inside its own catch, and the mirror
+  // warns from inside its per-announcement catch. A logger that throws at
+  // either -- a stderr EPIPE -- must not change what the source is reported
+  // as: the failure CODE feeds the durable freshness row and the health
+  // check's remedy, so a refusal recorded as a sync failure sends the
+  // operator to the wrong place.
+  function faultingWarn() {
+    return {
+      ...log(),
+      warn: vi.fn(() => {
+        throw new Error("EPIPE: broken pipe");
+      }),
+    };
+  }
+
+  test("a logger that throws cannot report a chain-verification refusal as a sync failure", async () => {
+    const faulting = faultingWarn();
+    const driver = {
+      verifySource: async () => {
+        throw new Error("transport failed");
+      },
+    } as unknown as VerifyDriver;
+    // The fixture's head is bare, which the driver posture refuses as
+    // `head-unsigned` before the driver is asked anything. Served inside a
+    // wire envelope it reaches the driver -- the signature is never checked
+    // here, because the throwing driver IS the thing under test.
+    const { transport: inner } = buildArchive(executionEvidenceFixture.bytes);
+    const transport: Transport = {
+      fetch: async (url, init) => {
+        const response = await inner.fetch(url, init);
+        if (url !== `https://archive.test${headPath(NAME)}`) return response;
+        const envelope = {
+          payloadType: "application/vnd.jinn.record-discovery.head+json",
+          payload: Buffer.from(response.bytes).toString("base64"),
+          signatures: [{ sig: Buffer.from("not checked").toString("base64") }],
+        };
+        return { status: 200, bytes: new TextEncoder().encode(JSON.stringify(envelope)) };
+      },
+    };
+
+    const outcome = await mirror({
+      transport,
+      chainVerification: createDriverChainVerification(driver, faulting),
+      log: faulting,
+    }).syncOnce();
+
+    expect(outcome.sources[0]!.failure).toEqual({
+      code: "chain-verification-rejected",
+      message: "verification-failed",
+    });
+  });
+
+  test("a logger that throws on an index failure does not wedge the rest of the source", async () => {
+    const { transport: inner } = buildArchive(executionEvidenceFixture.bytes);
+    // The record itself is unfetchable, so the indexer THROWS (a nonconforming
+    // record is a terminal `rejected` result and never enters the catch).
+    const transport: Transport = {
+      fetch: (url) =>
+        url.startsWith("https://archive.test/records/")
+          ? Promise.resolve({ status: 404, bytes: new Uint8Array() })
+          : inner.fetch(url),
+    };
+    const marks = createFileHighWaterMarkStore({ filePath: statePath, fs: corpusFs });
+
+    const outcome = await mirror({ transport, highWaterMarks: marks, log: faultingWarn() }).syncOnce();
+
+    expect(outcome.status).toBe("synced");
+    expect(outcome.sources[0]).toMatchObject({ entriesWalked: 1, indexed: 0, rejected: 1 });
+    expect(outcome.sources[0]!.failure).toBeUndefined();
+    expect(await marks.get({ agent: AGENT, name: NAME })).toBeDefined();
+  });
+
+  // #4551: the line logger drops a top-level `message` field as the
+  // envelope's, so the `describeError` detail at each site travels under
+  // `reason` (the `sync-loop.ts` convention). The exact-object matchers refuse
+  // a stray `message`; `logger.test.ts` proves `reason` survives the line.
+  test("an index failure reports its cause under reason", async () => {
+    const { transport: inner } = buildArchive(executionEvidenceFixture.bytes);
+    const transport: Transport = {
+      fetch: (url) =>
+        url.startsWith("https://archive.test/records/")
+          ? Promise.resolve({ status: 404, bytes: new Uint8Array() })
+          : inner.fetch(url),
+    };
+    const spy = log();
+
+    await mirror({ transport, log: spy }).syncOnce();
+
+    expect(spy.warn).toHaveBeenCalledWith("corpus.mirror.index-failed", {
+      announcementId: "ann-1",
+      reason: expect.stringContaining("record is unavailable"),
+    });
+  });
+
+  test("a lock failure reports its cause under reason", async () => {
+    const spy = log();
+    const fs: CorpusFilesystem = {
+      ...corpusFs,
+      mkdir: async () => {
+        throw new Error("EACCES: lock dir");
+      },
+    };
+
+    const outcome = await mirror({ fs, log: spy }).syncOnce();
+
+    expect(outcome).toEqual({ status: "failed", sources: [] });
+    expect(spy.warn).toHaveBeenCalledWith("corpus.mirror.lock-failed", {
+      reason: expect.stringContaining("mirror sync lock"),
+    });
+  });
+
+  test("a store failure reports its cause under reason", async () => {
+    const spy = log();
+    // A regular file where the catalog's parent directory must be: the
+    // catalog cannot be created there and does not exist, so opening the
+    // store throws before any source is walked.
+    await writeFile(join(directory, "blocker"), "");
+    const storePaths = { ...paths, catalogPath: join(directory, "blocker", "catalog.sqlite") };
+
+    const outcome = await mirror({ storePaths, log: spy }).syncOnce();
+
+    expect(outcome).toEqual({ status: "failed", sources: [] });
+    expect(spy.error).toHaveBeenCalledWith("corpus.mirror.sync-failed", {
+      reason: expect.stringContaining("corpus mirror catalog"),
+    });
   });
 
   test("one bad record does not wedge the rest of a source's entries", async () => {

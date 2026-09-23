@@ -60,10 +60,11 @@ function writeExecutable(path, body) {
   chmodSync(path, 0o755);
 }
 
-// Stands in for `platform-verification-selection.mjs`, reproducing the one behaviour
-// of it the surrounding shell has to survive: empty stdin yields `run: false`. That
-// is the selector's real CLI behaviour — `''.split('\n')` is `['']`, which normalises
-// to no paths, so its documented empty-input fail-safe is unreachable from a pipe.
+// Stands in for `platform-verification-selection.mjs` as a selector that fails open:
+// empty stdin yields `run: false`. The real CLI no longer does that — since #2830 it
+// answers `run: true` (reason `no changed files reported`) for empty or blank stdin.
+// The stub keeps the fail-open answer on purpose: it is the adversary the pipefail
+// guard has to survive, and the guard must not depend on what the selector answers today.
 const SELECTOR_STUB = [
   '#!/bin/bash',
   'input="$(cat)"',
@@ -366,9 +367,11 @@ test('a failing git diff reds selection instead of silently unselecting verifica
 
   // The same script with `set -o pipefail` stripped is the defect being guarded, and
   // running it proves the assertion above is load-bearing rather than incidental: git
-  // dies on the bad objects, the selector reads empty stdin and answers `run: false`,
-  // the pipeline inherits the selector's exit 0 — and `platform-verification` reports
-  // green on the lane that lands code, having verified nothing.
+  // dies on the bad objects, the selector reads empty stdin, and the pipeline inherits
+  // the selector's exit 0. The real selector would answer `run: true` today and quietly
+  // run the full battery against a diff that never happened; the stub's `run: false`
+  // shows the worse outcome — `platform-verification` green, having verified nothing.
+  // Either way pipefail is required: a broken `git diff` must red the job.
   const unguarded = runSelectionScript({
     script: script.replace('set -o pipefail\n', ''),
     gitMode: 'real',

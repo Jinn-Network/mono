@@ -198,4 +198,41 @@ describe('GET /ready — a failed degraded-recovery start still reports degraded
     expect(body.accepting_work).toBe(false);
     expect(String(errorSpy.mock.calls[0]?.join(' '))).toContain('recovery loops failed to construct');
   });
+
+  it('an integrity-class halt → 503 bootstrapping, never 200 degraded (fail-closed direction, #4312)', async () => {
+    // The mirror of the test above, and the more dangerous direction: an
+    // integrity-halted daemon answering 200 "do not restart me" would park
+    // a daemon that is fail-closed by design. Same real orchestrator, same
+    // real shared holder, same real route — only the classifier differs.
+    // `resolveDegradedStart` logs the fail-closed decision via console.log.
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const envelope = buildEnvelope({ code: 'invalid_invocation', message: 'bad config' });
+      let attempt = 0;
+      let readyDuringHalt: Response | undefined;
+
+      await runBootstrapWithDegradeOpen({
+        runBootstrap: async () => {
+          attempt += 1;
+          if (attempt === 1) throw new SetupBootstrapHalted(envelope);
+          return 'ok';
+        },
+        startDegraded: (halt) =>
+          resolveDegradedStart(halt, {
+            isEconomic: () => false,
+            start: () => { throw new Error('start must not be reached for an integrity halt'); },
+          }),
+        setReadiness: setDaemonReadiness,
+        awaitRetry: async () => { readyDuringHalt = await fetch(`${baseUrl}/ready`); },
+      });
+
+      expect(readyDuringHalt?.status).toBe(503);
+      const body = (await readyDuringHalt!.json()) as { reason: string; accepting_work: boolean };
+      expect(body.reason).toBe('bootstrapping');
+      expect(body.accepting_work).toBe(false);
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });

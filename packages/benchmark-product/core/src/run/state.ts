@@ -184,6 +184,8 @@ export const AdditionalBundleIdentitySchema = z.object({
     "integrity-anchors",
     /** Recorded only by a disclosed publication (issue #2839). Additive in the same way. */
     "disclosure-specification",
+    /** Recorded only by an imported-run publication (issue #3417). Additive in the same way. */
+    "external-import",
   ])),
 });
 
@@ -248,6 +250,8 @@ export const RunStateSchema = z.object({
     "integrity-anchors",
     /** Recorded only by a disclosed publication (issue #2839). Additive in the same way. */
     "disclosure-specification",
+    /** Recorded only by an imported-run publication (issue #3417). Additive in the same way. */
+    "external-import",
   ])).optional(),
   /** N-1 additional public bundle identities, one per additional Report, set at `publish` in the
    * SAME invocation as the canonical `bundleIdentity`/`bundleRelativePath`/`bundleChecks` triple

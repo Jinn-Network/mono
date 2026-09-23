@@ -37,10 +37,10 @@
   "manifestExclusions": [],
   "ownerGroups": {
     "architecture-control": [
-        "@oaksprout",
-        "@ritsukai",
-        "@ritsuKai2000"
-      ]
+      "@oaksprout",
+      "@ritsukai",
+      "@ritsuKai2000"
+    ]
   },
   "gateDefinitions": {
     "benchmarking-ci": {
@@ -196,7 +196,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 12,
+      "expectedPackageCount": 10,
       "publishPolicies": [
         "private",
         "never"
@@ -220,6 +220,7 @@
         "transitional"
       ],
       "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
         "colophon-claims-v1",
         "experimental-lifecycle-notifications",
         "experimental-policy",
@@ -234,7 +235,7 @@
       "stable": false
     },
     "colophon-claims-v1": {
-      "expectedPackageCount": 1,
+      "expectedPackageCount": 4,
       "publishPolicies": [
         "independent"
       ],
@@ -245,6 +246,7 @@
         "product"
       ],
       "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
         "colophon-claims-v1",
         "implementations-v1",
         "sealed-platform-v1"
@@ -253,13 +255,32 @@
       "canary": false,
       "stable": false
     },
+    "benchmarking-product-v1": {
+      "expectedPackageCount": 11,
+      "publishPolicies": [
+        "canary-only"
+      ],
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "allowedClassifications": [
+        "product"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "benchmarking-product-v1",
+        "implementations-v1",
+        "sealed-platform-v1"
+      ],
+      "stackPublished": false,
+      "canary": true,
+      "stable": false
+    },
     "sealed-platform-v1": {
-      "expectedPackageCount": 14,
+      "expectedPackageCount": 11,
       "publishPolicies": [
         "canary-and-stable"
       ],
       "requiredGateIds": [
-        "benchmarking-ci",
         "environments-ci",
         "evidence-ci",
         "record-discovery-ci",
@@ -278,12 +299,11 @@
       "stable": true
     },
     "implementations-v1": {
-      "expectedPackageCount": 63,
+      "expectedPackageCount": 53,
       "publishPolicies": [
         "canary-and-stable"
       ],
       "requiredGateIds": [
-        "benchmarking-ci",
         "contracts-ci",
         "environments-ci",
         "evidence-ci",
@@ -549,6 +569,45 @@
       }
     },
     {
+      "name": "@colophon-claims/check",
+      "path": "packages/benchmark-product/check",
+      "domain": "benchmark-product",
+      "role": "standalone Colophon public-bundle reader checker",
+      "tier": 4,
+      "classification": "product",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "spec/2026-08-13-colophon-self-serve.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-17-colophon-first-cut-canary-pin.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "colophon-claims-v1",
+      "publishPolicy": "independent",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
       "name": "@colophon-claims/cli",
       "path": "packages/benchmark-product/cli",
       "domain": "benchmark-product",
@@ -565,8 +624,8 @@
         ],
         "decisionRecord": null
       },
-      "releaseGroup": "transitional-or-private",
-      "publishPolicy": "never",
+      "releaseGroup": "colophon-claims-v1",
+      "publishPolicy": "independent",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmark-product-ci"
@@ -609,8 +668,8 @@
         ],
         "decisionRecord": null
       },
-      "releaseGroup": "transitional-or-private",
-      "publishPolicy": "never",
+      "releaseGroup": "colophon-claims-v1",
+      "publishPolicy": "independent",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmark-product-ci"
@@ -632,10 +691,10 @@
       "name": "@colophon-claims/verify",
       "path": "packages/benchmark-product/verify",
       "domain": "benchmark-product",
-      "role": "standalone Colophon public-bundle reader verifier",
+      "role": "deprecated passthrough alias for @colophon-claims/check",
       "tier": 4,
       "classification": "product",
-      "stability": "experimental",
+      "stability": "deprecated",
       "authority": {
         "documents": [
           {
@@ -665,7 +724,14 @@
         "conformance": []
       },
       "supersedes": [],
-      "replacedBy": []
+      "replacedBy": [
+        "@colophon-claims/check"
+      ],
+      "transition": {
+        "reason": "The checker publishes as @colophon-claims/check; this name stays as a permanent passthrough alias so sealed bundle instructions never 404 (issue #4188).",
+        "status": "permanent passthrough alias re-released with every checker version",
+        "sunsetCondition": "none planned"
+      }
     },
     {
       "name": "@colophon-claims/web",
@@ -720,8 +786,8 @@
       "path": "packages/benchmarking/aggregate",
       "domain": "benchmarking",
       "role": "aggregation capability",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -739,8 +805,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -763,8 +829,8 @@
       "path": "packages/benchmarking/evaluation",
       "domain": "benchmarking",
       "role": "TEP-free exact subject evaluation issuance",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -782,8 +848,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -806,8 +872,8 @@
       "path": "packages/benchmarking/evidence",
       "domain": "benchmarking",
       "role": "evidence-native cohort verification and matrix assembly",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -825,8 +891,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -849,8 +915,8 @@
       "path": "packages/benchmarking/interop",
       "domain": "benchmarking",
       "role": "task-execution import and export",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -868,8 +934,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -894,8 +960,8 @@
       "path": "packages/benchmarking/local",
       "domain": "benchmarking",
       "role": "local venue adapter",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -913,8 +979,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -933,57 +999,12 @@
       "replacedBy": []
     },
     {
-      "name": "@jinn-network/benchmarking-marketplace",
-      "path": "packages/benchmarking/marketplace",
-      "domain": "benchmarking",
-      "role": "marketplace adapter",
-      "tier": 3,
-      "classification": "platform",
-      "stability": "candidate",
-      "authority": {
-        "documents": [
-          {
-            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
-            "status": "ratified"
-          },
-          {
-            "path": "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md",
-            "status": "proposed"
-          }
-        ],
-        "decisionRecord": {
-          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
-          "status": "ratified"
-        }
-      },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
-      "ownerGroup": "architecture-control",
-      "requiredGateIds": [
-        "benchmarking-ci"
-      ],
-      "boundaryPolicy": {
-        "kind": "source-boundary",
-        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
-      },
-      "publicSurface": {
-        "schemas": [],
-        "profiles": [],
-        "fixtures": [
-          "fixtures"
-        ],
-        "conformance": []
-      },
-      "supersedes": [],
-      "replacedBy": []
-    },
-    {
       "name": "@jinn-network/benchmarking-native-capture",
       "path": "packages/benchmarking/native-capture",
       "domain": "benchmarking",
       "role": "resumable native execution capture coordinator",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -1001,8 +1022,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -1025,8 +1046,8 @@
       "path": "packages/benchmarking/protocol",
       "domain": "benchmarking",
       "role": "evidence-native benchmarking record protocol",
-      "tier": 2,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -1044,8 +1065,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "sealed-platform-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -1068,8 +1089,8 @@
       "path": "packages/benchmarking/publication",
       "domain": "benchmarking",
       "role": "benchmark publication planning and accounting verification",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -1087,8 +1108,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -1111,8 +1132,8 @@
       "path": "packages/benchmarking/records",
       "domain": "benchmarking",
       "role": "benchmark record family",
-      "tier": 2,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -1130,8 +1151,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "sealed-platform-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -1158,8 +1179,8 @@
       "path": "packages/benchmarking/run",
       "domain": "benchmarking",
       "role": "benchmark orchestration",
-      "tier": 3,
-      "classification": "platform",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -1177,8 +1198,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -1201,8 +1222,8 @@
       "path": "packages/benchmarking/testing",
       "domain": "benchmarking",
       "role": "benchmarking conformance kit",
-      "tier": null,
-      "classification": "platform-support",
+      "tier": 4,
+      "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
@@ -1220,8 +1241,8 @@
           "status": "ratified"
         }
       },
-      "releaseGroup": "sealed-platform-v1",
-      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "benchmarking-product-v1",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "benchmarking-ci"
@@ -1241,8 +1262,7 @@
         ]
       },
       "supersedes": [],
-      "replacedBy": [],
-      "tierReason": "Conformance machinery is platform support rather than a protocol tier."
+      "replacedBy": []
     },
     {
       "ownerGroup": "architecture-control",
@@ -1326,51 +1346,6 @@
       "publicSurface": {
         "schemas": [],
         "profiles": [],
-        "fixtures": [],
-        "conformance": []
-      },
-      "supersedes": [],
-      "replacedBy": []
-    },
-    {
-      "name": "@jinn-network/record-discovery-facts-benchmarking",
-      "path": "packages/discovery/facts/benchmarking",
-      "domain": "discovery",
-      "role": "benchmarking facts projection",
-      "tier": 3,
-      "classification": "platform",
-      "stability": "candidate",
-      "authority": {
-        "documents": [
-          {
-            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
-            "status": "ratified"
-          },
-          {
-            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
-            "status": "approved"
-          }
-        ],
-        "decisionRecord": {
-          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
-          "status": "ratified"
-        }
-      },
-      "releaseGroup": "implementations-v1",
-      "publishPolicy": "canary-and-stable",
-      "ownerGroup": "architecture-control",
-      "requiredGateIds": [
-        "record-discovery-ci"
-      ],
-      "boundaryPolicy": {
-        "kind": "source-boundary",
-        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
-      },
-      "publicSurface": {
-        "schemas": [],
-        "profiles": [
-          "profiles"
-        ],
         "fixtures": [],
         "conformance": []
       },

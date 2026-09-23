@@ -194,10 +194,19 @@ describe("I1 — a declaration no report could carry refuses at report, not sile
     });
     expect(declared.ok, declared.ok ? "" : JSON.stringify(declared.error)).toBe(true);
 
-    const reported = await runReport(context, { draftId: built.draftId });
+    const reported = await runReport(context, { draftId: built.draftId, composedFormat: false });
     expect(reported.ok).toBe(false);
     expect(reported.ok ? undefined : reported.error.code).toBe("conflict");
     expect(reported.ok ? "" : reported.error.detail).toMatch(/no binary-instrument analysis/);
+    // The production default is the composed generation (issue #3405). The same run has the same
+    // loss to refuse, for the registry's own reason: the record rides the qualification analysis,
+    // and this run has none. The message names no anchor, because there an anchor is not what is
+    // missing.
+    const composed = await runReport(context, { draftId: built.draftId });
+    expect(composed.ok).toBe(false);
+    expect(composed.ok ? undefined : composed.error.code).toBe("conflict");
+    expect(composed.ok ? "" : composed.error.detail).toMatch(/rides the binary-qualification analysis/);
+    expect(composed.ok ? "" : composed.error.detail).not.toMatch(/anchor/);
     // And the declaration is still on disk: refusing does not discard what the operator wrote.
     expect(readRunState(workspaceDir, built.draftId)!.disclosureSha256).toBe(
       declared.ok ? declared.result.recordSha256 : "",

@@ -25,7 +25,7 @@ import type { RuntimeLogger } from "../logger.js";
 import type { CorpusAdmission } from "./admission.js";
 import { adaptAnnouncementEntry } from "./announcements.js";
 import type { ChainVerification, WalkTruncation } from "./chain-verification.js";
-import { describeError } from "./errors.js";
+import { bestEffortLogger, describeError } from "./errors.js";
 import type { CorpusFilesystem } from "./fs.js";
 import { tryAcquireSyncLock } from "./lock.js";
 import { createCorpusRepositoryResolver } from "./repositories.js";
@@ -175,6 +175,8 @@ interface Counters {
  * caller can fire it opportunistically and drop the promise.
  */
 export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMirror {
+  const log = bestEffortLogger(options.log);
+
   async function collect(
     source: MirrorSourceConfig,
     counters: Counters,
@@ -292,7 +294,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
             issuedAt: head.head.issuedAt,
           });
         }
-        options.log.debug("corpus.mirror.head-revalidated", {
+        log.debug("corpus.mirror.head-revalidated", {
           source: `${identity.agent}/${identity.name}`,
           sequence: head.head.sequence,
           head: idle,
@@ -335,9 +337,9 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
             // One unfetchable or nonconforming record must not wedge the rest
             // of a source's entries.
             counters.rejected += 1;
-            options.log.warn("corpus.mirror.index-failed", {
+            log.warn("corpus.mirror.index-failed", {
               announcementId: announcement.announcementId,
-              message: describeError(error),
+              reason: describeError(error),
             });
           }
         }
@@ -369,7 +371,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
       try {
         lock = await tryAcquireSyncLock({ path: options.lockPath, fs: options.fs });
       } catch (error) {
-        options.log.warn("corpus.mirror.lock-failed", { message: describeError(error) });
+        log.warn("corpus.mirror.lock-failed", { reason: describeError(error) });
         return { status: "failed", sources: [] };
       }
       if (lock === undefined) return { status: "skipped-locked", sources: [] };
@@ -396,7 +398,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
           return { status, sources: reports };
         });
       } catch (error) {
-        options.log.error("corpus.mirror.sync-failed", { message: describeError(error) });
+        log.error("corpus.mirror.sync-failed", { reason: describeError(error) });
         return { status: "failed", sources: [] };
       } finally {
         await lock.close();

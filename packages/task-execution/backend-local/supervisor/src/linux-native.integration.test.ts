@@ -183,9 +183,11 @@ describe.runIf(linux)("Linux native custody shim", () => {
       argv: [process.execPath, "-e", "setInterval(()=>{},1000)"], env: {}, cwd: root,
     });
     const fingerprint = await waitFor(() => readShimFingerprint(meta) ?? undefined, "ready fingerprint");
+    // A nonzero grace: at graceMs 0 the shim sends SIGKILL right behind SIGTERM, so which signal
+    // the child reports is a scheduling race (#4600). The SIGTERM assertion needs the grace window.
     writeFileSync(
       join(meta, "cancellation-command.json"),
-      '{"nonce":"nul-\\u0000-control-\\u0001-quote-\\"-slash-\\\\-supplementary-\\ud83d\\ude00","graceMs":0,"killPollCeilingMs":500}',
+      '{"nonce":"nul-\\u0000-control-\\u0001-quote-\\"-slash-\\\\-supplementary-\\ud83d\\ude00","graceMs":1000,"killPollCeilingMs":2000}',
     );
     expect(requestShimCancellation(meta, fingerprint)).toBe(true);
     const outcome = await waitFor(() => readOutcome(meta, nonce) ?? undefined, "unicode cancellation outcome");

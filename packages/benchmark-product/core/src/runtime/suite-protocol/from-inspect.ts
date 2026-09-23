@@ -9,6 +9,20 @@ import {
 import type { SuiteQuotePresentation } from "./from-harbor.js";
 import { allArmsRunComplete, accountSuiteArmCells, type MatrixCellAccount } from "./run-complete.js";
 import type { InspectEvalSelectionManifest } from "../inspect-eval/manifest.js";
+import type { SuiteProtocolSelection } from "./manifest.js";
+
+/**
+ * Inspect eval suite items are sample ids. Named `--from inspect` uses this table the same way
+ * Harbor uses `taskNameByDigestFromSuite` — the existing name table, not a second mapper.
+ */
+export function sampleIdByDigestFromSuite(suite: SuiteProtocolSelection): Readonly<Record<string, string>> {
+  return Object.fromEntries(suite.items.map((item) => [item.taskSha256, item.taskName]));
+}
+
+/** Inverse of `sampleIdByDigestFromSuite`. The Inspect import front door. */
+export function digestBySampleIdFromSuite(suite: SuiteProtocolSelection): Readonly<Record<string, string>> {
+  return Object.fromEntries(suite.items.map((item) => [item.taskName, item.taskSha256]));
+}
 
 /**
  * `replicates` is the PLANNED k of the run being judged, never the sealed `suite.replicates`.
