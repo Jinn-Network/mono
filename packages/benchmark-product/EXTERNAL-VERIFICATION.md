@@ -58,6 +58,19 @@ The trust root is equally blunt, from `claim-package.json` `verification.trustRo
 "Signatures verify against the bundle-carried public keys minted by this
 workspace; there is no third-party trust anchor on the self-run venue."
 
+What the interoperability profile and the neutral-freeze spec add. The
+interoperability profile (`docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md`
+section 9.3) requires a self-run publisher to disclose that its dispatch source
+and publication source are owner-controlled. The neutral-freeze spec
+(`docs/superpowers/specs/2026-08-29-neutral-freeze-announcement-surface.md` section
+7.2) establishes why: the announcement chain has every transparency-log property
+except a witness, so the publisher who holds the signing key and hosts the archive
+can rewrite the chain from any point, re-sign a shorter or different head, and no
+reader who had not previously fetched the old head could tell. The five sealed
+sentences above do not yet say this in those words. Until they do, a reader should
+treat the announcement chain the publisher serves as the publisher's own statement
+about its own history, not as independent evidence of it.
+
 ## Post-seal randomness: `beacon-binding/1`
 
 A seal shows a method document existed by a given time. It does not show the run
