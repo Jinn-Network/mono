@@ -331,4 +331,12 @@ test('every head_ref-sensitive if: expression is pinned', () => {
     counts[workflow] = headRefSensitiveLines(readFileSync(join(workflowsRoot, workflow), 'utf8'));
   }
   assert.deepEqual(counts, { 'ci.yml': 4, 'layer-ci.yml': 1, 'jinn-agent-ci.yml': 1 });
+  // The execute list and the census must stay the same size. Emptying
+  // HEAVY_IF_SITES still greens the loop above, and the census can stay
+  // { ci: 4, layer: 1, jinn-agent: 1 } because it counts workflow source,
+  // not the list that actually evaluates the expressions (#4646).
+  assert.equal(
+    HEAVY_IF_SITES.length,
+    Object.values(counts).reduce((sum, count) => sum + count, 0),
+  );
 });
