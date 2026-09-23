@@ -129,5 +129,43 @@ test('the stack publishing runbook tracks the generated set, CLI registration, a
   assert.match(runbook, /--file stack-npm-publish\.yml/);
   assert.match(runbook, /--allow-publish/);
   assert.match(runbook, /ENEEDAUTH/);
-  assert.match(runbook, /truncat(?:e|es|ed|ion)|subsequent packages/i);
+  assert.match(runbook, /truncat(?:e|es|ed|ion)/i);
+
+  // The three names still missing npm registration (issue #3521 recurrence): the runbook
+  // must name each one and record that `npm view <name> version` returns E404, not just
+  // assert a generic "some names are missing" statement.
+  for (const unregistered of [
+    '@jinn-network/contract-abis',
+    '@jinn-network/evidence-gate',
+    '@jinn-network/record-discovery-facts-offers',
+  ]) {
+    const escaped = unregistered.replace(/[/]/gu, '\\/');
+    assert.match(runbook, new RegExp(escaped), `runbook must name ${unregistered}`);
+  }
+  assert.match(runbook, /E404/);
+  assert.match(runbook, /\[ \] Regenerate the list and compare it with the generated release view/);
+
+  // The bootstrap placeholder method: an empty temporary directory, not the workspace
+  // package directory (which is 0.1.0 with a build step and, for four packages,
+  // provenance:true that a local publish cannot satisfy).
+  assert.match(runbook, /empty temporary directory/);
+  assert.match(runbook, /publishConfig\.provenance: true/);
+  assert.match(runbook, /EUSAGE/);
+  assert.match(runbook, /"description": "Name reservation for npm trusted-publisher setup\. Not a platform receipt\."/);
+  assert.match(runbook, /"publishConfig": \{ "access": "public" \}/);
+  assert.match(runbook, /has no `provenance` field/);
+  assert.match(runbook, /`latest` stays `0\.0\.0` until the first real publish/);
+
+  // The failure scope: the throw crosses both loops in publishMissingTarballs, so it takes
+  // out the rest of the release group's walk (not just the current wave), while the other
+  // matrix group keeps publishing.
+  assert.match(runbook, /publishMissingTarballs/);
+  assert.match(runbook, /rest of\s+the wave and all later waves/);
+  assert.match(runbook, /other matrix group[\s\S]{0,80}?is unaffected/);
+  assert.match(runbook, /fail-fast: false/);
+
+  // Non-blocking: the rerun advice must name the artifact retention window.
+  assert.match(runbook, /platform-verification-artifacts/);
+  assert.match(runbook, /retention-days: 1/);
+  assert.match(runbook, /next push to `next` is the retry/);
 });

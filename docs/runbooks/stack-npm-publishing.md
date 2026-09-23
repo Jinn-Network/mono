@@ -79,16 +79,36 @@ reservation and no trusted-publisher binding fails `npm publish` with `ENEEDAUTH
 (or `E404` / HTTP `403`). `.github/scripts/publish-verified-platform.mjs` walks
 receipt waves in order and throws on that failure, so every subsequent package in
 the walk is not published. Between 2026-08-29 and 2026-09-01, unregistered
-`@jinn-network/evidence-offer` failed mid-walk and truncated the rest of that
-canary wave. Complete the CLI (or web UI) registration **before** merging a
-catalog addition.
+`@jinn-network/evidence-offer` failed mid-walk and truncated that canary walk;
+`evidence-offer` was registered 2026-09-01 and that failure is resolved. The same
+failure is recurring now: `@jinn-network/contract-abis`, `@jinn-network/evidence-gate`,
+and `@jinn-network/record-discovery-facts-offers` have no npm registration, and the
+`implementations-v1` canary has failed with `ENEEDAUTH` on every push since
+2026-09-01T17:34Z, currently truncated at `@jinn-network/contract-abis` (the first of
+the three in wave order). Complete the CLI (or web UI) registration **before** merging a
+catalog addition; see the completion checklist below for the three still outstanding.
 
 npm trusted-publisher configuration requires the package to already exist on the
-registry. For each generated name that is not yet on npmjs, reserve it first
-(npm 11.15+; an npm scope owner, locally, with 2FA):
+registry. For each generated name that is not yet on npmjs, reserve it first with a
+throwaway placeholder package, not the workspace package directory: every generated
+`package.json` on `next` is already version `0.1.0` with a `prepack: yarn build` step,
+so publishing from the package directory would publish built `0.1.0` bytes under the
+`bootstrap` tag and burn the future stable version; and the four evidence packages
+(`evidence-gate`, `evidence-offer`, `evidence-trace`, `evidence-trace-decode`) set
+`publishConfig.provenance: true`, which a local `npm publish` cannot satisfy
+(`EUSAGE: Automatic provenance generation not supported for provider`). Reserve from an
+empty temporary directory instead (npm 11.15+; an npm scope owner, locally, with 2FA):
 
 ```bash
-# from the package directory; version 0.0.0; dist-tag bootstrap — not latest
+mkdir /tmp/jinn-reserve-<package> && cd /tmp/jinn-reserve-<package>
+cat > package.json <<'EOF'
+{
+  "name": "@jinn-network/<package>",
+  "version": "0.0.0",
+  "description": "Name reservation for npm trusted-publisher setup. Not a platform receipt.",
+  "publishConfig": { "access": "public" }
+}
+EOF
 npm publish --access public --tag bootstrap
 npm trust github @jinn-network/<package> \
   --repo Jinn-Network/mono \
@@ -96,6 +116,11 @@ npm trust github @jinn-network/<package> \
   --environment npm-publish \
   --allow-publish
 ```
+
+This placeholder has no `provenance` field, so the reservation publish itself never
+hits the provenance error above. Publishing it under `--tag bootstrap` also sets
+`latest` to `0.0.0`: npm tags a package's first published version `latest` regardless
+of which tag the publish names, so `latest` stays `0.0.0` until the first real publish.
 
 `npm trust github` is the CLI equivalent of the npmjs Trusted Publisher form.
 Both paths must produce these exact fields:
@@ -121,8 +146,16 @@ and [`npm trust`](https://docs.npmjs.com/cli/v11/commands/npm-trust/).
 An npm scope owner must complete this once for every generated registration:
 
 - [x] Confirm the operator belongs to a team in the `@jinn-network` npm organization. (`ritsukai` / `@jinn-network:developers`)
-- [x] Regenerate the list and compare it with the generated release view. (64 names; topology union)
-- [x] Add every registration using the CLI path above (or the npmjs web UI with the same fields), including Environment `npm-publish`.
+- [ ] Regenerate the list and compare it with the generated release view (64 names;
+  topology union), then add every registration using the CLI path above (or the npmjs
+  web UI with the same fields), including Environment `npm-publish`. **Incomplete**: 61
+  of the 64 generated names are registered; three are not: `@jinn-network/contract-abis`,
+  `@jinn-network/evidence-gate`, and `@jinn-network/record-discovery-facts-offers`
+  (`npm view <name> version` returns `E404` for each). The `implementations-v1` canary is
+  currently truncated at the first of them in wave order, `@jinn-network/contract-abis`
+  (wave 1), and stays truncated until a scope owner reserves and binds all three, using
+  the reservation method above. Reserving and binding these names is an operator action;
+  it is not performed by this runbook change.
 - [x] `@jinn-network/evidence-offer` registered 2026-09-01 by `ritsukai` via CLI: bootstrap `0.0.0` (`npm publish --tag bootstrap`) then `npm trust github` (GitHub Actions / `Jinn-Network/mono` / `stack-npm-publish.yml` / environment `npm-publish` / allow publish). The package joined the release catalog on 2026-08-29 (#3217).
 - [ ] Protect the `npm-publish` GitHub environment with required reviewers and allowed branches. **Explicitly skipped 2026-08-17** — shared with operator/client canary; see [DR-2026-08-17-d](../../log/decisions/2026-08-17-platform-canary-publish-enabled.md).
 - [x] Add no `NODE_AUTH_TOKEN` or other long-lived npm credential.
@@ -139,6 +172,12 @@ Never repair the mismatch by repacking, moving a tag, or weakening receipt verif
 
 **`ENEEDAUTH`, `E404`, or HTTP `403` during `npm publish`:** a generated catalog name is missing
 from npmjs or has no trusted-publisher row bound to `stack-npm-publish.yml` / `npm-publish`.
-The walk stops; subsequent packages in that wave are not published. Register the missing
-package with the CLI path above, then rerun. Do not treat a partial wave as a successful
-canary.
+`publish-verified-platform.mjs`'s `publishMissingTarballs` throws out of both the per-wave
+and the per-package loop, so every later package in that release group's walk (the rest of
+the wave and all later waves) is not published; the other matrix group (`sealed-platform-v1`
+or `implementations-v1`, whichever did not fail) is unaffected, since `canary-publish` runs
+both release groups as a `fail-fast: false` matrix. Register the missing package with the CLI
+path above, then rerun. Rerunning only works while this run's `platform-verification-artifacts`
+artifact still exists (`retention-days: 1` in `platform-verification.yml`); once that window
+passes, the next push to `next` is the retry, not a manual rerun of the old run. Do not treat
+a partial walk as a successful canary.
