@@ -546,6 +546,28 @@ describe('first-party Base Sepolia public record transport', () => {
       }
     });
 
+    // #4643: a scheme-less peer locator is not a URL and can carry a newline. Raw interpolation
+    // would split the warn into a second log line; JSON.stringify keeps it one token, matching the
+    // NativeRecordDestinationError message.
+    it('escapes a destination that contains a newline so it cannot spoof a following log line (#4643)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const spoof = 'records.peer.example\n[native-records] spoofed: refused destination';
+        expect(reportRefusedRecordDestination(
+          'peer-announced record location',
+          new NativeRecordDestinationError(spoof, 'it is not an absolute HTTP(S) URL'),
+        )).toBe(true);
+        const line = String(warn.mock.calls.at(-1)?.[0]);
+        expect(line).toBe(
+          `[native-records] peer-announced record location: refused destination ${JSON.stringify(spoof)}: it is not an absolute HTTP(S) URL`,
+        );
+        expect(line.includes('\n')).toBe(false);
+        expect(warn.mock.calls).toHaveLength(1);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it('stays silent for an ordinary serving-plane miss, which is not a refusal', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       try {
