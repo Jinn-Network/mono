@@ -312,7 +312,7 @@ describe("product documentation consistency", () => {
     expect(intro).toContain("`benchmark-product-public-bundle/2`");
     expect(intro).toContain("DSSE");
     expect(intro).toContain("`schemas/`");
-    expect(intro).toContain("verify/fixtures/public-bundle-conformance-v1/");
+    expect(intro).toContain("check/fixtures/public-bundle-conformance-v1/");
     expect(intro).toContain("`benchmark-product-public-bundle/5`");
     expect(intro).toContain("Evidence-native bundle v5");
     expect(intro).toContain("EXTERNAL-VERIFICATION.md#evidence-native-bundle-v5");
