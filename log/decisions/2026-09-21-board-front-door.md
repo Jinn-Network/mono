@@ -81,28 +81,34 @@ resolving.
    a stated byte cap), `duplicate-identity`, `slug-collision`,
    `mutation-refused`, `npm-unavailable` (no fallback to ingest-only).
 
-4. **Board key is split.** Official named slices (`one_task` / `ten_task` /
-   `full`) with a conforming suite protocol object key on
-   `(suiteProtocolId, coverage)`. Catalog ids are exactly `SUITE_PROTOCOL_IDS`.
-   Custom methods, and official-suite `custom` coverage, key on the SHA-256 of
-   the locked method document bytes. Method digest is **not** equivalent to
+4. **One board per official suite.** A bundle whose sealed method carries a
+   conforming suite protocol object keys on `suiteProtocolId`, whatever its
+   coverage. Catalog ids are exactly `SUITE_PROTOCOL_IDS`. Every coverage
+   (`full`, `ten_task`, `one_task`, `custom`) is listed on that one board.
+   Coverage is a row fact, like `execution_conformance`: every row shows
+   both, and any row short of `full` carries a visible marker. Neither axis
+   splits a suite board; hiding non-conforming or subset runs would be a
+   ranking choice. The board header carries the two-axis comparability
+   reminder, so a subset row beside a full row is shown, not ranked. A
+   method with no suite protocol object keys on the SHA-256 of the locked
+   method document bytes. Method digest is **not** equivalent to
    suite×coverage: the locked document also names solver, host, arms, and
    pins, so a universal digest key would give each configuration its own
    one-row board and fragment official suites per solver. That reading
-   contradicts DR-2026-09-04 decision 5. `custom` `--ids` selections are not
-   a shared prefix; mixing them on one `(protocol, custom)` board would
-   compare different task sets. `execution_conformance` does **not** split
-   boards: hiding non-conforming official-slice runs would be a ranking
-   choice. Coverage still splits, because the task set differs. The first
-   successfully checked listing whose key is new creates that board. No
-   operator registers boards. Board URLs: `/boards/<protocol>/<coverage>` for
-   official named slices; `/boards/method/<64-hex>` for digest keys. A human
-   title derived from `suiteProtocolDisplayName` or the claim's method id is
-   paint, not the key. Bundles that wear an official suite but do not project
-   `suiteComparability` refuse `unknown-format` rather than guess.
-   Grandfathered reports re-project from existing
-   `public/reports/<slug>/bundle/` bytes; a bundle that cannot project a key
-   stays on `/reports/<slug>/` until a human resolves it.
+   contradicts DR-2026-09-04 decision 5. The first successfully checked
+   listing whose key is new creates that board. No operator registers
+   boards. Board URLs: `/boards/<protocol>` for official suites (example
+   `/boards/terminal-bench-2.1`); `/boards/method/<64-hex>` for digest keys.
+   A human title derived from `suiteProtocolDisplayName` or the claim's
+   method id is paint, not the key. Bundles that wear an official suite but
+   do not project `suiteComparability` refuse `unknown-format` rather than
+   guess a coverage. Grandfathered reports re-project from existing
+   `public/reports/<slug>/bundle/` bytes; a bundle that cannot project a
+   key, or for a suite its coverage, stays on `/reports/<slug>/` until a
+   human resolves it. The reason for one board per suite is usability: one
+   place per suite for a reader to look (the operator's direction of
+   2026-09-23 on #4715). The split key this record first proposed is under
+   Alternatives rejected.
 
 5. **A listing is a fact row, newest first.** The row copies what the bundle
    already seals. Score is whatever the claim package presents
@@ -110,8 +116,10 @@ resolving.
    numeric board score. A comparison-shaped claim has no headline; the row
    shows the comparison. Attach the claim's own limitation sentences on the
    row; full text lives on the report page. Date prefers a timestamp the
-   bundle seals; fall back to ingest time labeled "listed at". Venue is
-   `venueHonesty.venue` from the
+   bundle seals; fall back to ingest time labeled "listed at". On a suite
+   board the row shows coverage and execution conformance from
+   `suiteComparability`, with a visible marker on any row short of `full`.
+   Venue is `venueHonesty.venue` from the
    sealed disclosure, not who filed the GitHub issue. Today's value is
    `"self-run"`. The three DR-2026-09-04 independence lines are quoted from
    the sealed disclosure, not rewritten into a traffic-light:
@@ -124,15 +132,22 @@ resolving.
    sentences. Same-origin bundle link is `/reports/<slug>/bundle/`, the
    byte-exact copy ingest already writes. The claimant's locator is provenance
    in `data/reports/<slug>.json`, not identity, and is not required to stay up
-   for the listing to remain checkable. Default order is `reportedAt`
-   descending. Score-ranking and run-count-ranking are declined. Run count may
-   appear on the board **header** as a fact (how many checked bundles this
-   method has) without ordering rows by it. Official named-slice headers also
-   carry the two-axis comparability reminder. No "best score." No sparkline.
+   for the listing to remain checkable. Default order is the row's date,
+   newest first: sealing time, or listing time where the bundle seals none.
+   The page is built in that order, so it renders without script. A reader
+   may re-sort by any column except the score, in the browser, using the
+   page's own script (no external requests), with keyboard-operable column
+   headers. The score is not a sort key: it is the claim's own projection,
+   not one number. Score-ranking and run-count-ranking are declined. Run
+   count may appear on the board **header** as a fact (how many checked
+   bundles this board lists) without ordering rows by it. Suite board headers
+   also carry the two-axis comparability reminder, so a subset row beside a
+   full row is shown, not ranked. No "best score." No sparkline.
    Board pages reuse the `/reports` sentence: Colophon does not rank reports
    against each other. `/reports`
-   stays the chronological ledger; `/boards` sits above it as the method
-   grouping. Listing means the published checker, at the line this bundle
+   stays the chronological ledger; `/boards` sits above it as the grouping
+   by suite, or by method where there is no suite. Listing means the
+   published checker, at the line this bundle
    pins, passed against the bytes now at `/reports/<slug>/bundle/`. A passing
    check does not prove the producing venue was honest, that distinct keys are
    independent parties, that isolation was strong, or that costs were
@@ -171,8 +186,8 @@ resolving.
    - **11.1** `feat(site)`: submission issue form, cold-verify workflow,
      ingest-on-success PR. Lands in `colophon-claims/site`. Label
      `human-surface`.
-   - **11.2** `feat(site)`: board pages keyed by sealed method. Lands in
-     `colophon-claims/site`. Label `human-surface`.
+   - **11.2** `feat(site)`: board pages keyed by suite, or by method digest.
+     Lands in `colophon-claims/site`. Label `human-surface`.
    - **11.3** `feat(site)`: listing row fields as ruled. Lands in
      `colophon-claims/site`. Label `human-surface`.
    - **11.4** `feat(benchmark-product)`: `colophon board submit <locator>`
@@ -187,10 +202,13 @@ resolving.
 
 9. **This record is the design artifact** follow-on `human-surface` site
    issues consume. Board pages are a new domain model on `colophon-claims/site`
-   and land with it: a Board is keyed state plus a newest-first collection of
-   listings and has no actions (submit lives on GitHub); a Listing row is
-   sealed facts plus a same-origin bundle href and has no actions; Submission
-   is not a site-page component. Empty boards do not exist. No helper-text
+   and land with it: a Board is keyed state plus a collection of listings in
+   sealing-time order, and its one action is the reader's re-sort by any
+   column except the score, in the browser, with no request, no mutation,
+   and no failure state (submit lives on GitHub); a Listing row is sealed
+   facts, with coverage and conformance on a suite board, plus a same-origin
+   bundle href, and has no actions; Submission is not a site-page component.
+   Empty boards do not exist. No helper-text
    cruft restating the numbers; the non-ranking sentence is the claim
    boundary, the same class `/reports` already prints. Tooltips may explain
    "self-run" and the three independence lines.
@@ -209,6 +227,9 @@ resolving.
   rather than falling back to ingest-only.
 - That the claimant's locator remains up. The site's byte-exact copy is what
   remains checkable.
+- That a reader will not take a subset row for a full-suite result. One board
+  per suite puts them side by side; the header reminder and the row marker
+  state the difference, and they cannot make a reader read it.
 
 ## Consequences
 
@@ -219,8 +240,9 @@ resolving.
   provenance). The export remains static.
 - Ingest stays the projector. The published checker becomes the listing gate.
   The two must not drift.
-- Official named-slice boards will mix models, harnesses, and claimants.
-  That is the point. They will not mix coverages.
+- Official suite boards will mix models, harnesses, claimants, and
+  coverages. That is the point: one place per suite for a reader to look.
+  Coverage and conformance are on every row, and no row is ordered by score.
 - Custom methods appear without a catalog change. The catalog remains how you
   bind an official suite, not how you display one.
 - Auto-merge of append-only listing PRs is a site-repo settings change. The
@@ -243,9 +265,24 @@ resolving.
 - **Trust the claimant's pasted verify receipt.** Anyone can paste.
 - **Always key boards on method-document digest.** Fragments official suites
   per solver. Contradicts DR-2026-09-04 decision 5.
-- **Always key on suite id, ignore coverage.** Mixes `full` and `one_task`,
-  the incomparability `comparability.ts` already names. Custom methods have
-  no suite id.
+- **Split key: `(suiteProtocolId, coverage)` for official named slices,
+  method digest for official `custom` coverage.** Considered and declined.
+  It was this record's decision 4 as first proposed (spec §6.3 option A).
+  The operator's direction of 2026-09-23 on #4715 declined it for
+  usability: one place per suite for a reader to look. The split key kept
+  incomparable coverages off one page, but a reader had to know which
+  coverage board to open for a suite, and each official `custom` run sat on
+  its own digest board, apart from its suite. The caveat: a subset row now
+  sits beside a full row. What the split key carried by separation, the
+  board header's two-axis comparability reminder and the coverage fact on
+  every row, with its marker short of `full`, now carry on the page, in an
+  order that is sealing time and never score. They state the difference;
+  they cannot make a reader read it.
+- **A suite board that ignores coverage** (spec §6.3 option C as first
+  drafted). Without coverage on each row, a subset row would read as a
+  full-suite result, and a method with no suite id would have no board.
+  Taken instead as directed: coverage moves from the key onto every row,
+  and a method with no suite protocol object keeps its digest board.
 - **Operator-registered boards.** Privileged shortcut and a governance
   surface. First checked listing creates the key.
 - **Score-ranking.** A leaderboard. PRODUCT.md forbids it. Neutral forbids
@@ -268,8 +305,10 @@ resolving.
 
 Proposed 2026-09-21 from design issue #3993. Stage 1 ruled the forks in
 `docs/superpowers/specs/2026-09-21-board-front-door-design.md`. This record
-condenses those rulings. Ratified on code-owner approval of this record by
-the operator credential that did not author it.
+condenses those rulings. Revised 2026-09-23 to the operator's direction
+on #4715: decision 4 keys a board on the suite alone, and the split key is
+recorded under Alternatives rejected. Ratified on code-owner approval of
+this record by the operator credential that did not author it.
 
 ## Amends
 
