@@ -109,6 +109,20 @@ test('a release group can be atomically disabled in catalog data', () => {
   }
 });
 
+test('a canary-only group can leave the platform stack without changing member policy', () => {
+  const catalog = fixtureCatalog();
+  catalog.releaseGroups['platform-v1'].stackPublished = false;
+  const root = fixtureRepo({ catalog });
+  try {
+    const loaded = loadPlatformCatalog(root);
+    assert.equal(loaded.releaseGroups['platform-v1'].stackPublished, false);
+    assert.equal(loaded.releaseGroups['platform-v1'].canary, true);
+    assert.deepEqual(stackPublishedReleaseGroupIds(loaded), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('stable publication eligibility requires every group member to permit stable publication', () => {
   const catalog = fixtureCatalog();
   const definition = catalog.releaseGroups['platform-v1'];
@@ -538,9 +552,9 @@ test('release-group policy is catalog-authored and internally consistent', async
       pattern: /platform-v1\.publishPolicies must exactly equal member package policy union/u,
     },
     {
-      name: 'stack publication flag disagrees with policy',
-      mutate(catalog) { catalog.releaseGroups['platform-v1'].stackPublished = false; },
-      pattern: /platform-v1 publication flags must agree with every member publish policy/u,
+      name: 'stack publication requires canary-eligible member policies',
+      mutate(catalog) { catalog.releaseGroups['legacy-product-lines'].stackPublished = true; },
+      pattern: /legacy-product-lines cannot be stack-published unless every member publish policy is canary-eligible/u,
     },
     {
       name: 'canary flag disagrees with policy',
@@ -800,19 +814,12 @@ test('records authority status per governing document', () => {
       status: 'ratified',
     });
     assert.equal(pkg.stability, 'candidate');
-    const sealed = new Set([
-      '@jinn-network/benchmarking-protocol',
-      '@jinn-network/benchmarking-records',
-      '@jinn-network/benchmarking-testing',
-    ]);
-    if (sealed.has(pkg.name)) {
-      assert.equal(pkg.publishPolicy, 'canary-and-stable');
-      assert.equal(pkg.releaseGroup, 'sealed-platform-v1');
-    } else {
-      assert.equal(pkg.publishPolicy, 'canary-and-stable');
-      assert.equal(pkg.releaseGroup, 'implementations-v1');
-    }
+    assert.equal(pkg.classification, 'product');
+    assert.equal(pkg.tier, 4);
+    assert.equal(pkg.publishPolicy, 'canary-only');
+    assert.equal(pkg.releaseGroup, 'benchmarking-product-v1');
   }
+  assert.equal(benchmarking.length, 11);
   assert.equal(catalog.releaseGroups['sealed-platform-v1'].stable, true);
   assert.equal(catalog.releaseGroups['implementations-v1'].stable, true);
 });
@@ -898,8 +905,8 @@ test('the live catalog publishes sealed-platform-v1 and implementations-v1', () 
   ]);
   const sealed = catalog.releaseGroups['sealed-platform-v1'];
   const implementations = catalog.releaseGroups['implementations-v1'];
-  assert.equal(sealed.expectedPackageCount, 14);
-  assert.equal(implementations.expectedPackageCount, 63);
+  assert.equal(sealed.expectedPackageCount, 11);
+  assert.equal(implementations.expectedPackageCount, 53);
   assert.deepEqual(sealed.publishPolicies, ['canary-and-stable']);
   assert.deepEqual(implementations.publishPolicies, ['canary-and-stable']);
   assert.equal(sealed.stackPublished, true);
@@ -919,9 +926,6 @@ test('the live catalog publishes sealed-platform-v1 and implementations-v1', () 
     .map(({ name }) => name.replace('@jinn-network/', ''))
     .sort();
   assert.deepEqual(sealedNames, [
-    'benchmarking-protocol',
-    'benchmarking-records',
-    'benchmarking-testing',
     'chain-environment-record',
     'environment-record',
     'evidence-offer',
@@ -955,10 +959,63 @@ test('the live catalog publishes sealed-platform-v1 and implementations-v1', () 
   assert.equal(chainRecord.publishPolicy, 'canary-and-stable');
   assert.equal(
     loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'sealed-platform-v1', lane: 'stable' }).length,
-    14,
+    11,
   );
   assert.equal(
     loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'implementations-v1', lane: 'canary' }).length,
-    63,
+    53,
   );
+});
+
+test('the live catalog holds the benchmarking packages in a product canary-only group', () => {
+  const catalog = loadPlatformCatalog(repoRoot);
+  const group = catalog.releaseGroups['benchmarking-product-v1'];
+  assert.equal(group.expectedPackageCount, 11);
+  assert.deepEqual(group.publishPolicies, ['canary-only']);
+  assert.deepEqual(group.requiredGateIds, ['benchmarking-ci']);
+  assert.deepEqual(group.allowedClassifications, ['product']);
+  assert.deepEqual(group.allowedDependencyReleaseGroups, [
+    'benchmarking-product-v1',
+    'implementations-v1',
+    'sealed-platform-v1',
+  ]);
+  assert.equal(group.stackPublished, false);
+  assert.equal(group.canary, true);
+  assert.equal(group.stable, false);
+  assert.equal(stackPublishedReleaseGroupIds(catalog).includes('benchmarking-product-v1'), false);
+  assert.throws(
+    () => loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'benchmarking-product-v1', lane: 'canary' }),
+    /benchmarking-product-v1 is not eligible for canary publication/u,
+  );
+
+  const members = catalog.packages.filter(({ releaseGroup }) => releaseGroup === 'benchmarking-product-v1');
+  assert.equal(members.length, 11);
+  assert.ok(members.every((pkg) => pkg.domain === 'benchmarking'));
+  assert.ok(members.every((pkg) => pkg.classification === 'product'));
+  assert.ok(members.every((pkg) => pkg.tier === 4));
+  assert.ok(members.every((pkg) => pkg.publishPolicy === 'canary-only'));
+  assert.ok(members.every((pkg) => pkg.requiredGateIds.includes('benchmarking-ci')));
+  assert.deepEqual(
+    members.map(({ name }) => name.replace('@jinn-network/', '')).sort(),
+    [
+      'benchmarking-aggregate',
+      'benchmarking-evaluation',
+      'benchmarking-evidence',
+      'benchmarking-interop',
+      'benchmarking-local',
+      'benchmarking-native-capture',
+      'benchmarking-protocol',
+      'benchmarking-publication',
+      'benchmarking-records',
+      'benchmarking-run',
+      'benchmarking-testing',
+    ],
+  );
+
+  for (const groupId of ['colophon-claims-v1', 'transitional-or-private']) {
+    assert.ok(
+      catalog.releaseGroups[groupId].allowedDependencyReleaseGroups.includes('benchmarking-product-v1'),
+      `${groupId} must allow the benchmarking product group`,
+    );
+  }
 });

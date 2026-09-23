@@ -17,7 +17,6 @@ const packages = [
   ['run', '@jinn-network/benchmarking-run'],
   ['publication', '@jinn-network/benchmarking-publication'],
   ['interop', '@jinn-network/benchmarking-interop'],
-  ['marketplace', '@jinn-network/benchmarking-marketplace'],
   ['local', '@jinn-network/benchmarking-local'],
 ];
 
@@ -28,7 +27,6 @@ const codeEntrypoints = [
   '@jinn-network/benchmarking-run',
   '@jinn-network/benchmarking-publication',
   '@jinn-network/benchmarking-interop',
-  '@jinn-network/benchmarking-marketplace',
   '@jinn-network/benchmarking-local',
 ];
 
@@ -36,21 +34,16 @@ const codeEntrypoints = [
 // file: dep so NodeNext resolves it (program §7.8; record-discovery-packed-types.test.mjs
 // precedent). M1 seeds task-execution-protocol; M2 (testing) adds task-execution-profiles; M3
 // (aggregate) adds trust-core; M4 (run) adds task-execution-backend; M5 (interop) reuses
-// protocol + profiles; M7 (marketplace) adds marketplace-binding/projector plus
-// discovery + trust-resolve transitives for binding/projector graphs. C4 (local) adds no
-// cross-tree package of its own: it imports records + run only.
+// protocol + profiles. Publication adds the kind-neutral discovery coordinator. C4 (local)
+// adds no cross-tree package of its own: it imports records + run only.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
-  ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
   ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
   ['@jinn-network/record-publication', join(root, 'packages', 'discovery', 'publication')],
-  ['@jinn-network/contract-abis', join(root, 'packages', 'contract-abis')],
-  ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
-  ['@jinn-network/marketplace-projector', join(root, 'packages', 'marketplace', 'projector')],
 ];
 
 function run(command, args, options = {}) {

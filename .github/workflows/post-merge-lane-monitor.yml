@@ -165,9 +165,13 @@ jobs:
                 // A hand-closed alert whose marker still names the current failing run attempt
                 // has already been seen by a human: filing again now would only re-post it every
                 // tick. The next failing run, or a failing re-run, changes the marker and files
-                // afresh. A recovery-closed alert matches only when the success that closed it
-                // no longer decides, e.g. its re-run is in progress or was cancelled; staying
-                // quiet then is right, because that success already published.
+                // afresh. A recovery-closed match is the same contract: the closed issue's marker
+                // must name this tick's failing run attempt. That is not "whenever the success
+                // that closed it no longer decides." If that success is a re-run of the alerted
+                // run and is itself re-run (in progress or cancelled), an older failure can
+                // become latest and file a short-lived new alert; the next healthy tick closes
+                // it. Staying quiet is right only when the current failing attempt is still the
+                // one the closed alert named.
                 const closed = await closedAlertFor(lane, marker);
                 if (closed) {
                   core.info(`${lane.workflow}: alert #${closed.number} was closed for run ${marker.runId} attempt ${marker.attempt}; deferring to the next failing run.`);

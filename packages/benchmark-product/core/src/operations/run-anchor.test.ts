@@ -22,7 +22,7 @@ import {
   parseExactAnchorEvidence,
 } from "@jinn-network/trust-core";
 import type { AnchorProofSource } from "@jinn-network/trust-core";
-import { nodeCryptoAnchorPorts } from "@colophon-claims/verify";
+import { nodeCryptoAnchorPorts } from "@colophon-claims/check";
 import {
   KIT_AUTHORITY_SEED,
   KIT_BITCOIN_BLOCK_HEIGHT,

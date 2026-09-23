@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, posix, resolve } from 'node:path';
 import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -75,12 +75,18 @@ const LIVE_TREE_FIXTURES = {
   'evidence-source-boundaries.test.mjs': ['packages/evidence/repository-ipfs/.jinn-ipfs-production-boundary-'],
   'observation-reader-gate-boundary.test.mjs': ['.github/scripts/.tmp-observation-reader-guard-'],
 };
-// Calls that materialise a path on disk. `writeFileSync` counts: a single in-checkout *file* is
-// just as invisible to `git ls-files --cached --others --exclude-standard` as a directory is.
-// Mapped to the index of the argument naming the path being *created*: `cpSync(from, to)` reads
-// its first argument, so only the second says where anything lands.
+// Calls that materialize a path on disk, mapped to the index of the argument naming the path
+// being *created*. Sync and async spellings create the same path. A single in-checkout *file* is
+// just as invisible to `git ls-files --cached --others --exclude-standard` as a directory is, and
+// so is one that a copy, append, rename, or link lands. The two-path calls (`cpSync(from, to)`,
+// `copyFile`, `rename`, `symlink(target, path)`, `link`) read or point at their first argument, so
+// only the second says where anything lands. A match counts only when that argument references a
+// checkout binding, which bounds the false positives a common name like `link(` could raise.
 const FIXTURE_CREATING_CALLS = new Map([
-  ['mkdtempSync', 0], ['mkdtemp', 0], ['mkdirSync', 0], ['mkdir', 0], ['writeFileSync', 0], ['cpSync', 1],
+  ['mkdtempSync', 0], ['mkdtemp', 0], ['mkdirSync', 0], ['mkdir', 0],
+  ['writeFileSync', 0], ['writeFile', 0], ['appendFileSync', 0], ['appendFile', 0],
+  ['cpSync', 1], ['cp', 1], ['copyFileSync', 1], ['copyFile', 1],
+  ['renameSync', 1], ['rename', 1], ['symlinkSync', 1], ['symlink', 1], ['linkSync', 1], ['link', 1],
 ]);
 
 /** Splits a call's argument text on its top-level commas. */
@@ -202,49 +208,115 @@ function callArgumentText(source, open) {
 const stringLiterals = (text) => [...text.matchAll(/'([^']*)'|"([^"]*)"/gu)]
   .map((literal) => literal[1] ?? literal[2]);
 
+// Every suite this gate scans lives here: `collectLiveTreeFixtures` reads only `scriptsDir`. A
+// binding's offset is therefore resolved from this directory.
+const SCANNED_SUITE_DIR = '.github/scripts';
+
+// The two spellings of "this file's directory" that live in this tree: the modern
+// `import.meta.dirname` and the older `dirname(fileURLToPath(import.meta.url))`, with or without
+// a `path.` namespace.
+const THIS_DIRECTORY = String.raw`(?:import\.meta\.dirname|(?:path\.)?dirname\(\s*fileURLToPath\(\s*import\.meta\.url\s*\)\s*\))`;
+
 /**
- * Identifiers bound at module scope to the repository root. A `root` bound inside a helper is
- * almost always a tmpdir fixture root; only a module-level `resolve(<this file's directory>, ...)`
- * reaches into the live checkout.
- *
- * Both spellings of "this file's directory" that live in this tree are accepted -- the modern
- * `import.meta.dirname` and the older `dirname(fileURLToPath(import.meta.url))`, which 17 suites
- * still use -- with an optional `export`. Recognising only one of them made the gate skip every
- * suite written in the other, silently: `findInCheckoutFixtureCalls` returns [] with no bindings,
- * so the fail-closed null-prefix path is never reached.
+ * A repo-root-relative path as segments; null when it leaves the checkout. Callers pass the
+ * output of `posix.join`, which normalizes: that is what keeps `join(scriptsDir, '..', 'x')`
+ * comparable with the declared `.github/x`.
  */
-export function findRepoRootBindings(source) {
-  const binding = /^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*resolve\(\s*(?:import\.meta\.dirname|dirname\(\s*fileURLToPath\(\s*import\.meta\.url\s*\)\s*\))/gmu;
-  return [...maskLiterals(source).matchAll(binding)].map((match) => match[1]);
+function checkoutSegments(normalized) {
+  if (normalized === '..' || normalized.startsWith('../') || normalized.startsWith('/')) return null;
+  return normalized.split('/').filter((segment) => segment !== '' && segment !== '.');
+}
+
+/**
+ * Identifiers bound at module scope to a directory of this checkout, each mapped to that
+ * directory's repo-root-relative segments, or to null where the binding cannot be resolved
+ * statically. A `root` bound inside a helper is almost always a tmpdir fixture root; only a
+ * module-level binding derived from this file's directory reaches into the live checkout.
+ *
+ * Accepted shapes, each with an optional `export`: `const x = resolve(<here>, ...)` and
+ * `const x = join(<here>, ...)`, with or without `path.`, and a bare `const x = <here>;`, where
+ * `<here>` is either spelling of this file's directory. `<here>` must be the whole first argument,
+ * and the arguments after it must each be one plain string literal; anything else (such as
+ * `<here> + '/sub'`), an absolute literal, or a result that escapes the checkout binds the name to
+ * null, which every call through it reports.
+ *
+ * This used to accept only `resolve(<here>, ...)` climbing to the repository root. That made the
+ * gate skip every suite that binds a checkout directory some other way -- `const scriptsDir =
+ * path.dirname(fileURLToPath(import.meta.url))`, with no root at all -- silently:
+ * `findInCheckoutFixtureCalls` returns [] with no bindings, so the fail-closed null-prefix path
+ * is never reached (#3240). Recognizing only one spelling of `<here>` failed the same way before.
+ */
+export function findCheckoutBindings(source) {
+  const masked = maskLiterals(source);
+  /** @type {Map<string, string[] | null>} */
+  const bindings = new Map();
+  const derived = new RegExp(
+    String.raw`^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:path\.)?(?:resolve|join)\(\s*${THIS_DIRECTORY}`,
+    'gmu',
+  );
+  const wholeDirectory = new RegExp(String.raw`^\s*${THIS_DIRECTORY}\s*$`, 'u');
+  for (const match of masked.matchAll(derived)) {
+    const open = masked.indexOf('(', match.index + match[0].indexOf('='));
+    const maskedArguments = callArgumentText(masked, open);
+    const rawArguments = callArgumentText(source, open);
+    const here = wholeDirectory.test(argumentAt(maskedArguments, rawArguments, 0).masked);
+    const rest = [];
+    for (let index = 1; index <= argumentBoundaries(maskedArguments).length; index += 1) {
+      rest.push(argumentAt(maskedArguments, rawArguments, index).raw.trim());
+    }
+    // Literals are read from the raw text: the masked copy blanks their contents.
+    const literal = /^(['"])([^'"]*)\1$/u;
+    const resolvable = rest.every((argument) => literal.test(argument) && !argument.slice(1).startsWith('/'));
+    bindings.set(
+      match[1],
+      here && resolvable
+        ? checkoutSegments(posix.join(SCANNED_SUITE_DIR, ...rest.map((argument) => argument.slice(1, -1))))
+        : null,
+    );
+  }
+  const bare = new RegExp(String.raw`^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*${THIS_DIRECTORY}\s*(?:;|$)`, 'gmu');
+  for (const match of masked.matchAll(bare)) bindings.set(match[1], checkoutSegments(SCANNED_SUITE_DIR));
+  return bindings;
 }
 
 /**
  * Calls that create a path under the repository root, each with the repo-root-relative prefix it
- * creates. `segments` is null when the path is not statically resolvable to string literals.
+ * creates. `segments` is null when the path is not statically resolvable to string literals, or
+ * when it resolves outside the checkout.
  *
  * Known limits, accepted and matching the style of the tree's other regex-based guards: the
- * scanner resolves one level of `const x = join(root, ...)` indirection but not two, does not
+ * scanner resolves one level of `const x = join(dir, ...)` indirection but not two, does not
  * follow a path through a function parameter or a template literal, reads only the calls in
- * FIXTURE_CREATING_CALLS, and sees only the two repo-root binding shapes findRepoRootBindings
- * accepts -- a suite that binds a checkout directory some other way (`const scriptsDir =
- * dirname(fileURLToPath(import.meta.url))`, with no repo root at all) is skipped. A new
+ * FIXTURE_CREATING_CALLS, and sees only the module-level checkout bindings findCheckoutBindings
+ * accepts. A directory reference used inline in a call rather than bound at module scope, a
+ * `new URL(..., import.meta.url)`, a function-local binding, a root imported from another
+ * module, or a spelling of this file's directory other than the two THIS_DIRECTORY names (such as
+ * `dirname(import.meta.filename)`, `` `${import.meta.dirname}/x` ``, or
+ * `import.meta.dirname ?? ...`) binds nothing, and a suite with none of the accepted bindings is
+ * skipped. A new
  * in-checkout fixture built in a shape outside those bounds is invisible to this gate, which is
  * why the rule is documented at the fixture site as well.
  */
 export function findInCheckoutFixtureCalls(source) {
-  const bindings = findRepoRootBindings(source);
-  if (bindings.length === 0) return [];
+  const bindings = findCheckoutBindings(source);
+  if (bindings.size === 0) return [];
   const masked = maskLiterals(source);
-  const rootReference = new RegExp(`\\b(?:${bindings.join('|')})\\b`, 'u');
+  const rootReference = new RegExp(`\\b(?:${[...bindings.keys()].join('|')})\\b`, 'u');
+  // The first of `names` a masked argument references; undefined when it references none.
+  const referenced = (names, maskedText) => names.find((name) => new RegExp(`\\b${name}\\b`, 'u').test(maskedText));
 
   // One level of indirection: `const dir = join(root, '.github', 'scripts', '.tmp-x-');` is the
   // house style in this directory, and reading only the fixture call's own parens would miss it.
-  /** @type {Map<string, string[]>} */
+  /** @type {Map<string, { offset: string[] | null, literals: string[] }>} */
   const pathBindings = new Map();
-  for (const match of masked.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:join|resolve)\(/gu)) {
+  for (const match of masked.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:path\.)?(?:join|resolve)\(/gu)) {
     const open = match.index + match[0].length - 1;
-    if (!rootReference.test(callArgumentText(masked, open))) continue;
-    pathBindings.set(match[1], stringLiterals(callArgumentText(source, open)));
+    const through = referenced([...bindings.keys()], callArgumentText(masked, open));
+    if (through === undefined) continue;
+    pathBindings.set(match[1], {
+      offset: bindings.get(through),
+      literals: stringLiterals(callArgumentText(source, open)),
+    });
   }
   const pathReference = pathBindings.size === 0
     ? null
@@ -258,12 +330,14 @@ export function findInCheckoutFixtureCalls(source) {
       const maskedTarget = argument.masked;
       const viaRoot = rootReference.test(maskedTarget);
       if (!viaRoot && !(pathReference && pathReference.test(maskedTarget))) continue;
-      const target = argument.raw;
-      const inherited = viaRoot
-        ? []
-        : pathBindings.get([...pathBindings.keys()].find((key) => new RegExp(`\\b${key}\\b`, 'u').test(maskedTarget))) ?? [];
-      const segments = [...inherited, ...stringLiterals(target)];
-      calls.push({ call: name, segments: segments.length > 0 ? segments : null });
+      const base = viaRoot
+        ? { offset: bindings.get(referenced([...bindings.keys()], maskedTarget)), literals: [] }
+        : pathBindings.get(referenced([...pathBindings.keys()], maskedTarget));
+      const literals = [...base.literals, ...stringLiterals(argument.raw)];
+      const segments = base.offset === null || literals.length === 0
+        ? null
+        : checkoutSegments(posix.join(...base.offset, ...literals));
+      calls.push({ call: name, segments: segments !== null && segments.length > 0 ? segments : null });
     }
   }
   return calls;
@@ -423,7 +497,23 @@ test('every .github/scripts/*.test.mjs is referenced by at least one workflow', 
 });
 
 test('findOrphanedScriptTests detects a planted orphan', () => {
-  assert.deepEqual(findOrphanedScriptTests(scriptsDir, workflowsDir), []);
+  const scriptsRoot = mkdtempSync(join(tmpdir(), 'jinn-planted-orphan-scripts-'));
+  const workflowsRoot = mkdtempSync(join(tmpdir(), 'jinn-planted-orphan-workflows-'));
+  try {
+    writeFileSync(join(scriptsRoot, 'wired.test.mjs'), '');
+    writeFileSync(join(scriptsRoot, 'orphan.test.mjs'), '');
+    writeFileSync(join(workflowsRoot, 'w.yml'), [
+      'jobs:',
+      '  verify:',
+      '    steps:',
+      '      - run: node --test .github/scripts/wired.test.mjs',
+      '',
+    ].join('\n'));
+    assert.deepEqual(findOrphanedScriptTests(scriptsRoot, workflowsRoot), ['orphan.test.mjs']);
+  } finally {
+    rmSync(scriptsRoot, { recursive: true, force: true });
+    rmSync(workflowsRoot, { recursive: true, force: true });
+  }
 });
 
 // The harvest matched `*.test.mjs` over raw workflow source, comments included, so a suite named
@@ -701,7 +791,7 @@ test('the in-checkout fixture detector reads repo-root bindings, not tmpdir ones
     "const root = resolve(import.meta.dirname, '../..');",
     "const dir = mkdtempSync(join(root, '.github', 'scripts', '.tmp-guard-'));",
   ].join('\n');
-  assert.deepEqual(findRepoRootBindings(inCheckout), ['root']);
+  assert.deepEqual([...findCheckoutBindings(inCheckout)], [['root', []]]);
   assert.deepEqual(findInCheckoutFixtureCalls(inCheckout), [
     { call: 'mkdtempSync', segments: ['.github', 'scripts', '.tmp-guard-'] },
   ]);
@@ -736,7 +826,7 @@ test('both repo-root binding spellings are recognized', () => {
     "const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');",
     "mkdtempSync(join(root, 'packages', 'tmp-new-fixture-'));",
   ].join('\n');
-  assert.deepEqual(findRepoRootBindings(viaFileUrl), ['root']);
+  assert.deepEqual([...findCheckoutBindings(viaFileUrl)], [['root', []]]);
   assert.deepEqual(findInCheckoutFixtureCalls(viaFileUrl), [
     { call: 'mkdtempSync', segments: ['packages', 'tmp-new-fixture-'] },
   ]);
@@ -746,14 +836,122 @@ test('both repo-root binding spellings are recognized', () => {
     "export const root = resolve(import.meta.dirname, '../..');",
     "mkdtempSync(join(root, 'packages', '.tmp-exported-'));",
   ].join('\n');
-  assert.deepEqual(findRepoRootBindings(exported), ['root']);
+  assert.deepEqual([...findCheckoutBindings(exported)], [['root', []]]);
   assert.deepEqual(
     findInCheckoutFixtureCalls(exported).map(({ segments }) => segments),
     [['packages', '.tmp-exported-']],
   );
 
   // A tmpdir root written in either spelling still binds nothing.
-  assert.deepEqual(findRepoRootBindings("const dir = resolve(tmpdir(), 'x');"), []);
+  assert.deepEqual([...findCheckoutBindings("const dir = resolve(tmpdir(), 'x');")], []);
+});
+
+test('a checkout-directory binding with no repo root is seen (#3240)', () => {
+  // `npm-publish-workflow.test.mjs` binds only its own directory. A fixture added from that
+  // template used to bind nothing, so the gate skipped the suite without reporting anything.
+  const scriptsOnly = [
+    'const scriptsDir = path.dirname(fileURLToPath(import.meta.url));',
+    "writeFileSync(path.join(scriptsDir, 'tmp-x-'), 'x');",
+  ].join('\n');
+  assert.deepEqual([...findCheckoutBindings(scriptsOnly)], [['scriptsDir', ['.github', 'scripts']]]);
+  assert.deepEqual(findInCheckoutFixtureCalls(scriptsOnly), [
+    { call: 'writeFileSync', segments: ['.github', 'scripts', 'tmp-x-'] },
+  ]);
+
+  // The binding's offset is carried through one level of indirection.
+  const indirect = [
+    'const here = resolve(import.meta.dirname);',
+    "const d = join(here, '.tmp-y-');",
+    'mkdirSync(d);',
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(indirect), [
+    { call: 'mkdirSync', segments: ['.github', 'scripts', '.tmp-y-'] },
+  ]);
+
+  // The reported prefix is normalized, so it stays comparable with a declared one.
+  const climbing = [
+    'const scriptsDir = join(import.meta.dirname);',
+    "mkdtempSync(join(scriptsDir, '..', 'tmp-z-'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(climbing), [
+    { call: 'mkdtempSync', segments: ['.github', 'tmp-z-'] },
+  ]);
+
+  const bare = ['const here = import.meta.dirname;', "mkdirSync(join(here, '.tmp-w-'));"].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(bare), [
+    { call: 'mkdirSync', segments: ['.github', 'scripts', '.tmp-w-'] },
+  ]);
+});
+
+test('a checkout binding that escapes the root or is not literal fails closed', () => {
+  const escaping = [
+    "const up = resolve(import.meta.dirname, '../../..');",
+    "mkdirSync(join(up, 'a'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(escaping), [{ call: 'mkdirSync', segments: null }]);
+
+  const dynamic = [
+    'const dyn = resolve(import.meta.dirname, name);',
+    "mkdirSync(join(dyn, 'a'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(dynamic), [{ call: 'mkdirSync', segments: null }]);
+
+  const absolute = [
+    "const abs = resolve(import.meta.dirname, '/tmp');",
+    "mkdirSync(join(abs, 'a'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(absolute), [{ call: 'mkdirSync', segments: null }]);
+
+  const outside = [
+    "const root = resolve(import.meta.dirname, '../..');",
+    "mkdirSync(join(root, '..', 'outside'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(outside), [{ call: 'mkdirSync', segments: null }]);
+
+  // The directory must be the whole first argument; a concatenated suffix is not dropped.
+  const concatenated = [
+    "const x = resolve(import.meta.dirname + '/sub');",
+    "mkdirSync(join(x, 'tmp-a-'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(concatenated), [{ call: 'mkdirSync', segments: null }]);
+
+  // A directory reference with no literal of its own still names nothing checkable.
+  const unnamed = [
+    'const scriptsDir = dirname(fileURLToPath(import.meta.url));',
+    'const fixture = mkdtempSync(`${scriptsDir}/tmp-interpolated-`);',
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(unnamed), [{ call: 'mkdtempSync', segments: null }]);
+});
+
+test('the async, append, copy, and link siblings of covered calls are seen (#3278)', () => {
+  const prelude = "const root = resolve(import.meta.dirname, '../..');";
+  const rows = [
+    ["await writeFile(join(root, 'packages', '.tmp-a-'), 'x');", 'writeFile'],
+    ["appendFileSync(join(root, 'packages', '.tmp-a-'), 'x');", 'appendFileSync'],
+    ["await appendFile(join(root, 'packages', '.tmp-a-'), 'x');", 'appendFile'],
+    ["await cp(src, join(root, 'packages', '.tmp-a-'));", 'cp'],
+    ["copyFileSync(src, join(root, 'packages', '.tmp-a-'));", 'copyFileSync'],
+    ["await copyFile(src, join(root, 'packages', '.tmp-a-'));", 'copyFile'],
+    ["renameSync(src, join(root, 'packages', '.tmp-a-'));", 'renameSync'],
+    ["await rename(src, join(root, 'packages', '.tmp-a-'));", 'rename'],
+    ["symlinkSync(src, join(root, 'packages', '.tmp-a-'));", 'symlinkSync'],
+    ["await symlink(src, join(root, 'packages', '.tmp-a-'));", 'symlink'],
+    ["linkSync(src, join(root, 'packages', '.tmp-a-'));", 'linkSync'],
+    ["await fsp.link(src, join(root, 'packages', '.tmp-a-'));", 'link'],
+  ];
+  for (const [callSource, call] of rows) {
+    assert.deepEqual(
+      findInCheckoutFixtureCalls(`${prelude}\n${callSource}`),
+      [{ call, segments: ['packages', '.tmp-a-'] }],
+      callSource,
+    );
+  }
+
+  // The two-path calls read their destination: a copy out of the checkout creates nothing in it.
+  assert.deepEqual(
+    findInCheckoutFixtureCalls(`${prelude}\ncopyFileSync(join(root, 'x'), join(tmpdir(), 'y'));`),
+    [],
+  );
 });
 
 test('the mask survives quotes inside regex literals and comments', () => {

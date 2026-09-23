@@ -28,6 +28,13 @@ export const ALERT_LABEL = 'automated:post-merge-lane-failure';
 export const CONFIRM_AFTER_FAILURES = 2;
 
 /**
+ * Newest-run page the monitor reads (`per_page` in post-merge-lane-monitor.yml).
+ * A returned list shorter than this is the lane's full history, so counts are exact
+ * even when no success is in it.
+ */
+export const RUN_WINDOW = 100;
+
+/**
  * How long a SINGLE unrecovered failure is tolerated before it alerts anyway.
  * A genuine blip is followed by a green run and never opens an issue; a real break
  * that nothing has pushed over still surfaces well inside one working day, since the
@@ -179,8 +186,10 @@ function day(run) {
  * that proves recovery either, so the driver leaves any open alert alone. It is kept
  * apart from `healthy`, which always names the successful run that earned it.
  *
- * `windowBounded` is whether the window reaches past the failing streak: only then are
- * the streak length, its first failure, and the last success known rather than floors.
+ * `windowBounded` is whether the streak length and its first failure are known rather
+ * than floors: either a success sits behind the streak, or the page is shorter than
+ * `RUN_WINDOW` so the returned list is the whole history. The last-success row still
+ * names a run only when one is in the window.
  *
  * @param {{lane: {branch: string}, runs: ReadonlyArray<object>, now: number}} input
  *   `runs` is any window of that lane's runs, in any order.
@@ -217,9 +226,10 @@ export function classifyLane({ lane, runs, now }) {
   const verdict = {
     consecutiveFailures: streak.length,
     observedRuns,
-    // A success behind the streak proves the window reaches past it. Without one the
-    // streak may continue beyond the page that was read, and every count is a floor.
-    windowBounded: lastSuccess !== undefined,
+    // A success behind the streak, or a short page that is the whole history, makes
+    // the streak length exact. A full page with no success may continue earlier, so
+    // the count is a floor.
+    windowBounded: lastSuccess !== undefined || observedRuns < RUN_WINDOW,
     latestRun,
     firstFailure: streak[streak.length - 1],
     lastSuccess,
@@ -272,15 +282,19 @@ export function renderAlert({ lane, verdict }) {
       : `| Oldest failure in the observed window | ${firstFailure.html_url} (${day(firstFailure)}) — the streak may start earlier |`,
     lastSuccess
       ? `| Last successful run | ${lastSuccess.html_url} (\`${lastSuccess.head_sha.slice(0, 8)}\`, ${day(lastSuccess)}) |`
-      : `| Last successful run | Not in the observed window — ${windowNote} |`,
+      : windowBounded
+        ? `| Last successful run | None — the observed history has no success |`
+        : `| Last successful run | Not in the observed window — ${windowNote} |`,
     '',
     '### What is stale while this is red',
     '',
     lane.staleArtifact,
     lastSuccess
       ? `The newest artifacts this lane published come from \`${lastSuccess.head_sha.slice(0, 8)}\` (${day(lastSuccess)}).`
-      : `The published artifacts are older than the observed window reaches (${windowNote}); find the ` +
-        'last successful run in the Actions tab.',
+      : windowBounded
+        ? 'The observed history has no successful run, so this lane has not published a current artifact.'
+        : `The published artifacts are older than the observed window reaches (${windowNote}); find the ` +
+          'last successful run in the Actions tab.',
     '',
     '### Closing this',
     '',

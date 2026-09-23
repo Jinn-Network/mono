@@ -15,8 +15,8 @@ import {
   parseRun,
   readBeaconSource,
 } from "@jinn-network/benchmarking-records";
-import { BEACON_SOURCE_IDS, requiredBeaconRound, runBindingClass, runBindingSentence } from "@colophon-claims/verify";
-import type { BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
+import { BEACON_SOURCE_IDS, requiredBeaconRound, runBindingClass, runBindingSentence } from "@colophon-claims/check";
+import type { BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/check";
 import { readRunBindingCarriage } from "../binding/carriage.js";
 import type { LifecycleState } from "../domain/lifecycle.js";
 import { refuse, type ProductErrorEnvelope } from "../errors.js";

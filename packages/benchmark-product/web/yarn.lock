@@ -198,11 +198,35 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@colophon-claims/check@portal:../check::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@colophon-claims/check@portal:../check::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@fontsource-variable/newsreader": "npm:5.3.0"
+    "@fontsource-variable/public-sans": "npm:5.3.0"
+    "@fontsource/ibm-plex-mono": "npm:5.3.0"
+    "@jinn-network/benchmarking-aggregate": "npm:0.1.0"
+    "@jinn-network/benchmarking-evidence": "npm:0.1.0"
+    "@jinn-network/benchmarking-interop": "npm:0.1.0"
+    "@jinn-network/benchmarking-local": "npm:0.1.0"
+    "@jinn-network/benchmarking-protocol": "npm:0.1.0"
+    "@jinn-network/benchmarking-records": "npm:0.1.0"
+    "@jinn-network/benchmarking-run": "npm:0.1.0"
+    "@jinn-network/task-admission": "npm:0.1.0"
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+    zod: "npm:4.4.3"
+  bin:
+    colophon-check: ./dist/bin.js
+  languageName: node
+  linkType: soft
+
 "@colophon-claims/core@portal:../core::locator=%40colophon-claims%2Fweb%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@colophon-claims/core@portal:../core::locator=%40colophon-claims%2Fweb%40workspace%3A."
   dependencies:
-    "@colophon-claims/verify": "npm:0.2.1"
+    "@colophon-claims/check": "npm:0.2.1"
     "@fontsource-variable/newsreader": "npm:5.3.0"
     "@fontsource-variable/public-sans": "npm:5.3.0"
     "@fontsource/ibm-plex-mono": "npm:5.3.0"
@@ -234,30 +258,6 @@ __metadata:
     "@jinn-network/task-execution-workspace": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
     zod: "npm:4.4.3"
-  languageName: node
-  linkType: soft
-
-"@colophon-claims/verify@portal:../verify::locator=%40colophon-claims%2Fweb%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@colophon-claims/verify@portal:../verify::locator=%40colophon-claims%2Fweb%40workspace%3A."
-  dependencies:
-    "@fontsource-variable/newsreader": "npm:5.3.0"
-    "@fontsource-variable/public-sans": "npm:5.3.0"
-    "@fontsource/ibm-plex-mono": "npm:5.3.0"
-    "@jinn-network/benchmarking-aggregate": "npm:0.1.0"
-    "@jinn-network/benchmarking-evidence": "npm:0.1.0"
-    "@jinn-network/benchmarking-interop": "npm:0.1.0"
-    "@jinn-network/benchmarking-local": "npm:0.1.0"
-    "@jinn-network/benchmarking-protocol": "npm:0.1.0"
-    "@jinn-network/benchmarking-records": "npm:0.1.0"
-    "@jinn-network/benchmarking-run": "npm:0.1.0"
-    "@jinn-network/task-admission": "npm:0.1.0"
-    "@jinn-network/task-execution-profiles": "npm:0.1.0"
-    "@jinn-network/task-execution-protocol": "npm:0.1.0"
-    "@jinn-network/trust-core": "npm:0.1.0"
-    zod: "npm:4.4.3"
-  bin:
-    colophon-verify: ./dist/bin.js
   languageName: node
   linkType: soft
 

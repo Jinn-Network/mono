@@ -17,6 +17,7 @@ See `../docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md`
 | --- | --- |
 | `runtime/` | `@jinn-network/plugin-runtime` — lifecycle/configuration/health/logging scaffold. npm-published; later components and the Hermes adapter acquire it by exact pin. |
 | `adapter-hermes/` | The clean-slate Hermes adapter. Python; mirrored to the `Jinn-Network/jinn-plugin` channel repository; **never** npm-published. |
+| `adapter-claude/` | The Claude Code adapter. Dependency-free Node ESM, installed by clone as a Claude Code plugin; carries no `package.json` and is **never** npm-published. |
 | `frozen/` | The superseded 0.1.2-era Hermes adapter and its `layer-runtime.json`. Frozen: critical fixes only, no feature work. Removed when the published trio retires. |
 
 `runtime/` must never import from `frozen/`, and the source-boundary guard enforces it.

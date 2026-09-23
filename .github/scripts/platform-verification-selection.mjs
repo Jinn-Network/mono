@@ -14,11 +14,12 @@
 // The default is fail-safe. A changed path that maps to no catalogued package and
 // is not explicitly ignorable selects every lane.
 
+import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadCatalogPackages, loadPlatformCatalog, RUNTIME_DEPENDENCY_SECTIONS, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
 
 export const GATE_DOMAINS = new Map([
-  ['benchmarking-ci', 'benchmarking'],
   ['contracts-ci', 'contracts'],
   ['environments-ci', 'environments'],
   ['evidence-ci', 'evidence'],
@@ -222,7 +223,13 @@ function parseArgs(argv) {
   return parsed;
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+// Paths, not URLs, and both resolved: Node realpaths the entry module but not
+// `argv[1]`, so a checkout reached through a symlink would otherwise print nothing.
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   const { repoRoot, changedFiles } = parseArgs(process.argv.slice(2));
   // stdin is the normal path: `git diff --name-only base...head | node this-script.mjs`
   const stdinFiles = process.stdin.isTTY

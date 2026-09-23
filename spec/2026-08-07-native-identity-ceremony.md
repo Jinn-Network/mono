@@ -640,7 +640,7 @@ re-signs bindings without touching keys, stores, or Agent IRIs, so none of the f
 terms change and the digest is identical. The anchor MAY therefore be reused; the existing
 anchor already commits to exactly this tuple and there is no evidentiary reason to mint a
 second. Reuse is not automatically correct, and it is also what happens by default: `init`
-refuses outright while the catalog exists (`operator/src/cli/commands/ceremony.ts:949-966`), and
+refuses outright while the catalog exists (`operator/src/cli/commands/ceremony.ts:949-965`), and
 the only way past that guard leaves the run receipt in place, so `reusableAnchor` (`:333-349`)
 resumes onto the already-mined anchor unless the receipt is moved aside too. The runbook states
 this and both options' costs. They differ semantically. Reuse preserves
@@ -779,7 +779,7 @@ today.
 table above lists the `revocation-anchor/v1` preimage as authoring convention, so borrowing
 applies verbatim to revocation anchors. A revocation declaring a borrowed pre-evidence anchor
 takes effect before the evidence it revokes (`binding-resolver.ts:137-148`,
-`verify.ts:297-320`), and the authorized signer is the operator's own voucher account or
+`verify.ts:303-325`), and the authorized signer is the operator's own voucher account or
 `bindings`-scoped key (`verify.ts:276-295`) — so an operator can back-date a revocation of their
 own binding and de-attribute their own past evidence, which is exactly the non-retroactivity
 §7.4b forbids and law 6 exists to protect. The rule it breaks is **R1**, which requires an anchor
@@ -791,7 +791,7 @@ winning binding's digest alone (`binding-resolver.ts:279`), an earlier-anchored 
 binding for the same `(key, agent)` escapes every revocation bound to the record it supersedes —
 revocation defeated, entirely inside the author's own IRI. The actor there is the **catalog
 author**, not the key's thief: a non-genesis replacement still needs §7.4a's self-extension exit,
-which `voucherIdentityEquals` against the incumbent voucher gates (`verify.ts:220-225`). That makes
+which `voucherIdentityEquals` against the incumbent voucher gates (`verify.ts:225-230`). That makes
 the shared-catalog case the sharp one, where whoever holds the file can defeat another party's
 revocation.
 
@@ -1018,7 +1018,7 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    session tuple, so an interrupted run and a scope re-author both reproduce it, and
    `reusableAnchor` (`operator/src/cli/commands/ceremony.ts:333-349`) resumes onto the
    already-mined transaction rather than orphaning it. That is not merely the interrupted-run
-   case: `init` refuses outright while the catalog exists (`:949-966`), and the only way past
+   case: `init` refuses outright while the catalog exists (`:949-965`), and the only way past
    that guard leaves the run receipt in place, so a re-author reuses automatically too unless
    the receipt is moved aside. **The one act that MUST NOT reuse is a rebind**, whose anchor is
    always freshly submitted (§3.2b) — the narrow rebind preimage makes a cross-act collision
@@ -1297,7 +1297,7 @@ and both `isGenesisAmong` (`:217-223`) and `findIncumbentControlVoucher` (`:201-
 operate only within that per-agent set — so a joiner's fresh `urn:uuid:` Agent IRI gets its
 own genesis binding (equal-`effectiveStart` batch settled by the digest tiebreak,
 `:219-221`), same-session peer bindings pass because the incumbent window admits equality
-(`:150-154`) and the voucher is the same EOA (`verify.ts:176-180`), and the first operator's
+(`:150-154`) and the voucher is the same EOA (`voucherIdentityEquals`, `verify.ts:46-60`, applied at `:225-230`), and the first operator's
 bindings are never anyone else's incumbent. Governance succession was verified against the
 dual-threshold chain (`policy.ts:266-271`); the genesis signer set needs no binding or
 anchor of its own (`policy.ts:247-250`). The v0.2 changes are the review's findings: the

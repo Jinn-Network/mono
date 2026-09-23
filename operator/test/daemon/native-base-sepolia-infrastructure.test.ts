@@ -310,6 +310,8 @@ describe('first-party Base Sepolia public record transport', () => {
       'http://0177.0.0.1/records/x',
       'http://0x7f000001/records/x',
       'http://2130706433/records/x',
+      // A scheme-less locator (#3853).
+      'records/abc', // pins only that no fetch occurs; the scheme-less case below pins the named refusal
     ] as const;
 
     it.each(hostile)('never fetches %s', async (locator) => {
@@ -322,6 +324,30 @@ describe('first-party Base Sepolia public record transport', () => {
 
       await expect(transport.byLocation(locator)).rejects.toThrow();
       expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    // #3853: `new URL()` threw a bare TypeError here, which `reportRefusedRecordDestination` does
+    // not name, so a scheme-less locator was dropped without a warning.
+    it('refuses a scheme-less locator by name, without fetching it', async () => {
+      const fetchImpl = vi.fn(async () => new Response('unreachable'));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl,
+      });
+
+      const err = await transport.byLocation('records/abc').catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(NativeRecordDestinationError);
+      expect(err).toMatchObject({ message: expect.stringMatching(/not a resolvable URL/u) });
+      expect(fetchImpl).not.toHaveBeenCalled();
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(reportRefusedRecordDestination('ctx', err)).toBe(true);
+        expect(String(warn.mock.calls.at(-1)?.[0])).toContain('records/abc');
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('keeps a configured loopback serving root working (local deployments)', async () => {

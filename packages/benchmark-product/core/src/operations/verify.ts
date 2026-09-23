@@ -41,13 +41,19 @@ import {
   parseRun,
   type ReportRecord,
 } from "@jinn-network/benchmarking-records";
-import { evaluateIntegrityAnchors, type IntegrityAnchorsReport } from "@colophon-claims/verify";
+import {
+  DISCLOSURE_SPECIFICATION_CAPABILITY,
+  EXTERNAL_IMPORT_CAPABILITY,
+  activeCapabilityVector,
+  evaluateIntegrityAnchors,
+  type IntegrityAnchorsReport,
+} from "@colophon-claims/check";
 import { verifyMatrix } from "@jinn-network/benchmarking-run";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { refuse } from "../errors.js";
-import { additionalClaimPackagePath, ClaimPackageSchema } from "../report/claim.js";
+import { additionalClaimPackagePath, ClaimPackageSchema, COMPOSED_CLAIM_PACKAGE_SCHEMA_ID } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
 import {
   inspectRuntimeMethodForBinding,
@@ -78,6 +84,7 @@ import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receip
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
 import { foldRunJournal, readRunJournalEntries } from "../run/journal.js";
 import { readPreviewLog } from "../run/preview-log.js";
+import { loadPublicExternalImport } from "../run/imported-run.js";
 import { requireRunState } from "../run/state.js";
 import { artifactsDir, claimPackageArtifactPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
@@ -269,6 +276,7 @@ export async function verifyRunWorkspace(
         /** issue #2839: the disclosure section re-derived from the sealed record's own bytes, so
          * this workspace-side rebuild compares the same projection the portable reader does. */
         readonly disclosureCarriage: ReturnType<typeof readRunDisclosureCarriage>;
+        readonly importedCarriage: ReturnType<typeof loadPublicExternalImport>;
         readonly additionalLimitations: readonly string[];
         readonly suiteComparability?: {
           readonly executionConformance: boolean;
@@ -335,6 +343,7 @@ export async function verifyRunWorkspace(
           // below. Computed once — the anchors are a property of the Run/Matrix, not of any one
           // Report.
           const disclosureCarriage = readRunDisclosureCarriage(context.workspaceDir, runState);
+          const importedCarriage = loadPublicExternalImport(context.workspaceDir, input.draftId, runState);
           const inspectAdditional = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
             && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
             ? [...INSPECT_SEPARATE_ASSURANCE_LIMITATIONS]
@@ -405,6 +414,7 @@ export async function verifyRunWorkspace(
             previewLog,
             anchorCarriage,
             disclosureCarriage,
+            importedCarriage,
             additionalLimitations: [
               ...inspectAdditional,
               ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),
@@ -418,7 +428,19 @@ export async function verifyRunWorkspace(
             }),
           };
         }
-        const { previewLog, disclosureCarriage, additionalLimitations, suiteComparability } = sharedContext;
+        const { previewLog, disclosureCarriage, importedCarriage, additionalLimitations, suiteComparability } = sharedContext;
+        // Which generation `report` was asked for is the one fact taken from the stored claim: it is
+        // the operator's choice, recorded nowhere else, and no record could contradict it.
+        // Everything the choice implies -- the vector, and through it the id, the sections, the
+        // check list, and the reader line -- is re-derived from the run's own facts (issue #3403).
+        const composedCapabilities = claim.claimSchema === COMPOSED_CLAIM_PACKAGE_SCHEMA_ID
+          ? activeCapabilityVector({
+            anchoredClosure: anchorCarriage.anchoredClosure,
+            projectsBinaryQualification: reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument,
+            declaresDisclosure: disclosureCarriage !== undefined,
+            importedRun: importedCarriage !== undefined,
+          })
+          : undefined;
 
         assertClaimConsistency({
           claim,
@@ -442,11 +464,21 @@ export async function verifyRunWorkspace(
           // binary-qualification entry carries the section, because `/8` is the one disclosed cell.
           // A run's sibling analyses project no qualification, so rebuilding THEIR claim with a
           // disclosure would be rebuilding a claim no closure could have published.
+          //
+          // The composed generation scopes it by its own vector instead, exactly as `report` does.
           ...(disclosureCarriage === undefined
-            || !anchorCarriage.anchoredClosure
-            || reportRecord.method.id !== BENCHMARKING_METHOD_IDS.binaryInstrument
+            || (composedCapabilities !== undefined
+              ? !composedCapabilities.includes(DISCLOSURE_SPECIFICATION_CAPABILITY)
+              : !anchorCarriage.anchoredClosure
+                || reportRecord.method.id !== BENCHMARKING_METHOD_IDS.binaryInstrument)
             ? {}
             : { disclosure: disclosureCarriage.disclosure }),
+          ...(importedCarriage === undefined
+            || composedCapabilities === undefined
+            || !composedCapabilities.includes(EXTERNAL_IMPORT_CAPABILITY)
+            ? {}
+            : { externalImport: importedCarriage.claim }),
+          ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
           ...(previewLog === undefined
             ? {}
             : {
