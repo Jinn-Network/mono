@@ -939,7 +939,7 @@ describe("terminal attempt directory retention (#4596)", () => {
 
   async function remainingUuids(root: string): Promise<string[]> {
     try {
-      return (await readdir(join(root, "attempts"))).toSorted();
+      return [...(await readdir(join(root, "attempts")))].sort();
     } catch {
       return [];
     }
@@ -977,7 +977,7 @@ describe("terminal attempt directory retention (#4596)", () => {
       terminalAttemptRetentionMs: 24 * 60 * 60 * 1000,
     });
 
-    expect(await remainingUuids(root)).toEqual([future, live, recent, referenced].toSorted());
+    expect(await remainingUuids(root)).toEqual([future, live, recent, referenced].slice().sort());
   });
 
   test("rehydration directory scan stays bounded after expired terminals are pruned", async () => {
