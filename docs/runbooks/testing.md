@@ -467,6 +467,73 @@ git -C <checkout> status --porcelain   # and nothing written into the tree
 Across the five original runs and the five confirmation runs: no new entries,
 no mtime or size change, and nothing written into the checkout.
 
+### Per-test overrides below the suite bound (#4390, 2026-09-15)
+
+`operator/vitest.config.ts` and `packages/benchmark-product/core/vitest.config.ts`
+both set `testTimeout: 30_000` (#2766, #3289), but a per-test override *below*
+that value lowers the bound for that one test, and the config cannot reach it.
+#4390 audited every such override in `operator/` at or below the 5000ms figure
+#3289 named. Search with `[[:space:]]`, never `\s` — `\s` is not portable in
+`git grep -E` and matches a literal `s`, which silently undercounts:
+
+```bash
+git grep -nE '\}, *[0-9_]+\);' -- operator/test          # closing-argument form
+git grep -nE 'timeout:[[:space:]]*[0-9_]+' -- operator/test # object form
+```
+
+Two real test bounds at 5000ms were found. Classification per site:
+
+- `operator/test/harnesses/impls/claude-mcp-hyperliquid/mcp-tools.test.ts`
+  (`'rejects within timeout + slack when fetch never resolves'`, formerly `}, 5_000)`) — **incidental,
+  removed.** The test awaits a 10ms tick and asserts a signal was passed to
+  `fetch`; nothing in it depends on 5s. It now inherits the suite's 30s.
+- `operator/test/daemon/native-base-sepolia-infrastructure.test.ts`
+  (`'bounds the response body read, not only time-to-headers (#3458)'`,
+  formerly `}, 5_000)`) — **deliberate-for-speed, wall-clock-exposed;
+  exposure accepted, override removed.** Its comment names the mutation it
+  guards: clear the transport timer at the response headers again and the
+  guarded call never settles, so the test "hangs to the vitest timeout rather
+  than rejecting". That is still true at the suite's 30s bound — the mutation
+  check goes red either way; the 5s override only made it go red 25s sooner.
+  There is no clock-free mechanism for detecting "this promise never
+  settles": every hang detector is a deadline, and fake timers do not help
+  because the thing under test is a real `fetch` body read. The choice was
+  therefore between a 5s deadline exposed to runner starvation on a test
+  whose real cost is ~30ms (the #3289 flake class) and a 30s one. It inherits
+  30s, and its comment says so.
+
+Every other `}, <=5000)` hit under `operator/test` is **not a test bound** and
+needs no re-derivation next time: `e2e/task-first-helpers.ts:1037` is a
+`setInterval` argument, `daemon/native-base-sepolia-infrastructure.test.ts:763`
+is a stream `setTimeout`, `helpers/multi-op-daemon.test.ts:36,56` sit inside a
+daemon source string, and the `{ timeout: 5_000 }` object-form hits are
+`execFileSync` options, `vi.waitFor` budgets, or product `timeout` fields, not
+vitest. The 8s tail in `operator/test/harnesses/impls/learner/` sits above
+the 5s figure and was left alone. `packages/benchmark-product/core` has none
+below 30s (`src/suite-timeouts.test.ts` holds that floor).
+
+**`plugin/runtime` stays on Vitest's 5s default.** It has no
+`vitest.config.ts`; 70 `src/**/*.test.ts` files; 14 per-test overrides, all on
+three files that do real capture, archive, or mirror I/O and are individually
+justified (`src/capture/capture.integration.test.ts` ×12 at 60s/120s,
+`src/mcp/concurrency.test.ts` at 60s, `src/corpus/mirror-service.integration.test.ts`
+at 20s). Its one documented incident, `fc2308ffa`, was a **cost race** — a 5s
+bound against the archive busy budget's 10s default, fixed by shrinking the
+budget and bounding that one test — not scheduler starvation of a
+millisecond-cost test, so it supports the "cost-driven, not flake-driven"
+reading rather than refuting it. #2766's 30s was measured (114 hand-applied
+overrides that core had already converged on); `plugin/runtime` has no such
+measurement, and a blanket 30s buys a 6x slower failure for a genuine hang in
+what is mostly fast unit code. No `vitest.config.ts` is added.
+
+**What flips that answer:** a `plugin/runtime` test whose measured cost is
+milliseconds going red at exactly 5000ms in CI with no code change — the
+#2766 / #3289 signature, a same-tree flip — or per-test overrides appearing on
+a fast unit file that does no real I/O. Either is the starvation profile core
+had before #2766, and at that point the fix is the same suite-level
+`testTimeout: 30_000` with a `suite-timeouts.test.ts`-style floor guard, not
+another hand-applied override.
+
 ### Run `yarn test`, not a bare `vitest run`
 
 `yarn test` is `build:sdk && build:stack && build:plugin && build:core &&

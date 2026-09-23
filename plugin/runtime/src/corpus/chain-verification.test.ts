@@ -192,7 +192,7 @@ describe("driver-backed chain verification", () => {
       agent: source.agent,
       name: source.name,
       operation: "verify",
-      message: expect.stringContaining("transport failed"),
+      reason: expect.stringContaining("transport failed"),
     });
   });
 
@@ -215,7 +215,7 @@ describe("driver-backed chain verification", () => {
       agent: source.agent,
       name: source.name,
       operation: "revalidate-head",
-      message: expect.stringContaining("head transport failed"),
+      reason: expect.stringContaining("head transport failed"),
     });
   });
 
@@ -230,6 +230,45 @@ describe("driver-backed chain verification", () => {
       reason: "fork-detected",
     });
     expect(log.warnings).toHaveLength(0);
+  });
+
+  // #4482: the warn above runs inside the posture's own catch. A logger that
+  // throws there -- a stderr EPIPE is the realistic one -- escaped `verify`
+  // and reached the mirror's outer catch, which recorded the refusal under
+  // `source-sync-failed` and sent the operator to debug their transport.
+  function faultingLogger(): RuntimeLogger {
+    return {
+      debug: () => {},
+      info: () => {},
+      warn: () => {
+        throw new Error("EPIPE: broken pipe");
+      },
+      error: () => {},
+    };
+  }
+
+  test("a logger that throws cannot turn a driver failure into a thrown verify", async () => {
+    const driver = {
+      verifySource: async () => {
+        throw new Error("transport failed");
+      },
+    } as unknown as VerifyDriver;
+
+    await expect(
+      createDriverChainVerification(driver, faultingLogger()).verify(input),
+    ).resolves.toEqual({ status: "rejected", reason: "verification-failed" });
+  });
+
+  test("a logger that throws cannot turn a driver failure into a thrown revalidateHead", async () => {
+    const driver = {
+      verifyHead: async () => {
+        throw new Error("head transport failed");
+      },
+    } as unknown as VerifyDriver;
+
+    await expect(
+      createDriverChainVerification(driver, faultingLogger()).revalidateHead(headInput),
+    ).resolves.toEqual({ status: "rejected", reason: "verification-failed" });
   });
 });
 

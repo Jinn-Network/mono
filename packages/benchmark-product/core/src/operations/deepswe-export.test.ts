@@ -20,7 +20,7 @@ import { runQuote } from "./run-quote.js";
 import { requireRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { DEEP_SWE_V11_GIT_SHA } from "../runtime/deep-swe-v1.1/manifest.js";
-import { selectDeepSweV11Runtime } from "./deep-swe-v1.1.js";
+import { prepareDeepSweV11Draft } from "../runtime/testing/deep-swe-v1.1-draft.js";
 import { exportHarborHubPackage } from "./hub-export.js";
 import {
   decideDeepSweExportMode,
@@ -225,7 +225,7 @@ describe("DeepSWE v1.1 Pier export", () => {
 
   test("named-slice export is inspection-only and keeps the native job directory", async () => {
     const context = await prepareDraft("one");
-    expect((await selectDeepSweV11Runtime(context, { draftId: "one", ...request("one_task") })).ok).toBe(true);
+    expect((await prepareDeepSweV11Draft(context, { draftId: "one", ...request("one_task") })).ok).toBe(true);
     expect((await runQuote(context, { draftId: "one" })).ok).toBe(true);
     expect(runLock(context, { draftId: "one" }).ok).toBe(true);
     const hub = exportHarborHubPackage(context, { draftId: "one", armId: "one" });
@@ -248,7 +248,7 @@ describe("DeepSWE v1.1 Pier export", () => {
 
   test("custom coverage and missing jobs refuse suite-named DeepSWE export", async () => {
     const context = await prepareDraft("custom");
-    expect((await selectDeepSweV11Runtime(context, { draftId: "custom", ...request(undefined, ["t11"]) })).ok).toBe(true);
+    expect((await prepareDeepSweV11Draft(context, { draftId: "custom", ...request(undefined, ["t11"]) })).ok).toBe(true);
     expect((await runQuote(context, { draftId: "custom" })).ok).toBe(true);
     expect(runLock(context, { draftId: "custom" }).ok).toBe(true);
     stubArmJob("custom", "one");
@@ -261,7 +261,7 @@ describe("DeepSWE v1.1 Pier export", () => {
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
     const missing = await prepareDraft("missing");
-    expect((await selectDeepSweV11Runtime(missing, { draftId: "missing", ...request("one_task") })).ok).toBe(true);
+    expect((await prepareDeepSweV11Draft(missing, { draftId: "missing", ...request("one_task") })).ok).toBe(true);
     expect((await runQuote(missing, { draftId: "missing" })).ok).toBe(true);
     expect(runLock(missing, { draftId: "missing" }).ok).toBe(true);
     const absent = exportDeepSwePackage(missing, { draftId: "missing", armId: "one" });
@@ -272,7 +272,7 @@ describe("DeepSWE v1.1 Pier export", () => {
 
   test("named-slice coverage plus stubbed result.json without collect is inspection", async () => {
     const context = await prepareDraft("full");
-    expect((await selectDeepSweV11Runtime(context, { draftId: "full", ...request("ten_task") })).ok).toBe(true);
+    expect((await prepareDeepSweV11Draft(context, { draftId: "full", ...request("ten_task") })).ok).toBe(true);
     expect((await runQuote(context, { draftId: "full" })).ok).toBe(true);
     expect(runLock(context, { draftId: "full" }).ok).toBe(true);
     stubArmJob("full", "two");
@@ -296,11 +296,11 @@ describe("DeepSWE v1.1 Pier export", () => {
     expect(createDraft(context, { draftId: "ready", name: "ready" }).ok).toBe(true);
     expect(armAdd(context, { draftId: "ready", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
     expect(armAdd(context, { draftId: "ready", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
-    const claimedFull = await selectDeepSweV11Runtime(context, { draftId: "ready", ...request("full") });
+    const claimedFull = await prepareDeepSweV11Draft(context, { draftId: "ready", ...request("full") });
     expect(claimedFull.ok).toBe(false);
     if (claimedFull.ok) return;
     expect(claimedFull.error.detail).toMatch(/113-task tree/u);
-    const selected = await selectDeepSweV11Runtime(context, { draftId: "ready", ...request("one_task") });
+    const selected = await prepareDeepSweV11Draft(context, { draftId: "ready", ...request("one_task") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     const quoted = await runQuote(context, { draftId: "ready" });
     expect(quoted.ok, JSON.stringify(quoted)).toBe(true);

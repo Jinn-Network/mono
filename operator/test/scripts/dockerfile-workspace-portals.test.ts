@@ -4,6 +4,12 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  missingPortalManifestCopies,
+  portalEntries,
+  reachablePortalEdges,
+} from '../../../test-support/dockerfile-portals/portal-closure.mjs';
+
 const clientRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const repoRoot = resolve(clientRoot, '..');
 const dockerfile = readFileSync(resolve(clientRoot, 'Dockerfile'), 'utf8');
@@ -38,47 +44,6 @@ const externalPortalPackages = Object.entries({
       hasYarnConfig: existsSync(resolve(packageRoot, '.yarnrc.yml')),
     };
   });
-
-function portalEntries(manifest: Record<string, unknown>): Map<string, string> {
-  const portals = new Map<string, string>();
-  for (const field of [
-    'resolutions',
-    'dependencies',
-    'devDependencies',
-    'optionalDependencies',
-  ]) {
-    const group = manifest[field] as Record<string, string> | undefined;
-    for (const [name, version] of Object.entries(group ?? {})) {
-      if (version.startsWith('portal:')) portals.set(name, version.slice('portal:'.length));
-    }
-  }
-  return portals;
-}
-
-// build:stack runs `yarn --cwd ../packages/<pkg> install --immutable` for every
-// stack package, and each nested install resolves that package's OWN portal
-// resolutions. Those targets are never named in operator/package.json, so the
-// depth-1 sweep above cannot see them: Operator Images stayed red on `next`
-// with "Manifest not found" for a portal two levels down (#2809).
-function reachablePortalPackages(): { name: string; repoPath: string }[] {
-  const found = new Map<string, string>();
-
-  const walk = (packageRoot: string): void => {
-    const manifestPath = resolve(packageRoot, 'package.json');
-    if (!existsSync(manifestPath)) return;
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
-    for (const [name, target] of portalEntries(manifest)) {
-      const targetRoot = resolve(packageRoot, target);
-      const repoPath = relative(repoRoot, targetRoot).split(sep).join('/');
-      if (found.has(repoPath)) continue;
-      found.set(repoPath, name);
-      walk(targetRoot);
-    }
-  };
-
-  walk(clientRoot);
-  return [...found].map(([repoPath, name]) => ({ name, repoPath }));
-}
 
 function dockerfilePrefixBefore(command: string): string {
   const commandIndex = dockerfile.indexOf(command);
@@ -236,21 +201,35 @@ describe('client Docker build context', () => {
     }
   });
 
+  it('follows the resolutions portal target when a dependency field names a different one', () => {
+    // Yarn links the `resolutions` target, so the walk must validate that one.
+    // Same package name, different portal targets in each field (#4464).
+    const portals = portalEntries({
+      dependencies: { '@jinn-network/example': 'portal:../packages/from-dependencies' },
+      devDependencies: { '@jinn-network/example': 'portal:../packages/from-dev-dependencies' },
+      optionalDependencies: {
+        '@jinn-network/example': 'portal:../packages/from-optional-dependencies',
+      },
+      resolutions: { '@jinn-network/example': 'portal:../packages/from-resolutions' },
+    });
+
+    expect(portals.get('@jinn-network/example')).toBe('../packages/from-resolutions');
+  });
+
   it('copies every transitively reachable portal manifest before install', () => {
-    const reachable = reachablePortalPackages();
+    // build:stack runs `yarn --cwd ../packages/<pkg> install --immutable` for every stack
+    // package, and each nested install resolves that package's OWN portal resolutions. Those
+    // targets are never named in operator/package.json, so the depth-1 sweep above cannot see
+    // them: Operator Images stayed red on `next` with "Manifest not found" for a portal two
+    // levels down (#2809). The operator image has no Railway watchPatterns to check: its
+    // services deploy a published image tag, not a build of this checkout.
+    const edges = reachablePortalEdges(clientRoot, repoRoot);
     expect(
-      reachable.length,
+      new Set(edges.map(({ target }) => target)).size,
       'portal walk must recurse past the operator manifest',
     ).toBeGreaterThan(externalPortalPackages.length);
 
-    const beforeInstall = dockerfilePrefixBefore(
-      'RUN corepack enable && cd operator && yarn install --immutable',
-    );
-    const missing = reachable
-      .filter(({ repoPath }) => !beforeInstall.includes(`${repoPath}/package.json`))
-      .map(({ name, repoPath }) => `${name} (${repoPath})`);
-
-    expect(missing).toEqual([]);
+    expect(missingPortalManifestCopies(dockerfile, edges)).toEqual([]);
   });
 
   it('copies every stack-build script and tsconfig.build.json before yarn build', () => {

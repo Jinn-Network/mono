@@ -4,8 +4,12 @@ import { describe, expect, it } from "vitest";
 import {
   parseAnnouncementEntry,
   parseSourceHead,
+  parseWireDsseEnvelope,
 } from "@jinn-network/record-discovery-protocol";
+import type { SourceHeadOutcome } from "@jinn-network/record-discovery-protocol";
+import type { DsseEnvelope } from "@jinn-network/trust-core";
 
+import { vectorEnvelopeToWire } from "./harness.js";
 import { loadVectors, loadVectorsByKind, VECTOR_KINDS } from "./vectors.js";
 
 // Task 10 Step 2: every fixture loads, parses under protocol schemas where
@@ -133,6 +137,36 @@ describe("source-chain vectors parse under protocol schemas where applicable", (
   }
 });
 
+// Every `SourceHeadOutcome` status, tied to the protocol type in both
+// directions: `satisfies` rejects a status the type does not have, and
+// `AllSourceHeadStatusesListed` fails to compile if the type gains one this
+// list does not name.
+const SOURCE_HEAD_STATUSES = [
+  "ok",
+  "stale",
+  "refresh-by-ceiling",
+  "head-issued-ahead",
+  "unauthorized-signer",
+  "head-origin-mismatch",
+  "head-payload-mismatch",
+  "invalid-head-envelope",
+] as const satisfies readonly SourceHeadOutcome["status"][];
+type AllSourceHeadStatusesListed =
+  Exclude<SourceHeadOutcome["status"], (typeof SOURCE_HEAD_STATUSES)[number]> extends never ? true : never;
+const allSourceHeadStatusesListed: AllSourceHeadStatusesListed = true;
+
+describe("source-head vectors parse under protocol schemas and expect a SourceHeadOutcome status", () => {
+  for (const vector of loadVectorsByKind("source-head")) {
+    it(`"${vector.name}" -- head and signed payload parse; status is a recognized outcome`, () => {
+      const input = vector.input as { head: unknown; headSignature: { payload: string } };
+      expect(() => parseSourceHead(input.head)).not.toThrow();
+      expect(() => parseSourceHead(JSON.parse(input.headSignature.payload))).not.toThrow();
+      expect(allSourceHeadStatusesListed).toBe(true);
+      expect(SOURCE_HEAD_STATUSES).toContain((vector.expect as { status: string }).status);
+    });
+  }
+});
+
 describe("facts-consistency vectors carry a well-formed `facts` expectation", () => {
   for (const vector of loadVectorsByKind("facts-consistency")) {
     it(`"${vector.name}" expects a recognized FactsConsistency value`, () => {
@@ -172,6 +206,13 @@ describe("named checks in isolation are represented (design §18)", () => {
     }
   });
 
+  it("source-head-revalidation vectors cover ok and head-origin-mismatch", () => {
+    const statuses = new Set(loadVectorsByKind("source-head").map((vector) => (vector.expect as { status: string }).status));
+    for (const required of ["ok", "head-origin-mismatch"]) {
+      expect(statuses).toContain(required);
+    }
+  });
+
   it("facts-consistency vectors cover all three outcomes", () => {
     const outcomes = new Set(loadVectorsByKind("facts-consistency").map((vector) => (vector.expect as { facts: string }).facts));
     for (const required of ["consistent", "inconsistent", "indeterminate"]) {
@@ -186,5 +227,37 @@ describe("named checks in isolation are represented (design §18)", () => {
     for (const required of ["present", "fabricated", "reorged-away"]) {
       expect(outcomes).toContain(required);
     }
+  });
+});
+
+// The corpus stores DSSE envelopes in legible fixture form, not the wire
+// profile production parses (#4436). Pin that precondition corpus-wide so a
+// direct consumer cannot mistake the parser's refusal (which surfaces as
+// `unauthorized-signer` downstream) for the rule its test names.
+describe("vector DSSE envelopes are wire-form only after vectorEnvelopeToWire", () => {
+  // Walk every vector's whole `input`: the source-conformance and cross-head
+  // fork vectors carry envelopes under their own keys (`headA`, `refreshes`,
+  // entries without a `head`), so a shape-specific pick would skip them.
+  function isEnvelopeShaped(value: unknown): value is DsseEnvelope {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const record = value as Record<string, unknown>;
+    return typeof record["payloadType"] === "string" && typeof record["payload"] === "string" && Array.isArray(record["signatures"]);
+  }
+  function collectEnvelopes(value: unknown, path: string): Array<{ label: string; envelope: DsseEnvelope }> {
+    if (isEnvelopeShaped(value)) return [{ label: path, envelope: value }];
+    if (typeof value !== "object" || value === null) return [];
+    return Object.entries(value).flatMap(([key, child]) => collectEnvelopes(child, path === "" ? key : `${path}.${key}`));
+  }
+  const envelopes = loadVectors().flatMap((vector) =>
+    collectEnvelopes(vector.input, "").map(({ label, envelope }) => ({ vector: vector.name, label, envelope })),
+  );
+
+  it("covers the whole corpus", () => {
+    expect(envelopes.length).toBeGreaterThan(0);
+  });
+
+  it.each(envelopes)("$vector $label: raw form is refused, converted form parses", ({ envelope }) => {
+    expect(() => parseWireDsseEnvelope(envelope)).toThrow(/not canonical standard base64/u);
+    expect(() => parseWireDsseEnvelope(vectorEnvelopeToWire(envelope))).not.toThrow();
   });
 });

@@ -39,6 +39,12 @@ export interface MetricsLoopEntry {
 export interface MetricsRoutesConfig {
   getDaemonReadiness?: () => MetricsDaemonReadiness;
   getLoopSnapshot?: () => readonly MetricsLoopEntry[];
+  /**
+   * Whether the standalone degraded-recovery loops are up (#4311). Injected from
+   * `daemon/loop-heartbeat.ts`'s holder for the same boundary reason as the two above;
+   * absent (bare/test servers) the gauge is omitted, never fabricated.
+   */
+  getDegradedRecoveryRunning?: () => boolean;
 }
 
 function escapeLabelValue(value: string): string {
@@ -71,6 +77,20 @@ export function renderMetrics(store: Store, config: MetricsRoutesConfig = {}): s
 
   metricHeader(lines, 'jinn_daemon_degraded', 'gauge', 'Whether daemon readiness is exactly `degraded` (1) or not (0).');
   lines.push(`jinn_daemon_degraded ${readiness === 'degraded' ? 1 : 0}`);
+
+  if (config.getDegradedRecoveryRunning) {
+    metricHeader(
+      lines,
+      'jinn_degraded_recovery_running',
+      'gauge',
+      'Whether the standalone degraded-recovery loops are running (1) or not (0). Alert on ' +
+        'jinn_daemon_degraded==1 and jinn_degraded_recovery_running==0: an economic halt whose ' +
+        'recovery loops failed to start (issue #2425) — /ready still answers 200, but the fleet ' +
+        'will not self-heal until the halt is retried. Also 0 briefly before the loops come up ' +
+        'and after they stop on retry.',
+    );
+    lines.push(`jinn_degraded_recovery_running ${config.getDegradedRecoveryRunning() ? 1 : 0}`);
+  }
 
   if (loops.length > 0) {
     metricHeader(

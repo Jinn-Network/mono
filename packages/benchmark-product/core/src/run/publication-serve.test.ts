@@ -312,6 +312,24 @@ describe("public archive server", () => {
     }
   });
 
+  test("a throwing onProgress sink cannot fail the serve it only describes (#3848)", async () => {
+    const workspaceDir = workspace("publication-serve-throwing-sink-");
+    await announce(workspaceDir, "only", "2026-08-13T12:00:00Z");
+    let calls = 0;
+    const server = await startPublicationArchiveServer({
+      workspaceDir, sourceName: SOURCE_NAME, port: 0,
+      onProgress: () => { calls += 1; throw new Error("sink is broken"); },
+    });
+    try {
+      // The sink was genuinely invoked, so the guard -- not an absent call -- is what held.
+      expect(calls).toBeGreaterThan(0);
+      expect(server.wellKnown).toBe("published");
+      expect(server.url).toMatch(/^http:\/\//);
+    } finally {
+      await server.close();
+    }
+  });
+
   test("rejects a port outside the valid range before binding anything", async () => {
     const workspaceDir = workspace("publication-serve-port-");
     await expect(startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 70_000 }))

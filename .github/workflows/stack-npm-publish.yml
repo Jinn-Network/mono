@@ -455,8 +455,9 @@ jobs:
           the host refresh may not have run yet for this source SHA,
           and a host last refreshed by the push-to-next canary-host-refresh job serves
           lane \"canary\" bytes, which never byte-match a stable manifest. The host's own
-          .jinn-profile-host-source names the source SHA and lane it was last refreshed
-          from. See docs/runbooks/jinn-network-profile-hosting.md,
+          .jinn-profile-host-source names the source SHA and lane of its last
+          content-changing refresh (a refresh that found identical content writes
+          nothing). See docs/runbooks/jinn-network-profile-hosting.md,
           'Automatic host refresh'."
       - name: Upload live host receipt
         uses: actions/upload-artifact@v4

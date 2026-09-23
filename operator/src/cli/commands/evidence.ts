@@ -516,6 +516,7 @@ const FETCH_ERROR_CODES: Record<ArtifactFetchFailureReason, 'transient_error' | 
   blocked: 'fatal',
   too_large: 'fatal',
   digest_mismatch: 'fatal',
+  malformed_payload: 'fatal',
   no_locator: 'invalid_invocation',
 };
 

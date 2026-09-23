@@ -30,8 +30,7 @@ import type { Store } from '../store/store.js';
 import type { AnnouncedSubmissionCard } from './native-submission-facts.js';
 import {
   NATIVE_DISCOVERY_QUARANTINE_SCHEMA,
-  clearPoisonFailures,
-  isPoisonQuarantined,
+  preparePoisonProbes,
   recordPoisonFailure,
 } from './native-discovery-quarantine.js';
 
@@ -1051,6 +1050,8 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       entryDigest: `sha256:${string}`;
       announcement: WithdrawnAnnouncement;
     }> = [];
+    // Prepared once per pass; every announcement below probes the ledger (#4294).
+    const poison = preparePoisonProbes(input.store);
     for (const item of fetched) {
       const entryDigest = sealJson(item.entry).digest;
       for (const announcement of item.entry.announcements) {
@@ -1078,8 +1079,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         //
         // A quarantined announcement re-served on a later cold re-adoption is skipped here
         // rather than re-decoded, so re-adopting a source cannot resurrect the wedge.
-        if (isPoisonQuarantined({
-          store: input.store,
+        if (poison.isQuarantined({
           scope: 'announcement',
           source,
           entryDigest,
@@ -1122,8 +1122,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           pass.quarantined += 1;
           continue;
         }
-        clearPoisonFailures({
-          store: input.store,
+        poison.clear({
           scope: 'announcement',
           source,
           entryDigest,

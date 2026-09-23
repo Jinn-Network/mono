@@ -65,11 +65,12 @@ export function passwordFileIsStale(
 
 /**
  * Whether `earningDir` holds the very keystore the host-wide password file is
- * for — i.e. this is a default-operator rotation. Only then may a rotation
- * *create* that file: an absent file proves nothing about ownership, so
- * `passwordFileIsStale` cannot answer, but a rotation of the default keystore
- * is the one case where writing it can harm no other operator (`JINN_PASSWORD`
- * outranks the file for everyone else). Filesystem uncertainty answers "no".
+ * for — i.e. this is a default-operator rotation. That proves ownership of the
+ * file whatever it holds, so it authorizes a rotation to *create* the file
+ * (an absent file proves nothing, so `passwordFileIsStale` cannot answer) and
+ * to *rewrite* one that has drifted off the live password (#4116). Writing it
+ * then harms no other operator (`JINN_PASSWORD` outranks the file for everyone
+ * else). Filesystem uncertainty answers "no".
  *
  * Call AFTER the new keystore is saved, so the rotated file is known to exist.
  */

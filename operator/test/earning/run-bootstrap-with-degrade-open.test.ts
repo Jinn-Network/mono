@@ -251,6 +251,70 @@ describe('runBootstrapWithDegradeOpen ordering (#2407 M3)', () => {
   });
 });
 
+describe('runBootstrapWithDegradeOpen — setDegradedRecoveryRunning (#4311)', () => {
+  // Backs the `jinn_degraded_recovery_running` gauge: true exactly while a
+  // 'started' outcome's loops are up, false again once stop() has resolved,
+  // and never true for 'start-failed' / 'fail-closed'.
+  function haltingRunBootstrap() {
+    let attempt = 0;
+    return vi.fn().mockImplementation(async () => {
+      attempt += 1;
+      if (attempt === 1) throw haltError();
+      return 'ok';
+    });
+  }
+
+  it("sets true after a 'started' outcome (before readiness flips degraded) and false after stop() resolves (before readiness flips bootstrapping)", async () => {
+    const calls: string[] = [];
+    const stop = vi.fn().mockImplementation(async () => { calls.push('stop:resolved'); });
+
+    await runBootstrapWithDegradeOpen({
+      runBootstrap: haltingRunBootstrap(),
+      startDegraded: () => ({ kind: 'started' as const, recovery: { stop } }),
+      setReadiness: (r) => calls.push(`readiness:${r}`),
+      setDegradedRecoveryRunning: (running) => calls.push(`running:${running}`),
+      awaitRetry: async () => { calls.push('awaitRetry'); },
+    });
+
+    expect(calls).toEqual([
+      'readiness:bootstrapping',
+      'running:true',
+      'readiness:degraded',
+      'awaitRetry',
+      'stop:resolved',
+      'running:false',
+      'readiness:bootstrapping',
+      'readiness:ready',
+    ]);
+  });
+
+  it.each(['start-failed', 'fail-closed'] as const)("never sets true for a '%s' outcome", async (kind) => {
+    const setDegradedRecoveryRunning = vi.fn();
+
+    await runBootstrapWithDegradeOpen({
+      runBootstrap: haltingRunBootstrap(),
+      startDegraded: () => ({ kind }),
+      setReadiness: () => {},
+      setDegradedRecoveryRunning,
+      awaitRetry: async () => {},
+    });
+
+    expect(setDegradedRecoveryRunning).not.toHaveBeenCalledWith(true);
+    expect(setDegradedRecoveryRunning).toHaveBeenCalledWith(false);
+  });
+
+  it('is optional — the orchestrator runs unchanged when it is not injected', async () => {
+    await expect(
+      runBootstrapWithDegradeOpen({
+        runBootstrap: haltingRunBootstrap(),
+        startDegraded: () => ({ kind: 'started' as const, recovery: { stop: vi.fn() } }),
+        setReadiness: () => {},
+        awaitRetry: async () => {},
+      }),
+    ).resolves.toBe('ok');
+  });
+});
+
 describe('resolveDegradedStart (#2425)', () => {
   const economicEnvelope = buildEnvelope({ code: 'funding_required', message: 'needs funds' });
   const integrityEnvelope = buildEnvelope({ code: 'invalid_invocation', message: 'bad config' });
@@ -289,7 +353,12 @@ describe('resolveDegradedStart (#2425)', () => {
 
     expect(outcome).toEqual({ kind: 'fail-closed' });
     expect(start).not.toHaveBeenCalled();
-    expect(logSpy).toHaveBeenCalled();
+    // This line is the operator's only signal that the daemon is deliberately
+    // fail-closed, so assert its content, not merely that something logged.
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const message = String(logSpy.mock.calls[0]?.join(' '));
+    expect(message).toContain('integrity-class');
+    expect(message).toContain('fail-closed');
   });
 
   it("returns 'start-failed' — NOT 'fail-closed' — when an economic halt's recovery start throws (#2425)", () => {

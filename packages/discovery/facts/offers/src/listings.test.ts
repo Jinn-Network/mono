@@ -4,7 +4,12 @@
 // the query path fetches an offer, which is the property the profile exists to give an index.
 import { createHash } from "node:crypto";
 
-import { OFFER_RECORD_KIND, OfferRailSchema, sealOffer } from "@jinn-network/evidence-offer";
+import {
+  OFFER_RECORD_KIND,
+  OfferRailSchema,
+  OfferRecordSchema,
+  sealOffer,
+} from "@jinn-network/evidence-offer";
 import type { AnnouncedItem } from "@jinn-network/record-discovery-protocol";
 import { describe, expect, it } from "vitest";
 
@@ -419,21 +424,22 @@ describe("the whole listing query, from cards alone", () => {
   });
 });
 
-// `listings.ts` carries its own copies of two grammars the sealed offer schema owns: the amount
-// regex (schema: `RailAmount`) and the display-unsafe character class. They are byte-identical
-// today and nothing ties them together -- neither constant is exported from either side, so a
-// narrowing or widening edit to the schema's copy leaves the card reader silently accepting a
-// different language than the record it claims to summarize. The consequence is asymmetric and
-// worse than it looks: the reader accepting MORE than the record means an index ranks a card
-// whose offer the record layer will refuse; accepting LESS means an honest offer never reaches
-// the catalog at all.
+// `listings.ts` carries its own copies of four grammars the sealed offer schema owns: the amount
+// regex (schema: `RailAmount`), the digest grammar (schema: `Sha256DigestSchema`), and the
+// display-unsafe and interior-format character classes. They are byte-identical today and
+// nothing ties them together -- the card's constants are not exported, and this leaf cannot
+// import the schema's, so a narrowing or widening edit to the schema's copy leaves the card reader
+// silently accepting a different language than the record it claims to summarize. The consequence
+// is asymmetric and worse than it looks: the reader accepting MORE than the record means an index
+// ranks a card whose offer the record layer will refuse; accepting LESS means an honest offer
+// never reaches the catalog at all.
 //
 // Pinned through `readOfferCard` rather than by re-declaring the constants. A re-declared copy
 // pins nothing -- it drifts with neither side -- and exporting the constants would widen a
 // sealed record package's API to serve a test, while moving the card reader onto a zod parse
 // would put one on the per-amount hot path `amountOnRail` deliberately keeps clear.
 //
-// Two traps the probes must respect. Each holds the OTHER field valid, so a refusal is
+// Two traps the probes must respect. Each holds the OTHER fields valid, so a refusal is
 // attributable to the field under test. And the card's rail-identifier rule is compared against
 // the schema's `to`, never its `rail`: `rail` is a `NormalizedAbsoluteUri` and would refuse
 // these probes for an unrelated reason -- the pairing the `DISPLAY_UNSAFE_CHARACTER` comment in
@@ -458,14 +464,46 @@ describe("the card reader's grammars track the sealed offer schema", () => {
     }
   });
 
-  it("refuses exactly the display-unsafe characters the schema refuses in a destination", async () => {
+  it("accepts exactly the digests the schema's Sha256DigestSchema accepts", async () => {
+    const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
+    const card = item.facts as Record<string, unknown>;
+    // Probed on `subject`, not `offerRecordDigest`: the latter must also equal the
+    // announcement's own `record.digest`, so a refusal there would not be attributable to
+    // the grammar. Compared against the schema's own `subject` field (which is trust-core's
+    // `Sha256DigestSchema`) rather than importing trust-core, which this leaf's source
+    // boundary forbids.
+    const digestOf = (digest: string) => OfferRecordSchema.shape.subject.safeParse(digest).success;
+    const hex = "0123456789abcdef".repeat(4);
+    for (const digest of [
+      `sha256:${hex}`,
+      `sha256:${hex.toUpperCase()}`,
+      `sha256:${hex.slice(0, 32)}${hex.slice(32).toUpperCase()}`,
+      `sha256:${hex.slice(0, 63)}`,
+      `sha256:${hex}0`,
+      hex,
+      `SHA256:${hex}`,
+      `sha512:${hex}`,
+      `sha256:${"g".repeat(64)}`,
+      ` sha256:${hex}`,
+      `sha256:${hex} `,
+    ]) {
+      const readable = readOfferCard({ ...item, facts: { ...card, subject: digest } }) !== undefined;
+      expect(readable, `digest ${JSON.stringify(digest)}`).toBe(digestOf(digest));
+    }
+  });
+
+  it("refuses exactly the display-unsafe and interior-format characters the schema refuses in a destination", async () => {
     const item = await announce({ subject: SUBJECT, rails: [{ rail: USDC, amount: "10" }] });
     const card = item.facts as Record<string, unknown>;
     // Each in-class codepoint is paired with an adjacent out-of-class one, so a narrowed class
-    // and a widened one both show up rather than only one direction.
+    // and a widened one both show up rather than only one direction. The second class the
+    // schema refuses — every format character except the joiners U+200C/U+200D — is probed in
+    // both directions too: the two joiners as accepted, and U+2060 WORD JOINER, U+206A, U+FEFF
+    // and U+E0041 (the tag block) as refused.
     for (const code of [
-      0x00, 0x0a, 0x1f, 0x20, 0x7e, 0x7f, 0x9f, 0xa0, 0x061c, 0x061d, 0x200d, 0x200e, 0x200f,
-      0x2028, 0x2029, 0x202a, 0x202e, 0x202f, 0x2065, 0x2066, 0x2069, 0x206a, 0xfeff,
+      0x00, 0x0a, 0x1f, 0x20, 0x7e, 0x7f, 0x9f, 0xa0, 0x061c, 0x061d, 0x200c, 0x200d, 0x200e,
+      0x200f, 0x2028, 0x2029, 0x202a, 0x202e, 0x202f, 0x2060, 0x2065, 0x2066, 0x2069, 0x206a,
+      0xfeff, 0xe0041,
     ]) {
       const char = String.fromCodePoint(code);
       const readable =
