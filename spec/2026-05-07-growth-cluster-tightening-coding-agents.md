@@ -1,3 +1,5 @@
+> **Status (2026-09-24): superseded by `spec/2026-05-12-growth-target-ecosystem-builders.md`.** The §3 audience-cluster definition ("open-source coding agent contributors") is superseded, widened to "ecosystem builders shipping verifiable artefacts on the leading open agentic harness, plus ERC-8004 ecosystem builders." The swe-rebench v2 vertical-pinning reasoning stands as historical record. For the current direction read `spec/2026-05-12-growth-target-ecosystem-builders.md`.
+
 - **Date:** 2026-05-07
 - **Author:** Oak (with Claude)
 - **Status:** Proposal

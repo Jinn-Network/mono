@@ -1,3 +1,5 @@
+> **Status (2026-09-24): superseded by `spec/2026-05-07-growth-niche-and-pitch-pmf-search.md`.** The §3 audience-cluster definition ("AI builders") and the benchmarks-as-pitch framing this proposal established are superseded. The skill-governance and canonical-source-of-truth restructuring below carries forward. For the current direction read `spec/2026-05-07-growth-niche-and-pitch-pmf-search.md`.
+
 - **Date:** 2026-05-06
 - **Author:** Oak
 - **Status:** Proposal

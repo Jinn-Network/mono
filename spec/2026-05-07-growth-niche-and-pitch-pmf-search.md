@@ -1,3 +1,5 @@
+> **Status (2026-09-24): superseded by `spec/2026-05-07-growth-cluster-tightening-coding-agents.md`.** The §3 audience-cluster definition ("open-source agentic project contributors") is superseded, tightened the same day to "open-source coding agent contributors." The Sprint #2 retirement and pitch-replacement reasoning stand as historical record. For the current direction read `spec/2026-05-07-growth-cluster-tightening-coding-agents.md`.
+
 - **Date:** 2026-05-07
 - **Author:** Oak (with Claude)
 - **Status:** Proposal
