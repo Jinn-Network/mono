@@ -1,5 +1,7 @@
 # Plug-in surface — default-harness pluggable slots + scaffolding for both recruitment paths
 
+> **Status (2026-09-24): partly superseded by [spec/2026-05-01-harness-pack-architecture.md](2026-05-01-harness-pack-architecture.md).** Section 4 (Path 1, the default-harness plug-in slot taxonomy) is superseded by the harness-agnostic SolverPlugin mechanism, which retires Path 1 (that spec §11.7). Section 3 (Path 2, external RestorerImpls) holds under the vocabulary renames. For the current direction read [spec/2026-05-01-harness-pack-architecture.md](2026-05-01-harness-pack-architecture.md).
+
 - **Date:** 2026-04-30
 - **Author:** opus (drafted on jinn-mono-a9w9; Captain ritsukai)
 - **Status:** Proposal

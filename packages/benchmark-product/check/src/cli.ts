@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { VerificationFailureReason } from "@jinn-network/trust-core";
 import { SUPPORTED_BUNDLE_FORMATS, type VerifiedBundleSnapshot } from "./manifest.js";
 import {
   bundleIdentityLabel,
@@ -69,8 +70,30 @@ const INTERNAL_PROTOCOL_URL =
 const RAW_IDENTIFIER = /urn:[^\s,;)"']+|did:key:z[1-9A-HJ-NP-Za-km-z]+/gu;
 const IDENTIFIER_ALIAS = "<identifier: see --json>";
 
+/** Reasons a trust failure appends to its signer (`<key>:<reason>`); `unknown` is aggregate's
+ * fallback. Typed as a total record so a new trust-core reason is a compile error here. */
+const TRUST_FAILURE_REASONS: Readonly<Record<VerificationFailureReason | "unknown", true>> = {
+  "envelope-signature-invalid": true,
+  "binding-not-resolved": true,
+  "ceremony-verification-failed": true,
+  "window-violation": true,
+  "scope-violation": true,
+  "consent-chain-violation": true,
+  revoked: true,
+  "policy-rejected": true,
+  unknown: true,
+};
+
+/** Keeps a trailing `:<reason>` a urn-shaped signer swallowed, so the failure stays legible. The
+ * reason is kept on any urn, trust failure or not; only the closed set of reason words survives. */
 function aliasIdentifier(match: string): string {
-  return match.endsWith(".") ? `${IDENTIFIER_ALIAS}.` : IDENTIFIER_ALIAS;
+  const dot = match.endsWith(".") ? "." : "";
+  const body = dot === "" ? match : match.slice(0, -1);
+  const colon = body.lastIndexOf(":");
+  const reason = body.slice(colon + 1);
+  return colon > 0 && Object.hasOwn(TRUST_FAILURE_REASONS, reason)
+    ? `${IDENTIFIER_ALIAS}:${reason}${dot}`
+    : `${IDENTIFIER_ALIAS}${dot}`;
 }
 
 /** Removes only Jinn's unresolvable protocol namespaces, preserving actionable outside URLs. */
@@ -84,6 +107,50 @@ function withoutInternalProtocolIdentifiers(message: string): string {
 /** Refusal details keep raw identifiers in `--json`; the human error surface aliases them. */
 function withoutHumanIdentifiers(message: string): string {
   return withoutInternalProtocolIdentifiers(message).replace(RAW_IDENTIFIER, aliasIdentifier);
+}
+
+/**
+ * Refusals that embed a publisher-chosen name, which the schema constrains to a non-empty string
+ * and nothing more, so the name is aliased by the fixed wording around it. Tied to `verify.ts`:
+ * `publicKey`'s two messages for `trust.evaluators.<name>`, the two admission reviewer refusals,
+ * and the evaluator keyId refusal. A name may hold any character, line breaks and suffix text
+ * included, so it runs from the first prefix to the LAST suffix after it.
+ */
+const PUBLISHER_NAMED = [
+  { prefix: "evaluator ", suffixes: [" keyId is not derived from its SPKI"] },
+  { prefix: "reviewer ", suffixes: [" has no signer key id", " uses more than one key"] },
+  { prefix: "trust.evaluators.", suffixes: [" is not a valid SPKI public key", " is not an Ed25519 public key"] },
+] as const;
+
+const WORD_CHARACTER = /\w/u;
+
+/**
+ * Replaces everything between the first `prefix` at a word boundary and the last following suffix.
+ * `refuse` throws one message per refusal, so a message holds at most one instance of a template;
+ * ending at the last suffix over-redacts at worst, never leaks. Each search is one linear scan.
+ */
+function aliasPublisherNames(text: string, prefix: string, suffixes: readonly string[]): string {
+  let start = text.indexOf(prefix);
+  while (start > 0 && WORD_CHARACTER.test(text[start - 1]!)) start = text.indexOf(prefix, start + 1);
+  if (start < 0) return text;
+  const nameStart = start + prefix.length;
+  const end = Math.max(...suffixes.map((suffix) => text.lastIndexOf(suffix)));
+  // A suffix that starts at `nameStart` would leave the name empty, which the schema rules out.
+  if (end <= nameStart) return text;
+  return `${text.slice(0, nameStart)}${IDENTIFIER_ALIAS}${text.slice(end)}`;
+}
+
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/gu;
+
+/** One refusal, one stderr line: aliases identifiers, then escapes every control character (line
+ * feeds included), so a publisher-chosen string cannot forge a line of its own. */
+function humanRefusalDetail(message: string): string {
+  const named = PUBLISHER_NAMED.reduce(
+    (text, { prefix, suffixes }) => aliasPublisherNames(text, prefix, suffixes),
+    message,
+  );
+  return withoutHumanIdentifiers(named)
+    .replace(CONTROL_CHARACTER, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
 /**
@@ -527,9 +594,7 @@ export async function runVerifierCli(
     return {
       exitCode: 2,
       stdout: "",
-      stderr: withoutHumanIdentifiers(
-        `colophon-check: ${cause instanceof Error ? cause.message : String(cause)}\n`,
-      ),
+      stderr: `colophon-check: ${humanRefusalDetail(cause instanceof Error ? cause.message : String(cause))}\n`,
     };
   }
 
@@ -546,7 +611,7 @@ export async function runVerifierCli(
     const stdout = parsed.json
       ? `${JSON.stringify({ ok: false, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, code, message: error.message })}\n`
       : "";
-    const stderr = parsed.json ? "" : `colophon-check: ${withoutHumanIdentifiers(error.message)}\n`;
+    const stderr = parsed.json ? "" : `colophon-check: ${humanRefusalDetail(error.message)}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };
   }
 
@@ -633,7 +698,7 @@ export async function runVerifierCli(
     : [
       ...(freezeRepoFailure === undefined ? [] : [`freeze repository not checked: ${freezeRepoFailure.message}`]),
       ...(identityFailure === undefined ? [] : [`domain binding not applied: ${identityFailure.message}`]),
-    ].map((note) => withoutHumanIdentifiers(`colophon-check: ${note}\n`)).join("");
+    ].map((note) => `colophon-check: ${humanRefusalDetail(note)}\n`).join("");
   // A drifted freeze repository is a verdict about the artifact and takes precedence: exit 1 is
   // what the usage text promises for it, and an operational failure on a different flag must not
   // silently re-code that verdict as 2.

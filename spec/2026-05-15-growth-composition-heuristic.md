@@ -1,3 +1,5 @@
+> **Status (2026-09-24): superseded by the 2026-06-02 growth deprecation ([growth/archive/README.md](../growth/archive/README.md)).** It adds a composition heuristic to the §5 Refine subsection of the GROWTH.md archived as [growth/archive/2026-06-02-GROWTH.md](../growth/archive/2026-06-02-GROWTH.md), where it landed; the current GROWTH.md has no Refine section, and the `growth-refine` skill now lives in `growth/archive/skills/`. For the current direction read [GROWTH.md](../GROWTH.md).
+
 - **Date:** 2026-05-15
 - **Author:** Oak (with Claude)
 - **Status:** Proposal

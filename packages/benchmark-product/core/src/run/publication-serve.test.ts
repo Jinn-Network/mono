@@ -27,6 +27,7 @@ import {
   type SourceIdentity,
 } from "@jinn-network/record-discovery-protocol";
 import { parseWellKnownDocument } from "@jinn-network/record-discovery-serve";
+import { RUN_MEDIA_TYPE, RUN_RECORD_KIND } from "@jinn-network/benchmarking-records";
 import type { DsseEnvelope } from "@jinn-network/trust-core";
 import { createWorkspaceLayout } from "../workspace/workspace.js";
 import { publicationServeRoot, runsDir, runStatePath } from "../workspace/layout.js";
@@ -39,6 +40,8 @@ import {
   withWorkspacePublicationSourceLock,
 } from "./publication-source.js";
 import { startPublicationArchiveServer, type PublicationArchiveServer } from "./publication-serve.js";
+import { PUBLICATION_LOCK_INDEX_PATH } from "./publication-lock-index.js";
+import { createPublicationState, writeRunState } from "./state.js";
 
 const SOURCE_NAME = "colophon-benchmarks";
 const RECORD_KIND = "https://spec.jinn.network/records/task/v1";
@@ -50,7 +53,12 @@ function workspace(prefix: string): string {
 }
 
 /** Announces `label` with its own exact bytes, exactly as the product's own announce path does. */
-async function announce(workspaceDir: string, label: string, timestamp: string): Promise<Uint8Array> {
+async function announce(
+  workspaceDir: string,
+  label: string,
+  timestamp: string,
+  typed: { readonly kind: string; readonly mediaType: string } = { kind: RECORD_KIND, mediaType: "text/plain" },
+): Promise<Uint8Array> {
   const bytes = new TextEncoder().encode(label);
   await withWorkspacePublicationSourceLock(workspaceDir, async () => {
     const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
@@ -60,9 +68,9 @@ async function announce(workspaceDir: string, label: string, timestamp: string):
       announcement: {
         announcementId: label,
         action: "available",
-        record: { kind: RECORD_KIND, digest: `sha256:${sha256Hex(bytes)}`, mediaType: "text/plain" },
+        record: { kind: typed.kind, digest: `sha256:${sha256Hex(bytes)}`, mediaType: typed.mediaType },
       },
-      record: { bytes, contentType: "text/plain" },
+      record: { bytes, contentType: typed.mediaType },
     });
   });
   return bytes;
@@ -186,6 +194,54 @@ describe("public archive server", () => {
           expect(bytes).toEqual(announced.get(announcement.announcementId));
         }
       }
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("serves the lock index beside the archive, and chain verification never reaches it (#3398)", async () => {
+    const workspaceDir = workspace("publication-serve-lock-index-");
+    const lockBytes = await announce(workspaceDir, "lock", "2026-08-13T12:00:00Z", { kind: RUN_RECORD_KIND, mediaType: RUN_MEDIA_TYPE });
+    await announce(workspaceDir, "task", "2026-08-13T12:01:00Z");
+    writeRunState(workspaceDir, "draft-1", {
+      draftId: "draft-1",
+      specSha256: "a".repeat(64),
+      owner: loadOrCreateReportSigningKey(workspaceDir).keyId,
+      runSha256: sha256Hex(lockBytes),
+      publication: createPublicationState(),
+    });
+    const server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
+    try {
+      const response = await fetch(`${server.url}${PUBLICATION_LOCK_INDEX_PATH}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("application/json");
+      // Rewritten on regeneration, so never marked immutable the way digest paths are.
+      expect(response.headers.get("cache-control")).toBe("no-cache");
+      const indexBytes = new Uint8Array(await response.arrayBuffer());
+      const index = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(indexBytes)) as { locks: { lockSha256: string }[] };
+      // The Task announcement is not a lock; only the Run record is listed.
+      expect(index.locks.map((lock) => lock.lockSha256)).toEqual([sha256Hex(lockBytes)]);
+      expect((await fetch(`${server.url}${PUBLICATION_LOCK_INDEX_PATH}`, { method: "POST" })).status).toBe(405);
+
+      // A cold consumer's walk and source-chain-verification are untouched by the index, and no
+      // announcement in the verified chain names its bytes.
+      const listed = parseWellKnownDocument(await getJson(`${server.url}${WELL_KNOWN_PATH}`)).sources[0]!;
+      const headEnvelope = JSON.parse(new TextDecoder("utf-8", { fatal: true })
+        .decode(await getBytes(`${server.url}${listed.headPath}`))) as DsseEnvelope;
+      const head = parseSourceHead(JSON.parse(new TextDecoder("utf-8", { fatal: true })
+        .decode(parseWireDsseEnvelope(headEnvelope).payloadBytes)));
+      const entries = await coldWalk(server.url, SOURCE_NAME, listed.archiveRoot);
+      const outcome = await verifySourceChain({
+        head,
+        headSignature: headEnvelope,
+        entries: (async function* () { for (const signed of entries) yield signed; })(),
+        ports: verificationPorts(workspaceDir, new Date(head.issuedAt)),
+      });
+      expect(outcome.status).toBe("ok");
+      const digests = entries.flatMap((signed) => signed.entry.announcements)
+        .flatMap((announcement) => (announcement.action === "available" ? [announcement.record.digest] : []));
+      expect(digests).toHaveLength(2);
+      expect(digests).not.toContain(`sha256:${sha256Hex(indexBytes)}`);
     } finally {
       await server.close();
     }

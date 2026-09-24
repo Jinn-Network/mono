@@ -1033,10 +1033,11 @@ function compactStatus(input: PublicAssetInput, reportFacts: MethodFacts): strin
 }
 
 /** Compact paired surfaces deliberately carry no estimate, interval bound, alpha, or pair count.
- * They disclose the interval state and point to the relative full-report path instead. */
-function pairedCompactFragment(facts: MethodFacts): string {
+ * They disclose the interval state and point to the relative full-report path instead.
+ * Every caller (`buildBadge`, `buildSocialCard`, `buildShareText`) returns its binary asset before
+ * reaching here, so the parameter excludes `BinaryFacts` rather than carrying a dead branch. */
+function pairedCompactFragment(facts: Exclude<MethodFacts, BinaryFacts>): string {
   if (facts.kind === "wilson") return "";
-  if (facts.kind === "binary") return "Verified qualification signpost · full evidence at index.html";
   if (facts.kind === "pairwise-disagreement") {
     return `Pairwise disagreement panel · ${facts.pairs.length} arm pairs · index.html`;
   }

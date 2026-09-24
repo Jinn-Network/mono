@@ -3,6 +3,7 @@ title: Telemetry collector + task-generator SolverNet — design
 date: 2026-05-07
 author: opus (drafted on jinn-mono-6m7t; Captain oaksprout)
 status: ideas-level (Phase A.5+ candidate; pre-implementation; awaiting Phase A.1 land + jinn-mono-h43b)
+superseded-in-part-by: '[docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md](../docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md) §4 (2026-09-24): the `session-derived.v0` SolverNet contract (§5) and its launcher task-generator (§6) give way to task-profile documents and ordinary requester applications; the Captures tab is not ported to the operator console ([OPERATOR-APP-SPEC.md](../apps/operator-console/OPERATOR-APP-SPEC.md), 2026-08-17 amendment); the OTLP receiver (§4) still runs'
 version: 0.1
 ---
 

@@ -1,5 +1,7 @@
 # Autopilot — PR review-and-fix loop (`review-pr`) — design
 
+> **Status (2026-09-24): partly superseded by [docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md](2026-07-21-single-surface-lifecycle.md).** Its review-and-fix loop, in which `review-pr` pushes fixes to labeled PRs, is replaced: review findings become child issues routed back through the pipeline and review never publishes fixes (single-surface §5.1), and claiming and dispatch follow the [active-active lifecycle design](2026-07-19-active-active-autopilot-lifecycle-design.md). The independent `review-pr` pass itself stands. For the current direction read [docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md](2026-07-21-single-surface-lifecycle.md).
+
 **Version:** 0.2 (proposed)
 **Date:** 2026-05-29
 **Authors:** oak (Captain) and claude — co-designed in a brainstorming session, 2026-05-29

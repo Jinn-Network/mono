@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, posix, resolve } from 'node:path';
+import { join, posix, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -527,6 +527,350 @@ export function findOrphanedScriptTests(scriptsRoot = scriptsDir, workflowsRoot 
   const tests = listScriptTests(scriptsRoot);
   const referenced = collectReferencedScriptTests(workflowsRoot);
   return tests.filter((name) => !referenced.has(name));
+}
+
+const SKIPPED_DIRECTORIES = new Set(['node_modules', '.git', '.yarn', 'dist', 'legacy']);
+
+export function isGuardScriptName(name) {
+  if (name.split(':')[0] === 'typecheck') return false;
+  return /check|verify|guard|lint|audit/i.test(name);
+}
+
+function guardKey(workspace, script) {
+  return `${workspace}::${script}`;
+}
+
+function isNonEmptyJustification(value) {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+export function listDeclaredGuardScripts(repoRoot = root) {
+  /** @type {{ workspace: string, script: string }[]} */
+  const found = [];
+  const walk = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
+      const absolute = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        walk(absolute);
+        continue;
+      }
+      if (entry.name !== 'package.json') continue;
+      const workspace = relative(repoRoot, directory);
+      if (workspace === '') continue;
+      let manifest;
+      try {
+        manifest = JSON.parse(readFileSync(absolute, 'utf8'));
+      } catch (cause) {
+        throw new Error(`unreadable workspace manifest ${relative(repoRoot, absolute)}`, { cause });
+      }
+      for (const script of Object.keys(manifest.scripts ?? {})) {
+        if (isGuardScriptName(script)) found.push({ workspace, script });
+      }
+    }
+  };
+  walk(repoRoot);
+  found.sort((a, b) => a.workspace.localeCompare(b.workspace) || a.script.localeCompare(b.script));
+  return found;
+}
+
+/** @type {Record<string, string>} */
+export const NOT_CI_RUNNABLE = {
+  'operator::substrate:verify': 'live RPC',
+};
+
+export function assertNotCiRunnableJustifications(map = NOT_CI_RUNNABLE) {
+  const failures = [];
+  for (const [key, value] of Object.entries(map)) {
+    if (!isNonEmptyJustification(value)) failures.push(key);
+  }
+  if (failures.length > 0) {
+    throw new Error(`NOT_CI_RUNNABLE entries missing non-empty justification: ${failures.join(', ')}`);
+  }
+}
+
+function yamlIndent(line) {
+  return line.match(/^ */u)[0].length;
+}
+
+function stripYamlScalar(value) {
+  const text = value.trim();
+  if (
+    (text.startsWith('"') && text.endsWith('"'))
+    || (text.startsWith("'") && text.endsWith("'"))
+  ) {
+    return text.slice(1, -1);
+  }
+  return text;
+}
+
+function posixNormalize(path) {
+  const parts = [];
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') parts.pop();
+    else parts.push(part);
+  }
+  return parts.join('/');
+}
+
+function resolveOverrideCwd(base, override) {
+  const path = stripYamlScalar(override).replace(/\/+$/u, '');
+  const relativeOrBare = path.startsWith('.') || !path.includes('/');
+  if (relativeOrBare) return posixNormalize(base ? `${base}/${path}` : path);
+  return posixNormalize(path);
+}
+
+function workspacesForCwd(cwd, workspaces) {
+  if (cwd == null || cwd === '') return [];
+  const under = (anchor) => workspaces.filter(
+    (workspace) => workspace === anchor || workspace.startsWith(`${anchor}/`),
+  );
+  if (cwd.includes('${{')) {
+    const interpolation = cwd.indexOf('${{');
+    if (interpolation === 0) {
+      const close = cwd.indexOf('}}');
+      const suffix = close === -1 ? '' : cwd.slice(close + 2).replace(/^\/+/u, '').replace(/\/+$/u, '');
+      if (suffix === '') return [];
+      return under(suffix);
+    }
+    const prefix = cwd.slice(0, interpolation).replace(/\/+$/u, '');
+    if (prefix === '') return [];
+    return under(prefix);
+  }
+  const exact = cwd.replace(/\/+$/u, '');
+  if (exact === '' || exact === '.') return [];
+  return workspaces.filter((workspace) => workspace === exact);
+}
+
+function parseWorkingDirectory(text) {
+  const match = /^(?:-\s+)?working-directory:\s*(.+)$/u.exec(text.trim());
+  return match ? stripYamlScalar(match[1]) : null;
+}
+
+function isBlockScalar(rest) {
+  return /^(?:>|\|)[-+]?\d*[-+]?\s*$/u.test(rest);
+}
+
+// Command-position only. `\byarn\b` credits `echo yarn skill:check` and
+// `yarn install # yarn skill:check`, which is fail-OPEN for a wiring
+// obligation (the opposite polarity of collectTestInvocations). Script names
+// start with a letter so a flag such as `--check` is not read as a guard.
+const YARN_SCRIPT_RE = /(?:^|[;|&(]|\s(?:&&|\|\|)\s)\s*yarn(?:\s+run)?(?:\s+--cwd\s+\S+)?(?:\s+run)?\s+([A-Za-z][A-Za-z0-9:_-]*)/gu;
+
+function parseYarnInvocations(text, baseCwd) {
+  const results = [];
+  for (const line of text.split('\n')) {
+    const code = withoutCommentLine(line);
+    if (!/\byarn\b/u.test(code)) continue;
+    let cwd = baseCwd;
+    const cwdMatch = /\byarn(?:\s+run)?\s+--cwd\s+(\S+)/u.exec(code);
+    const cdMatch = /(?:^|[(\s])cd\s+(\S+)\s+&&/u.exec(code);
+    if (cwdMatch) cwd = resolveOverrideCwd(baseCwd, cwdMatch[1]);
+    else if (cdMatch) cwd = resolveOverrideCwd(baseCwd, cdMatch[1]);
+    for (const match of code.matchAll(YARN_SCRIPT_RE)) {
+      results.push({ cwd, script: match[1] });
+    }
+  }
+  return results;
+}
+
+function harvestYarnGuardInvocations(declared, workflowsRoot) {
+  const declaredSet = new Set(declared.map(({ workspace, script }) => guardKey(workspace, script)));
+  const workspaces = [...new Set(declared.map((entry) => entry.workspace))];
+  const credited = new Set();
+  const credit = (cwd, script) => {
+    if (!script || !isGuardScriptName(script)) return;
+    for (const workspace of workspacesForCwd(cwd, workspaces)) {
+      const key = guardKey(workspace, script);
+      if (declaredSet.has(key)) credited.add(key);
+    }
+  };
+
+  for (const fileName of readdirSync(workflowsRoot).filter((name) => name.endsWith('.yml'))) {
+    const lines = readFileSync(join(workflowsRoot, fileName), 'utf8').split('\n');
+    let workflowWd = '';
+    let inJobs = false;
+    let jobsIndent = -1;
+    let jobWd = '';
+    let jobIndent = -1;
+    let inSteps = false;
+    let stepsIndent = -1;
+    let inCurrentStep = false;
+    let defaultsKind = null;
+    let defaultsIndent = -1;
+    let inDefaultsRun = false;
+    let defaultsRunIndent = -1;
+    let stepWd = '';
+    let stepRun = [];
+    let collectingRunBody = false;
+    let runBodyIndent = -1;
+
+    const flushStep = () => {
+      collectingRunBody = false;
+      const base = stepWd || jobWd || workflowWd;
+      for (const { cwd, script } of parseYarnInvocations(stepRun.join('\n'), base)) {
+        credit(cwd, script);
+      }
+      stepWd = '';
+      stepRun = [];
+      inCurrentStep = false;
+    };
+
+    const applyStepLine = (content, indent) => {
+      const wd = parseWorkingDirectory(content);
+      if (wd !== null) {
+        stepWd = wd;
+        return;
+      }
+      const run = /^run:\s*(.*)$/u.exec(content.trim());
+      if (!run) return;
+      const rest = run[1].trim();
+      if (rest === '' || isBlockScalar(rest)) {
+        collectingRunBody = true;
+        runBodyIndent = indent;
+        return;
+      }
+      stepRun.push(rest);
+    };
+
+    for (const line of lines) {
+      const code = withoutCommentLine(line);
+      const indent = yamlIndent(code);
+
+      if (collectingRunBody) {
+        if (code.trim() === '' || indent > runBodyIndent) {
+          if (code.trim() !== '') stepRun.push(code.trim());
+          continue;
+        }
+        collectingRunBody = false;
+      }
+
+      if (code.trim() === '') continue;
+
+      if (defaultsKind && indent <= defaultsIndent) {
+        defaultsKind = null;
+        inDefaultsRun = false;
+      }
+      if (inDefaultsRun && indent <= defaultsRunIndent) inDefaultsRun = false;
+      if (inJobs && indent <= jobsIndent) {
+        flushStep();
+        inJobs = false;
+        inSteps = false;
+        jobWd = '';
+        jobIndent = -1;
+      }
+      if (jobIndent >= 0 && indent <= jobIndent) {
+        flushStep();
+        jobWd = '';
+        inSteps = false;
+        jobIndent = -1;
+      }
+      if (inSteps && indent <= stepsIndent) {
+        flushStep();
+        inSteps = false;
+      }
+
+      const trimmed = code.trim();
+
+      if (/^defaults:\s*$/u.test(trimmed)) {
+        defaultsKind = inJobs ? 'job' : 'workflow';
+        defaultsIndent = indent;
+        inDefaultsRun = false;
+        continue;
+      }
+      if (defaultsKind && /^run:\s*$/u.test(trimmed)) {
+        inDefaultsRun = true;
+        defaultsRunIndent = indent;
+        continue;
+      }
+      if (inDefaultsRun) {
+        const wd = parseWorkingDirectory(trimmed);
+        if (wd !== null) {
+          if (defaultsKind === 'workflow') workflowWd = wd;
+          else jobWd = wd;
+          continue;
+        }
+      }
+
+      if (/^jobs:\s*$/u.test(trimmed)) {
+        flushStep();
+        inJobs = true;
+        jobsIndent = indent;
+        continue;
+      }
+      if (inJobs && !inSteps && indent === jobsIndent + 2 && /^[A-Za-z0-9_-]+:\s*$/u.test(trimmed)) {
+        flushStep();
+        jobIndent = indent;
+        jobWd = '';
+        inSteps = false;
+        continue;
+      }
+      if (inJobs && /^steps:\s*$/u.test(trimmed)) {
+        flushStep();
+        inSteps = true;
+        stepsIndent = indent;
+        continue;
+      }
+      if (inSteps) {
+        const listItem = /^(\s*)-\s+(.*)$/u.exec(code);
+        if (listItem && indent > stepsIndent) {
+          flushStep();
+          inCurrentStep = true;
+          applyStepLine(listItem[2], indent);
+          continue;
+        }
+        if (inCurrentStep) applyStepLine(trimmed, indent);
+      }
+    }
+    flushStep();
+  }
+
+  return credited;
+}
+
+export function collectYarnGuardInvocations(repoRoot = root, workflowsRoot = workflowsDir) {
+  return harvestYarnGuardInvocations(listDeclaredGuardScripts(repoRoot), workflowsRoot);
+}
+
+/** @type {Record<string, string>} */
+const SUGGESTED_OWNER_BY_GUARD = {
+  'operator::skill:check': 'ci.yml (check job)',
+  'operator::generate:openapi:check': 'ci.yml (check job)',
+  'packages/task-supply/admission::fixtures:check': 'task-supply-ci.yml (packages job)',
+  'packages/environments/chain-extraction::check:fixtures': 'environments-ci.yml (packages job)',
+};
+
+function guardPrintForm(workspace, script) {
+  return `${workspace}: ${script}`;
+}
+
+export function findOrphanedGuardScripts(
+  repoRoot = root,
+  workflowsRoot = workflowsDir,
+  notCiRunnable = NOT_CI_RUNNABLE,
+) {
+  const declared = listDeclaredGuardScripts(repoRoot);
+  const harvested = harvestYarnGuardInvocations(declared, workflowsRoot);
+  const orphans = [];
+  for (const { workspace, script } of declared) {
+    const key = guardKey(workspace, script);
+    if (harvested.has(key) || isNonEmptyJustification(notCiRunnable[key])) continue;
+    orphans.push(guardPrintForm(workspace, script));
+  }
+  orphans.sort();
+  return orphans;
+}
+
+export function formatGuardOrphans(orphans) {
+  return orphans.map((printForm) => {
+    const separator = printForm.indexOf(': ');
+    const key = separator === -1
+      ? printForm
+      : guardKey(printForm.slice(0, separator), printForm.slice(separator + 2));
+    const owner = SUGGESTED_OWNER_BY_GUARD[key] ?? 'an owning workflow under .github/workflows/';
+    return `- ${printForm} (suggested owner: ${owner})`;
+  }).join('\n');
 }
 
 test('every .github/scripts/*.test.mjs is referenced by at least one workflow', () => {
@@ -1123,4 +1467,326 @@ test('the gate rejects an in-checkout fixture that is not dot-prefixed', () => {
   const [{ segments }] = findInCheckoutFixtureCalls(violating);
   assert.deepEqual(segments, ['packages', 'tmp-not-dot-prefixed-']);
   assert.ok(!segments.at(-1).startsWith('.'), 'the dot-prefix assertion above would fail for this suite');
+});
+
+function writePlantedManifest(repoRoot, workspace, scripts) {
+  const directory = workspace === '' ? repoRoot : join(repoRoot, workspace);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({ scripts }));
+}
+
+test('self-test: name predicate includes check/verify/guard/lint/audit and excludes typecheck', () => {
+  assert.equal(isGuardScriptName('skill:check'), true);
+  assert.equal(isGuardScriptName('generate:openapi:check'), true);
+  assert.equal(isGuardScriptName('demo1:verify'), true);
+  assert.equal(isGuardScriptName('fixtures:check'), true);
+  assert.equal(isGuardScriptName('check:fixtures'), true);
+  assert.equal(isGuardScriptName('lint:no-late-mount'), true);
+  assert.equal(isGuardScriptName('audit:licenses'), true);
+  assert.equal(isGuardScriptName('guard:foo'), true);
+  assert.equal(isGuardScriptName('typecheck'), false);
+  assert.equal(isGuardScriptName('typecheck:test'), false);
+  assert.equal(isGuardScriptName('test'), false);
+  assert.equal(isGuardScriptName('build'), false);
+});
+
+test('self-test: empty NOT_CI_RUNNABLE justification fails', () => {
+  for (const justification of ['', '   ', undefined]) {
+    assert.throws(
+      () => assertNotCiRunnableJustifications({ 'operator::substrate:verify': justification }),
+      (error) => String(error).includes('operator::substrate:verify'),
+    );
+  }
+});
+
+test('NOT_CI_RUNNABLE required members carry non-empty justifications', () => {
+  assertNotCiRunnableJustifications();
+  const required = {
+    'operator::substrate:verify': /live RPC/i,
+  };
+  for (const [key, substance] of Object.entries(required)) {
+    assert.equal(typeof NOT_CI_RUNNABLE[key], 'string', key);
+    assert.ok(NOT_CI_RUNNABLE[key].trim().length > 0, key);
+    assert.match(NOT_CI_RUNNABLE[key], substance, key);
+  }
+});
+
+test('NOT_CI_RUNNABLE declares nothing stale', () => {
+  const declaredKeys = new Set(
+    listDeclaredGuardScripts().map(({ workspace, script }) => guardKey(workspace, script)),
+  );
+  const credited = collectYarnGuardInvocations();
+  for (const key of Object.keys(NOT_CI_RUNNABLE)) {
+    assert.ok(
+      declaredKeys.has(key),
+      `NOT_CI_RUNNABLE exempts ${key}, which names no guard-shaped script in a tracked package.json.`,
+    );
+    assert.ok(
+      !credited.has(key),
+      `NOT_CI_RUNNABLE exempts ${key} as not CI-runnable, but a workflow now runs it; drop the exemption instead.`,
+    );
+  }
+});
+
+test('self-test: workspace walk skips node_modules, .git, .yarn, dist, legacy, and the root manifest', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-guard-walk-'));
+  try {
+    writePlantedManifest(fixture, '', { 'orphan:check': 'echo root' });
+    writePlantedManifest(fixture, 'operator', { 'skill:check': 'echo skill' });
+    writePlantedManifest(fixture, 'packages/foo', { 'demo1:verify': 'echo demo' });
+    writePlantedManifest(fixture, 'node_modules/pkg', { 'hidden:check': 'echo hidden' });
+    writePlantedManifest(fixture, '.git/hooks', { 'hidden:check': 'echo hidden' });
+    writePlantedManifest(fixture, '.yarn/unplugged', { 'hidden:check': 'echo hidden' });
+    writePlantedManifest(fixture, 'dist', { 'hidden:check': 'echo hidden' });
+    writePlantedManifest(fixture, 'legacy/ref', { 'hidden:check': 'echo hidden' });
+    assert.deepEqual(listDeclaredGuardScripts(fixture), [
+      { workspace: 'operator', script: 'skill:check' },
+      { workspace: 'packages/foo', script: 'demo1:verify' },
+    ]);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('self-test: harvest binds yarn invocations via working-directory, --cwd, and cd', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'jinn-guard-harvest-repo-'));
+  const workflows = mkdtempSync(join(tmpdir(), 'jinn-guard-harvest-wf-'));
+  try {
+    writePlantedManifest(repo, 'operator', { 'skill:check': 'echo skill' });
+    writePlantedManifest(repo, 'packages/foo', { 'demo1:verify': 'echo demo' });
+    writePlantedManifest(repo, 'packages/bar', { 'fixtures:check': 'echo fixtures' });
+    writePlantedManifest(repo, 'packages/baz', { 'check:fixtures': 'echo check' });
+    writePlantedManifest(repo, 'packages/qux', { 'lint:foo': 'echo lint' });
+    writeFileSync(join(workflows, 'wired.yml'), [
+      'defaults:',
+      '  run:',
+      '    working-directory: operator',
+      'jobs:',
+      '  check:',
+      '    steps:',
+      '      - run: yarn skill:check',
+      '  other:',
+      '    defaults:',
+      '      run:',
+      '        working-directory: packages/foo',
+      '    steps:',
+      '      - run: yarn demo1:verify',
+      '      - working-directory: packages/bar',
+      '        run: yarn fixtures:check',
+      '      - run: yarn --cwd packages/baz check:fixtures',
+      '      - run: (cd packages/qux && yarn lint:foo)',
+      '      # yarn skill:check',
+      '',
+    ].join('\n'));
+    const harvested = collectYarnGuardInvocations(repo, workflows);
+    for (const key of [
+      'operator::skill:check',
+      'packages/foo::demo1:verify',
+      'packages/bar::fixtures:check',
+      'packages/baz::check:fixtures',
+      'packages/qux::lint:foo',
+    ]) {
+      assert.ok(harvested.has(key), key);
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(workflows, { recursive: true, force: true });
+  }
+});
+
+test('self-test: harvest does not credit yarn mentions or yarn install', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'jinn-guard-mention-repo-'));
+  const workflows = mkdtempSync(join(tmpdir(), 'jinn-guard-mention-wf-'));
+  try {
+    writePlantedManifest(repo, 'operator', {
+      'skill:check': 'echo skill',
+      'install:check': 'echo install-check',
+    });
+    writeFileSync(join(workflows, 'mention.yml'), [
+      'jobs:',
+      '  check:',
+      '    defaults:',
+      '      run:',
+      '        working-directory: operator',
+      '    steps:',
+      '      - run: yarn install --immutable',
+      '      - run: echo yarn skill:check',
+      '      - run: echo "yarn install:check"',
+      '      - run: yarn install # yarn skill:check',
+      '',
+    ].join('\n'));
+    const harvested = collectYarnGuardInvocations(repo, workflows);
+    assert.equal(harvested.has('operator::skill:check'), false);
+    assert.equal(harvested.has('operator::install:check'), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(workflows, { recursive: true, force: true });
+  }
+});
+
+test('self-test: harvest keys same-named scripts by workspace', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'jinn-guard-homonym-repo-'));
+  const workflows = mkdtempSync(join(tmpdir(), 'jinn-guard-homonym-wf-'));
+  try {
+    writePlantedManifest(repo, 'operator', { 'skill:check': 'echo operator' });
+    writePlantedManifest(repo, 'packages/foo', { 'skill:check': 'echo foo' });
+    writeFileSync(join(workflows, 'wired.yml'), [
+      'jobs:',
+      '  check:',
+      '    steps:',
+      '      - working-directory: operator',
+      '        run: yarn skill:check',
+      '',
+    ].join('\n'));
+    const harvested = collectYarnGuardInvocations(repo, workflows);
+    assert.equal(harvested.has('operator::skill:check'), true);
+    assert.equal(harvested.has('packages/foo::skill:check'), false);
+    assert.deepEqual(
+      findOrphanedGuardScripts(repo, workflows, {}),
+      ['packages/foo: skill:check'],
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(workflows, { recursive: true, force: true });
+  }
+});
+
+test('self-test: harvest does not prefix-match script names', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'jinn-guard-prefix-repo-'));
+  const extraWorkflows = mkdtempSync(join(tmpdir(), 'jinn-guard-prefix-extra-'));
+  const exactWorkflows = mkdtempSync(join(tmpdir(), 'jinn-guard-prefix-exact-'));
+  try {
+    writePlantedManifest(repo, 'operator', { 'skill:check': 'echo skill' });
+    writeFileSync(join(extraWorkflows, 'extra.yml'), [
+      'jobs:',
+      '  check:',
+      '    defaults:',
+      '      run:',
+      '        working-directory: operator',
+      '    steps:',
+      '      - run: yarn skill:check:extra',
+      '',
+    ].join('\n'));
+    assert.equal(collectYarnGuardInvocations(repo, extraWorkflows).has('operator::skill:check'), false);
+
+    writeFileSync(join(exactWorkflows, 'exact.yml'), [
+      'jobs:',
+      '  check:',
+      '    defaults:',
+      '      run:',
+      '        working-directory: operator',
+      '    steps:',
+      '      - run: yarn skill:check',
+      '      - run: yarn run skill:check',
+      '',
+    ].join('\n'));
+    const harvested = collectYarnGuardInvocations(repo, exactWorkflows);
+    assert.equal(harvested.has('operator::skill:check'), true);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(extraWorkflows, { recursive: true, force: true });
+    rmSync(exactWorkflows, { recursive: true, force: true });
+  }
+});
+
+test('self-test: harvest credits interpolated working-directory prefix workspaces', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'jinn-guard-interp-repo-'));
+  const workflows = mkdtempSync(join(tmpdir(), 'jinn-guard-interp-wf-'));
+  try {
+    writePlantedManifest(repo, 'packages/evidence/repository-oci', { 'check:profile': 'echo oci' });
+    writePlantedManifest(repo, 'packages/evidence/repository-ipfs', { 'check:profile': 'echo ipfs' });
+    writePlantedManifest(repo, 'packages/evidence/undeclared', { test: 'echo no' });
+    writeFileSync(join(workflows, 'matrix.yml'), [
+      'jobs:',
+      '  components:',
+      '    steps:',
+      '      - working-directory: packages/evidence/${{ matrix.component }}',
+      '        run: yarn check:profile',
+      '',
+    ].join('\n'));
+    const harvested = collectYarnGuardInvocations(repo, workflows);
+    assert.equal(harvested.has('packages/evidence/repository-oci::check:profile'), true);
+    assert.equal(harvested.has('packages/evidence/repository-ipfs::check:profile'), true);
+    assert.equal(harvested.has('packages/evidence/undeclared::check:profile'), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(workflows, { recursive: true, force: true });
+  }
+});
+
+test('self-test: harvest does not expand sibling scripts', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'jinn-guard-sibling-repo-'));
+  const workflows = mkdtempSync(join(tmpdir(), 'jinn-guard-sibling-wf-'));
+  try {
+    writePlantedManifest(repo, 'operator', {
+      'verify:all': 'yarn skill:check',
+      'skill:check': 'echo skill',
+    });
+    writeFileSync(join(workflows, 'sibling.yml'), [
+      'jobs:',
+      '  check:',
+      '    defaults:',
+      '      run:',
+      '        working-directory: operator',
+      '    steps:',
+      '      - run: yarn verify:all',
+      '',
+    ].join('\n'));
+    const harvested = collectYarnGuardInvocations(repo, workflows);
+    assert.equal(harvested.has('operator::verify:all'), true);
+    assert.equal(harvested.has('operator::skill:check'), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(workflows, { recursive: true, force: true });
+  }
+});
+
+test('self-test: orphan detector names a planted unwired guard', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'jinn-guard-orphan-repo-'));
+  const workflows = mkdtempSync(join(tmpdir(), 'jinn-guard-orphan-wf-'));
+  try {
+    writePlantedManifest(repo, 'operator', {
+      'skill:check': 'echo skill',
+      'substrate:verify': 'echo rpc',
+      typecheck: 'tsc',
+    });
+    writePlantedManifest(repo, 'packages/foo', { 'orphan:check': 'echo orphan' });
+    writeFileSync(join(workflows, 'wired.yml'), [
+      'jobs:',
+      '  check:',
+      '    steps:',
+      '      - working-directory: operator',
+      '        run: yarn skill:check',
+      '',
+    ].join('\n'));
+    const exemptions = { 'operator::substrate:verify': 'live RPC' };
+    const orphans = findOrphanedGuardScripts(repo, workflows, exemptions);
+    assert.deepEqual(orphans, ['packages/foo: orphan:check']);
+    assert.equal(orphans.includes('operator: skill:check'), false);
+    assert.equal(orphans.includes('operator: substrate:verify'), false);
+    assert.equal(orphans.includes('operator: typecheck'), false);
+    const message = formatGuardOrphans(orphans);
+    assert.match(message, /packages\/foo: orphan:check/);
+    assert.match(message, /an owning workflow under \.github\/workflows\//);
+    assert.match(
+      formatGuardOrphans(['operator: skill:check']),
+      /ci\.yml \(check job\)/,
+    );
+    assert.match(
+      formatGuardOrphans(['operator: generate:openapi:check']),
+      /ci\.yml \(check job\)/,
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(workflows, { recursive: true, force: true });
+  }
+});
+
+test('every declared guard script is workflow-wired or in NOT_CI_RUNNABLE', () => {
+  const orphans = findOrphanedGuardScripts();
+  if (orphans.length === 0) return;
+  assert.fail(
+    `Found ${orphans.length} unwired guard script(s). Each declared guard must be invoked by a workflow or listed in NOT_CI_RUNNABLE with a justification:\n`
+    + formatGuardOrphans(orphans),
+  );
 });

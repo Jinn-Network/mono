@@ -1,5 +1,7 @@
 # ERC-8004 entity model — operator-rooted with per-execution metadata commitments
 
+> **Status (2026-09-24): partly superseded by [docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md](2026-07-27-trust-and-identity-layer-design.md).** Its identity root (§4.1, one agent NFT per operator Safe as the operator identity) is replaced: the Agent IRI is the durable identity, and an ERC-8004 agentId is registry evidence about an Agent, never the Agent (§2, decision 2). Its validation surface (§4.4, operator-initiated validation with a DisputeProxy for challenges) is set aside by the [marketplace binding design](2026-07-28-marketplace-binding-design.md) §2, which rejects ERC-8004 as verdict-of-record and never imports it into settlement. Per-execution `setMetadata` commitments (§4.2) are still what the legacy capture publisher writes. For the current direction read [docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md](2026-07-27-trust-and-identity-layer-design.md).
+
 **Version:** 1.0 (decision)
 **Date:** 2026-04-27
 **Status:** Decided. Binds PR #37 cleanup and shapes Phase 1b challenge mechanism + reputation surface.

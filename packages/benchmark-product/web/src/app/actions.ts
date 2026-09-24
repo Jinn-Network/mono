@@ -754,21 +754,7 @@ export async function runReportAction(_previous: GuiActionState, formData: FormD
 
 export async function runVerifyAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
-  return executeOperation(async (context) => {
-    const outcome = await runVerify(context, { draftId });
-    if (!outcome.ok) return outcome;
-    return {
-      ok: true as const,
-      result: {
-        draftId,
-        checks: [...outcome.result.checks],
-        matrixSha256: outcome.result.matrixSha256,
-        ...(outcome.result.reportEnvelopeSha256 !== undefined
-          ? { reportEnvelopeSha256: outcome.result.reportEnvelopeSha256 }
-          : {}),
-      },
-    };
-  });
+  return executeOperation((context) => runVerify(context, { draftId }));
 }
 
 /** Publishes, or re-verifies the one fixed draft-owned bundle when already published. The

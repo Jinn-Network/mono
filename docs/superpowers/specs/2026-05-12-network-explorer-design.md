@@ -1,5 +1,7 @@
 # Network explorer — public leaderboard + activity aggregation over the Discovery substrate
 
+> **Status (2026-09-24): partly superseded by [log/decisions/2026-06-30-tokenless-olas-native-pivot.md](../../../log/decisions/2026-06-30-tokenless-olas-native-pivot.md).** Its JINN-denominated measures (JINN distributed and earned in the §2 view scopes, and the `RewardDistribution` rows read from `JinnDistributor` in §4.1) retired with the JINN token; the explorer now reports operator activity in OLAS ([EXPLORER-APP-SPEC.md](../../../packages/indexer/explorer/EXPLORER-APP-SPEC.md) §2.7). The read path, data model and view design otherwise stand, and EXPLORER-APP-SPEC.md is the canonical model of the explorer. For the current direction read [packages/indexer/explorer/EXPLORER-APP-SPEC.md](../../../packages/indexer/explorer/EXPLORER-APP-SPEC.md).
+
 - **Date:** 2026-05-12
 - **Author:** Oak with Opus
 - **Status:** Design draft — ready for review

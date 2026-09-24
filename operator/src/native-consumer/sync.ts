@@ -11,7 +11,10 @@ import {
   compareCodeUnitStrings,
   formatOrigin,
   parseAnnouncementEntry,
+  SOURCE_HEAD_ORIGIN_PRECHECK_REASON,
   sealJson,
+  sourceChainRefusalReason,
+  sourceHeadRefusalReason,
   verifySourceChain,
   verifySourceHead,
   type AnnouncementEntry,
@@ -20,7 +23,6 @@ import {
   type KeyResolver,
   type SignatureVerifier,
   type SourceHead,
-  type SourceHeadOutcome,
   type SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
 import { ConsumerState } from './state.js';
@@ -103,33 +105,6 @@ function latestCommonEntry(
   return common?.digest;
 }
 
-function outcomeReason(status: Exclude<Awaited<ReturnType<typeof verifySourceChain>>['status'], 'ok'>): string {
-  switch (status) {
-    case 'stale': return 'stale-source-head';
-    case 'unauthorized-signer': return 'unauthorized-source-signer';
-    case 'forked': return 'forked-source-chain';
-    case 'broken-chain': return 'discontinuous-source-chain';
-  }
-}
-
-/**
- * `source-head-revalidation`'s outcomes in the same reason vocabulary the chain
- * procedure's outcomes already use, so one defect reads the same whichever path
- * refused it. The envelope-shaped refusals the chain procedure folds into
- * `unauthorized-signer` keep their own slugs, as the procedure intends.
- */
-function headOutcomeReason(status: Exclude<SourceHeadOutcome['status'], 'ok'>): string {
-  switch (status) {
-    case 'stale': return 'stale-source-head';
-    case 'unauthorized-signer': return 'unauthorized-source-signer';
-    case 'refresh-by-ceiling': return 'refresh-by-ceiling';
-    case 'head-issued-ahead': return 'head-issued-ahead';
-    case 'head-origin-mismatch': return 'source-head-origin-mismatch';
-    case 'head-payload-mismatch': return 'head-payload-mismatch';
-    case 'invalid-head-envelope': return 'invalid-head-envelope';
-  }
-}
-
 /**
  * Adapts the consumer's durable checkpoint to the protocol's named source-chain verification.
  * Verification uses a transaction-local high-water mark; only `syncPublicSource` advances durable
@@ -169,7 +144,7 @@ export function createProtocolSourceVerifier(options: ProtocolSourceVerifierOpti
         });
         return outcome.status === 'ok'
           ? { status: 'ok' }
-          : { status: 'rejected', reason: headOutcomeReason(outcome.status) };
+          : { status: 'rejected', reason: sourceHeadRefusalReason(outcome.status) };
       }
 
       let firstAdoption = input.mode === 'cold' && checkpoint === undefined;
@@ -217,7 +192,7 @@ export function createProtocolSourceVerifier(options: ProtocolSourceVerifierOpti
           firstAdoption,
         },
       });
-      if (outcome.status !== 'ok') return { status: 'rejected', reason: outcomeReason(outcome.status) };
+      if (outcome.status !== 'ok') return { status: 'rejected', reason: sourceChainRefusalReason(outcome.status) };
       if (advanced?.sequence !== input.head.sequence || advanced.entry !== input.head.entry) {
         return { status: 'rejected', reason: 'source-checkpoint-advance-mismatch' };
       }
@@ -241,7 +216,7 @@ export async function syncPublicSource(input: {
   }
   if (fetchedHead.signature === undefined) throw new ConsumerSyncError('unsigned-source-head');
   if (fetchedHead.head.origin !== formatOrigin(source.agent, source.name)) {
-    throw new ConsumerSyncError('source-head-origin-mismatch');
+    throw new ConsumerSyncError(SOURCE_HEAD_ORIGIN_PRECHECK_REASON);
   }
   const prior = input.state.checkpoint(source);
   let mode: ConsumerSyncMode;

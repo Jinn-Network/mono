@@ -1,5 +1,7 @@
 # portfolio.v0 — design spec
 
+> **Status (2026-09-24): partly superseded by [docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md](../docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md).** The generic primitives this spec introduced are replaced: the typed `DesiredState` (§3) and the per-kind evidence manifests (§5) by the sealed Task and Delivery of the Task Execution Protocol (§7, §11), and the kind-agnostic restorer engine (§6), which [spec/2026-05-01-harness-pack-architecture.md](2026-05-01-harness-pack-architecture.md) §7 renamed into the Harness model, retired with the TaskEngine in the one-swap cutover ([DR-2026-08-05](../log/decisions/2026-08-05-cutover-one-swap-collapse.md)); the protocol backend contract (§14) is its successor. The `portfolio.v0` kind itself (§4, §7, §8) still ships as a legacy solver type. For the current direction read [docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md](../docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md).
+
 **Version:** 1
 **Date:** 2026-04-17
 **Author:** ritsukai

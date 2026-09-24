@@ -19,7 +19,7 @@ import {
   KIT_AUTHORITY_SEED,
   KIT_BITCOIN_BLOCK_HEIGHT,
   KIT_CALENDAR_URI,
-  buildLinearOtsProof,
+  buildOtsCalendarNodeBody,
   createFixtureAuthority,
 } from "@jinn-network/trust-testing";
 import { runCli } from "../cli/main.js";
@@ -266,13 +266,13 @@ function rfc3161SourceFor(subjectSha256: string): AnchorProofSource {
 }
 
 function calendarBody(height?: number): Uint8Array {
-  return buildLinearOtsProof({
+  return buildOtsCalendarNodeBody({
     fileDigest: new Uint8Array(32),
     operations: [{ kind: "append", argument: Uint8Array.of(0x6a, 0x69, 0x6e, 0x6e) }, { kind: "sha256" }],
     attestations: height === undefined
       ? [{ kind: "pending", uri: KIT_CALENDAR_URI }]
       : [{ kind: "bitcoin", height }],
-  }).subarray(31 + 1 + 1 + 32);
+  });
 }
 
 function calendarTransport(state: { confirmed: boolean }): AnchorHttpFetch {
@@ -512,6 +512,13 @@ describe("runVerify — pre-report integrity anchors", () => {
       ],
       invalid: [],
     });
+
+    const human = await runCli(verifyArgs(), cliContext(clock));
+    expect(human.exitCode, human.stderr).toBe(0);
+    expect(human.stdout).toContain("Anchor subjects");
+    expect(human.stdout).toContain("lock: declared-but-absent");
+    expect(human.stdout).toContain("rfc3161-tsa/v1");
+    expect(human.stdout).toContain("matrix: absent");
   });
 
   test("refuses an anchor the shared evaluator marks invalid", async () => {
@@ -571,6 +578,8 @@ describe("runVerify — pre-report integrity anchors", () => {
     expect(human.exitCode, human.stderr).toBe(0);
     expect(human.stdout.split("\n")[0]).toBe("verified draft draft-1: matrix-rederivation, integrity-anchors");
     expect(human.stdout).toContain(`anchor lock: ${OPENTIMESTAMPS_ANCHOR_PROFILE}, authority-time, pending, record ${recordSha256}`);
+    expect(human.stdout).toContain("no Bitcoin attestation");
+    expect(human.stdout).toContain("Anchor subjects");
     expect(human.stdout).toContain("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
 
     const json = await runCli(verifyArgs(true), cliContext(clock));

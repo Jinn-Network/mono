@@ -546,7 +546,12 @@ export async function verifyPublicBundleSnapshot(
       return {
         verification: {
           ...verification,
-          signers: evidenceNativeBundleSigners(claimPackageBytes, verification.verifiedSignerKeyIds),
+          signers: evidenceNativeBundleSigners(
+            claimPackageBytes,
+            verification.verifiedSignerKeyIds,
+            checked.fileBytes.get("cohort.json") ?? new Uint8Array(),
+            checked.fileBytes,
+          ),
         },
         snapshot: checked,
       };

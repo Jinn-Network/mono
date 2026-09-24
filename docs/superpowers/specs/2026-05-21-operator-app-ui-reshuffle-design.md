@@ -1,5 +1,7 @@
 # Operator App UI/IA Reshuffle — Design Spec
 
+> **Status (2026-09-24): superseded by [log/decisions/2026-08-04-headless-operator-reconciliation.md](../../../log/decisions/2026-08-04-headless-operator-reconciliation.md).** This design is scoped to the daemon-served dashboard SPA; decision 2 re-derives the application tier rather than carrying it, the daemon now answers `/` with `no_human_surface`, and the separate operator console is a port, not a lift-and-shift ([headless operator design](2026-08-04-headless-operator-rederivation-design.md) §9). For the current direction read [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md).
+
 **Date:** 2026-05-21
 **Author:** Claude (handoff from [docs/superpowers/plans/2026-05-21-operator-app-ui-reshuffle-brief.md](../plans/2026-05-21-operator-app-ui-reshuffle-brief.md))
 **Status:** Draft

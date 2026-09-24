@@ -33,6 +33,80 @@ export type SourceHeadOutcome =
   | { status: "head-payload-mismatch" } // envelope does not carry these head bytes
   | { status: "invalid-head-envelope" }; // not a parseable wire DSSE envelope
 
+export type SourceHeadRefusalStatus = Exclude<SourceHeadOutcome["status"], "ok">;
+
+/**
+ * Shared log/reason slug for a `verifySourceHead` refusal (#3494).
+ *
+ * The procedure's typed `status` stays the protocol vocabulary. Callers that
+ * already prefix chain-path refusals (`stale-source-head`,
+ * `unauthorized-source-signer`) use this so a defect reads the same on the
+ * head path as on the chain path.
+ *
+ * `head-origin-mismatch` is deliberately NOT rewritten to
+ * `SOURCE_HEAD_ORIGIN_PRECHECK_REASON`: that latter slug is a consumer's
+ * `formatOrigin` string compare, which fires before this procedure runs.
+ */
+export type SourceHeadRefusalReason =
+  | "stale-source-head"
+  | "unauthorized-source-signer"
+  | "refresh-by-ceiling"
+  | "head-issued-ahead"
+  | "head-origin-mismatch"
+  | "head-payload-mismatch"
+  | "invalid-head-envelope";
+
+export const SOURCE_HEAD_ORIGIN_PRECHECK_REASON = "source-head-origin-mismatch" as const;
+
+export function sourceHeadRefusalReason(
+  status: SourceHeadRefusalStatus,
+): SourceHeadRefusalReason {
+  switch (status) {
+    case "stale": return "stale-source-head";
+    case "unauthorized-signer": return "unauthorized-source-signer";
+    case "refresh-by-ceiling": return "refresh-by-ceiling";
+    case "head-issued-ahead": return "head-issued-ahead";
+    case "head-origin-mismatch": return "head-origin-mismatch";
+    case "head-payload-mismatch": return "head-payload-mismatch";
+    case "invalid-head-envelope": return "invalid-head-envelope";
+    default: {
+      const exhaustive: never = status;
+      throw new Error(`sourceHeadRefusalReason: unhandled status ${String(exhaustive)}`);
+    }
+  }
+}
+
+export type SourceChainRefusalStatus = Exclude<SourceChainOutcome["status"], "ok">;
+
+/**
+ * Shared log/reason slug for a `verifySourceChain` refusal (#3494) -- the chain-path
+ * counterpart to `sourceHeadRefusalReason` above, and the same table
+ * `operator/src/native-consumer/sync.ts`'s `outcomeReason` used to hold locally. One table:
+ * the plugin runtime's corpus mirror (`chain-verification.ts`), the operator's
+ * native-consumer sync path, and the daemon's native discovery all share it, so a chain
+ * refusal reads the same slug no matter which consumer names it.
+ */
+export type SourceChainRefusalReason =
+  | "stale-source-head"
+  | "unauthorized-source-signer"
+  | "forked-source-chain"
+  | "discontinuous-source-chain";
+
+export function sourceChainRefusalReason(
+  status: SourceChainRefusalStatus,
+): SourceChainRefusalReason {
+  switch (status) {
+    case "stale": return "stale-source-head";
+    case "unauthorized-signer": return "unauthorized-source-signer";
+    case "forked": return "forked-source-chain";
+    case "broken-chain": return "discontinuous-source-chain";
+    default: {
+      const exhaustive: never = status;
+      throw new Error(`sourceChainRefusalReason: unhandled status ${String(exhaustive)}`);
+    }
+  }
+}
+
 export type FactsConsistency = "consistent" | "inconsistent" | "indeterminate";
 
 export type ItemOutcome =

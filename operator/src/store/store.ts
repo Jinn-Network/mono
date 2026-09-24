@@ -39,6 +39,7 @@ import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import type { VerdictTallyReadModel } from '../types/verdict-tally-read-model.js';
 import type { TxSubmissionKey, TxSubmissionLedgerEntry } from '../tx-retry.js';
 import { sanitizeErrorText, sanitizePersistedText } from '../rpc/transport.js';
+import { EMBEDDED_URL_SCHEMES } from '../util/embedded-url-pattern.js';
 
 export type { ActivityEventInput, ActivityEventRow } from './activity-events.js';
 export type { BalanceCacheEntry } from './balance-cache.js';
@@ -673,12 +674,14 @@ export class Store {
         // Store constructor, inside a write transaction, and `activity_events`
         // grows without bound on a busy operator — the whole result set must
         // not be materialized at boot.
+        const urlLike = EMBEDDED_URL_SCHEMES
+          .map((scheme) => `detail LIKE '%${scheme}://%'`)
+          .join(' OR ');
         const select = this.db.prepare(
           `SELECT id, detail FROM activity_events
            WHERE id > @afterId
              AND detail IS NOT NULL
-             AND (detail LIKE '%http://%' OR detail LIKE '%https://%'
-                  OR detail LIKE '%ws://%' OR detail LIKE '%wss://%')
+             AND (${urlLike})
            ORDER BY id
            LIMIT @batch`,
         );

@@ -8596,6 +8596,15 @@
         "kind": "fixtures",
         "package": "@jinn-network/record-discovery-testing",
         "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-invalid-head-envelope/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-invalid-head-envelope/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-refresh-by-ceiling/vector.json",
         "relativeSource": "fixtures/vectors/source-head-revalidation-refresh-by-ceiling/vector.json"
       },

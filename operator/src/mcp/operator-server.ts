@@ -644,7 +644,7 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
   server.tool(
     'jinn_update',
     [
-      'MUTATING: Update the client package and refresh host integrations.',
+      'MUTATING: Update the operator package and refresh host integrations.',
       'Step 1: npm update -g @jinn-network/operator',
       'Step 2: jinn integrations install (refreshes skills in all configured AI tools).',
       'May take 1-2 minutes. Use skip_npm=true to only refresh integrations with the current version.',
