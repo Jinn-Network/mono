@@ -340,9 +340,10 @@ describe("issue #3403: the composed claim package", () => {
     expect(anchored.claimSchema).toBe(COMPOSED_CLAIM_PACKAGE_SCHEMA_ID);
     expect(anchored.verification.checks).toEqual(PUBLIC_BUNDLE_V6_CHECKS);
     expect(anchored.verification).toEqual(expect.objectContaining(readerInstructions(["anchoring"])));
-    // No composed claim names the first-public 0.1 line: no 0.1 reader understands the format.
-    expect(anchored.verification.command).toBe(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND);
-    expect(base.verification.command).toBe(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND);
+    // No composed claim names the first-public 0.1 line or v7's verify 0.2.1: neither reader
+    // understands the format. It names the first checker release (issue #4746).
+    expect(anchored.verification.command).toBe("npx @colophon-claims/check@0.2.1 <bundle-dir>");
+    expect(base.verification.command).toBe("npx @colophon-claims/check@0.2.1 <bundle-dir>");
 
     // Section contents move across verbatim: only the id and the pins differ from claim-package/4.
     expect({ ...anchored, claimSchema: undefined, verification: undefined })
@@ -371,6 +372,32 @@ describe("issue #3403: the composed claim package", () => {
     expect(issuesOf(stripped)).toEqual([expect.stringContaining("six base checks plus each carried capability's")]);
     expect(issuesOf({ ...anchored, verification: { ...anchored.verification, command: PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND } }))
       .toEqual([expect.stringContaining("must pin the reader release its capability sections derive")]);
+  });
+
+  test("a composed claim naming a reader that predates /10 is refused (issue #4746)", () => {
+    // verify 0.2.1 is the release /7 and /8 pin. It predates the composed generation and refuses
+    // every /10 bundle at manifest parse, so neither of its lines is admitted on a composed claim.
+    const issuesOf = (claim: unknown): string[] => {
+      const parsed = ClaimPackageSchema.safeParse(claim);
+      return parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
+    };
+    for (const claim of [
+      claimFor({ composedCapabilities: [] }),
+      claimFor({ composedCapabilities: ["anchoring"], anchors: [] }),
+    ]) {
+      expect(issuesOf(claim)).toEqual([]);
+      for (const verification of [
+        {
+          ...claim.verification,
+          command: PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
+          compatibleCommand: PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+        },
+        { ...claim.verification, command: PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND },
+      ]) {
+        expect(issuesOf({ ...claim, verification }))
+          .toEqual([expect.stringContaining("must pin the reader release its capability sections derive")]);
+      }
+    }
   });
 
   test("the rebuild reads the vector from the bundle, so neither half of the biconditional passes", () => {

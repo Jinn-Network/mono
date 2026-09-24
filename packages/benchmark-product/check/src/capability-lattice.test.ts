@@ -191,7 +191,7 @@ describe("a shape that may not be empty", () => {
     roleDerivations: [],
     claimSection: "strict",
     checks: [],
-    minimumReaderRelease: "0.2.1",
+    minimumReaderRelease: "verify@0.2.1",
     activation: () => false,
   };
 

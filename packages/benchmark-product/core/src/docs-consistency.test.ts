@@ -101,6 +101,25 @@ const readerLine = (command: string): string => {
   return token;
 };
 
+/**
+ * The `{verify|check}@x.y[.z]` token of a reader command: `readerLine` with the package name kept.
+ * `verify@0.2.1` and `check@0.2.1` are two readers, and only the second reads `/10` (#4746).
+ */
+const readerSpecifier = (command: string): string => {
+  const token = /(?:verify|check)@[0-9][^\s]*/u.exec(command)?.[0];
+  if (token === undefined) throw new Error(`not a reader command: ${command}`);
+  return token;
+};
+
+/**
+ * How the per-format table states a reader line: bare `@x.y[.z]` on the rows that run the `verify`
+ * name, and with the package in full on a row that runs the checker's own name (#4746).
+ */
+const tableLine = (command: string): string => {
+  const specifier = readerSpecifier(command);
+  return specifier.startsWith("verify@") ? readerLine(command) : `@colophon-claims/${specifier}`;
+};
+
 /** The body of every fenced block in a Markdown region, whatever its info string. Both the opener
  * and the closer must sit at a line start, as a Markdown renderer reads an unindented fence (the
  * only kind this guide writes): an inline ```` ```x``` ```` in prose is code, not a fence, and
@@ -349,7 +368,9 @@ describe("product documentation consistency", () => {
     // Keyed by the row's first cell verbatim. Prompted screening is a fourth axis the format string
     // does not record, so `/2` and `/4` each carry two rows pinning different lines.
     // `/10` has no fixed check list: it runs whatever its declared vector derives. Its row states
-    // the range, from the empty vector to the vector naming every registered capability.
+    // the range, from the empty vector to the vector naming every registered capability. It is
+    // also the one row on the checker's own name, so `tableLine` keeps the package in its cells
+    // and a `verify` line there cannot pass for the checker's (#4746).
     const composedChecks = [[], CAPABILITY_REGISTRY.map((capability) => capability.token).sort()]
       .map((vector) => checkCountWord(expectedChecks(vector)))
       .join(" to ");
@@ -358,29 +379,29 @@ describe("product documentation consistency", () => {
       { pinned: readonly string[]; compatible: readonly string[]; checks: readonly string[] | string }
     > = {
       [`\`${BUNDLE_FORMAT}\`, unprompted`]: {
-        pinned: [readerLine(instruction(BUNDLE_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
       },
       [`\`${BUNDLE_FORMAT}\`, prompted screening`]: {
         pinned: [
-          readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
-          readerLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+          tableLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+          tableLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
         ],
-        compatible: [readerLine(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND)],
+        compatible: [tableLine(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND)],
         checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
       },
       [`\`${BUNDLE_V4_FORMAT}\`, unprompted`]: {
-        pinned: [readerLine(instruction(BUNDLE_V4_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_V4_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_V4_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_V4_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
       },
       [`\`${BUNDLE_V4_FORMAT}\`, prompted screening`]: {
         pinned: [
-          readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
-          readerLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+          tableLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+          tableLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
         ],
-        compatible: [readerLine(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND)],
+        compatible: [tableLine(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND)],
         checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
       },
       // The one row that does not read the instruction table's `command`, because `/5` is the one
@@ -389,28 +410,28 @@ describe("product documentation consistency", () => {
       // The asymmetry is documented on `PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND` and on the
       // instruction table itself (issue #3941); this row follows that documentation.
       [`\`${BUNDLE_V5_FORMAT}\``]: {
-        pinned: [readerLine(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND)],
+        pinned: [tableLine(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND)],
         compatible: [],
         checks: EVIDENCE_NATIVE_BUNDLE_V5_CHECKS,
       },
       [`\`${BUNDLE_V6_FORMAT}\``]: {
-        pinned: [readerLine(instruction(BUNDLE_V6_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_V6_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_V6_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_V6_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_V6_CHECKS,
       },
       [`\`${BUNDLE_V7_FORMAT}\``]: {
-        pinned: [readerLine(instruction(BUNDLE_V7_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_V7_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_V7_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_V7_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_V7_CHECKS,
       },
       [`\`${BUNDLE_V8_FORMAT}\``]: {
-        pinned: [readerLine(instruction(BUNDLE_V8_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_V8_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_V8_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_V8_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_V8_CHECKS,
       },
       [`\`${BUNDLE_V10_FORMAT}\``]: {
-        pinned: [readerLine(instruction(BUNDLE_V10_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_V10_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_V10_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_V10_FORMAT).compatibleCommand)],
         checks: `${composedChecks}, by declared capability`,
       },
     };
@@ -486,7 +507,7 @@ describe("product documentation consistency", () => {
       PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
       LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
       PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
-    ].map(readerLine);
+    ].map(readerSpecifier);
 
     for (const format of SUPPORTED_BUNDLE_FORMATS) {
       const heading = sections[format];
@@ -505,9 +526,11 @@ describe("product documentation consistency", () => {
       // Every fence, whatever its info string: the recipes are `bash` today, but a `sh` or bare
       // fence is still an instruction to run, and scanning only ```bash would let one carry a line
       // the format does not pin (#4011). Verified a no-op on the guide as it stands.
+      // Under either reader name, compared with the name kept: `verify@0.2.1` and `check@0.2.1`
+      // share a version, and only the second reads `/10` (#4746).
       const stated = fenceBodies(section)
-        .flatMap((body) => [...body.matchAll(/npx @colophon-claims\/verify\S*/gu)])
-        .map((command) => readerLine(command[0]));
+        .flatMap((body) => [...body.matchAll(/npx @colophon-claims\/(?:verify|check)\S*/gu)])
+        .map((command) => readerSpecifier(command[0]));
       expect(stated.length, `${format} states no reader command`).toBeGreaterThan(0);
 
       const instruction = PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[format];
@@ -523,10 +546,10 @@ describe("product documentation consistency", () => {
       // must still be one of those two.
       const pinned = new Set(
         format === BUNDLE_V5_FORMAT
-          ? [readerLine(instruction.compatibleCommand)]
+          ? [readerSpecifier(instruction.compatibleCommand)]
           : [
-              readerLine(instruction.command),
-              readerLine(instruction.compatibleCommand),
+              readerSpecifier(instruction.command),
+              readerSpecifier(instruction.compatibleCommand),
               ...(format === BUNDLE_FORMAT || format === BUNDLE_V4_FORMAT ? promptedLines : []),
             ],
       );
