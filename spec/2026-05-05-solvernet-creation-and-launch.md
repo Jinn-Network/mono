@@ -1,5 +1,7 @@
 # SolverNet creation and launch experience
 
+> **Status (2026-09-24): superseded by [docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md](../docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md).** That design dissolves SolverNets fully (§2, decision 2) and gives every function this spec defines a replacement (§4): the manifest contract becomes a task-profile document, the join flow and manifest-CID claim eligibility become operator task filters, and launcher-owned generators become ordinary requester applications. *Requester* is the demand-side role everywhere ([DR-2026-08-04](../log/decisions/2026-08-04-spec-origin-and-vocabulary.md), decision 6), the operator console does not port the Launcher or SolverNet draft-launch surfaces ([OPERATOR-APP-SPEC.md](../apps/operator-console/OPERATOR-APP-SPEC.md), 2026-08-17 amendment), and the `joinedSolverNets` claim gate retired in the one-swap cutover ([DR-2026-08-05](../log/decisions/2026-08-05-cutover-one-swap-collapse.md)). The legacy operator still reads launched records and `joinedSolverNets` until they retire. For the current direction read [docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md](../docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md).
+
 - **Date:** 2026-05-05 (v0.1 draft) → 2026-05-06 (v0.2 design-locked)
 - **Author:** Ritsu with Codex (v0.1) · design-locked with Opus (v0.2)
 - **Status:** Design-locked — ready for implementation plan

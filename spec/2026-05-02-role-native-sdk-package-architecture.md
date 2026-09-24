@@ -1,5 +1,7 @@
 # Single SDK and role-oriented developer surfaces
 
+> **Status (2026-09-24): superseded by [log/decisions/2026-07-30-platform-boundary-and-topology.md](../log/decisions/2026-07-30-platform-boundary-and-topology.md).** Decision 5 of DR-2026-07-30 deprecates `@jinn-network/sdk` in place, and the [generated platform topology](../architecture/generated/platform-topology.md) lists it as the deprecated SolverNet SDK; the runtime package this spec pairs with it was renamed from `@jinn-network/client` to `@jinn-network/operator` ([DR-2026-09-02](../log/decisions/2026-09-02-f1-operator-naming-closure.md)). Package roles now follow the platform tiers. For the current direction read [docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md](../docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md).
+
 - **Date:** 2026-05-02
 - **Author:** Codex (drafted on `codex/solvernet-sdk-helpers`; Captain ritsukai)
 - **Status:** Proposal

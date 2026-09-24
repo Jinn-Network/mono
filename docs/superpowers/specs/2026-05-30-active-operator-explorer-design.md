@@ -1,6 +1,6 @@
 # Active-operator surface in the network explorer
 
-> **Status (2026-09-24): superseded by `docs/superpowers/specs/2026-06-01-active-operator-surface-fix.md`.** The "Canonical definition" section's single all-purpose `Active?` definition is superseded by a split between last-block liveness and the 48h-sustained measure. The rest of this design (schema, indexing handler, endpoints, frontend) carries forward. For the current direction read `docs/superpowers/specs/2026-06-01-active-operator-surface-fix.md`.
+> **Status (2026-09-24): partly superseded by [packages/indexer/explorer/EXPLORER-APP-SPEC.md](../../../packages/indexer/explorer/EXPLORER-APP-SPEC.md) §2.7.** The "Canonical definition" section (at least 3 tJINN in each of the last eight 6-hour blocks, one definition for every use of "active") is superseded twice: [docs/superpowers/specs/2026-06-01-active-operator-surface-fix.md](2026-06-01-active-operator-surface-fix.md) split it into last-block liveness and a sustained measure, and [DR-2026-06-30](../../../log/decisions/2026-06-30-tokenless-olas-native-pivot.md) retired tJINN. The current definitions are `activeOperators` and `sustainedOperators`, in OLAS buckets, in EXPLORER-APP-SPEC.md §2.7. The shared util and endpoints this design adds still ship, recomputed in OLAS (`packages/indexer/src/api/active-operators.ts`). For the current direction read [packages/indexer/explorer/EXPLORER-APP-SPEC.md](../../../packages/indexer/explorer/EXPLORER-APP-SPEC.md) §2.7.
 
 - **Version:** 0.1
 - **Date:** 2026-05-30

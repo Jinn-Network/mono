@@ -1,6 +1,6 @@
 # Launcher role and Launcher mode
 
-> **Status (2026-09-24): superseded by `spec/2026-05-05-solvernet-creation-and-launch.md`.** The launch surface (the Create flow, manifest anchoring, and the launcher SPA) is superseded. The Launcher role and mode framing carries forward. For the current direction read `spec/2026-05-05-solvernet-creation-and-launch.md`.
+> **Status (2026-09-24): superseded by [spec/2026-05-05-solvernet-creation-and-launch.md](2026-05-05-solvernet-creation-and-launch.md), which is itself superseded.** This spec framed launching as toggling a local `launching` role on the daemon for a pre-existing Prediction SolverNet; the successor replaced that with launchers creating new SolverNets (its §1). SolverNets have since dissolved into task-profile documents and ordinary requester applications ([task-profiles design](../docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md) §4), *requester* is the demand-side role everywhere ([DR-2026-08-04](../log/decisions/2026-08-04-spec-origin-and-vocabulary.md), decision 6), and the operator console does not port the Launcher surfaces ([OPERATOR-APP-SPEC.md](../apps/operator-console/OPERATOR-APP-SPEC.md), 2026-08-17 amendment). For the current direction read [docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md](../docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md).
 
 - **Date:** 2026-05-05
 - **Author:** ritsukai with Opus (brainstorm session)

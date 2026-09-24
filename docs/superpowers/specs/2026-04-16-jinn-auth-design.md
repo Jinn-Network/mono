@@ -1,5 +1,7 @@
 # `jinn auth` — Claude Authentication Verb
 
+> **Status (2026-09-24): partly superseded by [docs/superpowers/specs/2026-05-15-per-harness-auth-design.md](2026-05-15-per-harness-auth-design.md).** The daemon-level Claude auth preflight this design adds to `jinn run` was removed in favor of per-harness auth stores, and `jinn auth` is now chiefly the operator-token pairing verb (`jinn auth rotate`, `jinn auth token`) under the [headless operator design](2026-08-04-headless-operator-rederivation-design.md) §4.2 and §9. The Claude login flow survives as legacy compatibility. For the current direction read [docs/superpowers/specs/2026-05-15-per-harness-auth-design.md](2026-05-15-per-harness-auth-design.md) and [docs/operator/rotating-harness-keys.md](../../operator/rotating-harness-keys.md).
+
 **Version:** 1.0
 **Date:** 2026-04-16
 **Author:** adrianobradley + Claude

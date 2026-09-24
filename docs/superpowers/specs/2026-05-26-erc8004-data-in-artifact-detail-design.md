@@ -1,5 +1,7 @@
 # ERC-8004 data in the artifact detail panel — design
 
+> **Status (2026-09-24): partly superseded by [log/decisions/2026-08-04-headless-operator-reconciliation.md](../../../log/decisions/2026-08-04-headless-operator-reconciliation.md).** Its UI change (the artifact detail panel in the daemon-served dashboard SPA) is superseded: decision 2 re-derives the application tier as a separate operator console, which does not port the captures surfaces ([OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md), 2026-08-17 amendment). The anchor data model and write path still ship (`operator/src/store/erc8004-anchors.ts`). For the current direction read [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md).
+
 **Version:** v0.1
 **Date:** 2026-05-26
 **Status:** Proposal

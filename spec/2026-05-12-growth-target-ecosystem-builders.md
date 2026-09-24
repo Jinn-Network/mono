@@ -1,3 +1,5 @@
+> **Status (2026-09-24): superseded by the 2026-06-02 growth deprecation ([growth/archive/README.md](../growth/archive/README.md)) and the later GROWTH.md rewrites.** The target cluster it set landed in the GROWTH.md archived as [growth/archive/2026-06-02-GROWTH.md](../growth/archive/2026-06-02-GROWTH.md); the 2026-07-07 rewrite retired the prior strategy's target cluster and GTM phases, and the current GROWTH.md defines its audience by evaluation trigger, names coding-agent and tool builders only as a default beachhead, and rules out OLAS and crypto-operator outreach as a growth target ([GROWTH.md](../GROWTH.md) §2). For the current direction read [GROWTH.md](../GROWTH.md).
+
 - **Date:** 2026-05-12
 - **Author:** Oak (with Claude)
 - **Status:** Proposal

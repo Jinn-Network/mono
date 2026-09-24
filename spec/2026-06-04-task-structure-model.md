@@ -3,6 +3,7 @@ version: 0.1
 date: 2026-06-04
 author: opus
 status: proposed
+superseded-by: '[docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md](../docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md) §5 (2026-09-24): the Task Execution Protocol record families (Task, Submission, Attempt, Lifecycle Observation, Delivery), with verdicts in the Evidence Protocol result-evaluation family, replace this Result, Process and Solution model; its JINN-staking Curator and App roles were retired by [DR-2026-06-30](../log/decisions/2026-06-30-tokenless-olas-native-pivot.md), and *requester* is the demand-side role ([DR-2026-08-04](../log/decisions/2026-08-04-spec-origin-and-vocabulary.md), decision 6)'
 discussion: 'https://github.com/Jinn-Network/mono/discussions/1036'
 ---
 

@@ -1,3 +1,5 @@
+> **Status (2026-09-24): superseded by the 2026-06-02 growth deprecation ([growth/archive/README.md](../growth/archive/README.md)).** It amends the §5 Engage closing structure of the GROWTH.md archived as [growth/archive/2026-06-02-GROWTH.md](../growth/archive/2026-06-02-GROWTH.md), where its four-ways-in change landed; the current GROWTH.md has no Engage, Teach or Refine sections. For the current direction read [GROWTH.md](../GROWTH.md).
+
 - **Date:** 2026-05-08
 - **Author:** Oak (with Claude)
 - **Status:** Proposal

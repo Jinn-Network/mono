@@ -1,5 +1,7 @@
 # Issue #951 — Consolidate the hosted-operator deploy into one container-native image
 
+> **Status (2026-09-24): partly superseded by [log/decisions/2026-08-05-cutover-one-swap-collapse.md](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md).** Decision 1 of its 2026-08-13 addendum retires the Railway-hosted operator, so the image-consolidation slices for the hosted Railway targets lose their purpose. The daemon-internal container fixes (moving pidfile, state-directory and dotfile handling out of entrypoints and into the daemon) are not superseded.
+
 - **Date:** 2026-06-02
 - **Author:** opus (design stage, `claude/eager-cerf-3d59c6`)
 - **Issue:** [#951](https://github.com/Jinn-Network/mono/issues/951)

@@ -1,5 +1,7 @@
 # TypeScript Seller-Side Trajectory Scrub Stack
 
+> **Status (2026-09-24): partly superseded by [docs/superpowers/specs/2026-07-22-scrub-redesign-design.md](../docs/superpowers/specs/2026-07-22-scrub-redesign-design.md).** The redesign was adopted: its follow-ups #1968 to #1973 closed as completed with the scrub train merged in #1992, and `packages/core/src/scrub/build.ts` now runs one shared detector inventory. It replaced the `openredaction` regex stage (stage 2, now retired) and the per-lane detector selection that grew from this pipeline (the strict, seed and layer-2 profiles, now deprecated presets over one inventory and a per-class disposition policy table), and it extended the provenance manifest with a policy hash and per-class counts. The in-process TypeScript architecture, the other stages and the fail-closed posture carry forward. For the current direction read [docs/superpowers/specs/2026-07-22-scrub-redesign-design.md](../docs/superpowers/specs/2026-07-22-scrub-redesign-design.md).
+
 > Version: 0.1
 > Date: 2026-06-15
 > Author: Ritsu (drafted by Opus 4.8 during independent review of PR #1114)
