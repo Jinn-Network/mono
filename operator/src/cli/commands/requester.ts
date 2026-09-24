@@ -127,7 +127,11 @@ export function createRequesterCommand(deps: RequesterCommandDeps = PRODUCTION_D
       );
     }
 
-    const password = deps.resolveCliPassword(ctx.argv, ctx.env);
+    const configPath = deps.getConfigPathFromArgs(ctx.argv);
+    const config = deps.loadConfig(configPath);
+    const chain: 'base' | 'base-sepolia' = config.network === 'testnet' ? 'base-sepolia' : 'base';
+
+    const password = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
     if (!password.ok) {
       return emitEnvelope(
         {
@@ -140,10 +144,6 @@ export function createRequesterCommand(deps: RequesterCommandDeps = PRODUCTION_D
         { writer: ctx.writer, exit: ctx.exit },
       );
     }
-
-    const configPath = deps.getConfigPathFromArgs(ctx.argv);
-    const config = deps.loadConfig(configPath);
-    const chain: 'base' | 'base-sepolia' = config.network === 'testnet' ? 'base-sepolia' : 'base';
 
     // This verb persists what it deploys: `stepFleetSafePredict` /
     // `stepFleetSafeDeploy` write `fleet_safe_address` into

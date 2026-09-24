@@ -40,7 +40,7 @@ function makeDeps(
       rpcUrl: 'http://127.0.0.1:8545',
     } as never),
     getConfigPathFromArgs: () => undefined,
-    resolveCliPassword: () => ({ ok: true as const, password: 'test' }),
+    resolveCliPassword: () => ({ ok: true as const, password: 'test', source: 'env' as const }),
     checkRpcNetwork: async () => okRpc(),
     rpcNetworkFailureHint: () => 'Point JINN_RPC_URL at the right chain.',
     logRpcLocalDevToStderr: () => {},
