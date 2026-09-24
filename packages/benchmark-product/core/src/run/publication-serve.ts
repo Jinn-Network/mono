@@ -20,6 +20,7 @@ import {
   createWorkspacePublicationHttpHandler,
   refreshWorkspacePublicationWellKnown,
 } from "./publication-source.js";
+import { createPublicationLockIndexHttpHandler, refreshWorkspacePublicationLockIndex } from "./publication-lock-index.js";
 
 /** Loopback by default: a public deployment is an explicit act, never a side effect of serving. */
 export const DEFAULT_PUBLICATION_SERVE_HOST = "127.0.0.1";
@@ -101,7 +102,8 @@ async function respond(response: ServerResponse, produced: Response, method: str
  *
  * The well-known document is refreshed first: a workspace whose announcements predate this
  * serving path has a valid signed chain on disk but nothing telling a cold client where the
- * newest archive page is.
+ * newest archive page is. The lock index is regenerated next, so it names anchors and bundles
+ * recorded since the last registration, and is served at its fixed path beside the archive.
  */
 export async function startPublicationArchiveServer(
   options: PublicationArchiveServerOptions,
@@ -142,7 +144,19 @@ export async function startPublicationArchiveServer(
     wellKnown = "refresh-failed";
     refreshFailure = cause;
   }
-  const handler = createWorkspacePublicationHttpHandler(options.workspaceDir);
+  // The lock index is derived presentation (publication-lock-index.ts), so a failure to rebuild it
+  // never blocks serving; any earlier index stays in place and still links only immutable bytes.
+  try {
+    await refreshWorkspacePublicationLockIndex(
+      options.workspaceDir,
+      () => progress("waiting on the publication source lock (another process is mid-announce); this clears on its own"),
+    );
+  } catch (cause) {
+    progress(`the lock index was not refreshed (${cause instanceof Error ? cause.message : String(cause)}); any earlier index is served unchanged`);
+  }
+  const archive = createWorkspacePublicationHttpHandler(options.workspaceDir);
+  const lockIndex = createPublicationLockIndexHttpHandler(options.workspaceDir);
+  const handler = async (request: Request): Promise<Response> => (await lockIndex(request)) ?? archive(request);
 
   const server = createServer((request, response) => {
     const method = request.method ?? "GET";

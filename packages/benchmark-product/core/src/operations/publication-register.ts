@@ -39,6 +39,7 @@ import {
   withWorkspacePublicationSourceLock,
 } from "../run/publication-source.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
+import { refreshWorkspacePublicationLockIndex } from "../run/publication-lock-index.js";
 import {
   WORKSPACE_AUTHORSHIP_ROLE,
   readPublicationOrigin,
@@ -447,6 +448,9 @@ export function publicationRegister(
           },
         },
       });
+      // Derived presentation over what was just announced; it cannot fail a durable registration,
+      // and `publication serve` rebuilds it on every start.
+      try { await refreshWorkspacePublicationLockIndex(context.workspaceDir); } catch { /* healed at serve time */ }
       return { source: source.source, postHoc, sourceSequence: receipt.sequence, recordSha256: lockedRunSha256 };
       } finally {
         operationLock.release();
