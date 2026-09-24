@@ -85,13 +85,13 @@ const AnnouncementEntrySchema = z.looseObject({
   // `assertIntentOwnership` pins `head.issuedAt === entry.timestamp`, and
   // `issuedAt` is calendar-strict RFC 3339 with a mandatory offset (#3482) --
   // so on the WRITE path this field is already strict, transitively, and the
-  // durable writer is its single authority. Own-source readers that parse a
-  // committed archive page through `parseAnnouncementEntry` (the native
-  // requester and native-signed-source) do feed `entry.timestamp` into
-  // `previousHeadIssuedAt` / `parseHeadTimestamp` for the previous-head
-  // monotonicity rule. Those reads fail closed, and the write-path equality
-  // pin is what keeps own entries calendar-strict -- not schema tightness
-  // here.
+  // durable writer is its single authority. On the read side, the native
+  // requester parses them through `parseAnnouncementEntry`; native-signed-source
+  // reads the same field through a raw cast in `parseAndVerifyPage`, bypassing
+  // this schema. Both feed `entry.timestamp` into `previousHeadIssuedAt` /
+  // `parseHeadTimestamp` for the previous-head monotonicity rule. Those reads
+  // fail closed, and the write-path equality pin is what keeps own entries
+  // calendar-strict -- not schema tightness here.
   //
   // The schema stays lax because `parseAnnouncementEntry` also parses bytes
   // received from a PEER during an archive walk. Tightening it would
