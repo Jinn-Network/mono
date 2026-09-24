@@ -194,6 +194,29 @@ describe("validateAnchorEvidence — strict schema battery", () => {
         kind: "https://spec.jinn.network/records/benchmark-run/v1\u009b31m",
       },
     }],
+    ["provider bidi override", {
+      ...VALID_ANCHOR_EVIDENCE,
+      provider: "https://provider.invalid/\u202e",
+    }],
+    ["provider bidi isolate", {
+      ...VALID_ANCHOR_EVIDENCE,
+      provider: "https://provider.invalid/\u2066hidden",
+    }],
+    ["provider line separator", {
+      ...VALID_ANCHOR_EVIDENCE,
+      provider: "https://provider.invalid/\u2028",
+    }],
+    ["provider zero-width space", {
+      ...VALID_ANCHOR_EVIDENCE,
+      provider: "https://provider.invalid/\u200b",
+    }],
+    ["subject.kind RLO", {
+      ...VALID_ANCHOR_EVIDENCE,
+      subject: {
+        ...VALID_ANCHOR_EVIDENCE.subject,
+        kind: "https://spec.jinn.network/records/benchmark-run/v1\u202e",
+      },
+    }],
   ])("terminal control characters in %s fail closed", (_field, record) => {
     expect(codesOf(bytesOf(record))).toContain("SCHEMA_VIOLATION");
   });

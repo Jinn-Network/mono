@@ -2252,7 +2252,7 @@
       "requiredGateIds": [
         "client-ci"
       ],
-      "role": "operator daemon and application",
+      "role": "operator daemon and application, and the requester CLI (consumer class 1)",
       "stability": "transitional",
       "supersedes": [],
       "tier": 4,
@@ -8589,6 +8589,15 @@
         "packedTargets": [],
         "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-identical-head-ok/vector.json",
         "relativeSource": "fixtures/vectors/source-head-revalidation-identical-head-ok/vector.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/record-discovery-testing",
+        "packedTargets": [],
+        "path": "packages/discovery/testing/fixtures/vectors/source-head-revalidation-invalid-head-envelope/vector.json",
+        "relativeSource": "fixtures/vectors/source-head-revalidation-invalid-head-envelope/vector.json"
       },
       {
         "claim": null,

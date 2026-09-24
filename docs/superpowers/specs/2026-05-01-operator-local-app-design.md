@@ -1,5 +1,7 @@
 # Operator-facing local app — design
 
+> **Status (2026-09-24): superseded by [log/decisions/2026-08-04-headless-operator-reconciliation.md](../../../log/decisions/2026-08-04-headless-operator-reconciliation.md).** Its decision 2 makes the daemon headless and re-derives the application tier rather than carrying it: the human surface is a separate operator console (Next.js and shadcn) that consumes the daemon's versioned read contract, and the daemon now answers `/` with `no_human_surface` (`operator/src/api/server.ts`). The localhost web app served by the daemon, and its embedded Claude Code session (retired with the agent WebSocket, [headless operator design](2026-08-04-headless-operator-rederivation-design.md) §4.2), are superseded. For the current direction read [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md).
+
 **Status:** draft (Captain-led brainstorm, 2026-05-01)
 **Author:** ritsukai (with Claude Opus 4.7)
 **Bead:** jinn-mono-3ois

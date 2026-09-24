@@ -63,7 +63,7 @@ import taskCoverage from './task-coverage.js';
 import { PLACEHOLDER_HTML } from './placeholder.js';
 import { indexedChainIds } from '../chain-config.js';
 import {
-  buildCurrentSupply,
+  assembleCurrentSupply,
   completedSupplyWindow,
   resolveSupplyChainId,
   type SupplyAttemptRow,
@@ -106,12 +106,21 @@ app.get('/supply', async (c) => {
   }
   const { chainId } = resolved;
 
+  let asOfMs: number;
+  let manifests: SupplyManifestRow[];
+  let attempts: SupplyAttemptRow[];
+  let verdicts: SupplyVerdictRow[];
+  let priorAttempts: SupplyAttemptRow[];
+  let tasks: SupplyTaskRow[];
+  let manifestEvidenceComplete: boolean;
+  let activityEvidenceComplete: boolean;
+
   try {
-    const asOfMs = Date.now();
+    asOfMs = Date.now();
     const window = completedSupplyWindow(asOfMs);
     const windowStart = BigInt(Date.parse(window.start) / 1_000);
     const windowEnd = BigInt(Date.parse(window.end) / 1_000);
-    const [manifests, attempts, verdicts, missingAttemptTimes, missingVerdictTimes] = await Promise.all([
+    const [launchedManifests, inWindowAttempts, inWindowVerdicts] = await Promise.all([
       db.select({
         id: solverNetManifest.id,
         cidKeccak: solverNetManifest.cidKeccak,
@@ -154,77 +163,82 @@ app.get('/supply', async (c) => {
           sql`${verdict.createdAtTimestamp} < ${windowEnd}`,
         ),
       ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1),
-      db.select({ taskId: attempt.taskId }).from(attempt).where(
-        and(eq(attempt.chainId, chainId), eq(attempt.createdAtTimestamp, 0n)),
-      ).limit(1),
-      db.select({ taskId: verdict.taskId }).from(verdict).where(
-        and(eq(verdict.chainId, chainId), eq(verdict.createdAtTimestamp, 0n)),
-      ).limit(1),
     ]);
 
-    const manifestEvidenceComplete = manifests.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
-    const activityEvidenceComplete = attempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
-      && verdicts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
-      && missingAttemptTimes.length === 0
-      && missingVerdictTimes.length === 0;
+    manifests = launchedManifests as SupplyManifestRow[];
+    attempts = inWindowAttempts as SupplyAttemptRow[];
+    verdicts = inWindowVerdicts as SupplyVerdictRow[];
+    manifestEvidenceComplete = manifests.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
+    const inWindowActivityComplete = attempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
+      && verdicts.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
 
-    // A capped or unusable activity read already forces `unknown`; skip the
+    // A capped in-window activity read already forces `unknown`; skip the
     // join reads rather than spending them on an answer that cannot be used.
-    if (!activityEvidenceComplete) {
-      return c.json(buildCurrentSupply({
-        chainId,
-        asOfMs,
-        manifestEvidenceComplete,
-        activityEvidenceComplete: false,
-        manifests: manifests as SupplyManifestRow[],
-        tasks: [],
-        attempts: [],
-        verdicts: [],
-      }));
+    if (!inWindowActivityComplete) {
+      priorAttempts = [];
+      tasks = [];
+      activityEvidenceComplete = false;
+    } else {
+      // Attempts referenced by an in-window verdict are fetched WITHOUT the window
+      // filter. A task claimed before the window and delivered inside it is an
+      // ordinary long loop; without its attempt row the assembler would read the
+      // broken join as index corruption and black out the whole chain's answer.
+      // An out-of-window attempt still never counts toward operator liveness.
+      const verdictTaskIds = [...new Set(verdicts.map((row) => row.taskId))];
+      priorAttempts = verdictTaskIds.length === 0 ? [] : await db.select({
+        taskId: attempt.taskId,
+        attemptIndex: attempt.attemptIndex,
+        operator: attempt.operator,
+        chainId: attempt.chainId,
+        createdAtTimestamp: attempt.createdAtTimestamp,
+      }).from(attempt).where(
+        and(eq(attempt.chainId, chainId), inArray(attempt.taskId, verdictTaskIds)),
+      ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1) as SupplyAttemptRow[];
+
+      const taskIds = [...new Set([
+        ...attempts.map((row) => row.taskId),
+        ...verdictTaskIds,
+      ])];
+      tasks = taskIds.length === 0 ? [] : await db.select({
+        id: task.id,
+        manifestDigest: task.manifestDigest,
+        chainId: task.chainId,
+      }).from(task).where(
+        and(eq(task.chainId, chainId), inArray(task.id, taskIds)),
+      ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1) as SupplyTaskRow[];
+
+      activityEvidenceComplete = tasks.length <= SUPPLY_EVIDENCE_ROW_LIMIT
+        && priorAttempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
     }
-
-    // Attempts referenced by an in-window verdict are fetched WITHOUT the window
-    // filter. A task claimed before the window and delivered inside it is an
-    // ordinary long loop; without its attempt row the assembler would read the
-    // broken join as index corruption and black out the whole chain's answer.
-    // An out-of-window attempt still never counts toward operator liveness.
-    const verdictTaskIds = [...new Set(verdicts.map((row) => row.taskId))];
-    const priorAttempts = verdictTaskIds.length === 0 ? [] : await db.select({
-      taskId: attempt.taskId,
-      attemptIndex: attempt.attemptIndex,
-      operator: attempt.operator,
-      chainId: attempt.chainId,
-      createdAtTimestamp: attempt.createdAtTimestamp,
-    }).from(attempt).where(
-      and(eq(attempt.chainId, chainId), inArray(attempt.taskId, verdictTaskIds)),
-    ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1);
-
-    const taskIds = [...new Set([
-      ...attempts.map((row) => row.taskId),
-      ...verdictTaskIds,
-    ])];
-    const tasks = taskIds.length === 0 ? [] : await db.select({
-      id: task.id,
-      manifestDigest: task.manifestDigest,
-      chainId: task.chainId,
-    }).from(task).where(
-      and(eq(task.chainId, chainId), inArray(task.id, taskIds)),
-    ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1);
-
-    return c.json(buildCurrentSupply({
-      chainId,
-      asOfMs,
-      manifestEvidenceComplete,
-      activityEvidenceComplete: tasks.length <= SUPPLY_EVIDENCE_ROW_LIMIT
-        && priorAttempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT,
-      manifests: manifests as SupplyManifestRow[],
-      tasks: tasks as SupplyTaskRow[],
-      attempts: [...attempts, ...priorAttempts] as SupplyAttemptRow[],
-      verdicts: verdicts as SupplyVerdictRow[],
-    }));
   } catch (err) {
     return c.json({ error: 'supply unavailable', detail: String(err) }, 503);
   }
+
+  let assembled;
+  try {
+    assembled = assembleCurrentSupply({
+      chainId,
+      asOfMs,
+      manifestEvidenceComplete,
+      activityEvidenceComplete,
+      manifests,
+      tasks,
+      attempts: activityEvidenceComplete ? [...attempts, ...priorAttempts] : [],
+      verdicts: activityEvidenceComplete ? verdicts : [],
+    });
+  } catch {
+    // A defect in the pure assembler is not a transient outage: the client's
+    // `fetchWithRetry` (operator/src/discovery-client/http.ts) transparently
+    // retries 502/503, and retrying a deterministic bug never succeeds. 500
+    // keeps this catch distinct from the query/transport catch above it.
+    return c.json({ error: 'supply unavailable', detail: 'assembler failed' }, 500);
+  }
+
+  if (assembled.unknownBecause) {
+    console.warn(`[indexer] supply unknown chainId=${chainId}: ${assembled.unknownBecause}`);
+  }
+  c.header('Cache-Control', 'public, max-age=30, must-revalidate');
+  return c.json(assembled.response);
 });
 
 // ── Shared ebu7-schema probe ──────────────────────────────────────────────────

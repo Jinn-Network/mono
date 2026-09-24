@@ -1,5 +1,7 @@
 # SolverNet architecture — Harness, SolverPlugin, and Task semantics
 
+> **Status (2026-09-24): partly superseded by [docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md](../docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md).** That design dissolves SolverNets fully (§2, decision 2) and maps each SolverNet function to a replacement (§4), so the SolverNet definition (§4), schema authority held by the SolverNet contract (§5.6), the Prediction SolverNet example (§10) and SolverType authority in the contract registry (§11.5) give way to task-profile documents, and the Task (§6) gives way to the sealed Task of the [Task Execution Protocol](../docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md) (§7). The Harness (§7) and SolverPlugin (§5.1 to §5.5) model stands. For the current direction read [docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md](../docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md).
+
 - **Date:** 2026-05-01
 - **Author:** opus (drafted on jinn-mono-dwqm; Captain ritsukai)
 - **Status:** Proposal

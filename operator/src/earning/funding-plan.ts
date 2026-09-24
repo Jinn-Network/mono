@@ -20,9 +20,16 @@ import {
 } from './contracts.js';
 import { FleetStateStore } from './store.js';
 import { computeRequiredMasterEth } from './bootstrap.js';
+import { requesterMinMasterEth } from './requester-init.js';
 import { detectDeprecatedTestnetSetup } from './testnet-setup-migration.js';
 import { decryptMnemonic, deriveMasterAddress } from './wallet.js';
-import { isOperationalServiceStep, type FleetState, type FundingRequirement, type StakingMode } from './types.js';
+import {
+  isOperationalServiceStep,
+  isRequesterPersona,
+  type FleetState,
+  type FundingRequirement,
+  type StakingMode,
+} from './types.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from './viem-clients.js';
 
 export interface FundingPlanOptions {
@@ -39,6 +46,15 @@ export interface FundingPlanOptions {
   minSafeEthWei?: string;
   /** Optional password — without it we cannot derive the master address from a keystore. */
   password?: string;
+  /**
+   * Evaluate the requester's gate instead of the operator's (B0a, issue #2446).
+   *
+   * When omitted the plan infers it from the persisted `requester_stage`
+   * marker, so a requester who has already run `jinn requester init` gets the
+   * right answer without repeating the flag. Pass `true` explicitly for the
+   * pre-init case, where nothing on disk yet says which persona is asking.
+   */
+  requester?: boolean;
   /** Inject a public client (tests). Defaults to a viem client over rpcUrl. */
   publicClientFactory?: (rpcUrl: string, network: JinnOnchainNetwork) => PublicClient;
   /** Inject the fleet store (tests). */
@@ -67,6 +83,12 @@ export type FundingPlanPartialReason =
   | 'fleet_state_invalid';
 
 export interface FundingPlan {
+  /**
+   * Which persona's gate produced `master`. `'requester'` means the shortfall
+   * is creator-Safe deployment gas and blocks posting a task; `'operator'`
+   * means it is the bootstrap target and blocks the state machine.
+   */
+  persona: 'operator' | 'requester';
   /**
    * Best-effort assessment that no funding gate is currently blocking advancement.
    * This is `false` whenever any requirement is present OR the answer is partial.
@@ -154,6 +176,15 @@ export async function planFleetFunding(
     reasons.push('fleet_state_missing');
   }
 
+  // Persona (B0a, issue #2446). An explicit flag wins; otherwise the shared
+  // `isRequesterPersona` predicate decides. It is shared rather than restated
+  // so this gate and `jinn tasks submit`'s refusal cannot drift apart — see
+  // the predicate's own comment for why the marker alone is not enough.
+  const persona: 'operator' | 'requester' = options.requester === true
+    || (options.requester === undefined && isRequesterPersona(fleetState))
+    ? 'requester'
+    : 'operator';
+
   // Resolve master address: prefer persisted state, then derive from
   // keystore + password if available, otherwise mark partial.
   let masterAddress: Address | null = null;
@@ -178,6 +209,7 @@ export async function planFleetFunding(
   // No master => no useful master-level evaluation possible.
   if (!masterAddress) {
     return {
+      persona,
       satisfied: false,
       partial: true,
       reasons,
@@ -191,6 +223,7 @@ export async function planFleetFunding(
   if (masterBalance === null) {
     reasons.push('rpc_unreachable');
     return {
+      persona,
       satisfied: false,
       partial: true,
       reasons,
@@ -244,14 +277,32 @@ export async function planFleetFunding(
   // `computeRequiredMasterEth` in bootstrap.ts — the same helper the mutating
   // `FleetBootstrapper.ensureStage1And2` gate routes through. Re-deriving it
   // inline here is the u34i cross-module invariant-drift hazard.
-  const requiredMasterEth = computeRequiredMasterEth({
-    services: fleetState?.services ?? [],
-    minEoaGasEth: config.minEoaGasEth,
-    pendingSetupMigration,
-    targetServices,
-    stakingMode,
-    preStage1: isPreStage1,
-  });
+  // The requester's gate is creator-Safe deployment gas, not the operator
+  // bootstrap target. Reporting the latter to a requester is the §4.2 defect
+  // this issue names ("asks for 0.02 ETH ... where a requester needs
+  // Safe-deployment gas"); both numbers come from the same helper the
+  // corresponding mutating gate uses, so neither can drift.
+  // The requester's requirement is Safe-deployment gas, so it drops to zero
+  // once that Safe exists. Without this the read-only plan reports a phantom
+  // shortfall to every requester who has finished init — the state a requester
+  // is in whenever they have a reason to ask — because a completed init
+  // legitimately leaves the master below the pre-deployment gate. Keeping the
+  // condition here is what holds this view in agreement with the completion
+  // short-circuit in `FleetBootstrapper.ensureRequesterSafe`.
+  const creatorSafeDeployed = fleetState !== null
+    && (fleetState.requester_stage === 'safe_deployed'
+      || fleetState.fleet_stage === 'stage1'
+      || fleetState.fleet_stage === 'stage1_and_2');
+  const requiredMasterEth = persona === 'requester'
+    ? (creatorSafeDeployed ? 0n : requesterMinMasterEth())
+    : computeRequiredMasterEth({
+      services: fleetState?.services ?? [],
+      minEoaGasEth: config.minEoaGasEth,
+      pendingSetupMigration,
+      targetServices,
+      stakingMode,
+      preStage1: isPreStage1,
+    });
 
   let master: FundingRequirement | undefined;
   if (systemEth < requiredMasterEth) {
@@ -297,6 +348,7 @@ export async function planFleetFunding(
   const satisfied = !master && safes.length === 0 && !partial;
 
   return {
+    persona,
     satisfied,
     partial,
     reasons: uniqueReasons,

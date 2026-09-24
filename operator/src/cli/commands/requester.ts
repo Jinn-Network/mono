@@ -1,0 +1,305 @@
+/**
+ * `jinn requester init` — class 1's first-touch verb (B0a, issue #2446).
+ *
+ * The consumer-class table gives an external requester a blessed surface of
+ * "record schemas + `jinn` CLI" and key custody of "CLI keystore,
+ * machine-local", and the class-1 quickstart is *post a task with the `jinn`
+ * CLI*. This verb is that first touch: wallet, keystore, creator Safe, testnet
+ * funds. It registers no OLAS service, stakes nothing, and deploys no mech —
+ * a person who wants work done is not onboarded as a supplier.
+ *
+ * It is deliberately a separate verb rather than a mode on `jinn init`, whose
+ * documented contract ("does not contact the RPC or create services") the
+ * operator path still depends on.
+ */
+import { parseArgs } from 'node:util';
+import type { CommandContext, CommandModule } from '../command.js';
+import { COMMON_FLAGS } from '../command.js';
+import { emitResult } from '../output.js';
+import { emitEnvelope } from '../../errors/envelope.js';
+import {
+  loadConfig as defaultLoadConfig,
+  getConfigPathFromArgs as defaultGetConfigPathFromArgs,
+} from '../../config.js';
+import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
+import { FleetBootstrapper } from '../../earning/bootstrap.js';
+import type { FleetBootstrapResult } from '../../earning/types.js';
+import {
+  checkRpcNetwork as defaultCheckRpcNetwork,
+  logRpcLocalDevToStderr as defaultLogRpcLocalDevToStderr,
+  rpcNetworkFailureHint as defaultRpcNetworkFailureHint,
+} from '../../preflight/rpc-network.js';
+import {
+  checkDaemonGuard as defaultCheckDaemonGuard,
+  daemonGuardEnvelope,
+} from '../daemon-guard.js';
+
+const EXAMPLE_CLI = 'JINN_PASSWORD=... jinn requester init';
+
+// `resolveCliPassword`'s generic no-password refusal names `jinn run` as a
+// third option, because that daemon entry point is the one place in this
+// codebase that auto-generates and persists a keystore password
+// (`main.ts`'s `~/.jinn-operator/keystore-password` write). `jinn requester
+// init` has no such auto-generation path -- it only ever reads an existing
+// password (env, --password-fd, or that same file if something else already
+// created it) -- so repeating `jinn run` here would be false, and it is
+// exactly the operator-daemon routing issue #2446 exists to keep a
+// requester's first-touch verb away from. Every other refusal
+// `resolveCliPassword` can return (bad/empty --password-fd) is specific and
+// requester-appropriate as-is.
+const NO_PASSWORD_MESSAGE = 'No keystore password found. Set JINN_PASSWORD, or pass --password-fd N.';
+
+function requesterPasswordMessage(message: string): string {
+  return message.includes('jinn run') ? NO_PASSWORD_MESSAGE : message;
+}
+
+export interface RequesterCommandDeps {
+  loadConfig: typeof defaultLoadConfig;
+  getConfigPathFromArgs: typeof defaultGetConfigPathFromArgs;
+  resolveCliPassword: typeof defaultResolveCliPassword;
+  /**
+   * Preflight, in the same order and for the same reasons as `jinn bootstrap`
+   * (`cli/commands/bootstrap.ts`). This verb broadcasts — the master -> agent
+   * value transfer and the Safe deployment — and it *persists* what it
+   * deploys, so both of that command's guards apply here verbatim.
+   */
+  checkRpcNetwork: typeof defaultCheckRpcNetwork;
+  rpcNetworkFailureHint: typeof defaultRpcNetworkFailureHint;
+  logRpcLocalDevToStderr: typeof defaultLogRpcLocalDevToStderr;
+  checkDaemonGuard: typeof defaultCheckDaemonGuard;
+  /**
+   * Requester-only onboarding walk. Production wires this to
+   * `FleetBootstrapper.ensureRequesterSafe`. Injected so the CLI surface is
+   * testable without a chain.
+   */
+  ensureRequesterSafe(input: {
+    readonly earningDir: string;
+    readonly chain: 'base' | 'base-sepolia';
+    readonly rpcUrl: string;
+    readonly password: string;
+  }): Promise<FleetBootstrapResult>;
+}
+
+export const PRODUCTION_DEPS: RequesterCommandDeps = {
+  loadConfig: defaultLoadConfig,
+  getConfigPathFromArgs: defaultGetConfigPathFromArgs,
+  resolveCliPassword: defaultResolveCliPassword,
+  checkRpcNetwork: defaultCheckRpcNetwork,
+  rpcNetworkFailureHint: defaultRpcNetworkFailureHint,
+  logRpcLocalDevToStderr: defaultLogRpcLocalDevToStderr,
+  checkDaemonGuard: defaultCheckDaemonGuard,
+  async ensureRequesterSafe(input) {
+    const bootstrapper = new FleetBootstrapper({
+      earningDir: input.earningDir,
+      chain: input.chain,
+      rpcUrl: input.rpcUrl,
+    });
+    return bootstrapper.ensureRequesterSafe(input.password);
+  },
+};
+
+export function createRequesterCommand(deps: RequesterCommandDeps = PRODUCTION_DEPS): CommandModule {
+  async function run(ctx: CommandContext): Promise<void> {
+    let parsed;
+    try {
+      parsed = parseArgs({ args: ctx.argv, options: { ...COMMON_FLAGS }, allowPositionals: true });
+    } catch (err) {
+      return emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          exampleCli: EXAMPLE_CLI,
+          details: { field: 'flags' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+    }
+
+    if (parsed.positionals.length !== 1 || parsed.positionals[0] !== 'init') {
+      return emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: 'requester requires the `init` subcommand.',
+          exampleCli: EXAMPLE_CLI,
+          details: { field: 'subcommand', expected: 'init' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+    }
+
+    const password = deps.resolveCliPassword(ctx.argv, ctx.env);
+    if (!password.ok) {
+      return emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: requesterPasswordMessage(password.message),
+          hint: 'Choose a passphrase and set JINN_PASSWORD. It encrypts the keystore on this machine and is never sent anywhere.',
+          exampleCli: EXAMPLE_CLI,
+          details: { field: 'keystore password', expected: 'non-empty string via environment or fd' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+    }
+
+    const configPath = deps.getConfigPathFromArgs(ctx.argv);
+    const config = deps.loadConfig(configPath);
+    const chain: 'base' | 'base-sepolia' = config.network === 'testnet' ? 'base-sepolia' : 'base';
+
+    // This verb persists what it deploys: `stepFleetSafePredict` /
+    // `stepFleetSafeDeploy` write `fleet_safe_address` into
+    // `earning_state.json`. A mis-set RPC would record a Safe deployed on the
+    // wrong chain as the fleet Safe -- and because the requester's Safe *is*
+    // the operator's Safe, that wrong-chain write poisons a later operator
+    // bootstrap too. Refuse before touching the chain, exactly as
+    // `jinn bootstrap` does.
+    const rpcPreflight = await deps.checkRpcNetwork(config);
+    if (!rpcPreflight.ok) {
+      return emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: rpcPreflight.message,
+          hint: deps.rpcNetworkFailureHint(rpcPreflight),
+          exampleCli: 'jinn doctor --human',
+          details: {
+            field: 'rpcUrl',
+            network: rpcPreflight.network,
+            expectedChainId: rpcPreflight.expectedChainId,
+            actualChainId: rpcPreflight.actualChainId ?? null,
+            rpcHost: rpcPreflight.rpcHost,
+            reason: rpcPreflight.reason,
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+    }
+    // Log to real stderr; `ctx.writer` is stdout and must stay a single JSON
+    // (or human) line for the `emitResult` / `emitEnvelope` contracts.
+    deps.logRpcLocalDevToStderr(rpcPreflight);
+
+    // D0a P3 (#525/#562/#897): `ensureRequesterSafe` broadcasts from the same
+    // agent EOA a running `jinn run` daemon signs with, against the same
+    // earning directory, with no cross-process nonce lock. The dual-role user
+    // this verb is built for is precisely the one who has that daemon up.
+    const daemonGuard = deps.checkDaemonGuard({ earningDir: config.earningDir, env: ctx.env });
+    if (daemonGuard.blocked) {
+      return emitEnvelope(
+        daemonGuardEnvelope(daemonGuard, EXAMPLE_CLI),
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+    }
+
+    let result: FleetBootstrapResult;
+    try {
+      result = await deps.ensureRequesterSafe({
+        earningDir: config.earningDir,
+        chain,
+        rpcUrl: config.rpcUrl,
+        password: password.password,
+      });
+    } catch (err) {
+      return emitEnvelope(
+        {
+          code: 'fatal',
+          message: 'Requester init could not complete.',
+          exampleCli: EXAMPLE_CLI,
+          details: { cause: err instanceof Error ? err.message : String(err) },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+    }
+
+    if (!result.ok) {
+      const funding = result.funding;
+      if (funding) {
+        return emitEnvelope(
+          {
+            code: 'funding_required',
+            message: result.message,
+            hint:
+              `Send ${chain === 'base-sepolia' ? 'Base Sepolia' : 'Base'} ETH to ` +
+              `${funding.master_address}, then run \`jinn requester init\` again. ` +
+              'This funds the creator Safe deployment only.',
+            exampleCli: EXAMPLE_CLI,
+            details: {
+              address: funding.master_address,
+              asset: 'ETH',
+              needWei: funding.eth_required,
+              haveWei: funding.eth_balance,
+              blocks: 'tasks-submit',
+            },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+      }
+      return emitEnvelope(
+        {
+          code: 'fatal',
+          message: result.message,
+          exampleCli: EXAMPLE_CLI,
+          ...(result.rawErrorMessage === undefined ? {} : { details: { cause: result.rawErrorMessage } }),
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+    }
+
+    const payload = {
+      schemaVersion: 1 as const,
+      generatedAt: new Date().toISOString(),
+      chain,
+      master: result.fleet_state.master_address,
+      creatorSafe: result.fleet_state.fleet_safe_address,
+      keystoreDir: config.earningDir,
+      nextStep: {
+        cli: 'jinn tasks submit',
+        purpose: 'Describe the work you want done and post it.',
+      },
+    };
+
+    emitResult(
+      payload,
+      (v) => {
+        const value = v as typeof payload;
+        return (
+          `Requester ready on ${value.chain}.\n` +
+          `Wallet: ${value.master}\n` +
+          `Creator Safe: ${value.creatorSafe}\n` +
+          `Next: ${value.nextStep.cli}\n` +
+          'Backup: your JINN_PASSWORD and the mnemonic in this keystore are the only way to recover this wallet. ' +
+          'Run `jinn keys backup` to export the mnemonic.'
+        );
+      },
+      {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      },
+    );
+  }
+
+  return {
+    name: 'requester',
+    summary: 'Requester-only onboarding: wallet, keystore, and creator Safe',
+    helpText: `Usage: JINN_PASSWORD=... jinn requester init [--human] [--json] [--config <path>]
+
+Idempotent. Creates the encrypted keystore if absent, then deploys the
+creator Safe that funds and owns the tasks you post. On testnet it drains
+the CDP faucet toward the small amount that deployment needs.
+
+Registers no service, stakes nothing, and deploys no mech. Those belong to
+operators who supply work, not to requesters who ask for it.
+
+When the wallet is short, this exits with \`funding_required\` naming the
+address to fund and the exact shortfall for Safe deployment.
+
+Examples:
+  JINN_PASSWORD=secret jinn requester init
+  JINN_PASSWORD=secret jinn requester init --human
+`,
+    run,
+  };
+}
+
+const command: CommandModule = createRequesterCommand();
+export default command;

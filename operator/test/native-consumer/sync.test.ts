@@ -70,7 +70,11 @@ function envelope(payloadType: string, value: unknown): DsseEnvelope {
   };
 }
 
-function publicSource(entries: readonly AnnouncementEntry[], issuedAt: string): {
+function publicSource(
+  entries: readonly AnnouncementEntry[],
+  issuedAt: string,
+  origin = formatOrigin(SOURCE.agent, SOURCE.name),
+): {
   readonly endpoint: { agent: string; name: string; servingRoot: string; archiveRootUrl: string };
   readonly transport: Transport;
   readonly head: SourceHead;
@@ -79,7 +83,7 @@ function publicSource(entries: readonly AnnouncementEntry[], issuedAt: string): 
   const page = '0000000000000001';
   const head: SourceHead = {
     protocol: RECORD_DISCOVERY_VERSION,
-    origin: formatOrigin(SOURCE.agent, SOURCE.name),
+    origin,
     sequence: latest.sequence,
     entry: sealJson(latest).digest,
     issuedAt,
@@ -112,6 +116,11 @@ function publicSource(entries: readonly AnnouncementEntry[], issuedAt: string): 
     head,
   };
 }
+
+/** `verifySourceHead` consults only `keys.resolve`; reaching this is a defect. */
+const unusedEverBound = async (): Promise<boolean> => {
+  throw new Error('verifySourceHead never consults everBound');
+};
 
 function checkpointHead(
   state: ConsumerState,
@@ -400,22 +409,131 @@ describe('independent public source sync', () => {
       ...ports,
       keys: {
         async resolve() { return [{ keyid: KEY, publicKey: 'test', algorithm: 'test' }]; },
-        async everBound() { return true; },
+        everBound: unusedEverBound,
       },
     });
     await expect(current.verify(presented)).resolves.toEqual({ status: 'ok' });
 
-    // The key is rotated out: still ever-bound, no longer valid at `now`.
+    // The key is rotated out: revalidation resolves only keys valid at `now`
+    // and never asks whether a key was ever bound.
     const rotated = createProtocolSourceVerifier({
       ...ports,
       keys: {
         async resolve() { return [{ keyid: 'requester-source-key-2', publicKey: 'test', algorithm: 'test' }]; },
-        async everBound(_agent, keyid) { return keyid === KEY; },
+        everBound: unusedEverBound,
       },
     });
     await expect(rotated.verify(presented)).resolves.toEqual({
       status: 'rejected',
       reason: 'unauthorized-source-signer',
+    });
+    state.close();
+  });
+
+  it('refuses a checkpointed head on the unchanged path once past refreshBy while its signer is still current (#3493)', async () => {
+    const state = await ConsumerState.open(await stateRoot());
+    const sourceEntry = entry(1, null);
+    const head: SourceHead = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: formatOrigin(SOURCE.agent, SOURCE.name),
+      sequence: sourceEntry.sequence,
+      entry: sealJson(sourceEntry).digest,
+      issuedAt: '2026-08-02T12:01:00.000Z',
+      refreshBy: '2026-08-03T12:00:00.000Z',
+    };
+    const headSignature = envelope(MEDIA_HEAD, head);
+    checkpointHead(state, head, sourceEntry, headSignature);
+
+    let now = new Date('2026-08-02T13:00:00.000Z');
+    const verifier = createProtocolSourceVerifier({
+      state,
+      keys: {
+        async resolve() { return [{ keyid: KEY, publicKey: 'test', algorithm: 'test' }]; },
+        everBound: unusedEverBound,
+      },
+      sigs: {
+        async verify(pae: Uint8Array, signature: Uint8Array) {
+          return Buffer.from(signature).equals(Buffer.from(pae.slice(0, 16)));
+        },
+      },
+      fresh: { isFresh: (refreshBy: string, at: Date) => new Date(refreshBy).getTime() > at.getTime() },
+      now: () => now,
+    });
+    const presented = {
+      mode: 'unchanged',
+      source: SOURCE,
+      head,
+      headSignature,
+      entries: [],
+    } as const;
+
+    // Control: the same signer and bytes pass before refreshBy.
+    await expect(verifier.verify(presented)).resolves.toEqual({ status: 'ok' });
+
+    now = new Date('2026-08-03T13:00:00.000Z');
+    await expect(verifier.verify(presented)).resolves.toEqual({
+      status: 'rejected',
+      reason: 'stale-source-head',
+    });
+    state.close();
+  });
+
+  it('refuses a fetched head whose origin string does not name the followed source before the verifier runs (#3494)', async () => {
+    const state = await ConsumerState.open(await stateRoot());
+    const source = publicSource(
+      [entry(1, null)],
+      '2026-08-02T12:01:00.000Z',
+      formatOrigin('did:web:other.example', 'requester'),
+    );
+    const verifier: PublicSourceVerifier = {
+      async verify() {
+        throw new Error('pre-verifier origin check must not reach the verifier');
+      },
+    };
+    await expect(syncPublicSource({ ...source, state, verifier })).rejects.toMatchObject(
+      { reason: 'source-head-origin-mismatch' } satisfies Partial<ConsumerSyncError>,
+    );
+    expect(state.checkpoint(SOURCE)).toBeUndefined();
+    state.close();
+  });
+
+  it('maps an in-procedure origin refusal to head-origin-mismatch, not the precheck slug (#3494)', async () => {
+    const state = await ConsumerState.open(await stateRoot());
+    const sourceEntry = entry(1, null);
+    const head: SourceHead = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: formatOrigin('did:web:other.example', 'requester'),
+      sequence: sourceEntry.sequence,
+      entry: sealJson(sourceEntry).digest,
+      issuedAt: '2026-08-02T12:01:00.000Z',
+      refreshBy: '2026-08-03T12:00:00.000Z',
+    };
+    const headSignature = envelope(MEDIA_HEAD, head);
+    checkpointHead(state, head, sourceEntry, headSignature);
+
+    const verifier = createProtocolSourceVerifier({
+      state,
+      keys: {
+        async resolve() { return [{ keyid: KEY, publicKey: 'test', algorithm: 'test' }]; },
+        everBound: unusedEverBound,
+      },
+      sigs: {
+        async verify() {
+          throw new Error('origin mismatch must refuse before signature verify');
+        },
+      },
+      fresh: { isFresh: () => true },
+      now: () => new Date('2026-08-02T13:00:00.000Z'),
+    });
+    await expect(verifier.verify({
+      mode: 'unchanged',
+      source: SOURCE,
+      head,
+      headSignature,
+      entries: [],
+    })).resolves.toEqual({
+      status: 'rejected',
+      reason: 'head-origin-mismatch',
     });
     state.close();
   });

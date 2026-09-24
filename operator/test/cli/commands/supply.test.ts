@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createSupplyCommand } from '@/cli/commands/supply.js';
+import { DiscoveryUnavailableError } from '@/discovery-client/types.js';
 import { runCommand } from '@test/cli.js';
 
 const WINDOW = {
@@ -98,6 +99,73 @@ describe('jinn supply', () => {
     expect(raw.join('')).not.toContain('incomplete indexer evidence');
   });
 
+  it('warns that the class list is short when the indexer skipped activity rows', async () => {
+    const deps = commandWith({
+      schemaVersion: 1, status: 'available', chainId: 84532,
+      generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
+      incompleteActivityRows: 3,
+      classes: [{
+        workClass: 'prediction.v1', contractId: 'prediction', contractVersion: 'v1',
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
+        latestAttemptAt: '2026-09-06T10:00:00.000Z',
+        latestVerdictAt: '2026-09-06T11:00:00.000Z',
+      }],
+    });
+    const { raw } = await runCommand(deps.command, { argv: ['--human'] });
+    expect(raw.join('')).toContain('3 activity row(s) had no matching task');
+    expect(raw.join('')).toContain('unproven, not absent');
+  });
+
+  it('says nothing about skipped activity when the indexer skipped none', async () => {
+    const deps = commandWith({
+      schemaVersion: 1, status: 'available', chainId: 84532,
+      generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
+      classes: [{
+        workClass: 'prediction.v1', contractId: 'prediction', contractVersion: 'v1',
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
+        latestAttemptAt: '2026-09-06T10:00:00.000Z',
+        latestVerdictAt: '2026-09-06T11:00:00.000Z',
+      }],
+    });
+    const { raw } = await runCommand(deps.command, { argv: ['--human'] });
+    expect(raw.join('')).not.toContain('no matching task');
+  });
+
+  it('strips C0, DEL, C1, CR, and an ESC-prefixed CSI sequence from human class lines, leaving JSON untouched', async () => {
+    // #4236 requires a bare carriage return and an ESC-prefixed escape
+    // sequence alongside BEL/DEL/C1 — a CSI "erase line" is the kind of
+    // sequence a hostile contractId could use to rewrite the operator's
+    // terminal line. \u001B is itself in the stripped C0 range, so once it is
+    // removed the trailing "[2K" is inert printable text, not a live escape.
+    const workClass = 'pred\u0007iction\u007F\r.\u009Bv1\u001b[2K';
+    const response = {
+      schemaVersion: 1, status: 'available', chainId: 84532,
+      generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
+      classes: [{
+        workClass, contractId: 'pred\u0007iction\r', contractVersion: '\u009Bv1\u001b[2K',
+        acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
+        latestAttemptAt: '2026-09-06T10:00:00.000Z',
+        latestVerdictAt: '2026-09-06T11:00:00.000Z',
+      }],
+    };
+    const human = commandWith(response);
+    const { raw } = await runCommand(human.command, { argv: ['--human'] });
+    const text = raw.join('');
+    // Stripping removes the control BYTES, not a whole escape sequence: ESC
+    // is a C0 byte and is removed, but the "[2K" it introduced is ordinary
+    // printable text that survives — inert (no live escape reaches the
+    // terminal) rather than invisible.
+    const sanitizedWorkClass = 'prediction.v1[2K';
+    expect(text).toContain(`${sanitizedWorkClass}:`);
+    const classLine = text.split('\n').find((line) => line.includes(`${sanitizedWorkClass}:`));
+    expect(classLine).toBeDefined();
+    expect(classLine).not.toMatch(/[\u0000-\u001F\u007F-\u009F]/u);
+
+    const json = commandWith(response);
+    const { envelopes } = await runCommand(json.command);
+    expect(envelopes[0]).toMatchObject({ classes: [{ workClass }] });
+  });
+
   it('renders unknown without calling it zero', async () => {
     const deps = commandWith({
       schemaVersion: 1, status: 'unknown', reason: 'incomplete_indexer_evidence',
@@ -129,5 +197,111 @@ describe('jinn supply', () => {
   it('keeps the command dependency boundary config-and-HTTP only', () => {
     const source = readFileSync(new URL('../../../src/cli/commands/supply.ts', import.meta.url), 'utf8');
     expect(source).not.toMatch(/(?:wallet|daemon|mcp|store|chain-client|viem)/iu);
+  });
+
+  it('maps invalid_request to invalid_invocation (exit 11) with a hint naming discovery.url and network', async () => {
+    const loadConfig = vi.fn(() => ({
+      network: 'testnet',
+      discovery: { mode: 'http', url: 'https://indexer.example' },
+    }));
+    const command = createSupplyCommand({
+      loadConfig: loadConfig as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({
+        getCurrentSupply: async () => {
+          throw new DiscoveryUnavailableError('bad chain', undefined, 'invalid_request');
+        },
+      }),
+    });
+    const { envelopes, exits } = await runCommand(command);
+    expect(exits).toEqual([11]);
+    expect(envelopes[0]).toMatchObject({ code: 'invalid_invocation', exitCode: 11 });
+    // #4235: chainId is derived from the config's `network`, not set
+    // directly, so the 4xx/config hint must name `network`, not just "the
+    // requested chain".
+    const hint = (envelopes[0] as { hint: string }).hint;
+    expect(hint).toContain('discovery.url');
+    expect(hint).toContain('network');
+  });
+
+  it('maps invalid_response (a decoder rejection) to invalid_invocation with a decode hint, not the 4xx hint', async () => {
+    // #4235: a Zod decoder rejection means the indexer answered with a body
+    // this client cannot decode. The 4xx hint ("fix discovery.url or the
+    // configured network") names the wrong service for this case, so it gets
+    // a distinct hint. That hint names the likeliest cause (an older client
+    // against a newer indexer) without promising that an upgrade fixes it: a
+    // malformed indexer answer looks the same from here.
+    const command = createSupplyCommand({
+      loadConfig: (() => ({
+        network: 'testnet',
+        discovery: { mode: 'http', url: 'https://indexer.example' },
+      })) as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({
+        getCurrentSupply: async () => {
+          throw new DiscoveryUnavailableError('response has an unrecognized field', undefined, 'invalid_response');
+        },
+      }),
+    });
+    const { envelopes, exits } = await runCommand(command);
+    expect(exits).toEqual([11]);
+    expect(envelopes[0]).toMatchObject({ code: 'invalid_invocation', exitCode: 11 });
+    const hint = (envelopes[0] as { hint: string }).hint;
+    expect(hint).toContain('could not decode');
+    expect(hint).toContain('@jinn-network/operator');
+    expect(hint).not.toMatch(/\bupgrade\b/iu);
+    // Distinct from the 4xx/config hint, which opens by telling the operator
+    // to fix discovery.url or the network — the wrong instruction when the
+    // indexer answered.
+    expect(hint).not.toMatch(/^Fix discovery\.url/u);
+  });
+
+  it('gates on discovery.mode "http" with discovery.url before touching the network (invalid_invocation, exit 11)', async () => {
+    // #4235: the discovery.mode gate (a non-'http' mode, or 'http' with no
+    // url) had no coverage before this — it is a distinct envelope from the
+    // catch-block mapping above, asserted separately here.
+    const nonHttpMode = createSupplyCommand({
+      loadConfig: (() => ({ network: 'testnet', discovery: { mode: 'mcp' } })) as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({ getCurrentSupply: async () => { throw new Error('must not be called'); } }),
+    });
+    const nonHttp = await runCommand(nonHttpMode);
+    expect(nonHttp.exits).toEqual([11]);
+    expect(nonHttp.envelopes[0]).toMatchObject({
+      code: 'invalid_invocation',
+      exitCode: 11,
+      details: { field: 'discovery.mode' },
+    });
+
+    const missingUrl = createSupplyCommand({
+      loadConfig: (() => ({ network: 'testnet', discovery: { mode: 'http' } })) as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({ getCurrentSupply: async () => { throw new Error('must not be called'); } }),
+    });
+    const noUrl = await runCommand(missingUrl);
+    expect(noUrl.exits).toEqual([11]);
+    expect(noUrl.envelopes[0]).toMatchObject({
+      code: 'invalid_invocation',
+      exitCode: 11,
+      details: { field: 'discovery.mode' },
+    });
+  });
+
+  it('maps untagged discovery failures to transient_error (exit 40)', async () => {
+    const command = createSupplyCommand({
+      loadConfig: (() => ({
+        network: 'testnet',
+        discovery: { mode: 'http', url: 'https://indexer.example' },
+      })) as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({
+        getCurrentSupply: async () => {
+          throw new DiscoveryUnavailableError('indexer down');
+        },
+      }),
+    });
+    const { envelopes, exits } = await runCommand(command);
+    expect(exits).toEqual([40]);
+    expect(envelopes[0]).toMatchObject({ code: 'transient_error', exitCode: 40 });
   });
 });

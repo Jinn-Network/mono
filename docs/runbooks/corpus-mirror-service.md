@@ -62,7 +62,7 @@ The head is a DSSE envelope. Its signature `keyid` is the `did:key` that signs
 for this source, and it is what you declare under `signingKeys`. Following an
 archive and trusting a key to speak for it are two separate acts: an archive
 declared with no signing key resolves its head against no candidate and is
-refused `unauthorized-signer`.
+refused `unauthorized-source-signer`.
 
 Two further values are yours to choose rather than to read: `servingRoot` is the
 base URL you fetched the two documents from, and `repositoryId` is a stable

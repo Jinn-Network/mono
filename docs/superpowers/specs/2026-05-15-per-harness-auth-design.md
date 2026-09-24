@@ -1,5 +1,7 @@
 # Per-harness auth: remove the daemon-level Claude gate
 
+> **Status (2026-09-24): partly superseded by [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md) §2.15.** Its readiness composition is keyed on `joinedSolverNets[<cid>].harness` and surfaced to the dashboard SPA (the problem statement and the Invariants); execution wiring now replaces `joinedSolverNets` as the record of which harness runs, the daemon builds its readiness registry from `executionWiring` (`buildHarnessReadinessRegistry` in `operator/src/main.ts`), and onboarding renders readiness as a report, not a selection surface (that spec §2.9). The core decision stands: no daemon-level Claude gate, per-harness `isReady()`, and harness auth in each harness's own store. For the current direction read [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md) §2.15.
+
 **Bead:** `jinn-mono-vh74.2` (P1, parent epic `jinn-mono-vh74`)
 **GitHub:** https://github.com/Jinn-Network/mono/issues/236
 **Date:** 2026-05-15

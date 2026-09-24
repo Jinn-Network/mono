@@ -19,6 +19,7 @@ import { makeInMemoryPorts } from "./fakes.js";
 import {
   isFactsConsistencyInput,
   isItemInput,
+  isInvalidHeadEnvelopeVector,
   isParseErrorVector,
   isRunnableSourceChainInput,
   toAsyncIterable,
@@ -179,7 +180,9 @@ export async function checkSourceHeadVector(verify: SourceHeadVerify, vector: Ve
   const outcome = await verify({
     source: input.source,
     head: input.head,
-    headSignature: vectorEnvelopeToWire(input.headSignature),
+    headSignature: isInvalidHeadEnvelopeVector(vector)
+      ? input.headSignature
+      : vectorEnvelopeToWire(input.headSignature),
     ports: { keys: ports.keys, sigs: ports.sigs, fresh: ports.fresh, hwm: ports.hwm, now: ports.clock.now() },
   });
   expect(outcome.status, `${vector.name}: ${vector.description}`)

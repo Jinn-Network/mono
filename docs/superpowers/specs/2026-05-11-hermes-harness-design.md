@@ -3,6 +3,7 @@ title: Hermes harness integration — design
 date: 2026-05-11
 author: opus (drafted on jinn-mono-8psp.1)
 status: draft — awaiting review
+superseded-in-part-by: '[log/decisions/2026-08-04-headless-operator-reconciliation.md](../../../log/decisions/2026-08-04-headless-operator-reconciliation.md) decision 2 and [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md) §2.15 (2026-09-24): the `/operator` join-row harness picker (§8.1) and its join-flow install precheck (§8.2) lived in the daemon-served dashboard SPA, which is not carried, and the per-SolverNet model override in `joinedSolverNets[...].model` (§9.1, step 1) gives way to execution wiring, which now holds harness and model per work kind; the adapter, plug-in surface and freeze contract (§3 to §7) are not superseded'
 version: 0.1
 ---
 

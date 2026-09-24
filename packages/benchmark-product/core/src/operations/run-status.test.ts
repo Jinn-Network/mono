@@ -6,6 +6,7 @@ import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, Submi
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { writeCancelMarker } from "../run/cancel-marker.js";
+import { runCli } from "../cli/main.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { appendRunJournalEntry, readRunJournalEntries } from "../run/journal.js";
 import { draftPath, runCancelMarkerPath, runJournalPath } from "../workspace/layout.js";
@@ -521,5 +522,42 @@ describe("runStatus — evaluation gaps resume would act on (#3084)", () => {
     if (!outcome.ok) return;
     expect(outcome.result.cells.every((cell) => cell.evaluationGap === undefined)).toBe(true);
     expect(outcome.result.counts.awaitingEvaluation).toBe(0);
+  });
+});
+
+describe("status CLI text surface (#3233)", () => {
+  test("the non-JSON status names both gap markers and the awaiting-evaluation count", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+    expect(launched.ok).toBe(true);
+
+    // One cell per marker: both lose their evaluation leg, and only the stranded one also loses its
+    // `delivery` record (the #3081 shape), so the renderer has to tell the two apart.
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const [strandedKey, gapKey] = [...new Set(fullEntries
+      .filter((entry) => entry.kind === "delivery")
+      .map((entry) => (entry.kind === "delivery" ? entry.cellKey : "")))];
+    if (strandedKey === undefined || gapKey === undefined) throw new Error("unreachable: fewer than two journaled deliveries");
+    const gapped = new Set([strandedKey, gapKey]);
+    const truncated = fullEntries.filter((entry) => {
+      if (entry.kind === "cell-event") return !(gapped.has(entry.event.cellKey) && entry.event.kind === "judged");
+      if (entry.kind === "evaluation") return !gapped.has(entry.cellKey);
+      if (entry.kind === "submission-accepted") return !(gapped.has(entry.cellKey) && entry.leg === "evaluation");
+      if (entry.kind === "delivery") return entry.cellKey !== strandedKey;
+      return true;
+    });
+    atomicWriteFileSync(runJournalPath(workspaceDir, "draft-1"), `${truncated.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+    const cli = await runCli(["status", "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1"], {
+      cwd: workspaceDir,
+      clock,
+    });
+    expect(cli.exitCode, cli.stderr).toBe(0);
+    const escaped = (key: string): string => key.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    expect(cli.stdout).toMatch(new RegExp(`^${escaped(strandedKey)}\\tdelivered\\t\\d+\\tawaiting evaluation \\(delivery not journaled\\)$`, "mu"));
+    expect(cli.stdout).toMatch(new RegExp(`^${escaped(gapKey)}\\tdelivered\\t\\d+\\tawaiting evaluation$`, "mu"));
+    expect(cli.stdout).toMatch(/, awaiting evaluation 2$/mu);
   });
 });

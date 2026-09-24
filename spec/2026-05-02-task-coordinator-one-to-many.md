@@ -1,5 +1,7 @@
 # TaskCoordinator one-to-many Task lifecycle
 
+> **Status (2026-09-24): partly superseded by [spec/2026-06-30-tokenless-olas-native.md](2026-06-30-tokenless-olas-native.md).** DR-2026-06-30 removed the policy apparatus this spec places in `TaskCoordinator`: the claim window, the claim lease TTL and `maxClaimsPerOperator` (§6, §9.2) are gone (that spec §7; `contracts/src/tasks/TaskCoordinator.sol` records that the window and lease apparatus is removed). The one-to-many attempt structure and the `maxClaims` attempt escrow still stand. For the current direction read [spec/2026-06-30-tokenless-olas-native.md](2026-06-30-tokenless-olas-native.md) §7.
+
 - **Date:** 2026-05-02
 - **Author:** Codex design session with ritsukai
 - **Status:** Proposal

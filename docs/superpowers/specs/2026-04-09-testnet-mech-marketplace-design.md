@@ -1,5 +1,7 @@
 # Testnet MechMarketplace + Full Client Daemon Design
 
+> **Status (2026-09-24): partly superseded by [spec/2026-06-30-tokenless-olas-native.md](../../../spec/2026-06-30-tokenless-olas-native.md).** The JINN-funded staking proxy and the JinnRouter activity-checker wiring (§3.3, §4 steps 8 to 10, §6) are superseded by the trimmed `TaskCoordinator`, `JinnRouterV3` and `TaskActivityCheckerV3` stack re-deployed on Base Sepolia under DR-2026-06-30 (§7, §13). The Mech Marketplace deployment it describes (§3.1, §4) is still the testnet venue (`contracts/deployment-phase1b-mech-baseSepolia-fast.json`). For the current direction read [spec/2026-06-30-tokenless-olas-native.md](../../../spec/2026-06-30-tokenless-olas-native.md).
+
 > Version: 0.1.0
 > Date: 2026-04-09
 > Author: Oak, Claude

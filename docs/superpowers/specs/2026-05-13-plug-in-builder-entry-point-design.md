@@ -1,5 +1,7 @@
 # Plug-in builder entry point — design
 
+> **Status (2026-09-24): partly superseded by [log/decisions/2026-08-04-headless-operator-reconciliation.md](../../../log/decisions/2026-08-04-headless-operator-reconciliation.md).** The `/build` route (§6.6) lived in the daemon-served dashboard SPA, which decision 2 does not carry, and the operator console's inherited surfaces include no `/build` ([OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md), 2026-08-17 amendment). The Discovery API plug-in endpoints (§6.5) fall to [DR-2026-08-03](../../../log/decisions/2026-08-03-phase-c-capability-boundaries.md) decision 4, which makes Record Discovery the sole public discovery plane. Plug-in publication (§6.3) still ships as `jinn solver-plugins publish`. For the current direction read [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md) and [docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md](2026-07-27-record-discovery-protocol-design.md).
+
 - **Date:** 2026-05-13
 - **Author:** opus (drafted with Captain `oak`)
 - **Status:** Proposal

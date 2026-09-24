@@ -3,6 +3,7 @@ title: Operator app — Overview + Configuration page split
 date: 2026-05-04
 author: oak
 status: draft
+superseded-by: '[log/decisions/2026-08-04-headless-operator-reconciliation.md](../../../log/decisions/2026-08-04-headless-operator-reconciliation.md) decision 2 (2026-09-24): the daemon-served dashboard SPA whose Overview and Configuration split this spec designs is not carried; the human surface is a separate operator console, and the right-rail agent panel retires with the embedded-agent WebSocket ([headless operator design](2026-08-04-headless-operator-rederivation-design.md) §4.2). Current direction: [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md)'
 supersedes: portion of `docs/superpowers/plans/2026-05-01-operator-local-app.md` that establishes the single-Operating-page model
 ---
 

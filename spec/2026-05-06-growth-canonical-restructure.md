@@ -1,3 +1,5 @@
+> **Status (2026-09-24): superseded by [spec/2026-05-07-growth-niche-and-pitch-pmf-search.md](2026-05-07-growth-niche-and-pitch-pmf-search.md) and the 2026-06-02 growth deprecation ([growth/archive/README.md](../growth/archive/README.md)).** Its §3 audience cluster ("AI builders") was tightened the next day, and the growth structure it established (the GROWTH.md §3 to §9 sections and the skill governance around them) was deprecated on 2026-06-02; the skills it re-scoped now live in `growth/archive/skills/` and no longer load. For the current direction read [GROWTH.md](../GROWTH.md).
+
 - **Date:** 2026-05-06
 - **Author:** Oak
 - **Status:** Proposal

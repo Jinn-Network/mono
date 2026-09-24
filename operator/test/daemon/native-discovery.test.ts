@@ -4,8 +4,10 @@ import {
   archivePagePath,
   headPath,
   sealJson,
+  sourceHeadRefusalReason,
   type AnnouncementEntry,
   type SourceHead,
+  type SourceHeadRefusalStatus,
 } from '@jinn-network/record-discovery-protocol';
 import type { SourceIdentity } from '@jinn-network/record-discovery-protocol';
 import { Store } from '../../src/store/store.js';
@@ -286,7 +288,7 @@ describe('native discovery consumer', () => {
       verifyHead,
       now: () => now,
     });
-    await expect(restarted.sync()).rejects.toMatchObject({ reason: 'stale' });
+    await expect(restarted.sync()).rejects.toMatchObject({ reason: 'stale-source-head' });
     expect(verifyHead).toHaveBeenCalledOnce();
     expect(restarted.takePending()).toEqual([]);
   });
@@ -359,7 +361,7 @@ describe('native discovery consumer', () => {
     // be partitioned or withholding".
     it('still refuses a genuinely stale PEER head — fail-closed, red if the discriminator is removed', async () => {
       const restarted = await idledSelfSource(false);
-      await expect(restarted.sync()).rejects.toMatchObject({ reason: 'stale' });
+      await expect(restarted.sync()).rejects.toMatchObject({ reason: 'stale-source-head' });
       expect(restarted.takePending()).toEqual([]);
     });
 
@@ -440,7 +442,7 @@ describe('native discovery consumer', () => {
         now: () => now,
         selfServed: false,
       });
-      await expect(peerCold.sync()).rejects.toMatchObject({ reason: 'broken-chain (at: head-issued-ahead)' });
+      await expect(peerCold.sync()).rejects.toMatchObject({ reason: 'discontinuous-source-chain (at: head-issued-ahead)' });
     });
 
     it('refuses a self-hosted source whose head is wrongly-signed — only staleness degrades, never a bad signature', async () => {
@@ -467,7 +469,7 @@ describe('native discovery consumer', () => {
         now: () => now,
         selfServed: true,
       });
-      await expect(badlySigned.sync()).rejects.toMatchObject({ reason: 'unauthorized-signer' });
+      await expect(badlySigned.sync()).rejects.toMatchObject({ reason: 'unauthorized-source-signer' });
       void restarted;
     });
 
@@ -647,7 +649,7 @@ describe('native discovery consumer', () => {
         now: () => new Date('2026-08-02T13:00:00.000Z'),
       });
 
-      await expect(refused.sync()).rejects.toMatchObject({ reason: 'unauthorized-signer' });
+      await expect(refused.sync()).rejects.toMatchObject({ reason: 'unauthorized-source-signer' });
       expect(refused.checkpoint({ agent: AGENT, name: SOURCE_NAME })?.signedHighWater).toMatchObject({
         issuedAt: '2026-08-02T01:00:00.000Z',
       });
@@ -663,7 +665,7 @@ describe('native discovery consumer', () => {
         now: () => new Date('2026-08-05T00:00:00.000Z'),
       });
 
-      await expect(lapsed.sync()).rejects.toMatchObject({ reason: 'stale' });
+      await expect(lapsed.sync()).rejects.toMatchObject({ reason: 'stale-source-head' });
     });
 
     it('degrades a SELF-HOSTED one that is past refreshBy without advancing the checkpoint', async () => {
@@ -858,7 +860,7 @@ describe('native discovery consumer', () => {
         verify: async () => ({ status: 'stale' }),
         selfServed: false,
       });
-      await expect(cold.sync()).rejects.toMatchObject({ reason: 'stale' });
+      await expect(cold.sync()).rejects.toMatchObject({ reason: 'stale-source-head' });
       expect(cold.takePending()).toEqual([]);
     });
 
@@ -873,7 +875,7 @@ describe('native discovery consumer', () => {
         verify: async () => ({ status: 'unauthorized-signer' }),
         selfServed: true,
       });
-      await expect(cold.sync()).rejects.toMatchObject({ reason: 'unauthorized-signer' });
+      await expect(cold.sync()).rejects.toMatchObject({ reason: 'unauthorized-source-signer' });
     });
 
     it('also refuses a self-hosted source whose cold verify reports forked', async () => {
@@ -884,7 +886,7 @@ describe('native discovery consumer', () => {
         verify: async () => ({ status: 'forked' }),
         selfServed: true,
       });
-      await expect(cold.sync()).rejects.toMatchObject({ reason: 'forked' });
+      await expect(cold.sync()).rejects.toMatchObject({ reason: 'forked-source-chain' });
     });
   });
 
@@ -2054,7 +2056,12 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
           return { status };
         },
       });
-      await expect(synced.sync()).rejects.toMatchObject({ reason: status });
+      // The chain-outcome mapper (#3494) only renames the protocol's closed set
+      // (`stale`, `forked`, `broken-chain`, `unauthorized-signer`); a
+      // trust-verifier-specific code outside it -- everything else this
+      // it.each drives -- still surfaces verbatim, exactly as it always has.
+      const expectedReason = status === 'unauthorized-signer' ? 'unauthorized-source-signer' : status;
+      await expect(synced.sync()).rejects.toMatchObject({ reason: expectedReason });
     });
 
     it.each(['unauthorized-signer', 'head-payload-mismatch', 'invalid-head-envelope', 'head-origin-mismatch'])(
@@ -2070,7 +2077,9 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
           verify: chainVerified,
           verifyHead: async () => ({ status }),
         });
-        await expect(restarted.sync()).rejects.toMatchObject({ reason: status });
+        await expect(restarted.sync()).rejects.toMatchObject({
+          reason: sourceHeadRefusalReason(status as SourceHeadRefusalStatus),
+        });
       },
     );
 
