@@ -466,10 +466,22 @@ describe("the mirror as a standing service", () => {
 
     // The black hole: never resolves on its own, and ends only when the
     // caller's signal says so — which is what a real `fetch` does, and what
-    // this transport had no way to ask for.
+    // this transport had no way to ask for. A real `fetch` also checks
+    // `signal.aborted` SYNCHRONOUSLY at call time and rejects immediately if
+    // it is already true, because `addEventListener("abort", ...)` on a
+    // signal that already fired never sees that past event again. Without
+    // the same check here, a call that lands after `fetchHead`'s deadline
+    // timer already aborted -- plausible any time the event loop is behind,
+    // not just under CI load -- attaches a listener that never fires and
+    // hangs until the test's own timeout, not `syncTimeoutMs`, ends it.
     const blackHole: FetchLike = (_url, init) =>
       new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () =>
+        const signal = init?.signal;
+        if (signal?.aborted === true) {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+          return;
+        }
+        signal?.addEventListener("abort", () =>
           reject(new DOMException("The operation was aborted.", "AbortError")),
         );
       });
@@ -484,14 +496,7 @@ describe("the mirror as a standing service", () => {
     } finally {
       await service.runtime.stop();
     }
-    // `waitFor` resolves on the loop's own recorded cycles rather than a fixed
-    // sleep, so this bound is headroom for the two REAL setTimeout-bound
-    // cycles (syncTimeoutMs + syncIntervalMs each, ~2s nominal), not a mask
-    // over the wait itself. A CI runner sharing CPU across many parallel
-    // vitest workers can stall the event loop past a 20s ceiling even though
-    // nothing here is slow; 60s matches the bound the repo already uses for
-    // other real-timer integration tests (e.g. operator/test/hermetic/*).
-  }, 60_000);
+  }, 20_000);
 
   test("the service follows the archives the home's configuration file declares", async () => {
     // The last link in the chain. Everything above resolves its configuration

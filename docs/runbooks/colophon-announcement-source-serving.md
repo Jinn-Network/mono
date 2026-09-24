@@ -188,21 +188,25 @@ entry can refuse a later chain that does not contain it — truncation below an
 anchored point becomes detectable to a reader who recorded it, and nothing
 more. It still does not prove publication-by-time, still does not make the
 stream provably complete, and still does nothing for a reader who never
-looked. The producer path is the never-blocks `anchorSourceEntry` hook
-(#4127); the consumer refusal is the named `anchored-entry-hold` procedure
-(#4129). §3 and §6 of that design are the authority for the ceiling.
+looked. The producer path is the never-blocks `acquireEntryAnchorAfterAppend`
+hook (#4127); the consumer refusal is the named `anchored-entry-hold`
+procedure (#4129). §3 and §6 of that design are the authority for the
+ceiling.
 
 ## Coverage: which sequences are anchored
 
 Coverage is a property of the archive rather than an operator claim about it.
 `enumerateEntryAnchorCoverage` in `@jinn-network/record-discovery-protocol`
-is the same census the walk below describes. Anybody holding the archive —
-the operator, or a stranger who cold-synced it — enumerates exactly which
-sequences are anchored, which are not, and which the archive cannot currently
-say either way about, from the archive alone. That last phrase is the whole
-value of the walk, and it is only earned if each step reads the records
-themselves rather than the publisher's description of them, which is why
-step 3 is written the way it is.
+covers steps 2 and 4 to 6 of the walk below (classification, read-off, the
+pending tail, and naming what is left) over anchor subjects the caller has
+already fetched and verified per step 3; it does not fetch those records
+itself. Anybody holding the archive, the operator, or a stranger who
+cold-synced it, enumerates exactly which sequences are anchored, which are
+not, and which the archive cannot currently say either way about, from the
+archive alone. That last phrase is the whole value of the walk, and it is
+only earned if each step reads the records themselves rather than the
+publisher's description of them, which is why step 3 is written the way it
+is.
 
 Once the workspace configures an anchor provider, each substantive append
 acquires an `AnchorEvidence` record over that entry's digest and announces it

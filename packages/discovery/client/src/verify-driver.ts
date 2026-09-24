@@ -160,7 +160,8 @@ export function createVerifyDriver(deps: VerifyDriverDeps): VerifyDriver {
           digest: sealJson(entry).digest as `sha256:${string}`,
         })),
         ports: { holds: deps.holds },
-        coveredThrough: priorHwm === undefined ? undefined : { sequence: priorHwm.sequence },
+        coveredThrough:
+          opts.firstAdoption || priorHwm === undefined ? undefined : { sequence: priorHwm.sequence },
         observed: opts.observedAnchoredEntry,
       });
       if (hold.status === "missing-held-entry") return hold;
