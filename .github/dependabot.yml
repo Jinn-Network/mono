@@ -1,9 +1,7 @@
 # .github/dependabot.yml
 #
 # Allowlist-only: Dependabot scans the directories listed below. Anything
-# not listed (notably legacy/) is silently un-scanned. The 599 already-open
-# alerts under legacy/jinn-cli-agents-reference/ are cleared in a sibling
-# commit via .github/scripts/dismiss-legacy-dependabot-alerts.sh.
+# not listed is silently un-scanned.
 #
 # Wave-shape policy (issue #769):
 #   - Minor + patch updates are GROUPED into one weekly PR per ecosystem
