@@ -2226,9 +2226,12 @@ export async function deployOperatorMech(
  * `PredictionV1Evaluator.run` calls `getResolution({ marketId, ... })` which
  * issues a single `GET ${gammaBaseUrl}/markets/{marketId}` request. The live
  * Gamma API would make the verdict leg network-dependent and non-deterministic
- * (a market's resolution state can change). Pointing the daemon's evaluator at
- * this mock — via `startDaemon`'s `opts.polymarketGammaBaseUrl` — makes the
- * verdict deterministic, offline, and free.
+ * (a market's resolution state can change). `startDaemon`'s
+ * `opts.polymarketGammaBaseUrl` is currently inert (#3866): it used to feed a
+ * harness registry `Daemon` never read, so passing this mock's `baseUrl` there
+ * does not wire the evaluator. Live injection is `opts.enableComposition` /
+ * `extraLaunchers`, not that leftover option. The mock itself still serves a
+ * deterministic, offline, free Gamma record for callers that do wire it.
  *
  * The served market record is `closed: true` with `outcomePrices: ['1','0']`,
  * which `getResolution` normalises to `status: 'resolved', outcome: 'YES'` →

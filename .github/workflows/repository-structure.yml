@@ -91,6 +91,8 @@ jobs:
         run: node --test .github/scripts/workflow-yarn-cache.test.mjs
       - name: Published-artifacts-smoke workflow shape
         run: node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs
+      - name: Canonical-docs-check re-runs on PR body edits
+        run: node --test .github/scripts/canonical-docs-check-workflow.test.mjs
       - name: Native restart-drill CI lane is scheduled and non-gating
         run: node --test .github/scripts/native-restart-drill-workflow.test.mjs
       - name: Vitest temp-directory sweep seam is wired everywhere
