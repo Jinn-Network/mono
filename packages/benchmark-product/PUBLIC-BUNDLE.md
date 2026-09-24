@@ -587,19 +587,21 @@ per-cell disclosures is cut. No disclosure the v6 page carries is absent from
 the v10 page. Later presentation features register as presentation capability
 entries inside this generation rather than taking a further format number.
 
-v10 cannot pin v6's first public `@0.1` line: no released `0.1` reader
-understands the format, so a claim naming one would be an instruction to fail.
-Every vector registered today pins the same `0.2.1` line v7 and v8 pin, with
-`@0.2` as the compatible line:
+v10 pins neither v6's first public `@0.1` line nor the `verify` `0.2.1` line v7
+and v8 pin: both readers predate the format and refuse it at manifest parse, so
+a claim naming either would be an instruction to fail. Every vector registered
+today pins the first `@colophon-claims/check` release, `0.2.1`, under the
+checker's own name, with the checker's `@0.2` as the compatible line. That line
+covers no release before `0.2.1`, so it names no reader that refuses v10:
 
 ```bash
-npx @colophon-claims/verify@0.2.1 <bundle-dir>
+npx @colophon-claims/check@0.2.1 <bundle-dir>
 ```
 
 A v10 bundle that declares `anchoring` takes the trust-material form too:
 
 ```bash
-npx @colophon-claims/verify@0.2.1 <bundle-dir> \
+npx @colophon-claims/check@0.2.1 <bundle-dir> \
   --tsa-root ./authority-root.pem \
   --ots-headers ./bitcoin-headers.txt
 ```
@@ -617,9 +619,9 @@ evidence was imported (`run import`) declares `external-import`. The enumerated 
 v6, v7, and v8 producer paths remain behind `composedFormat: false` on `report` --- that is
 the rollback. The verifier's legacy path for those formats remains forever.
 
-`0.2.1` is immutable and predates this format, so it refuses v10 at manifest parse --- a
-v10 bundle's sealed instruction names that line until a later reader that serves the format
-can be named. One run is treated differently, not only renumbered: a qualification run with
+The `verify` `0.2.1` reader is immutable and predates this format, so it refuses v10 at
+manifest parse --- which is why a v10 bundle's sealed instruction names the checker's
+`0.2.1` instead. One run is treated differently, not only renumbered: a qualification run with
 a sealed disclosure declaration and no anchor is refused at `report` on the rollback path,
 because v8 is the only disclosed enumerated cell and it is anchored, and on the default
 composed path it is admitted and declares `binary-qualification` and
@@ -657,7 +659,7 @@ out where it applies.
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/8` | `@0.2.1` | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
-| `benchmark-product-public-bundle/10` | `@0.2.1` | `@0.2` | six to nine, by declared capability | `--tsa-root`, `--ots-headers`, when `anchoring` is declared |
+| `benchmark-product-public-bundle/10` | `@colophon-claims/check@0.2.1` | `@colophon-claims/check@0.2` | six to nine, by declared capability | `--tsa-root`, `--ots-headers`, when `anchoring` is declared |
 
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a
@@ -667,12 +669,14 @@ reader. What distinguishes it is inside the claim package: its
 bundle and absent otherwise. That is the second reason to take the line from the claim package
 rather than from the format.
 
-Every row runs as `npx @colophon-claims/verify<line> <bundle-dir>`, with the anchor flags appended
-where the row lists them.
+Every row but `.../10` runs as `npx @colophon-claims/verify<line> <bundle-dir>`. The `.../10` row
+states its package in full and runs as `npx <line> <bundle-dir>`. Append the anchor flags where
+the row lists them.
 
 The checker is now published as `@colophon-claims/check`. `@colophon-claims/verify` — the name
-every row above states, because it is the name those formats sealed — stays published permanently
-as a passthrough alias onto it, so each sealed line keeps resolving.
+every row above but `.../10` states, because it is the name those formats sealed — stays published
+permanently as a passthrough alias onto it, so each sealed line keeps resolving. `.../10` is the
+first format sealed under the checker's own name.
 
 The qualification axis, unlike prompted screening, is not left to the format string's word. Across
 the legacy lineage and v8 — every row above but `.../5`, whose evidence-native closure is read by a
@@ -778,7 +782,8 @@ same message a genuinely corrupt or tampered manifest earns. **A valid bundle re
 that is too old is indistinguishable from an invalid bundle on the human surface.** An auditor
 who runs `@0.1`, or an explicitly pinned `@0.2.0`, against a public-bundle/7 or public-bundle/8
 bundle sees exactly this, and the bundle is fine. The `@0.2` range produces it only through
-`0.2.0`; from `0.2.1` on it reads both formats.
+`0.2.0`; from `0.2.1` on it reads both formats. The `verify` `0.2.1` line and every line before
+it refuse a public-bundle/10 bundle the same way, which is why its claim pins `check@0.2.1`.
 
 Tell the two apart with `--json`, which names both sides of the mismatch:
 

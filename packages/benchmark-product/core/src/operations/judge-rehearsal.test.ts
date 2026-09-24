@@ -361,8 +361,8 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     expect(records[0]!.runSha256).toBe(fixture.runSha256);
     expect(records[0]!.matrixSha256).toBe(fixture.matrixSha256);
     for (const claim of claims) {
-      expect(claim.verification.command).toBe("npx @colophon-claims/verify@0.2.1 <bundle-dir>");
-      expect(claim.verification.compatibleCommand).toBe("npx @colophon-claims/verify@0.2 <bundle-dir>");
+      expect(claim.verification.command).toBe("npx @colophon-claims/check@0.2.1 <bundle-dir>");
+      expect(claim.verification.compatibleCommand).toBe("npx @colophon-claims/check@0.2 <bundle-dir>");
     }
 
     const readoutNames = [...claims.map((claim) => readoutName(String(claim.method.id), String(claim.method.version)))].sort();

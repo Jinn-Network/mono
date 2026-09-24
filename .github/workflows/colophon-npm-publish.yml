@@ -13,7 +13,9 @@ name: Colophon npm Publish
 # receipt keyed `@colophon-claims/check@<version>`. A receipt attests one publish under one name,
 # so the @colophon-claims/verify@0.2.1 receipt is not re-keyed onto the checker.
 # Publish core before cli: cli depends on the published core version.
-# Claim-pin guard is reader-only; core and cli do not ship a reader pin.
+# The check dispatch's claim-pin guard admits the checker version that dispatch publishes. core and
+# cli publish no reader, so their guard admits nothing npm does not already serve: the composed /10
+# claim pins the first checker release, so dispatch check before core and cli.
 # Do not run this on push. Do not add a registry token.
 
 on:
@@ -116,6 +118,10 @@ jobs:
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public
+
+      - name: Refuse a publish whose claim pins name a reader npm does not serve
+        if: ${{ github.event.inputs.package == 'core' || github.event.inputs.package == 'cli' }}
+        run: node .github/scripts/colophon-publish-manifest.mjs --check-claim-pins packages/benchmark-product/${{ github.event.inputs.package }}/package.json
 
       - name: Pin platform dependencies to the recorded product-release receipt
         if: ${{ github.event.inputs.package == 'core' || github.event.inputs.package == 'cli' }}
