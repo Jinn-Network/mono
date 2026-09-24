@@ -1,3 +1,5 @@
+> **Status (2026-09-24): superseded by the 2026-06-02 growth deprecation ([growth/archive/README.md](../growth/archive/README.md)).** Its edits target §3, §5 and §7 of the GROWTH.md archived as [growth/archive/2026-06-02-GROWTH.md](../growth/archive/2026-06-02-GROWTH.md) (its §3 rotation trigger landed there); the current GROWTH.md replaced that structure and has no target cluster, no Engage or Teach loop and no metrics section. For the current direction read [GROWTH.md](../GROWTH.md).
+
 - **Date:** 2026-05-15
 - **Author:** Oak (with Claude)
 - **Status:** Proposal

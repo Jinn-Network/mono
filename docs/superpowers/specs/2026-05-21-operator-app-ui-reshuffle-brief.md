@@ -1,5 +1,7 @@
 # Operator App — UI/IA Reshuffle Brief
 
+> **Status (2026-09-24): superseded by [log/decisions/2026-08-04-headless-operator-reconciliation.md](../../../log/decisions/2026-08-04-headless-operator-reconciliation.md).** This brief reshuffles the daemon-served dashboard SPA; decision 2 re-derives the application tier rather than carrying it, the daemon now answers `/` with `no_human_surface`, and the human surface is a separate operator console. For the current direction read [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md).
+
 > A handoff brief for a fresh Claude Code instance picking up UI work on top of the operator-app spec-alignment stack. Read this end-to-end before touching anything.
 
 ## TL;DR

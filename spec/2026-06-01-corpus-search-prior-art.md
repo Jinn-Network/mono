@@ -1,5 +1,7 @@
 # Corpus search — prior-art survey & recommendation
 
+> **Status (2026-09-24): partly superseded by [docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md](../docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md).** Its recommendation and phasing (§2, §7) build on the daemon `DiscoveryAPI` `CorpusQuery` and its on-chain floor, both retired: Record Discovery is the sole public discovery plane ([DR-2026-08-03](../log/decisions/2026-08-03-phase-c-capability-boundaries.md), decision 4), its query plane replaces the `DiscoveryAPI` (§19), and Wave-4 D4 (#2684) deleted the on-chain floor. The prior-art survey and the trust-weighted ranking idea are not superseded; the record discovery design leaves relevance and ranking out of scope. For the current direction read [docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md](../docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md).
+
 - **Version:** 0.1
 - **Date:** 2026-06-01
 - **Author:** corpus-search spike (#931), deep-research synthesis

@@ -1,5 +1,7 @@
 # Retire the legacy short-name-keyed `solverNets` config block
 
+> **Status (2026-09-24): superseded by [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md) §2.15.** The retirement it designs shipped, but the manifest-CID-keyed `joinedSolverNets` shape it consolidates onto is no longer the claim authority: claim policy and execution wiring replace it (that spec §2.15; [headless operator design](2026-08-04-headless-operator-rederivation-design.md) §4.2), and the `joinedSolverNets` claim gate retired in the one-swap cutover ([DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md)). The key stays parseable legacy config until cutover stage 5. For the current direction read [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md) §2.15.
+
 **Date:** 2026-05-25
 **Author:** Stage 1 design subagent (issue #421)
 **Status:** Design

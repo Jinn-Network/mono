@@ -1,5 +1,7 @@
 # Hermes provider as a first-class catalog + config concept
 
+> **Status (2026-09-24): partly superseded by [apps/operator-console/OPERATOR-APP-SPEC.md](../apps/operator-console/OPERATOR-APP-SPEC.md) §2.15.** Its catalog entry (§4.1) lives in the dashboard SPA the daemon no longer serves ([DR-2026-08-04-b](../log/decisions/2026-08-04-headless-operator-reconciliation.md), decision 2), and its per-SolverNet config entry (§4.2) threads `provider` through `joinedSolverNets[<cid>]` and the join flow; claim policy and execution wiring replace `joinedSolverNets` as the claim authority, and per-kind harness and model selection now lives in execution wiring. The adapter resolution order (§4.3) is not superseded. For the current direction read [apps/operator-console/OPERATOR-APP-SPEC.md](../apps/operator-console/OPERATOR-APP-SPEC.md) §2.15.
+
 - **Date:** 2026-06-14
 - **Author:** Claude (spike for issue #295)
 - **Status:** Design proposal — awaiting review, spawns a separate implementation issue
