@@ -201,7 +201,7 @@ flow is:
    `dist/` tree. The human surface is the operator console (`apps/operator-console`).
 
 The CLI auto-generates a keystore password on first run and reads it from
-`join(earningDir, 'keystore-password')` thereafter (legacy fallback
+`<earningDir>/keystore-password` thereafter (legacy fallback
 `~/.jinn-operator/keystore-password`; read-fallback from a populated
 `~/.jinn-client` when the new directory is empty); set `JINN_PASSWORD` only if
 you need to manage the password yourself (CI, secrets manager).

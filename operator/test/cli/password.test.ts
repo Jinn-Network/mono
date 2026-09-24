@@ -22,36 +22,36 @@ describe('resolveCliPassword', () => {
   }
 
   it('returns env password when set', () => {
-    const r = resolveCliPassword([], { HOME: fakeHome, JINN_PASSWORD: 'secret' });
+    const r = resolveCliPassword([], { HOME: fakeHome, JINN_PASSWORD: 'secret' }, {});
     expect(r).toMatchObject({ ok: true, password: 'secret', source: 'env' });
   });
 
   it('prefers env over the keystore-password file', () => {
     writePasswordFile('from-file\n');
-    const r = resolveCliPassword([], { HOME: fakeHome, JINN_PASSWORD: 'from-env' });
+    const r = resolveCliPassword([], { HOME: fakeHome, JINN_PASSWORD: 'from-env' }, {});
     expect(r).toMatchObject({ ok: true, password: 'from-env', source: 'env' });
   });
 
   it('falls back to the keystore-password file when env and fd are unset', () => {
     writePasswordFile('from-file\n');
-    const r = resolveCliPassword([], { HOME: fakeHome });
+    const r = resolveCliPassword([], { HOME: fakeHome }, {});
     expect(r).toMatchObject({ ok: true, password: 'from-file', source: 'legacy' });
   });
 
   it('reads ~/.jinn-operator/keystore-password on a fresh home', () => {
     writePasswordFile('from-operator\n', '.jinn-operator');
-    const r = resolveCliPassword([], { HOME: fakeHome });
+    const r = resolveCliPassword([], { HOME: fakeHome }, {});
     expect(r).toMatchObject({ ok: true, password: 'from-operator', source: 'legacy' });
   });
 
   it('ignores an empty keystore-password file', () => {
     writePasswordFile('   \n');
-    const r = resolveCliPassword([], { HOME: fakeHome });
+    const r = resolveCliPassword([], { HOME: fakeHome }, {});
     expect(r.ok).toBe(false);
   });
 
   it('fails when env, fd, and file are all absent', () => {
-    const r = resolveCliPassword([], { HOME: fakeHome });
+    const r = resolveCliPassword([], { HOME: fakeHome }, {});
     expect(r.ok).toBe(false);
   });
 
@@ -63,7 +63,7 @@ describe('resolveCliPassword', () => {
   // #4375: an unusable fd must surface as this verb's `invalid_invocation`
   // envelope, never fall through to the env password.
   it('fails instead of falling back to the env password on an unusable fd', () => {
-    const r = resolveCliPassword(['--password-fd='], { HOME: fakeHome, JINN_PASSWORD: 'secret' });
+    const r = resolveCliPassword(['--password-fd='], { HOME: fakeHome, JINN_PASSWORD: 'secret' }, {});
     expect(r.ok).toBe(false);
     expect(r.ok === false && r.message).toContain('--password-fd');
   });
@@ -104,7 +104,7 @@ describe('resolveCliPassword', () => {
 
   it('empty legacy is skipped the same way as today', () => {
     writePasswordFile('   \n');
-    const r = resolveCliPassword([], { HOME: fakeHome });
+    const r = resolveCliPassword([], { HOME: fakeHome }, {});
     expect(r.ok).toBe(false);
   });
 

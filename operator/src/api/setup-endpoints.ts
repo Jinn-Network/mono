@@ -818,7 +818,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       } catch (err) {
         warn(`[warn] Could not update a keystore-password file (${errorMessage(err)}); leaving it in place.`);
       }
-      if (isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn) && existsSync(legacyPath)) {
+      if (existsSync(legacyPath) && isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)) {
         try {
           writeKeystorePasswordFile(legacyPath, parsed.data.next);
         } catch (err) {

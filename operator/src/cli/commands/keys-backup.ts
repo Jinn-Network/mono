@@ -8,7 +8,6 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { FleetStateStore } from '../../earning/store.js';
 import {
-  isDefaultOperatorKeystore,
   passwordFileIsStale,
   primaryKeystorePasswordPath,
 } from '../../earning/password-file.js';
@@ -81,6 +80,15 @@ function fileStillHolds(path: string, password: string): boolean {
   }
 }
 
+/**
+ * Delete whichever password file(s) still hold the rotated-away secret,
+ * independent of where `current` was actually resolved from. A rotation run
+ * with `JINN_PASSWORD` or `--password-fd` never reads a file, but a primary
+ * or legacy file can still hold that same old secret (e.g. from an earlier
+ * `jinn run` auto-generation or an HTTP rotation) — leaving it behind is the
+ * #4662 hazard by another route: the next `jinn run` without the env var
+ * resolves the leftover and fails closed as "wrong password".
+ */
 function deleteRotatedPasswordFile(
   current: Extract<ResolvedCliPassword, { ok: true }>,
   defaultEarningDir: string,
@@ -89,26 +97,22 @@ function deleteRotatedPasswordFile(
   warn: (message: string) => void,
 ): boolean {
   if (current.password === newPassword) return false;
-  if (current.source === 'primary') {
-    const path = current.filePath ?? primaryKeystorePasswordPath(earningDir);
-    if (!fileStillHolds(path, current.password)) return false;
-    unlinkSync(path);
-    // Default-operator HTTP rotation keeps primary and legacy in sync. After a
-    // later CLI rotation sourced from primary, a same-secret leftover at the
-    // legacy path is the next resolve source — delete it only when stale.
-    const legacyPath = join(dirname(defaultEarningDir), 'keystore-password');
-    if (passwordFileIsStale(legacyPath, defaultEarningDir, earningDir, current.password, newPassword, warn)) {
-      unlinkSync(legacyPath);
-    }
-    return true;
+  let deleted = false;
+  const primaryPath = primaryKeystorePasswordPath(earningDir);
+  if (fileStillHolds(primaryPath, current.password)) {
+    unlinkSync(primaryPath);
+    deleted = true;
   }
-  if (current.source === 'legacy' && current.filePath) {
-    if (!isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)) return false;
-    if (!fileStillHolds(current.filePath, current.password)) return false;
-    unlinkSync(current.filePath);
-    return true;
+  // Default-operator HTTP rotation keeps primary and legacy in sync, and a
+  // plain `jinn run` auto-generation may have created the legacy file
+  // before this PR's primary-file split — delete it only when it is proven
+  // stale (holds the old secret, and this is the default operator).
+  const legacyPath = join(dirname(defaultEarningDir), 'keystore-password');
+  if (passwordFileIsStale(legacyPath, defaultEarningDir, earningDir, current.password, newPassword, warn)) {
+    unlinkSync(legacyPath);
+    deleted = true;
   }
-  return false;
+  return deleted;
 }
 
 async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
@@ -417,9 +421,10 @@ change-password:
   --password-fd, JINN_PASSWORD, <earningDir>/keystore-password, or the
   legacy host-wide ~/.jinn-operator/keystore-password file, in that
   order) and re-encrypts it with JINN_NEW_PASSWORD (min 8 characters).
-  The file that supplied the old password is deleted: the primary file
-  always, the legacy file only for a default-operator rotation. Env and
-  --password-fd sources delete nothing. After a deletion, set
+  Any password file still holding the old password is deleted, whatever
+  supplied the old password to this run (env, fd, primary, or legacy):
+  the primary file whenever it holds the old secret, the legacy file
+  only for a default-operator rotation. After a deletion, set
   JINN_PASSWORD yourself for subsequent commands.
 
 Examples:

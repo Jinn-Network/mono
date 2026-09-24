@@ -1,5 +1,5 @@
 import { randomBytes as defaultRandomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
@@ -23,6 +23,7 @@ import {
 import {
   legacyKeystorePasswordPath,
   primaryKeystorePasswordPath,
+  replacePasswordFileAtomically,
 } from '../../earning/password-file.js';
 // ── Structured progress envelope ─────────────────────────────────────────────
 
@@ -76,7 +77,10 @@ export interface PasswordFileIO {
 const DEFAULT_PASSWORD_FILE_IO: PasswordFileIO = {
   exists: (path) => existsSync(path),
   read: (path) => readFileSync(path, 'utf-8'),
-  write: (path, content) => writeFileSync(path, content, { mode: 0o600 }),
+  // Sibling tmp + rename: a failed write never truncates a live file, and an
+  // existing 0644 file is replaced (mode 0600) rather than written through
+  // in place (#4610).
+  write: (path, content) => replacePasswordFileAtomically(path, content),
   remove: (path) => {
     try { unlinkSync(path); } catch { /* best effort — file may not exist */ }
   },
@@ -253,10 +257,6 @@ Examples:
       // Track whether we touched the password file so error paths can report
       // accurate cleanup state in the structured envelope.
       let passwordGenerated = false;
-      // `passwordFilePreexisted` records whether the primary file existed
-      // *before* this quickstart invocation. We must never delete a file the
-      // user already had — only one we just wrote.
-      const passwordFilePreexisted = deps.passwordFileIO.exists(passwordFilePath);
 
       const cleanupGeneratedPasswordIfOrphaned = (): { removed: boolean; reason: string } => {
         // Defense in depth: only remove the password file if we generated it

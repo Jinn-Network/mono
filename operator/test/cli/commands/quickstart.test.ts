@@ -1,16 +1,22 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQuickstartCommand, type PasswordFileIO, type QuickstartDeps } from '../../../src/cli/commands/quickstart.js';
 import { makeCommandCtx } from '@test/cli.js';
-import { legacyKeystorePasswordPath, primaryKeystorePasswordPath } from '../../../src/earning/password-file.js';
+import {
+  legacyKeystorePasswordPath,
+  primaryKeystorePasswordPath,
+  replacePasswordFileAtomically,
+} from '../../../src/earning/password-file.js';
 
 function diskPasswordFileIO(): PasswordFileIO {
   return {
     exists: (path) => existsSync(path),
     read: (path) => readFileSync(path, 'utf-8'),
-    write: (path, content) => writeFileSync(path, content, { mode: 0o600 }),
+    // Matches the production default: sibling tmp + rename, never a
+    // writeFileSync-in-place whose `mode` only applies on create (#4610).
+    write: (path, content) => replacePasswordFileAtomically(path, content),
     remove: () => { /* unused in these tests */ },
     ensureDir: (path) => mkdirSync(path, { recursive: true, mode: 0o700 }),
   };
@@ -76,5 +82,28 @@ describe('quickstart password resolution (#4087)', () => {
     expect(existsSync(primaryKeystorePasswordPath(earningDir))).toBe(false);
     expect(readFileSync(legacyPath, 'utf-8').trim()).toBe('legacy-secret');
     expect(capturedInitEnv?.['JINN_PASSWORD']).toBe('legacy-secret');
+  });
+
+  it('tightens a pre-existing loose primary file to 0600 when generating into it', async () => {
+    // A raw `writeFileSync(path, content, { mode: 0o600 })` only applies
+    // `mode` on create, so a hand-made 0644 empty file would receive the
+    // generated secret world-readable. The atomic replace (#4610) always
+    // creates its temp file at 0600, so the rename always lands at 0600.
+    const earningDir = join(fakeHome, '.jinn-operator', 'earning');
+    mkdirSync(join(fakeHome, '.jinn-operator'), { recursive: true });
+    mkdirSync(earningDir, { recursive: true });
+    const env = { HOME: fakeHome };
+    const primaryPath = primaryKeystorePasswordPath(earningDir);
+    writeFileSync(primaryPath, '');
+    chmodSync(primaryPath, 0o644);
+
+    const deps = makeDeps();
+    const cmd = createQuickstartCommand(deps);
+    const { ctx } = makeCommandCtx({ argv: ['--no-daemon'], env });
+    await cmd.run(ctx);
+
+    expect(deps.randomBytesFn).toHaveBeenCalled();
+    expect(readFileSync(primaryPath, 'utf-8').trim()).toBe('ab'.repeat(32));
+    expect(statSync(primaryPath).mode & 0o777).toBe(0o600);
   });
 });

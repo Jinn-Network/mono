@@ -81,9 +81,9 @@ export type ResolvedCliPassword =
   | { ok: false; message: string };
 
 export function resolveCliPassword(
-  argv?: string[],
+  argv: string[] | undefined,
   env: NodeJS.ProcessEnv = process.env,
-  options?: ResolveCliPasswordOptions,
+  options: ResolveCliPasswordOptions,
 ): ResolvedCliPassword {
   // 1. --password-fd wins (explicit scripted task).
   const merged = mergeArgv(argv);
@@ -113,7 +113,7 @@ export function resolveCliPassword(
   if (envPassword) return { ok: true, password: envPassword, source: 'env' };
 
   // 3. Primary `<earningDir>/keystore-password`, then host-wide legacy file.
-  const fromFile = readKeystorePasswordFile(options?.earningDir, env);
+  const fromFile = readKeystorePasswordFile(options.earningDir, env);
   if (fromFile) {
     return { ok: true, password: fromFile.password, source: fromFile.source, filePath: fromFile.path };
   }

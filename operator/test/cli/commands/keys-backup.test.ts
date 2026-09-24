@@ -232,11 +232,14 @@ describe('keys change-password command', () => {
   });
 
   it('deletes the legacy password file when the default earning dir is the target', async () => {
-    const { home, defaultEarningDir, passwordFile } = await makeDefaultOperator();
+    const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
 
     const { ctx, writes } = makeCtx(['change-password', '--json'], {
       HOME: home,
       JINN_EARNING_DIR: defaultEarningDir,
+      // Sourced from the env, not the file being deleted: deletion proves the
+      // file's content stale, independent of where `current` came from.
+      JINN_PASSWORD: password,
       JINN_NEW_PASSWORD: 'brand-new-password',
     });
 
@@ -297,6 +300,9 @@ describe('keys change-password command', () => {
     const { ctx, writes } = makeCtx(['change-password', '--json'], {
       HOME: home,
       JINN_EARNING_DIR: dir,
+      // Sourced from the env, not the file being deleted: deletion proves the
+      // file's content stale, independent of where `current` came from.
+      JINN_PASSWORD: password,
       JINN_NEW_PASSWORD: 'brand-new-password',
     });
 
@@ -332,7 +338,11 @@ describe('keys change-password command', () => {
     await expectDecryptsWith(b.dir, b.password);
   });
 
-  it('does not delete primary or legacy when the password came from the env', async () => {
+  it('deletes primary and legacy leftovers even when the password came from the env', async () => {
+    // #4662-by-another-route: a rotation run with JINN_PASSWORD never reads a
+    // file, but a leftover primary/legacy file holding the same old secret
+    // must still be cleared, or the next `jinn run` without the env var
+    // resolves it and fails closed as "wrong password".
     const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
     writeFileSync(join(defaultEarningDir, 'keystore-password'), `${password}\n`, { mode: 0o600 });
 
@@ -345,9 +355,9 @@ describe('keys change-password command', () => {
 
     await keysCmd.run(ctx);
 
-    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(false);
-    expect(readFileSync(passwordFile, 'utf-8').trim()).toBe(password);
-    expect(readFileSync(join(defaultEarningDir, 'keystore-password'), 'utf-8').trim()).toBe(password);
+    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(true);
+    expect(existsSync(passwordFile)).toBe(false);
+    expect(existsSync(join(defaultEarningDir, 'keystore-password'))).toBe(false);
     await expectDecryptsWith(defaultEarningDir, 'brand-new-password');
   });
 
