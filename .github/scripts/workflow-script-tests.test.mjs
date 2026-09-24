@@ -662,10 +662,14 @@ function isBlockScalar(rest) {
 
 // Command-position only. `\byarn\b` credits `echo yarn skill:check` and
 // `yarn install # yarn skill:check`, which is fail-OPEN for a wiring
-// obligation (the opposite polarity of collectTestInvocations). Script names
-// start with a letter so a flag such as `--check` is not read as a guard, and
-// may contain `.`: `release:tier-1:T1.3` otherwise reads as `release:tier-1:T1`.
-const YARN_SCRIPT_RE = /(?:^|[;|&(]|\s(?:&&|\|\|)\s)\s*yarn(?:\s+run)?(?:\s+--cwd\s+\S+)?(?:\s+run)?\s+([A-Za-z][A-Za-z0-9:._-]*)/gu;
+// obligation (the opposite polarity of collectTestInvocations). Leading
+// `NAME=value` assignments and an `env [-u NAME] [NAME=value]` prefix keep yarn
+// in command position; without them `FOO=x yarn test:browser` is never read.
+// Script names start with a letter so a flag such as `--check` is not read as a
+// guard, may contain `.` (`release:tier-1:T1.3` otherwise reads as
+// `release:tier-1:T1`), and must end the word: `yarn e2e:${{ matrix.kind }}`
+// is not misread as a script named `e2e:`.
+const YARN_SCRIPT_RE = /(?:^|[;|&(]|\s(?:&&|\|\|)\s)\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:env(?:\s+-u\s+\S+|\s+[A-Za-z_]\w*=\S*)*\s+)?yarn(?:\s+run)?(?:\s+--cwd\s+\S+)?(?:\s+run)?\s+([A-Za-z][A-Za-z0-9:._-]*)(?=$|[\s;|&)"'`])/gu;
 
 function parseYarnInvocations(text, baseCwd) {
   const results = [];
@@ -674,7 +678,7 @@ function parseYarnInvocations(text, baseCwd) {
     if (!/\byarn\b/u.test(code)) continue;
     let cwd = baseCwd;
     const cwdMatch = /\byarn(?:\s+run)?\s+--cwd\s+(\S+)/u.exec(code);
-    const cdMatch = /(?:^|[(\s])cd\s+(\S+)\s+&&/u.exec(code);
+    const cdMatch = /(?:^|[(\s`])cd\s+(\S+)\s+&&/u.exec(code);
     if (cwdMatch) cwd = resolveOverrideCwd(baseCwd, cwdMatch[1]);
     else if (cdMatch) cwd = resolveOverrideCwd(baseCwd, cdMatch[1]);
     for (const match of code.matchAll(YARN_SCRIPT_RE)) {
@@ -952,9 +956,13 @@ function runsInWorkspace(manifest, script) {
  * An interpolated working directory resolves to every workspace under its literal prefix (see
  * workspacesForCwd) and passes when any one of them can run the script. The forward harvest makes
  * the same over-read; reading the matrix values instead would be a second YAML parser. The residual
- * is a script removed from one matrix member while a sibling under the prefix keeps it. A script
- * name that is itself interpolated (`yarn ${{ matrix.script }}`, `yarn "$SCRIPT"`) never matches
- * YARN_SCRIPT_RE and is not checked; nothing in the tree writes one.
+ * is a script removed from one matrix member while a sibling under the prefix keeps it.
+ *
+ * Also not checked, and written nowhere in the tree today: a script name interpolated in whole or in
+ * part (`yarn ${{ matrix.script }}`, `yarn e2e:$KIND`), which YARN_SCRIPT_RE does not match; a yarn
+ * call after a `cd <dir>` on its own line, which is checked against the step's directory because
+ * only `cd <dir> &&` on the same line moves it; and the continuation lines of a multi-line plain
+ * `run:` scalar, which the walker does not collect.
  */
 export function checkWorkflowYarnScripts(repoRoot = root, workflowsRoot = workflowsDir) {
   const manifests = readWorkspaceManifests(repoRoot);
@@ -973,11 +981,25 @@ export function checkWorkflowYarnScripts(repoRoot = root, workflowsRoot = workfl
   return { missing, unresolved };
 }
 
-export function formatMissingYarnScript({ site, script, workspaces }) {
-  const binary = YARN_DEPENDENCY_BINARIES[script];
-  const provider = binary ? ` and no ${binary.join(' or ')} dependency` : '';
-  const where = workspaces.map((workspace) => `${workspace}/package.json`).join(', ');
-  return `- ${site}: \`yarn ${script}\` — no \`${script}\` script${provider} in ${where}`;
+/** checkWorkflowYarnScripts' findings as printable lines, minus the exempted directories. */
+export function findUnrunnableYarnScripts(
+  repoRoot = root,
+  workflowsRoot = workflowsDir,
+  uncheckable = UNCHECKABLE_YARN_CWDS,
+) {
+  const { missing, unresolved } = checkWorkflowYarnScripts(repoRoot, workflowsRoot);
+  return [
+    ...missing.map(({ site, script, workspaces }) => {
+      const binary = YARN_DEPENDENCY_BINARIES[script];
+      const provider = binary ? ` and no ${binary.join(' or ')} dependency` : '';
+      const where = workspaces.map((workspace) => `${workspace}/package.json`).join(', ');
+      return `- ${site}: \`yarn ${script}\`: no \`${script}\` script${provider} in ${where}`;
+    }),
+    ...unresolved
+      .filter(({ cwd }) => !isNonEmptyJustification(uncheckable[cwd]))
+      .map(({ site, cwd, script }) => `- ${site}: \`yarn ${script}\` runs in `
+        + `${cwd === '' ? 'the repository root' : cwd}, which is no tracked workspace`),
+  ];
 }
 
 test('every .github/scripts/*.test.mjs is referenced by at least one workflow', () => {
@@ -1945,7 +1967,8 @@ test('self-test: Yarn commands, dependency binaries, and dotted names are not mi
     mkdirSync(join(repo, 'operator'), { recursive: true });
     writeFileSync(join(repo, 'operator', 'package.json'), JSON.stringify({
       scripts: { 'release:tier-1:T1.3': 'node t13' },
-      devDependencies: { vitest: '1', '@playwright/test': '1' },
+      dependencies: { vitest: '1' },
+      devDependencies: { '@playwright/test': '1' },
     }));
     writeFileSync(join(workflows, 'accepted.yml'), [
       'jobs:',
@@ -2002,12 +2025,48 @@ test('self-test: the reverse check resolves --cwd, cd, and step working-director
       '      - run: (cd packages/foo && yarn build)',
       '      - working-directory: packages/foo',
       '        run: yarn test',
+      '      - run: out=`cd packages/foo && yarn build`',
       '',
     ].join('\n'));
     assert.deepEqual(checkWorkflowYarnScripts(repo, workflows), {
-      missing: [{ site: 'cwd.yml:9', script: 'build', workspaces: ['packages/foo'] }],
+      missing: [
+        { site: 'cwd.yml:9', script: 'build', workspaces: ['packages/foo'] },
+        { site: 'cwd.yml:12', script: 'build', workspaces: ['packages/foo'] },
+      ],
       unresolved: [],
     });
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(workflows, { recursive: true, force: true });
+  }
+});
+
+// benchmark-product-ci.yml and ci.yml each run yarn behind an environment prefix, which the
+// command-position match once skipped entirely. A name interpolated in part was the opposite
+// failure: `yarn e2e:${{ matrix.kind }}` read as a script named `e2e:`.
+test('self-test: env-prefixed calls are read, and a partly interpolated name is not misread', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'jinn-yarn-prefix-repo-'));
+  const workflows = mkdtempSync(join(tmpdir(), 'jinn-yarn-prefix-wf-'));
+  try {
+    writePlantedManifest(repo, 'operator', { test: 'vitest' });
+    writeFileSync(join(workflows, 'prefix.yml'), [
+      'jobs:',
+      '  check:',
+      '    defaults:',
+      '      run:',
+      '        working-directory: operator',
+      '    steps:',
+      '      - run: SENTINEL=abc yarn test:browser',
+      '      - run: env -u TOKEN -u KEY yarn test:removed',
+      '      - run: A=1 B=2 yarn test',
+      '      - run: yarn e2e:${{ matrix.kind }}',
+      '      - run: yarn build$SUFFIX',
+      '',
+    ].join('\n'));
+    assert.deepEqual(checkWorkflowYarnScripts(repo, workflows).missing, [
+      { site: 'prefix.yml:7', script: 'test:browser', workspaces: ['operator'] },
+      { site: 'prefix.yml:8', script: 'test:removed', workspaces: ['operator'] },
+    ]);
   } finally {
     rmSync(repo, { recursive: true, force: true });
     rmSync(workflows, { recursive: true, force: true });
@@ -2071,6 +2130,11 @@ test('self-test: a yarn script run outside every workspace is reported as unreso
         { site: 'unresolved.yml:8', cwd: 'packages/old-name', script: 'build' },
       ],
     });
+    // An exemption silences only its own directory.
+    assert.deepEqual(
+      findUnrunnableYarnScripts(repo, workflows, { 'packages/old-name': 'created at run time' }),
+      ['- unresolved.yml:4: `yarn build` runs in the repository root, which is no tracked workspace'],
+    );
   } finally {
     rmSync(repo, { recursive: true, force: true });
     rmSync(workflows, { recursive: true, force: true });
@@ -2088,19 +2152,13 @@ test('self-test: empty UNCHECKABLE_YARN_CWDS justification fails', () => {
 
 test('every yarn script a workflow step runs exists in that workspace', () => {
   assertUncheckableYarnCwdJustifications();
-  const { missing, unresolved } = checkWorkflowYarnScripts();
-  const problems = [
-    ...missing.map(formatMissingYarnScript),
-    ...unresolved
-      .filter(({ cwd }) => !isNonEmptyJustification(UNCHECKABLE_YARN_CWDS[cwd]))
-      .map(({ site, cwd, script }) => `- ${site}: \`yarn ${script}\` runs in ${cwd === '' ? 'the repository root' : cwd}, `
-        + 'which is no tracked workspace, so no package.json says whether the script exists'),
-  ];
+  const problems = findUnrunnableYarnScripts();
   if (problems.length === 0) return;
   assert.fail(
     `Found ${problems.length} workflow yarn invocation(s) with no script behind them. Each fails in CI when its workflow runs. `
-    + 'Fix the script name or working directory, drop the step, or, for a directory only created at run time, '
-    + 'declare it in UNCHECKABLE_YARN_CWDS with a justification:\n'
+    + 'Fix the script name or working directory, or drop the step. A dependency binary belongs in '
+    + 'YARN_DEPENDENCY_BINARIES; a directory only created at run time belongs in UNCHECKABLE_YARN_CWDS '
+    + 'with a justification:\n'
     + problems.join('\n'),
   );
 });
