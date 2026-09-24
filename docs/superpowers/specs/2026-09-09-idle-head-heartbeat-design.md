@@ -13,7 +13,7 @@
 | **Depends on** | [record discovery](../plans/2026-07-28-record-discovery.md) §5.2, §5.5, §7 item 3; [record-discovery protocol design](./2026-07-27-record-discovery-protocol-design.md) §5.2, §13.3, §13.4, §14.1 |
 | **Touches** | the `self-source-stale` / `self-source-future-head` degrades (#2547, #2548, #2550, #3467); the re-signed-head classification (#3468); the freshness-window rules (#3467, #3482). #2550 is the PR, merged 2026-08-10, that extended the `self-source-stale` degrade from the revalidation branch to the cold verify path, where a self-served source with no prior checkpoint lands (`operator/src/daemon/native-discovery.ts:1051-1058`, under the block comment at `:1015`, pinned from `operator/test/daemon/native-discovery.test.ts:832`), and #4187's AC3 names it. v0.3 dropped it for want of in-tree corroboration, and that was wrong: no comment cites it by number, but the code and tests it added are on `next`. |
 | **Outcome** | one primitive specified, one trigger rule, one liveness gate, one sequencing constraint, one persistence-invariant change on the requester leg, and two corrections to the issue's own phrasing |
-| **v0.4 changes** | Rulings and three corrections; no change to any recommendation. The operator ruled on §10.1's five decisions on 2026-09-24, in the coordinating session, each as recommended: §10.1 now records each ruling beneath the reasoning it was ruled on, §0 notes them, the status moves to adopted, and §11 gains follow-up 5, which ruling 1 asked for. A readiness review found three errors, corrected here: the header no longer drops #2550, which is on `next` as the cold-path `self-source-stale` degrade; every `file:line` citation is refreshed against `origin/next` at `d21fbce57`, where v0.3's matched the merge-base `670f78411` and 46 had drifted; and §8 Stage 5 case 2, which the file's trust double could never pass, now names the double, poster and decode ports it needs, counts its production changes, and asserts the report's `quarantined` field. |
+| **v0.4 changes** | Rulings and three corrections; no change to any recommendation. The operator ruled on §10.1's five decisions on 2026-09-24, in the coordinating session, each as recommended: §10.1 now records each ruling beneath the reasoning it was ruled on, §0 notes them, the status moves to adopted, and §11 gains follow-up 5, which ruling 1 asked for. A readiness review found three errors, corrected here: the header no longer drops #2550, which is on `next` as the cold-path `self-source-stale` degrade; every `file:line` citation is refreshed against `origin/next` at `d21fbce57`, where v0.3's matched the merge-base `670f78411` and 46 had drifted; and §8 Stage 5 case 2, which the file's trust double could never pass, now names the double, poster, decode ports, clock and key it needs, counts its production changes, and asserts the report's `quarantined` field. A second review pass restated the wording still left open outside §10.1 in the past tense, kept AC1's remainder and AC3's second clause in ruling 5, added two §8.1 rows, and restated §11 follow-up 5 as a problem with its faults named. |
 | **v0.3 changes** | Two corrections, five clarifications, no change to any recommendation. §5.1's key-rotation mechanism was wrong — a rotation throws out of `assertStateOwnership` before any head is read, wedging `append` and `readState` alike, and it never clears at the next append; §6.3's observability rationale and §8 Stage 2's `faulted` case follow, and §11 gains a follow-up. §2 consequence 2 no longer says the §14.1 rollback exposure is identical before and after: the *bound* is, the *realized* exposure is not, and that third weakening is now carried into §6.2, §9 and §10.1 decision 1. Also: §10.1 decision 3 states the whole loss (NB1), §10.2 marks its two tunable defaults (NB2), §5.4 stops overstating a guard (NB3), §2 corrects an elision note (NB5). This row is also where the record's revision history now lives: v0.2's corrections of v0.1 are no longer narrated in the body except where the correction itself is the content (§7, §8 Stage 4). |
 
 ## 0. Decision in plain language
@@ -46,9 +46,9 @@ window, §6 the gate and its limits, §7 the one consumer that must be pinned fi
 re-sign changes "issuedAt only"; it changes `refreshBy` too, and that re-basing is the
 entire mechanism. AC3 says the self-source degrade "keeps refusing" a stale self-served
 head; a self-served stale head *degrades* — it is a **peer's** that refuses. §2 and §6.1
-set out both corrections against the code. Adopting them changes what "done" means for
-#4187, so it is a decision for the issue's filer (§10.1) rather than an assertion this
-record makes on its own.
+set out both corrections against the code. Adopting them changed what "done" means for
+#4187, so it was put to the operator (§10.1) rather than asserted by this record on its own,
+and the operator adopted both on 2026-09-24 (§10.1, ruling 5).
 
 **A design record cannot itself discharge AC2 or AC3.** Both are runtime criteria — a peer
 cold-booting during the idle window fetches a head within `refreshBy`; the heartbeat cannot
@@ -156,8 +156,8 @@ original schedule and round-10 would recur unchanged. The heartbeat works *becau
    What the heartbeat changes is how often a source sits near that bound. §6.2's
    superseded-head row states the case: a source that idles and then appends leaves behind a
    head that a heartbeat has kept inside `refreshBy`, where today the same head has lapsed.
-   That is a third way a heartbeat weakens `refreshBy`, it is a consequence for §10.1's first
-   decision to be ruled on, and §9 records that this design declines to cover it. §6.2, §10.1.
+   That is a third way a heartbeat weakens `refreshBy`; the operator accepted it under §10.1's
+   first decision on 2026-09-24, and §9 records that this design declines to cover it. §6.2, §10.1.
 3. `Math.max(nowMs, prevIssuedAtMs + 1)` guarantees strict monotonicity at any cadence —
    but it also **carries a future-dated `issuedAt` forward**. On a fast-clocked host that
    makes `head-issued-ahead` sticky, and a heartbeat makes it *periodically* sticky rather
@@ -473,7 +473,8 @@ detail** (§10.1, decision 3):
   `recover()`.
 - **(c) One durable transaction spanning the blob write and the state commit.**
 
-This record recommends (a), and §10.1 states plainly what it costs.
+This record recommended (a), §10.1 states plainly what it costs, and the operator ruled (a) on
+2026-09-24 (§10.1, ruling 3).
 
 ## 6. What the heartbeat must not mask
 
@@ -525,8 +526,8 @@ and should be read alongside it.** §13.3's cold-start procedure fetches from *e
 mirror in the policy's mirror set and takes the highest valid `(sequence, issuedAt)`, so the
 real head at sequence N+1 is preferred wherever the real source is reachable; and a returning
 consumer is unaffected, because its high-water mark supplies both an `issuedAt` floor and a
-walk boundary the superseded head cannot satisfy. This is a caveat to name in §10.1's first
-decision, not a reason to change its recommendation.
+walk boundary the superseded head cannot satisfy. This was a caveat named in §10.1's first
+decision, not a reason to change its recommendation, and the operator accepted it on 2026-09-24.
 
 **The broken-writes row** is the other. A source in that condition is alive, its loops tick,
 and it can write a head blob a few hundred bytes long — so the heartbeat re-signs on schedule
@@ -544,8 +545,8 @@ removes that signal and puts nothing in its place: a peer cannot distinguish suc
 from an honestly idle one. This design does not cover it and says so in §9 rather than
 leaving the omission to be inferred from a table. Covering it would need a liveness oracle
 over the write and serve paths specifically — a different instrument from the watchdog, and
-a larger piece of work than this issue. §10.1's second decision is framed so that the gate
-is ruled on knowing this.
+a larger piece of work than this issue. §10.1's second decision was framed so that the gate
+was ruled on knowing this, and §11 follow-up 5 files the gap.
 
 The wedged-loop row has teeth, because `JINN_WATCHDOG_AUTO_RESTART` defaults to `false`: a
 stale loop is loud-logged and the process keeps running. It is also the row the daemon
@@ -584,14 +585,15 @@ Registering `always` and gating the tick's *action* is the only shape that expre
 because `runLoop` stamps a loop's heartbeat outside the admission gate — a `ready-only` row
 would be paused, not stale, and could not express the distinction by registry class.
 
-**With the watchdog disabled there is no gate**, and this record does not settle that on its
-own authority — it is §10.1's fourth decision. The recommendation is to run unconditionally
-and document it on the config field. An operator who has turned the watchdog off has already
-declined the daemon's liveness supervision, and refusing to refresh for them would make that
-operator un-joinable to every new peer, for the same reason §6.4 rejects the readiness gate.
-The alternative — refuse to refresh when no watchdog is present — fails closed and is
-defensible on that ground. Either way it is a masking hazard installable by configuration, so
-it belongs in §10.1 as a decision and not only as a note on a config field.
+**With the watchdog disabled there is no gate**, and this record did not settle that on its
+own authority: it was §10.1's fourth decision, and the operator ruled on 2026-09-24 that the
+heartbeat runs ungated and the config field documents it. An operator who has turned the
+watchdog off has already declined the daemon's liveness supervision, and refusing to refresh
+for them would make that operator un-joinable to every new peer, for the same reason §6.4
+rejects the readiness gate. The alternative, refusing to refresh when no watchdog is present,
+fails closed and was defensible on that ground. It is a masking hazard installable by
+configuration either way, which is why it was a decision in §10.1 and not only a note on a
+config field.
 
 ### 6.4 Why readiness is *not* the gate
 
@@ -674,7 +676,7 @@ producer before its consumers are pinned.
 
 | Stage | Change | Discharges |
 |---|---|---|
-| 0 | Prose corrections only: AC1's "issuedAt only" (§2) and AC3's "keeps refusing" (§6.1), once §10.1's fifth decision accepts the amendment | AC1 |
+| 0 | Prose corrections only: AC1's "issuedAt only" (§2) and AC3's "keeps refusing" (§6.1), as the operator's 2026-09-24 ruling on §10.1's fifth decision adopted them | AC1 |
 | 1 | Extend `operator/src/native-consumer/sync.ts`'s existing pin to the re-based window and both failure branches; align its predicate with `native-discovery.ts` | precondition for AC2 |
 | 2 | The fourth `DurableSourceWriter` method, with the staged-intent interlock (§5.2), the fast-clock guard (§5.3) and §10.1's requester crash-window resolution | AC1 |
 | 3 | The three operator legs: solver and evaluator on the existing serialized append chain; the requester's new lease-taking entry point | producer half of AC2 |
@@ -727,7 +729,7 @@ the signed source head")` (`source-writer.ts:831`). Capture the actual failure, 
 **That test is necessary and not sufficient.** It exercises a refresh that *completed*, which
 the state re-commit does fix. It does not touch §5.5's crash window — the interval between the
 head blob write and the state commit, in which the requester source is bricked outright.
-Closing that is §10.1's third decision and is a
+Closing that was §10.1's third decision, ruled (a) on 2026-09-24, and is a
 change to `reconstructRequesterHistory`, not a test. A crash-boundary case belongs in this
 stage beside the regression: kill between the two writes, then assert the source is still
 appendable.
@@ -761,7 +763,8 @@ which already accepts it. It also drives A's heartbeat through Stage 3's request
 which the fleet runtime and this test can reach only through `FleetRequesterWrite` (today
 `discovery`, `postTarget`, `reconcile` and `adopt`, `native-fleet-requester-write.ts:134-174`),
 so Stage 3 surfaces it there; that member is Stage 3's production change, not this stage's.
-The trust double, poster and decode ports case 2 needs are test-side, and case 2 lists them.
+The trust double, poster, decode ports, clock and key case 2 needs are test-side, and case 2
+lists them.
 Five cases, in order:
 
 1. **The defect, asserted rather than described** — heartbeat off, A's head aged past
@@ -774,7 +777,7 @@ Five cases, in order:
    of the report (`native-discovery.ts:288-315`), and the file's `COLD` fixture already asserts
    it (`native-fleet-two-operator-boot.test.ts:612-617`). The resolve and the **empty
    `degraded` array** are the pass condition: round-10 was a `stale` refusal thrown out of B's
-   `sync()`. The file's harness cannot produce this report today, and the case needs three
+   `sync()`. The file's harness cannot produce this report today, and the case needs four
    test-side changes:
    - **A trust double that verifies.** `fakeTrust()` (`operator/test/_support/native-trust.ts:8-29`)
      resolves and verifies nothing: `resolveBinding` returns `null` (`:9`),
@@ -804,6 +807,18 @@ Five cases, in order:
      (`native-discovery.ts:1128-1147`, `:555`), so `degraded` is never empty. Case 2 passes the
      Submission bytes A serves at the announced location and the `canonical: true` read A's own
      harness already uses (`native-fleet-two-operator-boot.test.ts:181`).
+   - **A's clock and A's key, surfaced on the harness.** `buildOperator` passes no `now` to
+     `buildFleetRequesterWrite` (`native-fleet-two-operator-boot.test.ts:163-183`), although the
+     write accepts one (`native-fleet-requester-write.ts:131`) and otherwise falls back to the
+     wall clock (`:224`). A's head is therefore minted at wall-clock time, a refresh is never
+     due inside the test, and a forced one re-bases `refreshBy` to wall-clock time plus 24 hours,
+     which is still lapsed at case 1's instant. Inject a test clock into A's requester write and
+     advance it past the half-window before the heartbeat runs. The requester's durable writer
+     and its append timestamp both read that clock (`requester.ts:1702`, `:1726`), and the
+     Stage 3 refresh, built on the same writer, reads it too. Separately, `requesterRoles()` is
+     called inline (`native-fleet-two-operator-boot.test.ts:169`) and `Operator` exposes no key
+     (`:119-133`), so the verifying double has no public key to check against: expose A's
+     `requester-discovery` public key on the test's `Operator`.
 3. **AC3 gate control** — watchdog reporting a stale loop, A's served head byte-unchanged, B
    still refuses.
 4. **AC3 inversion control** — readiness `degraded` with no stale loop: the head **does**
@@ -830,11 +845,13 @@ Correcting them is part of the change that makes them false, not a follow-up.
 | File | What is now false |
 |---|---|
 | `operator/src/daemon/native-discovery.ts:440-441` | "Nothing in this tree re-signs while idle yet", with its reason that every in-tree publisher "calls `maintainHead` only after an append", "so the shape arrives from an external source." |
+| `operator/src/daemon/native-discovery.ts:902-903` | "Nothing re-stamps an idle head's `refreshBy` (it advances only on append, `serve/src/head.ts`)". Correct it with the `:922-924` row below; the degrade it justifies stays (§6.5). |
 | `operator/src/daemon/native-discovery.ts:922-924` | "nothing in this tree re-signs an idle head yet, so this degrade still covers the operator that has not." Rewrite per §6.5: the degrade stays, now covering a gated operator, one pre-first-heartbeat, and one with a fast clock. |
 | `packages/discovery/protocol/src/verify/source-head.ts:29` | "though no in-tree publisher calls it while idle". |
 | `plugin/runtime/src/corpus/mirror.ts:77-78` | "the shape arrives from a conformant external source rather than from anything here (#2549)". |
 | `plugin/runtime/src/corpus/sync-loop.ts:568-573` | "Per #2549 every in-tree publisher re-signs a head only after an append, so a correct but quiet feed accumulates head age indefinitely." Correct the rationale; note that promoting that row from reported to gating is now possible and is **not** done here. |
 | `packages/discovery/protocol/src/verify/source-chain.test.ts:146-147` | "Both consumers now classify it before reaching this procedure" — there are three (§7). |
+| `operator/test/daemon/native-discovery.test.ts:298` | "nothing re-stamps an idle head", the stated reason for the #2547 fixture's idle stretch. The fixture stays valid, because a withheld or not-yet-run heartbeat still leaves the head to lapse (§6.5). |
 | `operator/test/daemon/native-discovery.test.ts:549-550` | "No in-tree publisher re-signs while idle, so the shape arrives from an external source." The fixture rationale that follows it stays true. |
 | `docs/superpowers/specs/2026-09-01-publication-head-anchoring-design.md:117` (its §2, "Ground truth") | Its "dormant" characterization of the idle re-stamp hazard. Amend with a pointer to this record rather than retro-editing dated prose. |
 
@@ -1004,15 +1021,16 @@ error into the design's central mechanism. But amending the criteria changes wha
 for this issue, and that scope call belongs to the person who filed it rather than to the
 record answering it. §8 Stage 0 executes the amendment once it is accepted.
 
-**Ruled 2026-09-24 by the operator:** adopt both corrections, so AC1 reads "a re-sign changes
-`issuedAt` and `refreshBy`" and AC3 reads "an operator's own stale head degrades; a peer's
-stale head refuses".
+**Ruled 2026-09-24 by the operator:** adopt both corrections: AC1's parenthetical "(issuedAt
+only)" becomes "(a re-sign changes `issuedAt` and `refreshBy`)" and the rest of AC1 stands;
+AC3's first clause becomes "an operator's own stale head degrades; a peer's stale head
+refuses", and its second clause, "the heartbeat cannot mask a dead source", stands.
 
 ### 10.2 Calls this record makes
 
 These are recorded so the operator can override them, not put up for adjudication. The second
 and third are settled by a mechanical fact about the code rather than by a tradeoff, and asking
-for a signature on a settled engineering call spends a ruling that §10.1 needs. The first is
+for a signature on a settled engineering call spends a ruling that §10.1 needed. The first is
 mixed: level-triggering versus a deadline is settled by argument, but **the fraction and the
 tick are tuning defaults**, not facts about the code, and an operator may set either
 differently without disturbing anything else in this design.
@@ -1029,8 +1047,8 @@ no longer holds — one its own `assertHeadMatchesState` then refuses. An empty-
 through the existing method does not carry either: `AppendAnnouncementCommand.announcement` is
 required, and an announcement advances `sequence`, which makes the result a chain claim rather
 than the same-position revalidation shape #3468 admits. Both alternatives are refused by a
-fact about the code, not by preference. §5.5's crash window makes the *contents* of the fourth
-method a live question — §10.1's third decision — but not its existence.
+fact about the code, not by preference. §5.5's crash window made the *contents* of the fourth
+method a question for §10.1's third decision, ruled (a) on 2026-09-24, but not its existence.
 
 **The third consumer is pinned before the producer is armed (§7, §8 Stage 1).** This is a
 sequencing step that Rule 4 already implies, not a decision, and putting it to a ruling invites
@@ -1040,7 +1058,8 @@ is extending one existing test.
 
 ## 11. Follow-ups this design defers
 
-To be filed as issues when this record is adopted; none of them blocks the work above.
+To be filed as issues now that this record is adopted (2026-09-24); none of them blocks the
+work above.
 
 1. **Promote the plugin corpus doctor's head-age row from reported to gating.** Its rationale
    for never gating is that "every in-tree publisher re-signs a head only after an append", which
@@ -1060,14 +1079,17 @@ To be filed as issues when this record is adopted; none of them blocks the work 
 4. **Consider a conformance-kit case for the idle re-sign.** `maintainsFreshness` in
    `packages/discovery/serve/src/head.ts` already checks a succession of heads; nothing exercises
    it against a producer that re-signs on a schedule.
-5. **Extend the heartbeat gate to broken writes or serving.** Ruling 1 (§10.1) accepted this
-   weakening and asked for this follow-up. A source whose writes or serving are broken (a full
-   or read-only blob store, an unreachable archive listener, a persistently throwing append)
-   keeps its loops ticking, so the watchdog never holds a loop stale and §6.3's gate never
-   withholds the refresh: the heartbeat keeps re-signing a head over an archive that is
-   unusable, and a peer cannot tell that source from an honestly idle one (§6.2, §9).
-   Acceptance criteria: while any of the three conditions holds for a source, its head is not
-   refreshed and lapses on its original schedule; each withheld refresh is reported under
-   §6.3's per-transition rule; a source whose writes and serving are healthy keeps refreshing
-   while idle, so round-10 does not return; and each condition has a regression test that is
-   red without the change.
+5. **A source whose writes or serving are broken still gets a fresh head.** Ruling 1 (§10.1)
+   accepted this weakening and asked for this follow-up. The write and serve faults in scope
+   are a full blob store, an unreachable archive listener, and an append that throws
+   persistently. Under each of them the source's loops keep ticking, so the watchdog never
+   holds a loop stale and §6.3's gate never withholds the refresh: the heartbeat keeps
+   re-signing a head over an archive that is unusable, and a peer cannot tell that source from
+   an honestly idle one (§6.2, §9). A read-only blob store is not in scope: the head and the
+   records share one store, `options.blobs` (records at
+   `packages/discovery/serve/src/source-writer.ts:812` through `:285`, the head at `:561`), so
+   the refresh faults (§5.1) and the head lapses as it does today. Acceptance criteria: while any
+   of those write or serve faults holds for a source, its head is not refreshed and lapses on
+   its original schedule; each withheld refresh is reported under §6.3's per-transition rule; a
+   source whose writes and serving are healthy keeps refreshing while idle, so round-10 does
+   not return; and each of those faults has a regression test that is red without the change.
