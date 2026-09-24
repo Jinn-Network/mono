@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   writeFileSync,
+  existsSync,
 } from 'node:fs';
 import {
   dirname,
@@ -17,6 +18,7 @@ import {
   resolve,
   sep,
 } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { catalogSha256 } from './build-prepublication-bundle.mjs';
 import {
@@ -276,7 +278,11 @@ export function manifestBytes(manifest) {
   return `${JSON.stringify(manifest, null, 2)}\n`;
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const args = process.argv.slice(2);
     const outDir = args[args.indexOf('--out') + 1];

@@ -49,7 +49,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { HOST_CONFIG_FILE_NAME, MANIFEST_FILE_NAME } from './build-profile-host-bundle.mjs';
 import { hasGitControlSegment } from './public-surface-assets.mjs';
@@ -473,7 +473,11 @@ export function run({ bundleDir, hostDir, sourceSha, workflowPath, expectedGroup
 // ($GITHUB_OUTPUT + ::notice::/::error::). The privileged `git push` stays in the YAML,
 // gated on the emitted `changed`.
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   const bundleDir = process.env.BUNDLE_DIR ?? '';
   const hostDir = process.env.HOST_DIR ?? 'host';
   const sourceSha = process.env.SOURCE_SHA ?? '';

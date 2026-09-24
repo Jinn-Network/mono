@@ -103,7 +103,6 @@ test('rule 1c sees through a type annotation', () => {
   assert.deepEqual(flagged('const apiPort: number = 45_000;'), [1]);
   assert.deepEqual(flagged('const apiPort: number = opts.apiPort ?? 45000;'), [1]);
   assert.deepEqual(flagged('const apiPort: number = 7331;'), [], 'sub-band is still fine');
-  assert.deepEqual(flagged('const makePort: () => number = () => 45000;'), [], 'not a binding');
 });
 
 test('rule 1c catches the defaulted-constant form', () => {
@@ -346,9 +345,24 @@ test('documented non-catches stay documented', () => {
     'a returned literal whose enclosing declaration is not port-ish',
   );
   assert.deepEqual(
+    flagged('function make() {\n  return [45000];\n}'),
+    [],
+    'a returned array whose enclosing declaration is not port-ish',
+  );
+  assert.deepEqual(
     flagged('function pickPort() {\n  return\n    45000;\n}'),
     [],
-    'a return written across lines — rule 2b is per-line',
+    'a return written across lines — rule 2b is per-line for a scalar',
+  );
+  assert.deepEqual(
+    flagged('const pickPort = (x) => 45000;'),
+    [],
+    'a concise arrow with a parameter — rule 2b matches () => only',
+  );
+  assert.deepEqual(
+    flagged('const pickPort = async () => 45000;'),
+    [],
+    'an async concise arrow — the () sits after async, not after =',
   );
   assert.deepEqual(
     flagged('const apiPort = 7331;\nobj.x = Math.random();'),
@@ -524,6 +538,51 @@ test('rule 2b catches a bare in-band literal returned from a port-ish declaratio
     flagged('const apiPort = 7331;\nreturn 45000;'),
     [],
     'and a completed statement stops the walk, exactly as for rule 2',
+  );
+});
+
+// ── Rule 2b widening: concise arrows and returned arrays (#4140)
+// The brace-body `return 45000` form is what #3580 caught. A concise arrow
+// (`() => 45000`) and a returned array (`return [45000]`) are the same
+// fixed port, one shape away, and escaped both the scalar return and the
+// const-array rules.
+test('rule 2b catches a concise arrow bound to an in-band literal', () => {
+  assert.deepEqual(flagged('const pickPort = () => 45000;'), [1], 'concise arrow');
+  assert.deepEqual(flagged('const pickPort = () => (45000);'), [1], 'parenthesized concise arrow');
+  assert.deepEqual(flagged('const pickPort = (): number => 45000;'), [1], 'typed concise arrow');
+  assert.deepEqual(
+    flagged('const pickPort: () => number = () => 45000;'),
+    [1],
+    'function-typed binding — PORT_DECL must not steal the = of =>',
+  );
+  assert.deepEqual(flagged('let pickPort = () => 45_000;'), [1], 'separated, and `let` too');
+  assert.deepEqual(flagged('const pickPort = () =>\n  45000;'), [2], 'arrow body on the next line');
+  assert.deepEqual(flagged('const pickPort = () => 7732;'), [], 'sub-band is the sanctioned form');
+  assert.deepEqual(flagged('const pickTransport = () => 45000;'), [], 'the name is filtered like every other rule');
+  assert.deepEqual(flagged('const pickPort = () => 45000; // ' + ALLOW_MARKER), [], 'the marker suppresses it');
+});
+
+test('rule 2b catches a returned in-band array from a port-ish declaration', () => {
+  assert.deepEqual(flagged('function pickPorts() { return [45000, 45001]; }'), [1], 'one line, both elements');
+  assert.deepEqual(flagged('function pickPort() { return [45000]; }'), [1], 'single-element return');
+  assert.deepEqual(flagged('const pickPort = () => { return [45000]; };'), [1], 'block arrow returning an array');
+  assert.deepEqual(flagged('const pickPorts = () => [45000];'), [1], 'concise arrow returning an array');
+  assert.deepEqual(
+    flagged('const pickPorts: () => number[] = () => [45000];'),
+    [1],
+    'function-typed binding returning an array',
+  );
+  assert.deepEqual(
+    flagged('function pickPorts() {\n  return [\n    45000,\n  ];\n}'),
+    [3],
+    'multi-line returned array, reported at the literal',
+  );
+  assert.deepEqual(flagged('function pickTransport() { return [45000]; }'), [], 'the name is filtered like every other rule');
+  assert.deepEqual(flagged('function pickPorts() { return [7732]; }'), [], 'sub-band is the sanctioned form');
+  assert.deepEqual(
+    flagged('function pickPorts() {\n  return [45000]; // ' + ALLOW_MARKER + '\n}'),
+    [],
+    'the marker suppresses it',
   );
 });
 

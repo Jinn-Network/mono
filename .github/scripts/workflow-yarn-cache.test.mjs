@@ -615,7 +615,13 @@ function shellInstallDirectories(run, loopValues) {
         while (at < words.length && prefixArgumentPattern.test(words[at])) at += 1;
       }
       if (!unmodeledKeywords.has(words[at])) break;
+      // The branch is unmodeled, so the directory is unknown — and so is
+      // whatever `cd -` or `popd` would restore. Leaving `previous` and the
+      // pushd stack as known directories made a later `popd` / `cd -` on its
+      // own line answer with the root lockfile (#4612).
       directories = null;
+      previous = null;
+      pushdStack = pushdStack.map(() => null);
       conditional = true;
       at += 1;
     }
@@ -1880,6 +1886,10 @@ for (const [label, run] of [
   // `builtin` in front of the `cd`: unlisted, it became the command name and the `cd`
   // behind it never moved the walk, which then named the root lockfile.
   ['a builtin prefix', 'builtin cd app; yarn install --immutable'],
+  // POSIX `command` as a wrapper, not a lookup. Returning from every `command`
+  // (not only `-v`/`-V`) hid these installs and left the suite green (#4648).
+  ['a command wrapper', 'cd app\n          command yarn install --immutable'],
+  ['a command -p wrapper', 'cd app\n          command -p yarn install --immutable'],
   // A version spec is still Yarn. Read as some other command, the install was invisible.
   ['a versioned corepack yarn', 'cd app\n          corepack yarn@4 install --immutable'],
   ['a versioned npx yarn', 'cd app\n          npx yarn@1 install --immutable'],
@@ -2697,6 +2707,11 @@ for (const [label, script, declared = 'other/yarn.lock'] of [
   ['an npx --package versioned Yarn spec before the command', 'npx --package yarn@4 yarn install --immutable'],
   ['a popd inside a keyword branch', 'pushd other\n          if [ -n "$X" ]; then popd; fi\n          yarn install --immutable', 'yarn.lock'],
   ['a cd - inside a keyword branch', 'cd other\n          if [ -n "$X" ]; then cd -; fi\n          yarn install --immutable', 'yarn.lock'],
+  // Same-line `then popd` / `then cd -` is handled above. A keyword on its own
+  // line still left `previous` and the pushd stack as known directories, so
+  // a later `popd` / `cd -` restored the root lockfile (#4612).
+  ['a popd on its own line inside a keyword block', 'pushd other\n          if [ -n "$X" ]; then\n            popd\n          fi\n          yarn install --immutable', 'yarn.lock'],
+  ['a cd - after a keyword block whose body changed directory', 'cd other\n          if [ -n "$X" ]; then\n            cd app\n          fi\n          cd -\n          yarn install --immutable', 'yarn.lock'],
   ['a backslash-newline inside a heredoc delimiter', 'cat <<E\\\n          OF\n          body\n          EOF\n          yarn install --immutable'],
 ]) {
   // The keyword-branch fixtures declare the root lockfile: the install may run from

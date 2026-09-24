@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -162,4 +163,39 @@ test('every fixture-bearing platform package has a current manifest on disk', ()
     }
   }
   assert.deepEqual(drift, []);
+});
+
+// #4647: URL-equality entry guards silent-noop when argv[1] has a space or is a
+// symlink (Node realpaths the module, not argv). The #4144 selectors already
+// compare realpathSync on both sides; this is the same fence on the drift checker
+// stack-fixture-immutability.yml invokes without jq-validating its stdout.
+test('the CLI runs from a checkout path containing a space or reached through a symlink (#4647)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'jinn-fixture-cli-space-'));
+  try {
+    const spaced = join(dir, 'via link');
+    mkdirSync(spaced);
+    const script = join(spaced, 'fixture-manifest.mjs');
+    symlinkSync(resolve(import.meta.dirname, 'fixture-manifest.mjs'), script);
+    const result = spawnSync(process.execPath, [script, '--check', '--root', repoRoot], {
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, `CLI exited ${result.status}: ${result.stderr}`);
+    assert.match(result.stdout, /fixture manifests are current/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const REALPATH_ENTRY_GUARD = /existsSync\(\s*process\.argv\[1\]\s*\)[\s\S]*realpathSync\(\s*process\.argv\[1\]\s*\)\s*===\s*realpathSync\(\s*fileURLToPath\(\s*import\.meta\.url\s*\)\s*\)/u;
+const ENTRY_GUARD_CANDIDATE = /process\.argv\[1\][\s\S]{0,400}import\.meta\.(?:url|filename)/u;
+
+test('remaining .github/scripts CLI entry guards compare real filesystem paths (#4647)', () => {
+  const scriptsDir = resolve(import.meta.dirname);
+  const offenders = [];
+  for (const name of readdirSync(scriptsDir).filter((file) => file.endsWith('.mjs') && !file.endsWith('.test.mjs')).sort()) {
+    const source = readFileSync(join(scriptsDir, name), 'utf8');
+    if (!ENTRY_GUARD_CANDIDATE.test(source)) continue;
+    if (!REALPATH_ENTRY_GUARD.test(source)) offenders.push(name);
+  }
+  assert.deepEqual(offenders, []);
 });

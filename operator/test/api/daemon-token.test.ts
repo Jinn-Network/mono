@@ -6,7 +6,7 @@
  * stable value.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -43,6 +43,29 @@ describe('ensureDaemonApiToken', () => {
     const second = ensureDaemonApiToken(path);
     expect(second.source).toBe('file');
     expect(second.token).toBe(first.token);
+  });
+
+  it('tightens a reused token file to 0600 even when the token is already current (#4611)', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    writeFileSync(path, 'a'.repeat(64) + '\n', { mode: 0o644 });
+    chmodSync(path, 0o644);
+
+    const result = ensureDaemonApiToken(path);
+    expect(result).toEqual({ token: 'a'.repeat(64), source: 'file' });
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it('tightens a regenerated short token file to 0600 (#4611)', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    mkdirSync(earningDir, { recursive: true });
+    writeFileSync(path, 'too-short\n', { mode: 0o644 });
+    chmodSync(path, 0o644);
+
+    const result = ensureDaemonApiToken(path);
+    expect(result.source).toBe('generated');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
   it('regenerates when the persisted value is too short to trust', () => {
@@ -142,6 +165,21 @@ describe('resolveDaemonApiToken', () => {
 
     expect(resolveDaemonApiToken({ path, envToken: token }))
       .toEqual({ token, source: 'env', persisted: 'unchanged' });
+  });
+
+  it('tightens an already-current 0644 token file to 0600 without rewriting the token (#4611)', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    const token = 'g'.repeat(64);
+    writeFileSync(path, token + '\n', { mode: 0o644 });
+    chmodSync(path, 0o644);
+    const before = statSync(path).ino;
+
+    expect(resolveDaemonApiToken({ path, envToken: token }))
+      .toEqual({ token, source: 'env', persisted: 'unchanged' });
+    expect(readDaemonApiToken(path)).toBe(token);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(statSync(path).ino).toBe(before);
   });
 
   it('trims the env token before persisting it', () => {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { mkdirSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { loadPlatformCatalog, loadPublishableCatalogPackages, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
@@ -62,7 +63,11 @@ export function renderRegistrationMarkdown(registrations) {
   ].join('\n');
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const args = process.argv.slice(2);
     const out = args[args.indexOf('--out') + 1];
