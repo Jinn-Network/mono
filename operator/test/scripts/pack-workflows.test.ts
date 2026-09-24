@@ -51,8 +51,19 @@ const OPERATOR_CI_SELECTED_PATHS = [
   'packages/**/package.json',
   '.github/workflows/ci.yml',
   '.github/workflows/npm-publish.yml',
+  // The image lanes and the operator-facing deploy documents, guarded by
+  // `test/scripts/ghcr-image-references.test.ts` (#2811).
+  '.github/workflows/docker.yml',
+  '.github/workflows/operator-images.yml',
+  'DEPLOY.md',
+  'deploy/**',
   '.github/scripts/npm-publish-workflow.test.mjs',
+  // docker.yml's three #2811 controls are pinned by this file alone, so an
+  // edit confined to it must still run the lane that executes it.
+  '.github/scripts/docker-workflow.test.mjs',
   '.github/scripts/operator-*.test.mjs',
+  // Shared portal-closure walk imported by the operator image guards (#4645).
+  'test-support/dockerfile-portals/**',
 ];
 
 function selectionEntries(path: string): string[] {
@@ -272,15 +283,42 @@ describe('packed client workflow coverage', () => {
     expect(smoke).not.toContain("'jinn-layer',");
   });
 
+  // Issue #4427: the packed `jinn doctor --json` run probed the default public
+  // testnet RPC chain under a 60s spawnSync timeout, so a transient stall
+  // failed a post-merge-only lane with no PR-lane warning. The run stays (it
+  // is the one check proving a config-bearing subcommand executes end to end
+  // from the packed install) but its RPC is pinned to loopback port 9, which
+  // Node's fetch rejects client-side as a blocked port before any socket is
+  // opened. The envelope's `rpc_network` check is asserted to have failed
+  // against that loopback host, so a run whose probe reached any other host
+  // (a regressed env precedence) fails the smoke instead of passing (#4548).
+  it('runs the packed doctor offline and asserts its rpc_network probe hit the pinned loopback', () => {
+    const smoke = workflow('operator/scripts/smoke-test-pack.mjs');
+
+    expect(smoke).toContain("env: { ...smokeEnv, JINN_RPC_URL: 'http://127.0.0.1:9' },");
+    expect(smoke).toContain("checks.find((check) => check?.name === 'rpc_network')");
+    expect(smoke).toContain('rpcNetwork?.ok !== false');
+    expect(smoke).toContain("rpcNetwork.detail.includes('via 127.0.0.1:9:')");
+  });
+
   it('proves the public no-install invocation without letting its guard pass on detection', () => {
     const smoke = workflow('operator/scripts/smoke-test-pack.mjs');
 
-    expect(smoke).toContain("['--no-install', '@jinn-network/operator', 'doctor']");
+    expect(smoke).toContain("['--no-install', '@jinn-network/operator', 'version', '--json']");
+    // The resolution proof must not depend on network reachability: `doctor`
+    // runs RPC probes, and the pack-smoke job is post-merge-only, so a
+    // transient stall lands as a red merge queue with no PR-lane warning
+    // (#3045).
+    expect(smoke).not.toContain("'@jinn-network/operator', 'doctor'");
     expect(smoke).toContain("publicOutput.includes('could not determine executable')");
     // `?? 1` lets a zero status through, so the guard would exit 0 on the exact
     // ambiguity it detects and skip every remaining check.
     expect(smoke).toContain('process.exit(publicNpx.status || 1);');
     expect(smoke).not.toContain('process.exit(publicNpx.status ?? 1);');
+    // A bare status is the third wrong answer: the non-zero guard admits
+    // `status === null` (signal-killed child, no `spawnSync` error), and
+    // `process.exit(null)` exits 0.
+    expect(smoke).not.toContain('process.exit(publicNpx.status);');
   });
 
   it('asserts the packed jinn-stop-hook bin link without executing the daemon client', () => {

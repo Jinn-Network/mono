@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { executePublicationPlan, sha256, validatePublicationPlan } from "./publication.js";
-import type { CasResult, CasSnapshot, PublicationJournal, PublicationJournalStore, PublicationPlan } from "./types.js";
+import { PublicationPlanError, type CasResult, type CasSnapshot, type PublicationJournal, type PublicationJournalStore, type PublicationPlan } from "./types.js";
 
 class MemoryJournal implements PublicationJournalStore {
   value: CasSnapshot<PublicationJournal> | undefined; revision = 0;
@@ -28,6 +28,32 @@ describe("record publication", () => {
     const journal = new MemoryJournal(); const calls: string[] = [];
     await executePublicationPlan(plan("origin-reference"), { journal, objects: { async putExact() { throw new Error("destination must receive mirror"); } }, destination: { async deliver({ action }) { calls.push(action); } }, verifyOrigin: { async verifyOrigin() { calls.push("verify"); } } });
     expect(calls).toEqual(["verify", "mirror"]);
+  });
+
+  it("refuses an announcement timestamp the durable writer would refuse (#4095)", () => {
+    // The plan's `announcementTimestamp` becomes the entry `timestamp`, which
+    // `assertIntentOwnership` pins equal to the head's `issuedAt` -- strict,
+    // offset-bearing, calendar-real RFC 3339 since #3482. A plan that validates
+    // must be a plan the writer accepts.
+    for (const invalid of [
+      "2026-08-13T00:00:00.000",  // offset-less: host-LOCAL by definition
+      "2026-02-30T00:00:00.000Z", // silently rolled forward to March by Date.parse
+      "August 13, 2026",          // legacy host-parser spelling
+      "2026-08-13",               // date only
+      undefined,                  // #4305: pin the non-string refusal `isHeadTimestamp` now owns
+      1,
+      null,
+    ]) {
+      const invalidPlan = plan();
+      (invalidPlan.stages[0]!.members[0]! as any).announcementTimestamp = invalid;
+      expect(() => validatePublicationPlan(invalidPlan), String(invalid)).toThrow(PublicationPlanError);
+      expect(() => validatePublicationPlan(invalidPlan), String(invalid)).toThrow("immutable announcement timestamp");
+    }
+
+    // A leap second is admitted by §5.2 and so is admitted here.
+    const leap = plan();
+    (leap.stages[0]!.members[0]! as any).announcementTimestamp = "2026-06-30T23:59:60Z";
+    expect(() => validatePublicationPlan(leap)).not.toThrow();
   });
 
   it("refuses an origin reference that asks to announce", () => {

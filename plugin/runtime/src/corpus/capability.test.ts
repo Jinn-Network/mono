@@ -391,7 +391,7 @@ describe("chain-verification postures", () => {
     expect(outcome.sources[0]).toMatchObject({
       status: "failed",
       indexed: 0,
-      failure: { code: "chain-verification-rejected", message: "unauthorized-signer" },
+      failure: { code: "chain-verification-rejected", message: "unauthorized-source-signer" },
     });
 
     const chain = (await built.healthChecks!()).find(
@@ -399,7 +399,7 @@ describe("chain-verification postures", () => {
     )!;
     expect(chain.ok).toBe(false);
     expect(chain.detail).toContain(`${source().agent}/${source().name}`);
-    expect(chain.detail).toContain("unauthorized-signer");
+    expect(chain.detail).toContain("unauthorized-source-signer");
     expect(chain.remedy).not.toBeNull();
   });
 

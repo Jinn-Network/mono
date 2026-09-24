@@ -35,13 +35,15 @@ export class NativeDiscoverySourceResolutionError extends Error {
    *   source asserted NOTHING, so there is nothing to distrust; the consumer degrades that source
    *   for the poll and retries at the next one. This is the live F2 failure: a peer that is simply
    *   not up yet, or restarting, must not kill this operator's daemon.
-   * - `unintroduced` — the serving root ANSWERED, and its answer failed a check. That is a
-   *   statement about identity, so the source is refused, never degraded-and-retried. Two cases
-   *   sit here and they no longer refuse alike: an answer that does not uniquely introduce this
-   *   identity (or has no introduction document at all) still aborts the whole poll, the hard
-   *   refusal this class has always been; an answer naming a destination outside the serving root
-   *   wraps a `ContainedOriginError`, which `native-discovery.ts` isolates to this one source as
-   *   `refused-destination` (#3433).
+   * - `unintroduced` — the serving root ANSWERED, and its answer failed a check. Where
+   *   `unreachable` asserted nothing, this source asserted something false, so there is nothing to
+   *   wait out. Two cases sit here and they do not refuse alike: an answer that does not uniquely
+   *   introduce this identity (or has no introduction document at all) aborts the whole poll, the
+   *   hard refusal this class has always been; an answer naming a destination outside the serving
+   *   root wraps a `ContainedOriginError`, which `native-discovery.ts` isolates to this one source
+   *   and reports in the poll's `degraded` list as `refused-destination` (#3433). That source
+   *   yields nothing for the poll, where an `unreachable` one is expected to yield once its peer
+   *   is up.
    */
   readonly kind: 'unreachable' | 'unintroduced';
 
@@ -285,6 +287,12 @@ export function buildNativeDiscoverySources(input: {
       // catalog fault deserves its own stack rather than a lie about the
       // envelope. `pollSource` still refuses the source either way.
       async verifyHead(candidate) {
+        // Typed protocol outcome, returned as-is: this composition IS the
+        // procedure, not the consumer that logs it. `pollSource`
+        // (`native-discovery.ts`) is that consumer, and it turns a refusal
+        // into a reason slug via the same `sourceHeadRefusalReason` the
+        // plugin runtime's corpus mirror uses (#3494), so a refusal reads
+        // the same across every consumer.
         return verifySourceHead({
           source: candidate.source,
           head: candidate.head,

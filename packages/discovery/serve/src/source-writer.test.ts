@@ -25,6 +25,7 @@ import {
   type DurableSourceAppendIntent,
   type DurableSourceSigner,
   type DurableSourceState,
+  type DurableSourceWriterOptions,
   type SourceAppendIntentStore,
   type SourceStateStore,
   type SourceWriterFaultBoundary,
@@ -171,6 +172,26 @@ function clockAt(iso: string): Clock {
 /** Pinned so the suite does not depend on wall clock now that appends are clock-bounded. */
 const DEFAULT_TEST_CLOCK = clockAt("2026-08-03T12:00:00.000Z");
 
+/**
+ * The one place this suite builds writer options. Every writer is constructed from
+ * it, so no case can silently fall back to the wall-clock default and start reading
+ * host time on the clock-bounded append path (#3570).
+ */
+function writerOptions(
+  harness: ReturnType<typeof makeHarness>,
+  overrides: Partial<DurableSourceWriterOptions> = {},
+): DurableSourceWriterOptions {
+  return {
+    source: SOURCE,
+    signer: harness.signer,
+    blobs: harness.blobs,
+    states: harness.states,
+    intents: harness.intents,
+    clock: DEFAULT_TEST_CLOCK,
+    ...overrides,
+  };
+}
+
 function writer(
   harness: ReturnType<typeof makeHarness>,
   faultBoundary?: SourceWriterFaultBoundary,
@@ -178,12 +199,7 @@ function writer(
 ) {
   let tripped = false;
   return createDurableSourceWriter({
-    source: SOURCE,
-    signer: harness.signer,
-    blobs: harness.blobs,
-    states: harness.states,
-    intents: harness.intents,
-    clock: clock ?? DEFAULT_TEST_CLOCK,
+    ...writerOptions(harness, clock === undefined ? {} : { clock }),
     ...(faultBoundary === undefined ? {} : {
       faults: {
         async at(boundary: SourceWriterFaultBoundary) {
@@ -294,13 +310,9 @@ describe("durable Record Discovery source writer", () => {
         return equalBytes(pae, signature);
       },
     };
-    const recoveryWriter = createDurableSourceWriter({
-      source: SOURCE,
-      signer: rejectingSigner,
-      blobs: harness.blobs,
-      states: harness.states,
-      intents: harness.intents,
-    });
+    const recoveryWriter = createDurableSourceWriter(
+      writerOptions(harness, { signer: rejectingSigner }),
+    );
 
     await expect(recoveryWriter.recover()).resolves.toMatchObject({ status: "recovered" });
     expect((await harness.blobs.get(pending.value.page.path))?.bytes)
@@ -411,13 +423,7 @@ describe("durable Record Discovery source writer", () => {
         return equalBytes(pae, signature);
       },
     };
-    const mismatched = createDurableSourceWriter({
-      source: SOURCE,
-      signer: otherSigner,
-      blobs: harness.blobs,
-      states: harness.states,
-      intents: harness.intents,
-    });
+    const mismatched = createDurableSourceWriter(writerOptions(harness, { signer: otherSigner }));
 
     await expect(mismatched.readState()).rejects.toThrow("different signer key");
   });
@@ -435,13 +441,7 @@ describe("durable Record Discovery source writer", () => {
         return harness.stateCas.compareAndSwap(expected, next);
       },
     };
-    await createDurableSourceWriter({
-      source: SOURCE,
-      signer: harness.signer,
-      blobs: harness.blobs,
-      states,
-      intents: harness.intents,
-    }).append(command());
+    await createDurableSourceWriter(writerOptions(harness, { states })).append(command());
 
     expect(new Set(seen)).toEqual(new Set([formatOrigin(SOURCE.agent, SOURCE.name)]));
   });
@@ -502,15 +502,7 @@ describe("durable Record Discovery source writer", () => {
   it("returns a committed announcement's receipt from a writer whose window now collapses", async () => {
     const harness = makeHarness();
     const first = await writer(harness).append(command());
-    const collapsed = createDurableSourceWriter({
-      source: SOURCE,
-      signer: harness.signer,
-      blobs: harness.blobs,
-      states: harness.states,
-      intents: harness.intents,
-      clock: DEFAULT_TEST_CLOCK,
-      refreshWithinMs: 0.5,
-    });
+    const collapsed = createDurableSourceWriter(writerOptions(harness, { refreshWithinMs: 0.5 }));
 
     await expect(collapsed.append(command())).resolves.toEqual(first);
   });
@@ -525,15 +517,7 @@ describe("durable Record Discovery source writer", () => {
   it("refuses a refresh window that truncates to nothing", async () => {
     const harness = makeHarness();
     // Sub-millisecond windows round to `refreshBy === issuedAt`, which §5.2 rule 1 refuses.
-    const collapsed = createDurableSourceWriter({
-      source: SOURCE,
-      signer: harness.signer,
-      blobs: harness.blobs,
-      states: harness.states,
-      intents: harness.intents,
-      clock: DEFAULT_TEST_CLOCK,
-      refreshWithinMs: 0.5,
-    });
+    const collapsed = createDurableSourceWriter(writerOptions(harness, { refreshWithinMs: 0.5 }));
 
     await expect(collapsed.append(command())).rejects.toThrow(/no consumer accepts/);
   });
@@ -572,5 +556,37 @@ describe("durable Record Discovery source writer", () => {
     // that re-bounded during recovery fails here.
     await expect(writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).recover())
       .resolves.toMatchObject({ status: "recovered" });
+  });
+
+  // The two guards above replay an announcement already committed in STATE, which the
+  // append path answers from its idempotency lookup before reaching the window check.
+  // This replays a durable INTENT instead -- signed, not yet in state -- which is what
+  // the carve-out at the top of the CAS loop is actually justified by: `recover()` runs
+  // unconditionally there, ahead of the window refusal, precisely so an out-of-window
+  // writer still finishes work that is already durable. Nothing covered that, so
+  // gating the recovery on `windowFailure === undefined` left the whole suite green
+  // while breaking exactly that: the intent can only be cleared by the recovery the
+  // gate now skips, so that command keeps refusing until the writer's clock catches up.
+  // The stall is bounded, not permanent -- an in-window append runs the recovery and
+  // clears the intent -- but it is a real refusal of durable work, which is what the
+  // carve-out exists to prevent.
+  //
+  // The clock must be BEHIND the intent's timestamp, as in the case above (#3570):
+  // `checkRefreshWindow` rule 3 only refuses a head issued ahead of `now`, so a clock
+  // set forward never produces the `windowFailure` the gate reads and the case would
+  // not discriminate at all.
+  it("finishes a durable intent on append from a writer whose clock is now out of window", async () => {
+    const harness = makeHarness();
+    await expect(writer(harness, "after-intent-before-page").append(command())).rejects.toThrow();
+    expect(await harness.intentCas.read()).toBeDefined();
+    const signCount = harness.signCount();
+
+    const replay = await writer(harness, undefined, clockAt("2026-08-01T12:00:00.000Z")).append(command());
+
+    expect(replay).toMatchObject({ announcementId: "ann-1", sequence: "0000000000000001" });
+    // Together these say the receipt came from finishing the frozen intent, not from
+    // minting a second head: nothing re-signed, and the intent is durably cleared.
+    expect(harness.signCount()).toBe(signCount);
+    expect(await harness.intentCas.read()).toBeUndefined();
   });
 });

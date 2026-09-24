@@ -10,11 +10,39 @@ step 7 unfinished.
 > historical), the never-written stage-3/stage-4 runbooks.
 > **Rollback pin (record at PR open, re-check before merge):** `@jinn-network/operator@<version>-canary.sha.<sha40>`
 
+> **Decision (#2472): Option B — human-run evidence.** `e2e:daemon-harness`
+> remains operator-run, non-gating evidence for the one-swap deploy/release cut. It
+> is not a PR-blocking gate; the deploy PR body is the required evidence record.
+
 ## Before this deploy PR merges
 
 - [ ] Rollback pin recorded above, verified installable (`npm view` the exact specifier)
-- [ ] Full client suite + `e2e:daemon-harness` green on the train head, **both** mode
-      variants (legacy + native)
+- [ ] Deterministic blocking CI is green on the exact train SHA — **both**
+      deterministic-suite contexts for the operator client (two of the required
+      contexts in `.github/scripts/required-check-set.mjs`): `operator-ci-gate`
+      (aggregates the `ci.yml` jobs, including `cd operator && yarn test`, the
+      full client suite) and `hermetic-gate` (`cd operator && yarn
+      test:hermetic`) — each green **with its suite selected** (the operator
+      lane in `ci.yml`; `.github/scripts/hermetic-selection.mjs` for
+      `hermetic-gate`). Neither workflow has a `paths:` filter; a `changes` job
+      selects each suite from the diff, and both gates report success when their
+      suite job is `skipped`, so a green `operator-ci-gate` / `hermetic-gate`
+      over a `skipped` suite job does not satisfy this item. Confirm a
+      non-skipped suite job (`check` in `ci.yml`, `hermetic` in
+      `hermetic-gate.yml`) for that SHA: `ci.yml` does not run on push to
+      `next`, and the `hermetic-gate` push run skips its suite when the merge
+      queue already ran it, so look at the `merge_group` (queue) run for the
+      train SHA, or any run whose suite job is non-skipped.
+- [ ] Operator-run, non-gating live-fork evidence is green on the exact train SHA in
+      **both** modes:
+  - legacy: `cd operator && JINN_E2E_MODE=legacy yarn e2e:daemon-harness`
+  - native: `cd operator && yarn e2e:daemon-harness:native`
+- [ ] Before cutover, record the exact train SHA, command and mode, non-skipped
+      result, and log or Actions URL for **each** live-fork run in the deploy PR
+      body. The scheduled/manual
+      [`native-e2e-rig`](../../.github/workflows/native-e2e-rig.yml) is
+      supplemental advisory evidence; it does not replace either operator-run
+      result or the deterministic blocking CI contexts above.
 - [ ] Config auto-migration round-trip verified on a copy of a real fleet
       `config.json` (additive, atomic, idempotent; pinned generation still boots from
       the migrated file — contract 4)

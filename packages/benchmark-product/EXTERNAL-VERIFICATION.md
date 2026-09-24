@@ -6,6 +6,16 @@ installing or running any Jinn code. The record formats are frozen; everything
 below is checkable from the bundle's own bytes. [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md)
 is the format reference; this document is the verification path.
 
+Scope. The claims table below, [The record family](#the-record-family), [The
+walkthrough](#the-walkthrough), and `external-verify.py` describe
+`benchmark-product-public-bundle/2`. `benchmark-product-public-bundle/5` has its
+own section, [Evidence-native bundle v5](#evidence-native-bundle-v5). For
+`benchmark-product-public-bundle/4`, `benchmark-product-public-bundle/6`,
+`benchmark-product-public-bundle/7`, `benchmark-product-public-bundle/8`, and
+`benchmark-product-public-bundle/10`, run the reader line the bundle's claim
+package pins, as [`PUBLIC-BUNDLE.md` §Portable verification](PUBLIC-BUNDLE.md#portable-verification)
+states; `external-verify.py` does not read those layouts.
+
 ## What verification proves, and what it does not
 
 Read this table first. It is the whole point of the document.
@@ -47,6 +57,21 @@ itself; the sentences below are carried verbatim in `claim-package.json`
 The trust root is equally blunt, from `claim-package.json` `verification.trustRoot`:
 "Signatures verify against the bundle-carried public keys minted by this
 workspace; there is no third-party trust anchor on the self-run venue."
+
+What the interoperability profile and the neutral-freeze spec add. The
+interoperability profile (`docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md`
+section 9.3) requires a self-run publisher to disclose that its dispatch source
+and publication source are owner-controlled. The neutral-freeze spec
+(`docs/superpowers/specs/2026-08-29-neutral-freeze-announcement-surface.md` section
+7.2) establishes why: the announcement chain (the sequence plus `previous` hash
+chain defined in `docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md`
+section 5.1) has every transparency-log property except a witness, so the
+publisher who holds the signing key and hosts the archive can rewrite the chain
+from any point, re-sign a shorter or different head, and no reader who had not
+previously fetched the old head could tell. The five sealed sentences above do
+not say this in those words. A reader should treat the announcement chain the
+publisher serves as the publisher's own statement about its own history, not as
+independent evidence of it.
 
 ## Post-seal randomness: `beacon-binding/1`
 
@@ -215,7 +240,7 @@ domain binding is how a publisher offers a name a reader can act on. It is
 material you supply:
 
 ```bash
-npx @colophon-claims/verify <bundle-dir> --identity-binding ./binding.json
+npx @colophon-claims/check@0.2 <bundle-dir> --identity-binding ./binding.json
 ```
 
 The document is small and self-describing:
@@ -373,8 +398,12 @@ openssl subprocess calls — read it, or reimplement it; it holds no secrets.
 The reference verifier covers the remaining rows of the table:
 
 ```bash
-npx @colophon-claims/verify@0.1 <bundle-dir>
+npx @colophon-claims/check@0.2 <bundle-dir>
 ```
+
+A bundle sealed before the checker was renamed names `@colophon-claims/verify`
+there. That name stays published permanently as a passthrough alias onto
+`@colophon-claims/check`, so the command the bundle itself pins keeps resolving.
 
 Exit 0 with `Recomputed: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
 `trust`, `matrix-rederivation`, `report-verification`, `claim-consistency`);
@@ -382,10 +411,47 @@ exit 1 invalid; exit 2 usage. It opens no network connection and uploads
 nothing. Every bundle names its own compatible command in
 `claim-package.json` `verification.compatibleCommand`.
 
+## Evidence-native bundle v5
+
+A `benchmark-product-public-bundle/5` bundle's claim is
+`benchmark-product.claim-package/3`, and its closure is manifest-relative:
+`bundle.json` declares every member, rather than this document fixing a list.
+Its seven checks split as follows.
+
+| Check | Who can prove it | Why |
+| --- | --- | --- |
+| `manifest` | Your own tools | SHA-256 and byte length of every file `bundle.json` declares, and no undeclared file present |
+| `evidence-closure` | Reference verifier | Interprets the evidence-native record families to close the graph |
+| `artifact-integrity` | Your own tools | SHA-256 of each `artifacts/<sha256>.bin` against `benchmark-product.claim-package/3` `records.artifacts` |
+| `signature-validity` | Reference verifier | Binding a signature to its signer identity and purpose requires parsing those record families; this document publishes no v5 key-format or binding recipe |
+| `matrix-rederivation` | Reference verifier | Re-derives the matrix from the evidence graph |
+| `report-verification` | Reference verifier | Recomputes the report from the matrix |
+| `claim-consistency` | Reference verifier | Checks the claim package against the verified records |
+
+The reference verifier runs all seven. The line a full-evidence v5 claim pins is:
+
+```bash
+npx @colophon-claims/check@0.2 <bundle-dir>
+```
+
+A metadata-first bundle omits the evidence artifact bodies. There,
+`artifact-integrity` reports **not fetched**, which is neither a pass nor a
+fail; a body that is carried is still digest-checked, and a mismatch still fails
+the whole verification. The carried artifact set must be exactly the declared
+signer public keys. The other six checks are unchanged: they read records and
+fixed members, never artifact bodies. The `@0.1` line refuses a metadata-first
+bundle at manifest parse; `@colophon-claims/check@0.2` lists the
+metadata-first profile among the ones it accepts, and `@0.2.0` and every earlier
+line refuse it. Read a metadata-first bundle with:
+
+```bash
+npx @colophon-claims/check@0.2 <bundle-dir>
+```
+
 ## The conformance kit
 
 The kit is the self-test corpus for external implementations. It lives in the
-source repository at `packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/`;
+source repository at `packages/benchmark-product/check/fixtures/public-bundle-conformance-v1/`;
 it is deliberately not in the npm tarball, because it is roughly 10 MB of bundle
 bytes that a reader verifying one bundle does not need.
 

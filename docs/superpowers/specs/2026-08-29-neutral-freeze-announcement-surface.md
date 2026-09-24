@@ -98,7 +98,7 @@ verifier rebuilds the section with, single-sourced rather than mirrored, so
 claim-consistency stays an exact byte-compare.
 
 **Verification.** The `integrity-anchors` check
-(`packages/benchmark-product/verify/src/anchor/check.ts`) is shared by `bundle verify`
+(`packages/benchmark-product/check/src/anchor/check.ts`) is shared by `bundle verify`
 and workspace-side `run.verify`. It never throws; every carried anchor gets an
 outcome. Its four rules are exact-bytes strict-schema parse, subject recomputation
 from the snapshot's own `run.json` / `matrix.json` bytes (never a stored assertion),
@@ -378,6 +378,12 @@ This is the residual that survives every other finding in this document, and it 
 the one thing the issue's instinct — "put something outside the publisher's control
 into this picture" — was correctly reaching for. Its target was simply the wrong
 object: the lock is already externally witnessed; the *stream* is not.
+
+The product's self-run disclosure is `LOCAL_VENUE_LIMITS` in
+`packages/benchmark-product/core/src/operations/run-results.ts` (mirrored in
+`packages/benchmark-product/check/src/profile/run-results.ts`), quoted in
+`packages/benchmark-product/EXTERNAL-VERIFICATION.md`; it names owner-controlled
+dispatch, not the publication source.
 
 ## 8. The one thing worth building — head anchoring
 

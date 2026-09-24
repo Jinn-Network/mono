@@ -1,3 +1,5 @@
+> **Status (2026-09-24): superseded by [spec/2026-05-12-growth-target-ecosystem-builders.md](2026-05-12-growth-target-ecosystem-builders.md) and the 2026-06-02 growth deprecation ([growth/archive/README.md](../growth/archive/README.md)).** Its §3 audience cluster ("open-source coding agent contributors") was redrawn on 2026-05-12 around ecosystem builders on the leading open agentic harness, and that target was itself retired with the prior growth strategy. For the current direction read [GROWTH.md](../GROWTH.md).
+
 - **Date:** 2026-05-07
 - **Author:** Oak (with Claude)
 - **Status:** Proposal

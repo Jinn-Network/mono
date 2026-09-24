@@ -26,6 +26,8 @@ import {
 } from "./paired-majority-delta-method.js";
 import { createMethodRegistry } from "./registry.js";
 import type { MethodComputeInput } from "./method.js";
+import { MethodInputError } from "./resolved-inputs.js";
+import { MAX_NONINFERIORITY_RESAMPLES_V1 } from "./stats/noninferiority.js";
 
 // Synthetic fixture only (license law, spec §0.3): every id, digest, and prompt below is
 // original to this test. Arms are referred to by role ("baseline"/"candidate"), never by
@@ -628,6 +630,45 @@ describe("paired-majority-delta@1 parameter validation", () => {
     const registry = createMethodRegistry();
     const method = registry.get("jinn.benchmarking.method/paired-majority-delta", "1")!;
     expect(method.validateParameters({ ...VALID, candidateClasses: ["z", "a"] }).ok).toBe(false);
+  });
+});
+
+describe("paired-majority-delta@1 compute parameter failures", () => {
+  // #3367: a `resamples` range violation is the one parameter failure the sibling methods
+  // (`noninferiority-iut@1`, `paired-delta@1`, #2583) report typed, so this method reports it the
+  // same way -- a consumer branching on `MethodInputError.code` gets the same answer from all
+  // three. Every other parameter issue stays the aggregate validator's untyped Error.
+  function expectRangeViolation(resamples: number): void {
+    const closure = buildClosure(ITEMS, { ...PARAMETERS, resamples });
+    let thrown: unknown;
+    try {
+      computeDirect(closure);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(MethodInputError);
+    const error = thrown as MethodInputError;
+    expect(error.code).toBe("method-parameter-out-of-range");
+    expect(error.digest).toBe("resamples");
+    expect(error.message).toContain(`resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
+  }
+
+  test("reports an out-of-range resamples as a typed parameter-range failure", () => {
+    expectRangeViolation(0);
+    expectRangeViolation(MAX_NONINFERIORITY_RESAMPLES_V1 + 1);
+  });
+
+  test("a non-range parameter issue still surfaces as the aggregate validator's untyped Error", () => {
+    const closure = buildClosure(ITEMS, { ...PARAMETERS, alpha: "0.20" });
+    let thrown: unknown;
+    try {
+      computeDirect(closure);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBeInstanceOf(MethodInputError);
+    expect((thrown as Error).message.startsWith("invalid paired-majority-delta@1 parameters:")).toBe(true);
   });
 });
 

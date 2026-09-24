@@ -15,8 +15,8 @@ import {
   parseRun,
   readBeaconSource,
 } from "@jinn-network/benchmarking-records";
-import { BEACON_SOURCE_IDS, requiredBeaconRound, runBindingClass, runBindingSentence } from "@colophon-claims/verify";
-import type { BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
+import { BEACON_SOURCE_IDS, requiredBeaconRound, runBindingClass, runBindingSentence } from "@colophon-claims/check";
+import type { BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/check";
 import { readRunBindingCarriage } from "../binding/carriage.js";
 import type { LifecycleState } from "../domain/lifecycle.js";
 import { refuse, type ProductErrorEnvelope } from "../errors.js";
@@ -74,10 +74,11 @@ export interface RunStatusCounts {
   /** Cells that reached a solve delivery (status "delivered" or "judged" — judged implies delivered). */
   readonly delivered: number;
   readonly judged: number;
-  /** Cells carrying an `evaluationGap` — delivered, but with no journaled verdict yet. Zero
-   * outside `running`, where `resume` cannot act. Non-zero becomes a cue to resume only once
-   * no driver is active and no cancellation is pending; while a driver is working, this is
-   * ordinary in-flight progress. */
+  /** Cells carrying an `evaluationGap` — they reached a delivery and still have at least one
+   * evaluation leg `resume` would act on. With `minVerdicts > 1` a `judged` cell can still carry a
+   * gap, so this count can overlap `judged`. Zero outside `running`, where `resume` cannot act.
+   * Ungated state, not a cue to resume: `driver.status` is folded from the journal, so a killed
+   * driver still reads `active`. */
   readonly awaitingEvaluation: number;
   /** Cells whose accounted terminal is a non-replaceable failure (excludes "expired"/"cancelled",
    * each visible on the per-cell `status` for callers who want that distinction). */

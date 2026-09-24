@@ -3,6 +3,7 @@ title: Agent-harness SolverNet — design exercise output
 date: 2026-05-06
 author: opus (drafted on jinn-mono-9fe5; Captain ritsukai)
 status: design-locked — ready for implementation plan
+superseded-in-part-by: '[docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md](2026-07-27-task-profiles-and-evaluation-specs-design.md) §4 (2026-09-24): §3, the `swe-rebench-v2` SolverNet (identity, contract definition, aggregation function and launcher task-generation policy), gives way to a task-profile document, consumer-side aggregation and ordinary requester applications; the train and frozen modes, the frozen-state contract and the HarnessCheckpoint (§5 to §7) are composed unchanged by [docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md](2026-08-03-policy-optimization-product-design.md) §15.4'
 version: 0.1
 ---
 

@@ -14,6 +14,7 @@ import {
   getConfigPathFromArgs as defaultGetConfigPathFromArgs,
   loadConfig as defaultLoadConfig,
 } from '../../config.js';
+import { requireConfigPathFromArgs } from '../../config/path-args.js';
 import {
   checkRpcNetwork as defaultCheckRpcNetwork,
   rpcNetworkFailureHint as defaultRpcNetworkFailureHint,
@@ -200,9 +201,26 @@ Failure example (funding gate):
         return;
       }
 
-      const config = deps.loadConfig(parsed.values.config as string | undefined);
+      let configPath: string | undefined;
+      try {
+        configPath = requireConfigPathFromArgs(ctx.argv);
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: err instanceof Error ? err.message : String(err),
+            hint: 'Pass a config path or omit --config.',
+            exampleCli: 'jinn run --config ~/.jinn-operator/config.json',
+            details: { field: 'config' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+
+      const config = deps.loadConfig(configPath);
       const rpcPreflightConfig: Pick<JinnConfig, 'network' | 'rpcUrl'> = config;
-      // Resolve password: env > file > auto-generate (matches what
+      // Resolve password: --password-fd > env > file > auto-generate (matches what
       // `jinn quickstart` used to do). A brand-new operator can run
       // `jinn run` with no env var, no setup, no input. Plaintext lives at
       // ~/.jinn-client/keystore-password (mode 0600) so the next run reuses
@@ -212,6 +230,21 @@ Failure example (funding gate):
       const probe = deps.resolveCliPassword(ctx.argv, ctx.env);
       if (probe.ok) {
         resolvedPassword = probe.password;
+      } else if (parsed.values['password-fd'] !== undefined) {
+        // An explicit --password-fd that could not be read is not "nothing
+        // configured": generating here would overwrite the persisted password
+        // and leave the existing keystore undecryptable (#4375).
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: probe.message,
+            hint: 'Pass a readable file descriptor via --password-fd N, or omit the flag.',
+            exampleCli: "printf '%s\\n' secret | jinn run --password-fd 0",
+            details: { field: 'password-fd', expected: 'non-negative file descriptor holding the password' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
       } else {
         const home = ctx.env['HOME'] ?? homedir();
         const pwFilePath = join(resolveDefaultStateDir({ home, env: ctx.env }), 'keystore-password');

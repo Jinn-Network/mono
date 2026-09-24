@@ -1,5 +1,7 @@
 # Host the supervised launcher+operator daemon (clear the M1 supply gap)
 
+> **Status (2026-09-24): superseded by [log/decisions/2026-08-05-cutover-one-swap-collapse.md](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md).** Decision 1 of its 2026-08-13 addendum retires the Railway-hosted operator ("there is no hosted fleet left"), and the launcher-owned generator this deploy hosts dissolves into ordinary requester applications ([task-profiles design](2026-07-27-task-profiles-and-evaluation-specs-design.md) §4).
+
 - **Version:** 0.1
 - **Date:** 2026-06-01
 - **Author:** ritsu (drafted with Claude)

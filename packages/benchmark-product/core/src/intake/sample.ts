@@ -32,13 +32,23 @@ import {
   sealPredictionSnapshotAdmissionReceipt,
   verifyPredictionSnapshotFixture,
 } from "@jinn-network/task-admission";
-import type { BenchmarkRecord } from "@jinn-network/benchmarking-records";
+import { TASK_PROVENANCE_EXTENSION_KEY_V1, type BenchmarkRecord } from "@jinn-network/benchmarking-records";
 import { defineBenchmark } from "@jinn-network/benchmarking-interop";
 import { sealTask } from "@jinn-network/task-execution-protocol";
 import { sha256Hex } from "../workspace/sealed-store.js";
 
 /** The issuer identity the sample's admission receipts are stamped with. */
 export const SAMPLE_ISSUER = "benchmark-product-sample-admitter";
+
+/**
+ * The one fixed synthetic venue origin every sample task's provenance names (issue #4098,
+ * DR-2026-09-05 §6). Deliberately ONE origin shared by all three variations, not a per-market
+ * value: the cluster key is the venue, so a per-market source would make every task its own
+ * singleton cluster and silently defeat the between-cluster correction the paired methods apply
+ * — the exact defect #2585 found on the SWE-bench import side. Market identity is not lost; it
+ * stays task identity via `payload.forecast.marketId`.
+ */
+export const SAMPLE_PROVENANCE_SOURCE = "https://sample-venue.invalid";
 
 interface SampleForecastVariation {
   readonly marketId: string;
@@ -166,6 +176,16 @@ export async function buildSampleBenchmark(): Promise<SampleBenchmark> {
   for (const variation of SAMPLE_FORECAST_VARIATIONS) {
     const candidateTask = structuredClone(goldenTask);
     candidateTask.payload = { forecast: { ...variation } };
+    // `prediction-forecast/1.0`'s payloadSchema is closed to exactly `{forecast}`, so provenance
+    // rides the namespaced top-level extension instead (issue #4098, DR-2026-09-05). Fixed
+    // synthetic values only — `timestamp` is the variation's own fixed `observedAt`, never a wall
+    // clock — so the sample stays byte-reproducible. The admission policy admits absolute-URI root
+    // extensions (and refuses unnamespaced ones), which is why the sanity call below still passes.
+    candidateTask[TASK_PROVENANCE_EXTENSION_KEY_V1] = {
+      kind: "synthetic",
+      source: SAMPLE_PROVENANCE_SOURCE,
+      timestamp: variation.observedAt,
+    };
     const taskBytes = sealTask(candidateTask);
 
     // Assert-by-construction sanity: admitPredictionSnapshot's own exactness

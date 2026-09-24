@@ -96,9 +96,23 @@ function decodeProofContent(content: string): ProofContentDecode {
 // Schema (§5). Strict at every level.
 // ---------------------------------------------------------------------------
 
-/** Same absolute-IRI test `AgentIriSchema` applies (spellings.ts), stated
+/**
+ * Characters refused in URI fields that can reach a terminal: C0/C1 (OSC 8 /
+ * SGR), plus bidi overrides/isolates, line/paragraph separators, and zero-width
+ * marks (Trojan Source / visual reordering). Applied to the raw string, not
+ * `new URL().href`, because the parsed href strips TAB/CR/LF and percent-encodes
+ * ESC.
+ */
+export function uriContainsDisallowedControls(value: string): boolean {
+  return /[\u0000-\u001f\u007f-\u009f\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u
+    .test(value);
+}
+
+/** Same absolute-IRI test `AgentIriSchema` applies (spellings.ts), plus a
+ * control-character ban because these values can appear in diagnostics. Stated
  * locally so the anchor record's URI fields carry no agent-identity meaning. */
 function isAbsoluteUri(value: string): boolean {
+  if (uriContainsDisallowedControls(value)) return false;
   try {
     return new URL(value).protocol.length > 1;
   } catch {

@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import tasksCommand from '@/cli/commands/tasks.js';
 import {
@@ -8,6 +9,7 @@ import {
   parseMarketplaceTaskSubmitRequest,
 } from '@/tasks/submit-request.js';
 import { makeCommandCtx } from '@test/cli.js';
+import { knownSolverTypes } from '@/solver-types/index.js';
 import { LocalAdapter } from '@/adapters/local/adapter.js';
 import { Store } from '@/store/store.js';
 import { marketplaceTaskSelectionSidecarPath } from '@/tasks/submit-selection.js';
@@ -304,6 +306,172 @@ describe('tasks submit machine contract', () => {
     expect(output.code).toBe('invalid_invocation');
     expect(output.message).toMatch(/mutually exclusive/i);
     expect(made.exits).toEqual([11]);
+  });
+
+  describe('requester persona (issue #2446)', () => {
+    // `jinn requester init` prints `jinn tasks submit` as the requester's next
+    // step, but registers no service by design. The refusal that meets them
+    // must not route them into `jinn bootstrap` — the operator supplier path
+    // they deliberately did not pay for.
+    const REQUESTER_FLEET = {
+      requester_stage: 'safe_deployed' as const,
+      fleet_stage: 'none' as const,
+      services: [] as Array<{ step: string; safe_address?: string }>,
+    };
+
+    // The same wallet after `jinn bootstrap`: the marker persists (nothing ever
+    // clears it), but the operator state machine has started and the service is
+    // parked on the OLAS bond. This state must read as an *operator*, which is
+    // what `funding-plan-requester.test.ts`'s "returns to the operator gate once
+    // the operator state machine advances" already asserts for the sibling gate.
+    const DUAL_ROLE_FLEET = {
+      requester_stage: 'safe_deployed' as const,
+      fleet_stage: 'stage1' as const,
+      services: [{ step: 'awaiting_stake', safe_address: '0x00112233445566778899aabbccddeeff00112233' }],
+    };
+
+    function expectNoOperatorRouting(envelope: { message: string; hint?: string; exampleCli?: string }) {
+      const text = [envelope.message, envelope.hint ?? '', envelope.exampleCli ?? ''].join(' ');
+      expect(text).not.toMatch(/Run `jinn bootstrap`/);
+      expect(text).not.toMatch(/jinn bootstrap --/);
+      expect(text).not.toContain('jinn run');
+    }
+
+    it('refuses a dry-run in requester terms', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-requester-'));
+      const config = join(dir, 'config.json');
+      writeFileSync(config, '{}');
+      gatherIntrospectionRaw.mockResolvedValueOnce({ fleet: REQUESTER_FLEET } as never);
+      const made = makeCommandCtx({
+        argv: [
+          'submit', '--id', 'req-1', '--description', 'do the thing',
+          '--config', config, '--dry-run', '--json',
+        ],
+      });
+
+      await tasksCommand.run(made.ctx);
+
+      const output = JSON.parse(made.writes.at(-1)!);
+      expect(output.code).toBe('bootstrap_incomplete');
+      expect(output.message).toContain('jinn requester init');
+      expectNoOperatorRouting(output);
+    });
+
+    it('refuses a confirmed submission in requester terms', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-requester-'));
+      const config = join(dir, 'config.json');
+      writeFileSync(config, '{}');
+      createCliExecutionContext.mockResolvedValueOnce({
+        ok: false,
+        envelope: {
+          code: 'bootstrap_incomplete',
+          message: 'No fleet service is complete with both a Safe and a mech address.',
+          hint: 'Finish bootstrap through mech deployment, or configure testnet mech artifacts.',
+          exampleCli: 'jinn bootstrap --json',
+          details: { field: 'fleet', requesterPersona: true },
+        },
+      });
+      const made = makeCommandCtx({
+        argv: [
+          'submit', '--id', 'req-1', '--description', 'do the thing',
+          '--config', config, '--yes', '--json',
+        ],
+      });
+
+      await tasksCommand.run(made.ctx);
+
+      const output = JSON.parse(made.writes.at(-1)!);
+      expect(output.code).toBe('bootstrap_incomplete');
+      expectNoOperatorRouting(output);
+    });
+
+    it('keeps the operator routing for a dual-role operator mid-bootstrap', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-dual-'));
+      const config = join(dir, 'config.json');
+      writeFileSync(config, '{}');
+      gatherIntrospectionRaw.mockResolvedValueOnce({ fleet: DUAL_ROLE_FLEET } as never);
+      const made = makeCommandCtx({
+        argv: [
+          'submit', '--id', 'dual-1', '--description', 'do the thing',
+          '--config', config, '--dry-run', '--json',
+        ],
+      });
+
+      await tasksCommand.run(made.ctx);
+
+      const output = JSON.parse(made.writes.at(-1)!);
+      expect(output.code).toBe('bootstrap_incomplete');
+      expect(output.hint).toContain('jinn fund-requirements');
+      expect(output.hint).not.toContain('nothing further for you to fund');
+    });
+
+    it('keeps the operator routing on the machine dry-run branch', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-dual-machine-'));
+      const file = join(dir, 'request.json');
+      const config = join(dir, 'config.json');
+      writeFileSync(file, JSON.stringify(request()));
+      writeFileSync(config, '{}');
+      createCliReadOnlySignerContext.mockResolvedValueOnce({
+        ok: true,
+        ctx: { fleetState: DUAL_ROLE_FLEET },
+      } as never);
+      const made = makeCommandCtx({
+        argv: ['submit', '--request-file', file, '--config', config, '--dry-run', '--json'],
+      });
+
+      await tasksCommand.run(made.ctx);
+
+      const output = JSON.parse(made.writes.at(-1)!);
+      expect(output.code).toBe('bootstrap_incomplete');
+      expect(output.hint).toContain('jinn fund-requirements');
+    });
+
+    it('keeps the operator wording for a confirmed submission by a dual-role operator', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-dual-yes-'));
+      const config = join(dir, 'config.json');
+      writeFileSync(config, '{}');
+      createCliExecutionContext.mockResolvedValueOnce({
+        ok: false,
+        envelope: {
+          code: 'bootstrap_incomplete',
+          message: 'No fleet service is complete with both a Safe and a mech address.',
+          hint: 'Finish bootstrap through mech deployment, or configure testnet mech artifacts.',
+          exampleCli: 'jinn bootstrap --json',
+          details: { field: 'fleet', requesterPersona: false },
+        },
+      });
+      const made = makeCommandCtx({
+        argv: [
+          'submit', '--id', 'dual-2', '--description', 'do the thing',
+          '--config', config, '--yes', '--json',
+        ],
+      });
+
+      await tasksCommand.run(made.ctx);
+
+      const output = JSON.parse(made.writes.at(-1)!);
+      expect(output.code).toBe('bootstrap_incomplete');
+      expect(output.hint).toContain('Finish bootstrap through mech deployment');
+    });
+
+    it('keeps the operator wording for an operator', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-operator-'));
+      const config = join(dir, 'config.json');
+      writeFileSync(config, '{}');
+      gatherIntrospectionRaw.mockResolvedValueOnce({ fleet: { services: [] } } as never);
+      const made = makeCommandCtx({
+        argv: [
+          'submit', '--id', 'op-1', '--description', 'do the thing',
+          '--config', config, '--dry-run', '--json',
+        ],
+      });
+
+      await tasksCommand.run(made.ctx);
+
+      const output = JSON.parse(made.writes.at(-1)!);
+      expect(output.code).toBe('bootstrap_incomplete');
+      expect(output.hint).toContain('jinn bootstrap');
+    });
   });
 
   it('dry-run validates without constructing a posting context', async () => {
@@ -924,5 +1092,151 @@ describe('tasks submit machine contract', () => {
     expect(secondPostTask).not.toHaveBeenCalled();
     secondStore.close();
     await secondAdapter.stop();
+  });
+});
+
+// Issue #4202: a spec-file submit whose window has already closed would post
+// a task no one can ever claim. Refuse it before confirmation or any post.
+describe('tasks submit spec-file window freshness', () => {
+  afterEach(() => {
+    createCliExecutionContext.mockReset();
+    gatherIntrospectionRaw.mockClear();
+  });
+
+  const fixturePath = fileURLToPath(new URL('../../../fixtures/prediction-v1-task.example.json', import.meta.url));
+
+  function specFileWithWindow(
+    window: { startTs: number; endTs: number },
+    resolutionMs = window.endTs + 86_400_000,
+  ) {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-window-'));
+    const file = join(dir, 'spec.json');
+    const config = join(dir, 'config.json');
+    const raw = JSON.parse(readFileSync(fixturePath, 'utf8')) as {
+      spec: { resolution: Record<string, unknown> };
+    };
+    // prediction.v1 requires the resolution time to follow the window.
+    raw.spec.resolution.expectedResolutionTime = new Date(resolutionMs).toISOString();
+    writeFileSync(file, JSON.stringify({ ...raw, window }));
+    writeFileSync(config, '{}');
+    return { file, config };
+  }
+
+  function submitArgv(file: string, config: string, mode: '--yes' | '--dry-run') {
+    return [
+      'submit', '--id', 'window-1', '--description', 'window test',
+      '--spec-file', file, '--manifest-cid', 'bafy-window', '--config', config,
+      mode, '--json',
+    ];
+  }
+
+  it('refuses a fully past window with invalid_invocation before posting', async () => {
+    const now = Date.now();
+    const window = { startTs: now - 7_200_000, endTs: now - 3_600_000 };
+    const { file, config } = specFileWithWindow(window);
+    const made = makeCommandCtx({ argv: submitArgv(file, config, '--yes') });
+
+    await tasksCommand.run(made.ctx);
+
+    const output = JSON.parse(made.writes.at(-1)!);
+    expect(output).toMatchObject({
+      code: 'invalid_invocation',
+      details: { field: 'window.endTs' },
+    });
+    expect(output.message).toContain(String(window.startTs));
+    expect(output.message).toContain(String(window.endTs));
+    expect(output.exampleCli).toContain('--spec-file');
+    expect(output.exampleCli).toContain('--dry-run');
+    expect(made.exits).toEqual([11]);
+    expect(createCliExecutionContext).not.toHaveBeenCalled();
+  });
+
+  it('does not refuse a window that is open but already started', async () => {
+    const now = Date.now();
+    const { file, config } = specFileWithWindow({ startTs: now - 3_600_000, endTs: now + 3_600_000 });
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: false,
+      envelope: { code: 'bootstrap_incomplete', message: 'stop after the guard' },
+    });
+    const made = makeCommandCtx({ argv: submitArgv(file, config, '--yes') });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(createCliExecutionContext).toHaveBeenCalledOnce();
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({ code: 'bootstrap_incomplete' });
+  });
+
+  it('refuses a past window given in epoch seconds', async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const window = { startTs: nowSec - 7_200, endTs: nowSec - 3_600 };
+    const { file, config } = specFileWithWindow(window, (window.endTs + 86_400) * 1000);
+    const made = makeCommandCtx({ argv: submitArgv(file, config, '--yes') });
+
+    await tasksCommand.run(made.ctx);
+
+    const output = JSON.parse(made.writes.at(-1)!);
+    expect(output).toMatchObject({
+      code: 'invalid_invocation',
+      details: { field: 'window.endTs' },
+    });
+    expect(output.message).toContain(String(window.endTs * 1000));
+    expect(made.exits).toEqual([11]);
+    expect(createCliExecutionContext).not.toHaveBeenCalled();
+  });
+
+  it('does not refuse a session-derived.v1 spec, whose window is in epoch seconds', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-window-'));
+    const file = join(dir, 'spec.json');
+    const config = join(dir, 'config.json');
+    writeFileSync(file, JSON.stringify({
+      // session-derived.v1 parses the task from the top level of the file.
+      solverType: 'session-derived.v1',
+      schemaVersion: 'session-derived-task.v1',
+      sourceCaptureCid: 'bafy-capture',
+      problemStatement: 'Fix the flaky test.',
+      distillation: {
+        promptSha256: 'a'.repeat(64),
+        model: 'test-model',
+        distilledAt: new Date().toISOString(),
+      },
+    }));
+    writeFileSync(config, '{}');
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: false,
+      envelope: { code: 'bootstrap_incomplete', message: 'stop after the guard' },
+    });
+    const made = makeCommandCtx({ argv: submitArgv(file, config, '--yes') });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(createCliExecutionContext).toHaveBeenCalledOnce();
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({ code: 'bootstrap_incomplete' });
+  });
+
+  it('still previews a past window on dry-run', async () => {
+    const now = Date.now();
+    const { file, config } = specFileWithWindow({ startTs: now - 7_200_000, endTs: now - 3_600_000 });
+    const made = makeCommandCtx({ argv: submitArgv(file, config, '--dry-run') });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+      dryRun: true,
+      verb: 'tasks submit',
+    });
+    expect(createCliExecutionContext).not.toHaveBeenCalled();
+  });
+});
+
+// Issue #4203: the --spec-file help must list every registered SolverType.
+describe('tasks help', () => {
+  it('lists every registered SolverType for --spec-file', () => {
+    const line = tasksCommand.helpText
+      .split('\n')
+      .find((l) => l.includes('Supports registered SolverTypes:'));
+    expect(line).toBeDefined();
+    for (const solverType of knownSolverTypes()) {
+      expect(line).toContain(solverType);
+    }
   });
 });

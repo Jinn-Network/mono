@@ -1,5 +1,7 @@
 # Active-operator surface — fix the "active" definition and the mint-time clock
 
+> **Status (2026-09-24): partly superseded by [packages/indexer/explorer/EXPLORER-APP-SPEC.md](../../../packages/indexer/explorer/EXPLORER-APP-SPEC.md) §2.7.** Its tJINN-denominated M1 floor (§2) and the mint-time clock question (§4) were overtaken when [DR-2026-06-30](../../../log/decisions/2026-06-30-tokenless-olas-native-pivot.md) retired tJINN; EXPLORER-APP-SPEC.md §2.7 now defines the liveness and sustained measures in OLAS buckets. The split between last-block liveness and a sustained measure (§1) stands there. For the current direction read [packages/indexer/explorer/EXPLORER-APP-SPEC.md](../../../packages/indexer/explorer/EXPLORER-APP-SPEC.md) §2.7.
+
 - **Version:** 0.1 (draft for review)
 - **Date:** 2026-06-01
 - **Author:** Oak (drafted with Claude)

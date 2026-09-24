@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { parseMatrix } from "@jinn-network/benchmarking-records";
+import type { MatrixCell } from "@jinn-network/benchmarking-records";
 import { parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
 import { readAuditEntries } from "../../audit/journal.js";
 import type { OperationContext } from "../../operations/context.js";
@@ -23,9 +24,11 @@ import { runPreview } from "../../operations/preview.js";
 import { runVerify } from "../../operations/verify.js";
 import { verifyPublicBundle } from "../../bundle/verify.js";
 import { readRunJournalEntries } from "../../run/journal.js";
+import type { RunJournalEntry } from "../../run/journal.js";
 import { getSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 import { readInspectSelectionManifest, inspectWorkerPath } from "./host.js";
 import { inspectOciRunnerPath } from "./oci.js";
+import { expectEvery, leakMarkers } from "./testing/assertions.js";
 // @ts-expect-error This product-private runtime is copied into dist without a public type surface.
 import { createInspectLogVerifierRegistration } from "./verifier-runtime.mjs";
 
@@ -41,6 +44,50 @@ afterEach(() => {
 
 function context(workspaceDir: string): OperationContext {
   return { workspaceDir, principal: "sponsor-1", clock: () => new Date().toISOString() };
+}
+
+/**
+ * Identity plus the asserted facts, not the whole cell (the shape `oci.integration.test.ts` uses,
+ * plus the verdict count this file asserts on): `checksFailed` separates a loaded environment,
+ * which reports a non-judged outcome with the failed check named, from a runtime defect, which
+ * reports a judged cell whose axis is pinned wrong.
+ */
+function projectCell(cell: MatrixCell, index: number): unknown {
+  return {
+    index,
+    cellKey: cell.cellKey,
+    armId: cell.armId,
+    replicate: cell.replicate,
+    outcome: cell.outcome,
+    verdicts: cell.verdicts.length,
+    isolation: cell.verification.isolation,
+    checksFailed: cell.verification.checksFailed,
+  };
+}
+
+/**
+ * Presence booleans, not values: the evaluation predicates assert that each provenance digest
+ * exists, so the booleans say which conjunct failed while the 64-char digests would only pad the
+ * line. A delivery projects its output names, which is what its predicate compares. The free-form
+ * `detail` is deliberately not projected.
+ */
+function projectEntry(entry: RunJournalEntry, index: number): unknown {
+  switch (entry.kind) {
+    case "delivery":
+      return { index, kind: entry.kind, outputs: entry.outputs.map((output) => output.name) };
+    case "evaluation":
+      return {
+        index,
+        kind: entry.kind,
+        evaluator: entry.evaluator,
+        evaluationTerminal: entry.evaluationTerminal,
+        hasEvalTaskSha256: entry.evalTaskSha256 !== undefined,
+        hasEvalDeliverySha256: entry.evalDeliverySha256 !== undefined,
+        hasEvalAttempt: entry.evalAttempt !== undefined,
+      };
+    default:
+      return { index, kind: entry.kind };
+  }
 }
 
 describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => {
@@ -104,26 +151,36 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
 
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     expect(matrix.cells).toHaveLength(2);
-    expect(
-      matrix.cells.every((cell) => cell.outcome === "judged"),
-      JSON.stringify({ matrix, journal: readRunJournalEntries(workspaceDir, preset) }),
-    ).toBe(true);
-    expect(matrix.cells.every((cell) => cell.verdicts.length === expectedVerifiers)).toBe(true);
+    expectEvery(matrix.cells, (cell) => cell.outcome === "judged", projectCell, "every cell is judged");
+    expectEvery(
+      matrix.cells,
+      (cell) => cell.verdicts.length === expectedVerifiers,
+      projectCell,
+      `every cell carries ${String(expectedVerifiers)} verdicts`,
+    );
     const deliveryEntries = readRunJournalEntries(workspaceDir, preset)
       .filter((entry) => entry.kind === "delivery");
     expect(deliveryEntries).toHaveLength(2);
-    expect(deliveryEntries.every((entry) =>
-      entry.outputs.map((output) => output.name).sort().join(",") === "inspect-log,inspect-summary"
-    )).toBe(true);
+    expectEvery(
+      deliveryEntries,
+      (entry) =>
+        entry.outputs.map((output) => output.name).sort().join(",") === "inspect-log,inspect-summary",
+      projectEntry,
+      "every delivery carries the inspect-log and inspect-summary outputs",
+    );
     const evaluationEntries = readRunJournalEntries(workspaceDir, preset)
       .filter((entry) => entry.kind === "evaluation");
     expect(evaluationEntries).toHaveLength(2 * expectedVerifiers);
-    expect(evaluationEntries.every((entry) =>
-      entry.evalTaskSha256 !== undefined
-      && entry.evalDeliverySha256 !== undefined
-      && entry.evalAttempt !== undefined
-      && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer"
-    )).toBe(true);
+    expectEvery(
+      evaluationEntries,
+      (entry) =>
+        entry.evalTaskSha256 !== undefined
+        && entry.evalDeliverySha256 !== undefined
+        && entry.evalAttempt !== undefined
+        && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer",
+      projectEntry,
+      "every evaluation carries eval provenance from a distinct evaluator",
+    );
     expect(new Set(evaluationEntries.map((entry) => entry.evaluator)).size).toBe(expectedVerifiers);
 
     expect((await runReport(ctx, { draftId: preset })).ok).toBe(true);
@@ -220,7 +277,9 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
       scorer: { name: "match", passValue: "C" },
     });
     expect(selected.ok).toBe(false);
-    expect(JSON.stringify({ selected, audit: readAuditEntries(workspaceDir) })).not.toContain(sentinel);
+    expect(
+      leakMarkers(Buffer.from(JSON.stringify({ selected, audit: readAuditEntries(workspaceDir) })), { sentinel }),
+    ).toEqual([]);
   }, 120_000);
 
   test("refuses duplicate resolved scorer names instead of relying on Inspect's private suffixing", async () => {
@@ -285,16 +344,20 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     if (!collected.ok) throw new Error("unreachable");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     expect(matrix.cells).toHaveLength(2);
-    expect(matrix.cells.every((cell) => cell.outcome === "unscorable")).toBe(true);
-    expect(matrix.cells.every((cell) => cell.verdicts.length === 0)).toBe(true);
+    expectEvery(matrix.cells, (cell) => cell.outcome === "unscorable", projectCell, "every cell is unscorable");
+    expectEvery(matrix.cells, (cell) => cell.verdicts.length === 0, projectCell, "every cell carries no verdicts");
     const failedVerifiers = readRunJournalEntries(workspaceDir, "inspect-scorer-failure")
       .filter((entry) => entry.kind === "evaluation");
     expect(failedVerifiers).toHaveLength(2);
-    expect(failedVerifiers.every((entry) =>
-      entry.evaluationTerminal === "could-not-grade"
-      && entry.evalTaskSha256 !== undefined
-      && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer"
-    )).toBe(true);
+    expectEvery(
+      failedVerifiers,
+      (entry) =>
+        entry.evaluationTerminal === "could-not-grade"
+        && entry.evalTaskSha256 !== undefined
+        && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer",
+      projectEntry,
+      "every failed verifier is could-not-grade with an eval task from a distinct evaluator",
+    );
   }, 120_000);
 
   test("honors Inspect maxSamples without multiplying or omitting benchmark cells", async () => {
@@ -323,8 +386,8 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     if (!collected.ok) throw new Error("unreachable");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     expect(matrix.cells).toHaveLength(2);
-    expect(matrix.cells.every((cell) => cell.outcome === "judged")).toBe(true);
-    expect(matrix.cells.every((cell) => cell.verdicts.length === 1)).toBe(true);
+    expectEvery(matrix.cells, (cell) => cell.outcome === "judged", projectCell, "every cell is judged");
+    expectEvery(matrix.cells, (cell) => cell.verdicts.length === 1, projectCell, "every cell carries 1 verdict");
     const legacyDelivery = readRunJournalEntries(workspaceDir, "inspect-incomplete")
       .find((entry) => entry.kind === "delivery");
     const legacySummary = legacyDelivery?.outputs.find((output) => output.name === "inspect-summary");
@@ -419,7 +482,12 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     const previewed = await runPreview(ctx, { draftId: "inspect-real", items: 1 });
     expect(previewed.ok, JSON.stringify(previewed)).toBe(true);
     if (!previewed.ok) throw new Error("unreachable");
-    expect(previewed.result.preview.arms.every((arm) => arm.outcomes.delivered === 2)).toBe(true);
+    expectEvery(
+      previewed.result.preview.arms,
+      (arm) => arm.outcomes.delivered === 2,
+      (arm, index) => ({ index, delivered: arm.outcomes.delivered }),
+      "every preview arm delivered 2",
+    );
     expect(previewed.result.runtimeMethod).toEqual(selected.result.runtimeMethod);
     const quoted = await runQuote(ctx, { draftId: "inspect-real" });
     expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
@@ -434,11 +502,8 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     if (!collected.ok) throw new Error("unreachable");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     expect(matrix.cells).toHaveLength(4);
-    expect(matrix.cells.every((cell) => cell.verification.isolation === "match")).toBe(true);
-    expect(
-      matrix.cells.every((cell) => cell.verdicts.length === 1),
-      JSON.stringify({ matrix, journal: readRunJournalEntries(workspaceDir, "inspect-real") }),
-    ).toBe(true);
+    expectEvery(matrix.cells, (cell) => cell.verification.isolation === "match", projectCell, "every cell matches isolation");
+    expectEvery(matrix.cells, (cell) => cell.verdicts.length === 1, projectCell, "every cell carries 1 verdict");
 
     const results = runResults(ctx, { draftId: "inspect-real" });
     expect(results.ok).toBe(true);
@@ -629,5 +694,5 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     expect(readdirSync(viewerBundleDir).length).toBeGreaterThan(0);
     rmSync(nativeLogs[0]!);
     await expect(verifyPublicBundle(detachedBundle)).rejects.toThrow();
-  }, 120_000);
+  }, 240_000);
 });

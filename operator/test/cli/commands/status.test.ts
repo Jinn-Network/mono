@@ -387,4 +387,16 @@ describe('status command', () => {
     expect(out).toContain('bootstrap:');
     expect(out).toContain('next actions:');
   });
+
+  it('rejects an empty --config instead of loading the default (#4673)', async () => {
+    const { getConfigPathFromArgs: _ignored, ...productionPathDeps } = fakeDeps;
+    const cmd = createStatusCommand(productionPathDeps);
+    const { envelopes, exits } = await runCommand(cmd, { argv: ['--config='] });
+    expect(envelopes[0]).toMatchObject({
+      code: 'invalid_invocation',
+      details: { field: 'config' },
+    });
+    expect(String((envelopes[0] as { message: string }).message)).toMatch(/empty/i);
+    expect(exits[exits.length - 1]).not.toBe(0);
+  });
 });

@@ -32,7 +32,7 @@ import {
   parseDisclosureSpecification,
 } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
-import { verifyPublicBundle } from "@colophon-claims/verify";
+import { verifyPublicBundle } from "@colophon-claims/check";
 import {
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,

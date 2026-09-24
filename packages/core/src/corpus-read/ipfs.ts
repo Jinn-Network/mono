@@ -1,3 +1,5 @@
+import { envInteger } from './env.js';
+
 const IPFS_FETCH_TIMEOUT_MS = 15_000;
 /**
  * Bound on one whole `fetchFromIpfs` / `fetchBytesFromIpfs` call. The
@@ -80,6 +82,37 @@ export class IpfsFetchFailedError extends Error {
  * default fetch also tries the `ipfs.io` fallback, which typically stalls into a 504 or an abort
  * for an unpinned digest rather than answering 404. Such a run classifies `'unavailable'` — the
  * safe direction, since absence is never claimed without proof of it.
+ *
+ * That near-unreachability was weighed and is ACCEPTED (#3477). Three loosenings were considered
+ * and all three are rejected:
+ *
+ *   - Treat a primary-gateway 404 as authoritative absence. A gateway 404 means *that gateway did
+ *     not resolve the CID inside its own timeout*, not that the content is absent from the
+ *     network. Elevating it to a global absence claim is strictly weaker evidence than the current
+ *     rule, in the exact direction #2647's FAILURE IS NOT ABSENCE exists to forbid.
+ *   - Surface per-gateway evidence to the caller. Nothing to build: {@link
+ *     IpfsFetchFailedError.causes} is already a per-candidate array in attempt order, and the
+ *     aggregate message names each candidate. So the strictness costs no INFORMATION — only the
+ *     convenience of a single verdict, which any caller needing finer granularity can bypass.
+ *   - Separate the never-reached fallback out as its own case, distinct from a fallback that
+ *     answered something other than 404. A candidate the whole-operation deadline never reached
+ *     is not evidence of absence — the
+ *     un-attempted gateway could have served it. Counting a non-attempt as absence-supporting is
+ *     the first loosening with an extra step.
+ *
+ * The asymmetry is what settles it. Classifying genuine absence as `'unavailable'` costs one
+ * warning line and a retry on a later tick: cheap and self-correcting. Classifying a mere
+ * non-answer as `'not-found'` costs silent treatment as absent, no retry signal, and a data gap
+ * indistinguishable from real data: expensive, permanent, invisible.
+ *
+ * The strictness is not free: control flow does branch on `'not-found'`, so its cost is noisier
+ * `'unavailable'` warnings for content that is genuinely absent, rather than none —
+ * `buildFetchIpfsBytes` (returns `undefined` instead of the refusal string) and `narrowIpfsBytes`
+ * (silent instead of `logger.warn`) in `operator/src/daemon/composition-root.ts`;
+ * `warnIpfsFallThrough` (silent instead of `console.warn`) and `ipfsReason` (reason `not_found`
+ * instead of `too_large` / `unavailable`) in `./artifact-retrieval.ts`; and the task, trajectory,
+ * and source-bundle reads in `operator/src/conformance/harness.ts` (silent instead of
+ * `console.warn`).
  */
 export function classifyIpfsFetchFailure(
   error: unknown,
@@ -95,19 +128,30 @@ export function classifyIpfsFetchFailure(
 export function normalizeIpfsGatewayBase(gatewayUrl: string): string {
   let normalized = gatewayUrl.trim();
   if (normalized === '') normalized = 'https://gateway.autonolas.tech';
-  // Drop any userinfo at the source. `fetch` rejects a credentialed URL
-  // outright, and its own error message quotes the URL back — so a gateway
-  // configured Infura-style would otherwise put its secret into every
-  // aggregated fetch error, which callers log.
   try {
     const parsed = new URL(normalized);
-    if (parsed.username !== '' || parsed.password !== '') {
-      parsed.username = '';
-      parsed.password = '';
-      normalized = parsed.toString();
-    }
+    // Drop any userinfo at the source. `fetch` rejects a credentialed URL
+    // outright, and its own error message quotes the URL back — so a gateway
+    // configured Infura-style would otherwise put its secret into every
+    // aggregated fetch error, which callers log.
+    parsed.username = '';
+    parsed.password = '';
+    // A fragment is never transmitted to a server, and treating it as part of
+    // the base corrupted the `/ipfs` suffix test into appending a second
+    // segment (`…/ipfs#frag` → `…/ipfs#frag/ipfs/`). Dropping it is the only
+    // reading that is both correct and lossless in transit.
+    parsed.hash = '';
+    // Normalize on the parsed path, not the raw string: a query-bearing base
+    // otherwise had `/ipfs/` spliced on after the query, putting the CID
+    // inside the query string (#3452).
+    let path = parsed.pathname.replace(/\/+$/, '');
+    if (!path.toLowerCase().endsWith('/ipfs')) path = `${path}/ipfs`;
+    parsed.pathname = `${path}/`;
+    return parsed.toString();
   } catch {
-    // Not an absolute URL; leave it to the caller's own failure path.
+    // Not an absolute URL; leave it to the caller's own failure path, which
+    // reports it as a per-candidate `candidate URL could not be parsed`
+    // instead of escaping as a bare TypeError.
   }
   normalized = normalized.replace(/\/+$/, '');
   if (!normalized.toLowerCase().endsWith('/ipfs')) normalized = `${normalized}/ipfs`;
@@ -195,7 +239,49 @@ async function discardBody(response: Response): Promise<void> {
   }
 }
 
-/** Read a response body as bytes, refusing anything past `maxBytes`. */
+/**
+ * The exact decoded length this response promises, or `undefined` when it
+ * promises nothing usable (#3759).
+ *
+ * `content-encoding` is the trap: with one set, `content-length` describes
+ * *wire* bytes, and the reader hands back the decoded ones — a gzipped 200 KB
+ * JSON body declares ~230. Pre-sizing from that is not a pessimization, it is
+ * a buffer guaranteed to overflow, so the fast path is gated on the encoding
+ * being absent or `identity`. The raw header is read rather than
+ * `Number(header)` because `Number(null)` is `0`, which cannot be told from a
+ * genuinely declared zero.
+ */
+function exactDecodedLength(response: Response, maxBytes: number): number | undefined {
+  const encoding = response.headers.get('content-encoding');
+  if (encoding !== null && encoding.trim().toLowerCase() !== 'identity') return undefined;
+  const raw = response.headers.get('content-length');
+  if (raw === null || raw.trim() === '') return undefined;
+  const declared = Number(raw);
+  if (!Number.isInteger(declared) || declared < 0 || declared > maxBytes) return undefined;
+  return declared;
+}
+
+/**
+ * Read a response body as bytes, refusing anything past `maxBytes`.
+ *
+ * Peak resident bytes, not memcpy count, is what the pre-sizing below buys.
+ * The stream has already allocated each chunk either way, and the join is the
+ * single copy in both designs — but the chunk-list path holds every chunk live
+ * *while* it allocates and fills the joined buffer, so it peaks at roughly
+ * twice the payload: ~128 MiB at `fetchTrajectoryFromIpfs`'s 64 MiB bound
+ * (measured), against ~1x live for the pre-sized path.
+ *
+ * The honest caveat: the fast path is gated on the absence of a content
+ * encoding, and gateways generally compress JSON — so it will rarely engage on
+ * the very trajectory read that motivated the bound. The win is real for the
+ * raw-bytes path (source files, sealed documents, envelopes) and
+ * correct-but-inert for compressed JSON.
+ *
+ * Out of scope, and larger than what this removes: `fetchJson` decodes these
+ * bytes into a UTF-16 string (up to 2x the byte length) and then `JSON.parse`s
+ * that into an object graph, all while the bytes are still live. Bringing that
+ * down means streaming JSON parsing, which is a rewrite rather than a fix.
+ */
 async function readBoundedBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
@@ -205,6 +291,9 @@ async function readBoundedBytes(response: Response, maxBytes: number): Promise<U
   const body = response.body;
   if (!body) return new Uint8Array(0);
   const reader = body.getReader();
+  const exact = exactDecodedLength(response, maxBytes);
+  let buffer = exact === undefined ? undefined : new Uint8Array(exact);
+  let written = 0;
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
@@ -213,8 +302,26 @@ async function readBoundedBytes(response: Response, maxBytes: number): Promise<U
       if (done) break;
       if (!value) continue;
       total += value.byteLength;
+      // The cumulative counter stays the authority on the cap. The pre-sized
+      // buffer's own length is never it — a lying `content-length` must not be
+      // able to widen or narrow the bound.
       if (total > maxBytes) {
         throw new IpfsResponseTooLargeError(maxBytes);
+      }
+      if (buffer !== undefined) {
+        if (written + value.byteLength <= buffer.length) {
+          buffer.set(value, written);
+          written += value.byteLength;
+          continue;
+        }
+        // The body outran what it declared, on an identity response. Fall back
+        // in place: what was written becomes the first chunk-list entry and
+        // the read continues exactly as it did before. Peak on this anomalous
+        // path is 2x — today's behaviour, so no regression and no new failure
+        // mode. (`subarray` is right here: the pre-sized buffer is dropped
+        // straight after, so retaining its backing store costs nothing.)
+        chunks.push(buffer.subarray(0, written));
+        buffer = undefined;
       }
       chunks.push(value);
     }
@@ -224,6 +331,15 @@ async function readBoundedBytes(response: Response, maxBytes: number): Promise<U
     } catch {
       // Already terminal; the read result (or throw) above is what matters.
     }
+  }
+  if (buffer !== undefined) {
+    // A short body is not reachable through `fetch` — undici rejects a body
+    // that ends early with `TypeError: terminated` — but returning trailing
+    // zeros would be wrong if it ever were, and the guard costs one branch.
+    // `slice`, never `subarray`: a view would retain the whole pre-sized
+    // backing store and silently defeat this change on the one path where it
+    // matters.
+    return written === buffer.length ? buffer : buffer.slice(0, written);
   }
   const joined = new Uint8Array(total);
   let offset = 0;
@@ -317,17 +433,28 @@ export type FetchFromIpfsOptions = {
    * {@link DEFAULT_MAX_IPFS_RESPONSE_BYTES}. Raise it only for a call site that
    * legitimately reads larger payloads (#3441) — the default is sized for JSON
    * envelopes and source files, and a caller that raises it accepts buffering
-   * that many bytes. Values below 1 fall back to the default.
+   * that many bytes. Values below 1 fall back to the env, then the default.
+   *
+   * An operator may move the *default* with `JINN_IPFS_MAX_RESPONSE_BYTES`
+   * (#3453). An explicit bound here wins over it, so the env cannot clamp a
+   * call site that already states its own — concretely, it does not reach
+   * `fetchTrajectoryFromIpfs`'s 64 MiB (`MAX_TRAJECTORY_IPFS_RESPONSE_BYTES`,
+   * `operator/src/adapters/mech/ipfs.ts`). Making it a ceiling instead would
+   * make the raise-the-cap intent this option exists for inexpressible.
    */
   maxResponseBytes?: number;
 };
 
 function resolveMaxResponseBytes(opts?: FetchFromIpfsOptions): number {
   const requested = opts?.maxResponseBytes;
-  if (typeof requested !== 'number' || !Number.isFinite(requested) || requested < 1) {
-    return DEFAULT_MAX_IPFS_RESPONSE_BYTES;
+  if (typeof requested === 'number' && Number.isFinite(requested) && requested >= 1) {
+    return Math.floor(requested);
   }
-  return Math.floor(requested);
+  // The env replaces the default as the fallback; it is not a second
+  // validation layer, so an out-of-range *option* still falls through to it.
+  // `minimum = 1` is what keeps the cap from being disabled into an unbounded
+  // read: `0` and every other out-of-range value land on the default.
+  return envInteger('JINN_IPFS_MAX_RESPONSE_BYTES', DEFAULT_MAX_IPFS_RESPONSE_BYTES, 1);
 }
 
 function resolveFallbackGatewayBases(
@@ -373,6 +500,23 @@ function resolveGatewayCandidateUrl(
   if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) {
     return { reason: 'candidate URL escapes the gateway path prefix' };
   }
+  // `new URL(cidPath, base)` drops the base's query unconditionally, which
+  // strips the API key off every request to an authenticated gateway (#3452).
+  // Re-attach it *after* the guard, so a manifest-supplied CID path can never
+  // influence the check, and only when the base has one, so every query-free
+  // base issues a byte-identical request. The base wins over any query the CID
+  // path carries: two query strings cannot be merged unambiguously, and
+  // letting manifest text override an operator's gateway credentials is the
+  // wrong direction.
+  //
+  // Two known limits, both narrow and neither fixed here. A *relative*
+  // redirect `Location` is resolved with `new URL(location, current)`, which
+  // drops the query, so the key is not forwarded across such a hop — gateways
+  // that redirect path form to subdomain form send an absolute `Location`, and
+  // `assertRedirectAllowed` already pins the host family and port. And
+  // `displayUrl` stays `origin + pathname`, which is what keeps the credential
+  // out of logs now that the request actually carries it.
+  if (base.search !== '') resolved.search = base.search;
   return { url: resolved };
 }
 

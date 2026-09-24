@@ -3,13 +3,14 @@
  *
  * One-swap R3b (issue #2494, DR-2026-08-05 addendum 2026-08-10 Decision 2).
  * R3a carved the plugin-publication read path onto `plugin-registry/`; this is
- * the sibling carve for the three HTTP-indexer consumers the ruling kept:
- * `cli/commands/evidence.ts`, `mcp/server.ts`, and `tasks/submit-preflight.ts`
+ * the sibling carve for the HTTP-indexer consumers the ruling kept:
+ * `cli/commands/evidence.ts`, `cli/commands/supply.ts`, `mcp/server.ts`, and
+ * `tasks/submit-preflight.ts`
  * (plus `cli/commands/tasks.ts`'s `watch` verb, which drives the same
  * `getAutopilotDeliveryCandidates` read).
  *
- * The module is deliberately NARROW: it owns only the four methods those
- * consumers actually drive, not the retired ~20-method `DiscoveryAPI`.
+ * The module is deliberately NARROW: it owns only the methods those consumers
+ * actually drive, not the retired ~20-method `DiscoveryAPI`.
  * Wave-4 D4 deleted `operator/src/discovery/`; catalog-row types for
  * `listLaunchedSolverNets` live here.
  *
@@ -31,7 +32,7 @@ export interface SolverNetLifecycleStatus {
 
 /**
  * Catalog-row projection of a launched SolverNet — the return shape of
- * `DiscoveryClient.listLaunchedSolverNets`. Not a fifth method.
+ * `DiscoveryClient.listLaunchedSolverNets`.
  */
 export interface SolverNetManifestSummary {
   manifestCid: string;
@@ -60,16 +61,25 @@ export interface SolverNetManifestSummary {
  * one branch callers act on distinctly: it means the configured RPC endpoint
  * returned a 429 (or otherwise rate-limited the daemon), which — on the shared
  * default RPC — is an operator-actionable condition ("add your own key"), not
- * an indexer outage. Any other transport failure is left untyped (`undefined`).
+ * an indexer outage. `invalid_request` is a caller/config/4xx problem
+ * (malformed discovery.url, non-positive chainId, indexer 4xx refusal, a
+ * response the indexer answered but that names a different chain).
+ * `invalid_response` is narrower: the indexer answered, but its response body
+ * does not decode against this client's schema — most often an older client
+ * against a newer indexer — so it needs a distinct code from
+ * `invalid_request` (whose hint would otherwise point at the wrong service).
+ * Any other transport failure is left untyped (`undefined`).
  */
-export type DiscoveryUnavailableCode = 'rpc_rate_limited';
+export type DiscoveryUnavailableCode = 'rpc_rate_limited' | 'invalid_request' | 'invalid_response';
 
 export class DiscoveryUnavailableError extends Error {
   override readonly cause?: unknown;
   /**
-   * Typed reason, when one can be classified — currently only
-   * `rpc_rate_limited`, surfaced end-to-end so the operator UI can render a
-   * distinct "your RPC is throttled" message instead of a generic failure.
+   * Typed reason, when one can be classified — currently `rpc_rate_limited`
+   * (RPC 429), `invalid_request` (caller/config/4xx), or `invalid_response`
+   * (indexer answered but the body failed to decode — usually version skew,
+   * not an outage). Untyped transport and 5xx failures stay `undefined` so
+   * the CLI can treat them as transient.
    */
   readonly code?: DiscoveryUnavailableCode;
 
@@ -173,6 +183,89 @@ export interface CodeDigestRewardRow {
   gradedScores: number[];
 }
 
+export type SupplyStatus = 'available' | 'zero_supply' | 'unknown';
+
+export type SupplyReason =
+  | 'no_requestable_solver_nets'
+  | 'no_recent_completed_loops'
+  | 'incomplete_indexer_evidence';
+
+export interface SupplyBucket {
+  start: string;
+  end: string;
+}
+
+export interface SupplyWindow {
+  start: string;
+  end: string;
+  bucketHours: 6;
+  buckets: SupplyBucket[];
+}
+
+export interface SupplyClass {
+  workClass: string;
+  contractId: string;
+  contractVersion: string;
+  acceptingSolverNets: number;
+  claimingOperators: number;
+  /** Verdicts delivered in the window — loop closure, not loop success. */
+  verdictDeliveries: number;
+  latestAttemptAt: string;
+  latestVerdictAt: string;
+}
+
+/**
+ * Network supply as REPORTED by the configured indexer from native,
+ * chain-scoped evidence. Strictly decoded on arrival, but decoding proves
+ * well-formedness, not integrity: the indexer is the oracle here.
+ */
+export type CurrentSupplyResponse =
+  | {
+      schemaVersion: 1;
+      status: 'available';
+      chainId: number;
+      generatedAt: string;
+      window: SupplyWindow;
+      classes: SupplyClass[];
+      /**
+       * How many launched SolverNet rows the indexer excluded for incomplete
+       * manifest evidence or an identifier over the decoder's length cap.
+       * Absent when none were.
+       *
+       * Present, it means `classes` is known-possibly-SHORT. The listed classes
+       * are still proven live; a class's ABSENCE from the list must be read as
+       * "no evidence", never as "no supply". The indexer reports it rather than
+       * suppressing the whole answer, because one manifest whose enrichment
+       * failed cannot subtract from a class whose own evidence is complete.
+       */
+      incompleteManifestRows?: number;
+      /**
+       * How many attempt or verdict rows the indexer skipped because no matching
+       * task joined. Absent when none were. Same monotone-short-list reading as
+       * `incompleteManifestRows`: listed classes remain proven; a class's
+       * ABSENCE is "no evidence", not "no supply".
+       */
+      incompleteActivityRows?: number;
+    }
+  | {
+      schemaVersion: 1;
+      status: 'zero_supply';
+      reason: 'no_requestable_solver_nets' | 'no_recent_completed_loops';
+      chainId: number;
+      generatedAt: string;
+      window: SupplyWindow;
+      classes: [];
+    }
+  | {
+      schemaVersion: 1;
+      status: 'unknown';
+      reason: 'incomplete_indexer_evidence';
+      chainId: number;
+      generatedAt: string;
+      window: SupplyWindow;
+      classes: [];
+    };
+
 /**
  * The surviving HTTP-indexer read slice.
  *
@@ -181,6 +274,9 @@ export interface CodeDigestRewardRow {
  * outage rather than as an empty result.
  */
 export interface DiscoveryClient {
+  /** Current requestable supply, with uncertainty preserved explicitly. */
+  getCurrentSupply(args: { chainId: number }): Promise<CurrentSupplyResponse>;
+
   /**
    * Resolve the exact indexed task/attempt/envelope rows for an Autopilot
    * marketplace delivery. Implementations must not substitute recent/global

@@ -134,7 +134,14 @@ test('entityTag rejects anything that is not a lowercase sha256', () => {
 test('assertLiteralRoutePath rejects traversal, absolutes and pattern metacharacters', () => {
   assert.equal(assertLiteralRoutePath('profiles/task-execution/1.0'), 'profiles/task-execution/1.0');
   assert.equal(assertLiteralRoutePath('@jinn-network/x/fixtures/a.json'), '@jinn-network/x/fixtures/a.json');
-  for (const bad of ['', '/leading', 'a/../b', 'a//b', 'a\\b', 'a/:id/b', 'a/(b)/c', 'a/*']) {
+  // The Git control names are refused here because the bundle is published by being copied
+  // into a Git worktree: `.git/...` lands in the host checkout's real `.git`, and the
+  // `.gitignore` family decides which attested bytes get staged. Every byte the bundle
+  // copies passes through this gate, root files included.
+  for (const bad of [
+    '', '/leading', 'a/../b', 'a//b', 'a\\b', 'a/:id/b', 'a/(b)/c', 'a/*',
+    '.git/config', '.gitignore', '.gitattributes', '.gitmodules', 'a/.gitignore', '.GIT/hooks/pre-commit',
+  ]) {
     assert.throws(() => assertLiteralRoutePath(bad), /served path/u, `expected ${JSON.stringify(bad)} to be rejected`);
   }
 });

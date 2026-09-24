@@ -26,8 +26,6 @@ on:
       - "packages/evidence/execution-recorder/**"
       - "packages/evidence/protocol/**"
       - "packages/evidence/repository/**"
-      - "packages/marketplace/binding/**"
-      - "packages/marketplace/projector/**"
       - "packages/task-execution/backend/**"
       - "packages/task-execution/backend-local/assembly/**"
       - "packages/task-execution/backend-local/launchers/**"
@@ -37,7 +35,6 @@ on:
       - "packages/task-execution/protocol/**"
       - "packages/task-execution/testing/**"
       - "packages/trust/core/**"
-      - "packages/trust/resolve/**"
   push:
     branches: [next]
     paths:
@@ -59,8 +56,6 @@ on:
       - "packages/evidence/execution-recorder/**"
       - "packages/evidence/protocol/**"
       - "packages/evidence/repository/**"
-      - "packages/marketplace/binding/**"
-      - "packages/marketplace/projector/**"
       - "packages/task-execution/backend/**"
       - "packages/task-execution/backend-local/assembly/**"
       - "packages/task-execution/backend-local/launchers/**"
@@ -70,7 +65,6 @@ on:
       - "packages/task-execution/protocol/**"
       - "packages/task-execution/testing/**"
       - "packages/trust/core/**"
-      - "packages/trust/resolve/**"
 
 permissions:
   contents: read
@@ -81,7 +75,7 @@ env:
 # Consolidated per #2997 (pattern proven by the trust-ci pilot, PR #3001): the
 # previous shape ran 11 runner jobs chained through artifact dist round-trips,
 # rebuilding the shared §7.8 portal set (up to nineteen packages) per job. The
-# packages job below builds the same twelve packages with the same commands in
+# packages job below builds the same eleven packages with the same commands in
 # dependency order in ONE workspace, every portal built once.
 #
 # The per-job isolation this retires was a de-facto undeclared-dependency
@@ -113,9 +107,46 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_sha || github.sha }}
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22.23.1
+          cache: yarn
+          cache-dependency-path: |
+            packages/trust/core/yarn.lock
+            packages/trust/testing/yarn.lock
+            packages/evidence/protocol/yarn.lock
+            packages/evidence/repository/yarn.lock
+            packages/evidence/discovery/yarn.lock
+            packages/evidence/execution-evidence-builder/yarn.lock
+            packages/evidence/execution-recorder/yarn.lock
+            packages/evidence/attestation-issuer/yarn.lock
+            packages/task-execution/protocol/yarn.lock
+            packages/task-execution/backend/yarn.lock
+            packages/task-execution/profiles/yarn.lock
+            packages/task-execution/backend-local/supervisor/yarn.lock
+            packages/task-execution/backend-local/workspace/yarn.lock
+            packages/task-execution/backend-local/launchers/yarn.lock
+            packages/task-execution/backend-local/assembly/yarn.lock
+            packages/task-execution/testing/yarn.lock
+            packages/discovery/protocol/yarn.lock
+            packages/discovery/serve/yarn.lock
+            packages/discovery/publication/yarn.lock
+            packages/benchmarking/protocol/yarn.lock
+            packages/benchmarking/records/yarn.lock
+            packages/benchmarking/aggregate/yarn.lock
+            packages/benchmarking/testing/yarn.lock
+            packages/benchmarking/evidence/yarn.lock
+            packages/benchmarking/native-capture/yarn.lock
+            packages/benchmarking/evaluation/yarn.lock
+            packages/benchmarking/run/yarn.lock
+            packages/benchmarking/interop/yarn.lock
+            packages/benchmarking/local/yarn.lock
+            packages/benchmarking/publication/yarn.lock
       # A freshly rolled runner image can regress the packed-consumer smoke:
       # node 22.23.2's bundled npm dies with "Cannot read properties of null
       # (reading 'edgesOut')" on yarn-packed tarballs (first seen on the
@@ -129,11 +160,6 @@ jobs:
           corepack prepare yarn@4.13.0 --activate
       - name: Build cross-tree portal dependency from source (trust-core, §7.8)
         working-directory: packages/trust/core
-        run: |
-          yarn install --immutable
-          yarn build
-      - name: Build cross-tree portal dependency from source (trust-resolve, §7.8)
-        working-directory: packages/trust/resolve
         run: |
           yarn install --immutable
           yarn build
@@ -227,16 +253,6 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
-      - name: Build cross-tree portal dependency from source (marketplace-binding, §7.8)
-        working-directory: packages/marketplace/binding
-        run: |
-          yarn install --immutable
-          yarn build
-      - name: Build cross-tree portal dependency from source (marketplace-projector, §7.8)
-        working-directory: packages/marketplace/projector
-        run: |
-          yarn install --immutable
-          yarn build
       - name: Verify Evidence-Native Benchmarking Protocol
         working-directory: packages/benchmarking/protocol
         run: |
@@ -301,14 +317,6 @@ jobs:
           yarn pack:smoke
       - name: Verify Benchmarking Interop
         working-directory: packages/benchmarking/interop
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-      - name: Verify Benchmarking Marketplace
-        working-directory: packages/benchmarking/marketplace
         run: |
           yarn install --immutable
           yarn typecheck

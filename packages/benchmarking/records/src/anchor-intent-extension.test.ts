@@ -55,6 +55,15 @@ describe("RunAnchorIntentExtensionSchema", () => {
     expect(RunAnchorIntentExtensionSchema.safeParse({ providers: [ANCHOR_PROFILE_NAMESPACE] }).success).toBe(false);
   });
 
+  test.each([
+    ["ESC in the suffix", `${ANCHOR_PROFILE_NAMESPACE}rfc3161-tsa\u001b]8;;https://attacker.invalid\u0007`],
+    ["bidi override in the suffix", `${ANCHOR_PROFILE_NAMESPACE}rfc3161-tsa\u202e`],
+    ["zero-width space in the suffix", `${ANCHOR_PROFILE_NAMESPACE}rfc3161-tsa\u200b`],
+    ["isolate in the suffix", `${ANCHOR_PROFILE_NAMESPACE}rfc3161-tsa\u2066`],
+  ])("refuses a profile URI with %s", (_label, profile) => {
+    expect(RunAnchorIntentExtensionSchema.safeParse({ providers: [profile] }).success).toBe(false);
+  });
+
   test("refuses an endpoint smuggled in beside the providers", () => {
     // §7.3: profiles only, never endpoints. The object schema strips unknown keys, so the
     // assertion is that nothing survives, not that the parse throws.

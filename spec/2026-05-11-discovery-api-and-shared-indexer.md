@@ -1,5 +1,7 @@
 # Discovery API and shared indexer
 
+> **Status (2026-09-24): partly superseded by [log/decisions/2026-08-03-phase-c-capability-boundaries.md](../log/decisions/2026-08-03-phase-c-capability-boundaries.md).** Its decision 4 ("On-chain fallback is always live") and the `DiscoveryAPI` design around it (decision 1, §5, §6.2, §8.3, §9.3) are retired: DR-2026-08-03 decision 4 makes Record Discovery the sole public discovery plane, the [record discovery design](../docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md) §19 maps the `DiscoveryAPI` onto its query plane, and Wave-4 D4 (#2684) deleted the daemon's `discovery/` tree, so `discovery.fallbackToOnchain` is parsed but never consulted. The standalone Ponder indexer (decision 2) still runs, and [EXPLORER-APP-SPEC.md](../packages/indexer/explorer/EXPLORER-APP-SPEC.md) still cites this spec as the explorer's read-side data contract. For the current direction read [docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md](../docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md).
+
 - **Date:** 2026-05-11 (v0.1 → v0.2 → v0.3)
 - **Author:** Oak with Opus
 - **Status:** Design draft — ready for review

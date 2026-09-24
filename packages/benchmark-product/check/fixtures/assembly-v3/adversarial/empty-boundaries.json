@@ -1,0 +1,31 @@
+{
+  "format": "benchmark-product-assembly/3",
+  "kind": "run",
+  "runCancelled": false,
+  "draftId": "dispatch-boundaries-golden",
+  "assurancePreset": "direct-check",
+  "graph": {
+    "admissions": [],
+    "solveSubmissions": [
+      {
+        "cellKey": "cell-a",
+        "dispatch": 1,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ],
+    "evaluationSubmissions": [
+      {
+        "cellKey": "cell-a",
+        "dispatch": 1,
+        "evalIndex": 1,
+        "evaluationAttempt": 1,
+        "evaluator": "urn:jinn:benchmark-product:local-venue:evaluator-1",
+        "evalTaskSha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      }
+    ],
+    "solveDeliveries": [],
+    "evaluations": [],
+    "dispatchBoundaries": []
+  }
+}

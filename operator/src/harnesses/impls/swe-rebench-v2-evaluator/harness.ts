@@ -99,7 +99,7 @@ import {
   PoolCacheStore,
   loadPoolWithCacheFallback,
 } from '../../../solver-types/_swe-rebench-v2-pool-cache.js';
-import { resolveDefaultStateDir } from '../../../state-dir.js';
+import { defaultImplStateDirRoot, resolveDefaultStateDir } from '../../../state-dir.js';
 
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
 const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
@@ -1558,7 +1558,7 @@ export function applyUpstreamPatches(upstreamRepoDir: string): void {
  * without going through the daemon use this default.
  */
 export function defaultSweRebenchV2EvaluatorImplStateDir(): string {
-  return join(resolveDefaultStateDir(), 'engine', 'impl-state', 'swe-rebench-v2-evaluator');
+  return join(defaultImplStateDirRoot(resolveDefaultStateDir()), 'swe-rebench-v2-evaluator');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

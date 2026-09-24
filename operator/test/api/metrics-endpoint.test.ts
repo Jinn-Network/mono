@@ -47,8 +47,12 @@ describe('renderMetrics — exposition format', () => {
   });
 
   it('emits HELP + TYPE lines for every metric family it writes samples for', () => {
-    const text = renderMetrics(store, { getDaemonReadiness, getLoopSnapshot: loopSnapshot });
-    const names = ['jinn_daemon_ready', 'jinn_daemon_degraded', 'jinn_loop_last_tick_seconds', 'jinn_loop_admitted', 'jinn_activity_events_total', 'jinn_balance_native_tokens', 'jinn_balance_bond_tokens'];
+    const text = renderMetrics(store, {
+      getDaemonReadiness,
+      getLoopSnapshot: loopSnapshot,
+      getDegradedRecoveryRunning: () => false,
+    });
+    const names = ['jinn_daemon_ready', 'jinn_daemon_degraded', 'jinn_degraded_recovery_running', 'jinn_loop_last_tick_seconds', 'jinn_loop_admitted', 'jinn_activity_events_total', 'jinn_balance_native_tokens', 'jinn_balance_bond_tokens'];
     for (const name of names) {
       expect(text).toContain(`# HELP ${name} `);
       expect(text).toMatch(new RegExp(`# TYPE ${name} (gauge|counter)`));
@@ -76,6 +80,21 @@ describe('renderMetrics — exposition format', () => {
     const text = renderMetrics(store, { getDaemonReadiness });
     expect(text).toContain('jinn_daemon_ready 0');
     expect(text).toContain('jinn_daemon_degraded 1');
+  });
+
+  it('reports jinn_degraded_recovery_running as 1/0 from the injected getter (#4311)', () => {
+    // The state #2425 introduced: an economic halt whose recovery loops failed
+    // to start. `jinn_daemon_degraded` reads 1 either way; this gauge is what
+    // lets an alert tell the two apart without scraping the daemon log.
+    expect(renderMetrics(store, { getDaemonReadiness, getDegradedRecoveryRunning: () => true }))
+      .toContain('jinn_degraded_recovery_running 1');
+    expect(renderMetrics(store, { getDaemonReadiness, getDegradedRecoveryRunning: () => false }))
+      .toContain('jinn_degraded_recovery_running 0');
+  });
+
+  it('omits jinn_degraded_recovery_running entirely when no getter is wired (bare/test server)', () => {
+    const text = renderMetrics(store, { getDaemonReadiness, getLoopSnapshot: loopSnapshot });
+    expect(text).not.toContain('jinn_degraded_recovery_running');
   });
 
   it('emits jinn_loop_admitted=1 for every loop when ready', () => {

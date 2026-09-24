@@ -99,6 +99,57 @@ describe("createLineLogger", () => {
     expect(JSON.parse(lines[0]!)).toEqual({ level: "debug", message: "real" });
   });
 
+  test("a reason field reaches the line while message stays the envelope's (#4551)", () => {
+    // The corpus warn sites carry their `describeError` detail under `reason`
+    // precisely because a top-level `message` field is the envelope's and is
+    // dropped above; this pins that the chosen key survives the line logger.
+    const { lines, write } = collect();
+    createLineLogger("warn", write).warn("corpus.mirror.lock-failed", {
+      reason: "Unable to prepare the mirror sync lock at /x.",
+    });
+    expect(JSON.parse(lines[0]!)).toEqual({
+      level: "warn",
+      message: "corpus.mirror.lock-failed",
+      reason: "Unable to prepare the mirror sync lock at /x.",
+    });
+  });
+
+  // #4552: JSON.stringify escapes C0 but passes DEL (U+007F) and C1
+  // (U+0080-U+009F) through raw, so peer-influenced text reaching a stderr
+  // tail could otherwise carry a CSI (U+009B) sequence. The logger boundary
+  // owns the strip for every emitter.
+  test("strips DEL and C1 from the message", () => {
+    const { lines, write } = collect();
+    createLineLogger("warn", write).warn("bad\u009b31m\u007fline\u0085");
+    expect(JSON.parse(lines[0]!).message).toBe("bad31mline");
+    expect(lines[0]!).not.toMatch(/[\u007f-\u009f]/);
+  });
+
+  test("strips DEL and C1 from string field values at every depth, keys untouched", () => {
+    const { lines, write } = collect();
+    createLineLogger("warn", write).warn("w", {
+      reason: "x\u009by",
+      nested: { deep: ["a\u007fb"] },
+      "k\u0085": "v\u0085",
+    });
+    expect(JSON.parse(lines[0]!)).toEqual({
+      level: "warn",
+      message: "w",
+      reason: "xy",
+      nested: { deep: ["ab"] },
+      "k\u0085": "v",
+    });
+    // Keys are program-authored, not peer-influenced: the one survivor is the key.
+    expect(lines[0]!.match(/[\u007f-\u009f]/g)).toHaveLength(1);
+  });
+
+  test("leaves C0 to JSON escaping", () => {
+    const { lines, write } = collect();
+    createLineLogger("warn", write).warn("esc\u001b");
+    expect(lines[0]!).toContain("\\u001b");
+    expect(JSON.parse(lines[0]!).message).toBe("esc\u001b");
+  });
+
   test("rejects cyclic field graphs", () => {
     const { lines, write } = collect();
     const cyclic: Record<string, unknown> = {};

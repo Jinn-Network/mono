@@ -5,8 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
+import { emitEnvelope } from '../../errors/envelope.js';
 import { findWiringByName } from '../../config/participation.js';
-import { loadConfig } from '../../config.js';
+import { requireConfigPathFromArgvSources, loadConfig } from '../../config.js';
 import {
   buildPredictionOperatorStatus,
   runPredictionSample,
@@ -179,8 +180,7 @@ interface ConfigShape {
 }
 
 function configPathFrom(argv: string[]): string {
-  const idx = argv.indexOf('--config');
-  return idx >= 0 && argv[idx + 1] ? argv[idx + 1]! : DEFAULT_CONFIG_PATH;
+  return requireConfigPathFromArgvSources(argv) ?? DEFAULT_CONFIG_PATH;
 }
 
 function readConfig(path: string): ConfigShape {
@@ -406,7 +406,22 @@ Output flags:
 
   async run(ctx) {
     const [subverb, ...rest] = ctx.argv;
-    const configPath = configPathFrom(ctx.argv);
+    let configPath: string;
+    try {
+      configPath = configPathFrom(ctx.argv);
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          hint: 'Pass a config path or omit --config.',
+          exampleCli: 'jinn solver-nets list --config ~/.jinn-operator/config.json',
+          details: { field: 'config' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
     const cfg = readConfig(configPath);
     const parsed = parseArgs({
       args: rest,

@@ -8,10 +8,10 @@
  * `../run/external-import.ts`, and the journal/record synthesis after it — is written against
  * exactly one shape.
  *
- * These readers deliberately do NOT reuse `parseCanonicalJsonl` (`./binary-item-bank.ts`). That
- * helper additionally requires each line to be byte-canonical JSON and the rows to be sorted and
- * unique by key, which is right for records we seal ourselves: byte-stability is what makes a
- * digest reproducible. An external harness's dump is never byte-canonical, and refusing it for
+ * These readers deliberately do NOT reuse the canonical JSONL parser used by fixture bank
+ * seeding. That helper additionally requires each line to be byte-canonical JSON and the rows to
+ * be sorted and unique by key, which is right for records we seal ourselves: byte-stability is
+ * what makes a digest reproducible. An external harness's dump is never byte-canonical, and refusing it for
  * that buys no safety — we re-serialize it into our own sealed records anyway. What DOES carry
  * safety is kept: UTF-8 without a BOM, LF endings, exactly one trailing LF, no blank lines, and a
  * refusal that names the 1-based row (and, for CSV, the column).

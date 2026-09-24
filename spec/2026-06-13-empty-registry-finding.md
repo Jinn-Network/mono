@@ -1,5 +1,7 @@
 # Finding — New operator hits an empty registry (issue #980)
 
+> **Status (2026-09-24): superseded by [docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md](../docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md).** The join flow and SolverNet registry this finding diagnoses are retired: join and leave retire with `joinedSolverNets` gating (§4.2), and claim policy with execution wiring becomes the only participation surface ([OPERATOR-APP-SPEC.md](../apps/operator-console/OPERATOR-APP-SPEC.md) §2.15), so a new operator claims work without joining a registry entry. For the current direction read [apps/operator-console/OPERATOR-APP-SPEC.md](../apps/operator-console/OPERATOR-APP-SPEC.md) §2.15.
+
 - **Date:** 2026-06-13
 - **Author:** Claude (spike for issue #980)
 - **Status:** Spike finding — needs-decision (recommends a fix; does not implement)

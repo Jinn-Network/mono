@@ -1,10 +1,12 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
-import type {
-  ContainerRunRequest,
+import {
+  DEFAULT_MAX_GRADER_REPORT_BYTES,
+  type ContainerRunRequest,
 } from '@jinn-network/task-execution-evaluator-adapters';
 import {
   ContainerTerminatedError,
+  DEFAULT_MAX_STDOUT_BYTES,
   STDERR_LOG_DELIMITER,
   buildDockerRunArgs,
   createDockerContainerRuntime,
@@ -225,6 +227,16 @@ describe('createDockerContainerRuntime', () => {
     const result = await runPromise;
     expect(Buffer.byteLength(result.stdout)).toBeLessThanOrEqual(8);
     expect(result.stdout).toBe('01234567');
+  });
+
+  it('bounds stdout at the same ceiling the package bounds the grader report at', () => {
+    // The two channels an untrusted grader container controls are its log (stdout, bounded here)
+    // and its report file (bounded in the package by DEFAULT_MAX_GRADER_REPORT_BYTES). The package
+    // comment on that constant states it mirrors this one, but they are independent literals in
+    // separate Yarn projects, so only this assertion holds them together. If it fails, one channel
+    // was widened without the other and the untrusted container has an OOM budget on the loose
+    // side that the tightened side's rationale no longer describes.
+    expect(DEFAULT_MAX_STDOUT_BYTES).toBe(DEFAULT_MAX_GRADER_REPORT_BYTES);
   });
 
   it('refuses to spawn when the deadline already elapsed, settling immediately', async () => {

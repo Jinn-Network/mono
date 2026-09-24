@@ -46,7 +46,7 @@ import {
   sealAnchorEvidence,
 } from "@jinn-network/trust-core";
 import type { AnchorEvidence, AnchorProofResult, AnchorProofSource } from "@jinn-network/trust-core";
-import { nodeCryptoAnchorPorts } from "@colophon-claims/verify";
+import { nodeCryptoAnchorPorts } from "@colophon-claims/check";
 import {
   anchorProofMediaType,
   encodeAnchorProofContent,
@@ -267,7 +267,7 @@ const ADMITTED_ACQUISITION_STATUSES: Readonly<Record<ProducibleAnchorProfile, re
  * producer that trusted its own material here would be grading its own homework. The honest
  * producer-side outcome for a well-formed RFC 3161 token is therefore `present`, never `verified`.
  */
-function verifyAcquiredProof(
+export function verifyAcquiredProof(
   profile: ProducibleAnchorProfile,
   subjectSha256: string,
   proofBytes: Uint8Array,
@@ -323,7 +323,7 @@ function assertWithinSpliceCatch(
   );
 }
 
-function requireVerifiable(
+export function requireVerifiable(
   profile: ProducibleAnchorProfile,
   result: AnchorProofResult,
   spliceCatch: { readonly closeAt: string } | undefined,
@@ -348,7 +348,7 @@ function existingAnchors(state: RunState, subject: AnchorSubject, provider: stri
   return (state.anchors ?? []).filter((anchor) => anchor.subject === subject && anchor.provider === provider);
 }
 
-function buildSource(profile: ProducibleAnchorProfile, deps: RunAnchorDeps): AnchorProofSource {
+export function buildSource(profile: ProducibleAnchorProfile, deps: RunAnchorDeps): AnchorProofSource {
   const injected = deps.sources?.[profile];
   if (injected !== undefined) return injected;
   const options = deps.fetch === undefined ? {} : { fetch: deps.fetch };

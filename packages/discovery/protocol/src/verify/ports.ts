@@ -1,6 +1,7 @@
 import type { AnnouncedItem, SourceCursor, SourceIdentity } from "../item.js";
+import type { AnchoredEntryHold } from "./outcomes.js";
 
-// Injected ports (design §10.3/§10.4): everything the two named verification
+// Injected ports (design §10.3-§10.5): everything the named verification
 // procedures need from the outside world. I/O, key resolution, clock reads,
 // and substrate lookups all arrive through these -- the protocol package
 // stays I/O-free (plan Global Constraints).
@@ -71,6 +72,15 @@ export interface HighWaterMark extends SourceCursor {
 export interface HighWaterMarkStore {
   get(source: SourceIdentity): Promise<HighWaterMark | undefined>;
   put(source: SourceIdentity, mark: HighWaterMark): Promise<void>;
+}
+
+/**
+ * Persists one anchored-entry tripwire per origin (§5.4 step 5). First
+ * recorded hold wins; a later visit only checks it.
+ */
+export interface AnchoredEntryHoldStore {
+  get(origin: string): Promise<AnchoredEntryHold | undefined>;
+  put(hold: AnchoredEntryHold): Promise<void>;
 }
 
 /** Projection derivation-consistency (§6.2). */

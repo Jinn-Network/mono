@@ -145,7 +145,36 @@ test('ignored public-root files do not alter profile bytes or counts while unign
   }
 });
 
-test('the profile manifest binds catalog digest, release group, lane, and exact package set', () => {
+test('a Git control name in a public surface directory is refused before it is attested', () => {
+  // The served-path law applies to every served document, and a document with no declared
+  // identity reaches the host exactly as publicly as one with a claim. The case that
+  // matters cannot take the claimed branch at all: `declaredClaim` returns null for
+  // anything not ending in `.json`, so a `.gitignore` committed into a declared
+  // publicSurface directory -- an ordinary developer act, not an attack -- can never HAVE a
+  // claim. Unguarded, it produced an attested, signed profile root serving
+  // `profiles/.gitignore`, and only the deploy bundle refused it: red on `next` after
+  // attestation instead of here, in platform verification.
+  for (const controlName of ['.gitignore', '.gitattributes', 'nested/.gitmodules']) {
+    const root = scratchRepo();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-control-out-'));
+    try {
+      const target = join(root, 'packages/evidence/protocol/profiles', controlName);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, '*.json\n', 'utf8');
+      assert.throws(
+        () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
+        /public surface document.*must name a canonical relative spec\.jinn\.network hosted path/u,
+        `${controlName} must be refused while the profile root is being built`,
+      );
+      assert.equal(existsSync(join(outDir, 'profiles', controlName)), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('the profile manifest binds catalog digest, release group, and exact package set, not lane', () => {
   const root = scratchRepo();
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
   try {
@@ -165,7 +194,7 @@ test('the profile manifest binds catalog digest, release group, lane, and exact 
       sha256: catalogDigest,
     });
     assert.equal(manifest.releaseGroup, 'platform-v1');
-    assert.equal(manifest.lane, 'stable');
+    assert.equal('lane' in manifest, false);
     const expectedPackages = loadCatalogPackages(root, { releaseGroup: 'platform-v1' })
       .map(({ name }) => name);
     assert.deepEqual(manifest.packages, expectedPackages);
@@ -185,6 +214,33 @@ test('the profile manifest binds catalog digest, release group, lane, and exact 
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('canary and stable builds of the same commit write identical served manifest bytes', () => {
+  const root = scratchRepo();
+  const canaryDir = mkdtempSync(join(tmpdir(), 'jinn-profile-canary-'));
+  const stableDir = mkdtempSync(join(tmpdir(), 'jinn-profile-stable-'));
+  try {
+    const catalogDigest = createHash('sha256')
+      .update(readFileSync(join(root, 'architecture/platform-packages.v1.json')))
+      .digest('hex');
+    const args = {
+      repoRoot: root,
+      commit: SHA,
+      catalogDigest,
+      releaseGroup: 'platform-v1',
+    };
+    buildProfileRoot({ ...args, outDir: canaryDir, lane: 'canary' });
+    buildProfileRoot({ ...args, outDir: stableDir, lane: 'stable' });
+    assert.equal(
+      readFileSync(join(canaryDir, 'manifest.json'), 'utf8'),
+      readFileSync(join(stableDir, 'manifest.json'), 'utf8'),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(canaryDir, { recursive: true, force: true });
+    rmSync(stableDir, { recursive: true, force: true });
   }
 });
 

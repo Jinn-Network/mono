@@ -1,5 +1,5 @@
 export * from './acquire.js';
-export * from './cache.js';
+export * from './artifact-retrieval.js';
 export * from './capture-meta.js';
 export * from './create-corpus.js';
 export * from './fetch-artifact.js';

@@ -139,4 +139,14 @@ describe("WorkspaceMetadataSchema", () => {
       WorkspaceMetadataSchema.safeParse({ storageVersion: 0, createdAt: FIXED_CREATED_AT }).success,
     ).toBe(false);
   });
+
+  test("accepts an optional entry-anchor skew allowance without moving storageVersion", () => {
+    expect(
+      WorkspaceMetadataSchema.safeParse({
+        storageVersion: WORKSPACE_STORAGE_VERSION,
+        createdAt: FIXED_CREATED_AT,
+        entryAnchorSkewAllowanceMs: 0,
+      }).success,
+    ).toBe(true);
+  });
 });

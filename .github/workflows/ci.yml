@@ -138,6 +138,14 @@ jobs:
           # what this lane verifies — and until #3573 none of them selected it. The
           # list is derived from the `portal:` graph and enforced by
           # `.github/scripts/portal-path-filters.test.mjs`; it is not hand-curated.
+          # The image lanes and the operator-facing deploy documents are what
+          # `operator/test/scripts/ghcr-image-references.test.ts` guards. A change
+          # confined to them — the exact shape of `af8bd65de`, which caused #2811
+          # — selected no lane before those four entries. `test-support/dockerfile-portals`
+          # is the shared walk those guards import (#4645); it is not a Yarn portal
+          # workspace, so the derived closure below cannot name it. Every line inside
+          # the array is a quoted pattern: `pack-workflows.test.ts` parses it and
+          # rejects anything else.
           patterns=(
             '^operator/'
             '^apps/operator-console/'
@@ -148,8 +156,15 @@ jobs:
             '^packages/.*/package\.json$'
             '^\.github/workflows/ci\.yml$'
             '^\.github/workflows/npm-publish\.yml$'
+            '^\.github/workflows/docker\.yml$'
+            '^\.github/workflows/operator-images\.yml$'
+            '^DEPLOY\.md$'
+            '^deploy/'
             '^\.github/scripts/npm-publish-workflow\.test\.mjs$'
+            '^\.github/scripts/docker-workflow\.test\.mjs$'
             '^\.github/scripts/operator-[^/]*\.test\.mjs$'
+            '^test-support/dockerfile-portals/'
+            '^packages/contract-abis/'
             '^packages/discovery/client/'
             '^packages/discovery/facts/offers/'
             '^packages/discovery/facts/task-execution/'
@@ -221,9 +236,16 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
       - run: corepack enable
       - name: Verify package inventory and portal graph
         run: node --test .github/scripts/operator-package-inventory.test.mjs
@@ -245,9 +267,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       # Foundry provides `anvil`, required by the test/_support/chain/*.test.ts
@@ -266,6 +295,8 @@ jobs:
       # This reuses the portal `dist/` trees `yarn typecheck` just built, so
       # it costs one extra `tsc` pass rather than a second stack build.
       - run: yarn typecheck:test
+      - run: yarn skill:check
+      - run: yarn generate:openapi:check
       # Late-mount lint: blocks app.METHOD(...) outside the startApiServer
       # call graph. Catches the Hono "matcher is already built" crash class
       # at code-review time. See jinn-mono-u34i.
@@ -302,6 +333,12 @@ jobs:
       # Unit tests must not inherit agent credentials. Remove them rather than
       # assigning empty values, which would override explicit test env files.
       - run: node --test ../.github/scripts/npm-publish-workflow.test.mjs
+      # Pins docker.yml's three #2811 controls: the release-tag allowlist on the
+      # manual-publish path, the semver validation that covers `client-v*` too,
+      # and the `env:` indirection keeping attacker-shaped values out of `${{ }}`
+      # inside a `run:` block. Nothing else in the repository exercises them —
+      # this lane is never dispatched from CI and the overlays pin by digest.
+      - run: node --test ../.github/scripts/docker-workflow.test.mjs
       - run: env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY yarn test
         env:
           SKIP_HL_TESTS: '1'
@@ -345,13 +382,22 @@ jobs:
     # it. Re-running here is duplicate load against the 20-concurrent-job ceiling
     # DR-2026-08-18-b names as the binding constraint, so `head_ref != 'next'`
     # excludes it. No other head is excluded, so hotfixes keep the full battery.
+    # A fork may name its branch `next` too; that residual is an accepted risk,
+    # recorded at `main-base-guard.yml`.
     if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || (github.base_ref == 'main' && github.head_ref != 'next'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       - run: yarn build
@@ -402,9 +448,18 @@ jobs:
         working-directory: apps/operator-console
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/lifecycle-notifications/yarn.lock
+            apps/operator-console/yarn.lock
       - run: corepack enable
         working-directory: .
       - name: Enable Yarn 4.13.0
@@ -445,9 +500,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       - run: yarn e2e:degraded-daemon-guard
@@ -467,9 +529,18 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            operator/yarn.lock
+            contracts/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       # `@jinn-network/*` resolve through `portal:` to `packages/*`, whose
@@ -511,9 +582,16 @@ jobs:
           df -h / | tail -1
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h / | tail -1
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: operator/yarn.lock
       - run: corepack enable
       - run: yarn install --immutable
       - run: yarn build

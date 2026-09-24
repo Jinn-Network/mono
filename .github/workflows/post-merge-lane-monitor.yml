@@ -1,0 +1,190 @@
+name: Post-merge lane monitor
+
+# Post-merge-only lanes on `next` have no pull request that can go red on their
+# behalf, and they publish to MUTABLE tags that consumers pull. A lane that stops
+# publishing therefore looks exactly like a lane with nothing to publish:
+# `Operator Images` was red for 47 consecutive runs across 25 days (2026-07-24 ->
+# 2026-08-17) and was found by an unrelated adversarial sweep, not by any signal
+# (#2809, #2812).
+#
+# This monitor turns that silence into the alert channel the repository already
+# uses for unattended failures — a labelled Issue, as in npm-publish-monitor.yml,
+# indexer-monitor.yml, and main-next-ancestor-check.yml. No new surface.
+#
+# The lanes it covers, the failure-vs-blip rule, and the issue body all live in
+# .github/scripts/post-merge-lane-health.mjs, down to each open/update/close
+# decision; this workflow only fetches Actions metadata and issues and performs the
+# API calls the module returns. Adding a lane means editing that registry and
+# the `workflows:` list below together — post-merge-lane-health.test.mjs pins the
+# two to each other.
+on:
+  workflow_run:
+    workflows: [Operator Images, SDK npm Publish, Layer Packages npm Publish, Stack npm Publish]
+    types: [completed]
+  # Bounds detection latency, and is the half that catches a SINGLE failure that no
+  # later push has recovered: that case only becomes alertable once its grace window
+  # elapses, with no completion event left to carry it.
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+# This trusted monitor never checks out or executes code from a monitored revision:
+# `workflow_run` and `schedule` both run this workflow from the default branch, `next`.
+# A change here or in its module is therefore live on the next run after it merges to
+# `next`; validate one on demand with a `workflow_dispatch` run, per
+# docs/runbooks/post-merge-lane-monitor.md.
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: post-merge-lane-monitor
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile post-merge lane alerts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Verify lane-health decision logic
+        run: node --test .github/scripts/post-merge-lane-health.test.mjs
+
+      - name: Open, update, or close lane alerts
+        uses: actions/github-script@v9
+        env:
+          ALERT_LABEL: automated:post-merge-lane-failure
+        with:
+          script: |
+            const {
+              MONITORED_LANES,
+              classifyLane,
+              planLaneReconcile,
+            } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/post-merge-lane-health.mjs`);
+
+            const repo = context.repo;
+            const label = process.env.ALERT_LABEL;
+            try {
+              await github.rest.issues.createLabel({
+                ...repo,
+                name: label,
+                color: 'D93F0B',
+                description: 'A post-merge-only lane on next is failing',
+              });
+            } catch (error) {
+              if (error.status !== 422) throw error;
+            }
+
+            // This script only performs API calls. Which alerts belong to a lane, and
+            // whether to open, update, defer, or close one, is decided by
+            // planLaneReconcile in the module, where it is unit-tested (#4260).
+            const reconcileLane = async (lane) => {
+              // A window, not the full history: the classification needs only the leading
+              // run streak and the newest success behind it. 100 is the most one request
+              // returns; the body says when the window did not reach a success.
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                ...repo,
+                workflow_id: lane.file,
+                branch: lane.branch,
+                event: 'push',
+                per_page: 100,
+              });
+              // Job lists are I/O for lanes that name a publishingJob (#4257).
+              // Fetching is gated to completed successes because failures stay
+              // decisive without jobs; job names and conclusions are classified
+              // only in classifyLane.
+              const jobsByRunId = {};
+              if (lane.publishingJob) {
+                for (const run of data.workflow_runs) {
+                  if (run.status === 'completed' && run.conclusion === 'success') {
+                    jobsByRunId[run.id] = await github.paginate(
+                      github.rest.actions.listJobsForWorkflowRun,
+                      { ...repo, run_id: run.id, per_page: 100 },
+                    );
+                  }
+                }
+              }
+              const verdict = classifyLane({
+                lane,
+                runs: data.workflow_runs,
+                now: Date.now(),
+                jobsByRunId,
+              });
+              const openAlerts = await github.paginate(
+                github.rest.issues.listForRepo,
+                { ...repo, state: 'open', labels: label, per_page: 100 },
+              );
+              // The 100 most recently updated closed alerts, read on every tick whether or
+              // not the plan consults them: one extra read per lane buys a driver that makes
+              // no decisions. The module states what a page this size can miss.
+              const { data: closedAlerts } = await github.rest.issues.listForRepo({
+                ...repo,
+                state: 'closed',
+                labels: label,
+                sort: 'updated',
+                direction: 'desc',
+                per_page: 100,
+              });
+
+              for (const action of planLaneReconcile({ lane, verdict, openAlerts, closedAlerts })) {
+                switch (action.kind) {
+                  case 'log':
+                    core[action.level](action.message);
+                    break;
+                  case 'comment':
+                    await github.rest.issues.createComment({ ...repo, issue_number: action.issue, body: action.body });
+                    break;
+                  case 'close':
+                    await github.rest.issues.update({
+                      ...repo,
+                      issue_number: action.issue,
+                      state: 'closed',
+                      state_reason: action.reason,
+                    });
+                    break;
+                  case 'update':
+                    await github.rest.issues.update({ ...repo, issue_number: action.issue, ...action.fields });
+                    break;
+                  case 'create': {
+                    const created = await github.rest.issues.create({
+                      ...repo,
+                      title: action.title,
+                      body: action.body,
+                      labels: [label],
+                    });
+                    core.warning(`Opened ${lane.workflow} alert #${created.data.number}.`);
+                    break;
+                  }
+                  default:
+                    throw new Error(`Unknown reconcile action: ${action.kind}`);
+                }
+              }
+            };
+
+            // Every lane is reconciled on every invocation, whichever lane's completion woke
+            // this run, so a dropped or out-of-order workflow_run delivery costs at most one
+            // scheduled tick. Lanes are isolated from each other too: this monitor exists
+            // because a silent guard is worse than none, so one lane's failed read must not
+            // stop the others from filing. Errors are collected and rethrown, leaving the run
+            // red rather than quietly incomplete.
+            const failures = [];
+            for (const lane of MONITORED_LANES) {
+              try {
+                await reconcileLane(lane);
+              } catch (error) {
+                core.error(`${lane.workflow}: reconciliation failed - ${error.message}`);
+                failures.push(`${lane.workflow}: ${error.message}`);
+              }
+            }
+            if (failures.length > 0) {
+              throw new Error(`Lane reconciliation failed:\n${failures.join('\n')}`);
+            }

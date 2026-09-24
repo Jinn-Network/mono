@@ -11,10 +11,27 @@ image; everything they share lives here.
 ## The base image
 
 `ghcr.io/jinn-network/operator` is the container-native base, built from
-`operator/Dockerfile` by [`.github/workflows/docker.yml`](../.github/workflows/docker.yml)
-on every published GitHub Release (tag `vX.Y.Z` or `client-vX.Y.Z`). The workflow
-pushes three tags: `:<version>`, `:sha-<short>`, and `:latest` (linux/amd64 +
-linux/arm64).
+`operator/Dockerfile` by two lanes:
+
+| Tag | Lane | Moves | Platforms |
+|---|---|---|---|
+| `:next`, `:canary-<short>` | [`operator-images.yml`](../.github/workflows/operator-images.yml) | every push to `next` | linux/amd64 |
+| `:<version>`, `:sha-<short>`, `:latest` | [`docker.yml`](../.github/workflows/docker.yml) | every published GitHub Release (tag `vX.Y.Z` or `client-vX.Y.Z`), or a manual `workflow_dispatch` run | linux/amd64 + linux/arm64 |
+
+The stable lane also takes a `workflow_dispatch` with a `version` input, so its
+tags can be republished without cutting a release — a release-only trigger is
+what turned one Dockerfile defect into a three-month `:latest` outage (#2811).
+A manual run is launched from the release tag itself, so `:<version>` and
+`:latest` carry the released commit whichever trigger produced them; the version
+input must match both that tag and `operator/package.json` at it. It applies to
+cuts made after this lands — `workflow_dispatch` runs the workflow file as it
+exists on the dispatched ref, and older tags carry no dispatch trigger.
+
+**The stable tags have not been published under this name yet.** `docker.yml`
+was repointed from `ghcr.io/jinn-network/client` to
+`ghcr.io/jinn-network/operator` while it was red, so `:latest` and `:<version>`
+are 404s until its first green run (#2811). Use `:next` or a `:canary-<short>`
+until then.
 
 The base is container-native after **#988**: its entrypoint drops root→node via
 gosu and chowns `$JINN_STATE_DIR`; it bakes the pinned `claude-code` CLI, `gosu`,
@@ -23,10 +40,18 @@ env-based auth (no `~/.claude.json` file), and `JINN_STATE_DIR=/data`; it ships
 The daemon owns the four former entrypoint workarounds — pidfile reclaim (#955),
 dotfile skip (#954), and state-dir derivation under `JINN_STATE_DIR` (#956).
 
+### `ghcr.io/jinn-network/client` — retired
+
+`client` is the base's former name. Its release tags are **frozen at 0.1.9**
+(2026-06-09); the canary lane kept pushing `:next` and `:canary-<sha>` there
+until the rename, and no lane pushes to it at all any more. Its tags stay resolvable so
+deployments pinned to them keep working; nothing new should reference it.
+`ghcr.io/jinn-network/operator` is the successor.
+
 ### Pulling the base
 
 The `ghcr.io/jinn-network/operator` package is **public**.
-An unauthenticated `docker pull ghcr.io/jinn-network/operator:latest` is the
+An unauthenticated `docker pull ghcr.io/jinn-network/operator:next` is the
 default path. So the overlays `FROM` it with **no registry auth** — nothing to
 wire on Railway/CI/local. This is the default path, and it matches the
 "anyone can run an operator" posture (the base bakes no secrets — auth is
@@ -44,7 +69,7 @@ Dockerfile, no registry pull, full rebuild per target — needs `operator/` +
 Each per-harness recipe is a ~4-line overlay:
 
 ```dockerfile
-ARG BASE_TAG=latest
+ARG BASE_TAG=next
 ARG BASE_IMAGE=ghcr.io/jinn-network/operator:${BASE_TAG}
 FROM ${BASE_IMAGE}
 RUN npm install -g <agent-cli>@<pinned-version>   # claude-code is already in the base
@@ -60,16 +85,19 @@ also chowns `/data` and drops root→node before seeding. All seed scripts end w
 `exec node dist/bin/jinn.js "$@"`, so the CMD tail (`run --config /data/config.json`)
 reaches the daemon.
 
-`BASE_TAG` must point to a base release that includes #988. Default is `latest`;
-pin it via a `BASE_TAG` Railway service variable or `[build.args]` in the
-recipe's `railway.toml`. CI also pins the base by **immutable digest** through the
+`BASE_TAG` must point to a base build that includes #988. Default is `next` —
+the rolling tag the canary lane republishes continuously, so a default-args
+`docker build` of an overlay always resolves. Pin it via a `BASE_TAG` Railway
+service variable or `[build.args]` in the recipe's `railway.toml`. CI also pins
+the base by **immutable digest** through the
 `BASE_IMAGE` build-arg (`--build-arg BASE_IMAGE=ghcr.io/jinn-network/operator@sha256:…`),
 welding overlay+base to one commit — see the canary lane below.
 
 > **Architecture:** the base + overlay images must be **`linux/amd64`** to run on
-> Railway/Fly. CI (`docker.yml`) publishes multi-arch (`linux/amd64,linux/arm64`),
-> so released images are fine. But a **hand-built single-arch image (e.g. `arm64`
-> from an Apple-Silicon `docker build`) fails to start on Railway** — the deploy
+> Railway/Fly. Both lanes publish `linux/amd64` (`docker.yml` also publishes
+> `linux/arm64`), so published images are fine. But a **hand-built single-arch
+> image (e.g. `arm64` from an Apple-Silicon `docker build`) fails to start on
+> Railway** — the deploy
 > goes `FAILED` with empty logs (the container can't exec). If you build locally
 > for a deploy, use `docker buildx build --platform linux/amd64 …`. (Verified
 > 2026-06-03: an arm64 launcher overlay `FAILED` on Railway; the amd64 rebuild
@@ -106,7 +134,7 @@ the canary needs its own pre-release images — built and **smoke-booted** per p
 to `next` by [`operator-images.yml`](../.github/workflows/operator-images.yml)
 (the container analogue of the npm `canary` dist-tag). On every push to `next` it:
 
-1. builds the base from the commit and publishes `client:{canary-<sha>, next}`;
+1. builds the base from the commit and publishes `operator:{canary-<sha>, next}`;
 2. builds each overlay **`FROM` that exact base digest** (overlay+base welded to
    one commit — never mismatched);
 3. **smoke-boots** each overlay with its baked default CMD and fails the build on
@@ -120,8 +148,9 @@ to `next` by [`operator-images.yml`](../.github/workflows/operator-images.yml)
 specific `:canary-<sha>`), keeping the same `/data` volume + seed env vars. No
 deploy-time build; the running container is the exact CI-smoke-tested artifact.
 
-- **Rollback:** repoint the tag to a known-good `:canary-<sha>` (atomic) or to
-  `:latest` (drops the test operator back to the release line).
+- **Rollback:** repoint the tag to a known-good `:canary-<sha>` (atomic). There
+  is no stable overlay tag to fall back to — publishing `operator-*` release
+  images is the deferred follow-up noted below.
 - **One-time:** the new `operator-launcher` / `operator-codex` GHCR packages must
   be **public** (like the base — see *Pulling the base*), or add a `read:packages`
   registry credential on the Railway service.
@@ -130,10 +159,11 @@ A **base-contract guard** (`JINN_BASE_CONTRACT` baked in the base, checked by ea
 seed script) fails loud if an overlay is ever run on a base too old for it — so a
 future contract drift surfaces as a clear message instead of `Unknown verb`.
 
-> Release operators are unchanged — they keep building `FROM client:latest`.
-> Moving them onto prebuilt `operator-*:latest` images (a stable lane) is a
-> planned follow-up; until then this workflow's release path is intentionally
-> omitted (those images would have no consumer).
+> Release operators are unchanged — they keep building from the base image
+> rather than a prebuilt overlay. Moving them onto prebuilt `operator-*:latest`
+> images (a stable overlay lane) is a planned follow-up; until then this
+> workflow's release path is intentionally omitted (those images would have no
+> consumer).
 
 ## The deploy contract
 
