@@ -295,6 +295,8 @@ jobs:
       # This reuses the portal `dist/` trees `yarn typecheck` just built, so
       # it costs one extra `tsc` pass rather than a second stack build.
       - run: yarn typecheck:test
+      - run: yarn skill:check
+      - run: yarn generate:openapi:check
       # Late-mount lint: blocks app.METHOD(...) outside the startApiServer
       # call graph. Catches the Hono "matcher is already built" crash class
       # at code-review time. See jinn-mono-u34i.
