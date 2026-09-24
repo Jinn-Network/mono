@@ -27,7 +27,7 @@
 // log/decisions/2026-08-18-merge-queue-on-next.md). One source of truth plus
 // one enforcement test makes that state unrepresentable.
 
-import { resolve } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 export const REQUIRED_CHECK_SET = Object.freeze([
@@ -136,7 +136,11 @@ function main() {
   process.stdout.write(`${requiredContexts().join('\n')}\n`);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     main();
   } catch (error) {
