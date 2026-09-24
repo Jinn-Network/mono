@@ -490,9 +490,9 @@ describe('independent public source sync', () => {
         throw new Error('pre-verifier origin check must not reach the verifier');
       },
     };
-    await expect(syncPublicSource({ ...source, state, verifier })).rejects.toMatchObject<Partial<ConsumerSyncError>>({
-      reason: 'source-head-origin-mismatch',
-    });
+    await expect(syncPublicSource({ ...source, state, verifier })).rejects.toMatchObject(
+      { reason: 'source-head-origin-mismatch' } satisfies Partial<ConsumerSyncError>,
+    );
     expect(state.checkpoint(SOURCE)).toBeUndefined();
     state.close();
   });
