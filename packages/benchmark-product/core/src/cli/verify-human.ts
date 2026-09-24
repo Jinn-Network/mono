@@ -1,4 +1,4 @@
-import type { AnchorSubjectReport, AnchorVerificationEntry, IntegrityAnchorsReport } from "@colophon-claims/verify";
+import type { AnchorSubjectReport, AnchorVerificationEntry, IntegrityAnchorsReport } from "@colophon-claims/check";
 import type { RunVerifyResult } from "../operations/verify.js";
 
 function evaluationNote(entry: AnchorVerificationEntry): string {
