@@ -46,3 +46,10 @@ export function moduleTouchesViem(
  * `isRpcAdjacent`. Empty on a healthy live tree.
  */
 export function findGraphCompletenessGaps(apiDir: string, srcRoot: string): string[];
+
+/**
+ * `api/` files with a raw error-to-string conversion that are neither
+ * `isRpcAdjacent` nor on the guard's `NON_RPC_API_ALLOWLIST`. Empty on a
+ * healthy live tree.
+ */
+export function findRawHitCompletenessGaps(apiDir: string, srcRoot: string): string[];

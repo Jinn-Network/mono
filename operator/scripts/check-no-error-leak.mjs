@@ -40,6 +40,16 @@
  * by it. If a future file starts talking to an RPC client directly, this
  * guard extends to it automatically (no allowlist edit needed) because the
  * check is import/usage-driven, not a file list.
+ *
+ * Completeness backstop (issue #4246): a file that reaches an RPC client
+ * only through an *injected port* — a structural type with no import edge,
+ * like `PluginPublicationReader` / `ArchiveReads` — is invisible to both the
+ * import-graph check (`findGraphCompletenessGaps`) and a future
+ * `INDIRECT_RPC_PATTERN` seam until someone remembers to add it. So every
+ * `api/` file with a raw error-to-string conversion must additionally be
+ * either `isRpcAdjacent` or named on `NON_RPC_API_ALLOWLIST` with a reason
+ * (`findRawHitCompletenessGaps`) — an unrecognized file fails the guard
+ * instead of passing silently.
  */
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -233,6 +243,96 @@ export function findGraphCompletenessGaps(apiDir, srcRoot) {
 const RAW_MESSAGE_PATTERN = /\.message\b|String\(\s*(e|err|error)\w*\s*\)/;
 const ALLOW_MARKER = 'lint:no-error-leak-allow';
 
+/**
+ * True when `line` is a raw error-to-string conversion this guard cares
+ * about: not an inline-allowed line, and not itself a call through one of
+ * the masking helpers (a *mention*, like a trailing comment, does not
+ * count — `RAW_MESSAGE_PATTERN` must still match a bare `.message` sitting
+ * next to it).
+ */
+function isRawHitLine(line) {
+  if (line.includes(ALLOW_MARKER)) return false;
+  if (MASKED_CALL_MARKERS.some((m) => line.includes(`${m}(`))) return false;
+  return RAW_MESSAGE_PATTERN.test(line);
+}
+
+/** True when any line in `text` is a raw error-to-string conversion. */
+function hasRawHit(text) {
+  return text.split('\n').some(isRawHitLine);
+}
+
+/**
+ * Non-RPC allowlist (issue #4246 review of PR #4663).
+ *
+ * `findGraphCompletenessGaps` closes the completeness gap for a file whose
+ * *import graph* statically reaches viem. It cannot close the gap for a file
+ * that reaches an RPC client only through an injected port — a structural
+ * type like `PluginPublicationReader` / `ArchiveReads` with no import edge
+ * to follow. `INDIRECT_RPC_PATTERN` names today's seams, but a *new* one
+ * stays invisible to both nets until someone remembers to extend that list.
+ *
+ * `findRawHitCompletenessGaps` is the backstop: every `src/api/**\/*.ts` file
+ * with a raw error-to-string conversion must be either `isRpcAdjacent` (and
+ * so already flagged directly by `findErrorLeaks` if unmasked) or named here
+ * with the reason it does not reach an RPC client. A new file that adds a
+ * raw conversion and is neither fails the guard, forcing a human decision
+ * instead of a silent pass. Each entry below was verified against the live
+ * source at review time — re-verify before removing an entry's justification.
+ */
+const NON_RPC_API_ALLOWLIST = new Map([
+  [
+    'claim-policy-endpoints.ts',
+    "zod issue.message from local claim-policy body validation; no RPC import",
+  ],
+  [
+    'daemon-token.ts',
+    'fs-only DAEMON_API_TOKEN keystore persistence failure message; no RPC import',
+  ],
+  [
+    'harness-status-endpoint.ts',
+    "deps.getStatus() (main.ts) hashes a local impl-state dir via hashImplStateDir; no RPC call",
+  ],
+  [
+    'hermes-doctor-endpoint.ts',
+    'fetch() to a literal OpenRouter URL with the key sent as a Bearer header, not in the URL',
+  ],
+  [
+    'loop-completion-build.ts',
+    "execFileSync('git', ...) local repo listing; not an RPC client",
+  ],
+  [
+    'operator-artifacts-endpoint.ts',
+    'local config-file read/write (readConfigFile/persistConfigValue) and Store reads; no RPC',
+  ],
+  [
+    'portfolio-v0-doctor.ts',
+    "loadApiWalletState uses viem/accounts (key signing material), not an RPC transport",
+  ],
+  [
+    'stop-hook.ts',
+    'zod issue.message from local stop-hook payload validation; no RPC import',
+  ],
+]);
+
+/**
+ * Backstop for the injected-port gap (issue #4246): every `src/api/**\/*.ts`
+ * file with a raw error-to-string conversion must be either `isRpcAdjacent`
+ * or named on `NON_RPC_API_ALLOWLIST`. Empty on a healthy live tree.
+ */
+export function findRawHitCompletenessGaps(apiDir, srcRoot) {
+  const gaps = [];
+  for (const file of walk(apiDir)) {
+    const text = readFileSync(file, 'utf8');
+    if (!hasRawHit(text)) continue;
+    if (isRpcAdjacent(text)) continue;
+    const rel = relative(apiDir, file).split('\\').join('/');
+    if (NON_RPC_API_ALLOWLIST.has(rel)) continue;
+    const reportedRel = relative(srcRoot, file).split('\\').join('/');
+    gaps.push(`operator/src/${reportedRel}`);
+  }
+  return gaps;
+}
+
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
@@ -262,13 +362,11 @@ export function findErrorLeaks(apiDir, srcRoot) {
     if (!isRpcAdjacent(text)) continue; // not RPC-adjacent — out of scope
 
     const rel = relative(srcRoot, file).split('\\').join('/');
+    // Already routed through a choke point — the fix, not the leak. A *call*
+    // is required, not a mention: `err.message, // masked by sanitizeErrorText`
+    // must still be flagged. See `isRawHitLine`.
     text.split('\n').forEach((line, idx) => {
-      if (line.includes(ALLOW_MARKER)) return;
-      // Already routed through a choke point — the fix, not the leak. A *call*
-      // is required, not a mention: `err.message, // masked by sanitizeErrorText`
-      // must still be flagged.
-      if (MASKED_CALL_MARKERS.some((m) => line.includes(`${m}(`))) return;
-      if (RAW_MESSAGE_PATTERN.test(line)) {
+      if (isRawHitLine(line)) {
         violations.push({ file: `operator/src/${rel}`, line: idx + 1, snippet: line.trim() });
       }
     });
@@ -299,6 +397,17 @@ function main() {
     console.error('  A new route that statically reaches viem needs a masking helper');
     console.error('  or an INDIRECT_RPC_PATTERN seam in the same change.\n');
     for (const file of gaps) console.error(`    ${file}`);
+    process.exit(1);
+  }
+
+  const rawHitGaps = findRawHitCompletenessGaps(API_DIR, SRC_ROOT);
+  if (rawHitGaps.length > 0) {
+    console.error('✗ api/ files with a raw error-to-string conversion are neither isRpcAdjacent');
+    console.error('  nor on the NON_RPC_API_ALLOWLIST (issue #4246).\n');
+    console.error('  Route the conversion through a masking helper (or an INDIRECT_RPC_PATTERN');
+    console.error('  seam), or add a named, justified NON_RPC_API_ALLOWLIST entry if the file');
+    console.error('  genuinely never reaches an RPC client.\n');
+    for (const file of rawHitGaps) console.error(`    ${file}`);
     process.exit(1);
   }
 

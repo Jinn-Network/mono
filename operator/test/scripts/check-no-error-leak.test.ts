@@ -17,6 +17,7 @@ import type { ErrorLeakViolation } from '../../scripts/check-no-error-leak.mjs';
 import {
   findErrorLeaks,
   findGraphCompletenessGaps,
+  findRawHitCompletenessGaps,
   isRpcAdjacent,
   moduleTouchesViem,
   parseRelativeImportSpecs,
@@ -207,5 +208,52 @@ describe('check-no-error-leak relative-import graph', () => {
     for (const name of names) {
       expect(flagged.has(name), `expected seam import to keep ${name} in scope`).toBe(true);
     }
+  });
+});
+
+/**
+ * The regression this backstop exists to catch (issue #4246 review of
+ * PR #4663): a route that reaches an RPC client only through an injected
+ * port has no import edge to `viem` for the graph check to follow, so it
+ * is invisible to `findGraphCompletenessGaps` too. A raw conversion in such
+ * a file must fail the guard, not pass silently, until a human either fixes
+ * it or names it on `NON_RPC_API_ALLOWLIST` with a reason.
+ */
+describe('check-no-error-leak raw-hit completeness (issue #4246)', () => {
+  function scanRawHitTree(files: Record<string, string>) {
+    const srcRoot = mkdtempSync(join(tmpdir(), 'jinn-leak-rawhit-'));
+    const apiDir = join(srcRoot, 'api');
+    mkdirSync(apiDir, { recursive: true });
+    for (const [name, body] of Object.entries(files)) writeFileSync(join(apiDir, name), body);
+    return findRawHitCompletenessGaps(apiDir, srcRoot);
+  }
+
+  it('fails on a synthetic injected-port file with a raw hit and no allowlist entry', () => {
+    const gaps = scanRawHitTree({
+      // No viem import (not isRpcAdjacent) and no NON_RPC_API_ALLOWLIST
+      // entry for this filename — the exact shape the guard used to miss.
+      'new-injected-reader-endpoint.ts':
+        "import type { SomeInjectedReader } from '../some-module/reader.js';\n" + RAW,
+    });
+    expect(gaps).toEqual(['operator/src/api/new-injected-reader-endpoint.ts']);
+  });
+
+  it('leaves a file with no raw hit alone', () => {
+    expect(scanRawHitTree({ 'clean.ts': 'export const x = 1;\n' })).toEqual([]);
+  });
+
+  it('leaves an isRpcAdjacent file alone (findErrorLeaks already covers it)', () => {
+    expect(
+      scanRawHitTree({ 'viem-route.ts': "import { createPublicClient } from 'viem';\n" + RAW }),
+    ).toEqual([]);
+  });
+
+  it('leaves a file named on NON_RPC_API_ALLOWLIST alone', () => {
+    // Same basename as a live, human-verified allowlist entry.
+    expect(scanRawHitTree({ 'stop-hook.ts': RAW })).toEqual([]);
+  });
+
+  it('live api/ tree: every raw hit is isRpcAdjacent or on the allowlist', () => {
+    expect(findRawHitCompletenessGaps(LIVE_API, LIVE_SRC)).toEqual([]);
   });
 });
