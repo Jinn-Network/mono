@@ -227,7 +227,7 @@
     },
     {
       "id": "vectors/source-head-revalidation-invalid-head-envelope/vector.json",
-      "sha256": "1b5f443705a4764babc2db3c5d87ac45bec3d9c6dc66978a1d722039c82e0d47"
+      "sha256": "decb8ee1b94a6f0efd733cff85ced737f243463d14cac085ecc41fdaf32cdaa7"
     },
     {
       "id": "vectors/source-head-revalidation-refresh-by-ceiling/vector.json",

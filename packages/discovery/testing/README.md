@@ -23,10 +23,12 @@ with the exported `vectorEnvelopeToWire`. `runSourceChainConformance` does so in
 `runSourceConformance` hands `refreshes[]` to the `ServeUnderTest` implementer raw, so that
 implementer converts before any production DSSE parsing.
 The `source-head` vector `source-head-revalidation-invalid-head-envelope` is the exception:
-its `headSignature` is already an unparseable wire object, and converting it would hide the
-`invalid-head-envelope` outcome. Handing over the raw form of every other envelope is
-refused, and downstream that refusal is reported as `unauthorized-signer`, so a test that
-skips the conversion can pass for the wrong reason.
+its `headSignature` is already an unparseable wire object, and converting it would mint valid
+base64 of the garbage payload plus a well-formed signature entry, reach the payload check, and
+report `head-payload-mismatch` instead, hiding the `invalid-head-envelope` outcome. Handing
+over the raw form of every other source-chain envelope is refused, and downstream that refusal
+is reported as `unauthorized-signer`, so a test that skips the conversion there can pass for
+the wrong reason.
 
 Depends only on `@jinn-network/record-discovery-protocol` — no cross-tree Jinn dependency.
 

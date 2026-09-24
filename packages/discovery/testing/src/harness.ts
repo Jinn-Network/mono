@@ -109,7 +109,8 @@ export function isParseErrorVector(vector: Vector): boolean {
  * object `verifySourceHead` must refuse as `invalid-head-envelope`. The rest of
  * the corpus stores legible fixture envelopes that become wire form only via
  * `vectorEnvelopeToWire`; converting this one would mint valid base64 of the
- * garbage and hide the parse failure.
+ * garbage payload plus a well-formed signature entry, reach the payload check,
+ * and report `head-payload-mismatch` instead, hiding the envelope outcome.
  */
 export function isInvalidHeadEnvelopeVector(vector: Vector): boolean {
   return vector.kind === "source-head" && (vector.expect as { status?: string }).status === "invalid-head-envelope";

@@ -253,7 +253,6 @@ describe("vector DSSE envelopes are wire-form only after vectorEnvelopeToWire", 
     return Object.entries(value).flatMap(([key, child]) => collectEnvelopes(child, path === "" ? key : `${path}.${key}`));
   }
   const envelopes = loadVectors()
-    .filter((vector) => !isInvalidHeadEnvelopeVector(vector))
     .flatMap((vector) =>
       collectEnvelopes(vector.input, "").map(({ label, envelope }) => ({ vector: vector.name, label, envelope })),
     );

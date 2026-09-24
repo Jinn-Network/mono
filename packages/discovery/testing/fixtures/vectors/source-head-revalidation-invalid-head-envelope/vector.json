@@ -1,7 +1,7 @@
 {
   "name": "source-head-revalidation-invalid-head-envelope",
   "kind": "source-head",
-  "description": "The presented head names the followed source and the seeded chain position, but the accompanying envelope is not a parseable wire DSSE envelope (`payload` is not canonical standard base64; `signatures` is empty). Revalidation must answer `invalid-head-envelope` (§10.5 \"Typed outcomes\") rather than folding the refusal into `unauthorized-signer` as §10.3 does. The harness must hand this envelope to production parsing as stored — `vectorEnvelopeToWire` would mint valid base64 of the garbage and hide the parse failure. The followed source's high-water mark is seeded at the same chain position, and the harness asserts it is identical after the call: the procedure adopts nothing, so no outcome may advance or clear it (§10.5).",
+  "description": "The presented head names the followed source and the seeded chain position, but the accompanying envelope is not a parseable wire DSSE envelope (`payload` is not canonical standard base64). Revalidation must answer `invalid-head-envelope` (§10.5 \"Typed outcomes\") rather than folding the refusal into `unauthorized-signer` as §10.3 does. The harness must hand this envelope to production parsing as stored -- converting it with `vectorEnvelopeToWire` would mint valid base64 of the garbage payload plus a well-formed signature entry, reach the payload check, and report `head-payload-mismatch`, hiding the envelope outcome. The followed source's high-water mark is seeded at the same chain position, and the harness asserts it is identical after the call: the procedure adopts nothing, so no outcome may advance or clear it (§10.5).",
   "input": {
     "seed": {
       "now": "2026-07-28T12:00:00.000Z",
@@ -41,7 +41,12 @@
     "headSignature": {
       "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
       "payload": "!!!not-base64!!!",
-      "signatures": []
+      "signatures": [
+        {
+          "keyid": "key-1",
+          "sig": "not-a-signature"
+        }
+      ]
     }
   },
   "expect": {
