@@ -303,6 +303,30 @@ describe("product documentation consistency", () => {
     expect([...new Set(stated)].sort()).toEqual(["@0.2"]);
   });
 
+  it("scopes the portable-verification pointer so /5 does not inherit the /2 kit (#4679)", () => {
+    const guide = read(bundleReadmePath);
+    const tableStart = guide.indexOf("\n## Portable verification\n");
+    expect(tableStart).toBeGreaterThan(-1);
+    const tableRows = guide.indexOf("\n| `bundle.json` format |");
+    expect(tableRows).toBeGreaterThan(tableStart);
+    const intro = guide.slice(tableStart, tableRows);
+    expect(intro).toContain("`benchmark-product-public-bundle/2`");
+    expect(intro).toContain("DSSE");
+    expect(intro).toContain("`schemas/`");
+    expect(intro).toContain("check/fixtures/public-bundle-conformance-v1/");
+    expect(intro).toContain("`benchmark-product-public-bundle/5`");
+    expect(intro).toContain("Evidence-native bundle v5");
+    expect(intro).toContain("EXTERNAL-VERIFICATION.md#evidence-native-bundle-v5");
+    expect(intro).toContain("seven-check");
+    expect(intro).toContain("`npx`");
+    const v5Start = intro.indexOf("`benchmark-product-public-bundle/5`");
+    expect(v5Start).toBeGreaterThan(-1);
+    const v5Rest = intro.slice(v5Start);
+    expect(v5Rest).not.toContain("DSSE");
+    expect(v5Rest).not.toContain("`schemas/`");
+    expect(v5Rest).not.toContain("public-bundle-conformance-v1");
+  });
+
   it("pins the per-format reader table to the reader's own constants", () => {
     // Issue #3519: the format-to-reader-line mapping is stated in each format section, in this
     // table, and again in the too-old subsection. Nothing pinned any of them, so a ninth format or
