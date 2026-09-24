@@ -78,8 +78,10 @@ resolving.
    Named refusals, commented on the submission issue, no silent skip:
    `fetch-failed`, `blocked-origin`, `unknown-format` (including a bundle the
    checker would accept but ingest cannot project — no second, unprojected
-   listing channel), `check-failed` (checker stdout and stderr, truncated to
-   a stated byte cap), `duplicate-identity`, `slug-collision`,
+   listing channel; ingest projects `/1`, `/5`, `/7` and `/8` only, and a
+   `/7` or `/8` bundle that seals no `presentation.json` reading record
+   refuses, because the issue form cannot supply one), `check-failed`
+   (checker stdout and stderr, truncated to a stated byte cap), `duplicate-identity`, `slug-collision`,
    `mutation-refused`, `npm-unavailable` (no fallback to ingest-only).
 
 4. **One board per official suite.** A bundle whose sealed method carries a
@@ -105,7 +107,11 @@ resolving.
    A human title derived from `suiteProtocolDisplayName` or the claim's
    method id is paint, not the key. Bundles that wear an official suite but
    do not project `suiteComparability` refuse `unknown-format` rather than
-   guess a coverage. The one report listed today, the LoCoMo judge report,
+   guess a coverage. Until a suite-bound bundle carries its sealed selection
+   bytes (follow-on 11.6), it refuses: the checker has nothing to re-derive
+   `suiteComparability` from (`check-failed`), and the site has no
+   `protocol` field to key a board on (`unknown-format`). The one report
+   listed today, the LoCoMo judge report,
    re-projects from its existing `public/reports/<slug>/bundle/` bytes; a
    bundle that cannot project a key, or for a suite its coverage, stays on
    `/reports/<slug>/` until a human resolves it. Re-projection reads only the
@@ -124,11 +130,21 @@ resolving.
    row; full text lives on the report page. Date is the sealed `run.json`
    `closeAt` when present, labeled as the run's close (the listed LoCoMo
    bundle seals no timestamp in `report.json` or its claim package); else
-   ingest time labeled "listed at". On a suite board the row shows coverage
+   the listing time, labeled "listed at". Ingest's `reportedAt`, today's
+   sort key, is not a listing time: `scripts/ingest-report.mjs` sets it from
+   `report.json` `reportedAt` for format `/1` and from the public reading
+   record's `sealedAt` for `/5`, `/7` and `/8`, and no ingest path writes a
+   listing time, so follow-on 11.1 adds one. For LoCoMo, `reportedAt` is
+   `2026-08-29T16:30:51Z`, the run's `closeAt` cut to seconds: the site
+   already shows that `closeAt` as the report's date, under the reading
+   record's name `sealedAt`. Whether `closeAt` should order the board at
+   all, and whether the listing-time fallback stays, are open (Open for the
+   operator). On a suite board the row shows coverage
    and execution conformance from `suiteComparability`, with a visible
    marker on any row short of `full`. The published checker does not yet
-   carry that field, so until follow-on 11.5 lands a suite-bound bundle
-   refuses `check-failed` (decision 8; What this does not yet prove).
+   carry that field, and the bundle does not yet carry the selection bytes
+   it would be re-derived from, so until follow-ons 11.5 and 11.6 land a
+   suite-bound bundle refuses (decision 8; What this does not yet prove).
    Venue is `venueHonesty.venue` from the
    sealed disclosure, not who filed the GitHub issue. Today's value is
    `"self-run"`. The three DR-2026-09-04 independence lines are quoted from
@@ -197,8 +213,8 @@ resolving.
      ingest-on-success PR. Lands in `colophon-claims/site`. Label
      `human-surface`.
    - **11.2** `feat(site)`: board pages keyed by suite, or by method digest.
-     Lands in `colophon-claims/site`. Label `human-surface`. Prerequisite:
-     11.5.
+     Lands in `colophon-claims/site`. Label `human-surface`. Prerequisites:
+     11.5 and 11.6.
    - **11.3** `feat(site)`: listing row fields as ruled. Lands in
      `colophon-claims/site`. Label `human-surface`.
    - **11.4** `feat(benchmark-product)`: `colophon board submit <locator>`
@@ -207,9 +223,17 @@ resolving.
      door. It does not upload bytes, run ingest, or write the site repo.
    - **11.5** `fix(benchmark-product)`: the published checker carries
      `suiteComparability` in its claim schema and re-derives it in
-     claim-consistency from the sealed suite-protocol selection and the
-     Matrix. Lands in `packages/benchmark-product/check`. Prerequisite of
-     11.2: until it lands, suite-bound bundles refuse `check-failed`.
+     claim-consistency from the sealed selection manifest the bundle carries
+     (11.6), the Run and the Matrix, never from the claim under test; the
+     source of `leaderboardSubmitReady` is open (Open for the operator).
+     Lands in `packages/benchmark-product/check`. Prerequisite of 11.2.
+   - **11.6** `feat(benchmark-product)`: a suite-bound bundle carries its
+     sealed selection bytes. Acceptance: a suite-bound run publishes a bundle
+     that carries its sealed selection bytes for every official protocol,
+     and the checker re-derives `suiteComparability` from the selection
+     manifest, the Run and the Matrix. Lands in `packages/benchmark-product`.
+     Prerequisite of 11.2, with 11.5: until both land, no suite board can
+     get its first row.
 
    Not filed from this design: the Colophon venue independence service
    (DR-2026-09-04 decision 2; named so row fields are ready, not designed);
@@ -254,8 +278,40 @@ resolving.
   listing gate, and no suite board can get its first row. A checker that
   merely tolerated the key would leave the coverage marker, the one on-page
   guard between a subset row and a full row, unchecked. Follow-on 11.5
-  (decision 8) is the prerequisite of 11.2; until it lands, suite-bound
-  bundles refuse `check-failed`.
+  (decision 8) is one prerequisite of 11.2; the next item names the other.
+- That a suite-bound bundle can be listed once 11.5 lands. For all seven
+  official suite protocols, the checker fix alone cannot open a suite board.
+  For Terminal-Bench 2.1 and 3.0, DeepSWE v1.1, SWE-bench Verified,
+  APEX-Agents and APEX-SWE-dev, the Run records the runtime selection and
+  the suite-protocol selection (`SUITE_PROTOCOL_SELECTION_ROLE`) only as
+  digests (`packages/benchmark-product/core/src/runtime/adapter.ts`), and
+  `packages/benchmark-product/core/src/bundle/materialize.ts` adds
+  `runtime-selection` bytes only for Inspect runtimes, so the bundle gives
+  the site no `protocol` field to key a board on (this includes
+  `/boards/terminal-bench-2.1`) and the checker nothing to re-derive from.
+  For Inspect eval, `publish` stops in `materialize.ts` before the checker
+  runs: it parses the runtime selection as an Inspect selection manifest
+  (`inspect-selection/1` to `/4`), which the Inspect eval manifest
+  (`inspect-eval-selection/1`) is not, and it requires every Task to carry
+  `payload.selectionManifestSha256`, while Inspect eval Tasks carry only
+  `sampleId` (`packages/benchmark-product/core/src/intake/inspect-eval.ts`).
+  For a full-coverage, conforming run of Terminal-Bench 2.1 or 3.0, DeepSWE
+  v1.1, SWE-bench Verified or APEX-Agents, core's `leaderboardSubmitReady`
+  turns on files core reads from the producing machine and the bundle does
+  not carry: ATIF trajectory files on the retained Harbor or Pier job, and
+  for DeepSWE also `reward.json`
+  (`packages/benchmark-product/core/src/runtime/suite-protocol/run-complete.ts`);
+  harness `report.json` files for SWE-bench Verified; Archipelago
+  `grades.json` for APEX-Agents. The checker rebuilds the whole claim and
+  compares bytes, and 11.5 forbids reading the key from the claim under
+  test, so 11.5's re-derivation cannot be met for those runs as first
+  written; the same flag also picks the suite limitation sentence on the
+  Report. Conformance reads the whole runtime selection manifest and the
+  Run, not the suite-protocol object alone (for Inspect eval: epochs,
+  Inspect version, solver, sample limit and run options, against the Run's
+  planned replicates). Follow-on 11.6 carries the selection bytes; 11.2
+  needs both 11.5 and 11.6. Where `leaderboardSubmitReady` comes from is
+  open (Open for the operator).
 - That a reader will not take a subset row for a full-suite result. One board
   per suite puts them side by side; the header reminder and the row marker
   state the difference, and they cannot make a reader read it.
@@ -330,6 +386,31 @@ resolving.
 - **Designing blob-hosting or the venue service in this record.** Named,
   not designed. Known LoCoMo git weight is not a design of hosting.
 
+## Open for the operator
+
+Recorded 2026-09-24 and not ruled here. The decisions above stand as
+written until the operator rules on each (spec §14 entries 10 to 12).
+
+- **Where `leaderboardSubmitReady` comes from.** Core derives it from files
+  the bundle does not carry, the checker may not read it from the claim
+  under test, and the same flag picks the suite limitation sentence on the
+  Report. Choices: carry that evidence in the bundle, naming which files
+  and under what, so the checker re-derives it; take the flag, and the
+  sentence it picks, out of what the checker rebuilds; or another source
+  the operator names.
+- **Whether `closeAt` should order the board.** `closeAt` is the claimant's
+  own clock at lock plus `closeAfterMs`, which the draft schema bounds only
+  as a positive integer, and a run that accounts every cell can collect
+  before `closeAt`, so a claimant can post-date a row to sit at the top of a
+  newest-first board at no cost. One option: order by the earlier of
+  `closeAt` and the listing time.
+- **Whether the listing-time fallback stays.** The Run record requires
+  `closeAt`, so every bundle with a `run.json` member has one; of the
+  formats ingest projects, only `/5` does not require a `run.json` member,
+  so only a `/5` bundle can reach the fallback. Keep it for `/5`, or drop
+  it. The earlier-of order above would need a listing time on every row
+  anyway.
+
 ## Ratification
 
 Proposed 2026-09-21 from design issue #3993. Stage 1 ruled the forks in
@@ -338,7 +419,12 @@ condenses those rulings. Revised 2026-09-23 to the operator's direction
 on #4715: decision 4 keys a board on the suite alone, and the split key is
 recorded under Alternatives rejected. Revised 2026-09-24 to record that the
 published checker does not yet carry `suiteComparability` (decision 8,
-follow-on 11.5). Ratified on code-owner approval of
+follow-on 11.5). Revised a second time 2026-09-24 to record that a
+suite-bound bundle does not carry its sealed selection bytes (decisions 4
+and 8, follow-on 11.6, now a second prerequisite of 11.2), that ingest's
+`reportedAt` is not a listing time (decision 5), how ingest treats a bundle
+it cannot project (decision 3), and three choices left open for the
+operator (Open for the operator). Ratified on code-owner approval of
 this record by the operator credential that did not author it.
 
 ## Amends
