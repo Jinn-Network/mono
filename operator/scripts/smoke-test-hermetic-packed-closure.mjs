@@ -12,7 +12,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -20,8 +19,23 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  assertFixtureLockfilePresent,
+  buildConsumerThirdPartyDependencies,
+  discoverPackageRoots,
+  firstPartyArchiveDependencies,
+  installPinnedGraph,
+  noLocalSpec,
+  packedClosurePackageNames,
+  packedOverlayInstallArgs,
+  readPackageJson,
+  requirePackageRoot,
+  sanitizedManifest,
+  writeConsumerPackageJson,
+} from './lib/hermetic-packed-closure.mjs';
 
-const clientRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const scriptsRoot = dirname(fileURLToPath(import.meta.url));
+const clientRoot = join(scriptsRoot, '..');
 const repoRoot = resolve(clientRoot, '..');
 const packagesRoot = join(repoRoot, 'packages');
 const closureRoot = mkdtempSync(join(tmpdir(), 'jinn-hermetic-packed-closure-'));
@@ -29,6 +43,11 @@ const archivesRoot = join(closureRoot, 'archives');
 const consumerRoot = join(closureRoot, 'consumer');
 const stagingRoot = join(closureRoot, 'staging');
 const productRoot = join(consumerRoot, 'product');
+// Every npm child uses a cache that starts empty for this run, so `--offline`
+// reaches only the tarballs `npm ci` fetched by lockfile integrity. A warm user
+// cache would otherwise let an offline install resolve a range from whatever
+// registry metadata it happens to hold.
+process.env.npm_config_cache = join(closureRoot, 'npm-cache');
 
 function run(command, args, context, options = {}) {
   const result = spawnSync(command, args, {
@@ -46,54 +65,6 @@ function run(command, args, context, options = {}) {
   return result;
 }
 
-function readPackageJson(root) {
-  return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-}
-
-function discoverPackageRoots(root, found = new Map()) {
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
-    const entryPath = join(root, entry.name);
-    if (!entry.isDirectory()) continue;
-    const manifestPath = join(entryPath, 'package.json');
-    try {
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      if (typeof manifest.name === 'string' && manifest.name.startsWith('@jinn-network/')) {
-        found.set(manifest.name, entryPath);
-      }
-    } catch {
-      discoverPackageRoots(entryPath, found);
-    }
-  }
-  return found;
-}
-
-function closurePackageNames(clientManifest, packageRoots) {
-  const pending = Object.keys(clientManifest.dependencies ?? {})
-    .filter((name) => name.startsWith('@jinn-network/'));
-  const names = new Set();
-  while (pending.length > 0) {
-    const name = pending.pop();
-    if (name === undefined || names.has(name)) continue;
-    const packageRoot = packageRoots.get(name);
-    if (packageRoot === undefined) {
-      throw new Error(`No local package root is available for ${name}.`);
-    }
-    names.add(name);
-    const manifest = readPackageJson(packageRoot);
-    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
-      if (dependency.startsWith('@jinn-network/')) pending.push(dependency);
-    }
-  }
-  return [...names].sort();
-}
-
-function noLocalSpec(value, context) {
-  if (typeof value === 'string' && /^(?:file|portal|workspace):/iu.test(value)) {
-    throw new Error(`${context} contains a forbidden local dependency specifier: ${value}`);
-  }
-}
-
 function assertNoForbiddenLocalSpecs(value, context) {
   if (typeof value === 'string') {
     noLocalSpec(value, context);
@@ -106,19 +77,6 @@ function assertNoForbiddenLocalSpecs(value, context) {
   if (value !== null && typeof value === 'object') {
     for (const item of Object.values(value)) assertNoForbiddenLocalSpecs(item, context);
   }
-}
-
-function sanitizedManifest(manifest, context, stripDevelopment = true) {
-  const sanitized = { ...manifest };
-  if (stripDevelopment) delete sanitized.devDependencies;
-  delete sanitized.resolutions;
-  delete sanitized.workspaces;
-  for (const [field, value] of Object.entries(sanitized)) {
-    if (/dependencies$/iu.test(field) && value !== null && typeof value === 'object') {
-      for (const specifier of Object.values(value)) noLocalSpec(specifier, context);
-    }
-  }
-  return sanitized;
 }
 
 function copyPackage(sourceRoot, targetRoot, context) {
@@ -136,9 +94,12 @@ function copyPackage(sourceRoot, targetRoot, context) {
 }
 
 function pack(root, destination, context) {
-  const args = ['pack', '--json', '--pack-destination', destination];
-  args.push('--ignore-scripts');
-  const output = run('npm', args, context, { cwd: root }).stdout;
+  const output = run(
+    'npm',
+    ['pack', '--json', '--pack-destination', destination, '--ignore-scripts'],
+    context,
+    { cwd: root },
+  ).stdout;
   const entries = JSON.parse(output);
   if (entries.length !== 1 || typeof entries[0]?.filename !== 'string') {
     throw new Error(`${context} did not produce exactly one tarball.`);
@@ -152,32 +113,8 @@ function stageAndPack(sourceRoot, packageName) {
   return pack(stagedRoot, archivesRoot, `pack ${packageName}`);
 }
 
-function installPackedArchives(archives, context, offline = false) {
-  run(
-    'npm',
-    [
-      'install',
-      '--no-save',
-      '--ignore-scripts',
-      '--package-lock=false',
-      '--no-audit',
-      '--no-fund',
-      ...(offline ? ['--offline'] : []),
-      ...archives,
-    ],
-    context,
-    { cwd: consumerRoot },
-  );
-}
-
-function writeConsumerManifest(dependencies, devDependencies = {}) {
-  const manifest = sanitizedManifest({
-    private: true,
-    type: 'module',
-    dependencies,
-    devDependencies,
-  }, 'clean consumer manifest', false);
-  writeFileSync(join(consumerRoot, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+function installPackedArchives(archives, context) {
+  run('npm', packedOverlayInstallArgs(archives), context, { cwd: consumerRoot });
 }
 
 function assertNoPersistedLocalSpecs(root) {
@@ -210,56 +147,42 @@ function assertInstalledUnderConsumer(packageName) {
 try {
   const packageRoots = discoverPackageRoots(packagesRoot);
   const clientManifest = readPackageJson(clientRoot);
-  const compileManifest = {
-    ...clientManifest,
-    dependencies: {
-      ...clientManifest.dependencies,
-      ...Object.fromEntries(
-        Object.entries(clientManifest.devDependencies ?? {})
-          .filter(([name]) => name.startsWith('@jinn-network/')),
-      ),
-    },
-  };
-  const names = closurePackageNames(compileManifest, packageRoots);
+  const names = packedClosurePackageNames(clientManifest, packageRoots);
 
   mkdirSync(archivesRoot, { recursive: true });
   mkdirSync(stagingRoot, { recursive: true });
   const archives = new Map();
+  const closureManifests = [];
   for (const name of names) {
-    const archive = stageAndPack(packageRoots.get(name), name);
-    archives.set(name, archive);
+    const packageRoot = requirePackageRoot(packageRoots, name);
+    archives.set(name, stageAndPack(packageRoot, name));
+    closureManifests.push(readPackageJson(packageRoot));
   }
 
   mkdirSync(consumerRoot, { recursive: true });
-  const closureDependencies = Object.fromEntries(names.map((name) => [
-    name,
-    readPackageJson(packageRoots.get(name)).version,
-  ]));
-  const runtimeExternalDependencies = Object.fromEntries(
-    Object.entries({
-      ...clientManifest.dependencies,
-      ...clientManifest.optionalDependencies,
-    }).filter(([name]) => !name.startsWith('@jinn-network/')),
+  const thirdParty = buildConsumerThirdPartyDependencies({
+    operatorManifest: clientManifest,
+    closureManifests,
+  });
+  writeConsumerPackageJson(consumerRoot, {
+    dependencies: {
+      ...thirdParty.dependencies,
+      ...firstPartyArchiveDependencies(consumerRoot, archives),
+    },
+    devDependencies: thirdParty.devDependencies,
+  });
+  installPinnedGraph({
+    run,
+    consumerRoot,
+    lockfileSource: assertFixtureLockfilePresent(scriptsRoot),
+  });
+  const closureDependencies = Object.fromEntries(
+    names.map((name, index) => [name, closureManifests[index].version]),
   );
-  const compilerDependencies = Object.fromEntries(
-    ['typescript', '@types/node', '@types/semver', '@types/ws']
-      .map((name) => [name, clientManifest.devDependencies?.[name]])
-      .filter(([, version]) => typeof version === 'string'),
-  );
-  writeConsumerManifest(runtimeExternalDependencies, compilerDependencies);
-  run(
-    'npm',
-    ['install', '--ignore-scripts', '--package-lock=false', '--no-audit', '--no-fund'],
-    'install dependency-only packed closure',
-    { cwd: consumerRoot },
-  );
-  installPackedArchives([...archives.values()], 'install dependency-only packed closure');
-  writeConsumerManifest({ ...runtimeExternalDependencies, ...closureDependencies }, compilerDependencies);
 
   for (const name of names) {
     assertInstalledUnderConsumer(name);
   }
-  assertNoPersistedLocalSpecs(consumerRoot);
 
   copyPackage(clientRoot, productRoot, '@jinn-network/operator');
   const tsc = join(consumerRoot, 'node_modules', '.bin', 'tsc');
@@ -283,13 +206,18 @@ try {
     'packed client',
   );
   rmSync(productRoot, { recursive: true, force: true });
-  writeConsumerManifest({
-    ...runtimeExternalDependencies,
-    ...closureDependencies,
-    '@jinn-network/operator': clientManifest.version,
-  }, compilerDependencies);
-  installPackedArchives([clientArchive], 'install packed client into clean closure', true);
+  // package.json still names the first-party archives, so the pinned closure
+  // satisfies the client's `@jinn-network/*` and third-party ranges offline.
+  installPackedArchives([clientArchive], 'install packed client into clean closure');
   assertInstalledUnderConsumer('@jinn-network/operator');
+  writeConsumerPackageJson(consumerRoot, {
+    dependencies: {
+      ...thirdParty.dependencies,
+      ...closureDependencies,
+      '@jinn-network/operator': clientManifest.version,
+    },
+    devDependencies: thirdParty.devDependencies,
+  });
   assertNoPersistedLocalSpecs(consumerRoot);
   const resolved = run(
     process.execPath,
