@@ -36,6 +36,23 @@ import {
 
 const EXAMPLE_CLI = 'JINN_PASSWORD=... jinn requester init';
 
+// `resolveCliPassword`'s generic no-password refusal names `jinn run` as a
+// third option, because that daemon entry point is the one place in this
+// codebase that auto-generates and persists a keystore password
+// (`main.ts`'s `~/.jinn-operator/keystore-password` write). `jinn requester
+// init` has no such auto-generation path -- it only ever reads an existing
+// password (env, --password-fd, or that same file if something else already
+// created it) -- so repeating `jinn run` here would be false, and it is
+// exactly the operator-daemon routing issue #2446 exists to keep a
+// requester's first-touch verb away from. Every other refusal
+// `resolveCliPassword` can return (bad/empty --password-fd) is specific and
+// requester-appropriate as-is.
+const NO_PASSWORD_MESSAGE = 'No keystore password found. Set JINN_PASSWORD, or pass --password-fd N.';
+
+function requesterPasswordMessage(message: string): string {
+  return message.includes('jinn run') ? NO_PASSWORD_MESSAGE : message;
+}
+
 export interface RequesterCommandDeps {
   loadConfig: typeof defaultLoadConfig;
   getConfigPathFromArgs: typeof defaultGetConfigPathFromArgs;
@@ -115,7 +132,7 @@ export function createRequesterCommand(deps: RequesterCommandDeps = PRODUCTION_D
       return emitEnvelope(
         {
           code: 'invalid_invocation',
-          message: password.message,
+          message: requesterPasswordMessage(password.message),
           hint: 'Choose a passphrase and set JINN_PASSWORD. It encrypts the keystore on this machine and is never sent anywhere.',
           exampleCli: EXAMPLE_CLI,
           details: { field: 'keystore password', expected: 'non-empty string via environment or fd' },

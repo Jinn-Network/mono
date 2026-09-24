@@ -67,7 +67,7 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     expect(result.fleet_state.services).toEqual([]);
   });
 
-  it('refuses one wei below the gate, and clears it at the gate itself', async () => {
+  it('refuses one wei below the gate', async () => {
     // Boundary test for the funding comparison itself (`masterBalance < required`):
     // one wei short must still refuse, proving the comparison is strict `<` and
     // not an off-by-one `<=`/rounding artifact that would let a requester through

@@ -4,13 +4,17 @@
  * The persona rule under test: nothing a requester reads on their first-touch
  * verb sends them to the operator daemon or the operator bootstrap.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRequesterCommand, PRODUCTION_DEPS, type RequesterCommandDeps } from '../../../src/cli/commands/requester.js';
 import requesterCommand from '../../../src/cli/commands/requester.js';
 import { CLI_COMMANDS } from '../../../src/cli/index.js';
 import { FleetBootstrapper } from '../../../src/earning/bootstrap.js';
 import { createDefaultFleetState } from '../../../src/earning/types.js';
 import type { FleetBootstrapResult } from '../../../src/earning/types.js';
+import { resolveCliPassword } from '../../../src/cli/password.js';
 import type { RpcNetworkPreflightResult } from '../../../src/preflight/rpc-network.js';
 import { makeCommandCtx } from '@test/cli.js';
 
@@ -66,6 +70,14 @@ function readyState(): FleetBootstrapResult {
 }
 
 describe('jinn requester init', () => {
+  const stateDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of stateDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('is registered as a public verb', () => {
     expect(CLI_COMMANDS.map((c) => c.name)).toContain('requester');
   });
@@ -165,6 +177,14 @@ describe('jinn requester init', () => {
 
     for (const argv of [['init'], ['bootstrap']]) {
       const fleet = createDefaultFleetState('base-sepolia');
+      // The real resolver against a genuinely empty state dir -- no
+      // JINN_PASSWORD, no --password-fd, no pre-existing keystore-password
+      // file -- is the actual first-touch refusal a requester with nothing
+      // set up yet sees. A stubbed resolver can't catch `resolveCliPassword`
+      // routing this refusal at `jinn run` (its shared "or run `jinn run` to
+      // auto-generate one" branch), which this verb must never repeat.
+      const emptyStateDir = mkdtempSync(join(tmpdir(), 'jinn-requester-nopass-'));
+      stateDirs.push(emptyStateDir);
       const cmd = createRequesterCommand({
         ...makeDeps({
           ok: false,
@@ -172,9 +192,9 @@ describe('jinn requester init', () => {
           fleet_state: { ...fleet, master_address: '0xMASTER' },
           funding: { master_address: '0xMASTER', eth_required: '1500000000000000', eth_balance: '0' },
         }),
-        resolveCliPassword: () => ({ ok: false as const, message: 'Set JINN_PASSWORD.' }),
+        resolveCliPassword,
       });
-      const { ctx, writes } = makeCommandCtx({ argv });
+      const { ctx, writes } = makeCommandCtx({ argv, env: { JINN_STATE_DIR: emptyStateDir } });
       await cmd.run(ctx);
       surfaces.push(writes.join(''));
 
