@@ -265,7 +265,7 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
      (Rulings).
    - **11.2** `feat(site)`: board pages keyed by suite, or by method digest.
      Lands in `colophon-claims/site`. Label `human-surface`. Prerequisites:
-     11.5, 11.6 and 11.8.
+     11.5, 11.6, 11.8 and 11.9.
    - **11.3** `feat(site)`: listing row fields as ruled. Lands in
      `colophon-claims/site`. Label `human-surface`.
    - **11.4** `feat(benchmark-product)`: `colophon board submit <locator>`
@@ -277,22 +277,23 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
      claim-consistency from the sealed selection manifest the bundle carries
      (11.6), the Run and the Matrix, never from the claim under test; for
      a full-coverage, conforming run of the five protocols 11.9 names, the
-     flag's re-derivation is 11.9's (Rulings).
+     flag's re-derivation is 11.9's, and the two land as one change
+     (Rulings).
      Lands in `packages/benchmark-product/check`. Prerequisite of 11.2.
    - **11.6** `feat(benchmark-product)`: a suite-bound bundle carries its
      sealed selection bytes. Acceptance: a suite-bound run publishes a bundle
      that carries its sealed selection bytes for every official protocol,
      and the checker re-derives `suiteComparability` from the selection
      manifest, the Run and the Matrix. Lands in `packages/benchmark-product`.
-     Prerequisite of 11.2, with 11.5 and 11.8: until all three land, no
-     suite board can get its first row.
+     Prerequisite of 11.2, with 11.5, 11.8 and 11.9: until all four land,
+     no suite board can get its first row.
    - **11.8** `feat(benchmark-product)`: a bundle `colophon publish` emits
      can be listed. Acceptance: a `/10` claim pins a published reader
      release that reads `/10`; the site's ingest projects `/10`; a `/10`
      bundle submitted through the front door lists with a public reading
      record that comes from the submitted bytes, with no `--presentation`.
      Lands in `packages/benchmark-product` and `colophon-claims/site`.
-     Label `human-surface`. Prerequisite of 11.2, with 11.5 and 11.6,
+     Label `human-surface`. Prerequisite of 11.2, with 11.5, 11.6 and 11.9,
      and of opening the front door: 11.1 may be built in parallel, but its
      workflow accepts submissions only after 11.8 lands (Rulings).
    - **11.9** `feat(benchmark-product)`: a suite-bound bundle carries the
@@ -304,8 +305,8 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
      `reward.json`; harness `report.json` files for SWE-bench Verified;
      Archipelago `grades.json` for APEX-Agents), and the published checker
      re-derives the flag, and the limitation sentence it selects, from
-     them cold. Lands in `packages/benchmark-product`. Not a prerequisite
-     of 11.1 or 11.2 (Rulings).
+     them cold. Lands in `packages/benchmark-product`, as one change with
+     11.5, so it is a prerequisite of 11.2 but not of 11.1 (Rulings).
 
    Not filed from this design: the Colophon venue independence service
    (DR-2026-09-04 decision 2; named so row fields are ready, not designed);
@@ -378,8 +379,8 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
   listing gate, and no suite board can get its first row. A checker that
   merely tolerated the key would leave the coverage marker, the one on-page
   guard between a subset row and a full row, unchecked. Follow-on 11.5
-  (decision 8) is one prerequisite of 11.2; the next item names a second,
-  and the item above names the third, 11.8.
+  (decision 8) is one prerequisite of 11.2; the next item names two more,
+  11.6 and 11.9, and the item above names the fourth, 11.8.
 - That a suite-bound bundle can be listed once 11.5 lands. For all seven
   official suite protocols, the checker fix alone cannot open a suite board.
   For Terminal-Bench 2.1 and 3.0, DeepSWE v1.1, SWE-bench Verified,
@@ -411,10 +412,10 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
   Run, not the suite-protocol object alone (for Inspect eval: epochs,
   Inspect version, solver, sample limit and run options, against the Run's
   planned replicates). Follow-on 11.6 carries the selection bytes; 11.2
-  needs 11.5, 11.6 and 11.8. The operator ruled that the bundle carry the
-  files `leaderboardSubmitReady` turns on, so the published checker
-  re-derives the flag cold: follow-on 11.9, which 11.2 does not need
-  (Rulings).
+  needs 11.5, 11.6, 11.8 and 11.9. The operator ruled that the bundle
+  carry the files `leaderboardSubmitReady` turns on, so the published
+  checker re-derives the flag cold: follow-on 11.9, which lands with 11.5
+  as one change (Rulings).
 - That a reader will not take a subset row for a full-suite result. One board
   per suite puts them side by side; the header reminder and the row marker
   state the difference, and they cannot make a reader read it.
@@ -500,9 +501,12 @@ The operator ruled on 2026-09-24 on the choices this record left open
 1. **`leaderboardSubmitReady` is re-derived cold from evidence the bundle
    carries.** The bundle carries the files core reads to decide the flag,
    so the published checker re-derives the flag, and the limitation
-   sentence it selects, cold: follow-on 11.9 (decision 8). 11.9 gates
-   neither the front door nor the board pages; it is not a prerequisite
-   of 11.1 or 11.2.
+   sentence it selects, cold: follow-on 11.9 (decision 8). Amended
+   2026-09-24 by the operator: 11.9 lands with 11.5, so it gates the board
+   pages but not the door. They land together because the not-ready
+   limitation sentences state specific reasons, such as coverage not being
+   the full official dataset, that would be false for those runs, and
+   `publish` runs the same checker.
 2. **Rows are ordered newest first by the earlier of the run's validated
    `closeAt` and the listing time** (decision 5). Taking the earlier means
    a claimant cannot date a row later than the moment it was listed.
@@ -514,7 +518,8 @@ The operator ruled on 2026-09-24 on the choices this record left open
 4. **Follow-on 11.8 gates the front door.** 11.1 may be built in
    parallel, but the door opens, meaning the workflow accepts
    submissions, only after 11.8 lands (decisions 3 and 8). 11.2's
-   prerequisites stay 11.5, 11.6 and 11.8.
+   prerequisites were then 11.5, 11.6 and 11.8; the amendment to ruling 1
+   adds 11.9.
 5. **The score is not a reader sort key.** Confirmed: a reader may
    re-sort by any column except the score (decision 5).
 
@@ -547,12 +552,15 @@ What this does not yet prove), and to read the row date only from a `run.json` t
 checker validated as a Run record (decision 5, Open for the operator,
 now Rulings). Revised a fifth time 2026-09-24 to record the operator's
 rulings of that date (Rulings): the bundle carries the evidence
-`leaderboardSubmitReady` turns on, as new follow-on 11.9, which gates
-neither 11.1 nor 11.2 (decision 8); the default order is the earlier of
+`leaderboardSubmitReady` turns on, as new follow-on 11.9 (decision 8);
+the default order is the earlier of
 the validated `closeAt` and the listing time, and the row shows the date
 that orders it (decisions 5 and 9); the listing-time fallback stays
 (decision 5); 11.8 gates the front door (decisions 3 and 8); and the
-score is not a reader sort key.
+score is not a reader sort key. Revised a sixth time 2026-09-24 to
+record the operator's amendment of ruling 1 (Rulings): 11.9 lands with
+11.5 as one change, so it gates the board pages (11.2) but not the door
+(decision 8, What this does not yet prove).
 Ratified on code-owner approval of this record by the
 operator credential that did not author it.
 
