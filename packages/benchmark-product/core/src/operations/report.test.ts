@@ -1077,7 +1077,7 @@ describe("portable public bundle", () => {
     expect(retry.ok, JSON.stringify(retry)).toBe(true);
     expect(digestNamedBundleDirs()).toHaveLength(1);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
-  }, 30_000);
+  });
 
   test("a fault before rename leaves no final bundle and no state advancement", async () => {
     const clock = makeClock();
