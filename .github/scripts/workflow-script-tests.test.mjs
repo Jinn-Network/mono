@@ -419,15 +419,22 @@ export function collectTestInvocations(workflowsRoot = workflowsDir) {
  * above cannot see: the invocation reads as a one-file batch no matter how many suites it actually
  * runs.
  *
- * This refuses the shape rather than parsing it. Nothing in the tree writes it — 8 folded scalars
- * today, none carrying `node --test` — and a folded-scalar reader inside this guard would be a
- * second YAML parser to keep honest for a shape that has never appeared (#3149).
+ * This refuses the shape rather than parsing it. Nothing in the tree writes it — the folded scalars
+ * it does carry include none with `node --test` — and a folded-scalar reader inside this guard
+ * would be a second YAML parser to keep honest for a shape that has never appeared (#3149).
  *
  * The body is every following line indented past the `run:` key itself, which is where both
  * `run: >-` and `- run: >-` put it. The key may also be quoted, carry an anchor, or have its
  * header alone on the following line (#4399); YAML folds every one of those to the same single
  * command, so every one is refused. The key column is read from the matched prefix rather than
  * `indexOf('run:')`, because a quoted key contains no `run:` substring.
+ *
+ * Three more shapes fold the same way (#4603): a tag, alone or after an anchor, between the key and
+ * the indicator (`run: !!str >-`); node properties on a next-line indicator (`&cmd >-`); and a plain
+ * or quoted scalar that continues onto a line indented past the key — inline (`run: node --test
+ * a.test.mjs` over an indented `b.test.mjs`) or as the body of a bare `run:`. YAML folds a plain
+ * scalar's lines exactly as it folds `>`, so a multi-line one carrying `node --test` is refused. A
+ * one-line plain scalar is a single command and is not.
  *
  * The header match takes an optional indentation indicator either side of the chomping indicator
  * and an optional trailing comment, because YAML writes all of `>2`, `>2-`, `>-2` and `>- # ...`.
@@ -443,11 +450,21 @@ export function foldedTestInvocations(workflowsRoot = workflowsDir) {
   for (const fileName of readdirSync(workflowsRoot).filter((name) => name.endsWith('.yml'))) {
     const lines = readFileSync(join(workflowsRoot, fileName), 'utf8').split('\n');
     for (let index = 0; index < lines.length; index += 1) {
-      const header = lines[index].match(/^(\s*(?:-\s+)?)(?:run|"run"|'run'):(?:\s*&\S+)?\s*(>[-+]?\d*[-+]?)?\s*(?:#.*)?$/u);
-      if (header === null) continue;
+      const header = lines[index].match(/^(\s*(?:-\s+)?)(?:run|"run"|'run'):(?:\s*[&!]\S+)*\s*(>[-+]?\d*[-+]?)?\s*(?:#.*)?$/u);
+      // A plain or quoted scalar starting on the key line. Its first character is none of `|`, `>`,
+      // `#`, nor a node property, so this never overlaps the header match above (#4603).
+      const inline = header === null
+        ? lines[index].match(/^(\s*(?:-\s+)?)(?:run|"run"|'run'):(?:\s+[&!]\S+)*\s+([^\s|>#&!].*)$/u)
+        : null;
+      if (header === null && inline === null) continue;
       // The key column comes from the matched prefix, not `indexOf('run:')`: a quoted key has no
       // `run:` substring, and a column of -1 never ends the body walk (#4399).
-      const keyColumn = header[1].length;
+      const keyColumn = (header ?? inline)[1].length;
+      if (inline !== null) {
+        const line = plainScalarTestInvocation(lines, index + 1, keyColumn, [{ code: inline[2], line: index + 1 }]);
+        if (line !== null) found.push({ workflow: fileName, line });
+        continue;
+      }
       let cursor = index + 1;
       if (header[2] === undefined) {
         // A bare `run:` (or `run: &anchor`) is a folded header only if the indicator sits alone on
@@ -456,11 +473,23 @@ export function foldedTestInvocations(workflowsRoot = workflowsDir) {
         // parser-dependent (YAML 1.2 and js-yaml reject it; the libyaml family folds it), and this
         // gate takes the false red over the under-read, so it is refused too (#4562). One less
         // indented than the key is invalid everywhere. `|` there is a literal scalar and a mapping
-        // key there is the `defaults.run:` block; neither is refused (#4399).
+        // key there is the `defaults.run:` block; neither is refused (#4399). The indicator may carry
+        // its own node properties (`&cmd >-`, `!!str >-`), and anything else indented past the key
+        // is a plain scalar body, which folds exactly as `>` does (#4603).
         while (cursor < lines.length && withoutCommentLine(lines[cursor]).trim() === '') cursor += 1;
         if (cursor >= lines.length) continue;
-        if (!/^\s*>[-+]?\d*[-+]?\s*(?:#.*)?$/u.test(lines[cursor])) continue;
-        if (lines[cursor].match(/^\s*/u)[0].length < keyColumn) continue;
+        const next = lines[cursor];
+        const nextColumn = next.match(/^\s*/u)[0].length;
+        if (!/^\s*(?:[&!]\S+\s+)*>[-+]?\d*[-+]?\s*(?:#.*)?$/u.test(next)) {
+          const scalarBody = nextColumn > keyColumn
+            && !/^\s*(?:[&!]\S+\s+)*\|/u.test(next)
+            && !/^\s*-(?:\s|$)/u.test(next)
+            && !/^\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'):(?:\s|$)/u.test(next);
+          const line = scalarBody ? plainScalarTestInvocation(lines, cursor, keyColumn, []) : null;
+          if (line !== null) found.push({ workflow: fileName, line });
+          continue;
+        }
+        if (nextColumn < keyColumn) continue;
         cursor += 1;
       }
       for (; cursor < lines.length; cursor += 1) {
@@ -474,6 +503,24 @@ export function foldedTestInvocations(workflowsRoot = workflowsDir) {
     }
   }
   return found;
+}
+
+/**
+ * The 1-based line of the first `node --test` in a plain (or quoted) `run:` scalar that spans more
+ * than one line, or `null`. `content` holds the part already on the key line, if any; the body is
+ * every following non-blank, non-comment line indented past the key, which YAML folds into the same
+ * single command. A one-line scalar is one command and is left to `collectTestInvocations` (#4603).
+ */
+function plainScalarTestInvocation(lines, start, keyColumn, content) {
+  const body = [...content];
+  for (let cursor = start; cursor < lines.length; cursor += 1) {
+    const code = withoutCommentLine(lines[cursor]);
+    if (code.trim() === '') continue;
+    if (code.match(/^\s*/u)[0].length <= keyColumn) break;
+    body.push({ code, line: cursor + 1 });
+  }
+  if (body.length < 2) return null;
+  return body.find(({ code }) => /\bnode\s+--test\b/u.test(code))?.line ?? null;
 }
 
 export function findOrphanedScriptTests(scriptsRoot = scriptsDir, workflowsRoot = workflowsDir) {
@@ -709,6 +756,54 @@ test('a folded run scalar is refused with its header on the next line, behind an
     const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-negative-'));
     try {
       writeFileSync(join(fixture, 'plain.yml'), [...lines, ''].join('\n'));
+      assert.deepEqual(foldedTestInvocations(fixture), [], name);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  }
+});
+
+// Three more shapes YAML folds into one command that the header match did not refuse (#4603): a
+// tag between key and indicator, node properties on the next-line indicator, and a plain or quoted
+// scalar continued onto a more-indented line — inline or under a bare `run:`. A plain multi-line
+// scalar folds exactly like `>`, so `collectTestInvocations` under-reads it the same way.
+test('a tagged header, a propertied next-line indicator, and a multi-line plain scalar are refused', () => {
+  const shapes = [
+    { name: 'tag before header', lines: ['      - run: !!str >-', '          node --test x.test.mjs', '          y.test.mjs'], line: 5 },
+    { name: 'anchor and tag before header', lines: ['      - run: &cmd !!str >-', '          node --test x.test.mjs', '          y.test.mjs'], line: 5 },
+    { name: 'anchor on the next-line indicator', lines: ['      - run:', '          &cmd >-', '          node --test x.test.mjs', '          y.test.mjs'], line: 6 },
+    { name: 'tag on the next-line indicator', lines: ['      - run:', '          !!str >-', '          node --test x.test.mjs', '          y.test.mjs'], line: 6 },
+    { name: 'inline plain scalar', lines: ['      - run: node --test x.test.mjs', '          y.test.mjs'], line: 4 },
+    { name: 'inline plain scalar, invocation on the continuation', lines: ['      - run: cd operator &&', '          node --test x.test.mjs y.test.mjs'], line: 5 },
+    { name: 'inline double-quoted scalar', lines: ['      - run: "node --test x.test.mjs', '          y.test.mjs"'], line: 4 },
+    { name: 'named step, inline plain scalar', lines: ['      - name: Test', '        run: node --test x.test.mjs', '          y.test.mjs'], line: 5 },
+    { name: 'bare run: then plain lines', lines: ['      - run:', '          node --test x.test.mjs', '          y.test.mjs'], line: 5 },
+  ];
+  for (const { name, lines, line } of shapes) {
+    const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-shape-'));
+    try {
+      writeFileSync(join(fixture, 'folded.yml'), ['jobs:', '  verify:', '    steps:', ...lines, ''].join('\n'));
+      assert.deepEqual(foldedTestInvocations(fixture), [{ workflow: 'folded.yml', line }], name);
+      assert.equal(collectTestInvocations(fixture).flatMap(({ files }) => files).includes('y.test.mjs'), name.includes('continuation'), name);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  }
+
+  // A one-line plain scalar is one command, and a bare `run:` over a single plain line folds
+  // nothing; a mapping or a literal under a bare `run:` is not a scalar body at all.
+  for (const { name, lines } of [
+    { name: 'single-line plain run', lines: ['      - run: node --test x.test.mjs y.test.mjs', '        env:', '          A: b', '      - run: node --test z.test.mjs'] },
+    { name: 'named single-line plain run', lines: ['      - name: Test', '        run: node --test x.test.mjs', '        env:', '          A: b'] },
+    { name: 'bare run: over one plain line', lines: ['      - run:', '          node --test x.test.mjs y.test.mjs', '      - run: echo hi'] },
+    { name: 'multi-line plain scalar without node --test', lines: ['      - run: echo one', '          two', '      - run: node --test z.test.mjs'] },
+    { name: 'tagged literal', lines: ['      - run: !!str |', '          node --test x.test.mjs', '          node --test y.test.mjs'] },
+    { name: 'bare run: then tagged literal', lines: ['      - run:', '          !!str |', '          node --test x.test.mjs', '          node --test y.test.mjs'] },
+    { name: 'defaults.run mapping', lines: ['  defaults:', '    run:', '      shell: bash', '      working-directory: operator'] },
+  ]) {
+    const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-shape-negative-'));
+    try {
+      writeFileSync(join(fixture, 'plain.yml'), ['jobs:', '  verify:', '    steps:', ...lines, ''].join('\n'));
       assert.deepEqual(foldedTestInvocations(fixture), [], name);
     } finally {
       rmSync(fixture, { recursive: true, force: true });

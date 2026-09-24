@@ -11,15 +11,19 @@
 // metadata and never executes code from the monitored revision. Precedents:
 // npm-publish-monitor.yml, indexer-monitor.yml, main-next-ancestor-check.yml.
 //
-// Scope: this monitor decides from the RUN-LEVEL conclusion only. A run that
-// concludes `success` while its publishing job was skipped reads healthy here — the
-// stack canary publish is gated on `vars.PLATFORM_CANARY_PUBLISH_ENABLED`
-// (stack-npm-publish.yml, DR-2026-08-17-d), and while that flag is off the lane is
-// deliberately not publishing rather than failing. Resolving jobs per run, the way
-// npm-publish-monitor.yml does for one lane, is a separate decision (#4257).
+// Scope: this monitor decides from the RUN-LEVEL conclusion, except on a lane that
+// names a `publishingJob`. There a `success` is decisive only when that job actually
+// ran: a skipped `stack-canary` (the flag-off path in stack-npm-publish.yml,
+// DR-2026-08-17-d) is non-decisive, the same as a cancelled run or a path-filter
+// skip. A success with no job list, an empty list, or no matching job is also
+// non-decisive (fail-closed). Failures, timeouts, and startup_failure stay
+// decisive without jobs. The driver fetches those jobs; this module classifies.
 //
-// This module is pure so the classification and the issue body are unit-testable
-// without GitHub; .github/workflows/post-merge-lane-monitor.yml is a thin driver.
+// This module is pure so the classification, the issue body, and every
+// open/update/close decision are unit-testable without GitHub.
+// .github/workflows/post-merge-lane-monitor.yml is a thin driver: it fetches runs
+// and alerts, asks `planLaneReconcile` what to do, and performs those API calls in
+// order without deciding anything itself (#4260).
 
 /** Label carried by every alert this monitor opens. */
 export const ALERT_LABEL = 'automated:post-merge-lane-failure';
@@ -51,7 +55,8 @@ export const GRACE_MS = 24 * 60 * 60 * 1000;
  * that is in neither. Add a lane here and to the monitor's `workflow_run` list
  * together — the same test pins the two to each other.
  *
- * @type {ReadonlyArray<{workflow: string, file: string, branch: string, staleArtifact: string}>}
+ * @type {ReadonlyArray<{workflow: string, file: string, branch: string, staleArtifact: string,
+ *   publishingJob?: string}>}
  */
 export const MONITORED_LANES = Object.freeze([
   Object.freeze({
@@ -81,6 +86,7 @@ export const MONITORED_LANES = Object.freeze([
     branch: 'next',
     staleArtifact:
       'The canary dist-tags for the stack packages keep resolving to the last versions this lane published.',
+    publishingJob: 'stack-canary',
   }),
 ]);
 
@@ -179,6 +185,32 @@ function day(run) {
   return Number.isFinite(at) ? new Date(at).toISOString().slice(0, 10) : 'unknown';
 }
 
+function jobsForRun(jobsByRunId, runId) {
+  if (jobsByRunId == null) return undefined;
+  if (jobsByRunId instanceof Map) {
+    return jobsByRunId.get(runId) ?? jobsByRunId.get(String(runId));
+  }
+  return jobsByRunId[runId] ?? jobsByRunId[String(runId)];
+}
+
+function publishingJobRan(jobs, publishingJob) {
+  if (!Array.isArray(jobs)) return false;
+  const matrixPrefix = `${publishingJob} (`;
+  return jobs.some(
+    (job) =>
+      (job.name === publishingJob || (typeof job.name === 'string' && job.name.startsWith(matrixPrefix))) &&
+      job.conclusion !== 'skipped',
+  );
+}
+
+function isDecisiveRun(run, lane, jobsByRunId) {
+  if (run.status !== 'completed' || run.event !== 'push' || run.head_branch !== lane.branch) return false;
+  if (!DECISIVE.has(run.conclusion)) return false;
+  if (FAILING.has(run.conclusion)) return true;
+  if (!lane.publishingJob) return true;
+  return publishingJobRan(jobsForRun(jobsByRunId, run.id), lane.publishingJob);
+}
+
 /**
  * Classify one lane's health from its recent runs.
  *
@@ -191,21 +223,17 @@ function day(run) {
  * `RUN_WINDOW` so the returned list is the whole history. The last-success row still
  * names a run only when one is in the window.
  *
- * @param {{lane: {branch: string}, runs: ReadonlyArray<object>, now: number}} input
- *   `runs` is any window of that lane's runs, in any order.
+ * @param {{lane: {branch: string, publishingJob?: string}, runs: ReadonlyArray<object>, now: number,
+ *   jobsByRunId?: Map<string|number, ReadonlyArray<object>> | Record<string, ReadonlyArray<object>>}} input
+ *   `runs` is any window of that lane's runs, in any order. `jobsByRunId` is consulted only
+ *   when `lane.publishingJob` is set; run ids may be numbers or strings.
  * @returns {{state: 'healthy'|'unknown'|'wait'|'alert', confidence?: 'confirmed'|'unconfirmed',
  *   consecutiveFailures: number, observedRuns: number, windowBounded: boolean,
  *   latestRun?: object, firstFailure?: object, lastSuccess?: object}}
  */
-export function classifyLane({ lane, runs, now }) {
+export function classifyLane({ lane, runs, now, jobsByRunId }) {
   const decisive = runs
-    .filter(
-      (run) =>
-        run.status === 'completed' &&
-        run.event === 'push' &&
-        run.head_branch === lane.branch &&
-        DECISIVE.has(run.conclusion),
-    )
+    .filter((run) => isDecisiveRun(run, lane, jobsByRunId))
     .sort((a, b) => b.run_number - a.run_number);
 
   const lastSuccess = decisive.find((run) => run.conclusion === 'success');
@@ -317,4 +345,109 @@ export function renderRecovery({ lane, verdict }) {
     throw new Error(`renderRecovery called for a ${verdict.state} lane: ${lane.workflow}`);
   }
   return `${lane.workflow} recovered on \`${lane.branch}\` in ${verdict.lastSuccess.html_url}. Closing.`;
+}
+
+const log = (level, message) => ({ kind: 'log', level, message });
+
+/**
+ * Every action one lane's reconciliation takes, in the order the driver must perform them
+ * (#4260). The driver executes each and decides nothing:
+ *
+ * - `{ kind: 'log', level: 'info'|'notice'|'warning', message }`
+ * - `{ kind: 'comment', issue, body }`
+ * - `{ kind: 'close', issue, reason: 'completed'|'not_planned' }`
+ * - `{ kind: 'update', issue, fields: { title?, body? } }`
+ * - `{ kind: 'create', title, body }` — the driver adds the alert label and logs the new number.
+ *
+ * `openAlerts` is the full open listing for the alert label and `closedAlerts` the most recently
+ * updated closed page, both raw: alerts are identified here by their marker, never by title,
+ * because a title prefix is only unambiguous while no lane name extends another, and the listing
+ * also returns pull requests, which must never be treated as alerts. The lowest-numbered open
+ * alert is canonical; any others are duplicates.
+ *
+ * @param {{lane: object, verdict: object, openAlerts: ReadonlyArray<object>,
+ *   closedAlerts: ReadonlyArray<object>}} input
+ * @returns {Array<object>}
+ */
+export function planLaneReconcile({ lane, verdict, openAlerts, closedAlerts }) {
+  const open = openAlerts.filter((issue) => isAlertFor(lane, issue)).sort((a, b) => a.number - b.number);
+
+  if (verdict.state !== 'alert') {
+    if (open.length === 0) return [log('info', `${lane.workflow}: ${verdict.state}.`)];
+    // Only a proven recovery closes an alert. A `wait` verdict is a lane that is still red
+    // and merely not yet re-confirmed, and an `unknown` verdict is a window with no decisive
+    // run in it; neither is evidence of health.
+    if (verdict.state !== 'healthy') {
+      return [log('info', `${lane.workflow}: ${verdict.state}; leaving ${open.length} alert(s) open.`)];
+    }
+    return open.flatMap((alert) => [
+      { kind: 'comment', issue: alert.number, body: renderRecovery({ lane, verdict }) },
+      { kind: 'close', issue: alert.number, reason: 'completed' },
+      log('notice', `Closed ${lane.workflow} alert #${alert.number}.`),
+    ]);
+  }
+
+  const { title, body } = renderAlert({ lane, verdict });
+  const marker = parseMarker(body);
+  const [canonical, ...duplicates] = open;
+  if (!canonical) {
+    // A hand-closed alert whose marker still names the current failing run attempt has
+    // already been seen by a human: filing again now would only re-post it every tick. The
+    // next failing run, or a failing re-run, changes the marker and files afresh. A
+    // recovery-closed match is the same contract: the closed issue's marker must name this
+    // tick's failing run attempt. That is not "whenever the success that closed it no longer
+    // decides." If that success is a re-run of the alerted run and is itself re-run (in
+    // progress or cancelled), an older failure can become latest and file a short-lived new
+    // alert; the next healthy tick closes it. Staying quiet is right only when the current
+    // failing attempt is still the one the closed alert named.
+    //
+    // Only the page of closed alerts the driver read is searched: if more than that were
+    // updated after the matching one, the deferral is missed and one extra alert is filed.
+    // With a 100-issue page that needs 100 alert updates within one failing run's life.
+    const closed = closedAlerts.find(
+      (issue) => isAlertFor(lane, issue) && sameFailingRun(parseMarker(issue.body), marker),
+    );
+    if (closed) {
+      return [
+        log(
+          'info',
+          `${lane.workflow}: alert #${closed.number} was closed for run ${marker.runId} attempt ${marker.attempt}; deferring to the next failing run.`,
+        ),
+      ];
+    }
+    return [{ kind: 'create', title, body }];
+  }
+
+  // A comment is posted only when the latest failing run attempt or the confidence changed;
+  // a human retitle is repaired silently. A note a human added to the body survives until
+  // one of those changes rewrites it.
+  const actions = [];
+  const update = planAlertUpdate({ issue: canonical, title, body });
+  if (update === 'rewrite') {
+    actions.push(
+      { kind: 'comment', issue: canonical.number, body },
+      { kind: 'update', issue: canonical.number, fields: { title, body } },
+      log('warning', `Updated ${lane.workflow} alert #${canonical.number}.`),
+    );
+  } else if (update === 'retitle') {
+    actions.push(
+      { kind: 'update', issue: canonical.number, fields: { title } },
+      log('notice', `Restored the title of ${lane.workflow} alert #${canonical.number}.`),
+    );
+  } else {
+    actions.push(log('info', `${lane.workflow} alert #${canonical.number} is current.`));
+  }
+
+  for (const duplicate of duplicates) {
+    actions.push(
+      {
+        kind: 'comment',
+        issue: duplicate.number,
+        body: `Duplicate ${lane.workflow} alert; consolidated into #${canonical.number}.`,
+      },
+      { kind: 'close', issue: duplicate.number, reason: 'not_planned' },
+      log('notice', `Closed duplicate ${lane.workflow} alert #${duplicate.number}.`),
+    );
+  }
+  return actions;
 }
