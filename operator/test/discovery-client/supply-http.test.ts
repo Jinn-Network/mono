@@ -174,9 +174,19 @@ describe('DiscoveryClient.getCurrentSupply', () => {
     });
   });
 
-  it('tags a Zod decoder rejection as invalid_request', async () => {
+  it('tags a Zod decoder rejection as invalid_response, distinct from invalid_request', async () => {
+    // The indexer answered; the body just doesn't decode against this
+    // client's schema — a version-skew signal where the OPERATOR is the
+    // stale side (#4235), not a caller/config mistake like a malformed
+    // discovery.url or the indexer's own 4xx refusal.
     await expect(
       clientFor({ ...available, schemaVersion: 0 }).client.getCurrentSupply({ chainId: 84532 }),
+    ).rejects.toMatchObject({ code: 'invalid_response' });
+  });
+
+  it('tags a response chainId mismatch as invalid_request, not invalid_response', async () => {
+    await expect(
+      clientFor({ ...available, chainId: 999 }).client.getCurrentSupply({ chainId: 84532 }),
     ).rejects.toMatchObject({ code: 'invalid_request' });
   });
 

@@ -739,12 +739,20 @@ export function createHttpDiscoveryClient(
       throw new DiscoveryUnavailableError(`Supply endpoint response parse error: ${String(error)}`, error);
     }
     const parsed = CurrentSupplyResponseSchema.safeParse(body);
-    if (!parsed.success || parsed.data.chainId !== args.chainId) {
-      const detail = parsed.success
-        ? `response chainId ${parsed.data.chainId} does not match ${args.chainId}`
-        : z.prettifyError(parsed.error);
+    if (!parsed.success) {
+      // The indexer answered; its body just doesn't decode against this
+      // client's schema. That is a version-skew signal — the indexer is
+      // current and the operator is the stale side — not a caller/config
+      // mistake, so it gets its own code rather than `invalid_request`.
       throw new DiscoveryUnavailableError(
-        `Supply endpoint returned invalid evidence: ${detail}`,
+        `Supply endpoint returned invalid evidence: ${z.prettifyError(parsed.error)}`,
+        undefined,
+        'invalid_response',
+      );
+    }
+    if (parsed.data.chainId !== args.chainId) {
+      throw new DiscoveryUnavailableError(
+        `Supply endpoint returned invalid evidence: response chainId ${parsed.data.chainId} does not match ${args.chainId}`,
         undefined,
         'invalid_request',
       );

@@ -145,14 +145,26 @@ Examples:
         result = await deps.createDiscoveryClient({ url: config.discovery.url })
           .getCurrentSupply({ chainId });
       } catch (error) {
-        const invalid = error instanceof DiscoveryUnavailableError && error.code === 'invalid_request';
+        const code = error instanceof DiscoveryUnavailableError ? error.code : undefined;
+        // `invalid_response` (a decode rejection) means the indexer answered
+        // and is current; the operator's own client schema is the stale
+        // side, so the hint must point at upgrading the client, not at the
+        // indexer or its config. `invalid_request` covers a malformed
+        // discovery.url, a non-positive chainId, or the indexer's own 4xx
+        // refusal — a caller/config problem, so the hint names both
+        // discovery.url and the configured network (chainId is derived from
+        // network, never set directly).
+        const invalid = code === 'invalid_request' || code === 'invalid_response';
+        const hint = code === 'invalid_response'
+          ? 'Upgrade @jinn-network/operator to match this indexer, or point discovery.url at an indexer on the same release.'
+          : invalid
+            ? 'Fix discovery.url or the configured network; this indexer will not answer that request for the chain network derives.'
+            : 'Retry when the configured discovery indexer is reachable and current.';
         emitEnvelope(
           {
             code: invalid ? 'invalid_invocation' : 'transient_error',
             message: `Supply lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-            hint: invalid
-              ? 'Fix discovery.url or the requested chain; this indexer will not answer that request.'
-              : 'Retry when the configured discovery indexer is reachable and current.',
+            hint,
             exampleCli: 'jinn supply',
             details: { chainId },
           },

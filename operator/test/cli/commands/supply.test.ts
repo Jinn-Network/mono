@@ -199,7 +199,7 @@ describe('jinn supply', () => {
     expect(source).not.toMatch(/(?:wallet|daemon|mcp|store|chain-client|viem)/iu);
   });
 
-  it('maps invalid_request to invalid_invocation (exit 11)', async () => {
+  it('maps invalid_request to invalid_invocation (exit 11) with a hint naming discovery.url and network', async () => {
     const loadConfig = vi.fn(() => ({
       network: 'testnet',
       discovery: { mode: 'http', url: 'https://indexer.example' },
@@ -216,6 +216,42 @@ describe('jinn supply', () => {
     const { envelopes, exits } = await runCommand(command);
     expect(exits).toEqual([11]);
     expect(envelopes[0]).toMatchObject({ code: 'invalid_invocation', exitCode: 11 });
+    // #4235: chainId is derived from the config's `network`, not set
+    // directly, so the 4xx/config hint must name `network`, not just "the
+    // requested chain".
+    const hint = (envelopes[0] as { hint: string }).hint;
+    expect(hint).toContain('discovery.url');
+    expect(hint).toContain('network');
+  });
+
+  it('maps invalid_response (a decoder rejection) to invalid_invocation with an upgrade hint, not the 4xx hint', async () => {
+    // #4235: a Zod decoder rejection means the indexer answered and is
+    // current — the operator's own client is the stale side. The 4xx hint
+    // ("fix discovery.url or the configured network") names the wrong
+    // service for this case, so it must get a distinct hint that says to
+    // upgrade the client instead.
+    const command = createSupplyCommand({
+      loadConfig: (() => ({
+        network: 'testnet',
+        discovery: { mode: 'http', url: 'https://indexer.example' },
+      })) as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({
+        getCurrentSupply: async () => {
+          throw new DiscoveryUnavailableError('response has an unrecognized field', undefined, 'invalid_response');
+        },
+      }),
+    });
+    const { envelopes, exits } = await runCommand(command);
+    expect(exits).toEqual([11]);
+    expect(envelopes[0]).toMatchObject({ code: 'invalid_invocation', exitCode: 11 });
+    const hint = (envelopes[0] as { hint: string }).hint;
+    expect(hint).toContain('@jinn-network/operator');
+    expect(hint).toContain('Upgrade');
+    // Distinct from the 4xx/config hint, which opens by telling the operator
+    // to fix discovery.url or the network — the wrong instruction when the
+    // indexer itself is the current, correctly-answering side.
+    expect(hint).not.toMatch(/^Fix discovery\.url/u);
   });
 
   it('gates on discovery.mode "http" with discovery.url before touching the network (invalid_invocation, exit 11)', async () => {
