@@ -81,9 +81,10 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
    Named refusals, commented on the submission issue, no silent skip:
    `fetch-failed`, `blocked-origin`, `unknown-format` (including a bundle the
    checker would accept but ingest cannot project — no second, unprojected
-   listing channel; ingest projects `/1`, `/5`, `/7` and `/8` only, and a
-   `/7` or `/8` bundle that seals no `presentation.json` reading record
-   refuses, because the issue form cannot supply one), `check-failed`
+   listing channel; a format ingest does not project (`/1`, `/5`, `/7`,
+   `/8` today; `/10` once 11.8 lands) refuses, and so does a `/7` or `/8`
+   bundle that seals no `presentation.json` reading record, because the
+   issue form cannot supply one), `check-failed`
    (checker stdout and stderr, truncated to a stated byte cap), `duplicate-identity`, `slug-collision`,
    `mutation-refused`, `npm-unavailable` (no fallback to ingest-only).
 
@@ -166,6 +167,13 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
    `scripts/ingest-grouped-report.mjs`, takes it from a hand-typed
    `--reported-at`, and `lib/reports.ts` renders and sorts on that value
    too; no ingest path writes a listing time, so follow-on 11.1 adds one.
+   A row's listing time is when the listing workflow ran ingest for it,
+   recorded in its data file; a report listed before that field existed
+   takes the committer time of the first `colophon-claims/site` `main`
+   commit that carried its data file. For the LoCoMo report that is merge
+   commit `94b8cb84a6` (site PR #9) at 2026-09-01T13:12:25Z, and its
+   validated `closeAt` (2026-08-29T16:30:51.384Z) is the earlier, so the
+   row keeps the date the site shows today.
    For LoCoMo, `reportedAt` is
    `2026-08-29T16:30:51Z`, the run's `closeAt` cut to seconds: the site
    already shows that `closeAt` as the report's date, under the reading
