@@ -72,9 +72,11 @@ before that walk (#4596):
   (settlement may still reference it); terminals inside the retention window; journals whose
   terminal time is missing, unparseable, or in the future.
 
-The prune never rewrites history and never deletes another attempt's files. After it runs,
-the number of directories the rehydration walk inspects is the retained set, not unbounded
-historical terminals.
+The prune never rewrites history and never deletes another attempt's files. This bounds only
+terminal attempts that never delivered. A delivered attempt (one carrying `meta/delivery.sealed`)
+is retained indefinitely: nothing in this package removes a delivery checkpoint, so delivered
+attempt directories accumulate without bound until a settlement-release signal exists. That
+signal, and the retention policy it would enable, are not yet defined.
 
 ## Never touches
 

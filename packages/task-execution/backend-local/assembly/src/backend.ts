@@ -2463,7 +2463,12 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
    * remains for settlement to read, and (3) the authoritative terminal time is
    * a real past timestamp older than `terminalAttemptRetentionMs` (default
    * seven days). Nonterminal attempts are never touched. Unparseable or future
-   * terminal times fail closed and keep the directory.
+   * terminal times fail closed and keep the directory. This bounds only
+   * terminal attempts that never delivered: a delivered attempt keeps its
+   * `delivery.sealed` checkpoint forever, since nothing in this package
+   * removes one, so this method retains it indefinitely regardless of age.
+   * That retention is deliberate until a settlement-release signal is
+   * defined; no such signal exists yet.
    */
   private pruneExpiredTerminalAttempts(): void {
     const attemptsRoot = join(this.config.stateRoot, "attempts");

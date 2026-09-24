@@ -980,6 +980,10 @@ describe("terminal attempt directory retention (#4596)", () => {
     expect(await remainingUuids(root)).toEqual([future, live, recent, referenced].slice().sort());
   });
 
+  // Scope: this only covers never-delivered terminals (planted below with state
+  // "failed", no `delivery.sealed`). A delivered terminal keeps its checkpoint
+  // forever and is not pruned, so it is not part of what "stays bounded" asserts
+  // here; see the README's "Terminal attempt directory retention" section.
   test("rehydration directory scan stays bounded after expired terminals are pruned", async () => {
     const root = await stateRoot("terminal-retention-bound");
     const live = "00000000-0000-4000-8000-000000000010";
