@@ -102,10 +102,15 @@ const NARRATED_CONTROL_SIGNS: readonly { readonly label: string; readonly patter
 const DATA_BEARING = /<(li|dd|dt|td|th|details)\b[^>]*>[\s\S]*?<\/\1>/giu;
 const VERBATIM = /<(style|script|pre|code)\b[^>]*>[\s\S]*?<\/\1>/giu;
 /**
- * Every HTML element whose content is a block of text a page author writes, not only the ones the
- * page renders today: a tag missing here would be in neither corpus -- not reviewed, and not
- * reported by `unreviewedReportProse` either -- so one more heading level would walk prose past
- * every rule without a trace (issue #4291).
+ * The tags `AUTHORED` actually matches: `p`, `h1`–`h6`, `caption`, `figcaption`, and
+ * `blockquote`. That is not every HTML element that can carry a sentence. Grouping-content
+ * and form-caption tags that can still sit in neither corpus — not reviewed, and not
+ * reported by `unreviewedReportProse` — include `address` and `legend`. A `<summary>`
+ * outside `<details>` is the same shape (`summary` is reported only via `AUTHORED_OR_SUMMARY`
+ * after the strip). Bare `li` / `dt` / `dd` / `td` / `th` text is already called out in the
+ * `DATA_BEARING` note. Staying true if a later revision renders an `<address>` or
+ * `<legend>` means naming those silent tags here rather than claiming the regex is complete
+ * (issue #4644).
  */
 const AUTHORED = /<(p|h[1-6]|caption|figcaption|blockquote)\b[^>]*>([\s\S]*?)<\/\1>/giu;
 /** `AUTHORED`'s tags plus `summary`, so a stripped span reports both kinds it can hide. */

@@ -55,7 +55,6 @@
   "test/cli/ceremony.test.ts": 2,
   "test/cli/commands/balance.test.ts": 1,
   "test/cli/commands/conformance.test.ts": 2,
-  "test/cli/commands/doctor.test.ts": 5,
   "test/cli/commands/evidence.test.ts": 3,
   "test/cli/commands/fleet-retire.test.ts": 2,
   "test/cli/commands/fleet-scale.test.ts": 1,

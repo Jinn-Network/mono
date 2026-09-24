@@ -241,10 +241,10 @@ const maxDirectoryCandidates = 64;
 // every child with `flatMap` and checking the length afterwards still materializes
 // N^K candidates for K nested variables of N values before a single cap returns, so a
 // 1.4 KB block of four nested `for` loops ran for seconds and a 5 KB one for hours —
-// the crash the cap was meant to prevent, converted into a hang. Two rules keep the
-// walk linear in the input: a level stops at the first candidate past the cap, and a
-// child that expands to nothing ends its parent at once — an overflowed inner level
-// therefore propagates up without a sibling being expanded. The second rule is also a
+// the crash the cap was meant to prevent, converted into a hang. The in-level cap
+// stops that materialization. Linearity of the walk is the other cut: a child that
+// expands to nothing ends its parent at once — an overflowed inner level therefore
+// propagates up without a sibling being expanded. That second cut is also a
 // correctness fix on its own. A child that expands to nothing is underivable, and an
 // underivable child makes its parent underivable too: keeping the siblings turned
 // `for d in a \`x\`; do (cd $d && yarn install); done` into a confident `a/yarn.lock`
@@ -725,11 +725,10 @@ function shellLoopValues(run) {
   const loopPattern = /(?:^|\n)\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;\n]+);\s*do/gu;
   for (const match of commands.matchAll(loopPattern)) {
     const entries = match[2].trim().split(/\s+/u).map(unquote).filter(Boolean);
-    // Leaving the variable unset makes expansion yield nothing, which the caller
-    // reports as "could not derive". A glob (`for d in packages/*`) is a directory
-    // set only the runner can enumerate, so emitting `packages/*/yarn.lock` as a
-    // required path would name something no workflow can ever satisfy.
-    if (entries.some((entry) => /[$*?[\]{}]/u.test(entry))) continue;
+    // Glob / substitution / brace values are refused at expansion (`expandShellWorkingDirectories`
+    // returns nothing for them), the same cut a command substitution already takes. Collecting
+    // them here and dropping them later is equivalent to skipping the loop; skipping here would
+    // let a revert of the expansion refusal go green.
     values.set(match[1], entries);
   }
   return values;
@@ -1400,22 +1399,18 @@ jobs:
 
 test('guard rejects a cache dependency path that is a symlink rather than a lockfile', () => {
   withFixture(({ fixtureRoot, fixtureWorkflows }) => {
-    // `statSync` follows the link and reports the target file, which would satisfy
-    // the very containment check the path assertion above it exists to enforce.
-    const outside = mkdtempSync(join(tmpdir(), 'jinn-workflow-yarn-cache-outside-'));
-    try {
-      writeFileSync(join(outside, 'yarn.lock'), 'outside lockfile\n');
-      rmSync(join(fixtureRoot, 'app/yarn.lock'));
-      symlinkSync(join(outside, 'yarn.lock'), join(fixtureRoot, 'app/yarn.lock'));
-      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
-        '          node-version: 22\n          cache: yarn\n          cache-dependency-path: app/yarn.lock',
-      ));
-      assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
-        'fixture.yml job verify: cache dependency path is not an existing lockfile: app/yarn.lock',
-      ]);
-    } finally {
-      rmSync(outside, { recursive: true, force: true });
-    }
+    // `statSync` follows the in-root target and reports a regular file inside the
+    // repository, which would satisfy both isFile and realpath containment. Only
+    // `lstatSync` refuses a lockfile that is itself a symlink (#4672 / #4569).
+    writeFileSync(join(fixtureRoot, 'app/yarn.lock.target'), 'in-root lockfile target\n');
+    rmSync(join(fixtureRoot, 'app/yarn.lock'));
+    symlinkSync(join(fixtureRoot, 'app/yarn.lock.target'), join(fixtureRoot, 'app/yarn.lock'));
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
+      '          node-version: 22\n          cache: yarn\n          cache-dependency-path: app/yarn.lock',
+    ));
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: cache dependency path is not an existing lockfile: app/yarn.lock',
+    ]);
   });
 });
 

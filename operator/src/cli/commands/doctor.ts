@@ -15,7 +15,7 @@ import {
   probeClaudeAuth as defaultProbeClaudeAuth,
 } from '../../preflight/claude-auth.js';
 import {
-  getConfigPathFromArgs as defaultGetConfigPathFromArgs,
+  requireConfigPathFromArgs as defaultGetConfigPathFromArgs,
   loadConfig as defaultLoadConfig,
   buildConfigProvenance,
   type JinnConfig,
@@ -406,8 +406,23 @@ Examples:
         );
         return;
       }
-      const configPath =
-        deps.getConfigPathFromArgs(ctx.argv ?? []) ?? deps.getConfigPathFromArgs(process.argv.slice(2));
+      let configPath: string | undefined;
+      try {
+        configPath =
+          deps.getConfigPathFromArgs(ctx.argv ?? []) ?? deps.getConfigPathFromArgs(process.argv.slice(2));
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: err instanceof Error ? err.message : String(err),
+            hint: 'Pass a config path or omit --config.',
+            exampleCli: 'jinn doctor --config ~/.jinn-operator/config.json',
+            details: { field: 'config' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
       const config = deps.loadConfig(configPath);
       const checks: CheckResult[] = [];
 

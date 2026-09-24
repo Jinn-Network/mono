@@ -105,6 +105,8 @@ function fixture(
     hostSecretResolver?: LocalTaskExecutionBackendConfig["hostSecretResolver"];
     capabilityGrants?: LocalTaskExecutionBackendConfig["capabilityGrants"];
     launcherDeployments?: LocalTaskExecutionBackendConfig["launcherDeployments"];
+    now?: () => string;
+    terminalAttemptRetentionMs?: number;
   } = {},
 ): LocalTaskExecutionBackend {
   const provisioner: ProvisionerContract = {
@@ -187,6 +189,10 @@ function fixture(
       ? {}
       : { launcherDeployments: options.launcherDeployments }),
     faults: { afterDeliveryCheckpoint: options.afterDeliveryCheckpoint },
+    ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.terminalAttemptRetentionMs === undefined
+      ? {}
+      : { terminalAttemptRetentionMs: options.terminalAttemptRetentionMs }),
   });
   backends.push(backend);
   return backend;
@@ -890,6 +896,111 @@ describe("seal-once Delivery checkpoint (C1)", () => {
     )).join("\n");
     expect((journal.match(/\"type\":\"delivery-recorded\"/g) ?? [])).toHaveLength(1);
     expect(await backend.fetchDelivery((await backend.deliveries(attempt))[0]!)).toEqual(delivery);
+  });
+});
+
+describe("terminal attempt directory retention (#4596)", () => {
+  const oldTime = "2020-01-01T00:00:00.000Z";
+  const nowTime = "2026-09-20T00:00:00.000Z";
+  const futureTime = "2099-01-01T00:00:00.000Z";
+
+  async function plantAttempt(
+    root: string,
+    uuid: string,
+    events: Array<Record<string, unknown>>,
+    extra: { checkpoint?: boolean } = {},
+  ): Promise<void> {
+    const meta = join(root, "attempts", uuid, "meta");
+    await mkdir(meta, { recursive: true });
+    await writeFile(
+      join(meta, "journal.jsonl"),
+      `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+    );
+    await writeFile(join(meta, "attempt.json"), JSON.stringify({
+      attempt: `urn:uuid:${uuid}`,
+      task: `sha256:${"a".repeat(64)}`,
+      submission: "urn:uuid:00000000-0000-4000-8000-000000000099",
+      effectiveDeadline: "2099-01-01T00:00:00Z",
+    }));
+    if (extra.checkpoint === true) {
+      await writeFile(join(meta, "delivery.sealed"), "settlement-checkpoint");
+    }
+  }
+
+  function event(
+    attempt: string,
+    seq: number,
+    type: string,
+    time: string,
+    details: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return { attemptId: attempt, seq, type, time, details, failsAttempt: false };
+  }
+
+  async function remainingUuids(root: string): Promise<string[]> {
+    try {
+      return [...(await readdir(join(root, "attempts")))].sort();
+    } catch {
+      return [];
+    }
+  }
+
+  test("prunes expired terminals and never removes a nonterminal or settlement checkpoint", async () => {
+    const root = await stateRoot("terminal-retention");
+    const expired = "00000000-0000-4000-8000-000000000001";
+    const live = "00000000-0000-4000-8000-000000000002";
+    const referenced = "00000000-0000-4000-8000-000000000003";
+    const recent = "00000000-0000-4000-8000-000000000004";
+    const future = "00000000-0000-4000-8000-000000000005";
+    await plantAttempt(root, expired, [
+      event(`urn:uuid:${expired}`, 1, "attempt-engaged", oldTime),
+      event(`urn:uuid:${expired}`, 2, "attempt-terminal", oldTime, { state: "delivered" }),
+    ]);
+    await plantAttempt(root, live, [
+      event(`urn:uuid:${live}`, 1, "attempt-engaged", oldTime),
+    ]);
+    await plantAttempt(root, referenced, [
+      event(`urn:uuid:${referenced}`, 1, "attempt-engaged", oldTime),
+      event(`urn:uuid:${referenced}`, 2, "attempt-terminal", oldTime, { state: "delivered" }),
+    ], { checkpoint: true });
+    await plantAttempt(root, recent, [
+      event(`urn:uuid:${recent}`, 1, "attempt-engaged", nowTime),
+      event(`urn:uuid:${recent}`, 2, "attempt-terminal", nowTime, { state: "delivered" }),
+    ]);
+    await plantAttempt(root, future, [
+      event(`urn:uuid:${future}`, 1, "attempt-engaged", futureTime),
+      event(`urn:uuid:${future}`, 2, "attempt-terminal", futureTime, { state: "delivered" }),
+    ]);
+
+    fixture(root, {
+      now: () => nowTime,
+      terminalAttemptRetentionMs: 24 * 60 * 60 * 1000,
+    });
+
+    expect(await remainingUuids(root)).toEqual([future, live, recent, referenced].slice().sort());
+  });
+
+  // Scope: this only covers never-delivered terminals (planted below with state
+  // "failed", no `delivery.sealed`). A delivered terminal keeps its checkpoint
+  // forever and is not pruned, so it is not part of what "stays bounded" asserts
+  // here; see the README's "Terminal attempt directory retention" section.
+  test("rehydration directory scan stays bounded after expired terminals are pruned", async () => {
+    const root = await stateRoot("terminal-retention-bound");
+    const live = "00000000-0000-4000-8000-000000000010";
+    await plantAttempt(root, live, [
+      event(`urn:uuid:${live}`, 1, "attempt-engaged", oldTime),
+    ]);
+    for (let index = 0; index < 20; index++) {
+      const uuid = `00000000-0000-4000-8000-${String(index + 20).padStart(12, "0")}`;
+      await plantAttempt(root, uuid, [
+        event(`urn:uuid:${uuid}`, 1, "attempt-engaged", oldTime),
+        event(`urn:uuid:${uuid}`, 2, "attempt-terminal", oldTime, { state: "failed" }),
+      ]);
+    }
+
+    fixture(root, { now: () => nowTime, terminalAttemptRetentionMs: 0 });
+
+    expect(await remainingUuids(root)).toEqual([live]);
   });
 });
 
