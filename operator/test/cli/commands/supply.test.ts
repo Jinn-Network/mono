@@ -218,6 +218,37 @@ describe('jinn supply', () => {
     expect(envelopes[0]).toMatchObject({ code: 'invalid_invocation', exitCode: 11 });
   });
 
+  it('gates on discovery.mode "http" with discovery.url before touching the network (invalid_invocation, exit 11)', async () => {
+    // #4235: the discovery.mode gate (a non-'http' mode, or 'http' with no
+    // url) had no coverage before this — it is a distinct envelope from the
+    // catch-block mapping above, asserted separately here.
+    const nonHttpMode = createSupplyCommand({
+      loadConfig: (() => ({ network: 'testnet', discovery: { mode: 'mcp' } })) as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({ getCurrentSupply: async () => { throw new Error('must not be called'); } }),
+    });
+    const nonHttp = await runCommand(nonHttpMode);
+    expect(nonHttp.exits).toEqual([11]);
+    expect(nonHttp.envelopes[0]).toMatchObject({
+      code: 'invalid_invocation',
+      exitCode: 11,
+      details: { field: 'discovery.mode' },
+    });
+
+    const missingUrl = createSupplyCommand({
+      loadConfig: (() => ({ network: 'testnet', discovery: { mode: 'http' } })) as never,
+      getConfigPathFromArgs: () => undefined,
+      createDiscoveryClient: () => ({ getCurrentSupply: async () => { throw new Error('must not be called'); } }),
+    });
+    const noUrl = await runCommand(missingUrl);
+    expect(noUrl.exits).toEqual([11]);
+    expect(noUrl.envelopes[0]).toMatchObject({
+      code: 'invalid_invocation',
+      exitCode: 11,
+      details: { field: 'discovery.mode' },
+    });
+  });
+
   it('maps untagged discovery failures to transient_error (exit 40)', async () => {
     const command = createSupplyCommand({
       loadConfig: (() => ({
