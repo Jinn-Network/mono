@@ -10,10 +10,19 @@ import type {
   AnnouncementEntry,
   AvailableAnnouncement,
   WithdrawnAnnouncement,
+  SourceChainRefusalStatus,
   SourceHead,
+  SourceHeadRefusalStatus,
   SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
-import { compareCodeUnitStrings, headPath, parseHeadTimestamp, sealJson } from '@jinn-network/record-discovery-protocol';
+import {
+  compareCodeUnitStrings,
+  headPath,
+  parseHeadTimestamp,
+  sealJson,
+  sourceChainRefusalReason,
+  sourceHeadRefusalReason,
+} from '@jinn-network/record-discovery-protocol';
 import {
   coldSync,
   fetchHead,
@@ -629,6 +638,24 @@ function appendCursor(url: string, entry: `sha256:${string}`): string {
   return parsed.toString();
 }
 
+/**
+ * The chain outcome's shared reason slug (#3494), best-effort: `NativeDiscoverySource.verify`
+ * is a host-injectable port typed as a bare `{ status: string }` rather than the protocol's
+ * closed `SourceChainOutcome` union (`native-discovery.test.ts`'s "untrustworthy source"
+ * suite deliberately drives it with trust-verifier statuses outside that set, e.g.
+ * `bad-signature`, to prove an unrecognized fault still refuses verbatim rather than
+ * crashing the daemon). Only the canonical statuses the real driver
+ * (`native-discovery-trust.ts`) actually returns share the plugin/sync-path vocabulary;
+ * anything else passes through unchanged.
+ */
+function chainRefusalReason(status: string): string {
+  try {
+    return sourceChainRefusalReason(status as SourceChainRefusalStatus);
+  } catch {
+    return status;
+  }
+}
+
 export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSubmissionCard>(input: {
   readonly store: Store;
   readonly sources: readonly NativeDiscoverySource[];
@@ -848,7 +875,10 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       // future-dated head handled directly above are eligible for the self-source degrade; both
       // are this operator's own clock, and every other status is a trust signal.
       if (revalidated.status !== 'ok' && revalidated.status !== 'stale') {
-        throw new NativeDiscoverySyncError(source, revalidated.status);
+        throw new NativeDiscoverySyncError(
+          source,
+          sourceHeadRefusalReason(revalidated.status as SourceHeadRefusalStatus),
+        );
       }
       // `parseHeadTimestamp` (#3482, #4096): the second operand is this module's own
       // reading of the same `refreshBy` the trust adapter's `isFresh` reads for the
@@ -893,7 +923,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
               + 'degrading this poll rather than refusing this operator its own boot',
           };
         }
-        throw new NativeDiscoverySyncError(source, 'stale');
+        throw new NativeDiscoverySyncError(source, sourceHeadRefusalReason('stale'));
       }
       if (idleHead === 're-signed') {
         // Nothing was adopted, so the position does not move — but the stored instant,
@@ -1020,9 +1050,10 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
             + 'operator its own boot',
         };
       }
+      const chainReason = chainRefusalReason(outcome.status);
       throw new NativeDiscoverySyncError(
         source,
-        outcome.at === undefined ? outcome.status : `${outcome.status} (at: ${outcome.at})`,
+        outcome.at === undefined ? chainReason : `${chainReason} (at: ${outcome.at})`,
       );
     }
 

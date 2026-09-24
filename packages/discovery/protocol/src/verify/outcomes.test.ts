@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { SourceHeadOutcome } from "./outcomes.js";
+import type { SourceChainOutcome, SourceHeadOutcome } from "./outcomes.js";
 import {
   SOURCE_HEAD_ORIGIN_PRECHECK_REASON,
+  sourceChainRefusalReason,
   sourceHeadRefusalReason,
 } from "./outcomes.js";
 
@@ -36,5 +37,32 @@ describe("sourceHeadRefusalReason (#3494)", () => {
       SOURCE_HEAD_ORIGIN_PRECHECK_REASON,
     );
     expect(sourceHeadRefusalReason("head-origin-mismatch")).toBe("head-origin-mismatch");
+  });
+});
+
+const CHAIN_REFUSALS = [
+  "stale",
+  "forked",
+  "broken-chain",
+  "unauthorized-signer",
+] as const satisfies readonly Exclude<SourceChainOutcome["status"], "ok">[];
+
+const CHAIN_SLUGS = {
+  stale: "stale-source-head",
+  forked: "forked-source-chain",
+  "broken-chain": "discontinuous-source-chain",
+  "unauthorized-signer": "unauthorized-source-signer",
+} as const;
+
+describe("sourceChainRefusalReason (#3494)", () => {
+  it.each(CHAIN_REFUSALS)("maps %s to the shared consumer slug", (status) => {
+    expect(sourceChainRefusalReason(status)).toBe(CHAIN_SLUGS[status]);
+  });
+
+  it("shares the same slug as the head path for the two faults both procedures can report", () => {
+    expect(sourceChainRefusalReason("stale")).toBe(sourceHeadRefusalReason("stale"));
+    expect(sourceChainRefusalReason("unauthorized-signer")).toBe(
+      sourceHeadRefusalReason("unauthorized-signer"),
+    );
   });
 });

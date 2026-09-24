@@ -13,6 +13,7 @@ import {
   parseAnnouncementEntry,
   SOURCE_HEAD_ORIGIN_PRECHECK_REASON,
   sealJson,
+  sourceChainRefusalReason,
   sourceHeadRefusalReason,
   verifySourceChain,
   verifySourceHead,
@@ -104,16 +105,6 @@ function latestCommonEntry(
   return common?.digest;
 }
 
-function outcomeReason(status: Exclude<Awaited<ReturnType<typeof verifySourceChain>>['status'], 'ok'>): string {
-  switch (status) {
-    case 'stale': return 'stale-source-head';
-    case 'unauthorized-signer': return 'unauthorized-source-signer';
-    case 'forked': return 'forked-source-chain';
-    case 'broken-chain': return 'discontinuous-source-chain';
-  }
-}
-
-
 /**
  * Adapts the consumer's durable checkpoint to the protocol's named source-chain verification.
  * Verification uses a transaction-local high-water mark; only `syncPublicSource` advances durable
@@ -201,7 +192,7 @@ export function createProtocolSourceVerifier(options: ProtocolSourceVerifierOpti
           firstAdoption,
         },
       });
-      if (outcome.status !== 'ok') return { status: 'rejected', reason: outcomeReason(outcome.status) };
+      if (outcome.status !== 'ok') return { status: 'rejected', reason: sourceChainRefusalReason(outcome.status) };
       if (advanced?.sequence !== input.head.sequence || advanced.entry !== input.head.entry) {
         return { status: 'rejected', reason: 'source-checkpoint-advance-mismatch' };
       }

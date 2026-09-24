@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SyncedEntry, VerifyDriver } from "@jinn-network/record-discovery-client";
-import type { SourceHead, SourceIdentity } from "@jinn-network/record-discovery-protocol";
-import { sourceHeadRefusalReason } from "@jinn-network/record-discovery-protocol";
+import type {
+  SourceChainRefusalStatus,
+  SourceHead,
+  SourceIdentity,
+} from "@jinn-network/record-discovery-protocol";
+import { sourceChainRefusalReason, sourceHeadRefusalReason } from "@jinn-network/record-discovery-protocol";
 import type { DsseEnvelope } from "@jinn-network/trust-core";
 
 import type { RuntimeLogger } from "../logger.js";
@@ -80,6 +84,22 @@ export const SYNC_TRUNCATED_REASON = "sync-truncated";
  * not cause the stop and that raising will not change.
  */
 export const SYNC_ABORTED_REASON = "sync-aborted";
+
+/**
+ * The chain outcome's shared reason slug (#3494), best-effort: a `VerifyDriver` is any
+ * implementation of that interface, and this module's own tests deliberately probe `verify`
+ * with a status outside the protocol's closed set (`fork-detected`) to prove an unrecognized
+ * driver fault still surfaces verbatim rather than crashing the mirror. Only the canonical
+ * statuses `verifySourceChain` actually returns share the sync-path vocabulary; anything else
+ * passes through unchanged, exactly as it did before #3494.
+ */
+function chainRefusalReason(status: SourceChainRefusalStatus): string {
+  try {
+    return sourceChainRefusalReason(status);
+  } catch {
+    return status;
+  }
+}
 
 export interface ChainVerification {
   readonly mode: "verified" | "unverified";
@@ -219,7 +239,7 @@ export function createDriverChainVerification(
         });
         return outcome.status === "ok"
           ? { status: "ok" }
-          : { status: "rejected", reason: outcome.status };
+          : { status: "rejected", reason: chainRefusalReason(outcome.status) };
       } catch (error) {
         reportDriverFailure(input.source, "verify", error);
         return { status: "rejected", reason: "verification-failed" };

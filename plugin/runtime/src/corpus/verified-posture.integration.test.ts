@@ -307,7 +307,7 @@ describe("the verified posture over a genuinely signed archive", () => {
     expect(replayed.status).toBe("failed");
     expect(replayed.sources[0]!.failure).toEqual({
       code: "chain-verification-rejected",
-      message: "broken-chain",
+      message: "discontinuous-source-chain",
     });
   });
 
@@ -356,13 +356,13 @@ describe("the verified posture fails closed", () => {
     expect(outcome.status).toBe("failed");
     expect(outcome.sources[0]!.failure).toEqual({
       code: "chain-verification-rejected",
-      message: "unauthorized-signer",
+      message: "unauthorized-source-signer",
     });
     expect(outcome.sources[0]!.indexed).toBe(0);
 
     const check = await chainVerificationCheck(capability);
     expect(check.ok).toBe(false);
-    expect(check.detail).toContain(`${source.agent}/${source.name} (unauthorized-signer)`);
+    expect(check.detail).toContain(`${source.agent}/${source.name} (unauthorized-source-signer)`);
   });
 
   test("refuses an archive that has declared no signing key", async () => {
@@ -372,7 +372,7 @@ describe("the verified posture fails closed", () => {
 
     const outcome = await capability.mirror.syncOnce();
     expect(outcome.status).toBe("failed");
-    expect(outcome.sources[0]!.failure?.message).toBe("unauthorized-signer");
+    expect(outcome.sources[0]!.failure?.message).toBe("unauthorized-source-signer");
     expect((await chainVerificationCheck(capability)).ok).toBe(false);
   });
 
@@ -383,7 +383,7 @@ describe("the verified posture fails closed", () => {
     expect(outcome.status).toBe("failed");
     expect(outcome.sources[0]!.failure).toEqual({
       code: "chain-verification-rejected",
-      message: "broken-chain",
+      message: "discontinuous-source-chain",
     });
     expect(outcome.sources[0]!.indexed).toBe(0);
   });

@@ -287,8 +287,12 @@ export function buildNativeDiscoverySources(input: {
       // catalog fault deserves its own stack rather than a lie about the
       // envelope. `pollSource` still refuses the source either way.
       async verifyHead(candidate) {
-        // Typed protocol outcome. Consumers that log a reason slug share
-        // `sourceHeadRefusalReason` (#3494); this composition is the procedure.
+        // Typed protocol outcome, returned as-is: this composition IS the
+        // procedure, not the consumer that logs it. `pollSource`
+        // (`native-discovery.ts`) is that consumer, and it turns a refusal
+        // into a reason slug via the same `sourceHeadRefusalReason` the
+        // plugin runtime's corpus mirror uses (#3494), so a refusal reads
+        // the same across every consumer.
         return verifySourceHead({
           source: candidate.source,
           head: candidate.head,
