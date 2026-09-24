@@ -447,4 +447,30 @@ describe("the adapter/runtime seam", () => {
       1,
     );
   });
+
+  test("a feed the Claude adapter wrote parses and assembles with both gaps closed", async () => {
+    const feed = parseSessionFeed(
+      new Uint8Array(
+        await readFile(new URL("../../fixtures/capture/session-claude.ndjson", import.meta.url)),
+      ),
+    );
+    const start = buildStartInput({
+      feed,
+      feedPath: "/home/op/capture/sessions/s-claude/feed.ndjson",
+      workspaceDir: "/home/op/capture/workspaces/s-claude",
+      producerVersion: "0.1.0",
+      outcome: resolveSessionOutcome(feed),
+      traceDigest: TRACE_DIGEST,
+    });
+
+    expect(start.repositoryState?.repository).toBe("https://github.com/Jinn-Network/mono");
+    expect(start.initialInputs?.map((input) => input.identifiers?.[0]?.value)).toEqual([
+      "config",
+      "workflow",
+      "prompt",
+    ]);
+    expect(start.runtime.components.filter((component) => component.kind === "opaque")).toHaveLength(
+      1,
+    );
+  });
 });

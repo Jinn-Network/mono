@@ -9,7 +9,7 @@
 | **Issue** | [#2763](https://github.com/Jinn-Network/mono/issues/2763) |
 | **Depends on** | [benchmarking application](./2026-07-28-benchmarking-application-design.md) §7.2; [publication interoperability profile](./2026-08-13-benchmark-publication-interoperability-profile.md) §9.3; [benchmark product](./2026-08-05-benchmark-product-design.md) §7; [proof-carrying anchors](./2026-08-17-pluggable-integrity-providers-design.md) §9, §16.6, §19; [reader-facing vocabulary](./2026-09-02-reader-facing-vocabulary.md); [bundle capability composition](./2026-08-29-bundle-capability-composition-design.md) (v0.2: the generation this design's carriage registers into) |
 | **Outcome** | one composed reader statement backed by two independent evidence channels; no blended score or claim |
-| **v0.2 changes** | Ruling erratum; carriage only. §3 stops allocating `benchmark-product-public-bundle/9` and `benchmark-product.claim-package/7` and instead registers one `marketplace-ordering` capability entry in the composed generation `/10`, with §3.1, §3.2, §5, §6, §7's test 9, §8, and §9's allocation bullet following. §8's slice order inverts, because the composed generation is now a precondition rather than an optional fold-in. Two evidence corrections in the document's own voice: §3's census now spans all three bundle lineages, and §4.1 names the check's predecessor exactly. **The adopted substance is unchanged** — §0, §1, §2, §4's steps and states, §5's reader copy, §6's other rules, and §7's other tests carry over unedited, and no analysis is rewritten. The landing pass then made this document accurate against its own sources without touching adopted substance: §10 quotes each standing-ruling comment as written and attributed, §3.1 states one composite refinement target and the cardinality it needs from the registry, §3.2 stops overreading the ruling on `claim-package/7` and states its trust boundary as a testable property of the derivation module, §4.1's `passed` condition stops contradicting its own `invalid` state, §2.1 pins the ordinal pad width the example already showed, §7's test 9 and §8 stop attributing requirements to proofs that do not cover them, §8 names the C5 emission boundary and the inherited `/10` properties it depends on, §9's closing bullet is corrected, and the new §11 records five open items the pass found. |
+| **v0.2 changes** | Ruling erratum; carriage only. §3 stops allocating `benchmark-product-public-bundle/9` and `benchmark-product.claim-package/7` and instead registers one `marketplace-ordering` capability entry in the composed generation `/10`, with §3.1, §3.2, §5, §6, §7's test 9, §8, and §9's allocation bullet following. §8's slice order inverts, because the composed generation is now a precondition rather than an optional fold-in. Two evidence corrections in the document's own voice: §3's census now spans all three bundle lineages, and §4.1 names the check's predecessor exactly. **The adopted substance is unchanged** — §0, §1, §2, §4's steps and states, §5's reader copy, §6's other rules, and §7's other tests carry over unedited, and no analysis is rewritten. The landing pass then made this document accurate against its own sources without touching adopted substance: §10 quotes each standing-ruling comment as written and attributed, §3.1 states one composite refinement target and the cardinality it needs from the registry, §3.2 stops overreading the ruling on `claim-package/7` and states its trust boundary as a testable property of the derivation module, §4.1's `passed` condition stops contradicting its own `invalid` state, §2.1 pins the ordinal pad width the example already showed, §7's test 9 and §8 stop attributing requirements to proofs that do not cover them, §8 names the C5 emission boundary and the inherited `/10` properties it depends on, §9's closing bullet is corrected, and the new §11 records five open items the pass found. Independent review of PR #4105 then added six more (§11 items 6–11). |
 
 ## 0. Decision in plain language
 
@@ -607,7 +607,7 @@ call.
    later `earliestCellPostAt`, passes `checkPreregistrationAnchoredOrder`
    (`packages/benchmarking/run/src/checks.ts:104`, a two-timestamp comparison),
    and seals the strong literal. The two existing literals
-   (`packages/benchmark-product/verify/src/profile/anchor-claims.ts:321`,
+   (`packages/benchmark-product/check/src/profile/anchor-claims.ts:321`,
    `:323`) name their evidentiary basis rather than their conclusion. Whether to
    grade the scalar, or to state normatively that it is a producer assertion and
    forbid deriving a badge from the check status alone, is undecided.
@@ -635,6 +635,85 @@ call.
    and verifier to derive byte-identical claim text, and the self-run limits are
    exact string constants duplicated on both sides
    (`packages/benchmark-product/core/src/operations/run-results.ts:167`;
-   `packages/benchmark-product/verify/src/profile/run-results.ts:8`). Which §5
+   `packages/benchmark-product/check/src/profile/run-results.ts:8`). Which §5
    strings become entries, in what order, and whether placeholders are
    interpolated, must be pinned before slice 4.
+
+Items 6–11 were named after the landing pass, by the independent review of
+PR #4105 at head `ef91b0336`. They are added here and not resolved by editing
+adopted text: §2's record, §4's steps and states, and §5's reader copy are what
+R1 adopted verbatim. None reopens a ruled decision. Items 8 and 9 block slice 3
+as specified.
+
+6. **`declared-but-absent` cannot be reached as an ordering detail.** §4.1
+   lists it as a state the `marketplace-ordering` check reports. But §3.1 sets
+   both member patterns to `mayBeEmpty: false` so the case "must fail as a
+   missing member", §7's test 9 says it is "refused as a missing member", and
+   §8 makes two-way member closure a normative precondition. Composed closure
+   runs before this check, which §4.1 places after all six base checks, so the
+   check never runs on such a bundle and cannot report that detail. The texts
+   agree on behavior: the bundle is refused and never reports `present`. The
+   imprecision is where the refusal is reported. It still needs naming,
+   because a literal reading of §4.1 leads an implementer to write a dead
+   branch or, worse, to set `mayBeEmpty: true` so the state can be reached.
+   That would delete §3.1's stated reason for the flag and let a bundle with no
+   ordering events report a quiet `present`. The state name comes from
+   `integrity-anchors` (§4.2), where it can be reached because `anchoring` is
+   `mayBeEmpty: true`, the condition §3.1 deliberately inverts.
+7. **The `submissions` sort order is normative, but nothing enforces it.**
+   §2.1 says entries "are sorted by `(submission, task, sha256)` using
+   code-unit order". That rule is absent from §2.1's own strict-parsing
+   rejection list, from all seven steps in §4.1, and from all ten tests in §7.
+   Test 3 covers reordered events but never mis-sorted submissions. §3.2 pins
+   `recordSha256` to the exact `ordering/marketplace.json` bytes, and §7's
+   test 1 requires producer and verifier to derive byte-identical claim text.
+   Without enforcement, a verifier accepts a record no conforming producer
+   would emit, and closure cannot catch it because every member is present and
+   referenced.
+8. **`minimumReaderRelease` names a mechanism that cannot supply its value.**
+   §3.1 says the value is "resolved through the composition design's
+   `minimumRelease(vector)` derivation rather than pinned as a string here".
+   That derivation is `minimumRelease(vector) = max(base,
+   max(capability.minimumReaderRelease))`
+   ([composition design](./2026-08-29-bundle-capability-composition-design.md)
+   §7). It computes a bundle's minimum from the entries' values, so it cannot
+   resolve an entry's own value. That design's §9 registry invariant requires
+   the opposite: "every `minimumReaderRelease` a real published release". The
+   entry therefore has to pin a string, §3.1 declines to pin one, and the
+   substitute it names cannot supply one. As specified, slice 3 cannot register
+   the entry.
+9. **No claim-package id is allocated for the composed generation, and §3
+   implies one is.** §3 says the composition design "still names `/8` for the
+   generation and `benchmark-product.claim-package/6` for its claim id — both
+   numbers were taken after that design was written, which is the same
+   numbering drift the ruling corrects". R2 as quoted in §10 corrects only the
+   bundle number: it moves the generation to `/10` and notes that #4109 names
+   `claim-package/7`. It gives the composed generation no claim-package id.
+   `/6` is taken (`packages/benchmark-product/core/src/report/claim.ts:108`,
+   `DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID`) and `/7` is claimed by #4109. So when
+   §3.2 says "The composed generation carries one claim-package id", no ruling
+   allocates that id. Meanwhile §3 tells the reader the numbering drift is
+   already fixed. Slice 3 needs that id before it can land.
+10. **Nothing requires `ordinal` to match the index in `events`.** §2.1 states
+    that "Array order is the projector's input order and is evidence" and that
+    "`ordinal` values are contiguous from zero", but never ties the two
+    together. §4.1's step 4 says "replay the carried events in their recorded
+    order", which a reader can take as array order or as ordinal order. No rule
+    rejects a record whose ordinals are contiguous but out of step with array
+    position: §2.1 rejects only gaps in the ordinals, and §7's test 3 covers
+    reordered events and ordinal gaps, not a mismatch between the two. §9
+    records that projector reduction is order-sensitive, so the same
+    authenticated bytes can yield two different authority projections. One
+    normative sentence would close this: `ordinal` MUST equal the event's
+    zero-based index in `events`.
+11. **Nothing says what happens to an open-competition run with no cell
+    posts, and no bundle can represent one.** Under §3.1's `activation`, the
+    token applies whenever the sealed Run's venue is `open-competition` and the
+    receipt came from `runOnMarketplace`'s frozen projection. Under §3.2, the
+    `marketplaceOrdering` section and the open-competition `venueHonesty`
+    variant can only appear when the token is declared. §3.1 sets both member
+    patterns to `mayBeEmpty: false`, and §2.1 requires `earliestCellPostAt`. So
+    no bundle can represent a marketplace run with no cell posts. It cannot
+    declare the token, because it has no members to carry, and it cannot omit
+    the token, because its venue is not `self-run`. Nothing says whether such a
+    run is refused at seal time or is out of scope by construction.

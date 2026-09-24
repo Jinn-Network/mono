@@ -82,6 +82,7 @@ import {
   NativeEvaluatorStateRepository,
   type NativeEvaluationRow,
 } from "./native-evaluator-state.js";
+import { reconcileNonterminalAtBoot } from "./task-execution-boot-reconciliation.js";
 import type { RoleIdentitySet } from "./role-identities.js";
 
 type LauncherDeployment = NonNullable<LocalTaskExecutionBackendConfig["launcherDeployments"]>[string];
@@ -786,6 +787,8 @@ export async function buildNativeEvaluatorComposition(
     evidence: input.backend.evidence,
   };
   const backend = (input.constructBackend ?? makeLocalTaskExecutionBackend)(backendConfig);
+  // #4397: converge attempts no coordinator will track, before any coordinator's first recover.
+  await reconcileNonterminalAtBoot(backend, "[native-evaluator]", console);
   const verification = buildNativeEvaluatorVerdictVerification(input.verification);
   let publisher: NativeEvaluatorPublisher | undefined;
   try {

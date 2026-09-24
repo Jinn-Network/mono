@@ -27,6 +27,7 @@ import type { RunJournalEntry } from "../../run/journal.js";
 import { readRunState, writeRunState } from "../../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../../workspace/sealed-store.js";
 import { createRuntimeVenue } from "../adapter.js";
+import { expectEvery, expectOk, expectRefused, leakMarkers } from "./testing/assertions.js";
 
 const imageDigest = process.env.JINN_INSPECT_OCI_IMAGE;
 const datasetCacheDir = process.env.JINN_INSPECT_OCI_DATASET_CACHE;
@@ -83,44 +84,6 @@ async function expectNoInspectContainers(): Promise<void> {
     remaining,
     `Inspect containers survived ${String(CONTAINER_REAP_BUDGET_MS)}ms of polling after the run released them:\n${remaining}`,
   ).toBe("");
-}
-
-/**
- * Every lifecycle operation returns a typed result whose failure carries a code and a detail. A
- * bare `expect(result.ok).toBe(true)` discards both and reports only `expected false to be true`,
- * which is what #2832's first observation left behind: a `runQuote` refusal in CI with nothing
- * naming what refused or why. Assert through this helper instead, so a failure names the step and
- * prints the result -- the evidence that tells a loaded environment apart from a runtime defect.
- */
-function expectOk<T extends { ok: boolean }>(result: T, step: string): T {
-  // The detail is built only on the failing path. `expect`'s message argument is eager, so
-  // carrying it inline would serialize every passing result in a suite that makes dozens of these
-  // calls per test -- and a serializer that threw on a success would report as the step failing.
-  if (!result.ok) expect.fail(`${step} failed: ${JSON.stringify(result)}`);
-  return result;
-}
-
-/**
- * `expect(items.every(p)).toBe(true)` reports `expected false to be true`: it names neither which
- * element failed nor what it held. Assert through this instead, so a failure names the step, the
- * count, and a projection of every offending element.
- *
- * The projection is built only on the failing path, for the reason `expectOk` documents above:
- * `expect`'s message argument is eager, so carrying the evidence inline would serialize a whole
- * matrix and journal on every passing assertion in a test that runs for minutes of real OCI work.
- */
-function expectEvery<T>(
-  items: readonly T[],
-  predicate: (item: T) => boolean,
-  project: (item: T, index: number) => unknown,
-  step: string,
-): void {
-  const offenders = items
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => !predicate(item));
-  if (offenders.length === 0) return;
-  expect.fail(`${step}: ${String(offenders.length)} of ${String(items.length)} failed: ${
-    JSON.stringify(offenders.map(({ item, index }) => project(item, index)))}`);
 }
 
 /**
@@ -483,9 +446,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       ...runState,
       matrixSha256: putSealedBytes(workspaceDir, dishonest.bytes),
     });
-    const rejected = await runVerify(context, { draftId: "inspect-oci" });
-    expect(rejected.ok).toBe(false);
-    if (rejected.ok) throw new Error("unreachable");
+    const rejected = expectRefused(await runVerify(context, { draftId: "inspect-oci" }), "verify of a tampered matrix");
     expect(rejected.error).toMatchObject({ code: "record-integrity" });
     expect(rejected.error.issues?.[0]?.path).toBe("matrix-rederivation");
     // The sweeping `afterEach` below removes a leaked container and only warns, so without this
@@ -703,7 +664,10 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     workspaces.push(detachedRoot);
     const detachedBundle = join(detachedRoot, "bundle");
     cpSync(join(workspaceDir, published.result.bundleRelativePath), detachedBundle, { recursive: true });
-    expect(JSON.stringify(readRunJournalEntries(workspaceDir, "inspect-broker"))).not.toContain(keySentinel);
+    expect(leakMarkers(
+      Buffer.from(JSON.stringify(readRunJournalEntries(workspaceDir, "inspect-broker"))),
+      { "key-sentinel": keySentinel },
+    )).toEqual([]);
     rmSync(workspaceDir, { recursive: true, force: true });
     expect((await verifyPublicBundle(detachedBundle)).checks).toContain("report-verification");
     const evidenceCatalog = JSON.parse(readFileSync(join(detachedBundle, "evidence.json"), "utf8")) as {
@@ -740,11 +704,10 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       "--entrypoint=inspect", imageDigest!, "view", "bundle", "--log-dir=/logs", "--output-dir=/output/inspect-view-bundle",
     ], { encoding: "utf8" });
     expect(readdirSync(viewerDir).length).toBeGreaterThan(0);
-    expect(retainedBytes(detachedBundle).flatMap(({ path, bytes }) => [
-      ...(bytes.includes(Buffer.from(keySentinel)) ? [{ path, marker: "key-sentinel" }] : []),
-      ...(bytes.includes(Buffer.from(keyPath)) ? [{ path, marker: "key-file-path" }] : []),
-    ])).toEqual([]);
-    expect(readFileSync(responsePath, "utf8")).not.toContain(keySentinel);
+    expect(retainedBytes(detachedBundle).flatMap(({ path, bytes }) =>
+      leakMarkers(bytes, { "key-sentinel": keySentinel, "key-file-path": keyPath }).map((marker) => ({ path, marker })),
+    )).toEqual([]);
+    expect(leakMarkers(readFileSync(responsePath), { "key-sentinel": keySentinel })).toEqual([]);
     await expectNoInspectContainers();
     const networks = execFileSync(dockerPath, ["network", "ls", "--filter", "name=jinn-inspect-", "--format", "{{.Name}}"], { encoding: "utf8" }).trim();
     const volumes = execFileSync(dockerPath, ["volume", "ls", "--filter", "name=jinn-inspect-", "--format", "{{.Name}}"], { encoding: "utf8" }).trim();

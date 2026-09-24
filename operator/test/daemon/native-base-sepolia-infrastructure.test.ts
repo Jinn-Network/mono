@@ -310,6 +310,8 @@ describe('first-party Base Sepolia public record transport', () => {
       'http://0177.0.0.1/records/x',
       'http://0x7f000001/records/x',
       'http://2130706433/records/x',
+      // A scheme-less locator (#3853).
+      'records/abc', // pins only that no fetch occurs; the scheme-less case below pins the named refusal
     ] as const;
 
     it.each(hostile)('never fetches %s', async (locator) => {
@@ -322,6 +324,30 @@ describe('first-party Base Sepolia public record transport', () => {
 
       await expect(transport.byLocation(locator)).rejects.toThrow();
       expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    // #3853: `new URL()` threw a bare TypeError here, which `reportRefusedRecordDestination` does
+    // not name, so a scheme-less locator was dropped without a warning.
+    it('refuses a scheme-less locator by name, without fetching it', async () => {
+      const fetchImpl = vi.fn(async () => new Response('unreachable'));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl,
+      });
+
+      const err = await transport.byLocation('records/abc').catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(NativeRecordDestinationError);
+      expect(err).toMatchObject({ message: expect.stringMatching(/not a resolvable URL/u) });
+      expect(fetchImpl).not.toHaveBeenCalled();
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(reportRefusedRecordDestination('ctx', err)).toBe(true);
+        expect(String(warn.mock.calls.at(-1)?.[0])).toContain('records/abc');
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('keeps a configured loopback serving root working (local deployments)', async () => {
@@ -520,6 +546,28 @@ describe('first-party Base Sepolia public record transport', () => {
       }
     });
 
+    // #4643: a scheme-less peer locator is not a URL and can carry a newline. Raw interpolation
+    // would split the warn into a second log line; JSON.stringify keeps it one token, matching the
+    // NativeRecordDestinationError message.
+    it('escapes a destination that contains a newline so it cannot spoof a following log line (#4643)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const spoof = 'records.peer.example\n[native-records] spoofed: refused destination';
+        expect(reportRefusedRecordDestination(
+          'peer-announced record location',
+          new NativeRecordDestinationError(spoof, 'it is not an absolute HTTP(S) URL'),
+        )).toBe(true);
+        const line = String(warn.mock.calls.at(-1)?.[0]);
+        expect(line).toBe(
+          `[native-records] peer-announced record location: refused destination ${JSON.stringify(spoof)}: it is not an absolute HTTP(S) URL`,
+        );
+        expect(line.includes('\n')).toBe(false);
+        expect(warn.mock.calls).toHaveLength(1);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it('stays silent for an ordinary serving-plane miss, which is not a refusal', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       try {
@@ -705,8 +753,10 @@ describe('native record transport refusal diagnostics and bounds (#3704)', () =>
   // #3458.1: the timeout was cleared when the RESPONSE HEADERS arrived, so a peer that answers 200
   // and then trickles held the caller past the 30s fleet worker lease TTL — the same `loop 'work'
   // stale` symptom the #30 bound exists to prevent, reached through the body instead of the
-  // headers. Mutation check: clear the timer at the headers again and this hangs to the vitest
-  // timeout rather than rejecting.
+  // headers. Mutation check: clear the timer at the headers again and this hangs to the suite's
+  // 30s `testTimeout` rather than rejecting. It used to carry its own 5s bound so that hang went
+  // red sooner; a hang detector is a deadline either way, and 5s of wall clock on a ~30ms test is
+  // the starvation exposure #3289 is about, so it inherits the suite bound (#4390).
   it('bounds the response body read, not only time-to-headers (#3458)', async () => {
     const transport = createBaseSepoliaRecordTransport({
       ipfsApiUrl: 'https://ipfs.example.invalid',
@@ -721,7 +771,7 @@ describe('native record transport refusal diagnostics and bounds (#3704)', () =>
     });
 
     await expect(transport.byLocation(`${CONFIGURED}abc`)).rejects.toThrow(/timed out/u);
-  }, 5_000);
+  });
 
   // #3458.2: a chunked response omits `content-length`, and the cap was applied only AFTER
   // `arrayBuffer()` had already buffered the whole body.

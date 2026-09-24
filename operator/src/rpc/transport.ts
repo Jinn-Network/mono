@@ -36,6 +36,7 @@ import {
   type Transport,
 } from 'viem';
 
+import { EMBEDDED_URL_RE } from '../util/embedded-url-pattern.js';
 import { walkStructured } from '../util/structured-walk.js';
 
 /**
@@ -258,7 +259,7 @@ export function maskRpcHost(url: string): string {
  * false-positive rate against a leak that cannot occur.
  */
 export function maskUrlsInMessage(message: string): string {
-  return message.replace(/(?:https?|wss?):\/\/[^\s"'<>]+/gi, (url) => maskRpcHost(url));
+  return message.replace(EMBEDDED_URL_RE, (url) => maskRpcHost(url));
 }
 
 /**

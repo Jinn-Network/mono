@@ -65,8 +65,8 @@ import {
   admitHumanTruth,
   createHumanReviewPackets,
   signHumanReviewResponse,
-} from "../../operations/human-review.js";
-import { importBinaryItemBank } from "../../operations/import-item-bank.js";
+} from "./seed-admission.js";
+import { importBinaryItemBank, renderCanonicalJsonl } from "./seed-binary-item-bank.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runAnchor } from "../../operations/run-anchor.js";
 import { disclosureDeclare } from "../../operations/disclosure-declare.js";
@@ -78,10 +78,9 @@ import { runReport } from "../../operations/report.js";
 import {
   BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
   BINARY_ITEM_BANK_ENTRY_PROTOCOL,
+  BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED,
   BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
-  renderCanonicalJsonl,
-} from "../../intake/binary-item-bank.js";
-import { BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED } from "../../human-review/application.js";
+} from "@colophon-claims/check/admission";
 import { readRunState } from "../../run/state.js";
 import type { ProxiedBackend } from "../../run/drive.js";
 import {
@@ -310,22 +309,24 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
   ] as const satisfies readonly SyntheticFixtureItem[];
   if (scenario === "minimal") return minimal;
 
-  // Two excluded items, each replaced by a later admitted item in its own stratum (issue #3247).
-  // The accepted set is two items in the same two strata as `minimal`, and outcomes outside the
-  // 144 scenario are arm-agnostic, so the run, the cells and the Matrix behave exactly as
-  // `minimal`'s do -- the only difference is that the replacement ledger carries TWO entries
-  // instead of zero. That is the point: every other qualification-carrying fixture yields zero or
-  // one exclusion, where sorting the projection is a no-op.
+  // Scenario name is historical (#3247). The bank now carries three exclusions: two excluded
+  // cores plus one excluded stress, each replaced by a later admitted item in the same class
+  // and stratum. The accepted set is still the same two strata as `minimal`, and outcomes
+  // outside the 144 scenario are arm-agnostic, so the run, the cells and the Matrix behave as
+  // `minimal`'s do -- the difference is that the replacement ledger carries THREE entries
+  // instead of zero. That is the point: every other qualification-carrying fixture yields zero
+  // or one exclusion, where sorting the projection is a no-op.
   //
   // Pool order is the array order here, and the item bank additionally requires the array to be
-  // sorted by `itemId`, so the excluded pair must occupy the first two ids. For the two-human path
-  // the ledger is emitted in pool order, and the `itemSha256` digests of these two fall in the
-  // OPPOSITE order (a property of their exact payload bytes, verified by the fixture's own test
-  // rather than asserted here) -- which is what makes replacement-ledger order differ from the
-  // sorted order `materialize.ts` applies. A fixture whose two orders agreed would exercise the
-  // sort vacuously, so `v4-materialize.test.ts` asserts the disagreement directly; if a payload
-  // field ever changes and the digests reorder, that assertion fails loudly instead of the
-  // coverage quietly evaporating.
+  // sorted by `itemId`, so the excluded triple occupies the first three ids. For the two-human
+  // path the ledger is emitted in pool order. Items 0 and 1 MUST stay byte-identical to the
+  // #3247 payloads: their `itemSha256` digests fall in the OPPOSITE of pool order (a property
+  // of those exact bytes, verified by the fixture's own test rather than asserted here). A
+  // sorted 3-tuple would require a sorted 2-prefix, so that inherited disagreement is what
+  // keeps replacement-ledger order different from the sorted order `materialize.ts` applies.
+  // If a payload field on items 0-1 ever changes and those two digests reorder, the
+  // `v4-materialize.test.ts` disagreement assertion fails loudly instead of the coverage
+  // quietly evaporating.
   if (scenario === "two-exclusions") {
     const item = (
       index: number,
@@ -351,8 +352,10 @@ function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureI
     return [
       item(0, "core", "CORRECT", "excluded"),
       item(1, "stress", "WRONG", "excluded"),
-      { ...item(2, "core", "CORRECT", "reserve"), replacesItemId: qualificationItemId(0) },
-      { ...item(3, "stress", "WRONG", "reserve"), replacesItemId: qualificationItemId(1) },
+      item(2, "core", "CORRECT", "excluded"),
+      { ...item(3, "core", "CORRECT", "reserve"), replacesItemId: qualificationItemId(0) },
+      { ...item(4, "stress", "WRONG", "reserve"), replacesItemId: qualificationItemId(1) },
+      { ...item(5, "core", "CORRECT", "reserve"), replacesItemId: qualificationItemId(2) },
     ];
   }
 
@@ -917,7 +920,7 @@ async function admitItems(
  * Produces a complete binary public-bundle/4 with no provider, registry, Docker, Harbor, or
  * licensed-data dependency. The caller owns workspace cleanup.
  */
-export async function createSyntheticV4BundleFixture(input: {
+export async function createSyntheticV4BundleFixture<Skip extends true | undefined = undefined>(input: {
   readonly workspaceDir: string;
   readonly truthAdmission: SyntheticV4TruthAdmission;
   readonly scenario?: SyntheticV4Scenario;
@@ -962,13 +965,29 @@ export async function createSyntheticV4BundleFixture(input: {
    * real `disclosure declare` operation (issue #2839). OPTIONS-ONLY and defaults off, so every
    * existing caller's bundle bytes and closure version are unchanged. With it on AND `anchorLock`,
    * the run is anchored, qualification-projecting, and disclosed — the only cell
-   * `benchmark-product-public-bundle/8` occupies.
+   * `benchmark-product-public-bundle/8` occupies. WITHOUT `anchorLock` the legacy path refuses the
+   * run at `report`, so that combination builds only when `composedFormat` is also set.
    *
    * The declaration is synthetic placeholder prose written for this fixture (design R7): no
    * third-party prompt, dataset row, annotation, or audit-derived text appears in it.
    */
   readonly declareDisclosure?: true;
-}): Promise<SyntheticV4BundleFixture> {
+  /**
+   * Asks `report` for the composed generation (issue #3403 / #3405). OPTIONS-ONLY and defaults
+   * off **in this fixture**, so every existing caller still materializes the enumerated cell it
+   * always did. The production `report` default is the other way: omitted means `/10`. This
+   * fixture passes `composedFormat: false` unless this option is set, which is how the legacy
+   * materialize suites keep proving `/2` `/4` `/6` `/7` `/8`.
+   */
+  readonly composedFormat?: true;
+  /**
+   * Stops after collect (and disclosure declare, when asked), without reporting or materializing.
+   * OPTIONS-ONLY and defaults off. A caller that needs the SAME run published two ways —
+   * `composedFormat: false` and `composedFormat: true` — copies this workspace and reports each
+   * copy (issue #3404). Mutually ignored with `composedFormat`: there is no report to flag.
+   */
+  readonly skipReport?: Skip;
+}): Promise<[Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture> {
   const scenario = input.scenario ?? "minimal";
   const withEvidence = input.withEvidence ?? false;
   const judgeModel: AcceptedJudgeModelId = input.judgeModel ?? "gpt-5.6-luna";
@@ -1198,16 +1217,7 @@ export async function createSyntheticV4BundleFixture(input: {
       "disclosure declare",
     );
   }
-  const reported = requireOk(await runReport(context, { draftId: DRAFT_ID }), "report");
-  const runState = readRunState(input.workspaceDir, DRAFT_ID);
-  if (runState === undefined) throw new Error("reported synthetic run has no RunState");
-  const bundle = materializePublicBundle({
-    workspaceDir: input.workspaceDir,
-    draftId: DRAFT_ID,
-    benchmarkSha256: reported.claimPackage.records.benchmarkSha256,
-    runState,
-  });
-  return {
+  const collected = {
     workspaceDir: input.workspaceDir,
     draftId: DRAFT_ID,
     truthAdmission: input.truthAdmission,
@@ -1217,6 +1227,24 @@ export async function createSyntheticV4BundleFixture(input: {
     admissionManifestSha256: imported.admissionManifestSha256,
     taskSha256s: imported.taskSha256s,
     instrumentSha256s,
-    bundle,
   };
+  if (input.skipReport === true) {
+    return collected as unknown as [Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture;
+  }
+  const reported = requireOk(
+    await runReport(context, { draftId: DRAFT_ID, composedFormat: input.composedFormat === true }),
+    "report",
+  );
+  const runState = readRunState(input.workspaceDir, DRAFT_ID);
+  if (runState === undefined) throw new Error("reported synthetic run has no RunState");
+  const bundle = materializePublicBundle({
+    workspaceDir: input.workspaceDir,
+    draftId: DRAFT_ID,
+    benchmarkSha256: reported.claimPackage.records.benchmarkSha256,
+    runState,
+  });
+  return {
+    ...collected,
+    bundle,
+  } as unknown as [Skip] extends [true] ? Omit<SyntheticV4BundleFixture, "bundle"> : SyntheticV4BundleFixture;
 }

@@ -36,9 +36,14 @@ import type { SourceHeadOutcome } from "./outcomes.js";
 // EXACTLY the chain position it already holds before calling this; a head
 // that names any other position is a chain claim and must go through
 // `verifySourceChain`. Position is `sequence` and `entry`: an `issuedAt` that
-// does not strictly increase is a rollback or a backdated re-sign and belongs
-// to the chain procedure's monotonicity rule, so the caller must exclude it
-// here too.
+// REGRESSES is a rollback or a backdated re-sign and belongs to the chain
+// procedure's monotonicity rule, so the caller must exclude it here too. An
+// `issuedAt` EQUAL to the one already held is admitted, not excluded -- that
+// is the byte-identical head above, and it is why this precondition reads
+// "does not regress" rather than §5.2's "strictly increases". A GREATER
+// `issuedAt` at the same position -- the head re-signed before `refreshBy`
+// expired -- reaches here too; only a regressing, or unparseable, instant
+// goes down the chain path.
 //
 // This procedure deliberately neither reads nor advances the high-water mark:
 // a revalidated head adopts nothing. What the CALLER does with the instant

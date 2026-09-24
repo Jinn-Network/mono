@@ -225,3 +225,21 @@ describe('doctor command (DI integration)', () => {
     expect(env.config!.envOverrides['JINN_RPC_URL']).toBe('set');
   });
 });
+
+describe('checkDistributorReachable', () => {
+  it('masks embedded RPC URLs in the probe-failure detail (#4549)', async () => {
+    const { checkDistributorReachable } = await import('@/cli/commands/doctor.js');
+    const config = { network: 'testnet', rpcUrl: 'https://u:pw@rpc.example.com/v2/SECRETKEY123' } as never;
+    const result = await checkDistributorReachable(config, async () => {
+      throw new Error(
+        'HTTP request failed.\n\nURL: https://u:pw@rpc.example.com/v2/SECRETKEY123\nDetails: fetch failed',
+      );
+    });
+    expect(result?.name).toBe('distributor_reachable');
+    expect(result?.ok).toBe(true);
+    expect(result?.detail).toContain('distributor probe failed:');
+    expect(result?.detail).toContain('rpc.example.com');
+    expect(result?.detail).not.toContain('SECRETKEY123');
+    expect(result?.detail).not.toContain('u:pw');
+  });
+});

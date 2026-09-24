@@ -20,7 +20,6 @@ const BENCHMARKING_PACKAGES = [
   ['run', '@jinn-network/benchmarking-run'],
   ['publication', '@jinn-network/benchmarking-publication'],
   ['interop', '@jinn-network/benchmarking-interop'],
-  ['marketplace', '@jinn-network/benchmarking-marketplace'],
   ['local', '@jinn-network/benchmarking-local'],
 ];
 
@@ -47,9 +46,6 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
   ['@jinn-network/record-publication', join(root, 'packages', 'discovery', 'publication')],
-  ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
-  ['@jinn-network/marketplace-projector', join(root, 'packages', 'marketplace', 'projector')],
-  ['@jinn-network/marketplace-testing', join(root, 'packages', 'marketplace', 'testing')],
 ]);
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -155,28 +151,6 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     devDependencies: ['@jinn-network/benchmarking-testing'],
     // benchmarking-records now parses signed Report v2 envelopes through trust-core.
     portalResolutions: ['@jinn-network/trust-core'],
-    optionalDependencies: [], peerDependencies: [],
-  }],
-  ['marketplace', {
-    dependencies: [
-      '@jinn-network/benchmarking-records',
-      '@jinn-network/benchmarking-run',
-      '@jinn-network/marketplace-binding',
-      '@jinn-network/marketplace-projector',
-      '@jinn-network/task-execution-protocol',
-    ],
-    devDependencies: [
-      '@jinn-network/benchmarking-testing',
-      '@jinn-network/task-execution-profiles',
-    ],
-    portalResolutions: [
-      '@jinn-network/contract-abis',
-      '@jinn-network/record-discovery-protocol',
-      '@jinn-network/record-discovery-serve',
-      '@jinn-network/task-execution-backend',
-      '@jinn-network/trust-core',
-      '@jinn-network/trust-resolve',
-    ],
     optionalDependencies: [], peerDependencies: [],
   }],
   // local (C4) deliberately declares NO backend and NO evidence dependency: the local venue's

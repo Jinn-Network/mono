@@ -87,6 +87,9 @@ describe("Colophon install surface", () => {
     const answer = await runColophonCli(["--help"], context);
     expect(answer.exitCode).toBe(0);
     expect(answer.stdout).toContain("colophon demo");
+    expect(answer.stdout).toContain("Published claimant verbs:");
+    expect(answer.stdout).toContain("method, arm add, lock, anchor, run import, collect, report, publish, results, status");
+    expect(answer.stdout).toContain("service's machinery");
     expect(answer.stdout).not.toContain("terminal-bench-2.1");
   });
 
@@ -154,7 +157,7 @@ describe("Colophon install surface", () => {
       TEST_BUILD,
     );
     expect(receipt.bundleIdentity).toBe(`sha256:${"a".repeat(64)}`);
-    expect(receipt.bundleFormat).toBe("benchmark-product-public-bundle/2");
+    expect(receipt.bundleFormat).toBe("benchmark-product-public-bundle/10");
     expect(receipt.sourceCommit).toBe("b".repeat(40));
     const bytes = readFileSync(join(root, "quickstart-receipt.json"), "utf8");
     expect(bytes).not.toContain("must-not-appear");
@@ -218,6 +221,35 @@ describe("Colophon install surface", () => {
   });
 });
 
+const SELF_SERVE_SPEC = "spec/2026-08-13-colophon-self-serve.md";
+const SELF_SERVE_SPEC_PATH = fileURLToPath(new URL(`../../../../${SELF_SERVE_SPEC}`, import.meta.url));
+
+function extractSpecTextBlock(specMarkdown: string, marker: string): string {
+  const markerIndex = specMarkdown.indexOf(marker);
+  if (markerIndex < 0) {
+    throw new Error(`${SELF_SERVE_SPEC}: marker not found: ${marker}`);
+  }
+  const after = specMarkdown.slice(markerIndex);
+  const open = after.indexOf("```text\n");
+  if (open < 0) {
+    throw new Error(`${SELF_SERVE_SPEC}: \`\`\`text opening fence not found after marker`);
+  }
+  const contentStart = open + "```text\n".length;
+  const close = after.indexOf("\n```", contentStart);
+  if (close < 0) {
+    throw new Error(`${SELF_SERVE_SPEC}: closing fence not found`);
+  }
+  return after.slice(contentStart, close);
+}
+
+/** Normalizes paths and bundle identity to the spec's §5.2 placeholders. */
+function normalizeSection52Sample(text: string): string {
+  return text
+    .replace(/^Bundle: .+$/m, "Bundle: <absolute-path>/bundle")
+    .replace(/^Receipt: .+$/m, "Receipt: <absolute-path>/quickstart-receipt.json")
+    .replace(/^Identity: sha256:[0-9a-f]{64}$/m, "Identity: sha256:<bundle-id>");
+}
+
 describe("local-publish answer", () => {
   const published = {
     bundle: "/tmp/colophon-sample/bundle",
@@ -248,36 +280,15 @@ describe("local-publish answer", () => {
     );
   });
 
-  // The spec's §5.2 sample is a literal transcription of these six lines, and nothing but this test
-  // compares the two (issue #4416; #4283 was the render moving while the transcription stood
-  // still). The renderer is the authority: a red here means the spec block needs re-transcribing.
-  test("the self-serve spec §5.2 sample is this answer", () => {
-    const spec = readFileSync(fileURLToPath(new URL(`../../../../${SELF_SERVE_SPEC}`, import.meta.url)), "utf8");
-    const expected = specSampleBlock(spec, "The last lines state what happened and what did not:")
-      .replaceAll("<absolute-path>", "/tmp/colophon-sample")
-      .replace("<bundle-id>", published.identity);
+  test("§5.2 local-publish closing lines match the spec fenced sample", () => {
+    const specBlock = extractSpecTextBlock(
+      readFileSync(SELF_SERVE_SPEC_PATH, "utf8"),
+      "The last lines state what happened and what did not:",
+    );
+    const answer = localPublishAnswer(published);
     expect(
-      localPublishAnswer(published),
-      `${SELF_SERVE_SPEC} §5.2 sample block no longer matches localPublishAnswer; re-transcribe the block from the renderer`,
-    ).toBe(expected);
+      normalizeSection52Sample(answer).trimEnd(),
+      `${SELF_SERVE_SPEC} §5.2`,
+    ).toBe(specBlock.trimEnd());
   });
 });
-
-const SELF_SERVE_SPEC = "spec/2026-08-13-colophon-self-serve.md";
-
-/** The fenced ```text block that immediately follows `afterSentence` in `spec`, without its fences.
- * Anchored on the sentence rather than a block ordinal so an edit elsewhere in the document cannot
- * silently re-point the pin at a different sample (issue #4416). */
-function specSampleBlock(spec: string, afterSentence: string): string {
-  const start = spec.indexOf(`${afterSentence}\n`);
-  if (start === -1) throw new Error(`${SELF_SERVE_SPEC} no longer contains the sentence "${afterSentence}"`);
-  // Adjacency is required, not just order: a later ```text block must not satisfy this pin.
-  const opening = `${afterSentence}\n\n\`\`\`text\n`;
-  if (!spec.startsWith(opening, start)) {
-    throw new Error(`${SELF_SERVE_SPEC}: no \`\`\`text block immediately follows "${afterSentence}"`);
-  }
-  const bodyStart = start + opening.length;
-  const end = spec.indexOf("\n```\n", bodyStart);
-  if (end === -1) throw new Error(`${SELF_SERVE_SPEC}: the \`\`\`text block after "${afterSentence}" is unterminated`);
-  return spec.slice(bodyStart, end + 1);
-}

@@ -22,7 +22,7 @@
 
 import { z } from "zod";
 import { TASK_SELECTION_MODES } from "@jinn-network/benchmarking-records";
-import { BeaconSourceIdSchema } from "@colophon-claims/verify";
+import { BeaconSourceIdSchema } from "@colophon-claims/check";
 import { refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
 import { LifecycleStateSchema } from "./lifecycle.js";
 

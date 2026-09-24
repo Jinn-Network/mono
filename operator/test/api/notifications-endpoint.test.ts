@@ -7,7 +7,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Hono } from 'hono';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { addNotificationsRoutes } from '../../src/api/notifications-endpoint.js';
+import { addOperatorArtifactsRoutes } from '../../src/api/operator-artifacts-endpoint.js';
 import { Store } from '../../src/store/store.js';
 import type { GatheredStatusRaw } from '../../src/api/status-build.js';
 import type { StatusV1Response } from '../../src/api/contract/status.js';
@@ -224,6 +228,34 @@ describe('GET /v1/notifications', () => {
       gatherRaw: async () => minimalRaw(),
       assemble: () => minimalAssembled(),
     });
+
+    const res = await app.request('/v1/notifications');
+    const body = await res.json() as { notifications: Array<{ kind: string }> };
+    expect(body.notifications.map((n) => n.kind)).toContain('restart_required');
+  });
+
+  // Issue #4242: pin the wiring end to end — a pricing save on the same app
+  // must surface as a `restart_required` notification.
+  it('restart_required fires after a pricing save on the same app', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-notifications-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, `${JSON.stringify({ network: 'testnet' }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+    addNotificationsRoutes(app, {
+      store,
+      getStatus: () => undefined,
+      gatherRaw: async () => minimalRaw(),
+      assemble: () => minimalAssembled(),
+    });
+
+    const save = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ defaultPriceUsdc: '0.001' }),
+    });
+    expect(save.status).toBe(200);
 
     const res = await app.request('/v1/notifications');
     const body = await res.json() as { notifications: Array<{ kind: string }> };

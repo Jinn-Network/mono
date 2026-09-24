@@ -63,6 +63,19 @@ describe('release-readiness scaffolding', () => {
     expect(content).toContain('## Recommendation: SHIP');
     expect(content).toContain('GAP-1');
     expect(content).toContain('verdictCode=1');
+    const envSection = content.slice(
+      content.indexOf('## Environment-suite evidence'),
+      content.indexOf('## Walk-through script for human pass'),
+    );
+    const envBullets = envSection.split('\n').filter((l) => l.startsWith('- '));
+    expect(envBullets).toEqual([
+      '- Verdict: pass (verdictCode=1)',
+      '- Wall-clock: 278000ms',
+      '- Scenario: op-a solves sympy__sympy-27510, op-b evaluates',
+      '- Hermes model: deepseek/deepseek-v4-flash',
+      '- Tx: deliver 0xa1b2, verdict 0xc3d4',
+      '- Cost: $0.07',
+    ]);
     expect(content).toContain('release-readiness-recommendation=SHIP');
     // Marker keys speak the two-gate vocabulary, not the retired tier ladder.
     expect(content).toContain('hermetic-gate-t1-1=passed');
@@ -120,6 +133,41 @@ describe('release-readiness scaffolding', () => {
     expect(content).toContain('hermetic-gate-t1-2=skipped:no gate workflow runs it');
     expect(content).toContain('environment-suite=skipped:no-reason');
     expect(content).not.toContain('failed:null');
+  });
+
+  // The prose branch required verdict AND evidence while the marker branch required only
+  // the verdict, so a verdict-without-evidence input printed "SKIPPED (... no verdict was
+  // supplied)" directly above `environment-suite=passed` (#4487). Prose now branches on the
+  // verdict alone and renders evidence as optional detail.
+  it('writeHandoffDoc renders a verdict without an evidence record instead of SKIPPED', async () => {
+    const outPath = path.join(tmpRoot, 'handoff.md');
+    await writeHandoffDoc(outPath, { ...baseInput(), environmentSuiteEvidence: null });
+    const content = await fs.readFile(outPath, 'utf-8');
+    expect(content).toContain('- Verdict: pass');
+    expect(content).toContain('- Evidence record: none supplied');
+    const envSection = content.slice(
+      content.indexOf('## Environment-suite evidence'),
+      content.indexOf('## Walk-through script for human pass'),
+    );
+    const envBullets = envSection.split('\n').filter((l) => l.startsWith('- '));
+    expect(envBullets).toEqual([
+      '- Verdict: pass',
+      expect.stringMatching(/^- Wall-clock: /),
+      '- Evidence record: none supplied (scenario, model, tx hashes, cost unavailable)',
+    ]);
+    expect(content).toContain('environment-suite=passed');
+    expect(content).not.toContain('SKIPPED');
+    expect(content).not.toContain('no environment-suite verdict was supplied');
+    expect(content).not.toContain('verdictCode=');
+  });
+
+  it('writeHandoffDoc treats orphaned evidence without a verdict as SKIPPED', async () => {
+    const outPath = path.join(tmpRoot, 'handoff.md');
+    await writeHandoffDoc(outPath, { ...baseInput(), environmentSuiteVerdict: null });
+    const content = await fs.readFile(outPath, 'utf-8');
+    expect(content).toContain('SKIPPED (mode=human-invoked');
+    expect(content).toContain('environment-suite=skipped:no-verdict-supplied');
+    expect(content).not.toContain('- Verdict:');
   });
 
   // The marker block is a line-oriented `key=value` list inside an HTML comment, so
