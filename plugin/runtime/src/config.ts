@@ -213,8 +213,9 @@ const MirrorSourceConfigSchema = z.strictObject({
   /**
    * Absent (the default) means this archive has declared NO signer, so under
    * the `verified` posture its head signature resolves against no key and the
-   * chain is refused `unauthorized-signer`. That is the fail-closed direction:
-   * following an archive is not the same act as trusting a key to speak for it.
+   * chain is refused `unauthorized-source-signer`. That is the fail-closed
+   * direction: following an archive is not the same act as trusting a key to
+   * speak for it.
    */
   signingKeys: z.array(MirrorSourceSigningKeySchema).default([]),
 });

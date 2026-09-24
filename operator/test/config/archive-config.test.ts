@@ -1,8 +1,9 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/config.js';
+import { isolateEnv } from '../_support/env.js';
 
 function configFile(value: Record<string, unknown>): string {
   const dir = mkdtempSync(join(tmpdir(), 'jinn-archive-config-'));
@@ -11,29 +12,13 @@ function configFile(value: Record<string, unknown>): string {
   return path;
 }
 
-const TOUCHED = [
+// Paired save/clear/restore: the bare afterEach here isolated nothing from an
+// ambient value and destroyed whatever the contributor had exported (#3112).
+isolateEnv([
   'JINN_PUBLIC_ARCHIVE',
   'JINN_PUBLIC_ARCHIVE_BIND_HOST',
   'JINN_PUBLIC_ARCHIVE_PORT',
-];
-
-const savedArchiveEnv: Record<string, string | undefined> = {};
-
-// Paired save/clear/restore: the bare afterEach here isolated nothing from an
-// ambient value and destroyed whatever the contributor had exported (#3112).
-beforeEach(() => {
-  for (const key of TOUCHED) {
-    savedArchiveEnv[key] = process.env[key];
-    delete process.env[key];
-  }
-});
-
-afterEach(() => {
-  for (const key of TOUCHED) {
-    if (savedArchiveEnv[key] === undefined) delete process.env[key];
-    else process.env[key] = savedArchiveEnv[key];
-  }
-});
+]);
 
 describe('publicArchive config', () => {
   it('defaults the public archive plane to disabled on loopback', () => {
