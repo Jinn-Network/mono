@@ -131,13 +131,18 @@ describe('jinn supply', () => {
     expect(raw.join('')).not.toContain('no matching task');
   });
 
-  it('strips C0, DEL, and C1 from human class lines and leaves JSON untouched', async () => {
-    const workClass = 'pred\u0007iction\u007F.\u009Bv1';
+  it('strips C0, DEL, C1, CR, and an ESC-prefixed CSI sequence from human class lines, leaving JSON untouched', async () => {
+    // #4236 requires a bare carriage return and an ESC-prefixed escape
+    // sequence alongside BEL/DEL/C1 — a CSI "erase line" is the kind of
+    // sequence a hostile contractId could use to rewrite the operator's
+    // terminal line. \u001B is itself in the stripped C0 range, so once it is
+    // removed the trailing "[2K" is inert printable text, not a live escape.
+    const workClass = 'pred\u0007iction\u007F\r.\u009Bv1\u001b[2K';
     const response = {
       schemaVersion: 1, status: 'available', chainId: 84532,
       generatedAt: '2026-09-06T13:47:00.000Z', window: WINDOW,
       classes: [{
-        workClass, contractId: 'pred\u0007iction', contractVersion: '\u009Bv1',
+        workClass, contractId: 'pred\u0007iction\r', contractVersion: '\u009Bv1\u001b[2K',
         acceptingSolverNets: 1, claimingOperators: 2, verdictDeliveries: 3,
         latestAttemptAt: '2026-09-06T10:00:00.000Z',
         latestVerdictAt: '2026-09-06T11:00:00.000Z',
@@ -146,8 +151,13 @@ describe('jinn supply', () => {
     const human = commandWith(response);
     const { raw } = await runCommand(human.command, { argv: ['--human'] });
     const text = raw.join('');
-    expect(text).toContain('prediction.v1:');
-    const classLine = text.split('\n').find((line) => line.includes('prediction.v1:'));
+    // Stripping removes the control BYTES, not a whole escape sequence: ESC
+    // is a C0 byte and is removed, but the "[2K" it introduced is ordinary
+    // printable text that survives — inert (no live escape reaches the
+    // terminal) rather than invisible.
+    const sanitizedWorkClass = 'prediction.v1[2K';
+    expect(text).toContain(`${sanitizedWorkClass}:`);
+    const classLine = text.split('\n').find((line) => line.includes(`${sanitizedWorkClass}:`));
     expect(classLine).toBeDefined();
     expect(classLine).not.toMatch(/[\u0000-\u001F\u007F-\u009F]/u);
 
