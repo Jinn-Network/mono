@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import keysCmd from '../../../src/cli/commands/keys-backup.js';
 import type { CommandContext } from '../../../src/cli/command.js';
+import { readKeystorePasswordFile } from '../../../src/earning/password-file.js';
 
 async function makeKeystore(): Promise<{ dir: string; password: string }> {
   const dir = mkdtempSync(join(tmpdir(), 'jinn-keys-backup-test-'));
@@ -230,12 +231,14 @@ describe('keys change-password command', () => {
     expect(readFileSync(passwordFile, 'utf-8').trim()).toBe(shared);
   });
 
-  it('deletes the password file when the default earning dir is the target', async () => {
+  it('deletes the legacy password file when the default earning dir is the target', async () => {
     const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
 
     const { ctx, writes } = makeCtx(['change-password', '--json'], {
       HOME: home,
       JINN_EARNING_DIR: defaultEarningDir,
+      // Sourced from the env, not the file being deleted: deletion proves the
+      // file's content stale, independent of where `current` came from.
       JINN_PASSWORD: password,
       JINN_NEW_PASSWORD: 'brand-new-password',
     });
@@ -248,19 +251,13 @@ describe('keys change-password command', () => {
     await expectDecryptsWith(defaultEarningDir, 'brand-new-password');
   });
 
-  // Single operator on a custom earning dir: the auto-generated file is that
-  // operator's own boot password, so leaving it behind would wedge the next `jinn run`.
-  it('deletes the password file when it opens no default keystore', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'jinn-keys-cp-home-'));
-    const stateDir = join(home, '.jinn-operator');
-    mkdirSync(stateDir, { recursive: true });
-    const passwordFile = join(stateDir, 'keystore-password');
-    const { dir, password } = await makeKeystore();
-    writeFileSync(passwordFile, `${password}\n`, { mode: 0o600 });
+  it('deletes a same-secret default-operator legacy leftover after primary rotation', async () => {
+    const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
+    writeFileSync(join(defaultEarningDir, 'keystore-password'), `${password}\n`, { mode: 0o600 });
 
     const { ctx, writes } = makeCtx(['change-password', '--json'], {
       HOME: home,
-      JINN_EARNING_DIR: dir,
+      JINN_EARNING_DIR: defaultEarningDir,
       JINN_NEW_PASSWORD: 'brand-new-password',
     });
 
@@ -268,8 +265,100 @@ describe('keys change-password command', () => {
 
     const result = JSON.parse(writes[writes.length - 1]!);
     expect(result.passwordFileDeleted).toBe(true);
+    expect(existsSync(join(defaultEarningDir, 'keystore-password'))).toBe(false);
     expect(existsSync(passwordFile)).toBe(false);
+    const leftover = readKeystorePasswordFile(defaultEarningDir, { HOME: home });
+    expect(leftover).toBeUndefined();
+    await expectDecryptsWith(defaultEarningDir, 'brand-new-password');
+  });
+
+  it('keeps a default-operator legacy file that holds a different secret', async () => {
+    const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
+    writeFileSync(join(defaultEarningDir, 'keystore-password'), `${password}\n`, { mode: 0o600 });
+    writeFileSync(passwordFile, 'other-host-secret\n', { mode: 0o600 });
+
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home,
+      JINN_EARNING_DIR: defaultEarningDir,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    const result = JSON.parse(writes[writes.length - 1]!);
+    expect(result.passwordFileDeleted).toBe(true);
+    expect(existsSync(join(defaultEarningDir, 'keystore-password'))).toBe(false);
+    expect(readFileSync(passwordFile, 'utf-8').trim()).toBe('other-host-secret');
+    await expectDecryptsWith(defaultEarningDir, 'brand-new-password');
+  });
+
+  it('deletes a custom-dir primary file and leaves the host-wide legacy file', async () => {
+    const { home, passwordFile, password: defaultPassword } = await makeDefaultOperator();
+    const { dir, password } = await makeKeystore();
+    writeFileSync(join(dir, 'keystore-password'), `${password}\n`, { mode: 0o600 });
+
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home,
+      JINN_EARNING_DIR: dir,
+      // Sourced from the env, not the file being deleted: deletion proves the
+      // file's content stale, independent of where `current` came from.
+      JINN_PASSWORD: password,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    const result = JSON.parse(writes[writes.length - 1]!);
+    expect(result.passwordFileDeleted).toBe(true);
+    expect(existsSync(join(dir, 'keystore-password'))).toBe(false);
+    expect(existsSync(passwordFile)).toBe(true);
+    expect(readFileSync(passwordFile, 'utf-8').trim()).toBe(defaultPassword);
     await expectDecryptsWith(dir, 'brand-new-password');
+  });
+
+  it('rotating one custom dir does not delete another custom dir primary', async () => {
+    const { home } = await makeDefaultOperator();
+    const a = await makeKeystore();
+    const b = await makeKeystore();
+    writeFileSync(join(a.dir, 'keystore-password'), `${a.password}\n`, { mode: 0o600 });
+    writeFileSync(join(b.dir, 'keystore-password'), `${b.password}\n`, { mode: 0o600 });
+
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home,
+      JINN_EARNING_DIR: a.dir,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(true);
+    expect(existsSync(join(a.dir, 'keystore-password'))).toBe(false);
+    expect(readFileSync(join(b.dir, 'keystore-password'), 'utf-8').trim()).toBe(b.password);
+    await expectDecryptsWith(a.dir, 'brand-new-password');
+    await expectDecryptsWith(b.dir, b.password);
+  });
+
+  it('deletes primary and legacy leftovers even when the password came from the env', async () => {
+    // #4662-by-another-route: a rotation run with JINN_PASSWORD never reads a
+    // file, but a leftover primary/legacy file holding the same old secret
+    // must still be cleared, or the next `jinn run` without the env var
+    // resolves it and fails closed as "wrong password".
+    const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
+    writeFileSync(join(defaultEarningDir, 'keystore-password'), `${password}\n`, { mode: 0o600 });
+
+    const { ctx, writes } = makeCtx(['change-password', '--json'], {
+      HOME: home,
+      JINN_EARNING_DIR: defaultEarningDir,
+      JINN_PASSWORD: password,
+      JINN_NEW_PASSWORD: 'brand-new-password',
+    });
+
+    await keysCmd.run(ctx);
+
+    expect(JSON.parse(writes[writes.length - 1]!).passwordFileDeleted).toBe(true);
+    expect(existsSync(passwordFile)).toBe(false);
+    expect(existsSync(join(defaultEarningDir, 'keystore-password'))).toBe(false);
+    await expectDecryptsWith(defaultEarningDir, 'brand-new-password');
   });
 
   it('resolves the default state dir from JINN_STATE_DIR', async () => {
@@ -289,7 +378,6 @@ describe('keys change-password command', () => {
       HOME: home,
       JINN_STATE_DIR: stateDir,
       JINN_EARNING_DIR: defaultEarningDir,
-      JINN_PASSWORD: 'pw',
       JINN_NEW_PASSWORD: 'brand-new-password',
     });
 
@@ -442,12 +530,11 @@ describe('keys change-password command', () => {
   );
 
   it('recognizes a directory symlink to the default earning dir during rotation', async () => {
-    const { home, defaultEarningDir, passwordFile, password } = await makeDefaultOperator();
+    const { home, defaultEarningDir, passwordFile } = await makeDefaultOperator();
     const alias = join(home, 'earning-alias');
     symlinkSync(defaultEarningDir, alias, 'dir');
     const { ctx, writes } = makeCtx(['change-password', '--json'], {
-      HOME: home, JINN_EARNING_DIR: alias, JINN_PASSWORD: password,
-      JINN_NEW_PASSWORD: 'brand-new-password',
+      HOME: home, JINN_EARNING_DIR: alias, JINN_NEW_PASSWORD: 'brand-new-password',
     });
 
     await keysCmd.run(ctx);

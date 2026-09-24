@@ -7,12 +7,14 @@ import { makeCommandCtx } from '@test/cli.js';
 import type { RunDeps } from '../../../src/cli/commands/run.js';
 import { BASE_SEPOLIA_TODAY } from '@jinn-network/marketplace-binding';
 
-function makeFakeDeps(overrides: Partial<RunDeps> = {}): RunDeps {
+function makeFakeDeps(overrides: Partial<RunDeps> = {}, fakeHome?: string): RunDeps {
+  const earningDir = fakeHome ? join(fakeHome, '.jinn-operator', 'earning') : '/tmp/jinn-run-missing-earning';
   return {
     loadConfig: vi.fn(() => ({
       network: 'testnet',
       rpcUrl: 'https://sepolia.base.org',
       apiPort: 7331,
+      earningDir,
     })) as unknown as RunDeps['loadConfig'],
     getConfigPathFromArgs: vi.fn(() => undefined) as unknown as RunDeps['getConfigPathFromArgs'],
     checkRpcNetwork: vi.fn(async () => ({ ok: true as const })) as unknown as RunDeps['checkRpcNetwork'],
@@ -47,8 +49,8 @@ describe('run command', () => {
   let fakeHome: string;
 
   beforeEach(() => {
-    fakeDeps = makeFakeDeps();
     fakeHome = mkdtempSync(join(tmpdir(), 'jinn-run-test-home-'));
+    fakeDeps = makeFakeDeps({}, fakeHome);
   });
 
   afterEach(() => {
@@ -63,13 +65,29 @@ describe('run command', () => {
     await run.run(ctx);
     // mainFn must have been invoked (no early exit on missing password).
     expect(fakeDeps.mainFn).toHaveBeenCalled();
-    // Auto-generated password file persists at ~/.jinn-operator/keystore-password.
-    const pwPath = join(fakeHome, '.jinn-operator', 'keystore-password');
+    // Auto-generated password file persists next to the keystore.
+    const pwPath = join(fakeHome, '.jinn-operator', 'earning', 'keystore-password');
     expect(existsSync(pwPath)).toBe(true);
     const persisted = readFileSync(pwPath, 'utf-8').trim();
     expect(persisted.length).toBeGreaterThanOrEqual(32);
+    expect(existsSync(join(fakeHome, '.jinn-operator', 'keystore-password'))).toBe(false);
     // process.env was set so the daemon picks it up.
     expect(process.env['JINN_PASSWORD']).toBe(persisted);
+  });
+
+  it('does not auto-generate when a legacy host-wide password file already exists', async () => {
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const { resolveCliPassword } = await import('../../../src/cli/password.js');
+    mkdirSync(join(fakeHome, '.jinn-operator'), { recursive: true });
+    writeFileSync(join(fakeHome, '.jinn-operator', 'keystore-password'), 'legacy-secret\n', { mode: 0o600 });
+    fakeDeps = makeFakeDeps({ resolveCliPassword }, fakeHome);
+    const run = createRunCommand(fakeDeps);
+    const { ctx } = makeCommandCtx({ env: { HOME: fakeHome } });
+    await run.run(ctx);
+    expect(fakeDeps.mainFn).toHaveBeenCalled();
+    expect(existsSync(join(fakeHome, '.jinn-operator', 'earning', 'keystore-password'))).toBe(false);
+    expect(readFileSync(join(fakeHome, '.jinn-operator', 'keystore-password'), 'utf-8').trim()).toBe('legacy-secret');
+    expect(process.env['JINN_PASSWORD']).toBe('legacy-secret');
   });
 
   it('delegates to mainFn() when JINN_PASSWORD is set', async () => {
@@ -85,6 +103,7 @@ describe('run command', () => {
     fakeDeps = makeFakeDeps({
       loadConfig: vi.fn(() => ({
         network: 'testnet', rpcUrl: 'https://sepolia.base.org', apiPort: 7331,
+        earningDir: join(fakeHome, '.jinn-operator', 'earning'),
         operator: {
           verticalMode: 'native-v1',
           native: {
@@ -101,7 +120,7 @@ describe('run command', () => {
   });
 
   // #4375: an explicit but unusable --password-fd must not be mistaken for
-  // "nothing configured" -- that branch overwrites ~/.jinn-operator/keystore-password
+  // "nothing configured" -- that branch overwrites <earningDir>/keystore-password
   // with a fresh random secret, leaving the existing keystore undecryptable.
   it('does not auto-generate a keystore password when --password-fd is given but unusable', async () => {
     fakeDeps = makeFakeDeps({
@@ -109,7 +128,7 @@ describe('run command', () => {
         ok: false as const,
         message: 'Missing or invalid value for --password-fd (expected a non-negative file descriptor)',
       })) as unknown as RunDeps['resolveCliPassword'],
-    });
+    }, fakeHome);
     const run = createRunCommand(fakeDeps);
     const { ctx, writes, exits } = makeCommandCtx({
       env: { HOME: fakeHome },
@@ -121,6 +140,7 @@ describe('run command', () => {
     expect(parsed.message).toContain('--password-fd');
     expect(exits[exits.length - 1]).not.toBe(0);
     expect(fakeDeps.mainFn).not.toHaveBeenCalled();
+    expect(existsSync(join(fakeHome, '.jinn-operator', 'earning', 'keystore-password'))).toBe(false);
     expect(existsSync(join(fakeHome, '.jinn-operator', 'keystore-password'))).toBe(false);
   });
 
@@ -172,7 +192,7 @@ describe('run command', () => {
   it('fails before mainFn() when api port is occupied', async () => {
     fakeDeps = makeFakeDeps({
       checkApiPortAvailable: vi.fn(async () => ({ ok: false as const, port: 7331, code: 'EADDRINUSE', message: 'in use' })) as unknown as RunDeps['checkApiPortAvailable'],
-    });
+    }, fakeHome);
     const run = createRunCommand(fakeDeps);
     const { ctx, writes, exits } = makeCommandCtx({ env: { JINN_PASSWORD: 'test', HOME: fakeHome } });
     await run.run(ctx);

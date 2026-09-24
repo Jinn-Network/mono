@@ -63,6 +63,11 @@ import {
 } from '../../config/write-native-identity.js';
 import { ROLE_SETS, orderedRolesForSet, type RoleSetName } from './native-requester.js';
 import { resolveDefaultStateDir } from '../../state-dir.js';
+import {
+  legacyKeystorePasswordPath,
+  primaryKeystorePasswordPath,
+  readKeystorePasswordFile,
+} from '../../earning/password-file.js';
 
 const OPTIONS = {
   ...COMMON_FLAGS,
@@ -440,58 +445,39 @@ export interface CeremonyPasswordResolution {
  * daemon cannot decrypt — a failure that surfaces only at the next boot, after the anchor gas is
  * spent and the catalog is sealed.
  *
- * The daemon resolves `JINN_PASSWORD` first and falls back to a keystore-password file whose path
- * is HARD-CODED to `~/.jinn-client/keystore-password` (`main.ts:178,198`) — it does not follow
- * `--dir`. So an operator homed anywhere else (§4.4's operator B at `~/.jinn-client-op-b`) can
- * never use the fallback and must supply the env var at ceremony time AND at every daemon start.
+ * The daemon resolves `JINN_PASSWORD` first, then `<dir>/earning/keystore-password` (primary),
+ * then the host-wide default-state file (legacy). JINN_PASSWORD is not required when the primary
+ * file exists under `--dir`.
  */
 export function resolveCeremonyPassword(input: {
   readonly dir: string;
   readonly env: NodeJS.ProcessEnv;
 }): CeremonyPasswordResolution | { readonly refusal: string; readonly hint: string } {
-  const home = input.env.HOME ?? homedir();
-  const defaultDir = resolveDefaultStateDir({ home, env: input.env });
-  const fallbackPath = join(defaultDir, 'keystore-password');
-  const isDefaultDir = input.dir === defaultDir;
-  const fallback = existsSync(fallbackPath)
-    ? readFileSync(fallbackPath, 'utf-8').trim()
-    : undefined;
+  const primaryPath = primaryKeystorePasswordPath(join(input.dir, 'earning'));
+  const legacyPath = legacyKeystorePasswordPath({ env: input.env });
+  const fromFile = readKeystorePasswordFile(join(input.dir, 'earning'), input.env);
+  const filePassword = fromFile?.password;
+  const filePath = fromFile?.path;
 
   const envPassword = input.env.JINN_PASSWORD;
   if (typeof envPassword === 'string' && envPassword.length > 0) {
     const warnings: string[] = [];
-    if (!isDefaultDir) {
+    if (filePassword !== undefined && filePassword !== envPassword && filePath !== undefined) {
       warnings.push(
-        `The keystore-password file fallback is hard-coded to ${fallbackPath} and does NOT follow --dir, `
-          + `so the daemon for ${input.dir} can only ever resolve JINN_PASSWORD. Set it on every daemon start.`,
-      );
-    } else if (fallback !== undefined && fallback !== envPassword) {
-      // The daemon prefers env, so this only bites the day someone starts it without the var —
-      // at which point it resolves a DIFFERENT password and refuses to open this custody.
-      warnings.push(
-        `JINN_PASSWORD differs from the password stored at ${fallbackPath}. The daemon prefers the env var, `
+        `JINN_PASSWORD differs from the password stored at ${filePath}. The daemon prefers the env var, `
           + 'so any start without it will resolve the file value and fail to open this custody.',
       );
     }
     return { password: envPassword, source: 'env', warnings };
   }
 
-  if (!isDefaultDir) {
-    return {
-      refusal: `JINN_PASSWORD is required for an operator homed at ${input.dir}.`,
-      hint: `The daemon's keystore-password fallback is hard-coded to ${fallbackPath} and does not follow --dir, `
-        + 'so a non-default operator directory has no fallback. Export JINN_PASSWORD for the ceremony and for '
-        + 'every daemon start.',
-    };
-  }
-  if (fallback !== undefined && fallback.length > 0) {
-    // This IS what the daemon will resolve for the default directory, so using it is correct.
-    return { password: fallback, source: 'keystore-file', warnings: [] };
+  if (filePassword !== undefined && filePath !== undefined) {
+    return { password: filePassword, source: 'keystore-file', warnings: [] };
   }
   return {
-    refusal: `No password is resolvable: JINN_PASSWORD is unset and ${fallbackPath} does not exist.`,
-    hint: 'The daemon auto-generates and persists a password on its first start, which would not match custody '
-      + 'minted now. Either export JINN_PASSWORD, or start the daemon once so the file exists, then re-run.',
+    refusal: `JINN_PASSWORD is required for an operator homed at ${input.dir} when neither ${primaryPath} nor ${legacyPath} exists.`,
+    hint: 'The daemon auto-generates and persists a password next to the keystore on its first start, which would not match custody '
+      + 'minted now. Either export JINN_PASSWORD, write <dir>/earning/keystore-password, or start the daemon once so the file exists, then re-run.',
   };
 }
 
@@ -1578,9 +1564,10 @@ Options (init and join):
   --execute                  Perform the ceremony. Without it, nothing is minted, sent, or written.
   --dry-run                  Force the read-only plan. Refuses if combined with --execute.
   --human                    Human-readable output, including the anchor and finality progress lines.
-  JINN_PASSWORD              Required unless --dir is the default home AND its keystore-password file
-                             exists. The ceremony must run with the password the daemon will later
-                             resolve, or it mints custody the daemon cannot decrypt.
+  JINN_PASSWORD              Required unless a keystore-password file exists (primary
+                             <dir>/earning/keystore-password, or the host-wide default-state
+                             fallback). The ceremony must run with the password the daemon
+                             will later resolve, or it mints custody the daemon cannot decrypt.
 
 Options (show):
   --catalog <path>           Catalog to inspect (default: the config's trustRootsPath)

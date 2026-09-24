@@ -572,7 +572,7 @@ describe('dual-role: operator-then-builder (52x3.7 r83r)', () => {
 
     const mockDeps = {
       ...PRODUCTION_DEPS,
-      resolveCliPassword: () => ({ ok: true as const, password: 'test' }),
+      resolveCliPassword: () => ({ ok: true as const, password: 'test', source: 'env' as const }),
       loadConfig: () => ({
         ...PRODUCTION_DEPS.loadConfig(),
         rpcUrl: anvil.rpcUrl,

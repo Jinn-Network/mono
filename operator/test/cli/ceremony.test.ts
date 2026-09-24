@@ -301,13 +301,7 @@ describe('ceremony init — read-only plan', () => {
 });
 
 describe('ceremony password identity guard', () => {
-  /**
-   * The daemon's keystore-password fallback path is HARD-CODED to `~/.jinn-operator/keystore-password`
-   * and does not follow `--dir`, so operator B at `~/.jinn-client-op-b` has no fallback at all. A
-   * ceremony that picked its own password there would mint custody the daemon can never decrypt —
-   * a failure that surfaces only at the next boot, after the anchor gas is spent.
-   */
-  it('refuses a non-default operator dir with no JINN_PASSWORD', () => {
+  it('refuses a non-default operator dir when neither primary nor env exist', () => {
     const home = mkdtempSync(join(tmpdir(), 'ceremony-pw-'));
     const resolution = resolveCeremonyPassword({
       dir: join(home, '.jinn-client-op-b'),
@@ -315,17 +309,35 @@ describe('ceremony password identity guard', () => {
     });
     expect('refusal' in resolution).toBe(true);
     expect((resolution as { refusal: string }).refusal).toContain('JINN_PASSWORD is required');
-    expect((resolution as { hint: string }).hint).toContain('does not follow --dir');
+    expect((resolution as { hint: string }).hint).not.toContain('does not follow --dir');
   });
 
-  it('warns that a non-default dir needs JINN_PASSWORD at every daemon start too', () => {
+  it('accepts a non-default --dir from the primary earning-dir password file', () => {
     const home = mkdtempSync(join(tmpdir(), 'ceremony-pw-'));
+    const dir = join(home, '.jinn-client-op-b');
+    mkdirSync(join(dir, 'earning'), { recursive: true });
+    writeFileSync(join(dir, 'earning', 'keystore-password'), `${PASSWORD}\n`);
     const resolution = resolveCeremonyPassword({
-      dir: join(home, '.jinn-client-op-b'),
+      dir,
+      env: { HOME: home } as NodeJS.ProcessEnv,
+    });
+    expect(resolution).toMatchObject({ password: PASSWORD, source: 'keystore-file', warnings: [] });
+    expect(JSON.stringify(resolution)).not.toContain('does not follow --dir');
+  });
+
+  it('does not warn that the daemon cannot follow --dir when a primary file exists', () => {
+    const home = mkdtempSync(join(tmpdir(), 'ceremony-pw-'));
+    const dir = join(home, '.jinn-client-op-b');
+    mkdirSync(join(dir, 'earning'), { recursive: true });
+    writeFileSync(join(dir, 'earning', 'keystore-password'), `${PASSWORD}\n`);
+    const resolution = resolveCeremonyPassword({
+      dir,
       env: { HOME: home, JINN_PASSWORD: PASSWORD } as NodeJS.ProcessEnv,
     });
     expect(resolution).toMatchObject({ password: PASSWORD, source: 'env' });
-    expect((resolution as { warnings: string[] }).warnings.join(' ')).toContain('every daemon start');
+    const warnings = (resolution as { warnings: string[] }).warnings.join(' ');
+    expect(warnings).not.toContain('does not follow --dir');
+    expect(warnings).not.toContain('every daemon start');
   });
 
   it('uses the keystore-password file for the default dir — the value the daemon itself resolves', () => {

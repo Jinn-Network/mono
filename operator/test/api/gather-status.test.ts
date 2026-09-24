@@ -821,6 +821,36 @@ describe('gatherStatusForApi', () => {
     });
   });
 
+  it('security.lastPasswordRotationAt prefers the primary filePath when both files exist', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    const { writeFileSync, utimesSync, mkdirSync } = await import('node:fs');
+    await withTempStore(async (store) => {
+      const home = mkdtempSync(join(tmpdir(), 'jinn-pw-both-'));
+      const earningDir = join(home, 'earning');
+      mkdirSync(earningDir, { recursive: true });
+      const primaryPath = join(earningDir, 'keystore-password');
+      const legacyPath = join(home, 'keystore-password');
+      writeFileSync(primaryPath, 'primary\n', { mode: 0o600 });
+      writeFileSync(legacyPath, 'legacy\n', { mode: 0o600 });
+      const primaryWhen = new Date('2024-06-01T00:00:00.000Z');
+      const legacyWhen = new Date('2020-01-01T00:00:00.000Z');
+      utimesSync(primaryPath, primaryWhen, primaryWhen);
+      utimesSync(legacyPath, legacyWhen, legacyWhen);
+
+      const status = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        passwordRotation: { source: 'file', filePath: primaryPath },
+      });
+
+      expect(status.security.lastPasswordRotationAt).toBe('2024-06-01T00:00:00.000Z');
+    });
+  });
+
   it('security.lastPasswordRotationAt is null when the password is env-sourced', async () => {
     mockStatusRpc();
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');

@@ -1,6 +1,5 @@
 import { randomBytes as defaultRandomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
@@ -21,8 +20,11 @@ import {
   apiPortFailureMessage as defaultApiPortFailureMessage,
   checkApiPortAvailable as defaultCheckApiPortAvailable,
 } from '../../preflight/api-port.js';
-import { resolveDefaultStateDir } from '../../state-dir.js';
-
+import {
+  legacyKeystorePasswordPath,
+  primaryKeystorePasswordPath,
+  replacePasswordFileAtomically,
+} from '../../earning/password-file.js';
 // ── Structured progress envelope ─────────────────────────────────────────────
 
 /**
@@ -72,10 +74,13 @@ export interface PasswordFileIO {
   ensureDir(path: string): void;
 }
 
-const DEFAULT_PASSWORD_FILE_IO: PasswordFileIO = {
+export const DEFAULT_PASSWORD_FILE_IO: PasswordFileIO = {
   exists: (path) => existsSync(path),
   read: (path) => readFileSync(path, 'utf-8'),
-  write: (path, content) => writeFileSync(path, content, { mode: 0o600 }),
+  // Sibling tmp + rename: a failed write never truncates a live file, and an
+  // existing 0644 file is replaced (mode 0600) rather than written through
+  // in place (#4610).
+  write: (path, content) => replacePasswordFileAtomically(path, content),
   remove: (path) => {
     try { unlinkSync(path); } catch { /* best effort — file may not exist */ }
   },
@@ -151,7 +156,8 @@ Password handling:
   is written. This is the recommended approach for CI and advanced use.
 
   Otherwise quickstart auto-generates a random password and writes it to
-  ~/.jinn-client/keystore-password (mode 0600). This file sits next to the
+  <earningDir>/keystore-password (mode 0600; typically
+  ~/.jinn-operator/earning/keystore-password). This file sits next to the
   encrypted keystore, so anyone with shell access to this machine can
   decrypt the wallet. Keep funds to the gas + rewards minimum.
 
@@ -171,7 +177,7 @@ Agent/script mode (--json / --no-daemon / --json-progress):
       "status": "ready",
       "masterAddress": "0x...",
       "dashboardUrl": "http://127.0.0.1:7331",
-      "passwordFile": "~/.jinn-client/keystore-password"  // omitted if JINN_PASSWORD was used
+      "passwordFile": "<earningDir>/keystore-password"  // omitted if JINN_PASSWORD was used
     }
 
   Operational verbs emit JSON on stdout by default. Use --human for
@@ -227,9 +233,6 @@ Examples:
         typeof parsed.values.config === 'string' && parsed.values.config.length > 0
           ? parsed.values.config
           : undefined;
-      const jinnDir = resolveDefaultStateDir({ home: ctx.env['HOME'] ?? homedir(), env: ctx.env });
-      const passwordFilePath = join(jinnDir, 'keystore-password');
-      const keystoreFilePath = join(jinnDir, 'earning', 'master_keystore.json');
       const bootstrapArgv = ['--json', ...(configPath ? ['--config', configPath] : [])];
 
       // ── Preflight (no secret state yet) ──
@@ -237,14 +240,23 @@ Examples:
       // BEFORE we generate or write any plaintext password material. If any
       // blocking preflight fails we exit with no orphan secrets on disk.
       const config = deps.loadConfig(configPath);
+      const passwordFilePath = primaryKeystorePasswordPath(config.earningDir);
+      const keystoreFilePath = join(config.earningDir, 'master_keystore.json');
+      const readExistingPassword = (path: string): string | undefined => {
+        if (!deps.passwordFileIO.exists(path)) return undefined;
+        const value = deps.passwordFileIO.read(path).trim();
+        return value.length > 0 ? value : undefined;
+      };
+      // Same order as `jinn run`: primary earning-dir file, then host-wide legacy.
+      // Generating while only the legacy file exists would write a new primary
+      // that then outranks the password that still opens the keystore.
+      const existingFilePassword =
+        readExistingPassword(passwordFilePath)
+        ?? readExistingPassword(legacyKeystorePasswordPath({ env: ctx.env }));
 
       // Track whether we touched the password file so error paths can report
       // accurate cleanup state in the structured envelope.
       let passwordGenerated = false;
-      // `passwordFilePreexisted` records whether the on-disk password file
-      // existed *before* this quickstart invocation. We must never delete a
-      // file the user already had — only one we just wrote.
-      const passwordFilePreexisted = deps.passwordFileIO.exists(passwordFilePath);
 
       const cleanupGeneratedPasswordIfOrphaned = (): { removed: boolean; reason: string } => {
         // Defense in depth: only remove the password file if we generated it
@@ -313,7 +325,8 @@ Examples:
       }
       console.error('[quickstart] Running preflight checks...');
       const doctorTransientPassword = ctx.env['JINN_PASSWORD']
-        ?? (passwordFilePreexisted ? deps.passwordFileIO.read(passwordFilePath).trim() : 'preflight-only');
+        ?? existingFilePassword
+        ?? 'preflight-only';
       const doctorWriter = new StringWriter();
       await deps.doctorRun({
         argv: ['--json', ...(configPath ? ['--config', configPath] : [])],
@@ -371,12 +384,12 @@ Examples:
       if (ctx.env['JINN_PASSWORD']) {
         password = ctx.env['JINN_PASSWORD'];
         console.error('[quickstart] Using password from JINN_PASSWORD environment variable.');
-      } else if (passwordFilePreexisted) {
-        password = deps.passwordFileIO.read(passwordFilePath).trim();
+      } else if (existingFilePassword) {
+        password = existingFilePassword;
         console.error('[quickstart] Using existing auto-generated password.');
       } else {
         password = deps.randomBytesFn(32).toString('hex');
-        deps.passwordFileIO.ensureDir(jinnDir);
+        deps.passwordFileIO.ensureDir(config.earningDir);
         deps.passwordFileIO.write(passwordFilePath, password + '\n');
         passwordGenerated = true;
         console.error('[quickstart] Generated keystore password.');

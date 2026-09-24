@@ -179,10 +179,9 @@ export function createFundRequirementsCommand(deps: FundRequirementsDeps = PRODU
     // Password is *optional* for the read-only path. When absent we still
     // produce a partial plan that lists what we could not learn — see
     // docs/reviews/2026-04-28-operator-experience-audit.md (W1).
-    const password = deps.resolveCliPassword(ctx.argv, ctx.env);
-    const passwordValue = password.ok ? password.password : undefined;
-
     const config = deps.loadConfig(configPath);
+    const password = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
+    const passwordValue = password.ok ? password.password : undefined;
     const chain = config.network === 'testnet' ? 'base-sepolia' : 'base';
 
     let plan: FundingPlan;

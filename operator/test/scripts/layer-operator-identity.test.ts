@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -80,6 +81,18 @@ describe('layer operator identity', () => {
         env: { JINN_PASSWORD: fixture.password },
       }),
     ).rejects.toThrow(/derived wallet.*stored agent address/i);
+  });
+
+  it('opens the keystore from the primary earning-dir password file without JINN_PASSWORD', async () => {
+    const fixture = await operatorFixture();
+    writeFileSync(join(fixture.earningDir, 'keystore-password'), `${fixture.password}\n`, { mode: 0o600 });
+
+    const identity = await deriveOperatorIdentity([], {
+      earningDir: fixture.earningDir,
+      env: { HOME: fixture.earningDir },
+    });
+
+    expect(identity.agentId).toBe(42n);
   });
 
   it('does not expose password material when keystore decryption fails', async () => {

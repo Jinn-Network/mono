@@ -51,7 +51,12 @@ import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { markRestartRequired } from './restart-required-state.js';
 import { resolveDefaultStateDir } from '../state-dir.js';
-import { isDefaultOperatorKeystore, passwordFileIsStale, replacePasswordFileAtomically } from '../earning/password-file.js';
+import {
+  isDefaultOperatorKeystore,
+  writeKeystorePasswordFile,
+  writePrimaryKeystorePassword,
+  legacyKeystorePasswordPath,
+} from '../earning/password-file.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -783,43 +788,41 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       const reencrypted = await encryptMnemonic(mnemonic, parsed.data.next);
       await store.saveMnemonicKeystore(reencrypted);
 
-      // Update the persisted password file so subsequent `jinn run` invocations
-      // pick up the new password seamlessly — but only when that host-wide file
-      // is provably ours. It is not earning-dir relative, so rewriting it
-      // unconditionally replaced another operator's password with a value that
-      // does not open their keystore (#4086). An existing file may be rewritten
-      // when it is the one this rotation just invalidated (the same proof the
-      // CLI uses to decide whether to delete it), or when the rotated keystore
-      // is the default operator's: keystore identity proves ownership whatever
-      // the file holds (#4116). An absent one is created only in the latter
-      // case. Otherwise we leave it alone and say so in the response.
+      // Always write this daemon's primary password file (via
+      // `writePrimaryKeystorePassword` -> `replacePasswordFileAtomically`: a
+      // failed write never truncates a live file, and a symlink at the path
+      // is replaced rather than written through, #4610). `passwordFileUpdated`
+      // reports the primary write only -- it is what `jinn run` resolves
+      // first, so it is the write that matters to the caller.
+      //
+      // Best-effort mirror into the host-wide legacy file, for existing
+      // single-operator installs that still read it: keystore identity
+      // proves this is the default operator's file whatever it currently
+      // holds, so an existing but drifted legacy file is repaired the same
+      // way as the CLI's rotation (#4116) -- but new auto-generation never
+      // creates that file (module doc, #4087), so an absent one stays
+      // absent here too. A legacy-write failure only warns; it never flips
+      // `passwordFileUpdated` back to false when the primary write already
+      // succeeded.
       const home = process.env['HOME'] ?? homedir();
       const stateDir = resolveDefaultStateDir({ home });
       const defaultEarningDir = join(stateDir, 'earning');
-      const pwFilePath = join(stateDir, 'keystore-password');
+      const legacyPath = legacyKeystorePasswordPath({ home, env: process.env });
       const warn = (message: string): void => { console.warn(message); };
+      // Keystore is already rotated: a password file we cannot write must not
+      // turn this into `change_failed`.
       let passwordFileUpdated = false;
-      if (
-        passwordFileIsStale(
-          pwFilePath,
-          defaultEarningDir,
-          earningDir,
-          parsed.data.current,
-          parsed.data.next,
-          warn,
-        )
-        || isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)
-      ) {
-        // The keystore is already rotated: a password file we cannot write
-        // (e.g. one `passwordFileIsStale` could not even read) must not turn
-        // this into a `change_failed` response.
+      try {
+        writePrimaryKeystorePassword(earningDir, parsed.data.next);
+        passwordFileUpdated = true;
+      } catch (err) {
+        warn(`[warn] Could not update a keystore-password file (${errorMessage(err)}); leaving it in place.`);
+      }
+      if (existsSync(legacyPath) && isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)) {
         try {
-          // Sibling tmp + rename: a failed write never truncates the live file,
-          // and a symlink at this path is replaced rather than followed (#4610).
-          replacePasswordFileAtomically(pwFilePath, parsed.data.next + '\n');
-          passwordFileUpdated = true;
+          writeKeystorePasswordFile(legacyPath, parsed.data.next);
         } catch (err) {
-          warn(`[warn] Could not update ${pwFilePath} (${errorMessage(err)}); leaving it in place.`);
+          warn(`[warn] Could not update a keystore-password file (${errorMessage(err)}); leaving it in place.`);
         }
       }
 

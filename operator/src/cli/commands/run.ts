@@ -1,14 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
-import { resolveDefaultStateDir } from '../../state-dir.js';
+import { writePrimaryKeystorePassword } from '../../earning/password-file.js';
 import type { JinnConfig } from '../../config.js';
 import {
   getConfigPathFromArgs as defaultGetConfigPathFromArgs,
@@ -220,14 +217,12 @@ Failure example (funding gate):
 
       const config = deps.loadConfig(configPath);
       const rpcPreflightConfig: Pick<JinnConfig, 'network' | 'rpcUrl'> = config;
-      // Resolve password: --password-fd > env > file > auto-generate (matches what
-      // `jinn quickstart` used to do). A brand-new operator can run
-      // `jinn run` with no env var, no setup, no input. Plaintext lives at
-      // ~/.jinn-client/keystore-password (mode 0600) so the next run reuses
-      // the same value. The known security trade-off is documented in
-      // operator/src/cli/password.ts.
+      // Resolve password: --password-fd > env > primary earning-dir file >
+      // legacy host-wide file > auto-generate into primary. A brand-new
+      // operator can run `jinn run` with no env var, no setup, no input.
+      // The known security trade-off is documented in operator/src/cli/password.ts.
       let resolvedPassword: string;
-      const probe = deps.resolveCliPassword(ctx.argv, ctx.env);
+      const probe = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
       if (probe.ok) {
         resolvedPassword = probe.password;
       } else if (parsed.values['password-fd'] !== undefined) {
@@ -246,24 +241,20 @@ Failure example (funding gate):
         );
         return;
       } else {
-        const home = ctx.env['HOME'] ?? homedir();
-        const pwFilePath = join(resolveDefaultStateDir({ home, env: ctx.env }), 'keystore-password');
-        // Defensive: probe.ok=false means neither env, fd, nor a non-empty
-        // file existed. Generate, persist, and continue.
         const generated = randomBytes(32).toString('hex');
+        let pwFilePath: string;
         try {
-          mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
-          writeFileSync(pwFilePath, generated + '\n', { mode: 0o600 });
+          pwFilePath = writePrimaryKeystorePassword(config.earningDir, generated);
         } catch (err) {
           emitEnvelope(
             {
               code: 'invalid_invocation',
-              message: `Failed to persist auto-generated keystore password to ${pwFilePath}: ${
+              message: `Failed to persist auto-generated keystore password to ${config.earningDir}: ${
                 err instanceof Error ? err.message : String(err)
               }`,
-              hint: 'Check filesystem permissions on $HOME/.jinn-client, or set JINN_PASSWORD explicitly.',
+              hint: 'Check filesystem permissions on the earning directory, or set JINN_PASSWORD explicitly.',
               exampleCli: 'jinn run',
-              details: { field: 'keystore password', expected: 'writable ~/.jinn-client' },
+              details: { field: 'keystore password', expected: 'writable earning directory' },
             },
             { writer: ctx.writer, exit: ctx.exit },
           );

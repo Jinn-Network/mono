@@ -1,36 +1,75 @@
 /**
- * Shared reasoning about `<default state dir>/keystore-password` (#2515, #4086).
+ * Per-operator keystore password files (#4087).
  *
- * That path is NOT earning-dir relative: `main.ts` and `resolveCliPassword` read
- * exactly this one file whatever earning dir a caller targets, so it is host-wide
- * state, not per-operator state. Both password-rotation surfaces — the
- * `jinn keys change-password` CLI and `POST /v1/setup/change-password` — must
- * therefore prove the file belongs to the keystore they just rotated before
- * touching it. The CLI deletes it; the endpoint rewrites it. Same proof.
+ * The primary path is `<earningDir>/keystore-password`, next to the keystore.
+ * A host-wide `<default state dir>/keystore-password` remains a read fallback
+ * for existing single-operator installs. New auto-generation never writes the
+ * legacy file. Rotation may mutate legacy only for the default operator.
  */
 import { randomBytes } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { resolveDefaultStateDir } from '../state-dir.js';
 import { mnemonicKeystorePath } from './store.js';
 
+export function primaryKeystorePasswordPath(earningDir: string): string {
+  return join(earningDir, 'keystore-password');
+}
+
+export function legacyKeystorePasswordPath(options?: {
+  home?: string;
+  env?: NodeJS.ProcessEnv;
+}): string {
+  const env = options?.env ?? process.env;
+  const home = options?.home ?? env['HOME'] ?? env['USERPROFILE'] ?? homedir();
+  return join(resolveDefaultStateDir({ home, env }), 'keystore-password');
+}
+
+function readNonEmptyPasswordFile(path: string): string | undefined {
+  if (!existsSync(path)) return undefined;
+  const value = readFileSync(path, 'utf-8').trim();
+  return value.length > 0 ? value : undefined;
+}
+
+export function readKeystorePasswordFile(
+  earningDir: string | undefined,
+  env: NodeJS.ProcessEnv,
+): { password: string; path: string; source: 'primary' | 'legacy' } | undefined {
+  const home = env['HOME'] ?? env['USERPROFILE'] ?? homedir();
+  if (earningDir) {
+    const primaryPath = primaryKeystorePasswordPath(earningDir);
+    const primary = readNonEmptyPasswordFile(primaryPath);
+    if (primary) return { password: primary, path: primaryPath, source: 'primary' };
+  }
+  const legacyPath = legacyKeystorePasswordPath({ home, env });
+  const legacy = readNonEmptyPasswordFile(legacyPath);
+  if (legacy) return { password: legacy, path: legacyPath, source: 'legacy' };
+  return undefined;
+}
+
 /**
- * Whether the password file is proven stale by a successful rotation — i.e. it
- * holds the authenticated old password and the keystore it opens is the one that
- * was just re-encrypted. The file must contain the authenticated old password,
- * and the default keystore must be either the rotated file or absent (the
- * supported single-operator custom-dir case).
- *
- * Never infer staleness from a failed decryption of another keystore: damaged
- * mnemonic metadata can fail reconstruction while its V3 private key remains
- * recoverable with this password. Preserve any other existing default keystore's
- * password, including corrupt or unfamiliar payloads, without decrypting it.
- * Canonical file paths recognize directory aliases while atomic replacement of a
- * file symlink correctly leaves its former target protected.
+ * Persist a keystore password at `path` via `replacePasswordFileAtomically`
+ * (sibling tmp + rename): a failed write never truncates a live file, and a
+ * symlink at `path` is replaced rather than written through (#4610).
+ */
+export function writeKeystorePasswordFile(path: string, password: string): void {
+  replacePasswordFileAtomically(path, password + '\n');
+}
+
+export function writePrimaryKeystorePassword(earningDir: string, password: string): string {
+  const path = primaryKeystorePasswordPath(earningDir);
+  writeKeystorePasswordFile(path, password);
+  return path;
+}
+
+/**
+ * Whether the host-wide legacy password file is proven stale by a successful
+ * default-operator rotation. The file must hold the authenticated old password,
+ * and `earningDir` must be the default operator's keystore. Absence of the
+ * default keystore is not license to delete a shared file.
  *
  * Call AFTER the new keystore is saved. Filesystem uncertainty keeps the file.
- * Two custom-dir operators sharing this file still cannot be distinguished when
- * no default keystore exists; ceremony.ts already requires explicit passwords
- * for non-default operator directories.
  */
 export function passwordFileIsStale(
   passwordFilePath: string,
@@ -44,18 +83,7 @@ export function passwordFileIsStale(
   try {
     const value = readFileSync(passwordFilePath, 'utf-8').trim();
     if (value !== currentPassword || value === newPassword) return false;
-    const defaultKeystorePath = mnemonicKeystorePath(defaultEarningDir);
-    try {
-      lstatSync(defaultKeystorePath);
-    } catch (err) {
-      // Only absence establishes the custom-dir case. Permission or other errors
-      // do not prove that another operator's keystore is absent.
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return true;
-      throw err;
-    }
-    // A dangling symlink exists but cannot be classified: realpath then throws
-    // into the conservative catch below rather than treating it as absent.
-    return realpathSync(defaultKeystorePath) === realpathSync(mnemonicKeystorePath(earningDir));
+    return isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn);
   } catch (err) {
     warn(
       `[warn] Could not tell whether ${passwordFilePath} is still in use ` +
@@ -67,12 +95,8 @@ export function passwordFileIsStale(
 
 /**
  * Whether `earningDir` holds the very keystore the host-wide password file is
- * for — i.e. this is a default-operator rotation. That proves ownership of the
- * file whatever it holds, so it authorizes a rotation to *create* the file
- * (an absent file proves nothing, so `passwordFileIsStale` cannot answer) and
- * to *rewrite* one that has drifted off the live password (#4116). Writing it
- * then harms no other operator (`JINN_PASSWORD` outranks the file for everyone
- * else). Filesystem uncertainty answers "no".
+ * for — i.e. this is a default-operator rotation. Only then may a rotation
+ * mutate that file. Filesystem uncertainty answers "no".
  *
  * Call AFTER the new keystore is saved, so the rotated file is known to exist.
  */

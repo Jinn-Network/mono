@@ -50,7 +50,7 @@ function makeFakeDeps(overrides: FakeDepsOverrides = {}): MigrateAgentIdDeps {
     resolveCliPassword: () =>
       overrides.passwordOk === false
         ? { ok: false as const, message: 'no password' }
-        : { ok: true as const, password: 'pw' },
+        : { ok: true as const, password: 'pw', source: 'env' as const },
     runMigration: async (args: any) => {
       overrides.captureRunArgs?.(args);
       if (overrides.migrationThrows) throw overrides.migrationThrows;

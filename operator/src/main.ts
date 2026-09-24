@@ -11,9 +11,9 @@
  *   3. Built-in defaults
  *
  * Keystore password (used to encrypt the wallet at rest) resolves in this
- * order: JINN_PASSWORD env var → ~/.jinn-client/keystore-password file →
- * auto-generated random value (persisted mode 0600 to that same file). A
- * brand-new operator can run `jinn run` with no env var and no input.
+ * order: JINN_PASSWORD env var → <earningDir>/keystore-password → legacy
+ * ~/.jinn-operator/keystore-password → auto-generated into the primary file.
+ * A brand-new operator can run `jinn run` with no env var and no input.
  *
  * Canonical operator command:
  *   jinn run
@@ -27,6 +27,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
 import { requireConfigPathFromArgs } from './config/path-args.js';
+import { readKeystorePasswordFile, writePrimaryKeystorePassword } from './earning/password-file.js';
 import { writeConfigFileAtomic } from './config/atomic-write.js';
 import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
@@ -174,60 +175,9 @@ if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'dev
   dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 }
 
-// ── Password (env > file > auto-generated) ─────────────────────────────────
-//
-// Resolution order:
-//   1. JINN_PASSWORD env var (explicit operator-set, never in config files)
-//   2. ~/.jinn-client/keystore-password (file from a previous auto-gen)
-//   3. Auto-generate a 32-byte hex string, persist mode 0600, and reuse next run
-//
-// Auto-generation matches `jinn run` CLI password behavior so a brand-new
-// operator can run `jinn run` with no env var, no setup, no input. The
-// known security trade-off is documented in operator/src/cli/password.ts:
-// plaintext on disk + encrypted keystore on the same disk only defends
-// against casual snooping. Treat the wallet as hot until rotated.
-
-function resolveOrGenerateKeystorePassword(): {
-  password: string;
-  source: 'env' | 'file' | 'generated';
-  filePath?: string;
-} {
-  const envPw = process.env['JINN_PASSWORD'];
-  if (envPw && envPw.length > 0) {
-    return { password: envPw, source: 'env' };
-  }
-
-  const home = process.env['HOME'] ?? homedir();
-  const pwFilePath = join(resolveDefaultStateDir({ home }), 'keystore-password');
-  if (existsSync(pwFilePath)) {
-    const fromDisk = readFileSync(pwFilePath, 'utf-8').trim();
-    if (fromDisk.length > 0) {
-      return { password: fromDisk, source: 'file', filePath: pwFilePath };
-    }
-  }
-
-  const generated = cryptoRandomBytes(32).toString('hex');
-  mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
-  writeFileSyncMain(pwFilePath, generated + '\n', { mode: 0o600 });
-  return { password: generated, source: 'generated', filePath: pwFilePath };
-}
-
-const passwordResolution = resolveOrGenerateKeystorePassword();
-const PASSWORD: string = passwordResolution.password;
-// Sub-commands (e.g. the embedded `init` invocation below) read JINN_PASSWORD
-// from env. Mirror our resolved value so they don't have to redo this dance.
-process.env['JINN_PASSWORD'] = PASSWORD;
-
-if (passwordResolution.source === 'generated') {
-  console.log('━'.repeat(64));
-  console.log('A keystore password was auto-generated for you.');
-  console.log(`  Stored at: ${passwordResolution.filePath}`);
-  console.log('  Mode 0600. Treat the wallet as hot until you rotate the password.');
-  console.log('  To rotate: JINN_NEW_PASSWORD=<new> jinn keys change-password');
-  console.log('━'.repeat(64));
-}
-
-// ── Load config ─────────────────────────────────────────────────────────────
+// ── Load config (before password so auto-gen lands next to this earning dir) ─
+// Never generate a keystore password before loadConfig: the primary file is
+// join(config.earningDir, 'keystore-password').
 
 let CONFIG_PATH: string | undefined;
 try {
@@ -242,6 +192,55 @@ try {
   });
 }
 const config = loadConfig(CONFIG_PATH);
+
+// ── Password (env > primary earning-dir file > legacy host-wide file > auto-generated)
+//
+// Resolution order:
+//   1. JINN_PASSWORD env var (explicit operator-set, never in config files)
+//   2. <earningDir>/keystore-password (primary auto-gen)
+//   3. ~/.jinn-operator/keystore-password (legacy host-wide fallback)
+//   4. Auto-generate into the primary path only
+//
+// Auto-generation matches `jinn run` CLI password behavior so a brand-new
+// operator can run `jinn run` with no env var, no setup, no input. The
+// known security trade-off is documented in operator/src/cli/password.ts:
+// plaintext on disk + encrypted keystore on the same disk only defends
+// against casual snooping. Treat the wallet as hot until rotated.
+
+function resolveOrGenerateKeystorePassword(earningDir: string): {
+  password: string;
+  source: 'env' | 'file' | 'generated';
+  filePath?: string;
+} {
+  const envPw = process.env['JINN_PASSWORD'];
+  if (envPw && envPw.length > 0) {
+    return { password: envPw, source: 'env' };
+  }
+
+  const fromFile = readKeystorePasswordFile(earningDir, process.env);
+  if (fromFile) {
+    return { password: fromFile.password, source: 'file', filePath: fromFile.path };
+  }
+
+  const generated = cryptoRandomBytes(32).toString('hex');
+  const filePath = writePrimaryKeystorePassword(earningDir, generated);
+  return { password: generated, source: 'generated', filePath };
+}
+
+const passwordResolution = resolveOrGenerateKeystorePassword(config.earningDir);
+const PASSWORD: string = passwordResolution.password;
+// Sub-commands (e.g. the embedded `init` invocation below) read JINN_PASSWORD
+// from env. Mirror our resolved value so they don't have to redo this dance.
+process.env['JINN_PASSWORD'] = PASSWORD;
+
+if (passwordResolution.source === 'generated') {
+  console.log('━'.repeat(64));
+  console.log('A keystore password was auto-generated for you.');
+  console.log(`  Stored at: ${passwordResolution.filePath}`);
+  console.log('  Mode 0600. Treat the wallet as hot until you rotate the password.');
+  console.log('  To rotate: JINN_NEW_PASSWORD=<new> jinn keys change-password');
+  console.log('━'.repeat(64));
+}
 /**
  * One-swap M2 (#2461): the network AS WRITTEN, captured before the pre-launch clamp below rewrites
  * mainnet to testnet. `resolveFleetCompositionMode` gates on THIS value, not the clamped one — an

@@ -71,20 +71,6 @@ async function buildCliSignerContext(
   willBroadcast = true,
 ): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
   const env = opts.env ?? process.env;
-  const pw = resolveCliPassword(opts.argv, env);
-  if (!pw.ok) {
-    return {
-      ok: false,
-      envelope: {
-        code: 'invalid_invocation',
-        message: pw.message,
-        hint: 'Use JINN_PASSWORD or --password-fd N.',
-        exampleCli: 'jinn tasks submit --id x --description "…" --solver-net prediction --yes',
-        details: { field: 'keystore password' },
-      },
-    };
-  }
-
   let configPath: string | undefined;
   try {
     configPath = mergeArgvForConfig(opts.argv);
@@ -102,6 +88,19 @@ async function buildCliSignerContext(
     };
   }
   const config = loadConfig(configPath);
+  const pw = resolveCliPassword(opts.argv, env, { earningDir: config.earningDir });
+  if (!pw.ok) {
+    return {
+      ok: false,
+      envelope: {
+        code: 'invalid_invocation',
+        message: pw.message,
+        hint: 'Use JINN_PASSWORD or --password-fd N.',
+        exampleCli: 'jinn tasks submit --id x --description "…" --solver-net prediction --yes',
+        details: { field: 'keystore password' },
+      },
+    };
+  }
 
   // D0a P3 (#525/#562/#897): every context built from this shared function
   // hands the caller live signer key material (`masterWallet`, and

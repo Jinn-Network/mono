@@ -41,7 +41,7 @@ const fakeDeps = {
   loadConfig: () => ({ network: 'testnet', rpcUrl: 'https://fake', earningDir: '/tmp/e' }) as any,
   getConfigPathFromArgs: () => undefined,
   gatherIntrospectionRaw: async () => mockRaw as GatheredStatusRaw,
-  resolveCliPassword: () => ({ ok: true as const, password: 'test' }),
+  resolveCliPassword: () => ({ ok: true as const, password: 'test', source: 'env' as const }),
   parseWithdrawArgv,
   validateWithdrawArgs,
   computeSweepWouldSend: async () => false,

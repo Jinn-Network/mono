@@ -29,7 +29,7 @@ function makeFakeDeps(opts: MakeDepsOpts = {}): FundRequirementsDeps {
     getConfigPathFromArgs: () => undefined,
     resolveCliPassword: () =>
       passwordOk
-        ? { ok: true as const, password: 'test' }
+        ? { ok: true as const, password: 'test', source: 'env' as const }
         : { ok: false as const, message: 'Set JINN_PASSWORD or pass --password-fd N with a readable file descriptor.' },
     planFleetFunding: planSpy as unknown as FundRequirementsDeps['planFleetFunding'],
   };
@@ -184,7 +184,7 @@ describe('fund-requirements command', () => {
     const deps: FundRequirementsDeps = {
       loadConfig: () => ({ earningDir: '/tmp', network: 'testnet', rpcUrl: 'http://127.0.0.1:8545' } as any),
       getConfigPathFromArgs: () => undefined,
-      resolveCliPassword: () => ({ ok: true as const, password: 'test' }),
+      resolveCliPassword: () => ({ ok: true as const, password: 'test', source: 'env' as const }),
       planFleetFunding: planSpy as unknown as FundRequirementsDeps['planFleetFunding'],
     };
 

@@ -154,7 +154,8 @@ export function createFleetScaleCommand(deps: FleetScaleDeps = PRODUCTION_DEPS):
       return;
     }
 
-    const pw = deps.resolveCliPassword(ctx.argv, ctx.env);
+    const { earningDir } = deps.loadConfig(parsed.values.config as string | undefined);
+    const pw = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir });
     if (!pw.ok) {
       emitEnvelope(
         {
@@ -457,7 +458,8 @@ export function createFleetScaleCommand(deps: FleetScaleDeps = PRODUCTION_DEPS):
       return;
     }
 
-    const pw = deps.resolveCliPassword(ctx.argv, ctx.env);
+    const { earningDir } = deps.loadConfig(parsed.values.config as string | undefined);
+    const pw = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir });
     if (!pw.ok) {
       emitEnvelope(
         {

@@ -175,20 +175,6 @@ Examples:
 
       if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
 
-      const pw = deps.resolveCliPassword(ctx.argv, ctx.env);
-      if (!pw.ok) {
-        emitEnvelope(
-          {
-            code: 'invalid_invocation',
-            message: pw.message,
-            exampleCli: 'jinn withdraw --to 0xDEST --yes',
-            details: { field: 'keystore password' },
-          },
-          { writer: ctx.writer, exit: ctx.exit },
-        );
-        return;
-      }
-
       let configPath: string | undefined;
       try {
         configPath =
@@ -207,6 +193,20 @@ Examples:
         return;
       }
       const config = deps.loadConfig(configPath);
+
+      const pw = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
+      if (!pw.ok) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: pw.message,
+            exampleCli: 'jinn withdraw --to 0xDEST --yes',
+            details: { field: 'keystore password' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
 
       // D0a P3 (#525/#562/#897): below, `runWithdrawPlan` sweeps the master
       // EOA and every agent EOA with no cross-process lock against a

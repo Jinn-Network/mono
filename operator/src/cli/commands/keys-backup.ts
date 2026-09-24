@@ -1,15 +1,18 @@
 import { parseArgs } from 'node:util';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { FleetStateStore } from '../../earning/store.js';
-import { passwordFileIsStale } from '../../earning/password-file.js';
+import {
+  passwordFileIsStale,
+  primaryKeystorePasswordPath,
+} from '../../earning/password-file.js';
 import { decryptMnemonic, encryptMnemonic } from '../../earning/wallet.js';
-import { resolveCliPassword, resolveNewPassword } from '../password.js';
+import { resolveCliPassword, resolveNewPassword, type ResolvedCliPassword } from '../password.js';
 import { defaultConfigPath, resolveDefaultStateDir } from '../../state-dir.js';
 import { loadConfig } from '../../config.js';
 
@@ -18,12 +21,6 @@ interface EarningTarget {
   earningDir: string;
   /** `<default state dir>/earning` — what the daemon opens when nothing overrides it. */
   defaultEarningDir: string;
-  /**
-   * `<default state dir>/keystore-password`. This path is NOT earning-dir relative:
-   * `main.ts` and `resolveCliPassword` read exactly this one file whatever
-   * `earningDir` resolves to, so it is host-wide state, not per-operator state.
-   */
-  passwordFilePath: string;
 }
 
 /**
@@ -70,9 +67,52 @@ function resolveEarningTarget(
     target: {
       earningDir,
       defaultEarningDir,
-      passwordFilePath: join(defaultStateDir, 'keystore-password'),
     },
   };
+}
+
+function fileStillHolds(path: string, password: string): boolean {
+  if (!existsSync(path)) return false;
+  try {
+    return readFileSync(path, 'utf-8').trim() === password;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Delete whichever password file(s) still hold the rotated-away secret,
+ * independent of where `current` was actually resolved from. A rotation run
+ * with `JINN_PASSWORD` or `--password-fd` never reads a file, but a primary
+ * or legacy file can still hold that same old secret (e.g. from an earlier
+ * `jinn run` auto-generation or an HTTP rotation) — leaving it behind is the
+ * #4662 hazard by another route: the next `jinn run` without the env var
+ * resolves the leftover and fails closed as "wrong password".
+ */
+function deleteRotatedPasswordFile(
+  current: Extract<ResolvedCliPassword, { ok: true }>,
+  defaultEarningDir: string,
+  earningDir: string,
+  newPassword: string,
+  warn: (message: string) => void,
+): boolean {
+  if (current.password === newPassword) return false;
+  let deleted = false;
+  const primaryPath = primaryKeystorePasswordPath(earningDir);
+  if (fileStillHolds(primaryPath, current.password)) {
+    unlinkSync(primaryPath);
+    deleted = true;
+  }
+  // Default-operator HTTP rotation keeps primary and legacy in sync, and a
+  // plain `jinn run` auto-generation may have created the legacy file
+  // before this PR's primary-file split — delete it only when it is proven
+  // stale (holds the old secret, and this is the default operator).
+  const legacyPath = join(dirname(defaultEarningDir), 'keystore-password');
+  if (passwordFileIsStale(legacyPath, defaultEarningDir, earningDir, current.password, newPassword, warn)) {
+    unlinkSync(legacyPath);
+    deleted = true;
+  }
+  return deleted;
 }
 
 async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
@@ -114,20 +154,6 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
     );
     return;
   }
-  const resolved = resolveCliPassword(rest, ctx.env);
-  if (!resolved.ok) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: resolved.message,
-        exampleCli: 'JINN_PASSWORD=... jinn keys backup --output /tmp/mnemonic.txt',
-        details: { field: 'keystore password', expected: 'non-empty string via env, fd, or auto-generated file' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-
   const target = resolveEarningTarget(ctx, parsed.values.config as string | undefined);
   if (!target.ok) {
     emitEnvelope(
@@ -141,6 +167,20 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
     );
     return;
   }
+  const resolved = resolveCliPassword(rest, ctx.env, { earningDir: target.target.earningDir });
+  if (!resolved.ok) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: resolved.message,
+        exampleCli: 'JINN_PASSWORD=... jinn keys backup --output /tmp/mnemonic.txt',
+        details: { field: 'keystore password', expected: 'non-empty string via env, fd, or auto-generated file' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
   const { earningDir } = target.target;
   const store = new FleetStateStore(earningDir);
   const keystore = await store.loadMnemonicKeystore();
@@ -207,7 +247,7 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
     );
     return;
   }
-  const { earningDir, defaultEarningDir, passwordFilePath } = target.target;
+  const { earningDir, defaultEarningDir } = target.target;
   const store = new FleetStateStore(earningDir);
 
   // 2. Check keystore exists
@@ -225,7 +265,7 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
   }
 
   // 3. Resolve current password
-  const current = resolveCliPassword(ctx.argv, ctx.env);
+  const current = resolveCliPassword(ctx.argv, ctx.env, { earningDir });
   if (!current.ok) {
     emitEnvelope(
       {
@@ -291,15 +331,12 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
   // 8. Save new keystore
   await store.saveMnemonicKeystore(newKeystore);
 
-  // 9. Delete only a password proven stale by this rotation (#2515).
+  // 9. Delete the file that supplied the old secret; for the default operator,
+  //    also drop a same-secret legacy leftover so the next resolve cannot
+  //    resurrect the rotated-away password.
   let passwordFileDeleted = false;
-  if (
-    passwordFileIsStale(
-      passwordFilePath, defaultEarningDir, earningDir, current.password, newPass.password,
-      (m) => { process.stderr.write(`${m}\n`); },
-    )
-  ) {
-    unlinkSync(passwordFilePath);
+  const warn = (m: string): void => { process.stderr.write(`${m}\n`); };
+  if (deleteRotatedPasswordFile(current, defaultEarningDir, earningDir, newPass.password, warn)) {
     passwordFileDeleted = true;
   }
 
@@ -381,14 +418,14 @@ backup:
 
 change-password:
   Decrypts the keystore with the current password (resolved from
-  --password-fd, JINN_PASSWORD, or the auto-generated
-  ~/.jinn-operator/keystore-password file, in that order) and
-  re-encrypts it with JINN_NEW_PASSWORD (min 8 characters).
-  The auto-generated password file is deleted only if it contains the
-  authenticated old password and the default keystore is the rotated
-  file or absent. Rotating another operator preserves an existing
-  default operator's password file, even if its keystore is damaged.
-  After a deletion, set JINN_PASSWORD yourself for subsequent commands.
+  --password-fd, JINN_PASSWORD, <earningDir>/keystore-password, or the
+  legacy host-wide ~/.jinn-operator/keystore-password file, in that
+  order) and re-encrypts it with JINN_NEW_PASSWORD (min 8 characters).
+  Any password file still holding the old password is deleted, whatever
+  supplied the old password to this run (env, fd, primary, or legacy):
+  the primary file whenever it holds the old secret, the legacy file
+  only for a default-operator rotation. After a deletion, set
+  JINN_PASSWORD yourself for subsequent commands.
 
 Examples:
   JINN_PASSWORD=secret jinn keys backup --output ~/backup/jinn.txt

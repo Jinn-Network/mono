@@ -22,36 +22,36 @@ describe('resolveCliPassword', () => {
   }
 
   it('returns env password when set', () => {
-    const r = resolveCliPassword([], { HOME: fakeHome, JINN_PASSWORD: 'secret' });
-    expect(r).toEqual({ ok: true, password: 'secret' });
+    const r = resolveCliPassword([], { HOME: fakeHome, JINN_PASSWORD: 'secret' }, {});
+    expect(r).toMatchObject({ ok: true, password: 'secret', source: 'env' });
   });
 
   it('prefers env over the keystore-password file', () => {
     writePasswordFile('from-file\n');
-    const r = resolveCliPassword([], { HOME: fakeHome, JINN_PASSWORD: 'from-env' });
-    expect(r).toEqual({ ok: true, password: 'from-env' });
+    const r = resolveCliPassword([], { HOME: fakeHome, JINN_PASSWORD: 'from-env' }, {});
+    expect(r).toMatchObject({ ok: true, password: 'from-env', source: 'env' });
   });
 
   it('falls back to the keystore-password file when env and fd are unset', () => {
     writePasswordFile('from-file\n');
-    const r = resolveCliPassword([], { HOME: fakeHome });
-    expect(r).toEqual({ ok: true, password: 'from-file' });
+    const r = resolveCliPassword([], { HOME: fakeHome }, {});
+    expect(r).toMatchObject({ ok: true, password: 'from-file', source: 'legacy' });
   });
 
   it('reads ~/.jinn-operator/keystore-password on a fresh home', () => {
     writePasswordFile('from-operator\n', '.jinn-operator');
-    const r = resolveCliPassword([], { HOME: fakeHome });
-    expect(r).toEqual({ ok: true, password: 'from-operator' });
+    const r = resolveCliPassword([], { HOME: fakeHome }, {});
+    expect(r).toMatchObject({ ok: true, password: 'from-operator', source: 'legacy' });
   });
 
   it('ignores an empty keystore-password file', () => {
     writePasswordFile('   \n');
-    const r = resolveCliPassword([], { HOME: fakeHome });
+    const r = resolveCliPassword([], { HOME: fakeHome }, {});
     expect(r.ok).toBe(false);
   });
 
   it('fails when env, fd, and file are all absent', () => {
-    const r = resolveCliPassword([], { HOME: fakeHome });
+    const r = resolveCliPassword([], { HOME: fakeHome }, {});
     expect(r.ok).toBe(false);
   });
 
@@ -63,7 +63,60 @@ describe('resolveCliPassword', () => {
   // #4375: an unusable fd must surface as this verb's `invalid_invocation`
   // envelope, never fall through to the env password.
   it('fails instead of falling back to the env password on an unusable fd', () => {
-    const r = resolveCliPassword(['--password-fd='], { HOME: fakeHome, JINN_PASSWORD: 'secret' });
+    const r = resolveCliPassword(['--password-fd='], { HOME: fakeHome, JINN_PASSWORD: 'secret' }, {});
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.message).toContain('--password-fd');
+  });
+
+  function writePrimaryAndLegacy(primary: string | undefined, legacy: string | undefined): {
+    earningDir: string;
+    primaryPath: string;
+    legacyPath: string;
+  } {
+    const earningDir = join(fakeHome, 'op-a', 'earning');
+    mkdirSync(earningDir, { recursive: true });
+    const primaryPath = join(earningDir, 'keystore-password');
+    const operatorDir = join(fakeHome, '.jinn-operator');
+    mkdirSync(operatorDir, { recursive: true });
+    const legacyPath = join(operatorDir, 'keystore-password');
+    if (primary !== undefined) writeFileSync(primaryPath, primary, { mode: 0o600 });
+    if (legacy !== undefined) writeFileSync(legacyPath, legacy, { mode: 0o600 });
+    return { earningDir, primaryPath, legacyPath };
+  }
+
+  it('prefers primary earning-dir file over a differing legacy file', () => {
+    const { earningDir } = writePrimaryAndLegacy('from-primary\n', 'from-legacy\n');
+    const r = resolveCliPassword([], { HOME: fakeHome }, { earningDir });
+    expect(r).toMatchObject({ ok: true, password: 'from-primary', source: 'primary' });
+  });
+
+  it('falls back to the host-wide legacy file when primary is absent', () => {
+    const { earningDir } = writePrimaryAndLegacy(undefined, 'from-legacy\n');
+    const r = resolveCliPassword([], { HOME: fakeHome }, { earningDir });
+    expect(r).toMatchObject({ ok: true, password: 'from-legacy', source: 'legacy' });
+  });
+
+  it('empty primary does not mask a non-empty legacy file', () => {
+    const { earningDir } = writePrimaryAndLegacy('   \n', 'from-legacy\n');
+    const r = resolveCliPassword([], { HOME: fakeHome }, { earningDir });
+    expect(r).toMatchObject({ ok: true, password: 'from-legacy', source: 'legacy' });
+  });
+
+  it('empty legacy is skipped the same way as today', () => {
+    writePasswordFile('   \n');
+    const r = resolveCliPassword([], { HOME: fakeHome }, {});
+    expect(r.ok).toBe(false);
+  });
+
+  it('env still beats both files when earningDir is passed', () => {
+    const { earningDir } = writePrimaryAndLegacy('from-primary\n', 'from-legacy\n');
+    const r = resolveCliPassword([], { HOME: fakeHome, JINN_PASSWORD: 'from-env' }, { earningDir });
+    expect(r).toMatchObject({ ok: true, password: 'from-env', source: 'env' });
+  });
+
+  it('unusable --password-fd still does not fall through to files', () => {
+    const { earningDir } = writePrimaryAndLegacy('from-primary\n', 'from-legacy\n');
+    const r = resolveCliPassword(['--password-fd='], { HOME: fakeHome }, { earningDir });
     expect(r.ok).toBe(false);
     expect(r.ok === false && r.message).toContain('--password-fd');
   });
