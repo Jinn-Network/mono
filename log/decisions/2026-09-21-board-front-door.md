@@ -97,12 +97,13 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
    that predates `/10` and refuses it at manifest parse, so it refuses
    `check-failed` before ingest runs, and ingest does not project `/10`
    either. `/2`, `/4` and `/6` pass the published line they pin, and
-   ingest refuses them `unknown-format`. No checker closure allows a
-   `presentation.json` member, so every `/7` or `/8` bundle that passes
-   the checker seals no reading record, and ingest refuses it. `publish`
-   refuses to emit `/5`, the one format both can accept. Follow-on 11.8 is
-   the work that lets a bundle `colophon publish` emits through; whether
-   the front door waits for it is open (Open for the operator).
+   ingest refuses them `unknown-format`. No `/7`, `/8` or `/10` closure
+   allows a `presentation.json` member, so every `/7` or `/8` bundle that
+   passes the checker seals no reading record, and ingest refuses it.
+   `publish` refuses to emit `/5`, the one format both can accept.
+   Follow-on 11.8 is the work that lets a bundle `colophon publish` emits
+   through; whether the front door waits for it is open (Open for the
+   operator).
 
 4. **One board per official suite.** A bundle whose sealed method carries a
    conforming suite protocol object keys on its suite protocol id, whatever
@@ -149,10 +150,12 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
    (`headline`, `comparison`, or `qualification`); do not invent a single
    numeric board score. A comparison-shaped claim has no headline; the row
    shows the comparison. Attach the claim's own limitation sentences on the
-   row; full text lives on the report page. Date is the sealed `run.json`
-   `closeAt` when present, labeled as the run's close (the listed LoCoMo
-   bundle seals no timestamp in `report.json` or its claim package); else
-   the listing time, labeled "listed at". Ingest's `reportedAt`, today's
+   row; full text lives on the report page. Date is the `closeAt` of a
+   `run.json` the checker validated as a Run record, labeled as the run's
+   close (the listed LoCoMo bundle seals no timestamp in `report.json` or
+   its claim package); else the listing time, labeled "listed at". A
+   `run.json` nothing checked, such as one a `/5` bundle declares, does not
+   set the date. Ingest's `reportedAt`, today's
    sort key, is not a listing time: `scripts/ingest-report.mjs` sets it from
    `report.json` `reportedAt` for format `/1` and from the public reading
    record's `sealedAt` for `/5`, `/7` and `/8`; the site's grouped ingest,
@@ -185,7 +188,8 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
    in `data/reports/<slug>.json`, not identity, and is not required to stay up
    for the listing to remain checkable. Default order is the row's date,
    newest first: the run's pre-registered close time, `closeAt`, or the
-   listing time where the bundle carries none. `closeAt` is not a seal
+   listing time where the bundle carries no Run record the checker
+   validated. `closeAt` is not a seal
    time: it is fixed at lock, and a run that accounts every cell can be
    collected, reported and published before it. The operator's direction
    calls this order sealing time; this record names it the close time.
@@ -325,7 +329,7 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
   (`packages/benchmark-product/check/src/capabilities.ts`), which predates
   `/10` and refuses it at manifest parse, and ingest does not project it.
   `/2`, `/4` and `/6` pass the published line they pin, and ingest refuses
-  them. No checker closure allows a `presentation.json` member
+  them. No `/7`, `/8` or `/10` closure allows a `presentation.json` member
   (`packages/benchmark-product/check/src/verify.ts`), so a `/7` or `/8`
   bundle that passes the checker has no reading record, and ingest refuses
   it. `publish` refuses to emit `/5`
@@ -472,21 +476,26 @@ written until the operator rules on each (spec §14 entries 10 to 13).
   before `closeAt`, so a claimant can post-date a row to sit at the top of a
   newest-first board at no cost. One option: order by the earlier of
   `closeAt` and the listing time.
-- **Whether the listing-time fallback stays.** The Run record requires
-  `closeAt`, so every `run.json` that parses as today's Run record has
-  one. That is not shown for the site's legacy `/1` shape, from whose
-  `run.json` ingest reads `lockedAt`, and no `/1` bundle passes the
-  published checker. Of the other formats ingest projects, only `/5` does
-  not require a `run.json` member, so only a `/5` bundle can reach the
-  fallback, and `/5` is the only format the front door can list today
-  (decision 3), so until 11.8 lands every listed row would take it. Keep
-  it for `/5`, or drop it. The earlier-of order above would need a listing
+- **Whether the listing-time fallback stays.** The row date reads
+  `closeAt` only from a `run.json` the checker validated as a Run record
+  (decision 5): the checker parses `run.json` as a Run on `/2`, `/4`, `/6`,
+  `/7`, `/8` and `/10`, and the Run record requires `closeAt`. The site's
+  legacy `/1` shape, from whose `run.json` ingest reads `lockedAt`, is
+  outside that rule, and no `/1` bundle passes the published checker. A
+  `/5` bundle need carry no `run.json` (the site's `/5` bundle carries
+  none), and the `/5` checker and the site's `/5` ingest accept a
+  `run.json` the manifest declares without reading it as a Run, so under
+  the rule every `/5` row takes the fallback, and only a `/5` row can.
+  `/5` is the only format the front door can list today (decision 3), so
+  until 11.8 lands every listed row would take it. Keep it for `/5`, or
+  drop it. The earlier-of order above would need a listing
   time on every row anyway.
 - **Whether follow-on 11.8 gates the front door.** Nothing
   `colophon publish` emits passes the cold gate and ingest today (decision
   3). Either 11.1 waits for 11.8, so the door opens on the bundles the
   claimant path produces; or 11.1 ships first and lists only `/5` bundles
-  from other producers, each dated by its listing time, until 11.8 lands.
+  from other producers, each dated by its listing time under the date
+  rule, until 11.8 lands.
   This record does not choose.
 
 ## Ratification
@@ -511,7 +520,12 @@ default order for the pre-registered close time, `closeAt`, not sealing
 time (decision 5); and to correct the npm status of the checker (Context),
 the site's grouped ingest (decisions 3 and 5), the existing
 `digests.bundleIdentity` field (decision 6) and the site repository's
-visibility. Ratified on code-owner approval of this record by the
+visibility. Revised a fourth time 2026-09-24 to narrow the
+`presentation.json` statement to the `/7`, `/8` and `/10` closures, since
+the `/5` closure accepts other members its manifest declares (decision 3,
+What this does not yet prove), and to read the row date only from a `run.json` the
+checker validated as a Run record (decision 5, Open for the operator).
+Ratified on code-owner approval of this record by the
 operator credential that did not author it.
 
 ## Amends
