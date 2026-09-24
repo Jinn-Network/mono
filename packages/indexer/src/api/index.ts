@@ -227,7 +227,11 @@ app.get('/supply', async (c) => {
       verdicts: activityEvidenceComplete ? verdicts : [],
     });
   } catch {
-    return c.json({ error: 'supply unavailable', detail: 'assembler failed' }, 503);
+    // A defect in the pure assembler is not a transient outage: the client's
+    // `fetchWithRetry` (operator/src/discovery-client/http.ts) transparently
+    // retries 502/503, and retrying a deterministic bug never succeeds. 500
+    // keeps this catch distinct from the query/transport catch above it.
+    return c.json({ error: 'supply unavailable', detail: 'assembler failed' }, 500);
   }
 
   if (assembled.unknownBecause) {
