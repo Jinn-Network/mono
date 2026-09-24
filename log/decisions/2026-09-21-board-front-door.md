@@ -102,8 +102,9 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
    passes the checker seals no reading record, and ingest refuses it.
    `publish` refuses to emit `/5`, the one format both can accept.
    Follow-on 11.8 is the work that lets a bundle `colophon publish` emits
-   through; whether the front door waits for it is open (Open for the
-   operator).
+   through, and the front door waits for it: the workflow may be built
+   before 11.8 lands, but it accepts submissions only after 11.8 lands
+   (Rulings).
 
 4. **One board per official suite.** A bundle whose sealed method carries a
    conforming suite protocol object keys on its suite protocol id, whatever
@@ -150,11 +151,14 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
    (`headline`, `comparison`, or `qualification`); do not invent a single
    numeric board score. A comparison-shaped claim has no headline; the row
    shows the comparison. Attach the claim's own limitation sentences on the
-   row; full text lives on the report page. Date is the `closeAt` of a
-   `run.json` the checker validated as a Run record, labeled as the run's
-   close (the listed LoCoMo bundle seals no timestamp in `report.json` or
-   its claim package); else the listing time, labeled "listed at". A
-   `run.json` nothing checked, such as one a `/5` bundle declares, does not
+   row; full text lives on the report page. Date is the date that orders
+   the row: the earlier of the `closeAt` of a `run.json` the checker
+   validated as a Run record and the listing time. Where that `closeAt` is
+   the earlier, the row shows it, labeled as the run's close (the listed
+   LoCoMo bundle seals no timestamp in `report.json` or its claim package);
+   otherwise it shows the listing time, labeled "listed at". A row with no
+   such `run.json` takes the listing time. A `run.json` nothing checked,
+   such as one a `/5` bundle declares, does not
    set the date. Ingest's `reportedAt`, today's
    sort key, is not a listing time: `scripts/ingest-report.mjs` sets it from
    `report.json` `reportedAt` for format `/1` and from the public reading
@@ -165,9 +169,9 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
    For LoCoMo, `reportedAt` is
    `2026-08-29T16:30:51Z`, the run's `closeAt` cut to seconds: the site
    already shows that `closeAt` as the report's date, under the reading
-   record's name `sealedAt`. Whether `closeAt` should order the board at
-   all, and whether the listing-time fallback stays, are open (Open for the
-   operator). On a suite board the row shows coverage
+   record's name `sealedAt`. The earlier-of order below and the
+   listing-time fallback are the operator's rulings of 2026-09-24
+   (Rulings). On a suite board the row shows coverage
    and execution conformance from `suiteComparability`, with a visible
    marker on any row short of `full`. The published checker does not yet
    carry that field, and the bundle does not yet carry the selection bytes
@@ -187,12 +191,15 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
    byte-exact copy ingest already writes. The claimant's locator is provenance
    in `data/reports/<slug>.json`, not identity, and is not required to stay up
    for the listing to remain checkable. Default order is the row's date,
-   newest first: the run's pre-registered close time, `closeAt`, or the
-   listing time where the bundle carries no Run record the checker
-   validated. `closeAt` is not a seal
+   newest first: the earlier of the run's pre-registered close time,
+   `closeAt`, and the listing time, or the listing time where the bundle
+   carries no Run record the checker validated. Taking the earlier means a
+   claimant cannot date a row later than the moment it was listed.
+   `closeAt` is not a seal
    time: it is fixed at lock, and a run that accounts every cell can be
    collected, reported and published before it. The operator's direction
-   calls this order sealing time; this record names it the close time.
+   calls this order sealing time; this record names `closeAt` the close
+   time.
    The page is built in that order, so it renders without script. A reader
    may re-sort by any column except the score, in the browser, using the
    page's own script (no external requests), with keyboard-operable column
@@ -245,7 +252,9 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
 
    - **11.1** `feat(site)`: submission issue form, cold-verify workflow,
      ingest-on-success PR. Lands in `colophon-claims/site`. Label
-     `human-surface`.
+     `human-surface`. Prerequisite of opening the door, not of building
+     it: 11.8. The workflow accepts submissions only after 11.8 lands
+     (Rulings).
    - **11.2** `feat(site)`: board pages keyed by suite, or by method digest.
      Lands in `colophon-claims/site`. Label `human-surface`. Prerequisites:
      11.5, 11.6 and 11.8.
@@ -258,8 +267,9 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
    - **11.5** `fix(benchmark-product)`: the published checker carries
      `suiteComparability` in its claim schema and re-derives it in
      claim-consistency from the sealed selection manifest the bundle carries
-     (11.6), the Run and the Matrix, never from the claim under test; the
-     source of `leaderboardSubmitReady` is open (Open for the operator).
+     (11.6), the Run and the Matrix, never from the claim under test; for
+     a full-coverage, conforming run of the five protocols 11.9 names, the
+     flag's re-derivation is 11.9's (Rulings).
      Lands in `packages/benchmark-product/check`. Prerequisite of 11.2.
    - **11.6** `feat(benchmark-product)`: a suite-bound bundle carries its
      sealed selection bytes. Acceptance: a suite-bound run publishes a bundle
@@ -274,8 +284,20 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
      bundle submitted through the front door lists with a public reading
      record that comes from the submitted bytes, with no `--presentation`.
      Lands in `packages/benchmark-product` and `colophon-claims/site`.
-     Label `human-surface`. Prerequisite of 11.2, with 11.5 and 11.6;
-     whether it also gates 11.1 is open (Open for the operator).
+     Label `human-surface`. Prerequisite of 11.2, with 11.5 and 11.6,
+     and of opening the front door: 11.1 may be built in parallel, but its
+     workflow accepts submissions only after 11.8 lands (Rulings).
+   - **11.9** `feat(benchmark-product)`: a suite-bound bundle carries the
+     evidence `leaderboardSubmitReady` turns on. Acceptance: for a
+     full-coverage, conforming run of Terminal-Bench 2.1 or 3.0, DeepSWE
+     v1.1, SWE-bench Verified or APEX-Agents, the bundle carries the files
+     core reads to decide the flag (on the retained Harbor or Pier job,
+     each trial's `config.json` and ATIF files, and for DeepSWE
+     `reward.json`; harness `report.json` files for SWE-bench Verified;
+     Archipelago `grades.json` for APEX-Agents), and the published checker
+     re-derives the flag, and the limitation sentence it selects, from
+     them cold. Lands in `packages/benchmark-product`. Not a prerequisite
+     of 11.1 or 11.2 (Rulings).
 
    Not filed from this design: the Colophon venue independence service
    (DR-2026-09-04 decision 2; named so row fields are ready, not designed);
@@ -293,7 +315,8 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
 9. **This record is the design artifact** follow-on `human-surface` site
    issues consume. Board pages are a new domain model on `colophon-claims/site`
    and land with it: a Board is keyed state plus a collection of listings in
-   close-time order, and its one action is the reader's re-sort by any
+   the order of the row's date (decision 5), and its one action is the
+   reader's re-sort by any
    column except the score, in the browser, with no request, no mutation,
    and no failure state (submit lives on GitHub); a Listing row is sealed
    facts, with coverage and conformance on a suite board, plus a same-origin
@@ -334,7 +357,8 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
   bundle that passes the checker has no reading record, and ingest refuses
   it. `publish` refuses to emit `/5`
   (`packages/benchmark-product/core/src/operations/publish.ts`), the one
-  format both can accept. Follow-on 11.8 closes the gap.
+  format both can accept. Follow-on 11.8 closes the gap, and the front
+  door opens only after it lands (Rulings).
 - That a suite-bound bundle can be listed today. The published checker does
   not carry `suiteComparability`: its claim schema
   (`packages/benchmark-product/check/src/profile/claim.ts`) has no such key,
@@ -379,8 +403,10 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
   Run, not the suite-protocol object alone (for Inspect eval: epochs,
   Inspect version, solver, sample limit and run options, against the Run's
   planned replicates). Follow-on 11.6 carries the selection bytes; 11.2
-  needs 11.5, 11.6 and 11.8. Where `leaderboardSubmitReady` comes from is
-  open (Open for the operator).
+  needs 11.5, 11.6 and 11.8. The operator ruled that the bundle carry the
+  files `leaderboardSubmitReady` turns on, so the published checker
+  re-derives the flag cold: follow-on 11.9, which 11.2 does not need
+  (Rulings).
 - That a reader will not take a subset row for a full-suite result. One board
   per suite puts them side by side; the header reminder and the row marker
   state the difference, and they cannot make a reader read it.
@@ -388,9 +414,9 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
 ## Consequences
 
 - Step 8 of the claimant path gets a door that does not require an
-  operator to copy a folder. It lists a bundle `colophon publish` emits
-  only once follow-on 11.8 lands; before that it can list only a `/5`
-  bundle from another producer (decision 3).
+  operator to copy a folder. It opens only once follow-on 11.8 lands, so
+  from its first day it can list a bundle `colophon publish` emits
+  (decision 3).
 - `colophon-claims/site` gains a workflow, an issue form, board routes, and
   ingest fields (board key, venue projection, locator provenance, listing
   time; the bundle identity is already there as `digests.bundleIdentity`).
@@ -433,7 +459,7 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
   sits beside a full row. What the split key carried by separation, the
   board header's two-axis comparability reminder and the coverage fact on
   every row, with its marker short of `full`, now carry on the page, in an
-  order that is close time and never score. They state the difference;
+  order by the row's date and never by score. They state the difference;
   they cannot make a reader read it.
 - **A suite board that ignores coverage** (spec §6.3 option C as first
   drafted). Without coverage on each row, a subset row would read as a
@@ -458,45 +484,31 @@ published reader is `@colophon-claims/verify@0.2.1`, published 2026-09-01.
 - **Designing blob-hosting or the venue service in this record.** Named,
   not designed. Known LoCoMo git weight is not a design of hosting.
 
-## Open for the operator
+## Rulings (2026-09-24)
 
-Recorded 2026-09-24 and not ruled here. The decisions above stand as
-written until the operator rules on each (spec §14 entries 10 to 13).
+The operator ruled on 2026-09-24 on the choices this record left open
+(spec §14 entries 7 and 10 to 13). The decisions above carry each ruling.
 
-- **Where `leaderboardSubmitReady` comes from.** Core derives it from files
-  the bundle does not carry, the checker may not read it from the claim
-  under test, and the same flag picks the suite limitation sentence on the
-  Report. Choices: carry that evidence in the bundle, naming which files
-  and under what, so the checker re-derives it; take the flag, and the
-  sentence it picks, out of what the checker rebuilds; or another source
-  the operator names.
-- **Whether `closeAt` should order the board.** `closeAt` is the claimant's
-  own clock at lock plus `closeAfterMs`, which the draft schema bounds only
-  as a positive integer, and a run that accounts every cell can collect
-  before `closeAt`, so a claimant can post-date a row to sit at the top of a
-  newest-first board at no cost. One option: order by the earlier of
-  `closeAt` and the listing time.
-- **Whether the listing-time fallback stays.** The row date reads
-  `closeAt` only from a `run.json` the checker validated as a Run record
-  (decision 5): the checker parses `run.json` as a Run on `/2`, `/4`, `/6`,
-  `/7`, `/8` and `/10`, and the Run record requires `closeAt`. The site's
-  legacy `/1` shape, from whose `run.json` ingest reads `lockedAt`, is
-  outside that rule, and no `/1` bundle passes the published checker. A
-  `/5` bundle need carry no `run.json` (the site's `/5` bundle carries
-  none), and the `/5` checker and the site's `/5` ingest accept a
-  `run.json` the manifest declares without reading it as a Run, so under
-  the rule every `/5` row takes the fallback, and only a `/5` row can.
-  `/5` is the only format the front door can list today (decision 3), so
-  until 11.8 lands every listed row would take it. Keep it for `/5`, or
-  drop it. The earlier-of order above would need a listing
-  time on every row anyway.
-- **Whether follow-on 11.8 gates the front door.** Nothing
-  `colophon publish` emits passes the cold gate and ingest today (decision
-  3). Either 11.1 waits for 11.8, so the door opens on the bundles the
-  claimant path produces; or 11.1 ships first and lists only `/5` bundles
-  from other producers, each dated by its listing time under the date
-  rule, until 11.8 lands.
-  This record does not choose.
+1. **`leaderboardSubmitReady` is re-derived cold from evidence the bundle
+   carries.** The bundle carries the files core reads to decide the flag,
+   so the published checker re-derives the flag, and the limitation
+   sentence it selects, cold: follow-on 11.9 (decision 8). 11.9 gates
+   neither the front door nor the board pages; it is not a prerequisite
+   of 11.1 or 11.2.
+2. **Rows are ordered newest first by the earlier of the run's validated
+   `closeAt` and the listing time** (decision 5). Taking the earlier means
+   a claimant cannot date a row later than the moment it was listed.
+3. **The listing-time fallback stays.** A row with no `run.json` the
+   checker validated as a Run record takes the listing time, labeled
+   "listed at". The row shows the date that orders it: the validated
+   `closeAt`, labeled as the run's close, where it is the earlier;
+   otherwise the listing time, labeled "listed at" (decision 5).
+4. **Follow-on 11.8 gates the front door.** 11.1 may be built in
+   parallel, but the door opens, meaning the workflow accepts
+   submissions, only after 11.8 lands (decisions 3 and 8). 11.2's
+   prerequisites stay 11.5, 11.6 and 11.8.
+5. **The score is not a reader sort key.** Confirmed: a reader may
+   re-sort by any column except the score (decision 5).
 
 ## Ratification
 
@@ -511,11 +523,11 @@ suite-bound bundle does not carry its sealed selection bytes (decisions 4
 and 8, follow-on 11.6, now a second prerequisite of 11.2), that ingest's
 `reportedAt` is not a listing time (decision 5), how ingest treats a bundle
 it cannot project (decision 3), and three choices left open for the
-operator (Open for the operator). Revised a third time 2026-09-24 to
+operator (Open for the operator, now Rulings). Revised a third time 2026-09-24 to
 record that nothing `colophon publish` emits today can be listed through
 the front door (decision 3, What this does not yet prove), adding
 follow-on 11.8 as a third prerequisite of 11.2 and asking the operator
-whether it also gates the front door (Open for the operator); to name the
+whether it also gates the front door (Open for the operator, now Rulings); to name the
 default order for the pre-registered close time, `closeAt`, not sealing
 time (decision 5); and to correct the npm status of the checker (Context),
 the site's grouped ingest (decisions 3 and 5), the existing
@@ -524,7 +536,15 @@ visibility. Revised a fourth time 2026-09-24 to narrow the
 `presentation.json` statement to the `/7`, `/8` and `/10` closures, since
 the `/5` closure accepts other members its manifest declares (decision 3,
 What this does not yet prove), and to read the row date only from a `run.json` the
-checker validated as a Run record (decision 5, Open for the operator).
+checker validated as a Run record (decision 5, Open for the operator,
+now Rulings). Revised a fifth time 2026-09-24 to record the operator's
+rulings of that date (Rulings): the bundle carries the evidence
+`leaderboardSubmitReady` turns on, as new follow-on 11.9, which gates
+neither 11.1 nor 11.2 (decision 8); the default order is the earlier of
+the validated `closeAt` and the listing time, and the row shows the date
+that orders it (decisions 5 and 9); the listing-time fallback stays
+(decision 5); 11.8 gates the front door (decisions 3 and 8); and the
+score is not a reader sort key.
 Ratified on code-owner approval of this record by the
 operator credential that did not author it.
 
