@@ -1,6 +1,16 @@
 const BUCKET_SECONDS = 6 * 60 * 60;
 const BUCKET_COUNT = 8;
 
+/**
+ * Longest `workClass` (`${contractId}.${contractVersion}`) a `/supply`
+ * response may carry. Mirrors `SUPPLY_IDENTIFIER_MAX_LENGTH` in the operator's
+ * decoder (`operator/src/discovery-client/http.ts`), which caps `workClass`,
+ * `contractId` and `contractVersion` at this length and rejects the WHOLE
+ * response when any one class exceeds it. Capping the joined string also caps
+ * both parts, since each part is non-empty. The two values must move together.
+ */
+export const SUPPLY_IDENTIFIER_MAX_LENGTH = 128;
+
 export type SupplyStatus = 'available' | 'zero_supply' | 'unknown';
 export type SupplyReason =
   | 'no_requestable_solver_nets'
@@ -47,7 +57,8 @@ export interface CurrentSupplyResponse {
   reason?: SupplyReason;
   /**
    * How many launched SolverNet rows on this chain carried incomplete manifest
-   * evidence and were therefore excluded from `classes`. Absent when every
+   * evidence, or a work class longer than `SUPPLY_IDENTIFIER_MAX_LENGTH`, and
+   * were therefore excluded from `classes`. Absent when every
    * launched row was usable, and never present unless `status` is `available`
    * — an incomplete row can only ever downgrade a would-be zero to `unknown`
    * (see `buildCurrentSupply`), so it has nothing to mark on the other two.
@@ -224,7 +235,8 @@ export interface AssembledCurrentSupply {
  * Aggregate requestable supply from native indexed facts. Unusable event time
  * and orphaned chain tuples make the whole answer unknown — they are read as
  * index corruption, which nothing in the response can be trusted against.
- * Incomplete per-row manifest enrichment is narrower: it excludes its own row
+ * Incomplete per-row manifest enrichment, or an identifier past
+ * `SUPPLY_IDENTIFIER_MAX_LENGTH`, is narrower: it excludes its own row
  * and can only downgrade a would-be `zero_supply` to `unknown`, marked on the
  * result as `incompleteManifestRows`. Neither path ever turns missing evidence
  * into a false zero.
@@ -264,10 +276,16 @@ export function assembleCurrentSupply(input: BuildCurrentSupplyInput): Assembled
   // until its next `MetadataSet` — must not black out a chain whose other
   // classes have complete evidence and real in-window loops, because nothing
   // that row could contain would subtract from them.
+  //
+  // An identifier past the client's decoder cap is excluded the same way.
+  // Anyone can launch a SolverNet with a long contract id, and the client
+  // rejects the whole response over one such class, so emitting it would
+  // blank every class on the chain for every operator.
   const complete = launched.filter((row) => row.manifestEnrichmentStatus === 'ok'
     && row.openRoles.length > 0
     && row.contractId.trim() !== ''
     && row.contractVersion.trim() !== ''
+    && `${row.contractId}.${row.contractVersion}`.length <= SUPPLY_IDENTIFIER_MAX_LENGTH
     && Boolean(row.cidKeccak));
   const incompleteManifestRows = launched.length - complete.length;
 

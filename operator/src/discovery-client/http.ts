@@ -58,10 +58,18 @@ const SupplyWindowSchema = z.object({
     }
   });
 });
+/**
+ * Defense in depth against permissionless manifest strings. Mirrors
+ * `SUPPLY_IDENTIFIER_MAX_LENGTH` in `packages/indexer/src/api/supply.ts`, which
+ * drops an over-cap class into `incompleteManifestRows` before responding. An
+ * over-cap identifier reaching this decoder rejects the whole response, so the
+ * two values must move together.
+ */
+const SUPPLY_IDENTIFIER_MAX_LENGTH = 128;
 const SupplyClassSchema = z.object({
-  workClass: z.string().min(1).max(128),
-  contractId: z.string().min(1).max(128),
-  contractVersion: z.string().min(1).max(128),
+  workClass: z.string().min(1).max(SUPPLY_IDENTIFIER_MAX_LENGTH),
+  contractId: z.string().min(1).max(SUPPLY_IDENTIFIER_MAX_LENGTH),
+  contractVersion: z.string().min(1).max(SUPPLY_IDENTIFIER_MAX_LENGTH),
   acceptingSolverNets: SafeCountSchema.positive(),
   claimingOperators: SafeCountSchema.positive(),
   verdictDeliveries: SafeCountSchema.positive(),
@@ -741,9 +749,10 @@ export function createHttpDiscoveryClient(
     const parsed = CurrentSupplyResponseSchema.safeParse(body);
     if (!parsed.success) {
       // The indexer answered; its body just doesn't decode against this
-      // client's schema. That is a version-skew signal — the indexer is
-      // current and the operator is the stale side — not a caller/config
-      // mistake, so it gets its own code rather than `invalid_request`.
+      // client's schema. Most often that is version skew (an older client
+      // against a newer indexer), but a malformed indexer answer looks the
+      // same from here. Either way it is not a caller/config mistake, so it
+      // gets its own code rather than `invalid_request`.
       throw new DiscoveryUnavailableError(
         `Supply endpoint returned invalid evidence: ${z.prettifyError(parsed.error)}`,
         undefined,

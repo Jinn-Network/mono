@@ -147,16 +147,17 @@ Examples:
       } catch (error) {
         const code = error instanceof DiscoveryUnavailableError ? error.code : undefined;
         // `invalid_response` (a decode rejection) means the indexer answered
-        // and is current; the operator's own client schema is the stale
-        // side, so the hint must point at upgrading the client, not at the
-        // indexer or its config. `invalid_request` covers a malformed
+        // with a body this client cannot decode. The likeliest cause is an
+        // older client against a newer indexer, but a malformed indexer answer
+        // looks the same from here, so the hint names the cause without
+        // promising that upgrading fixes it. `invalid_request` covers a malformed
         // discovery.url, a non-positive chainId, or the indexer's own 4xx
         // refusal — a caller/config problem, so the hint names both
         // discovery.url and the configured network (chainId is derived from
         // network, never set directly).
         const invalid = code === 'invalid_request' || code === 'invalid_response';
         const hint = code === 'invalid_response'
-          ? 'Upgrade @jinn-network/operator to match this indexer, or point discovery.url at an indexer on the same release.'
+          ? 'The indexer answered, but this client could not decode the response. The likeliest cause is an older @jinn-network/operator against a newer indexer; if both run the same release, the indexer served malformed evidence.'
           : invalid
             ? 'Fix discovery.url or the configured network; this indexer will not answer that request for the chain network derives.'
             : 'Retry when the configured discovery indexer is reachable and current.';

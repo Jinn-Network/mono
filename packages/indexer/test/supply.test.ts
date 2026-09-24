@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildCurrentSupply, assembleCurrentSupply, completedSupplyWindow, resolveSupplyChainId } from '../src/api/supply.js';
+import {
+  buildCurrentSupply,
+  assembleCurrentSupply,
+  completedSupplyWindow,
+  resolveSupplyChainId,
+  SUPPLY_IDENTIFIER_MAX_LENGTH,
+} from '../src/api/supply.js';
 import { BASE_SEPOLIA_CHAIN_ID, indexedChainIds } from '../src/chain-config.js';
 
 const CHAIN_ID = 84532;
@@ -300,6 +306,41 @@ describe('buildCurrentSupply', () => {
 
   it('omits the incomplete-rows marker when every launched row is usable', () => {
     expect(build()).not.toHaveProperty('incompleteManifestRows');
+  });
+
+  it('pins the identifier cap to the operator decoder cap', () => {
+    // operator/src/discovery-client/http.ts rejects the whole response when any
+    // class identifier is longer than 128 characters. Moving this cap alone
+    // lets one class blank `jinn supply` for every operator again.
+    expect(SUPPLY_IDENTIFIER_MAX_LENGTH).toBe(128);
+  });
+
+  it.each([
+    ['contractId', { contractId: 'c'.repeat(200) }],
+    ['contractVersion', { contractVersion: 'v'.repeat(200) }],
+    // Each part fits the cap on its own; only the joined workClass is over it.
+    ['joined workClass', { contractId: 'c'.repeat(SUPPLY_IDENTIFIER_MAX_LENGTH - 2) }],
+  ])('drops a class whose over-cap %s would fail the client decoder, and counts it as incomplete', (_label, overrides) => {
+    // #4234: one permissionless manifest with an identifier the client refuses
+    // must exclude only itself, not every class on the chain. The long class
+    // has real in-window loops, so only the cap keeps it out of `classes`.
+    const longDigest = `0x${'44'.repeat(32)}`;
+    const result = build({
+      manifests: [manifest(), manifest({ id: 'bafy-long', cidKeccak: longDigest, ...overrides })],
+      tasks: [task(), task({ id: '8', manifestDigest: longDigest })],
+      attempts: [attempt(), attempt({ taskId: '8' })],
+      verdicts: [verdict(), verdict({ taskId: '8' })],
+    });
+    expect(result.status).toBe('available');
+    expect(result.classes.map((entry) => entry.workClass)).toEqual(['prediction.v1']);
+    expect(result.incompleteManifestRows).toBe(1);
+  });
+
+  it('still reports a class whose workClass is exactly at the cap', () => {
+    const contractId = 'c'.repeat(SUPPLY_IDENTIFIER_MAX_LENGTH - '.v1'.length);
+    const result = build({ manifests: [manifest({ contractId })] });
+    expect(result.classes.map((entry) => entry.workClass)).toEqual([`${contractId}.v1`]);
+    expect(result).not.toHaveProperty('incompleteManifestRows');
   });
 
   it.each([

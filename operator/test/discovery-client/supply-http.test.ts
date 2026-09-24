@@ -115,6 +115,42 @@ describe('DiscoveryClient.getCurrentSupply', () => {
     await expect(clientFor(body).client.getCurrentSupply({ chainId: 84532 })).resolves.toEqual(body);
   });
 
+  // The indexer drops an over-cap class into incompleteManifestRows (#4234),
+  // so a healthy response carries only in-cap identifiers. The decoder keeps
+  // its own cap as defense in depth against an indexer that does not.
+  function withSecondClass(contractId: string, contractVersion: string) {
+    const second = {
+      ...available.classes[0],
+      contractId,
+      contractVersion,
+      workClass: `${contractId}.${contractVersion}`,
+    };
+    return {
+      ...available,
+      classes: [available.classes[0], second].sort((a, b) => (a.workClass < b.workClass ? -1 : 1)),
+    };
+  }
+
+  it('passes a multi-class response whose identifiers are all within the cap', async () => {
+    const body = withSecondClass('c'.repeat(125), 'v1');
+    await expect(clientFor(body).client.getCurrentSupply({ chainId: 84532 })).resolves.toEqual(body);
+  });
+
+  it.each([
+    ['contractId', 'c'.repeat(200), 'v1'],
+    ['contractVersion', 'prediction', 'v'.repeat(200)],
+    // Each part fits the cap on its own; only the joined workClass is over it.
+    ['joined workClass', 'c'.repeat(126), 'v1'],
+  ])('fails closed with invalid_response when a class next to a healthy one has an over-cap %s', async (
+    _label,
+    contractId,
+    contractVersion,
+  ) => {
+    await expect(
+      clientFor(withSecondClass(contractId, contractVersion)).client.getCurrentSupply({ chainId: 84532 }),
+    ).rejects.toMatchObject({ code: 'invalid_response' });
+  });
+
   it('preserves a server unknown response', async () => {
     const unknown = {
       ...available,
@@ -176,8 +212,8 @@ describe('DiscoveryClient.getCurrentSupply', () => {
 
   it('tags a Zod decoder rejection as invalid_response, distinct from invalid_request', async () => {
     // The indexer answered; the body just doesn't decode against this
-    // client's schema — a version-skew signal where the OPERATOR is the
-    // stale side (#4235), not a caller/config mistake like a malformed
+    // client's schema — usually version skew (#4235), not a caller/config
+    // mistake like a malformed
     // discovery.url or the indexer's own 4xx refusal.
     await expect(
       clientFor({ ...available, schemaVersion: 0 }).client.getCurrentSupply({ chainId: 84532 }),

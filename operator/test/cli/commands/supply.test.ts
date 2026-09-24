@@ -224,12 +224,13 @@ describe('jinn supply', () => {
     expect(hint).toContain('network');
   });
 
-  it('maps invalid_response (a decoder rejection) to invalid_invocation with an upgrade hint, not the 4xx hint', async () => {
-    // #4235: a Zod decoder rejection means the indexer answered and is
-    // current — the operator's own client is the stale side. The 4xx hint
-    // ("fix discovery.url or the configured network") names the wrong
-    // service for this case, so it must get a distinct hint that says to
-    // upgrade the client instead.
+  it('maps invalid_response (a decoder rejection) to invalid_invocation with a decode hint, not the 4xx hint', async () => {
+    // #4235: a Zod decoder rejection means the indexer answered with a body
+    // this client cannot decode. The 4xx hint ("fix discovery.url or the
+    // configured network") names the wrong service for this case, so it gets
+    // a distinct hint. That hint names the likeliest cause (an older client
+    // against a newer indexer) without promising that an upgrade fixes it: a
+    // malformed indexer answer looks the same from here.
     const command = createSupplyCommand({
       loadConfig: (() => ({
         network: 'testnet',
@@ -246,11 +247,12 @@ describe('jinn supply', () => {
     expect(exits).toEqual([11]);
     expect(envelopes[0]).toMatchObject({ code: 'invalid_invocation', exitCode: 11 });
     const hint = (envelopes[0] as { hint: string }).hint;
+    expect(hint).toContain('could not decode');
     expect(hint).toContain('@jinn-network/operator');
-    expect(hint).toContain('Upgrade');
+    expect(hint).not.toMatch(/\bupgrade\b/iu);
     // Distinct from the 4xx/config hint, which opens by telling the operator
     // to fix discovery.url or the network — the wrong instruction when the
-    // indexer itself is the current, correctly-answering side.
+    // indexer answered.
     expect(hint).not.toMatch(/^Fix discovery\.url/u);
   });
 
