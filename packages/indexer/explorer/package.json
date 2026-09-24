@@ -13,25 +13,25 @@
     "e2e:install": "playwright install chromium"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.102.0",
+    "@tanstack/react-query": "^5.102.8",
     "clsx": "^2.1.1",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "uplot": "^1.6.30",
     "wouter": "^3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
+    "@playwright/test": "^1.63.0",
     "@testing-library/dom": "^10",
     "@testing-library/jest-dom": "^7",
     "@testing-library/react": "^16",
-    "@types/node": "^26.2.0",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
-    "@vitejs/plugin-react": "^6.1.0",
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "jsdom": "^29",
     "typescript": "^5.6.3",
-    "vite": "^8.2.2",
+    "vite": "^8.3.0",
     "vitest": "^4.1.11"
   }
 }

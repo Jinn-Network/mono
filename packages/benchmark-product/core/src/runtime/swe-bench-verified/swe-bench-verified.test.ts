@@ -9,7 +9,7 @@ import { exportSwebenchPredictions } from "../../operations/swebench-export.js";
 import { initWorkspace } from "../../operations/init.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
-import { selectSwebenchVerifiedRuntime } from "../../operations/swe-bench-verified.js";
+import { prepareSwebenchVerifiedDraft } from "../testing/swe-bench-verified-draft.js";
 import { requireRunState, writeRunState } from "../../run/state.js";
 import { exportCompletenessCertification } from "../suite-protocol/comparability.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
@@ -148,7 +148,7 @@ process.exit(1);
 
   test("select seals replicates=1 and swebench-harness; quote shows 1 × 2 × 1 and two-axis bits", async () => {
     const context = await prepareDraft("one");
-    const selected = await selectSwebenchVerifiedRuntime(context, { draftId: "one", ...request("one_task") });
+    const selected = await prepareSwebenchVerifiedDraft(context, { draftId: "one", ...request("one_task") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(selected.result.draft.spec.replicates).toBe(1);
@@ -175,7 +175,7 @@ process.exit(1);
 
   test("a 12-instance snapshot claiming full coverage is refused method eligibility; lock without those quote bits refuses", async () => {
     const context = await prepareDraft("full");
-    const selected = await selectSwebenchVerifiedRuntime(context, { draftId: "full", ...request("full") });
+    const selected = await prepareSwebenchVerifiedDraft(context, { draftId: "full", ...request("full") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect(parseBenchmark(getSealedBytes(workspaceDir, selected.result.benchmarkSha256)).items).toHaveLength(12);
@@ -198,7 +198,7 @@ process.exit(1);
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
     const refuseContext = await prepareDraft("full-refuse");
-    const refuseSelected = await selectSwebenchVerifiedRuntime(refuseContext, { draftId: "full-refuse", ...request("full") });
+    const refuseSelected = await prepareSwebenchVerifiedDraft(refuseContext, { draftId: "full-refuse", ...request("full") });
     expect(refuseSelected.ok, JSON.stringify(refuseSelected)).toBe(true);
     if (!refuseSelected.ok) return;
     const refuseQuoted = await runQuote(refuseContext, { draftId: "full-refuse" });
@@ -214,7 +214,7 @@ process.exit(1);
 
   test("eligibility keys off the sealed revision pin and sealed instance count, not manifest self-agreement", async () => {
     const context = await prepareDraft("pin");
-    const selected = await selectSwebenchVerifiedRuntime(context, { draftId: "pin", ...request("full") });
+    const selected = await prepareSwebenchVerifiedDraft(context, { draftId: "pin", ...request("full") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     const manifest = SwebenchVerifiedSelectionManifestSchema.parse(
@@ -242,7 +242,7 @@ describe("SWE-bench Verified harness grade and export", () => {
   test("fake harness writes report.json; fixture-full collect bits become ready only with accounted cells and reports", async () => {
     writeFixture(["inst00"]);
     const context = await prepareDraft("ready");
-    const selected = await selectSwebenchVerifiedRuntime(context, { draftId: "ready", ...request("full") });
+    const selected = await prepareSwebenchVerifiedDraft(context, { draftId: "ready", ...request("full") });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
     expect((await runQuote(context, { draftId: "ready" })).ok).toBe(true);
@@ -317,7 +317,7 @@ describe("SWE-bench Verified harness grade and export", () => {
 
   test("named-slice export is inspection-only; custom and cousin refuse the Verified name", async () => {
     const context = await prepareDraft("one");
-    expect((await selectSwebenchVerifiedRuntime(context, { draftId: "one", ...request("one_task") })).ok).toBe(true);
+    expect((await prepareSwebenchVerifiedDraft(context, { draftId: "one", ...request("one_task") })).ok).toBe(true);
     expect((await runQuote(context, { draftId: "one" })).ok).toBe(true);
     const unsealed = exportSwebenchPredictions(context, { draftId: "one", armId: "one" });
     expect(unsealed.ok).toBe(false);
@@ -338,7 +338,7 @@ describe("SWE-bench Verified harness grade and export", () => {
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(workspaceDir);
     const customContext = await prepareDraft("custom");
-    expect((await selectSwebenchVerifiedRuntime(customContext, { draftId: "custom", ...request(undefined, ["inst11"]) })).ok).toBe(true);
+    expect((await prepareSwebenchVerifiedDraft(customContext, { draftId: "custom", ...request(undefined, ["inst11"]) })).ok).toBe(true);
     expect((await runQuote(customContext, { draftId: "custom" })).ok).toBe(true);
     expect(runLock(customContext, { draftId: "custom" }).ok).toBe(true);
     const custom = exportSwebenchPredictions(customContext, { draftId: "custom", armId: "one" });

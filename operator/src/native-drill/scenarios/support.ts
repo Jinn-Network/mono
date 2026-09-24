@@ -82,6 +82,15 @@ export async function broadcastOnce(
   return { txHash, broadcast: true };
 }
 
+/** Count one `broadcastOnce` port call versus an actual chain send (#4195). */
+export function countBroadcast(
+  sent: { readonly broadcast: boolean },
+  counters: { attempts: number; sent: number },
+): void {
+  counters.attempts += 1;
+  if (sent.broadcast) counters.sent += 1;
+}
+
 /**
  * A single port member the drilled phase must never call. Used where a port interface is only
  * partly exercised by a checkpoint and a whole-object proxy would not typecheck.
@@ -105,8 +114,14 @@ export class ExternalJournal<T> {
   entries(): readonly T[] {
     try {
       return JSON.parse(readFileSync(this.path, 'utf8')) as T[];
-    } catch {
-      return [];
+    } catch (error) {
+      // Absence is the first-write case. Anything else — truncated JSON, EISDIR, EACCES —
+      // is a corrupt model of the external system, and must fail the drill rather than
+      // masquerade as an empty journal (#4197).
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw new Error(`restart drill journal unreadable at ${this.path}: ${String(error)}`, {
+        cause: error,
+      });
     }
   }
 

@@ -62,6 +62,8 @@ const OPERATOR_CI_SELECTED_PATHS = [
   // edit confined to it must still run the lane that executes it.
   '.github/scripts/docker-workflow.test.mjs',
   '.github/scripts/operator-*.test.mjs',
+  // Shared portal-closure walk imported by the operator image guards (#4645).
+  'test-support/dockerfile-portals/**',
 ];
 
 function selectionEntries(path: string): string[] {
@@ -287,13 +289,16 @@ describe('packed client workflow coverage', () => {
   // is the one check proving a config-bearing subcommand executes end to end
   // from the packed install) but its RPC is pinned to loopback port 9, which
   // Node's fetch rejects client-side as a blocked port before any socket is
-  // opened, and the envelope is asserted to carry the `rpc_network` check so
-  // the probe is proven to have run.
-  it('runs the packed doctor offline and asserts its rpc_network check ran', () => {
+  // opened. The envelope's `rpc_network` check is asserted to have failed
+  // against that loopback host, so a run whose probe reached any other host
+  // (a regressed env precedence) fails the smoke instead of passing (#4548).
+  it('runs the packed doctor offline and asserts its rpc_network probe hit the pinned loopback', () => {
     const smoke = workflow('operator/scripts/smoke-test-pack.mjs');
 
     expect(smoke).toContain("env: { ...smokeEnv, JINN_RPC_URL: 'http://127.0.0.1:9' },");
-    expect(smoke).toContain("checks.some((check) => check?.name === 'rpc_network')");
+    expect(smoke).toContain("checks.find((check) => check?.name === 'rpc_network')");
+    expect(smoke).toContain('rpcNetwork?.ok !== false');
+    expect(smoke).toContain("rpcNetwork.detail.includes('via 127.0.0.1:9:')");
   });
 
   it('proves the public no-install invocation without letting its guard pass on detection', () => {

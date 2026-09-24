@@ -241,6 +241,17 @@ describe('buildLaunchers selection (extraLaunchers seam)', () => {
       .toEqual(['hermes']);
   });
 
+  it('maps prediction-v1-baseline onto the legacy launcher only in legacy mode', async () => {
+    const { buildLaunchers } = await import('../../src/daemon/composition-root.js');
+    // The two launchers read different inputs (legacy-signed-task-v1.json vs the sealed
+    // prediction-forecast profile), so a dropped alias would silently dispatch a legacy wiring
+    // to the native launcher.
+    expect(buildLaunchers(wiringFor('prediction-v1-baseline'), 'legacy').map((l) => l.id))
+      .toEqual(['legacy-prediction-v1-baseline']);
+    expect(buildLaunchers(wiringFor('prediction-v1-baseline'), 'native').map((l) => l.id))
+      .toEqual(['prediction-v1-baseline']);
+  });
+
   it('selects an injected launcher only when a wiring entry names its id', async () => {
     const { buildLaunchers } = await import('../../src/daemon/composition-root.js');
     const extra = [{ launcher: injectedLauncher('e2e-injected-launcher'), command: process.execPath }];

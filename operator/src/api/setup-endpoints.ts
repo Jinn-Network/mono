@@ -17,9 +17,9 @@
  * is `claude auth login` on the CLI (harness `isReady` nextStep.cli).
  */
 import type { Hono } from 'hono';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { z } from 'zod/v3';
 import { stage1MinMasterEth } from '../earning/bootstrap.js';
 import { getChainConfig } from '../earning/contracts.js';
@@ -51,7 +51,7 @@ import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { markRestartRequired } from './restart-required-state.js';
 import { resolveDefaultStateDir } from '../state-dir.js';
-import { isDefaultOperatorKeystore, passwordFileIsStale } from '../earning/password-file.js';
+import { isDefaultOperatorKeystore, passwordFileIsStale, replacePasswordFileAtomically } from '../earning/password-file.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -787,11 +787,12 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       // pick up the new password seamlessly — but only when that host-wide file
       // is provably ours. It is not earning-dir relative, so rewriting it
       // unconditionally replaced another operator's password with a value that
-      // does not open their keystore (#4086). An existing file must be the one
-      // this rotation just invalidated (the same proof the CLI uses to decide
-      // whether to delete it); an absent one is created only for a
-      // default-operator rotation. Otherwise we leave it alone and say so in
-      // the response.
+      // does not open their keystore (#4086). An existing file may be rewritten
+      // when it is the one this rotation just invalidated (the same proof the
+      // CLI uses to decide whether to delete it), or when the rotated keystore
+      // is the default operator's: keystore identity proves ownership whatever
+      // the file holds (#4116). An absent one is created only in the latter
+      // case. Otherwise we leave it alone and say so in the response.
       const home = process.env['HOME'] ?? homedir();
       const stateDir = resolveDefaultStateDir({ home });
       const defaultEarningDir = join(stateDir, 'earning');
@@ -799,20 +800,27 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       const warn = (message: string): void => { console.warn(message); };
       let passwordFileUpdated = false;
       if (
-        existsSync(pwFilePath)
-          ? passwordFileIsStale(
-              pwFilePath,
-              defaultEarningDir,
-              earningDir,
-              parsed.data.current,
-              parsed.data.next,
-              warn,
-            )
-          : isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)
+        passwordFileIsStale(
+          pwFilePath,
+          defaultEarningDir,
+          earningDir,
+          parsed.data.current,
+          parsed.data.next,
+          warn,
+        )
+        || isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)
       ) {
-        mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
-        writeFileSync(pwFilePath, parsed.data.next + '\n', { mode: 0o600 });
-        passwordFileUpdated = true;
+        // The keystore is already rotated: a password file we cannot write
+        // (e.g. one `passwordFileIsStale` could not even read) must not turn
+        // this into a `change_failed` response.
+        try {
+          // Sibling tmp + rename: a failed write never truncates the live file,
+          // and a symlink at this path is replaced rather than followed (#4610).
+          replacePasswordFileAtomically(pwFilePath, parsed.data.next + '\n');
+          passwordFileUpdated = true;
+        } catch (err) {
+          warn(`[warn] Could not update ${pwFilePath} (${errorMessage(err)}); leaving it in place.`);
+        }
       }
 
       // Mirror into env so the running daemon's in-memory PASSWORD stays valid

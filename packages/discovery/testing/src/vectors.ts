@@ -10,6 +10,7 @@ import { compareCodeUnitStrings } from "@jinn-network/record-discovery-protocol"
 
 export const VECTOR_KINDS = [
   "source-chain",
+  "source-head",
   "item",
   "facts-consistency",
   "derivation-consistency",

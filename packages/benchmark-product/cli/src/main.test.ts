@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { QUALIFIED_HARNESS_LOGIN_ARTIFACTS } from "@colophon-claims/core";
 import { describe, expect, test } from "vitest";
 import { BUILD_METADATA_KIND, DEFAULT_QUALIFIED_TARGETS, type ColophonBuildMetadata } from "./build-metadata.js";
@@ -86,6 +87,9 @@ describe("Colophon install surface", () => {
     const answer = await runColophonCli(["--help"], context);
     expect(answer.exitCode).toBe(0);
     expect(answer.stdout).toContain("colophon demo");
+    expect(answer.stdout).toContain("Published claimant verbs:");
+    expect(answer.stdout).toContain("method, arm add, lock, anchor, run import, collect, report, publish, results, status");
+    expect(answer.stdout).toContain("service's machinery");
     expect(answer.stdout).not.toContain("terminal-bench-2.1");
   });
 
@@ -153,7 +157,7 @@ describe("Colophon install surface", () => {
       TEST_BUILD,
     );
     expect(receipt.bundleIdentity).toBe(`sha256:${"a".repeat(64)}`);
-    expect(receipt.bundleFormat).toBe("benchmark-product-public-bundle/2");
+    expect(receipt.bundleFormat).toBe("benchmark-product-public-bundle/10");
     expect(receipt.sourceCommit).toBe("b".repeat(40));
     const bytes = readFileSync(join(root, "quickstart-receipt.json"), "utf8");
     expect(bytes).not.toContain("must-not-appear");
@@ -217,6 +221,35 @@ describe("Colophon install surface", () => {
   });
 });
 
+const SELF_SERVE_SPEC = "spec/2026-08-13-colophon-self-serve.md";
+const SELF_SERVE_SPEC_PATH = fileURLToPath(new URL(`../../../../${SELF_SERVE_SPEC}`, import.meta.url));
+
+function extractSpecTextBlock(specMarkdown: string, marker: string): string {
+  const markerIndex = specMarkdown.indexOf(marker);
+  if (markerIndex < 0) {
+    throw new Error(`${SELF_SERVE_SPEC}: marker not found: ${marker}`);
+  }
+  const after = specMarkdown.slice(markerIndex);
+  const open = after.indexOf("```text\n");
+  if (open < 0) {
+    throw new Error(`${SELF_SERVE_SPEC}: \`\`\`text opening fence not found after marker`);
+  }
+  const contentStart = open + "```text\n".length;
+  const close = after.indexOf("\n```", contentStart);
+  if (close < 0) {
+    throw new Error(`${SELF_SERVE_SPEC}: closing fence not found`);
+  }
+  return after.slice(contentStart, close);
+}
+
+/** Normalizes paths and bundle identity to the spec's §5.2 placeholders. */
+function normalizeSection52Sample(text: string): string {
+  return text
+    .replace(/^Bundle: .+$/m, "Bundle: <absolute-path>/bundle")
+    .replace(/^Receipt: .+$/m, "Receipt: <absolute-path>/quickstart-receipt.json")
+    .replace(/^Identity: sha256:[0-9a-f]{64}$/m, "Identity: sha256:<bundle-id>");
+}
+
 describe("local-publish answer", () => {
   const published = {
     bundle: "/tmp/colophon-sample/bundle",
@@ -245,5 +278,17 @@ describe("local-publish answer", () => {
       + "Recomputed: 6 of 6 checks passed\n"
       + "Complete comparison; no comparative winner stated.\n",
     );
+  });
+
+  test("§5.2 local-publish closing lines match the spec fenced sample", () => {
+    const specBlock = extractSpecTextBlock(
+      readFileSync(SELF_SERVE_SPEC_PATH, "utf8"),
+      "The last lines state what happened and what did not:",
+    );
+    const answer = localPublishAnswer(published);
+    expect(
+      normalizeSection52Sample(answer).trimEnd(),
+      `${SELF_SERVE_SPEC} §5.2`,
+    ).toBe(specBlock.trimEnd());
   });
 });

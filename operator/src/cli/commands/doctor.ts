@@ -15,12 +15,13 @@ import {
   probeClaudeAuth as defaultProbeClaudeAuth,
 } from '../../preflight/claude-auth.js';
 import {
-  getConfigPathFromArgs as defaultGetConfigPathFromArgs,
+  requireConfigPathFromArgs as defaultGetConfigPathFromArgs,
   loadConfig as defaultLoadConfig,
   buildConfigProvenance,
   type JinnConfig,
 } from '../../config.js';
 import { getChainConfig, ERC20_ABI } from '../../earning/contracts.js';
+import { sanitizeErrorText } from '../../rpc/transport.js';
 import { runPortfolioV0DoctorChecks as defaultRunPortfolioV0DoctorChecks } from '../../api/portfolio-v0-doctor.js';
 import { mnemonicKeystorePath } from '../../earning/store.js';
 import {
@@ -246,13 +247,27 @@ function checkDaemonRuntimeReady(): CheckResult {
   };
 }
 
+/** Reads the distributor's OLAS balance via RPC; tests inject a fake. */
+async function readDistributorBalance(config: JinnConfig, olasToken: Address, distributor: Address): Promise<bigint> {
+  const client = createPublicClient({ chain: baseSepolia, transport: http(config.rpcUrl) });
+  return client.readContract({
+    address: olasToken,
+    abi: ERC20_ABI,
+    functionName: 'balanceOf',
+    args: [distributor],
+  });
+}
+
 /**
  * On testnet, warn if the stOLAS distributor pool is drained. Operators can
  * neither fix this themselves nor bootstrap past it — the protocol team has
  * to refill the distributor. Emitted as a warning, not a hard failure,
  * because a refill may be in-flight.
  */
-async function checkDistributorReachable(config: JinnConfig): Promise<CheckResult | null> {
+export async function checkDistributorReachable(
+  config: JinnConfig,
+  readBalance: typeof readDistributorBalance = readDistributorBalance,
+): Promise<CheckResult | null> {
   if (config.network !== 'testnet') return null;
   try {
     const cfg = getChainConfig('base-sepolia', {
@@ -268,13 +283,7 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
         detail: 'distributor address not configured (standard mode staking disabled)',
       };
     }
-    const client = createPublicClient({ chain: baseSepolia, transport: http(config.rpcUrl) });
-    const balance = await client.readContract({
-      address: cfg.olasToken as Address,
-      abi: ERC20_ABI,
-      functionName: 'balanceOf',
-      args: [cfg.distributorAddress as Address],
-    });
+    const balance = await readBalance(config, cfg.olasToken as Address, cfg.distributorAddress as Address);
     const floor = cfg.bondAmount * 2n;
     const jinn = Number(balance) / 1e18;
     const required = Number(floor) / 1e18;
@@ -297,7 +306,9 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
     return {
       name: 'distributor_reachable',
       ok: true, // Non-fatal — probe failure doesn't mean the pool is empty.
-      detail: `distributor probe failed: ${err instanceof Error ? err.message : String(err)}`,
+      // viem's HttpRequestError message carries the transport URL verbatim,
+      // so mask it down to the host as rpc_network does (#4549).
+      detail: `distributor probe failed: ${sanitizeErrorText(err)}`,
     };
   }
 }
@@ -395,8 +406,23 @@ Examples:
         );
         return;
       }
-      const configPath =
-        deps.getConfigPathFromArgs(ctx.argv ?? []) ?? deps.getConfigPathFromArgs(process.argv.slice(2));
+      let configPath: string | undefined;
+      try {
+        configPath =
+          deps.getConfigPathFromArgs(ctx.argv ?? []) ?? deps.getConfigPathFromArgs(process.argv.slice(2));
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: err instanceof Error ? err.message : String(err),
+            hint: 'Pass a config path or omit --config.',
+            exampleCli: 'jinn doctor --config ~/.jinn-operator/config.json',
+            details: { field: 'config' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
       const config = deps.loadConfig(configPath);
       const checks: CheckResult[] = [];
 

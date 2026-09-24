@@ -11,10 +11,11 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  realpathSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { canonicalJsonBytes, catalogSha256 } from './build-prepublication-bundle.mjs';
 import { buildProfileRoot } from './build-profile-root.mjs';
@@ -245,7 +246,10 @@ function validateProfileManifest(profileManifest, profileManifestPath, context) 
   if (profileManifest.releaseGroup !== context.releaseGroup) {
     throw new Error('profile manifest release group does not match the receipt input');
   }
-  if (profileManifest.lane !== context.lane) throw new Error('profile manifest lane does not match the receipt input');
+  // Served inventory is lane-independent (#4469). Lane lives on the receipt.
+  if ('lane' in profileManifest) {
+    throw new Error('profile manifest must not embed lane');
+  }
   if (!sameSet(profileManifest.packages, context.catalogNames)) {
     throw new Error(`profile package set does not match ${context.releaseGroup}`);
   }
@@ -418,7 +422,11 @@ function parseArgs(argv) {
   return parsed;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const receipt = createVerificationReceipt(parseArgs(process.argv.slice(2)));
     console.log(`wrote verification receipt for ${receipt.sourceSha}`);

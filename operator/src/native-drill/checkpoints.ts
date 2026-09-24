@@ -27,6 +27,12 @@ export interface DrillCheckpointSpec {
    * "zero duplicate posts/claims/deliveries/settlements" assertions made machine-checkable.
    */
   readonly requiredEffects: Readonly<Record<string, number>>;
+  /**
+   * The terminal lifecycle state a completed run must report. A matching pair of failures
+   * (`compareRuns` equal, `requiredEffects` satisfied) must not seal: both lanes agreeing on
+   * `failed` or on a non-terminal hang is a red drill, not a green report (#4196).
+   */
+  readonly expectedFinalState: string;
 }
 
 /**
@@ -40,8 +46,11 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     role: 'requester',
     boundary: 'after the posting wallet invocation returns, before the transaction hash is persisted',
     proof: 'Reconcile canonical TaskCreated/nonce history; zero duplicate posts; the signed '
-      + 'association uses the original Submission and posting terms',
+      + 'association uses the original Submission and posting terms. Duplicate-freedom is '
+      + 'canonical history; broadcastOnce is the harness fence that absorbs a re-drive, and '
+      + 'invocations.broadcast vs invocations.broadcastSent distinguish the two',
     requiredEffects: { posting: 1, signedSourceEntries: 1, duplicatePosts: 0 },
+    expectedFinalState: 'published',
   },
   {
     checkpoint: 'claim',
@@ -49,8 +58,11 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     role: 'solver',
     boundary: 'after the claim transaction is broadcast, before the hash is attached to the claim operation',
     proof: 'One logical claimOperationId; replacement hashes remain attached to it; execution '
-      + 'starts only after canonical finality',
+      + 'starts only after canonical finality. Duplicate-freedom is canonical history; '
+      + 'broadcastOnce is the harness fence that absorbs a re-drive, and invocations.broadcast '
+      + 'vs invocations.broadcastSent distinguish the two',
     requiredEffects: { claims: 1, claimOperations: 1, duplicateClaims: 0 },
+    expectedFinalState: 'claim-finalized',
   },
   {
     checkpoint: 'backend-submit',
@@ -59,6 +71,7 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     boundary: 'after the dispatch context is durable, before the backend submit is recorded',
     proof: 'backend.recover reports matching; no second Attempt or divergent submit',
     requiredEffects: { backendSubmissions: 1, duplicateSubmits: 0 },
+    expectedFinalState: 'solution-settled',
   },
   {
     checkpoint: 'evidence',
@@ -71,14 +84,19 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     // envelope. Pinned, so a change in what the solution path publishes fails this drill rather
     // than quietly redefining what "publication resumes once" was measured against.
     requiredEffects: { publishedRecords: 4 },
+    expectedFinalState: 'solution-settled',
   },
   {
     checkpoint: 'solution-settlement',
     seed: 'B814',
     role: 'solver',
     boundary: 'after the solution settlement transaction is broadcast, before it is reconciled',
-    proof: 'Receipt/replacement/canonical logs reconcile to one finalized solution operation',
+    proof: 'Receipt/replacement/canonical logs reconcile to one finalized solution operation. '
+      + 'Duplicate-freedom is canonical history; broadcastOnce is the harness fence that '
+      + 'absorbs a re-drive, and invocations.settlementBroadcast vs '
+      + 'invocations.settlementBroadcastSent distinguish the two',
     requiredEffects: { settlements: 1, duplicateSettlements: 0 },
+    expectedFinalState: 'solution-settled',
   },
   {
     checkpoint: 'verdict-settlement',
@@ -86,8 +104,11 @@ export const DRILL_SPECS: readonly DrillCheckpointSpec[] = [
     role: 'evaluator',
     boundary: 'after the verdict settlement transaction is broadcast, before it is reconciled',
     proof: 'Decision-grade gate reruns over public bytes; one finalized verdict operation; '
-      + 'consumer graph equals uninterrupted run',
+      + 'consumer graph equals uninterrupted run. Duplicate-freedom is canonical history; '
+      + 'broadcastOnce is the harness fence that absorbs a re-drive, and '
+      + 'invocations.verdictClaim vs invocations.verdictClaimSent distinguish the two',
     requiredEffects: { canonicalVerdictSettlements: 1, duplicateVerdictSettlements: 0 },
+    expectedFinalState: 'complete',
   },
 ];
 

@@ -31,38 +31,15 @@ import {
   type SourceHead,
 } from '@jinn-network/record-discovery-protocol';
 import type { Transport } from '@jinn-network/record-discovery-client';
-import type { BindingResolver, DsseChainVerifier, PolicyCheckInput, WitnessVerifier } from '@jinn-network/trust-core';
 import { Store } from '../../src/store/store.js';
 import { buildNativeDiscoverySources } from '../../src/daemon/native-discovery-trust.js';
-import type { NativeTrustAuthority } from '../../src/daemon/native-trust-catalog.js';
+import { fakeTrust } from '../_support/native-trust.js';
 
 const AGENT = 'did:key:zNativeRequester';
 const OTHER_AGENT = 'did:key:zSomeOtherAgent';
 const SOURCE_NAME = 'requester';
 const ROOT = 'https://requester.example';
 const DIGEST = `sha256:${'a'.repeat(64)}` as const;
-
-function fakeTrust(): NativeTrustAuthority {
-  const bindingResolver: BindingResolver = { async resolveBinding() { return null; } };
-  const witnessVerifier: WitnessVerifier = {
-    async verify1271Witness() { return { verified: false, reason: 'fixture never verifies' }; },
-  };
-  const dsseVerifier: DsseChainVerifier = () => ({ validSignerKeyids: [] });
-  return {
-    bindingResolver,
-    dsseVerifier,
-    witnessVerifier,
-    conflicts: [],
-    newestPolicyVersion: 1,
-    rawSignatureVerifier: { async verify() { return false; } },
-    async assertFresh() { /* fixture */ },
-    candidateKeys() { return []; },
-    policy(purpose) { return { accepted: [`accepted-for-${purpose}`], requiredStrength: 'strong' } as PolicyCheckInput; },
-    async verifyRoleBinding() { return { bindingDigest: `sha256:${'0'.repeat(64)}` as const }; },
-    async verifyOnchainAuthority() { return { bindingDigest: `sha256:${'0'.repeat(64)}` as const }; },
-    resolverFor() { return bindingResolver; },
-  };
-}
 
 /** Head revalidation performs no fetch, so any request from this path is itself a failure. */
 const noTransport: Transport = {

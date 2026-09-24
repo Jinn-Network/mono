@@ -8,7 +8,9 @@
  * therefore prove the file belongs to the keystore they just rotated before
  * touching it. The CLI deletes it; the endpoint rewrites it. Same proof.
  */
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { mnemonicKeystorePath } from './store.js';
 
 /**
@@ -65,11 +67,12 @@ export function passwordFileIsStale(
 
 /**
  * Whether `earningDir` holds the very keystore the host-wide password file is
- * for — i.e. this is a default-operator rotation. Only then may a rotation
- * *create* that file: an absent file proves nothing about ownership, so
- * `passwordFileIsStale` cannot answer, but a rotation of the default keystore
- * is the one case where writing it can harm no other operator (`JINN_PASSWORD`
- * outranks the file for everyone else). Filesystem uncertainty answers "no".
+ * for — i.e. this is a default-operator rotation. That proves ownership of the
+ * file whatever it holds, so it authorizes a rotation to *create* the file
+ * (an absent file proves nothing, so `passwordFileIsStale` cannot answer) and
+ * to *rewrite* one that has drifted off the live password (#4116). Writing it
+ * then harms no other operator (`JINN_PASSWORD` outranks the file for everyone
+ * else). Filesystem uncertainty answers "no".
  *
  * Call AFTER the new keystore is saved, so the rotated file is known to exist.
  */
@@ -89,5 +92,23 @@ export function isDefaultOperatorKeystore(
         `(${err instanceof Error ? err.message : String(err)}); not writing a password file.`,
     );
     return false;
+  }
+}
+
+/**
+ * Replace `path` with `contents` at mode 0600 via a sibling temp file and
+ * rename. A failed write never truncates the live file. `rename` replaces a
+ * symlink at `path` rather than writing through it, so the former target
+ * stays protected (#4610).
+ */
+export function replacePasswordFileAtomically(path: string, contents: string): void {
+  const tmp = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(tmp, contents, { mode: 0o600, flag: 'wx' });
+    renameSync(tmp, path);
+  } catch (err) {
+    try { rmSync(tmp, { force: true }); } catch { /* tmp may never have been created */ }
+    throw err;
   }
 }

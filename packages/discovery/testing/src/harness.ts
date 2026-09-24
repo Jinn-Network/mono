@@ -2,6 +2,7 @@ import type {
   AnnouncementEntry,
   AnnouncedItem,
   SourceHead,
+  SourceIdentity,
   WireDsseEnvelope,
 } from "@jinn-network/record-discovery-protocol";
 // DsseEnvelope is trust-core's type (verifySourceChain's declaration file
@@ -81,6 +82,21 @@ export function isRunnableSourceChainInput(input: unknown): input is RunnableSou
     Array.isArray(record["entries"]) &&
     typeof record["firstAdoption"] === "boolean"
   );
+}
+
+// -- source-head vector shape -------------------------------------------------
+
+/**
+ * A `source-head-revalidation` vector (§10.5): everything `verifySourceHead`
+ * needs in one call. `source` is the source the consumer follows, which the
+ * head's own `origin` may deliberately fail to name; `seed.hwm` is the mark the
+ * consumer already holds for it, which the procedure must leave unchanged.
+ */
+export interface SourceHeadVectorInput {
+  seed: { now: string; keys: unknown[]; hwm: unknown };
+  source: SourceIdentity;
+  head: SourceHead;
+  headSignature: DsseEnvelope;
 }
 
 /** Vectors whose `input` intentionally fails Announcement Entry *parsing* before source-chain-verification even runs (§18 corpus completeness; primary coverage is M1's entry.test.ts). */

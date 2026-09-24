@@ -8,7 +8,7 @@ import {
   sealJson,
 } from "@jinn-network/record-discovery-protocol";
 import type { Transport, TransportResponse, VerifyDriver } from "@jinn-network/record-discovery-client";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -541,6 +541,61 @@ describe("mirror sync", () => {
     expect(outcome.sources[0]).toMatchObject({ entriesWalked: 1, indexed: 0, rejected: 1 });
     expect(outcome.sources[0]!.failure).toBeUndefined();
     expect(await marks.get({ agent: AGENT, name: NAME })).toBeDefined();
+  });
+
+  // #4551: the line logger drops a top-level `message` field as the
+  // envelope's, so the `describeError` detail at each site travels under
+  // `reason` (the `sync-loop.ts` convention). The exact-object matchers refuse
+  // a stray `message`; `logger.test.ts` proves `reason` survives the line.
+  test("an index failure reports its cause under reason", async () => {
+    const { transport: inner } = buildArchive(executionEvidenceFixture.bytes);
+    const transport: Transport = {
+      fetch: (url) =>
+        url.startsWith("https://archive.test/records/")
+          ? Promise.resolve({ status: 404, bytes: new Uint8Array() })
+          : inner.fetch(url),
+    };
+    const spy = log();
+
+    await mirror({ transport, log: spy }).syncOnce();
+
+    expect(spy.warn).toHaveBeenCalledWith("corpus.mirror.index-failed", {
+      announcementId: "ann-1",
+      reason: expect.stringContaining("record is unavailable"),
+    });
+  });
+
+  test("a lock failure reports its cause under reason", async () => {
+    const spy = log();
+    const fs: CorpusFilesystem = {
+      ...corpusFs,
+      mkdir: async () => {
+        throw new Error("EACCES: lock dir");
+      },
+    };
+
+    const outcome = await mirror({ fs, log: spy }).syncOnce();
+
+    expect(outcome).toEqual({ status: "failed", sources: [] });
+    expect(spy.warn).toHaveBeenCalledWith("corpus.mirror.lock-failed", {
+      reason: expect.stringContaining("mirror sync lock"),
+    });
+  });
+
+  test("a store failure reports its cause under reason", async () => {
+    const spy = log();
+    // A regular file where the catalog's parent directory must be: the
+    // catalog cannot be created there and does not exist, so opening the
+    // store throws before any source is walked.
+    await writeFile(join(directory, "blocker"), "");
+    const storePaths = { ...paths, catalogPath: join(directory, "blocker", "catalog.sqlite") };
+
+    const outcome = await mirror({ storePaths, log: spy }).syncOnce();
+
+    expect(outcome).toEqual({ status: "failed", sources: [] });
+    expect(spy.error).toHaveBeenCalledWith("corpus.mirror.sync-failed", {
+      reason: expect.stringContaining("corpus mirror catalog"),
+    });
   });
 
   test("one bad record does not wedge the rest of a source's entries", async () => {

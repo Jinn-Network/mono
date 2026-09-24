@@ -17,6 +17,7 @@ import { TERMINAL_BENCH_2_SELECTION_SCHEMA } from "../runtime/terminal-bench-2/m
 import { TERMINAL_BENCH_2_1_SELECTION_SCHEMA, TerminalBench21RegistryMetadataSchema } from "../runtime/terminal-bench-2-1/manifest.js";
 import { TERMINAL_BENCH_3_0_SELECTION_SCHEMA, TerminalBench30RegistryMetadataSchema } from "../runtime/terminal-bench-3-0/manifest.js";
 import type { SuiteCoverage, SuiteProtocolId } from "../runtime/suite-protocol/comparability.js";
+import { officialTerminalBench21TaskNames } from "../intake/terminal-bench-2-1.js";
 import { coverageFromSelectedNames, namedSliceTaskNames } from "../runtime/suite-protocol/manifest.js";
 
 export {
@@ -231,16 +232,32 @@ function selectedFromRegistry(
   cwd: string,
   n: number,
 ): { readonly coverage: SuiteCoverage; readonly selectedIds: readonly string[] } {
+  const inventory = catalogId === "terminal-bench-2.1"
+    ? officialTerminalBench21TaskNames()
+    : registryInventory(catalogId, host, cwd);
+  if (n > inventory.length) {
+    refuse(
+      "invalid-invocation",
+      "--n",
+      catalogId === "terminal-bench-2.1"
+        ? `--n ${n} is larger than the official Terminal-Bench 2.1 slate (${inventory.length})`
+        : `--n ${n} is larger than the registry inventory (${inventory.length})`,
+    );
+  }
+  const selectedIds = namedSliceTaskNames(inventory, "full").slice(0, n);
+  return { coverage: coverageFromSelectedNames(inventory, selectedIds), selectedIds };
+}
+
+function registryInventory(
+  catalogId: MethodCatalogId,
+  host: Record<string, unknown>,
+  cwd: string,
+): readonly string[] {
   const registryMetadataPath = host.registryMetadataPath;
   if (typeof registryMetadataPath !== "string" || registryMetadataPath.length === 0) {
     refuse("invalid-invocation", "--host", "host.registryMetadataPath must be a string path");
   }
-  const inventory = registryIds(catalogId, readJsonObject(resolvePath(cwd, registryMetadataPath), "--host"));
-  if (n > inventory.length) {
-    refuse("invalid-invocation", "--n", `--n ${n} is larger than the registry inventory (${inventory.length})`);
-  }
-  const selectedIds = namedSliceTaskNames(inventory, "full").slice(0, n);
-  return { coverage: coverageFromSelectedNames(inventory, selectedIds), selectedIds };
+  return registryIds(catalogId, readJsonObject(resolvePath(cwd, registryMetadataPath), "--host"));
 }
 
 export function resolveMethodOperand(input: ResolveMethodOperandInput): ResolvedMethod {

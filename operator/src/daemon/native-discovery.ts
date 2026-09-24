@@ -30,8 +30,7 @@ import type { Store } from '../store/store.js';
 import type { AnnouncedSubmissionCard } from './native-submission-facts.js';
 import {
   NATIVE_DISCOVERY_QUARANTINE_SCHEMA,
-  clearPoisonFailures,
-  isPoisonQuarantined,
+  preparePoisonProbes,
   recordPoisonFailure,
 } from './native-discovery-quarantine.js';
 
@@ -291,9 +290,15 @@ export interface NativeDiscoverySyncReport {
    * the loop and counts nothing, so this stays 0 once the wedge has cleared rather than reading
    * non-zero forever. A crossing counts even when a LATER announcement degrades that same
    * source in the same pass (#4394) -- the crossing is durable and is skipped from then on, so
-   * dropping it with the discarded source result would report it zero times, ever. The durable
+   * dropping it with the discarded source result would report it zero times, ever. That
+   * argument scopes to the DEGRADE path, the one the counter's placement can fix: a crossing
+   * followed in the same pass by a fault `degradedReason` does not classify (local-authority,
+   * trust, identity) makes `sync()` re-throw fail-closed, and the whole report -- this count
+   * with it -- never reaches the caller; the crossing is still durable and skipped from the
+   * next poll on, so on that path it is reported here zero times, ever. The durable
    * `native_discovery_quarantine` row and the `native_discovery_poison_quarantined` event are
-   * the authority for what is quarantined; this is a per-pass summary, not a running total.
+   * the authority for what is quarantined, on that path explicitly so; this is a per-pass
+   * summary, not a running total.
    * Withdrawal-scope quarantine is not a sync-pass event and is not counted here --
    * `drainNativeDiscoveryWithdrawals` owns that lane.
    */
@@ -1045,6 +1050,8 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       entryDigest: `sha256:${string}`;
       announcement: WithdrawnAnnouncement;
     }> = [];
+    // Prepared once per pass; every announcement below probes the ledger (#4294).
+    const poison = preparePoisonProbes(input.store);
     for (const item of fetched) {
       const entryDigest = sealJson(item.entry).digest;
       for (const announcement of item.entry.announcements) {
@@ -1072,8 +1079,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         //
         // A quarantined announcement re-served on a later cold re-adoption is skipped here
         // rather than re-decoded, so re-adopting a source cannot resurrect the wedge.
-        if (isPoisonQuarantined({
-          store: input.store,
+        if (poison.isQuarantined({
           scope: 'announcement',
           source,
           entryDigest,
@@ -1110,12 +1116,13 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           if (!poisoned.quarantined) throw undecodable;
           // Counted on the pass, not the outcome: the throw above, reached again on a LATER
           // announcement, would discard an outcome-carried count even though this is durable and
-          // is skipped from the next poll on — reporting it zero times, ever (#4394).
+          // is skipped from the next poll on — reporting it zero times, ever (#4394). A fatal
+          // fault later in the same pass still re-throws out of `sync()`, taking the whole
+          // report with it; the ledger row and event are the authority there.
           pass.quarantined += 1;
           continue;
         }
-        clearPoisonFailures({
-          store: input.store,
+        poison.clear({
           scope: 'announcement',
           source,
           entryDigest,

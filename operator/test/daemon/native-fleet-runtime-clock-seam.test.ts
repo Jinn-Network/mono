@@ -24,6 +24,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildFleetNativeRuntime } from '../../src/daemon/native-fleet-runtime.js';
 import { Store } from '../../src/store/store.js';
 import { buildTwoOperatorNativeSetup } from '../e2e/fixtures/native-fleet/config.js';
+import { CATALOG_REFRESH_BY } from '../e2e/fixtures/native-fleet/trust-catalog.js';
 
 const PASSWORD = 'native-fleet-clock-seam-password';
 const CEREMONY_ACCOUNT = privateKeyToAccount(`0x${'11'.repeat(32)}`);
@@ -45,11 +46,11 @@ const WALL_CLOCK = new Date('2026-08-20T00:00:00.000Z');
 /** Outside it, on the wrong side of `validFrom`: no binding is effective yet. */
 const BEFORE_VALID_FROM = new Date('2026-07-01T00:00:00.000Z');
 /**
- * Past the catalog's `refreshBy` (`2027-01-01`, the two-operator fixture's constant) and so on the
- * wrong side of the ONE window only the trust-policy chain has. Role bindings carry no upper bound,
- * so this instant separates the trust-catalog threading from the two role-identity ones (#4062).
+ * A day past the fixture catalog's `refreshBy`, and so on the wrong side of the ONE window only
+ * the trust-policy chain has. Role bindings carry no upper bound, so this instant separates the
+ * trust-catalog threading from the two role-identity ones (#4062).
  */
-const AFTER_REFRESH_BY = new Date('2027-06-01T00:00:00.000Z');
+const AFTER_REFRESH_BY = new Date(Date.parse(CATALOG_REFRESH_BY) + 24 * 60 * 60 * 1000);
 
 /**
  * The only chain reads a native boot makes: `createBaseSepoliaFinalizedAnchorClient`'s lookup of
@@ -123,7 +124,7 @@ describe('buildFleetNativeRuntime effective-time seam', () => {
   /**
    * Every temp root `boot()` created (#4063). `test/_support/isolate-home.ts` redirects `$TMPDIR`
    * into a per-file home and sweeps it in `afterAll`, so these never outlive a run; removing them
-   * per test keeps the file's peak footprint at one fixture tree instead of four, and converges on
+   * per test bounds the file's peak footprint to the trees a single test creates, and converges on
    * the cleaning pattern the rest of `test/daemon/` uses.
    */
   const roots: string[] = [];

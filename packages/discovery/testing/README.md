@@ -6,9 +6,10 @@ Conformance testing kit for the Jinn Record Discovery Protocol v1
 Ships the §18 golden-vector corpus, a reusable conformance harness, in-memory
 deterministic fakes for every injected port `@jinn-network/record-discovery-protocol`
 defines (including a `FactsRecompute` registry that recomputes the vectors' record facts
-from bytes), and the exported `run*Conformance` suites that `protocol` (source-chain and
-item verification), `serve` (source conformance), and `client` (query, subscribe, consumer
-conformance) drive against their own implementations.
+from bytes), and the exported `run*Conformance` suites that `protocol` (source-chain
+verification, source-head revalidation, and item verification), `serve` (source
+conformance), and `client` (query, subscribe, consumer conformance) drive against their
+own implementations.
 
 Fixtures are append-only: a vector that turns out to state a rule wrongly is retained
 unedited and replaced by a new one plus a dated erratum in

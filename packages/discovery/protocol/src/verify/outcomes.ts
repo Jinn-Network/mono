@@ -2,7 +2,7 @@ import type { AnnouncementEntry } from "../entry.js";
 import type { SourceHead } from "../head.js";
 import type { HighWaterMark } from "./ports.js";
 
-// Typed outcomes for the two named verification procedures (design §16
+// Typed outcomes for the named verification procedures (design §16
 // item 11): failures are typed, not boolean.
 
 export type SourceChainOutcome =

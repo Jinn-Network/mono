@@ -80,17 +80,24 @@ const AnnouncementEntrySchema = z.looseObject({
   sequence: SequenceSchema,
   previous: z.union([Sha256DigestSchema, z.null()]),
   // Deliberately laxer than `HeadTimestampSchema`, and the asymmetry is a
-  // decision, not an oversight (#4095).
+  // decision, not an oversight (#4095, #4303).
   //
   // `assertIntentOwnership` pins `head.issuedAt === entry.timestamp`, and
   // `issuedAt` is calendar-strict RFC 3339 with a mandatory offset (#3482) --
   // so on the WRITE path this field is already strict, transitively, and the
-  // durable writer is its single authority. `parseAnnouncementEntry`, by
-  // contrast, parses bytes received from a PEER during an archive walk.
-  // `timestamp` is not a §5.2 window field: nothing here reads it as an
-  // instant, and tightening the schema would retroactively refuse
-  // already-signed, digest-chained historical entries. That is a protocol
-  // compatibility change, decided in a protocol change -- not here.
+  // durable writer is its single authority. On the read side, the native
+  // requester parses them through `parseAnnouncementEntry`; native-signed-source
+  // reads the same field through a raw cast in `parseAndVerifyPage`, bypassing
+  // this schema. Both feed `entry.timestamp` into `previousHeadIssuedAt` /
+  // `parseHeadTimestamp` for the previous-head monotonicity rule. Those reads
+  // fail closed, and the write-path equality pin is what keeps own entries
+  // calendar-strict -- not schema tightness here.
+  //
+  // The schema stays lax because `parseAnnouncementEntry` also parses bytes
+  // received from a PEER during an archive walk. Tightening it would
+  // retroactively refuse already-signed, digest-chained historical peer
+  // entries. That is a protocol compatibility change, decided in a protocol
+  // change -- not here.
   timestamp: z.string().min(1),
   announcements: z.array(AnnouncementSchema).min(1),
 });

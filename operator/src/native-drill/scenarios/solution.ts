@@ -158,6 +158,7 @@ export async function runSolutionScenario(
     evidenceRead: 0,
     publish: 0,
     settlementBroadcast: 0,
+    settlementBroadcastSent: 0,
   };
 
   const store = new Store(path);
@@ -270,7 +271,8 @@ export async function runSolutionScenario(
           const sent = await broadcastOnce(context, settlementKey, async () => {
             if (checkpoint === 'solution-settlement') await context.boundary();
           });
-          if (sent.broadcast) invocations.settlementBroadcast += 1;
+          invocations.settlementBroadcast += 1;
+          if (sent.broadcast) invocations.settlementBroadcastSent += 1;
           return { txHash: sent.txHash };
         },
         readCanonical: async () => {
@@ -296,11 +298,19 @@ export async function runSolutionScenario(
       },
     });
 
-    // One reconcile loop drives the engagement to its terminal state in both modes. The recovered
-    // run enters it with the same durable row the uninterrupted run passed through.
+    let settled = false;
     for (let pass = 0; pass < 8; pass += 1) {
       const results = await coordinator.reconcileStartup();
-      if (results.every(({ kind }) => kind === 'solution-settled' || kind === 'failed')) break;
+      if (results.some(({ kind }) => kind === 'failed')) {
+        throw new Error(`restart drill ${checkpoint}: reconcile ended in failed`);
+      }
+      if (results.length > 0 && results.every(({ kind }) => kind === 'solution-settled')) {
+        settled = true;
+        break;
+      }
+    }
+    if (!settled) {
+      throw new Error(`restart drill ${checkpoint}: reconcile loop exhausted without a terminal state`);
     }
 
     const finalEngagement = state.getEngagement(engagementId)!;

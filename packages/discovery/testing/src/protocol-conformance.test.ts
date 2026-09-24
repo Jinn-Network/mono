@@ -1,6 +1,6 @@
-import { verifyItem, verifySourceChain } from "@jinn-network/record-discovery-protocol";
+import { verifyItem, verifySourceChain, verifySourceHead } from "@jinn-network/record-discovery-protocol";
 
-import { runItemConformance, runSourceChainConformance } from "./conformance.js";
+import { runItemConformance, runSourceChainConformance, runSourceHeadConformance } from "./conformance.js";
 
 // Plan Task 11 Step 3: runs the harness against protocol's OWN reference
 // procedures. `verifySourceChain` and `verifyItem` are still M2 skeletons
@@ -11,4 +11,5 @@ import { runItemConformance, runSourceChainConformance } from "./conformance.js"
 // verification procedures against these exact vectors and fakes.
 
 runSourceChainConformance(verifySourceChain);
+runSourceHeadConformance(verifySourceHead);
 runItemConformance(verifyItem);

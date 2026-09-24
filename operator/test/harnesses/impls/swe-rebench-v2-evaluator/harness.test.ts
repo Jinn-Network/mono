@@ -10,9 +10,11 @@ import { fileURLToPath } from 'node:url';
 import {
   SweRebenchV2EvaluatorHarness,
   applyUpstreamPatches,
+  defaultSweRebenchV2EvaluatorImplStateDir,
   inspectCurrentSweRebenchV2EvaluatorEnableContract,
 } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js';
 import { HttpHfFetcher } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
+import { defaultImplStateDirRoot } from '../../../../src/state-dir.js';
 import type { Task } from '../../../../src/types/task.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 import {
@@ -2137,5 +2139,14 @@ describe('SweRebenchV2EvaluatorHarness — minted-pool.v2 environment recheck', 
     expect(error).toBeInstanceOf(SkippableError);
     expect(error.reason).toBe('minted_substrate_source_binding_drift');
     expect(runner.runEval).not.toHaveBeenCalled();
+  });
+});
+
+describe('defaultSweRebenchV2EvaluatorImplStateDir', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+  it('roots under the shared impl-state helper', () => {
+    vi.stubEnv('JINN_STATE_DIR', '/state');
+    expect(defaultSweRebenchV2EvaluatorImplStateDir())
+      .toBe(join(defaultImplStateDirRoot('/state'), 'swe-rebench-v2-evaluator'));
   });
 });
