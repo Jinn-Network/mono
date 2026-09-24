@@ -43,6 +43,11 @@ recognize it refuses rather than returning a check denominator: it throws with `
 `BenchmarkProductError` and `.code` `record-integrity`. No published 0.2.x release exported
 this function, so there is no upgrade path on which its behavior changed.
 
+`beaconIndexWord` maps a registered beacon source to the index word a reader surface uses
+(`round` or `height`). An unknown source — including inherited object keys and a symbol —
+refuses rather than resolving through the prototype: it throws `BenchmarkProductError` with
+`.code` `record-integrity`.
+
 Verification opens no network connection, reads no account or API credential, and uploads
 nothing. It recomputes the checks the bundle's declared format closes over, against the bytes
 the bundle carries and nothing else. It does not prove that the producing machine was honest

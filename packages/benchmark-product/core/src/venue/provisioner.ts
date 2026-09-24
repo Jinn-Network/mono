@@ -16,9 +16,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { parseCellKey } from "@jinn-network/benchmarking-records";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import {
@@ -400,7 +400,7 @@ async function runGitOutput(args: readonly string[], env: NodeJS.ProcessEnv): Pr
   child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
   const code = await new Promise<number>((resolve, reject) => {
     child.once("error", reject);
-    child.once("exit", (value) => resolve(value ?? 70));
+    child.once("close", (value) => resolve(value ?? 70));
   });
   if (code !== 0) throw new Error(`git ${args[0] ?? ""} exited ${code}: ${stderr.trim()}`);
   return stdout;
@@ -430,14 +430,33 @@ function harnessId(view: { readonly effectiveRequirements?: Readonly<Record<stri
 }
 
 /**
- * Whether `work` is a git checkout harvest can extract from (issue #3655). Existence is not enough:
- * an interrupted teardown can leave the directory with its `.git` gone or pointing at a pruned
- * admin dir. The top level must be `work` itself because `git -C` searches parent directories, so a
- * checkout that lost its `.git` inside some enclosing repository would otherwise pass; `HEAD` must
- * resolve because extraction reads it. A git refusal means unusable; a failure to run git at all
- * (a spawn error such as ENOENT) is an infrastructure fault and propagates, so it is never
- * harvested as a declared omission.
+ * Whether `work` is a git checkout harvest can extract from (issues #3655, #4631, #4638).
+ *
+ * Always probe with git: do not skip the spawn when `work/.git` is missing, because `git -C`
+ * walks parents and the enclosing-repo case is exactly that walk. Spawn faults (ENOENT and other
+ * errno) still throw. On success, `realpathSync(toplevel)` must equal `realpathSync(work)` or the
+ * checkout is unusable. On a non-zero git exit without errno, treat as unusable only when
+ * `work/.git` is missing or is a gitfile whose gitdir target does not exist; otherwise rethrow —
+ * a real `.git` directory with a broken object store / HEAD is infrastructure, not a declared
+ * omission.
  */
+function isAbsentOrDanglingGit(work: string): boolean {
+  const gitPath = join(work, ".git");
+  if (!existsSync(gitPath)) return true;
+  let contents: string;
+  try {
+    contents = readFileSync(gitPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EISDIR") return false;
+    throw error;
+  }
+  const match = /^gitdir:\s*(.+)\s*$/mu.exec(contents);
+  if (match === null) return false;
+  const target = match[1]!.trim();
+  const resolved = isAbsolute(target) ? target : join(work, target);
+  return !existsSync(resolved);
+}
+
 async function isUsableCheckout(work: string): Promise<boolean> {
   if (!existsSync(work)) return false;
   let output: string;
@@ -450,7 +469,8 @@ async function isUsableCheckout(work: string): Promise<boolean> {
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== undefined) throw error;
-    return false;
+    if (isAbsentOrDanglingGit(work)) return false;
+    throw error;
   }
   try {
     const [topLevel] = output.split("\n");

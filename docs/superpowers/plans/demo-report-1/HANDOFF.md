@@ -173,10 +173,13 @@ first and throws with the complete list of any missing cells.
 This step has run: both outputs are committed and `demo1-report.md` is published. The test now
 **refuses** to seal when either output already exists, because every run signs with a keypair
 generated in that run, so a re-seal can never reproduce the published digests. To exercise the
-chain without touching the seal, set `SKILLSBENCH_DEMO1_REPORT_OUT_DIR` to a scratch directory. If
-you hit that refusal, the bytes are also no longer reproducible for a second reason — the #2973
-method-identifier change. See **Erratum: method identifier in the sealed records** in
-[`demo1-report.md`](demo1-report.md) before reaching for the override.
+chain without touching the seal, set `SKILLSBENCH_DEMO1_REPORT_OUT_DIR` to a scratch directory.
+Re-sealing in place means deleting the committed outputs (`E1-demo1-evidence-bundle.v1.json` and
+`demo1-report.v1.json`) first; `SKILLSBENCH_DEMO1_REPORT_OUT_DIR` is the path that does not touch
+those files. If you hit that refusal, the bytes are also no longer reproducible for a second
+reason — the #2973 method-identifier change. See **Erratum: method identifier in the sealed
+records** in [`demo1-report.md`](demo1-report.md) before setting
+`SKILLSBENCH_DEMO1_REPORT_OUT_DIR`.
 
 **d. Verify:**
 
