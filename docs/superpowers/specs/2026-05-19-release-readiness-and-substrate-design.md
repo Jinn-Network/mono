@@ -1,5 +1,7 @@
 # Release-readiness and test-operator substrate
 
+> **Status (2026-09-24): superseded by `docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md`.** The Tier 1/2/3 release-validation ladder (§3 release-prep skill, §4 release-readiness skill) is superseded by the two-gate determinism split. The Tier 3 test-operator substrate it describes (§2) remains accurate background for what the `environment-suite` CI job now runs. For the current direction read `docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md`.
+
 **Version:** v0.1
 **Date:** 2026-05-19
 **Authors:** Adriano Bradley, Claude Opus 4.7

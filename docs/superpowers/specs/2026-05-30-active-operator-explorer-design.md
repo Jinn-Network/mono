@@ -1,5 +1,7 @@
 # Active-operator surface in the network explorer
 
+> **Status (2026-09-24): superseded by `docs/superpowers/specs/2026-06-01-active-operator-surface-fix.md`.** The "Canonical definition" section's single all-purpose `Active?` definition is superseded by a split between last-block liveness and the 48h-sustained measure. The rest of this design (schema, indexing handler, endpoints, frontend) carries forward. For the current direction read `docs/superpowers/specs/2026-06-01-active-operator-surface-fix.md`.
+
 - **Version:** 0.1
 - **Date:** 2026-05-30
 - **Author:** Oak (drafted with Claude)

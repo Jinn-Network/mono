@@ -1,5 +1,7 @@
 # Launcher role and Launcher mode
 
+> **Status (2026-09-24): superseded by `spec/2026-05-05-solvernet-creation-and-launch.md`.** The launch surface (the Create flow, manifest anchoring, and the launcher SPA) is superseded. The Launcher role and mode framing carries forward. For the current direction read `spec/2026-05-05-solvernet-creation-and-launch.md`.
+
 - **Date:** 2026-05-05
 - **Author:** ritsukai with Opus (brainstorm session)
 - **Status:** Draft for Captain review
