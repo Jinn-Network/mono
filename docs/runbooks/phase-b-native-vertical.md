@@ -171,12 +171,12 @@ same run ID, operation IDs, exact sealed bytes, source sequence, and transaction
 
 | Checkpoint | Stop after durable evidence | Required recovery proof |
 |---|---|---|
-| `posting` | Posting intent is durable; inject before broadcast and after wallet invocation before hash persistence | Reconcile canonical `TaskCreated`/Safe nonce history; zero duplicate posts; signed association uses the original Submission and posting terms |
-| `claim` | Claim operation intent or uncertain/broadcast transaction is durable | One logical `claimOperationId`; replacement hashes remain attached to it; execution starts only after canonical finality |
+| `posting` | Posting intent is durable; inject before broadcast and after wallet invocation before hash persistence | Reconcile canonical `TaskCreated`/Safe nonce history; zero duplicate posts (`broadcastOnce` fence; report `invocations.broadcast` vs `broadcastSent`); signed association uses the original Submission and posting terms |
+| `claim` | Claim operation intent or uncertain/broadcast transaction is durable | One logical `claimOperationId`; replacement hashes remain attached to it; execution starts only after canonical finality; zero duplicate claims (`broadcastOnce` fence; `invocations.broadcast` vs `broadcastSent`) |
 | `backend-submit` | Exact Task, Submission, dispatch context, and backend-submit intent are durable | `backend.recover` reports matching; no second Attempt or divergent submit |
 | `evidence` | Execution evidence and Delivery are sealed but publication/settlement is incomplete | Every `Delivery.evidenceRecords` digest resolves; publication resumes once; Delivery bytes do not change |
-| `solution-settlement` | Solution publication and settlement intent are durable | Receipt/replacement/canonical logs reconcile to one finalized solution operation |
-| `verdict-settlement` | Verdict/evaluation Delivery publication and verdict-settlement intent are durable | Decision-grade gate reruns over public bytes; one finalized verdict operation; consumer graph equals uninterrupted run |
+| `solution-settlement` | Solution publication and settlement intent are durable | Receipt/replacement/canonical logs reconcile to one finalized solution operation; zero duplicate settlements (`broadcastOnce` fence; `invocations.settlementBroadcast` vs `settlementBroadcastSent`) |
+| `verdict-settlement` | Verdict/evaluation Delivery publication and verdict-settlement intent are durable | Decision-grade gate reruns over public bytes; one finalized verdict operation; consumer graph equals uninterrupted run; zero duplicate verdict settlements (`broadcastOnce` fence; `invocations.verdictClaim` vs `verdictClaimSent`) |
 
 For every drill retain the seed, injected boundary, sanitized before/after state summaries, operation
 IDs and transaction hashes, source heads, final graph digest, and comparison with the uninterrupted
@@ -218,7 +218,20 @@ nothing, because `comparison.equalToUninterrupted` is a literal `true` in the re
 
 Each report also carries `liveRunDelta`, naming what the deterministic drill does **not** cover — a
 funded, mech-registered operator Safe and the escrowed marketplace legs, a live requester record
-source, and container-graded evaluation. A green drill is not a green live round trip.
+source, container-graded evaluation, and the single-role seeded-fixture framing (each checkpoint
+drills one role against directly seeded durable state, not a chained vertical). A green drill is
+not a green live round trip.
+
+The drill's own broadcast port (`broadcastOnce`) is a harness fence: it reconciles canonical
+history before it signs, so a recovered operator that re-drives a post/claim/settlement does not
+mint a second on-chain transaction. Reports therefore count port invocations separately from
+actual broadcasts (`invocations.broadcast` vs `invocations.broadcastSent`). Duplicate counters
+remain canonical history, not a local tally.
+
+CI runs `yarn drill:native-restart:verify` on a nightly/manual Foundry-provisioned lane
+(`.github/workflows/native-restart-drill.yml`). That lane is not a pull-request gate: the drill
+spawns twelve Anvil nodes and eighteen role-host processes. A red job there is a real regression
+(hermetic Anvil, no public RPC) rather than a flake.
 
 ## Public artifact capture
 

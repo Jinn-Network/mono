@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composed presentation generation, round-tripped through the portable reader (issue #4191).
+ * The composed generation, round-tripped through the portable reader (issue #4191 for the page,
+ * issue #3403 for the capability vector).
  *
- * `v10-closure.test.ts` in the reader package states `/10`'s allocation against the constants;
- * this is the other half, and the half no constant can supply: a real anchored bundle, relabelled
- * `/10` and re-rendered at `/10`, verifies — with v6's closure, v6's seven checks, and v6's
- * mandatory members — under the same `verifyPublicBundle` a third party runs.
+ * `v10-closure.test.ts` and `composed-verify.test.ts` in the reader package state `/10`'s
+ * allocation against the constants and against the conformance kit's unanchored golden bundle; this
+ * is the half neither can supply: a real ANCHORED bundle, converted to the composed bundle the same
+ * facts produce under the vector `["anchoring"]`, verifies -- with v6's closure, v6's seven checks,
+ * and v6's mandatory members -- under the same `verifyPublicBundle` a third party runs.
  *
- * That matters because the two places `/10` reaches the verification path are wiring, not data:
- * the closure selection (`verify.ts`, which must resolve `/10` to v6's row) and the claim rebuild's
- * `anchoredBundleFormat` (which must be read from the manifest so a `/10` bundle is required to
- * carry `/10`'s reader pin, and a `/6` bundle `/6`'s). Neither is exercised by a test that only
- * reads constants, and a drift in either would be silent.
+ * That matters because the places `/10` reaches the verification path are wiring, not data: the
+ * closure selection (`verify.ts`, which must derive the closure from the declared vector) and the
+ * claim rebuild's `composedCapabilities` (which must be read from the manifest, so a `/10` bundle is
+ * required to carry the composed claim its own vector derives). Neither is exercised by a test that
+ * only reads constants, and a drift in either would be silent.
  *
- * No producer emits `/10` — its claim seals a reader that predates the format and refuses it at
- * manifest parse — so the bundle here is BUILT as `/6` and converted. That conversion is exactly
- * what a producer flipping to `/10` would do, and doing it in the test rather than in the producer
- * is what keeps `/10` unemittable while still proving it readable.
+ * The producer also emits `/10` by default (issue #3405). The bundle here is still BUILT as `/6`
+ * and converted, so this file proves the reader independently of the producer.
  */
 
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -28,11 +28,11 @@ import { parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import {
   BUNDLE_V10_FORMAT,
-  PUBLIC_BUNDLE_V10_COMPATIBLE_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND,
+  COMPOSED_CLAIM_PACKAGE_SCHEMA_ID,
+  readerInstructions,
   verifyPublicBundle,
   verifyPublicBundleSnapshot,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { buildPublicAssets, type PublicAssetInput } from "./assets.js";
 import { buildBundleManifest } from "./manifest.js";
 import { BUNDLE_V6_FORMAT } from "../legacy-closures.js";
@@ -57,30 +57,31 @@ function json(bundleDir: string, path: string): Record<string, any> {
   return JSON.parse(readFileSync(join(bundleDir, path), "utf8")) as Record<string, any>;
 }
 
+/** The vector an anchored, non-qualifying run declares: exactly what `/6` implied by its number. */
+const ANCHORED = ["anchoring"] as const;
+
 /**
- * Converts a materialized `/6` bundle in place into the `/10` bundle the same facts produce.
+ * Converts a materialized `/6` bundle in place into the composed bundle the same facts produce.
  *
- * Three edits, in the order a producer would make them: repin the claim's reader line, re-render
- * every presentation asset at `/10`, then relabel the manifest over the members the directory now
- * holds. Nothing about the records moves — that is the whole claim `/10` makes — so the sealed
- * Run, Matrix, Report, evidence catalog, and anchors are untouched.
+ * Three edits, in the order a producer would make them: the claim becomes the composed generation's
+ * claim package and pins the reader line its vector derives, every presentation asset is
+ * re-rendered at `/10`, and the manifest is re-sealed with the vector over the members the
+ * directory now holds. Nothing about the records moves, so the sealed Run, Matrix, Report, evidence
+ * catalog, and anchors are untouched.
  *
  * Every input to the re-render is read from the bundle's own bytes rather than carried over from
  * the fixture's build, so a conversion that drifted from what the verifier assembles would fail
  * the verifier's own byte-compare rather than passing against a private copy of the facts.
  */
-function convertToComposedPresentation(
+function convertToComposed(
   bundleDir: string,
   comparison: PublicAssetInput["comparison"],
-  options: { readonly repinReader?: boolean } = {},
+  options: { readonly keepLegacyClaim?: boolean; readonly capabilities?: readonly string[] } = {},
 ): void {
   const claim = json(bundleDir, "claim-package.json");
-  if (options.repinReader !== false) {
-    claim["verification"] = {
-      ...claim["verification"],
-      command: PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND,
-      compatibleCommand: PUBLIC_BUNDLE_V10_COMPATIBLE_VERIFICATION_COMMAND,
-    };
+  if (options.keepLegacyClaim !== true) {
+    claim["claimSchema"] = COMPOSED_CLAIM_PACKAGE_SCHEMA_ID;
+    claim["verification"] = { ...claim["verification"], ...readerInstructions(ANCHORED) };
     // Canonical JSON, because the verifier re-encodes the parsed claim and refuses any byte that
     // differs -- a pretty-printed rewrite is rejected before claim-consistency is ever reached.
     writeFileSync(join(bundleDir, "claim-package.json"), canonicalJsonBytes(claim));
@@ -115,12 +116,25 @@ function convertToComposedPresentation(
 
   writeFileSync(
     join(bundleDir, "bundle.json"),
-    buildBundleManifest(bundleDir, manifest.files.map((file) => file.path), { format: BUNDLE_V10_FORMAT }).bytes,
+    buildBundleManifest(bundleDir, manifest.files.map((file) => file.path), {
+      format: BUNDLE_V10_FORMAT,
+      capabilities: options.capabilities ?? ANCHORED,
+    }).bytes,
   );
 }
 
-describe("composed presentation bundle v10 — portable verification", () => {
-  test("a relabelled, re-rendered anchored bundle verifies with v6's closure", async () => {
+async function refusal(bundleDir: string): Promise<{ path: string; message: string }> {
+  try {
+    await verifyPublicBundle(bundleDir);
+  } catch (cause) {
+    const issue = (cause as { readonly issues?: readonly { path?: string; message?: string }[] }).issues?.[0];
+    return { path: issue?.path ?? "", message: issue?.message ?? String(cause) };
+  }
+  return { path: "NOT REFUSED", message: "NOT REFUSED" };
+}
+
+describe("composed bundle v10 — portable verification", () => {
+  test("a converted anchored bundle verifies with v6's closure, derived from its vector", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "composed-v10-"));
     roots.push(workspaceDir);
     const built = await createSyntheticV6BundleFixture({ workspaceDir, plans: [{ kind: "rfc3161-lock" }] });
@@ -133,14 +147,16 @@ describe("composed presentation bundle v10 — portable verification", () => {
     const asSix = await verifyPublicBundleSnapshot(bundleDir);
     expect(asSix.verification.format).toBe(BUNDLE_V6_FORMAT);
 
-    convertToComposedPresentation(bundleDir, asSix.comparison);
+    convertToComposed(bundleDir, asSix.comparison);
     // The originating workspace is gone before a single byte is verified.
     rmSync(built.workspaceDir, { recursive: true, force: true });
 
     const verified = await verifyPublicBundle(bundleDir);
     expect(verified.format).toBe(BUNDLE_V10_FORMAT);
-    // v6's seven, in v6's order. The presentation generation adds none: a check it grew would be
-    // claiming the render proves something the records did not already prove.
+    if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
+    expect(verified.capabilities).toEqual(ANCHORED);
+    // v6's seven, in v6's order -- the same verification outcome the pre-composition cell gives.
+    expect(verified.checks).toEqual(asSix.verification.checks);
     expect(verified.checks).toEqual([
       "manifest",
       "evidence-closure",
@@ -150,38 +166,59 @@ describe("composed presentation bundle v10 — portable verification", () => {
       "claim-consistency",
       "integrity-anchors",
     ]);
-    // `integrity-anchors` is in that list because `/10` resolves to v6's `carriesAnchors`. Stated
+    // `integrity-anchors` is in that list because the vector declares `anchoring`. Stated
     // separately so a closure that silently lost the anchor axis fails on the axis, not just on a
     // check name.
-    if (verified.format === "benchmark-product-public-bundle/5") throw new Error("unreachable");
     expect(verified.anchors?.anchors).toHaveLength(1);
     // The four rulings are on the page the verifier just byte-compared against its own rebuild.
     const page = readFileSync(join(bundleDir, "index.html"), "utf8");
     expect(page).not.toContain("Open a cell to inspect its evidence");
     expect(page.split('<p class="about">').length - 1).toBe(1);
     expect(page.split("values below are copied without reconciliation").length - 1).toBe(1);
+
+    // ── The same real bundle, under every other declaration ─────────────────────────────────────
+    //
+    // Re-sealed each time, so what the reader refuses is the declaration and not a stale digest.
+    // Members without declaration: the anchor record is still in the tree, and nothing allowlists
+    // it once the vector stops declaring `anchoring`. Stripping the declaration is never a quieter
+    // bundle (P2, P3).
+    convertToComposed(bundleDir, asSix.comparison, { capabilities: [] });
+    expect(await refusal(bundleDir)).toEqual({
+      path: expect.stringMatching(/^anchors\/[a-f0-9]{64}\.bin$/u),
+      message: expect.stringContaining("non-allowlisted"),
+    });
+    // Declared without members: nothing in this bundle is a qualification document.
+    convertToComposed(bundleDir, asSix.comparison, { capabilities: ["anchoring", "binary-qualification"] });
+    expect(await refusal(bundleDir)).toEqual({
+      path: "qualification.json",
+      message: expect.stringContaining("is missing"),
+    });
+    // A token this reader does not implement refuses the bundle whole, by name.
+    const manifest = json(bundleDir, "bundle.json");
+    writeFileSync(join(bundleDir, "bundle.json"), canonicalJsonBytes({ ...manifest, capabilities: ["anchoring", "zz-unknown"] } as never));
+    expect(await refusal(bundleDir)).toEqual({
+      path: "bundle.manifest.capabilities",
+      message: expect.stringContaining('"zz-unknown"'),
+    });
   }, 180_000);
 
-  test("a /10 bundle carrying /6's reader pin is refused on the field that disagrees", async () => {
-    // The binding that makes the pin honest: the claim rebuild reads the format from the MANIFEST,
-    // never from the claim under test, so the claim cannot satisfy itself. Both reader pairs are
-    // legal `claim-package/4` — the admission schema accepts either — so if this binding were
-    // absent the mismatch would pass every check.
-    const workspaceDir = mkdtempSync(join(tmpdir(), "composed-v10-pin-"));
+  test("a /10 bundle carrying /6's own claim is refused on the field that disagrees", async () => {
+    // The binding that makes the claim honest: the rebuild reads the vector from the MANIFEST,
+    // never from the claim under test, so the claim cannot satisfy itself. claim-package/4 is a
+    // well-formed claim -- the admission schema accepts it -- so if this binding were absent the
+    // mismatch would pass every check.
+    const workspaceDir = mkdtempSync(join(tmpdir(), "composed-v10-claim-"));
     roots.push(workspaceDir);
     const built = await createSyntheticV6BundleFixture({ workspaceDir, plans: [{ kind: "rfc3161-lock" }] });
     const bundleDir = detach(built.bundle.bundleDir);
 
     const asSix = await verifyPublicBundleSnapshot(bundleDir);
-    // Relabelled and re-rendered as `/10`, but the claim keeps `/6`'s reader line.
-    convertToComposedPresentation(bundleDir, asSix.comparison, { repinReader: false });
+    // Relabelled and re-rendered as `/10`, but the claim is still `/6`'s.
+    convertToComposed(bundleDir, asSix.comparison, { keepLegacyClaim: true });
 
-    let message = "";
-    try {
-      await verifyPublicBundle(bundleDir);
-    } catch (cause) {
-      message = cause instanceof Error ? cause.message : String(cause);
-    }
-    expect(message).toContain("verification.command");
+    expect(await refusal(bundleDir)).toEqual({
+      path: "claim-consistency",
+      message: expect.stringContaining("claimSchema"),
+    });
   }, 180_000);
 });

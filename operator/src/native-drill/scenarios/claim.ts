@@ -113,7 +113,8 @@ export function enqueueCard(store: Store): void {
 export async function runClaimScenario(context: ScenarioContext): Promise<RunObservation | undefined> {
   const path = storePath(context);
   const claimKey = `${context.runId}:claim`;
-  let broadcasts = 0;
+  let broadcastCalls = 0;
+  let broadcastsSent = 0;
   let canonicalReads = 0;
 
   const store = new Store(path);
@@ -132,7 +133,8 @@ export async function runClaimScenario(context: ScenarioContext): Promise<RunObs
           // is what the boundary interrupts, so the restarted process must find it by reconciling
           // canonical history.
           const sent = await broadcastOnce(context, claimKey, () => context.boundary());
-          if (sent.broadcast) broadcasts += 1;
+          broadcastCalls += 1;
+          if (sent.broadcast) broadcastsSent += 1;
           return { txHash: sent.txHash, attemptIndex: 0, requestId: DRILL_REQUEST_ID };
         },
       },
@@ -196,7 +198,7 @@ export async function runClaimScenario(context: ScenarioContext): Promise<RunObs
         claimOperations: operations.filter(({ kind }) => kind === 'claim').length,
         duplicateClaims: Math.max(history.length - 1, 0),
       },
-      invocations: { broadcast: broadcasts, canonicalRead: canonicalReads },
+      invocations: { broadcast: broadcastCalls, broadcastSent: broadcastsSent, canonicalRead: canonicalReads },
       stateBefore: 'one admitted engagement with a durable claim operation intent',
       stateAfter: `${operations.length} operation(s); ${history.length} canonical claim transaction(s)`,
     };

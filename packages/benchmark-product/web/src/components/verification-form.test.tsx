@@ -35,6 +35,36 @@ describe("verification action presentation", () => {
     expect(markup).not.toContain("<pre");
   });
 
+  test("renders per-anchor status and the pending-window warning", () => {
+    actionState.current = {
+      status: "success",
+      result: {
+        draftId: "draft-1",
+        checks: ["matrix-rederivation", "integrity-anchors"],
+        matrixSha256: "a".repeat(64),
+        anchors: {
+          anchors: [{
+            recordSha256: "c".repeat(64),
+            status: "pending",
+            subject: "lock",
+            trustMaterial: "none",
+          }],
+          subjects: [
+            { subject: "lock", outcome: "anchored" },
+            { subject: "matrix", outcome: "absent" },
+          ],
+          invalid: [],
+        },
+        anchoringWindow: { closingOperation: "report" },
+      },
+    };
+    const markup = renderToStaticMarkup(<VerificationForm action={action} draftId="draft-1" />);
+    expect(markup).toContain("lock · pending");
+    expect(markup).toContain("lock: anchored");
+    expect(markup).toContain("matrix: absent");
+    expect(markup).toContain("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
+  });
+
   test("renders a typed recomputation or integrity failure loudly and never claims success", () => {
     actionState.current = {
       status: "error",

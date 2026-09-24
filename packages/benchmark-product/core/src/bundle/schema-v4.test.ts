@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { compareCodeUnitStrings } from "@jinn-network/benchmarking-records";
 import {
   BUNDLE_QUALIFICATION_FORMAT,
   BUNDLE_V4_EVIDENCE_FORMAT,
@@ -151,5 +152,37 @@ describe("public bundle v4 contracts", () => {
     const duplicate = structuredClone(valid) as any;
     duplicate.records.push({ ...duplicate.records[1] });
     expect(BundleV4EvidenceCatalogSchema.safeParse(duplicate).success).toBe(false);
+  });
+
+  test("refuses an unsorted qualification.exclusions projection", () => {
+    const unused = (n: number) => `sha256:${n.toString(16).padStart(64, "0")}`;
+    const qualification = structuredClone(operatorQualification()) as any;
+    qualification.admissionRecords.push(
+      ...[0, 1, 2, 3, 4, 5].map((n) => ({ sha256: unused(n), roles: ["source-item"] })),
+    );
+    qualification.admissionRecords.sort((left: { sha256: string }, right: { sha256: string }) =>
+      compareCodeUnitStrings(left.sha256, right.sha256)
+    );
+    qualification.reachableSha256s = qualification.admissionRecords.map((entry: { sha256: string }) => entry.sha256);
+    qualification.exclusions = [
+      { itemSha256: unused(2), replacementItemSha256: unused(3), reason: "review-disagreement" },
+      { itemSha256: unused(0), replacementItemSha256: unused(4), reason: "review-disagreement" },
+      { itemSha256: unused(1), replacementItemSha256: unused(5), reason: "review-disagreement" },
+    ];
+
+    const unsorted = BundleQualificationSchema.safeParse(qualification);
+    expect(unsorted.success).toBe(false);
+    expect(unsorted.success ? [] : unsorted.error.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: ["exclusions"], message: "values must be code-unit sorted and unique" }),
+    ]));
+
+    const sorted = BundleQualificationSchema.safeParse({
+      ...qualification,
+      exclusions: [...qualification.exclusions].sort((
+        left: { itemSha256: string },
+        right: { itemSha256: string },
+      ) => compareCodeUnitStrings(left.itemSha256, right.itemSha256)),
+    });
+    expect(sorted.success).toBe(true);
   });
 });

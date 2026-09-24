@@ -8,20 +8,32 @@ import { existsSync, readFileSync } from 'node:fs';
 import { relative, resolve, sep } from 'node:path';
 
 /**
- * Every `portal:` entry in a manifest, keyed by package name. `resolutions` is read LAST because
- * a later `set` wins here and Yarn gives `resolutions` precedence over the dependency fields: when
- * a package names the same portal in both with different targets, the guard must check the one
- * the install actually links (#4464).
+ * Every `portal:` entry in a manifest. `.get(name)` is the last-wins target: `resolutions` is
+ * read LAST because Yarn gives it precedence over the dependency fields (#4464). Iteration yields
+ * every distinct `(name, target)` pair in field order, so a package that names one portal with
+ * two targets is checked against both: the operator image's own install links the dependency-field
+ * target, and a nested install in that package applies `resolutions` (#4636).
  */
 /** @param {Record<string, unknown>} manifest @returns {Map<string, string>} */
 export function portalEntries(manifest) {
   const portals = new Map();
+  const distinct = [];
+  const seen = new Set();
   for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'resolutions']) {
     const group = /** @type {Record<string, string> | undefined} */ (manifest[field]);
     for (const [name, version] of Object.entries(group ?? {})) {
-      if (version.startsWith('portal:')) portals.set(name, version.slice('portal:'.length));
+      if (!version.startsWith('portal:')) continue;
+      const target = version.slice('portal:'.length);
+      portals.set(name, target);
+      const key = `${name}\0${target}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      distinct.push([name, target]);
     }
   }
+  portals[Symbol.iterator] = function* portalEntryPairs() {
+    yield* distinct;
+  };
   return portals;
 }
 
@@ -74,6 +86,108 @@ function dockerInstructions(dockerfile) {
   return instructions;
 }
 
+const YARN_FLAGS_WITH_VALUE = new Set([
+  '--cwd',
+  '--use-yarnrc',
+  '--cache-folder',
+  '--modules-folder',
+  '--preferred-cache-folder',
+]);
+
+// Yarn builtins and common package scripts that are not an install. Anything else that
+// still starts with `yarn` is treated as an install so an unrecognized form cannot hide
+// between a manifest COPY and a later `yarn install` (#4635).
+const YARN_NON_INSTALL = new Set([
+  'add',
+  'bin',
+  'build',
+  'cache',
+  'config',
+  'constraints',
+  'create',
+  'dedupe',
+  'dlx',
+  'exec',
+  'explain',
+  'help',
+  'info',
+  'init',
+  'link',
+  'lint',
+  'node',
+  'npm',
+  'outdated',
+  'pack',
+  'plugin',
+  'publish',
+  'remove',
+  'run',
+  'search',
+  'set',
+  'tag',
+  'test',
+  'typecheck',
+  'unlink',
+  'up',
+  'upgrade',
+  'version',
+  'why',
+  'workspace',
+  'workspaces',
+]);
+
+// A `RUN` instruction can carry BuildKit options (`--mount=...`, `--network=...`, `--security=...`)
+// before the actual command; strip them so the command check below sees the real first token
+// (#4635 forms like `RUN --mount=type=cache,target=/root/.yarn yarn install --immutable`).
+const RUN_OPTION_PREFIX = /^--(?:mount|network|security)=\S*\s*/u;
+
+function stripRunOptions(args) {
+  let rest = args;
+  for (let match = RUN_OPTION_PREFIX.exec(rest); match !== null; match = RUN_OPTION_PREFIX.exec(rest)) {
+    rest = rest.slice(match[0].length);
+  }
+  return rest;
+}
+
+/**
+ * True when a Dockerfile `RUN` resolves packages the way a `yarn install` does. The literal-text
+ * check is next's original regex, kept as a disjunct: it alone covers forms the token-first-word
+ * parse below can miss because the install sits inside a wrapper (`sh -c "yarn install"`, `env
+ * CI=1 yarn install`, `if ...; then yarn install; fi`) or a non-assignment prefix
+ * (`/usr/local/bin/yarn install`) (#4635).
+ */
+function runResolvesYarnInstall(args) {
+  const body = stripRunOptions(args);
+  return (
+    /\byarn\s+install\b/u.test(body) ||
+    body.split(/\s*(?:&&|\|\||;)\s*/u).some(commandResolvesYarnInstall)
+  );
+}
+
+function commandResolvesYarnInstall(command) {
+  const tokens = command.trim().split(/\s+/u).filter((token) => token !== '');
+  let index = 0;
+  while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/u.test(tokens[index])) index += 1;
+  if (tokens[index] === 'corepack' && tokens[index + 1] === 'yarn') index += 2;
+  else if (tokens[index] === 'yarn') index += 1;
+  else return false;
+
+  const positionals = [];
+  for (let cursor = index; cursor < tokens.length; cursor += 1) {
+    const token = tokens[cursor];
+    if (token.startsWith('--')) {
+      const name = token.slice(0, token.includes('=') ? token.indexOf('=') : token.length);
+      if (!token.includes('=') && YARN_FLAGS_WITH_VALUE.has(name)) cursor += 1;
+      continue;
+    }
+    if (token.startsWith('-')) continue;
+    positionals.push(token);
+  }
+
+  if (positionals.length === 0 || positionals[0] === 'install') return true;
+  return !YARN_NON_INSTALL.has(positionals[0]);
+}
+
 /** Build-context sources of a `COPY` instruction; `COPY --from` copies from a stage, not the context. */
 function contextCopySources(args) {
   let rest = args;
@@ -88,9 +202,10 @@ function contextCopySources(args) {
 
 /**
  * Every edge whose target manifest is not copied from the build context, IN THE SAME BUILD STAGE,
- * before each install that resolves it -- the first `yarn install` after any COPY of the
- * consumer's own manifest. Comparing whole-file offsets would let a COPY in another stage satisfy the
- * check while the image breaks (#4465).
+ * before each install that resolves it -- the first yarn install-equivalent after any COPY of the
+ * consumer's own manifest (`yarn install`, a flag-only `yarn`, `yarn --cwd <dir> install`, or any
+ * unrecognized `yarn` form; known non-install commands are skipped). Comparing whole-file offsets
+ * would let a COPY in another stage satisfy the check while the image breaks (#4465, #4635).
  */
 export function missingPortalManifestCopies(dockerfile, edges) {
   const instructions = dockerInstructions(dockerfile);
@@ -109,7 +224,7 @@ export function missingPortalManifestCopies(dockerfile, edges) {
         candidate > index &&
         instruction.stage === instructions[index].stage &&
         instruction.keyword === 'RUN' &&
-        /\byarn\s+install\b/u.test(instruction.args),
+        runResolvesYarnInstall(instruction.args),
     );
 
   const missing = [];

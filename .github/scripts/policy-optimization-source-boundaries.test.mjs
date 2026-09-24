@@ -68,7 +68,6 @@ const HOST_LOCAL_ALLOWED_JINN_PACKAGES = [
 // Named so the denial is a positive assertion rather than a consequence of the allow-list, and so
 // a reader can see which families were considered and refused.
 const EXPLICITLY_DENIED = [
-  '@jinn-network/benchmarking-marketplace',
   '@jinn-network/marketplace-*',
   '@jinn-network/evidence-retrieval',
   '@jinn-network/task-execution-backend-local',

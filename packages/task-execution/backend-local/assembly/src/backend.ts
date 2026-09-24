@@ -680,6 +680,14 @@ export interface LocalTaskExecutionBackendConfig {
   readonly now?: () => string;
   readonly faults?: LocalBackendFaults;
   /**
+   * How long a terminal attempt directory may remain after its authoritative
+   * terminal journal time before boot-time prune (#4596). Nonterminal
+   * directories and directories whose `delivery.sealed` checkpoint still
+   * exists are never removed. Missing, non-finite, or future terminal times
+   * fail closed (keep the directory). Default: seven days.
+   */
+  readonly terminalAttemptRetentionMs?: number;
+  /**
    * Host-supplied namespaced Delivery extensions (TEP §21.3). Keys must be absolute URIs; the
    * backend adds no semantics of its own. Used by the operator runtime's bridge era only.
    */
@@ -738,6 +746,23 @@ interface PersistedAttempt extends AttemptMeta {}
 
 function asAttemptUri(value: string): AttemptUri {
   return value as AttemptUri;
+}
+
+/** Default terminal-attempt directory retention (#4596). */
+export const DEFAULT_TERMINAL_ATTEMPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+function terminalAttemptRetentionMs(configured: number | undefined): number {
+  if (configured === undefined || !Number.isFinite(configured) || configured < 0) {
+    return DEFAULT_TERMINAL_ATTEMPT_RETENTION_MS;
+  }
+  return configured;
+}
+
+function authoritativeTerminalTime(events: readonly JournalEvent[]): string | undefined {
+  return [...events]
+    .sort((left, right) => left.seq - right.seq)
+    .find((event) => event.type === "attempt-terminal" && event.rejectedAtAppend !== true)
+    ?.time;
 }
 
 function asSubmissionUri(value: string): SubmissionUri {
@@ -2379,6 +2404,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
 
     const live: AttemptUri[] = [];
+    // #4596: drop expired terminal directories before the rehydration walk so
+    // shim-fingerprint and journal reads stay bounded by retained attempts.
+    this.pruneExpiredTerminalAttempts();
     // #4396: one lazily-taken process-table snapshot per boot, memoized including its failure, so
     // rehydration costs a bounded number of table reads however many nonterminal attempts exist.
     let snapshot: { readonly table?: ProcessGroupTable; readonly failure?: ProcessTableProbeError } | undefined;
@@ -2427,6 +2455,45 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       }
     }
     this.capacity.restore(live);
+  }
+
+  /**
+   * Retention policy (#4596): a terminal attempt directory may be removed when
+   * (1) its journal folds to terminal, (2) no `delivery.sealed` checkpoint
+   * remains for settlement to read, and (3) the authoritative terminal time is
+   * a real past timestamp older than `terminalAttemptRetentionMs` (default
+   * seven days). Nonterminal attempts are never touched. Unparseable or future
+   * terminal times fail closed and keep the directory. This bounds only
+   * terminal attempts that never delivered: a delivered attempt keeps its
+   * `delivery.sealed` checkpoint forever, since nothing in this package
+   * removes one, so this method retains it indefinitely regardless of age.
+   * That retention is deliberate until a settlement-release signal is
+   * defined; no such signal exists yet.
+   */
+  private pruneExpiredTerminalAttempts(): void {
+    const attemptsRoot = join(this.config.stateRoot, "attempts");
+    if (!existsSync(attemptsRoot)) return;
+    const nowMs = Date.parse(this.now());
+    if (!Number.isFinite(nowMs)) return;
+    const retentionMs = terminalAttemptRetentionMs(this.config.terminalAttemptRetentionMs);
+    for (const entry of readdirSync(attemptsRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const attempt = asAttemptUri(`urn:uuid:${entry.name}`);
+      const directory = join(attemptsRoot, entry.name);
+      try {
+        const events = openAttemptJournal(join(directory, "meta")).read();
+        if (!foldAttemptRecord(events).terminal) continue;
+        if (existsSync(this.deliveryCheckpointPath(attempt))) continue;
+        const terminalTime = authoritativeTerminalTime(events);
+        if (terminalTime === undefined) continue;
+        const terminalMs = Date.parse(terminalTime);
+        if (!Number.isFinite(terminalMs) || terminalMs > nowMs) continue;
+        if (nowMs - terminalMs < retentionMs) continue;
+        rmSync(directory, { recursive: true, force: true });
+      } catch {
+        // Corrupt or unreadable journals stay for recover(); prune is fail-closed.
+      }
+    }
   }
 
   private resolveAttempt(ref: SubmissionUri | AttemptUri): AttemptUri {

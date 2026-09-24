@@ -10,10 +10,12 @@ import {
   EXCLUDED_LANES,
   GRACE_MS,
   MONITORED_LANES,
+  RUN_WINDOW,
   classifyLane,
   isAlertFor,
   parseMarker,
   planAlertUpdate,
+  planLaneReconcile,
   renderAlert,
   renderMarker,
   renderRecovery,
@@ -26,6 +28,7 @@ const workflowsDir = path.resolve(scriptsDir, '..', 'workflows');
 const monitor = readFileSync(path.join(workflowsDir, 'post-merge-lane-monitor.yml'), 'utf8');
 
 const LANE = MONITORED_LANES[0];
+const STACK = MONITORED_LANES.find((lane) => lane.file === 'stack-npm-publish.yml');
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.parse('2026-08-18T12:00:00Z');
 
@@ -53,6 +56,10 @@ function run({ conclusion, hoursAgo, event = 'push', branch = 'next', status = '
 
 function classify(runs, now = NOW) {
   return classifyLane({ lane: LANE, runs, now });
+}
+
+function classifyStack(runs, jobsByRunId, now = NOW) {
+  return classifyLane({ lane: STACK, runs, now, jobsByRunId });
 }
 
 test('a green latest run is healthy', () => {
@@ -152,6 +159,94 @@ test('cancelled and skipped runs are neither failures nor recoveries', () => {
   assert.equal(blip.state, 'healthy');
 });
 
+test('the Stack lane names stack-canary as its publishing job; the other lanes do not', () => {
+  assert.equal(STACK.publishingJob, 'stack-canary');
+  assert.equal(STACK.workflow, 'Stack npm Publish');
+  const stackWorkflow = readFileSync(path.join(workflowsDir, STACK.file), 'utf8');
+  // GitHub's job.name is the `name:` field, not the YAML key (`canary-publish`).
+  assert.match(
+    stackWorkflow,
+    new RegExp(`^ {4}name: ${STACK.publishingJob}$`, 'mu'),
+    `${STACK.file} must declare name: ${STACK.publishingJob} — that is the Actions job.name`,
+  );
+  for (const lane of MONITORED_LANES) {
+    if (lane !== STACK) {
+      assert.equal(lane.publishingJob, undefined, `${lane.workflow} must keep classifying from the run conclusion alone`);
+    }
+  }
+});
+
+test('a Stack success whose stack-canary job was skipped is unknown, not healthy', () => {
+  const latest = run({ conclusion: 'success', hoursAgo: 1 });
+  const verdict = classifyStack([latest], { [latest.id]: [{ name: 'stack-canary', conclusion: 'skipped' }] });
+  assert.equal(verdict.state, 'unknown');
+  assert.notEqual(verdict.state, 'healthy');
+});
+
+test('a Stack success whose matrix stack-canary job was skipped is unknown', () => {
+  const latest = run({ conclusion: 'success', hoursAgo: 1 });
+  const verdict = classifyStack(
+    [latest],
+    { [String(latest.id)]: [{ name: 'stack-canary (sealed-platform-v1)', conclusion: 'skipped' }] },
+  );
+  assert.equal(verdict.state, 'unknown');
+});
+
+test('a Stack success with a live stack-canary job is healthy', () => {
+  const latest = run({ conclusion: 'success', hoursAgo: 1 });
+  const verdict = classifyStack([latest], { [latest.id]: [{ name: 'stack-canary', conclusion: 'success' }] });
+  assert.equal(verdict.state, 'healthy');
+  assert.equal(verdict.lastSuccess, latest);
+});
+
+test('a Stack success whose matrix stack-canary jobs ran is healthy', () => {
+  // stack-npm-publish.yml names the job `stack-canary` and matrices it, so GitHub
+  // reports `stack-canary (<release_group>)`, never the bare name. A skipped matrix
+  // job is also unknown when the name does not match (fail-closed), so that case
+  // cannot prove the prefix matcher; a live matrix success can.
+  const latest = run({ conclusion: 'success', hoursAgo: 1 });
+  const verdict = classifyStack(
+    [latest],
+    {
+      [latest.id]: [
+        { name: 'canary-verification', conclusion: 'success' },
+        { name: 'stack-canary (sealed-platform-v1)', conclusion: 'success' },
+        { name: 'stack-canary (implementations-v1)', conclusion: 'success' },
+      ],
+    },
+  );
+  assert.equal(verdict.state, 'healthy');
+  assert.equal(verdict.lastSuccess, latest);
+});
+
+test('a Stack success without a matching publishing job is unknown (fail-closed)', () => {
+  const latest = run({ conclusion: 'success', hoursAgo: 1 });
+  assert.equal(classifyStack([latest]).state, 'unknown', 'no jobsByRunId');
+  assert.equal(classifyStack([latest], {}).state, 'unknown', 'run id missing from jobsByRunId');
+  assert.equal(classifyStack([latest], { [latest.id]: [] }).state, 'unknown', 'empty job list');
+  assert.equal(
+    classifyStack([latest], { [latest.id]: [{ name: 'canary-verification', conclusion: 'success' }] }).state,
+    'unknown',
+    'unrelated job names',
+  );
+});
+
+test('Operator Images success without jobsByRunId is still healthy', () => {
+  assert.equal(classify([run({ conclusion: 'success', hoursAgo: 1 })]).state, 'healthy');
+});
+
+test('a skipped Stack success does not mask a later decisive failure as healthy', () => {
+  const skipSuccess = run({ conclusion: 'success', hoursAgo: 0.1 });
+  const failure = run({ conclusion: 'failure', hoursAgo: 2 });
+  const verdict = classifyStack([skipSuccess, failure], {
+    [skipSuccess.id]: [{ name: 'stack-canary', conclusion: 'skipped' }],
+  });
+  assert.notEqual(verdict.state, 'healthy');
+  assert.equal(verdict.latestRun, failure);
+  assert.equal(verdict.state, 'wait');
+  assert.equal(verdict.lastSuccess, undefined);
+});
+
 test('runs from other branches and other events are excluded', () => {
   const verdict = classify([
     run({ conclusion: 'failure', hoursAgo: 0.1, branch: 'integration/evidence-v1' }),
@@ -216,21 +311,36 @@ test('the alert body states the verdict basis so a blip is distinguishable from 
   assert.ok(/unconfirmed/i.test(unconfirmed));
 });
 
-test('a streak the window cannot bound is reported as a floor, not a count', () => {
+test('a never-succeeded lane shorter than the window reports an exact count', () => {
   const verdict = classify([
     run({ conclusion: 'cancelled', hoursAgo: 0.05 }),
     run({ conclusion: 'failure', hoursAgo: 0.1 }),
     run({ conclusion: 'failure', hoursAgo: 1 }),
     run({ conclusion: 'failure', hoursAgo: 2 }),
   ]);
-  assert.equal(verdict.windowBounded, false);
+  assert.equal(verdict.windowBounded, true);
   assert.equal(verdict.observedRuns, 4);
   const { body } = renderAlert({ lane: LANE, verdict });
-  assert.ok(body.includes('at least 3 consecutive'), 'the count is a floor');
+  assert.ok(body.includes('3 consecutive'), 'the short page is the whole history');
+  assert.ok(!body.includes('at least'), 'a complete history is a count, not a floor');
+  assert.ok(body.includes('First failure of this streak'));
+  assert.ok(body.includes('the observed history has no success'));
+  assert.ok(!body.includes('Not in the observed window'));
+});
+
+test('a streak the window cannot bound is reported as a floor, not a count', () => {
+  const runs = Array.from({ length: RUN_WINDOW }, (_, i) =>
+    run({ conclusion: 'failure', hoursAgo: i * 0.01 }),
+  );
+  const verdict = classify(runs);
+  assert.equal(verdict.windowBounded, false);
+  assert.equal(verdict.observedRuns, RUN_WINDOW);
+  const { body } = renderAlert({ lane: LANE, verdict });
+  assert.ok(body.includes(`at least ${RUN_WINDOW} consecutive`), 'the count is a floor');
   assert.ok(body.includes('Oldest failure in the observed window'), 'the first failure is not asserted');
   assert.ok(!body.includes('First failure of this streak'));
   assert.ok(body.includes('Not in the observed window'), 'the last-success row is marked as window-limited');
-  assert.ok(body.includes('newest 4 runs'), 'the body says how far the window reached');
+  assert.ok(body.includes(`newest ${RUN_WINDOW} runs`), 'the body says how far the window reached');
   assert.ok(!body.includes('No successful run in the observed window'), 'it never reads as "never succeeded"');
 });
 
@@ -289,7 +399,13 @@ test('a re-run of the same failing run is a different failing run', () => {
   assert.ok(!sameFailingRun(markerOf(failing), markerOf(rerun)), 'a later attempt is new');
   assert.ok(!sameFailingRun(markerOf(failing), markerOf(run({ conclusion: 'failure', hoursAgo: 1 }))));
   assert.ok(!sameFailingRun(null, markerOf(failing)), 'a missing marker never matches');
-  assert.ok(monitor.includes('sameFailingRun('), 'the monitor compares failing runs through the helper');
+  // The deferral decision compares through the helper: a closed alert for the first attempt
+  // defers that attempt and files for the re-run.
+  const closedAlerts = [{ number: 1, ...renderAlert({ lane: LANE, verdict: classify([failing]) }) }];
+  const reconcile = (latestRun) =>
+    planLaneReconcile({ lane: LANE, verdict: classify([latestRun]), openAlerts: [], closedAlerts })[0].kind;
+  assert.equal(reconcile(failing), 'log', 'the same attempt defers to its closed alert');
+  assert.equal(reconcile(rerun), 'create', 'a failing re-run files afresh');
 });
 
 test('alerts filed before the attempt was recorded are still recognized as attempt 1', () => {
@@ -368,14 +484,159 @@ test('an open alert is rewritten only for a new failing run or a changed confide
   assert.equal(plan({ title: 'retitled', body }, newRun), 'rewrite', 'a rewrite also restores the title');
 });
 
+// planLaneReconcile (#4260): every open/update/close decision the monitor makes, as data.
+function reconcileFixtures() {
+  // Fixtures created earlier carry higher run numbers, so the newest run is made first.
+  const recovered = run({ conclusion: 'success', hoursAgo: 0.01 });
+  const newer = run({ conclusion: 'failure', hoursAgo: 0.05 });
+  const latest = run({ conclusion: 'failure', hoursAgo: 0.1 });
+  const older = run({ conclusion: 'failure', hoursAgo: 1 });
+  const alert = classify([latest, older]);
+  const rendered = renderAlert({ lane: LANE, verdict: alert });
+  const newRun = classify([newer, latest]);
+  const healthy = classify([recovered, latest]);
+  return { alert, rendered, newRun, healthy };
+}
+
+const plan = (input) => planLaneReconcile({ lane: LANE, openAlerts: [], closedAlerts: [], ...input });
+
+test('reconcile: an alert verdict with no open or matching closed alert creates one', () => {
+  const { alert, rendered } = reconcileFixtures();
+  const otherLane = { number: 5, ...renderAlert({ lane: MONITORED_LANES[1], verdict: alert }) };
+  assert.deepEqual(plan({ verdict: alert, openAlerts: [otherLane], closedAlerts: [otherLane] }), [
+    { kind: 'create', title: rendered.title, body: rendered.body },
+  ]);
+});
+
+test('reconcile: a closed alert naming the same failing run defers instead of filing', () => {
+  const { alert, rendered, newRun } = reconcileFixtures();
+  const marker = parseMarker(rendered.body);
+  const closed = { number: 7, ...rendered };
+  assert.deepEqual(plan({ verdict: alert, closedAlerts: [closed] }), [
+    {
+      kind: 'log',
+      level: 'info',
+      message: `${LANE.workflow}: alert #7 was closed for run ${marker.runId} attempt ${marker.attempt}; deferring to the next failing run.`,
+    },
+  ]);
+  assert.equal(plan({ verdict: newRun, closedAlerts: [closed] })[0].kind, 'create', 'a new failing run files afresh');
+});
+
+test('reconcile: a current alert only logs, a stale one is rewritten, a retitled one is repaired', () => {
+  const { alert, rendered, newRun } = reconcileFixtures();
+  const open = { number: 9, ...rendered };
+  assert.deepEqual(plan({ verdict: alert, openAlerts: [open] }), [
+    { kind: 'log', level: 'info', message: `${LANE.workflow} alert #9 is current.` },
+  ]);
+
+  const fresh = renderAlert({ lane: LANE, verdict: newRun });
+  assert.deepEqual(plan({ verdict: newRun, openAlerts: [open] }), [
+    { kind: 'comment', issue: 9, body: fresh.body },
+    { kind: 'update', issue: 9, fields: { title: fresh.title, body: fresh.body } },
+    { kind: 'log', level: 'warning', message: `Updated ${LANE.workflow} alert #9.` },
+  ]);
+
+  assert.deepEqual(plan({ verdict: alert, openAlerts: [{ ...open, title: 'retitled' }] }), [
+    { kind: 'update', issue: 9, fields: { title: rendered.title } },
+    { kind: 'log', level: 'notice', message: `Restored the title of ${LANE.workflow} alert #9.` },
+  ]);
+});
+
+test('reconcile: duplicates are consolidated into the lowest-numbered alert', () => {
+  const { alert, rendered } = reconcileFixtures();
+  const actions = plan({
+    verdict: alert,
+    openAlerts: [{ number: 30, ...rendered }, { number: 12, ...rendered }, { number: 20, ...rendered }],
+  });
+  assert.deepEqual(actions, [
+    { kind: 'log', level: 'info', message: `${LANE.workflow} alert #12 is current.` },
+    ...[20, 30].flatMap((issue) => [
+      { kind: 'comment', issue, body: `Duplicate ${LANE.workflow} alert; consolidated into #12.` },
+      { kind: 'close', issue, reason: 'not_planned' },
+      { kind: 'log', level: 'notice', message: `Closed duplicate ${LANE.workflow} alert #${issue}.` },
+    ]),
+  ]);
+});
+
+test('reconcile: only a healthy verdict closes open alerts', () => {
+  const { rendered, healthy } = reconcileFixtures();
+  const openAlerts = [{ number: 4, ...rendered }, { number: 3, ...rendered }];
+  assert.deepEqual(plan({ verdict: healthy, openAlerts }), [3, 4].flatMap((issue) => [
+    { kind: 'comment', issue, body: renderRecovery({ lane: LANE, verdict: healthy }) },
+    { kind: 'close', issue, reason: 'completed' },
+    { kind: 'log', level: 'notice', message: `Closed ${LANE.workflow} alert #${issue}.` },
+  ]));
+
+  const wait = classify([run({ conclusion: 'failure', hoursAgo: 2 }), run({ conclusion: 'success', hoursAgo: 9 })]);
+  for (const verdict of [wait, classify([])]) {
+    assert.deepEqual(plan({ verdict, openAlerts }), [
+      { kind: 'log', level: 'info', message: `${LANE.workflow}: ${verdict.state}; leaving 2 alert(s) open.` },
+    ]);
+    assert.deepEqual(plan({ verdict }), [
+      { kind: 'log', level: 'info', message: `${LANE.workflow}: ${verdict.state}.` },
+    ]);
+  }
+  assert.deepEqual(plan({ verdict: healthy }), [
+    { kind: 'log', level: 'info', message: `${LANE.workflow}: healthy.` },
+  ]);
+});
+
+test('reconcile: a skipped Stack success does not close an open Stack alert', () => {
+  const skipSuccess = run({ conclusion: 'success', hoursAgo: 0.1 });
+  const failing = classifyLane({
+    lane: STACK,
+    runs: [run({ conclusion: 'failure', hoursAgo: 1 }), run({ conclusion: 'failure', hoursAgo: 2 })],
+    now: NOW,
+  });
+  const rendered = renderAlert({ lane: STACK, verdict: failing });
+  const verdict = classifyStack([skipSuccess], {
+    [skipSuccess.id]: [{ name: 'stack-canary', conclusion: 'skipped' }],
+  });
+  assert.equal(verdict.state, 'unknown');
+  const actions = planLaneReconcile({
+    lane: STACK,
+    verdict,
+    openAlerts: [{ number: 11, ...rendered }],
+    closedAlerts: [],
+  });
+  assert.deepEqual(actions, [
+    { kind: 'log', level: 'info', message: `${STACK.workflow}: unknown; leaving 1 alert(s) open.` },
+  ]);
+  assert.ok(!actions.some((action) => action.kind === 'close'));
+});
+
+test('reconcile: a pull request carrying the label is never acted on', () => {
+  const { alert, rendered, healthy } = reconcileFixtures();
+  const pr = { number: 2, ...rendered, pull_request: { url: 'https://api.github.com/repos/o/r/pulls/2' } };
+  assert.deepEqual(plan({ verdict: healthy, openAlerts: [pr] }), [
+    { kind: 'log', level: 'info', message: `${LANE.workflow}: healthy.` },
+  ]);
+  assert.deepEqual(plan({ verdict: alert, openAlerts: [pr], closedAlerts: [pr] }), [
+    { kind: 'create', title: rendered.title, body: rendered.body },
+  ]);
+});
+
 /**
  * The `on:` block of a workflow, as `{ key: [lines under it] }` for each trigger at
  * two-space indent. A tiny line-based reader rather than a YAML dependency: this test runs
  * with bare `node --test` both pre-merge and as the monitor's first step.
+ *
+ * The single-line forms `on: push` and `on: [push, workflow_dispatch]` read as triggers with
+ * no lines under them (#4604). Any other shape — a flow mapping, a quoted key, no `on:` at
+ * all — is `null`, which the enumeration below refuses rather than skips.
  */
 function triggersOf(source) {
   const lines = source.split('\n');
-  const start = lines.findIndex((line) => /^on:\s*$/u.test(line));
+  for (const line of lines) {
+    const inline = line.match(/^on:[ \t]+([^\s#{][^#]*?)\s*(?:#.*)?$/u);
+    if (!inline) continue;
+    const flow = inline[1].match(/^\[([^\]]*)\]$/u);
+    const keys = flow ? flow[1].split(',') : [inline[1]];
+    const names = keys.map((key) => key.trim().replace(/^(['"])(.*)\1$/u, '$2')).filter(Boolean);
+    if (!names.every((name) => /^[A-Za-z_]+$/u.test(name))) return null;
+    return Object.fromEntries(names.map((name) => [name, []]));
+  }
+  const start = lines.findIndex((line) => /^on:\s*(?:#.*)?$/u.test(line));
   if (start === -1) return null;
   const triggers = {};
   let current = null;
@@ -445,17 +706,24 @@ const PRE_MERGE = ['pull_request', 'pull_request_target', 'merge_group'];
 function postMergeOnlyLanes(branch) {
   return readdirSync(workflowsDir)
     .filter((file) => /\.ya?ml$/u.test(file))
-    .filter((file) => {
-      const source = readFileSync(path.join(workflowsDir, file), 'utf8');
-      const triggers = triggersOf(source);
-      if (!triggers || PRE_MERGE.some((key) => key in triggers)) return false;
-      const chained = triggerBranches(source, 'workflow_run') ?? [];
-      return (
-        (pushBranches(source) ?? []).some((pattern) => branchMatches(pattern, branch)) ||
-        (!chained.includes('**') && chained.some((pattern) => branchMatches(pattern, branch)))
-      );
-    })
+    .filter((file) => laneFromSource(file, readFileSync(path.join(workflowsDir, file), 'utf8'), branch))
     .sort();
+}
+
+/**
+ * Whether one workflow source is a post-merge-only lane on `branch`. A workflow whose `on:`
+ * this reader cannot parse throws rather than reading as "not a lane": skipping it would let a
+ * new lane slip past the registry test unnoticed, the blind spot that test exists for (#4604).
+ */
+function laneFromSource(file, source, branch) {
+  const triggers = triggersOf(source);
+  assert.ok(triggers, `${file}: the trigger reader cannot parse its on: block; teach triggersOf the shape`);
+  if (PRE_MERGE.some((key) => key in triggers)) return false;
+  const chained = triggerBranches(source, 'workflow_run') ?? [];
+  return (
+    (pushBranches(source) ?? []).some((pattern) => branchMatches(pattern, branch)) ||
+    (!chained.includes('**') && chained.some((pattern) => branchMatches(pattern, branch)))
+  );
 }
 
 test('the push-trigger reader anchors under the push key and accepts both branches forms', () => {
@@ -469,6 +737,21 @@ test('the push-trigger reader anchors under the push key and accepts both branch
   assert.ok(!branchMatches('main', 'next') && !branchMatches('release/*', 'next') && !branchMatches('nex', 'next'));
   assert.ok(!('pull_request' in triggersOf('on:\n  push:\n    branches: [next]\n')));
   assert.ok('merge_group' in triggersOf('on:\n  push:\n    branches: [next]\n  merge_group:\n'));
+});
+
+test('the trigger reader accepts single-line on: forms and returns null for any other shape', () => {
+  // #4604: a scalar or flow-sequence `on:` read as null, and the enumeration skipped the file.
+  assert.deepEqual(triggersOf('on: push\n'), { push: [] });
+  assert.deepEqual(triggersOf('on: [push, workflow_dispatch]\n'), { push: [], workflow_dispatch: [] });
+  assert.deepEqual(triggersOf('on:  # triggers\n  push:\n    branches: [next]\n'), { push: ['    branches: [next]'] });
+  assert.deepEqual(pushBranches('on: push\n'), ['**']);
+  assert.deepEqual(pushBranches("on: ['push']\n"), ['**']);
+  assert.ok('pull_request' in triggersOf('on: [push, pull_request]\n'));
+  // Shapes this reader does not parse must fail the enumeration, never drop the file from it.
+  assert.equal(triggersOf('on: {push: {}}\n'), null);
+  assert.equal(triggersOf('"on":\n  push:\n'), null);
+  assert.equal(triggersOf('name: no triggers\n'), null);
+  assert.throws(() => laneFromSource('flow.yml', 'on: {push: {}}\n', 'next'), /flow\.yml/u);
 });
 
 test('every registered lane names a real workflow that is genuinely post-merge-only', () => {
@@ -541,14 +824,25 @@ test('the monitor runs on a schedule and holds only read-plus-issues authority',
   assert.ok(monitor.includes('post-merge-lane-health.test.mjs'), 'the monitor verifies its own decision logic');
 });
 
-test('the monitor selects alerts by marker, reads a full page, and closes only on health', () => {
-  assert.ok(monitor.includes('isAlertFor('), 'alerts are selected through the marker helper');
-  assert.ok(!monitor.includes('startsWith('), 'no title-prefix selection remains');
-  assert.ok(monitor.includes('parseMarker('), 'a hand-closed alert is recognised by its marker');
-  assert.ok(monitor.includes('planAlertUpdate('), 'an open alert is updated through the plan helper');
-  assert.ok(!monitor.includes('canonical.title !== title'), 'a title difference alone never reaches the comment path');
-  assert.ok(/per_page: 100,\s*\n\s*\}\);\s*\n\s*const verdict = classifyLane/u.test(monitor), 'the run window is the full page one request allows');
-  assert.ok(monitor.includes("verdict.state !== 'healthy'"), 'only a healthy verdict reaches the close loop');
+test('the monitor delegates every decision to planLaneReconcile and reads a full page', () => {
+  // The driver performs API calls only (#4260); the decisions above are unit-tested here.
+  // Fetching jobs for a lane.publishingJob is I/O (#4257), not a lifecycle decision.
+  assert.ok(monitor.includes('planLaneReconcile('), 'the driver executes the planned actions');
+  for (const decision of ['isAlertFor(', 'parseMarker(', 'planAlertUpdate(', 'sameFailingRun(', 'verdict.state', 'startsWith(']) {
+    assert.ok(!monitor.includes(decision), `the driver makes no lifecycle decision of its own (${decision})`);
+  }
+  assert.ok(/switch \(action\.kind\)/u.test(monitor), 'the driver dispatches on the action kind');
+  assert.ok(
+    /listWorkflowRuns\(\{[\s\S]*?per_page: 100,\s*\n\s*\}\);/u.test(monitor),
+    'the run window is the full page one request allows',
+  );
+  assert.equal(RUN_WINDOW, 100, 'classifyLane and the monitor share the same page size');
+  assert.ok(monitor.includes('listJobsForWorkflowRun'), 'publishing-job lanes fetch jobs for success runs');
+  assert.ok(/lane\.publishingJob/u.test(monitor), 'job fetches are gated on the lane registry, not a driver rule');
+  assert.ok(
+    /classifyLane\(\{[\s\S]*?jobsByRunId/u.test(monitor),
+    'jobsByRunId is passed into classifyLane; the driver does not interpret jobs',
+  );
 });
 
 test('lanes that already have a dedicated monitor are excluded on the record', () => {

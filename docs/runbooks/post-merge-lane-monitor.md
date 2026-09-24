@@ -35,12 +35,21 @@ have the same silence problem and need their own answer.
 [`.github/workflows/post-merge-lane-monitor.yml`](../../.github/workflows/post-merge-lane-monitor.yml)
 runs when a watched lane completes, every six hours, and on demand. It reads Actions
 metadata only — it never executes code from a monitored revision — and maintains at most
-one open Issue per lane, labelled `automated:post-merge-lane-failure`.
+one open Issue per lane, labelled `automated:post-merge-lane-failure`. Every decision — which
+Issue belongs to a lane, and whether to open, update, defer, or close one — is made by
+`planLaneReconcile` in the module, where it is unit-tested; the workflow only performs the API
+calls that function returns (#4260).
 
 It reads the newest 100 `push` runs of the lane on `next`. Runs that decide nothing are
 discarded first: `cancelled` (concurrency superseded it) and `skipped` (a path filter declined
 it) are neither failures nor recoveries, and a run that is not yet `completed` decides nothing
-whatever conclusion it carries. Then:
+whatever conclusion it carries. On the Stack lane, a run-level `success` whose `stack-canary`
+job was skipped — including the matrix form `stack-canary (…)` — is the same non-decisive
+class: `stack-npm-publish.yml` gates that job on `vars.PLATFORM_CANARY_PUBLISH_ENABLED`, and
+while the flag is off (DR-2026-08-17-d) the lane is deliberately not publishing rather than
+failing. A Stack success with no job list, an empty list, or no matching job is also
+non-decisive (fail-closed). Failures, timeouts, and `startup_failure` stay decisive without
+jobs. Other lanes still classify from the run conclusion alone. Then:
 
 | Observation | Result |
 |---|---|
@@ -54,12 +63,12 @@ whatever conclusion it carries. Then:
 So a genuine infrastructure blip costs nothing, and a real break reaches the issue tracker
 within 24 hours plus one six-hourly tick — inside one working day.
 
-The verdict is the **run-level conclusion**. A run that concludes `success` while its publishing
-job was skipped reads healthy here: `stack-npm-publish.yml` gates `canary-publish` on
-`vars.PLATFORM_CANARY_PUBLISH_ENABLED`, and while that flag is off (DR-2026-08-17-d documents the
-off position) the lane is deliberately not publishing rather than failing. Resolving jobs per
-run, the way `npm-publish-monitor.yml` does for its one lane, is a separate decision (#4257); until
-then a green-but-not-publishing lane is not covered by this monitor.
+The verdict is the **run-level conclusion**, except on a lane that names a `publishingJob`
+(Stack npm Publish → `stack-canary`). There the driver paginates
+`listJobsForWorkflowRun` for each completed success, the way `npm-publish-monitor.yml` does
+for its one lane, and `classifyLane` treats a skipped publishing job as non-decisive — the
+same as a cancelled run or a path-filter skip — so a flag-off success neither recovers an
+open alert nor reads as a healthy publish.
 
 ## When it starts working
 
@@ -84,7 +93,8 @@ When the streak fills the window — no success among the 100 runs read — the 
 count becomes "at least N", the first-failure row becomes "oldest failure in the observed
 window", and the last-success row says the window did not reach one rather than that the lane
 never succeeded. Find the last successful run in the Actions tab in that case; the monitor does
-not page further back.
+not page further back. A lane with fewer than 100 runs and no success is the whole history, so
+the count is exact, not "at least N".
 
 The body is derived from run data only, never from the current time. The marker line at the
 bottom names the latest failing run, its attempt, and the alert's confidence, and the monitor
@@ -92,10 +102,16 @@ rewrites the body (and posts the new body as a comment) only when that marker ch
 scheduled re-evaluation never comments and **a new comment means a new failing run** (or a
 failing re-run of one) **or a change in the alert's confidence**. Confidence can change with no
 new failing run: if a successful re-run leaves only the latest run failing, a confirmed alert
-is left as it is until that run's grace window elapses, and only then becomes unconfirmed. A retitled alert gets its
-title restored with no comment and its body left alone. Put notes in comments, not the body: the
-body is rewritten when a new failing run arrives or the confidence changes, and an alert whose
-marker line is edited away is no longer recognised as the lane's alert.
+is left as it is until that run's grace window elapses, and only then becomes unconfirmed. A
+retitled alert gets its title restored with no comment and its body left alone. Put notes in
+comments, not the body: the body is rewritten when a new failing run arrives or the confidence
+changes, and an alert whose marker line is edited away is no longer recognized as the lane's
+alert.
+
+The rewrite key is the marker, not every fact in the body. An older run in a confirmed streak
+that is later re-run to success can leave the count, first-failure row, and last-success row
+stale until the latest failing run or the confidence changes. Treat those rows as the facts at
+the last marker rewrite, not as a live census.
 
 Fix or re-run the lane. Only a later successful **`push` run on `next`** closes the alert — a
 new push, or a re-run of the failed push run. `workflow_dispatch` runs are not counted: on these

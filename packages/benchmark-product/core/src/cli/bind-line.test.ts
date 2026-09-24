@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from "vitest";
-import type { BeaconReference } from "@colophon-claims/verify";
+import type { BeaconReference } from "@colophon-claims/check";
 import type { RunBindResult } from "../operations/index.js";
 import { renderBindLine } from "./main.js";
 

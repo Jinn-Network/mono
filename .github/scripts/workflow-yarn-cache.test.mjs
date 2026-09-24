@@ -241,10 +241,10 @@ const maxDirectoryCandidates = 64;
 // every child with `flatMap` and checking the length afterwards still materializes
 // N^K candidates for K nested variables of N values before a single cap returns, so a
 // 1.4 KB block of four nested `for` loops ran for seconds and a 5 KB one for hours —
-// the crash the cap was meant to prevent, converted into a hang. Two rules keep the
-// walk linear in the input: a level stops at the first candidate past the cap, and a
-// child that expands to nothing ends its parent at once — an overflowed inner level
-// therefore propagates up without a sibling being expanded. The second rule is also a
+// the crash the cap was meant to prevent, converted into a hang. The in-level cap
+// stops that materialization. Linearity of the walk is the other cut: a child that
+// expands to nothing ends its parent at once — an overflowed inner level therefore
+// propagates up without a sibling being expanded. That second cut is also a
 // correctness fix on its own. A child that expands to nothing is underivable, and an
 // underivable child makes its parent underivable too: keeping the siblings turned
 // `for d in a \`x\`; do (cd $d && yarn install); done` into a confident `a/yarn.lock`
@@ -318,6 +318,10 @@ function dedent(run) {
   }
   return common > 0 && common !== Infinity ? lines.map((line) => line.slice(common)).join('\n') : run;
 }
+
+// Inside double quotes a backslash-newline is still a line continuation, so `"ya\
+// rn"` is the word `yarn`; inside single quotes it is two literal characters.
+const quotedContent = (quote, content) => (quote === '"' ? content.replace(/\\\n/gu, '') : content);
 
 // Shell text is not a regular language, and every regex this guard read it with had
 // the same failure mode: an unanticipated form resolved to the WRONG lockfile instead
@@ -408,7 +412,8 @@ function shellTokens(indentedRun) {
         const inner = run[index];
         if (inner === '"' || inner === "'") {
           const close = run.indexOf(inner, index + 1);
-          delimiter += close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
+          const content = close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
+          delimiter += quotedContent(inner, content);
           index = close === -1 ? run.length : close + 1;
         } else if (inner === '\\' && run[index + 1] === '\n') {
           // A line continuation joins the delimiter across lines rather than adding to it.
@@ -446,7 +451,8 @@ function shellTokens(indentedRun) {
         const inner = run[index];
         if (inner === '"' || inner === "'") {
           const close = run.indexOf(inner, index + 1);
-          word += close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
+          const content = close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
+          word += quotedContent(inner, content);
           index = close === -1 ? run.length : close + 1;
         } else if (inner === '\\' && run[index + 1] === '\n') {
           // A line continuation, not a quoted newline: `ya\<newline>rn` is `yarn`.
@@ -477,9 +483,18 @@ const informationalYarnFlags = new Set(['--version', '-v', '--help', '-h']);
 // The set is not closed and cannot be: any wrapper it does not list makes whatever
 // follows the command name. Left there, a wrapped install was simply invisible —
 // `xvfb-run yarn install` imposed no cache requirement at all, the silent direction.
-// So an unknown command whose later words spell a Yarn install is read as underivable
-// in `finish()` below: the job goes red with "could not derive" rather than green.
-// Accepted limit, in the safe direction: `echo yarn install` is underivable too.
+// So an unknown command whose later words spell an explicit Yarn install is read as
+// underivable in `finish()` below: the job goes red with "could not derive" rather than
+// green. Explicit, because a bare `yarn` is only an install when it is the command:
+// `npm install -g yarn` and `corepack enable yarn` name `yarn` without running it.
+//
+// Accepted limits. In the safe direction: `echo yarn install` is underivable, and so
+// is a prefix whose argument is not option-shaped — `sudo -u runner -E yarn install`
+// leaves `runner` as the command name. In the WRONG direction: a wrapper that is a
+// separate process (`env cd app`, `timeout 300 cd app`) runs its `cd` in a child and
+// the shell stays put, while this walk follows it into `app` (#4570); and a verb-less
+// `yarn` behind an unlisted wrapper (`nohup yarn`) is indistinguishable from `which
+// yarn`, so it imposes nothing (#4567).
 const commandPrefixes = new Set([
   'do', '{', '!', 'time', 'env', 'sudo', 'command', 'exec', 'nice', 'npx',
   'timeout', 'corepack', 'builtin', 'xvfb-run',
@@ -534,7 +549,7 @@ function yarnInvocation(rest) {
   const isInstall = args.length === 0
     ? !flags.some((flag) => informationalYarnFlags.has(flag))
     : args[0] === 'install';
-  return { isInstall, cwd };
+  return { isInstall, cwd, verbless: args.length === 0 };
 }
 
 // Walk the tokens the way the shell walks them, tracking the working directory across
@@ -588,11 +603,25 @@ function shellInstallDirectories(run, loopValues) {
     for (;;) {
       while (at < words.length
         && (commandPrefixes.has(words[at]) || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[at]))) {
+        // `command -v yarn` only reports where `yarn` is; nothing runs. Stepped over as
+        // an option it left a verb-less `yarn` as the command name — an install. The
+        // options may be split (`command -p -v`), so every one of them is read.
+        if (words[at] === 'command') {
+          for (let option = at + 1; /^-[pvV]+$/u.test(words[option] ?? ''); option += 1) {
+            if (/[vV]/u.test(words[option])) return;
+          }
+        }
         at += 1;
         while (at < words.length && prefixArgumentPattern.test(words[at])) at += 1;
       }
       if (!unmodeledKeywords.has(words[at])) break;
+      // The branch is unmodeled, so the directory is unknown — and so is
+      // whatever `cd -` or `popd` would restore. Leaving `previous` and the
+      // pushd stack as known directories made a later `popd` / `cd -` on its
+      // own line answer with the root lockfile (#4612).
       directories = null;
+      previous = null;
+      pushdStack = pushdStack.map(() => null);
       conditional = true;
       at += 1;
     }
@@ -610,11 +639,17 @@ function shellInstallDirectories(run, loopValues) {
     }
     if (name === 'cd' || name === 'pushd') {
       if (name === 'pushd') pushdStack.push(directories);
-      const separated = rest[0] === '--';
-      const target = separated ? rest[1] : rest[0];
+      // `cd -P app` resolves symlinks physically; the option says how to get there, not
+      // where. Taken as the target it named `-P/yarn.lock`.
+      let targetAt = 0;
+      while (targetAt < rest.length && /^-[LPe@]+$/u.test(rest[targetAt])) targetAt += 1;
+      const separated = rest[targetAt] === '--';
+      const target = separated ? rest[targetAt + 1] : rest[targetAt];
       if (target === undefined) directories = null;
       else if (target === '-' && !separated) [directories, previous] = [previous, directories];
-      else if (target.startsWith('~')) directories = null;
+      // `~` belongs to the shell, and an absolute path is not under the directory the
+      // walk is in: joined onto it, `cd b; cd /abs` named `b/abs/yarn.lock`.
+      else if (target.startsWith('~') || target.startsWith('/')) directories = null;
       else move(target);
       return;
     }
@@ -627,12 +662,21 @@ function shellInstallDirectories(run, loopValues) {
     // `yarn` after it is the command — so this is the wrapper case, not a Yarn call.
     if (!isYarn(name) || (!bareYarn(name) && rest.some(bareYarn))) {
       // An unlisted wrapper around an install (see `commandPrefixes`). Only an
-      // install matters: `env -u TOKEN yarn test` leaves `TOKEN` as the name and must
-      // impose nothing, exactly as a bare `yarn test` imposes nothing.
-      // Only a bare `yarn` counts here: `corepack prepare yarn@4.13.0 --activate` names
-      // a version to fetch, not a command to run.
-      const wrapped = rest.findIndex(bareYarn);
-      if (wrapped !== -1 && yarnInvocation(rest.slice(wrapped + 1)).isInstall) installs.push(null);
+      // explicit install matters: `env -u TOKEN yarn test` leaves `TOKEN` as the name
+      // and must impose nothing, exactly as a bare `yarn test` imposes nothing — and
+      // `which yarn` names `yarn` without running it, so a verb-less `yarn` here is
+      // an install only when `--cwd` says so.
+      // Prefer a later bare `yarn` so `npx -p yarn@4 yarn install` is the wrapper case;
+      // a versioned word still counts when it is the only Yarn token (`some-wrapper
+      // yarn@4 install`). `corepack prepare yarn@4.13.0 --activate` is verb-less and
+      // has no `--cwd`, so it imposes nothing.
+      const wrappedBare = rest.findIndex(bareYarn);
+      const wrapped = wrappedBare !== -1 ? wrappedBare : rest.findIndex(isYarn);
+      if (wrapped === -1) return;
+      const invocation = yarnInvocation(rest.slice(wrapped + 1));
+      if (invocation.isInstall && (!invocation.verbless || invocation.cwd !== null)) {
+        installs.push(null);
+      }
       return;
     }
 
@@ -681,11 +725,10 @@ function shellLoopValues(run) {
   const loopPattern = /(?:^|\n)\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;\n]+);\s*do/gu;
   for (const match of commands.matchAll(loopPattern)) {
     const entries = match[2].trim().split(/\s+/u).map(unquote).filter(Boolean);
-    // Leaving the variable unset makes expansion yield nothing, which the caller
-    // reports as "could not derive". A glob (`for d in packages/*`) is a directory
-    // set only the runner can enumerate, so emitting `packages/*/yarn.lock` as a
-    // required path would name something no workflow can ever satisfy.
-    if (entries.some((entry) => /[$*?[\]{}]/u.test(entry))) continue;
+    // Glob / substitution / brace values are refused at expansion (`expandShellWorkingDirectories`
+    // returns nothing for them), the same cut a command substitution already takes. Collecting
+    // them here and dropping them later is equivalent to skipping the loop; skipping here would
+    // let a revert of the expansion refusal go green.
     values.set(match[1], entries);
   }
   return values;
@@ -1356,22 +1399,18 @@ jobs:
 
 test('guard rejects a cache dependency path that is a symlink rather than a lockfile', () => {
   withFixture(({ fixtureRoot, fixtureWorkflows }) => {
-    // `statSync` follows the link and reports the target file, which would satisfy
-    // the very containment check the path assertion above it exists to enforce.
-    const outside = mkdtempSync(join(tmpdir(), 'jinn-workflow-yarn-cache-outside-'));
-    try {
-      writeFileSync(join(outside, 'yarn.lock'), 'outside lockfile\n');
-      rmSync(join(fixtureRoot, 'app/yarn.lock'));
-      symlinkSync(join(outside, 'yarn.lock'), join(fixtureRoot, 'app/yarn.lock'));
-      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
-        '          node-version: 22\n          cache: yarn\n          cache-dependency-path: app/yarn.lock',
-      ));
-      assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
-        'fixture.yml job verify: cache dependency path is not an existing lockfile: app/yarn.lock',
-      ]);
-    } finally {
-      rmSync(outside, { recursive: true, force: true });
-    }
+    // `statSync` follows the in-root target and reports a regular file inside the
+    // repository, which would satisfy both isFile and realpath containment. Only
+    // `lstatSync` refuses a lockfile that is itself a symlink (#4672 / #4569).
+    writeFileSync(join(fixtureRoot, 'app/yarn.lock.target'), 'in-root lockfile target\n');
+    rmSync(join(fixtureRoot, 'app/yarn.lock'));
+    symlinkSync(join(fixtureRoot, 'app/yarn.lock.target'), join(fixtureRoot, 'app/yarn.lock'));
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), fixtureWorkflow(
+      '          node-version: 22\n          cache: yarn\n          cache-dependency-path: app/yarn.lock',
+    ));
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+      'fixture.yml job verify: cache dependency path is not an existing lockfile: app/yarn.lock',
+    ]);
   });
 });
 
@@ -1416,6 +1455,8 @@ for (const [label, run] of [
   ['cd "${GITHUB_WORKSPACE}"', 'cd b\n          cd "${GITHUB_WORKSPACE}"\n          yarn install --immutable'],
   ['cd "${{ github.workspace }}"', 'cd b\n          cd "${{ github.workspace }}"\n          yarn install --immutable'],
   ['yarn --cwd "$GITHUB_WORKSPACE"', 'cd b\n          yarn --cwd "$GITHUB_WORKSPACE" install --immutable'],
+  // `cd -` returns to the previous directory; read as a target it named `b/-/yarn.lock`.
+  ['cd -', 'cd b\n          cd -\n          yarn install --immutable'],
 ]) {
   test(`guard resets to the repository root on ${label}`, () => {
     withFixture(({ fixtureRoot, fixtureWorkflows }) => {
@@ -1552,6 +1593,27 @@ for (const run of [
   // it imposes nothing, as the unwrapped command would.
   'env -u SOME_TOKEN yarn test',
   'some-wrapper yarn --version',
+  // `yarn` named without being run. Each of these once imposed a requirement or read
+  // as underivable: `command -v` is not a wrapper, and a verb-less `yarn` behind an
+  // unlisted command is an argument, not the command.
+  'command -v yarn >/dev/null || npm i -g yarn',
+  // The same, with the options split: only the word right after `command` was read.
+  'command -p -v yarn',
+  // Clustered and uppercase option letters are still lookups, not wrappers.
+  'command -V yarn',
+  'command -pv yarn',
+  'which yarn',
+  'type yarn',
+  'hash yarn',
+  'npm install -g yarn',
+  'brew install yarn',
+  'corepack enable yarn',
+  'rm -rf ~/.cache/yarn',
+  'echo yarn',
+  // A version spec is Yarn (see `isYarn`), and this is the form every workflow here
+  // uses to activate it; the verb-less rule above is what keeps it from reading as an
+  // install.
+  'corepack prepare yarn@4.13.0 --activate',
 ]) {
   test(`guard does not mistake \`${run}\` for an install`, () => {
     withFixture(({ fixtureRoot, fixtureWorkflows }) => {
@@ -1571,6 +1633,28 @@ jobs:
     });
   });
 }
+
+// Inside single quotes a backslash-newline is two literal characters, so this word is
+// not `yarn` (compare the double-quoted spelling among the resolved installs below).
+test('guard does not mistake a word continued inside single quotes for yarn', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: |
+          cd app
+          'ya\\
+          rn' install --immutable
+`);
+    assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), []);
+  });
+});
 
 // A redirected or argument-carrying install is still an install; missing one imposes
 // no cache requirement at all, which is the direction that costs a silent cache miss.
@@ -1792,6 +1876,25 @@ for (const [label, run] of [
   ['a sudo prefix with an option', 'cd app\n          sudo -E yarn install --immutable'],
   ['a nice prefix with a level', 'cd app\n          nice -n 10 yarn install --immutable'],
   ['a yarn invoked by path', 'cd app\n          ./node_modules/.bin/yarn install --immutable'],
+  ['a corepack prefix', 'cd app\n          corepack yarn install --immutable'],
+  ['an xvfb-run prefix', 'cd app\n          xvfb-run -a yarn install --immutable'],
+  // `builtin` in front of the `cd`: unlisted, it became the command name and the `cd`
+  // behind it never moved the walk, which then named the root lockfile.
+  ['a builtin prefix', 'builtin cd app; yarn install --immutable'],
+  // POSIX `command` as a wrapper, not a lookup. Returning from every `command`
+  // (not only `-v`/`-V`) hid these installs and left the suite green (#4648).
+  ['a command wrapper', 'cd app\n          command yarn install --immutable'],
+  ['a command -p wrapper', 'cd app\n          command -p yarn install --immutable'],
+  // A version spec is still Yarn. Read as some other command, the install was invisible.
+  ['a versioned corepack yarn', 'cd app\n          corepack yarn@4 install --immutable'],
+  ['a versioned npx yarn', 'cd app\n          npx yarn@1 install --immutable'],
+  ['a verb-less versioned yarn', 'cd app\n          corepack yarn@4.13.0'],
+  ['a cd with a -P option', 'cd -P app; yarn install --immutable'],
+  // A backslash-newline inside a word is a continuation, not part of the word: read
+  // as `yarn\n`, the command was not `yarn` and the install was invisible.
+  ['a continued yarn word', 'cd app\n          "yarn"\\\n            install --immutable'],
+  // Inside double quotes too: `"ya\<newline>rn"` is `yarn`, not a word with a newline.
+  ['a yarn word continued inside double quotes', 'cd app\n          "ya\\\n          rn" install --immutable'],
 ]) {
   test(`guard resolves an install behind ${label}`, () => {
     withFixture(({ fixtureRoot, fixtureWorkflows }) => {
@@ -1820,6 +1923,11 @@ jobs:
 for (const [label, run] of [
   ['a conditional directory change', 'cd app\n          if [ -d other ]; then cd ../other; fi\n          yarn install --immutable'],
   ['a while loop', 'ls | while read d; do cd $d; yarn install --immutable; done'],
+  // A literal `cd`, so the loop fails closed on the keyword itself and not on a loop
+  // variable the walk cannot expand.
+  ['a while loop with a literal cd', 'ls | while read d; do cd app; yarn install --immutable; done'],
+  // An absolute target is not under the walk's directory: joined, it named `app/abs/yarn.lock`.
+  ['an absolute directory change', 'cd app\n          cd /abs\n          yarn install --immutable'],
   // Each of these once named a literal path no checkout can contain — `$/yarn.lock`,
   // `app*/yarn.lock` — while silently dropping the requirement on the directory the
   // install really runs in. A confident wrong answer is the one direction #4255 rules
@@ -1833,6 +1941,15 @@ for (const [label, run] of [
   // no requirement at all — which is the silent direction; underivable is the loud one.
   ['an unlisted command wrapper', 'cd app\n          some-wrapper yarn install --immutable'],
   ['a wrapper of a yarn invoked by path', 'cd app\n          some-wrapper ./node_modules/.bin/yarn install'],
+  ['a wrapper of a versioned yarn', 'cd app\n          some-wrapper yarn@4 install'],
+  // `echo yarn install` names an install without running it; underivable is the
+  // recorded safe-direction limit next to `commandPrefixes`.
+  ['echo of an install', 'echo yarn install --immutable'],
+  // A prefix whose argument is not option-shaped leaves that argument as the command
+  // name (`runner` here), so the install is underivable rather than silently dropped.
+  ['a sudo prefix with a non-option argument', 'sudo -u runner -E yarn install --immutable'],
+  // A verb-less `yarn` behind a wrapper is an install only when `--cwd` says so.
+  ['a wrapper of a verb-less yarn with --cwd', 'some-wrapper yarn --cwd app'],
   // A loop value the walk cannot expand made only that sibling vanish: `a/yarn.lock`
   // was named, the substituted directory silently dropped.
   ['a loop value the walk cannot expand', 'for d in a `x`; do (cd $d && yarn install --immutable); done'],
@@ -1952,6 +2069,41 @@ jobs:
         yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
         /must cache app\/yarn\.lock/u,
       );
+    });
+  });
+}
+
+// The delimiter is `EOF` in both spellings. Recorded with the newline inside it, no
+// line ever matched, the body ran to the end of the block and the install after it was
+// invisible. The unquoted form is also in `guard sees`; the double-quoted form needs
+// `quotedContent` so the continuation is stripped inside the quotes.
+for (const [label, opener] of [
+  ['unquoted', 'cat <<EO\\\n          F'],
+  ['inside double quotes', 'cat <<"EO\\\n          F"'],
+]) {
+  test(`guard reads a heredoc delimiter continued across a backslash-newline ${label}`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: app/yarn.lock
+      - run: |
+          ${opener}
+          cd app
+          EOF
+          yarn install --immutable
+`);
+      assert.deepEqual(yarnCacheViolations(fixtureWorkflows, fixtureRoot), [
+        'fixture.yml job verify: setup-node must cache yarn.lock',
+      ]);
     });
   });
 }
@@ -2550,6 +2702,11 @@ for (const [label, script, declared = 'other/yarn.lock'] of [
   ['an npx --package versioned Yarn spec before the command', 'npx --package yarn@4 yarn install --immutable'],
   ['a popd inside a keyword branch', 'pushd other\n          if [ -n "$X" ]; then popd; fi\n          yarn install --immutable', 'yarn.lock'],
   ['a cd - inside a keyword branch', 'cd other\n          if [ -n "$X" ]; then cd -; fi\n          yarn install --immutable', 'yarn.lock'],
+  // Same-line `then popd` / `then cd -` is handled above. A keyword on its own
+  // line still left `previous` and the pushd stack as known directories, so
+  // a later `popd` / `cd -` restored the root lockfile (#4612).
+  ['a popd on its own line inside a keyword block', 'pushd other\n          if [ -n "$X" ]; then\n            popd\n          fi\n          yarn install --immutable', 'yarn.lock'],
+  ['a cd - after a keyword block whose body changed directory', 'cd other\n          if [ -n "$X" ]; then\n            cd app\n          fi\n          cd -\n          yarn install --immutable', 'yarn.lock'],
   ['a backslash-newline inside a heredoc delimiter', 'cat <<E\\\n          OF\n          body\n          EOF\n          yarn install --immutable'],
 ]) {
   // The keyword-branch fixtures declare the root lockfile: the install may run from

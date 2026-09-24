@@ -1,5 +1,7 @@
 # Execution envelope + trajectory + TEE — **Scope** (pre-design)
 
+> **Status (2026-09-24): partly superseded by [docs/superpowers/specs/2026-07-28-marketplace-binding-design.md](2026-07-28-marketplace-binding-design.md).** The `jinn.execution.v1` envelope and intent model (§3.1) migrates to the Task Execution Protocol Delivery under the marketplace deployment profile (that design §6.3, §14); operator identity and signing (§3.2) move to the Agent IRI with DSSE as the only envelope ([trust and identity layer](2026-07-27-trust-and-identity-layer-design.md) §2); and ERC-8004 registration with a subgraph as the discovery surface (§3.3) gives way to Record Discovery ([DR-2026-08-03](../../../log/decisions/2026-08-03-phase-c-capability-boundaries.md), decision 4). The evidence-tier ladder and the TEE attestation profile stand ([DR-2026-08-04](../../../log/decisions/2026-08-04-spec-origin-and-vocabulary.md), decision 6), and §4.10 still scopes the legacy envelope conformance checks ([docs/runbooks/conformance.md](../../runbooks/conformance.md)). For the current direction read [docs/superpowers/specs/2026-07-28-marketplace-binding-design.md](2026-07-28-marketplace-binding-design.md).
+
 **Version:** 0.9 (scope — review feedback folded in; scope decisions locked, design-spec decisions enumerated)  
 **Date:** 2026-04-24  
 **Status:** scope locked for follow-on design work (open decisions in §6)  

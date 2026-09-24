@@ -576,19 +576,37 @@ export async function runBindAction(_previous: GuiActionState, formData: FormDat
   const roundText = field(formData, "beaconRound");
   const value = field(formData, "beaconValue");
   return executeOperation((context) => {
-    // The shape check is on the TEXT, before conversion (issue #3332). `Number` coerces rather
-    // than parses: it reads "1e3", "0x10", "+1" and "1." as integers and "" as zero, and
-    // `Number.isInteger` then passes, so an operator who mistyped a round was not refused by
-    // name -- they got a successfully bound run at a round they never typed. `bind` is write-once
-    // (a run binds once, because re-binding is re-drawing), so that cannot be corrected by
-    // rebinding, and a coerced value landing after the seal binds cleanly to the wrong round.
-    // The CLI applies the same rule at its own entry point (`core/src/cli/main.ts`).
+    // The shape check is on the TEXT, after `field()` trims, before conversion (issues #3332,
+    // #4133). `Number` coerces rather than parses: it reads "1e3", "0x10", "+1" and "1." as
+    // integers and "" as zero, and `Number.isInteger` then passes, so an operator who mistyped a
+    // round was not refused by name -- they got a successfully bound run at a round they never
+    // typed. `bind` is write-once (a run binds once, because re-binding is re-drawing), so that
+    // cannot be corrected by rebinding, and a coerced value landing after the seal binds cleanly
+    // to the wrong round. The CLI applies the same rule at its own entry point
+    // (`core/src/cli/main.ts`): trim, then decimal digits, then a safe positive integer.
+    // Refuse via the typed envelope so `issues[].path` names `beaconRound` on the GUI surface
+    // (issue #4134); throwing `ProductContextConfigurationError` would keep the code but drop the
+    // field name behind a generic catch.
     if (!/^[0-9]+$/u.test(roundText)) {
-      throw new ProductContextConfigurationError("beaconRound must be decimal digits denoting a round or block height");
+      return {
+        ok: false,
+        error: {
+          code: "invalid-invocation",
+          detail: "beaconRound must be decimal digits denoting a round or block height",
+          issues: [{ path: "beaconRound", message: "beaconRound must be decimal digits denoting a round or block height" }],
+        },
+      };
     }
     const round = Number(roundText);
     if (!Number.isSafeInteger(round) || round < 1) {
-      throw new ProductContextConfigurationError("beaconRound must be a positive round or block height");
+      return {
+        ok: false,
+        error: {
+          code: "invalid-invocation",
+          detail: "beaconRound must be a positive round or block height",
+          issues: [{ path: "beaconRound", message: "beaconRound must be a positive round or block height" }],
+        },
+      };
     }
     return runBind(context, { draftId, beacon: { source: source as BeaconReference["source"], round, value } });
   }, { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
@@ -736,21 +754,7 @@ export async function runReportAction(_previous: GuiActionState, formData: FormD
 
 export async function runVerifyAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
-  return executeOperation(async (context) => {
-    const outcome = await runVerify(context, { draftId });
-    if (!outcome.ok) return outcome;
-    return {
-      ok: true as const,
-      result: {
-        draftId,
-        checks: [...outcome.result.checks],
-        matrixSha256: outcome.result.matrixSha256,
-        ...(outcome.result.reportEnvelopeSha256 !== undefined
-          ? { reportEnvelopeSha256: outcome.result.reportEnvelopeSha256 }
-          : {}),
-      },
-    };
-  });
+  return executeOperation((context) => runVerify(context, { draftId }));
 }
 
 /** Publishes, or re-verifies the one fixed draft-owned bundle when already published. The

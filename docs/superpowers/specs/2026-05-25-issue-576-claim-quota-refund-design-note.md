@@ -3,6 +3,7 @@ date: 2026-05-25
 issue: https://github.com/Jinn-Network/mono/issues/576
 shape: design (Stage 1 brainstorming note — feeds Stage 2 DR)
 status: draft
+superseded-by: '[docs/superpowers/specs/2026-07-28-marketplace-binding-design.md](2026-07-28-marketplace-binding-design.md) §5.2 (2026-09-24): issue #576 closed as not planned on 2026-05-25, and the contract revision specifies attempt expiry and capacity accounting instead: `attemptIndex` is never reused, while release and expiry free a separate occupancy counter that the `maxClaims` gate reads'
 authors: opus (design subagent, headless)
 relates-to: DR-2026-05-22-a, issue #545, issue #562, issue #569
 ---

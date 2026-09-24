@@ -283,10 +283,11 @@ can have it taken mid-run. Three sanctioned forms, in preference order:
 
 The invariant under all three: **never a literal inside 32768–65535 in a
 port-shaped position** — a `.listen(` argument, a port-shaped object key, a
-port-ish `const`, or a `return` from inside a port-ish block, and in the object
-key and `const` cases every element of an array bound
-there. Those are the positions the lint can see; a port buried in a
-URL string (`fetch('http://127.0.0.1:45020/health')`) is outside it, and so are
+port-ish `const` (scalar, defaulted, or array), a `return` of a scalar or an
+array from inside a port-ish block, or a port-ish concise arrow (`() => 45000`,
+`() => (45000)`, `() => [45000]`). Those are the positions the lint can see; a
+port buried in a URL string (`fetch('http://127.0.0.1:45020/health')`) is
+outside it, and so are
 the other gaps listed under "What this guard does not catch" in the header of
 [`operator/scripts/check-no-fixed-test-port.mjs`](../../operator/scripts/check-no-fixed-test-port.mjs),
 which also names the two false positives the guard can still produce and the
@@ -417,14 +418,22 @@ lacked turned up on the first attempt: the `real two-process concurrent
 --create` race took **~56s of a flat 60s budget on an idle 12-core laptop**
 (~8-11s per iteration over 6 iterations, 18 real CLI process boots), and the
 same test went red at **60017ms on a CI `Typecheck & Test` job on 2026-09-05**
-— a ~7% margin, on a 4-vCPU runner sharing itself with two sibling workers. The
-fix applies both rules above: the loop is bounded by wall clock (a 60s budget,
-and the next iteration starts only if the slowest one seen so far still fits in
-what is left), it asserts on exhaustion if not even one race completes, and the
-`testTimeout` moved to 90s so it is a backstop rather than the thing that ends
-the loop. A race test's coverage is probabilistic, so the currency spent under
-load is iterations, not reliability. Verified: green idle (50.8s) and green
-under an added 8-way CPU load at load average 35 (48.7s).
+— a ~7% margin, on a 4-vCPU runner sharing itself with two sibling workers.
+That measurement is of the 6-iteration form. On `next`, `409eab0b5`
+("test(operator): bound process identity race runtime", 2026-09-05) had
+already cut `ITERATIONS` 6→3 to leave headroom for the default suite's
+parallel workers on two-core CI runners. The wall-clock budget supersedes that
+flat cut: it bounds wall time under contention the way `409eab0b5` wanted,
+while leaving the extra iterations available on a host with room. It does not
+silently revert the cut. The fix applies both rules above: the loop is bounded
+by wall clock (a 60s budget, and the next iteration starts only if the slowest
+one seen so far still fits in what is left). The first iteration is
+unconditional, so a host that cannot finish even one race surfaces as the 90s
+`testTimeout` — that is why the backstop exists; the exhaustion assertion under
+the loop is a defensive invariant if the loop ever completes zero iterations
+without throwing. A race test's coverage is probabilistic, so the currency
+spent under load is iterations, not reliability. Verified: green idle (50.8s)
+and green under an added 8-way CPU load at load average 35 (48.7s).
 
 `test/_support/chain/anvil.test.ts` / `olas-funding.test.ts` — **measured, and
 left alone.** Anvil readiness against a live Base-mainnet fork was timed over
@@ -492,9 +501,10 @@ Two real test bounds at 5000ms were found. Classification per site:
   formerly `}, 5_000)`) — **deliberate-for-speed, wall-clock-exposed;
   exposure accepted, override removed.** Its comment names the mutation it
   guards: clear the transport timer at the response headers again and the
-  guarded call never settles, so the test "hangs to the vitest timeout rather
-  than rejecting". That is still true at the suite's 30s bound — the mutation
-  check goes red either way; the 5s override only made it go red 25s sooner.
+  guarded call never settles, so the test "hangs to the suite's 30s
+  `testTimeout` rather than rejecting". That is still true at that bound — the
+  mutation check goes red either way; the 5s override only made it go red 25s
+  sooner.
   There is no clock-free mechanism for detecting "this promise never
   settles": every hang detector is a deadline, and fake timers do not help
   because the thing under test is a real `fetch` body read. The choice was

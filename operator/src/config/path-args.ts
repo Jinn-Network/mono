@@ -58,3 +58,14 @@ export function requireConfigPathFromArgs(argv: string[] = process.argv): string
   }
   return scanned.kind === 'path' ? scanned.path : undefined;
 }
+
+/**
+ * Verb argv first, then process argv. Throws when the operator named `--config`
+ * with an empty value, so a silent default cannot load a different file (#4673).
+ */
+export function requireConfigPathFromArgvSources(
+  verbArgv: string[] = [],
+  processArgv: string[] = typeof process !== 'undefined' ? process.argv.slice(2) : [],
+): string | undefined {
+  return requireConfigPathFromArgs(verbArgv) ?? requireConfigPathFromArgs(processArgv);
+}

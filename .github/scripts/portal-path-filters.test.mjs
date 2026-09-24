@@ -22,6 +22,7 @@ import {
   parseShellArray,
   parseWorkflowPaths,
   portalClosure,
+  PUSH_ONLY_EXEMPT,
   readWorkspaceGraph,
 } from './portal-path-filters.mjs';
 
@@ -77,6 +78,32 @@ test('lane discovery finds every diff-selected lane and no publish lane', () => 
   // Both dialects must be represented, or one of them has silently fallen out.
   assert.ok(discovered.includes('ci') && discovered.includes('layer-ci'));
   assert.ok(discovered.includes('contracts-ci'), 'a flow-sequence paths: must be discovered');
+});
+
+test('indexer image-guard lanes select the shared dockerfile-portals module (#4637)', () => {
+  for (const file of ['indexer-ci.yml', 'indexer-enrichment-ci.yml']) {
+    const source = readFileSync(join(repoRoot, '.github/workflows', file), 'utf8');
+    const blocks = parsePathsBlocks(source);
+    assert.ok(
+      blocks.some(({ trigger }) => trigger === 'pull_request'),
+      `${file} must filter pull_request`,
+    );
+    assert.ok(blocks.some(({ trigger }) => trigger === 'push'), `${file} must filter push`);
+    for (const { trigger, entries } of blocks) {
+      assert.ok(
+        entries.includes('test-support/dockerfile-portals/**'),
+        `${file} ${trigger} must include test-support/dockerfile-portals/**`,
+      );
+    }
+  }
+});
+
+test('operator lane selects the shared dockerfile-portals module (#4645)', () => {
+  const source = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+  assert.ok(
+    parseShellArray(source, 'patterns').includes('^test-support/dockerfile-portals/'),
+    'ci.yml patterns must include ^test-support/dockerfile-portals/',
+  );
 });
 
 test('the trees named in #3573 now select on packages/trust/core', () => {
@@ -205,6 +232,43 @@ test('a workflow that selects from the diff must match a dialect or be exempt', 
     assert.throws(() => discoverLanes(root), /does not\s+model|does not model/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a push-only lane with a path filter must be audited or exempt (#3661)', () => {
+  const publish = ['on:', '  push:', '    paths:', "      - 'packages/x/**'", ''].join('\n');
+  const root = mkdtempSync(join(tmpdir(), 'portal-path-filters-'));
+  try {
+    mkdirSync(join(root, '.github/workflows'), { recursive: true });
+    writeFileSync(join(root, '.github/workflows/novel-publish.yml'), publish);
+    assert.throws(() => discoverLanes(root), /PUSH_ONLY_EXEMPT/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  const listed = mkdtempSync(join(tmpdir(), 'portal-path-filters-'));
+  try {
+    mkdirSync(join(listed, '.github/workflows'), { recursive: true });
+    writeFileSync(join(listed, '.github/workflows/operator-images.yml'), publish);
+    assert.deepEqual(discoverLanes(listed), []);
+  } finally {
+    rmSync(listed, { recursive: true, force: true });
+  }
+});
+
+test('PUSH_ONLY_EXEMPT lists exactly the live push-only lanes', () => {
+  // Independent of discoverLanes' branch order: a workflow in the shell-ERE
+  // dialect carries no `paths:` block, so parsePathsBlocks alone decides this.
+  const directory = join(repoRoot, '.github/workflows');
+  const pushOnly = readdirSync(directory)
+    .filter((file) => file.endsWith('.yml'))
+    .filter((file) => {
+      const blocks = parsePathsBlocks(readFileSync(join(directory, file), 'utf8'));
+      return blocks.length > 0 && !blocks.some(({ trigger }) => trigger === 'pull_request');
+    })
+    .sort();
+  assert.deepEqual(pushOnly, Object.keys(PUSH_ONLY_EXEMPT).sort());
+  for (const [file, reason] of Object.entries(PUSH_ONLY_EXEMPT)) {
+    assert.ok(typeof reason === 'string' && reason.trim().length > 0, `${file} needs a reason`);
   }
 });
 

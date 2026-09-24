@@ -275,11 +275,32 @@ Constraints:
   passed until then.
 - Item digests distinct. Named check: `benchmark-item-distinctness`.
 - Per-item provenance (source, creation timestamp, quality annotations,
-  canary marker) lives **inside the Task payload** (the profiles design's
-  `provenance` block, with its blindable `sourceCommitment`), never in the
-  Benchmark record. The Benchmark stays a thin set-namer. Provenance values
-  are author-sealed *claims* — sealing fixes bytes, it does not attest dates
-  (see §9.2 `clean-subset@1` for the consequence).
+  canary marker) lives **on the sealed Task**, never in the Benchmark record.
+  The Benchmark stays a thin set-namer. Provenance values are author-sealed
+  *claims* — sealing fixes bytes, it does not attest dates (see §9.2
+  `clean-subset@1` for the consequence).
+
+  **Amended by DR-2026-09-05 (issue #4098):** there are two accepted locations
+  on the Task, and they are alternatives, not a precedence pair.
+
+  1. `payload.provenance` — the profiles design's `provenance` block, with its
+     blindable `sourceCommitment`. This is the **profile-declared** location,
+     available to any profile whose `payloadSchema` declares it
+     (`repository-work/1.0` today, and indefinitely — nothing moves).
+  2. `task["https://spec.jinn.network/task-provenance/v1"]` — a namespaced
+     absolute-URI **top-level extension** key on the sealed Task. This is the
+     **profile-agnostic** location, and the only one available to a profile
+     whose payload is closed (`prediction-forecast/1.0` is exactly
+     `{forecast}`).
+
+  `resolveBenchmarkTaskProvenance` accepts either, with the same value shape
+  and the same refusal grounds at both. **Both present refuses
+  `invalid-provenance`** — a Task carrying two provenance claims is corrupt,
+  and a precedence rule would let the shadowed one drift unnoticed. Neither
+  present refuses `invalid-provenance`, as before. The key is exported as
+  `TASK_PROVENANCE_EXTENSION_KEY_V1`; no consumer transcribes the literal.
+  Full rationale:
+  `docs/superpowers/specs/2026-09-02-prediction-forecast-paired-scoreability.md`.
 
 ### 6.2 Identity and versioning
 

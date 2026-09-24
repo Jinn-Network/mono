@@ -226,6 +226,10 @@
       "sha256": "6a27243b013d39c456ea46408764a1258a0fbd0a2f3eb857e2b4396264f961e8"
     },
     {
+      "id": "vectors/source-head-revalidation-invalid-head-envelope/vector.json",
+      "sha256": "decb8ee1b94a6f0efd733cff85ced737f243463d14cac085ecc41fdaf32cdaa7"
+    },
+    {
       "id": "vectors/source-head-revalidation-refresh-by-ceiling/vector.json",
       "sha256": "b7dca714ee27c966775b981ceac7832a6cc1706058f8901829b30b32f9eef2b5"
     },

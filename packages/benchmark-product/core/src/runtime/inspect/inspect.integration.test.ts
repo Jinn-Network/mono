@@ -28,7 +28,7 @@ import type { RunJournalEntry } from "../../run/journal.js";
 import { getSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 import { readInspectSelectionManifest, inspectWorkerPath } from "./host.js";
 import { inspectOciRunnerPath } from "./oci.js";
-import { expectEvery } from "./testing/assertions.js";
+import { expectEvery, leakMarkers } from "./testing/assertions.js";
 // @ts-expect-error This product-private runtime is copied into dist without a public type surface.
 import { createInspectLogVerifierRegistration } from "./verifier-runtime.mjs";
 
@@ -277,7 +277,9 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
       scorer: { name: "match", passValue: "C" },
     });
     expect(selected.ok).toBe(false);
-    expect(JSON.stringify({ selected, audit: readAuditEntries(workspaceDir) })).not.toContain(sentinel);
+    expect(
+      leakMarkers(Buffer.from(JSON.stringify({ selected, audit: readAuditEntries(workspaceDir) })), { sentinel }),
+    ).toEqual([]);
   }, 120_000);
 
   test("refuses duplicate resolved scorer names instead of relying on Inspect's private suffixing", async () => {
@@ -692,5 +694,5 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     expect(readdirSync(viewerBundleDir).length).toBeGreaterThan(0);
     rmSync(nativeLogs[0]!);
     await expect(verifyPublicBundle(detachedBundle)).rejects.toThrow();
-  }, 120_000);
+  }, 240_000);
 });

@@ -58,10 +58,18 @@ const SupplyWindowSchema = z.object({
     }
   });
 });
+/**
+ * Defense in depth against permissionless manifest strings. Mirrors
+ * `SUPPLY_IDENTIFIER_MAX_LENGTH` in `packages/indexer/src/api/supply.ts`, which
+ * drops an over-cap class into `incompleteManifestRows` before responding. An
+ * over-cap identifier reaching this decoder rejects the whole response, so the
+ * two values must move together.
+ */
+const SUPPLY_IDENTIFIER_MAX_LENGTH = 128;
 const SupplyClassSchema = z.object({
-  workClass: z.string().min(1),
-  contractId: z.string().min(1),
-  contractVersion: z.string().min(1),
+  workClass: z.string().min(1).max(SUPPLY_IDENTIFIER_MAX_LENGTH),
+  contractId: z.string().min(1).max(SUPPLY_IDENTIFIER_MAX_LENGTH),
+  contractVersion: z.string().min(1).max(SUPPLY_IDENTIFIER_MAX_LENGTH),
   acceptingSolverNets: SafeCountSchema.positive(),
   claimingOperators: SafeCountSchema.positive(),
   verdictDeliveries: SafeCountSchema.positive(),
@@ -86,6 +94,7 @@ const CurrentSupplyResponseSchema = z.discriminatedUnion('status', [
     // Optional so an indexer that excluded nothing may omit it entirely; the
     // count is only ever positive when present.
     incompleteManifestRows: SafeCountSchema.positive().optional(),
+    incompleteActivityRows: SafeCountSchema.positive().optional(),
   }).strict(),
   z.object({
     ...SupplyBaseShape,
@@ -681,15 +690,34 @@ export function createHttpDiscoveryClient(
 
   async function getCurrentSupply(args: { chainId: number }): Promise<CurrentSupplyResponse> {
     if (!Number.isSafeInteger(args.chainId) || args.chainId <= 0) {
-      throw new DiscoveryUnavailableError('Supply lookup requires a positive integer chainId');
+      throw new DiscoveryUnavailableError(
+        'Supply lookup requires a positive integer chainId',
+        undefined,
+        'invalid_request',
+      );
     }
+
+    // Construct the request URL before the /ready probe. A malformed
+    // discovery.url makes fetch throw an untagged TypeError on `/ready`,
+    // which the CLI would map to a retryable outage. Fail closed here so
+    // the operator sees invalid_invocation instead.
+    let requestUrl: URL;
+    try {
+      requestUrl = new URL(supplyUrl);
+      requestUrl.searchParams.set('chainId', String(args.chainId));
+    } catch (error) {
+      throw new DiscoveryUnavailableError(
+        `Supply lookup has a malformed discovery.url: ${String(error)}`,
+        error,
+        'invalid_request',
+      );
+    }
+
     await ensureReady();
 
     let response: Response;
     try {
-      const url = new URL(supplyUrl);
-      url.searchParams.set('chainId', String(args.chainId));
-      response = await fetchImpl(url, { method: 'GET' });
+      response = await fetchImpl(requestUrl, { method: 'GET' });
     } catch (error) {
       throw new DiscoveryUnavailableError(`Supply endpoint network error: ${String(error)}`, error);
     }
@@ -704,8 +732,11 @@ export function createHttpDiscoveryClient(
       } catch {
         detail = '';
       }
+      const code = response.status >= 400 && response.status < 500 ? 'invalid_request' : undefined;
       throw new DiscoveryUnavailableError(
         `Supply endpoint HTTP ${response.status} ${response.statusText}${detail}`,
+        undefined,
+        code,
       );
     }
 
@@ -716,11 +747,24 @@ export function createHttpDiscoveryClient(
       throw new DiscoveryUnavailableError(`Supply endpoint response parse error: ${String(error)}`, error);
     }
     const parsed = CurrentSupplyResponseSchema.safeParse(body);
-    if (!parsed.success || parsed.data.chainId !== args.chainId) {
-      const detail = parsed.success
-        ? `response chainId ${parsed.data.chainId} does not match ${args.chainId}`
-        : z.prettifyError(parsed.error);
-      throw new DiscoveryUnavailableError(`Supply endpoint returned invalid evidence: ${detail}`);
+    if (!parsed.success) {
+      // The indexer answered; its body just doesn't decode against this
+      // client's schema. Most often that is version skew (an older client
+      // against a newer indexer), but a malformed indexer answer looks the
+      // same from here. Either way it is not a caller/config mistake, so it
+      // gets its own code rather than `invalid_request`.
+      throw new DiscoveryUnavailableError(
+        `Supply endpoint returned invalid evidence: ${z.prettifyError(parsed.error)}`,
+        undefined,
+        'invalid_response',
+      );
+    }
+    if (parsed.data.chainId !== args.chainId) {
+      throw new DiscoveryUnavailableError(
+        `Supply endpoint returned invalid evidence: response chainId ${parsed.data.chainId} does not match ${args.chainId}`,
+        undefined,
+        'invalid_request',
+      );
     }
     return parsed.data as CurrentSupplyResponse;
   }

@@ -1,20 +1,39 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { loadStackPublishedCatalogPackages } from './platform-catalog.mjs';
 
 export const FIXTURE_MANIFEST_NAME = 'manifest.sha256.json';
 
+export class FixtureEntryTypeError extends Error {
+  constructor(id) {
+    super(`fixture ${id} is neither a regular file nor a directory; refusing to pin it`);
+    this.name = 'FixtureEntryTypeError';
+  }
+}
+
+// The one walk of a fixture tree: this checker and the golden-fixture writers all call
+// it, so what gets pinned and what gets checked cannot diverge (#3920).
 function walk(directory, prefix, found) {
   for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    // Installed dependencies are never fixtures.
     if (entry.name === 'node_modules') continue;
+    // Machine-local Finder junk: its bytes vary per machine, so pinning it would freeze
+    // bytes nobody can reproduce and report drift on every other macOS checkout.
+    if (entry.name === '.DS_Store') continue;
+    // Only the root manifest is this file; one nested deeper is an ordinary fixture.
+    if (prefix === '' && entry.name === FIXTURE_MANIFEST_NAME) continue;
     const child = join(directory, entry.name);
     const id = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isDirectory()) walk(child, id, found);
-    else if (entry.isFile() && id !== FIXTURE_MANIFEST_NAME) found.push({ id, path: child });
+    else if (entry.isFile()) found.push({ id, path: child });
+    // A symlink or other special entry is refused rather than skipped: a silent skip
+    // lets a fixture escape the pinned set, the failure this guard exists to prevent.
+    else throw new FixtureEntryTypeError(id);
   }
   return found;
 }
@@ -43,7 +62,21 @@ export function writeFixtureManifest(packageRoot, manifest) {
   );
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+// Rebuilds the manifest from the tree, keeping the stored hand-authored errata. Returns
+// the written manifest, or null when the package has no fixtures directory.
+export function rewriteFixtureManifest(packageRoot) {
+  const built = buildFixtureManifest(packageRoot);
+  if (built === null) return null;
+  const manifest = { ...built, errata: readFixtureManifest(packageRoot)?.errata ?? [] };
+  writeFixtureManifest(packageRoot, manifest);
+  return manifest;
+}
+
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const args = process.argv.slice(2);
     const root = args.includes('--root') ? args[args.indexOf('--root') + 1] : process.cwd();
@@ -52,13 +85,14 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     const drift = [];
     for (const pkg of loadStackPublishedCatalogPackages(root)) {
       const packageRoot = join(root, pkg.directory);
+      if (write) {
+        rewriteFixtureManifest(packageRoot);
+        continue;
+      }
       const built = buildFixtureManifest(packageRoot);
       if (built === null) continue;
       const stored = readFixtureManifest(packageRoot);
-      const next = { ...built, errata: stored?.errata ?? [] };
-      if (write) {
-        writeFixtureManifest(packageRoot, next);
-      } else if (stored === null || JSON.stringify(stored.entries) !== JSON.stringify(next.entries)) {
+      if (stored === null || JSON.stringify(stored.entries) !== JSON.stringify(built.entries)) {
         drift.push(`${pkg.directory}/fixtures/${FIXTURE_MANIFEST_NAME}`);
       }
     }

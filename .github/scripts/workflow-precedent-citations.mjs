@@ -33,7 +33,13 @@ const workflowsDir = resolve(root, '.github/workflows');
 // above the step's `- ` opener; a marker written inside the step body, or
 // separated from the opener by a blank line, is not read. Keep precedent
 // markers in the attached block so this gate sees them.
-export function citedPrecedents(source, selfName) {
+//
+// With `stepName`, only the download-artifact step whose `- name:` opener
+// carries exactly that name is read, so a per-workflow guard is satisfied by
+// its own restore step's marker and not by a sibling step's (#3512). A step
+// whose `name:` is not on its opener line reads as uncited: a false red,
+// consistent with this gate's posture.
+export function citedPrecedents(source, selfName, stepName) {
   const lines = source.split('\n');
   const cited = new Set();
   for (let index = 0; index < lines.length; index += 1) {
@@ -41,6 +47,13 @@ export function citedPrecedents(source, selfName) {
 
     let start = index;
     while (start >= 0 && !/^\s*- /.test(lines[start])) start -= 1;
+
+    if (stepName !== undefined) {
+      const named = (lines[start] ?? '')
+        .match(/^\s*- name:\s*(.*?)\s*$/)?.[1]
+        ?.replace(/^(['"])(.*)\1$/, '$2');
+      if (named !== stepName) continue;
+    }
 
     // No `if (start < 0) continue` guard: when the scan runs off the top of
     // the file `start` is -1, the comment walk below starts at -2 and does not

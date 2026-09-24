@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  CEILINGS,
   DISCOVERY_SIGNING_SCOPE,
   RECORD_DISCOVERY_VERSION,
   RECORD_KINDS,
@@ -127,7 +128,7 @@ describe('requester source v1 compatibility freeze refuses before anything is du
   const recordContentType = 'application/vnd.jinn.task-execution.submission.v1+json';
   const recordBytes = new TextEncoder().encode('{"submission":"fixture"}');
 
-  function publicationAt(issuedAt: string, refreshBy: string) {
+  function publicationAt(issuedAt: string, refreshBy: string, facts: unknown = { chainId: '84532', taskId: '17' }) {
     const entry: AnnouncementEntry = {
       protocol: RECORD_DISCOVERY_VERSION,
       source,
@@ -142,7 +143,7 @@ describe('requester source v1 compatibility freeze refuses before anything is du
           profile: 'https://spec.jinn.network/record-discovery/location/https/v1',
           locator: `https://requester.test/records/${recordDigest(recordBytes).slice(7)}`,
         }],
-        facts: { chainId: '84532', taskId: '17' },
+        facts,
       }],
     };
     const entryDigest = sealJson(entry).digest;
@@ -240,5 +241,41 @@ describe('requester source v1 compatibility freeze refuses before anything is du
     const { signer } = countingSigner();
     const frozen = await freeze(publicationAt('2026-06-30T23:59:60Z', '2026-07-01T23:59:59.000Z'), signer);
     expect(frozen.announcementId).toBe('native-requester-fixture');
+  });
+
+  it('refuses a sealed entry past the published-source ceiling without signing (#4306)', async () => {
+    const { signer, counter } = countingSigner();
+    const oversized = { pad: 'x'.repeat(CEILINGS.entrySealedBytes) };
+    await expect(
+      freeze(publicationAt('2026-08-03T12:00:00.000Z', '2026-08-04T12:00:00.000Z', oversized), signer),
+    ).rejects.toThrow('frozen announcement entry exceeds the published-source byte ceiling');
+    expect(counter.signs).toBe(0);
+
+    const frozen = await freeze(publicationAt('2026-08-03T12:00:00.000Z', '2026-08-04T12:00:00.000Z'), signer);
+    expect(frozen.announcementId).toBe('native-requester-fixture');
+    expect(counter.signs).toBeGreaterThan(0);
+  });
+
+  it('refuses a sealed archive page past the published-source ceiling after the entry is signed, without signing a head (#4306)', async () => {
+    const counter = { signs: 0 };
+    const oversizedSigSigner = {
+      scope: DISCOVERY_SIGNING_SCOPE,
+      keyId: 'did:key:requester-fixture',
+      async sign() {
+        counter.signs += 1;
+        // Base64 inflates by ~4/3; once wrapped in the page envelope this
+        // clears CEILINGS.archivePageBytes (4 MiB) while the entry alone --
+        // checked separately, before any signing -- stays tiny.
+        return [{ keyid: 'did:key:requester-fixture', sig: new Uint8Array(3.5 * 1024 * 1024) }];
+      },
+      verify() { return true; },
+    };
+    await expect(
+      freeze(publicationAt('2026-08-03T12:00:00.000Z', '2026-08-04T12:00:00.000Z'), oversizedSigSigner),
+    ).rejects.toThrow('frozen archive page exceeds the published-source byte ceiling');
+    // The entry signature was produced -- the page ceiling is only checkable
+    // after the entry is signed -- but the refusal still lands before the
+    // head is signed.
+    expect(counter.signs).toBe(1);
   });
 });

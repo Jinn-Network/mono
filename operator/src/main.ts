@@ -25,7 +25,8 @@ import { homedir, hostname, userInfo } from 'node:os';
 import { randomBytes as cryptoRandomBytes, randomUUID as cryptoRandomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { loadConfig, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { requireConfigPathFromArgs } from './config/path-args.js';
 import { writeConfigFileAtomic } from './config/atomic-write.js';
 import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
@@ -228,7 +229,18 @@ if (passwordResolution.source === 'generated') {
 
 // ── Load config ─────────────────────────────────────────────────────────────
 
-const CONFIG_PATH = getConfigPathFromArgs();
+let CONFIG_PATH: string | undefined;
+try {
+  CONFIG_PATH = requireConfigPathFromArgs();
+} catch (err) {
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message: err instanceof Error ? err.message : String(err),
+    hint: 'Pass a config path or omit --config.',
+    exampleCli: 'jinn run --config ~/.jinn-operator/config.json',
+    details: { field: 'config' },
+  });
+}
 const config = loadConfig(CONFIG_PATH);
 /**
  * One-swap M2 (#2461): the network AS WRITTEN, captured before the pre-launch clamp below rewrites

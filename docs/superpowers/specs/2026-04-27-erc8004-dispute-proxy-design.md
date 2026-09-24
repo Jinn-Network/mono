@@ -1,5 +1,7 @@
 # ERC-8004 DisputeProxy — adversarial third-party challenges on `ValidationRegistry`
 
+> **Status (2026-09-24): superseded by [docs/superpowers/specs/2026-07-28-marketplace-binding-design.md](2026-07-28-marketplace-binding-design.md).** That design rejects ERC-8004 as verdict-of-record (§2): ERC-8004 composes one way, as an identity pointer plus an optional later export of verdicts, and is never imported into settlement, so a DisputeProxy on `ValidationRegistry` has no settlement role. The challenge mechanism is deferred to Phase B.2 and deliberately avoided while reward gates on any verdict ([spec/2026-06-30-tokenless-olas-native.md](../../../spec/2026-06-30-tokenless-olas-native.md) §14). For the current direction read [docs/superpowers/specs/2026-07-28-marketplace-binding-design.md](2026-07-28-marketplace-binding-design.md).
+
 **Version:** 1.0 (design proposal)
 **Date:** 2026-04-27
 **Status:** Proposed. Phase 1b ship/defer recommendation made (§6); ratification deferred to user.

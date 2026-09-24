@@ -1,5 +1,7 @@
 # JinnRouter V2 + Activity Checker Integration Design
 
+> **Status (2026-09-24): superseded by [spec/2026-06-30-tokenless-olas-native.md](../../../spec/2026-06-30-tokenless-olas-native.md).** DR-2026-06-30 collapses the custom on-chain surface to one activity checker that counts completed-loop activity and one thin recorder, the trimmed `TaskCoordinator` and `JinnRouterV3` (§7); the V2 router with novelty-weighted evidence forwarding is replaced, and novelty decay survives only as an optional lever that can be re-added in the checker. Mainnet still runs the legacy marketplace-native model (§13). For the current direction read [spec/2026-06-30-tokenless-olas-native.md](../../../spec/2026-06-30-tokenless-olas-native.md).
+
 > Version: 0.1.0
 > Date: 2026-04-09
 > Author: Oak, Claude

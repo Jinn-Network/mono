@@ -1,6 +1,16 @@
 const BUCKET_SECONDS = 6 * 60 * 60;
 const BUCKET_COUNT = 8;
 
+/**
+ * Longest `workClass` (`${contractId}.${contractVersion}`) a `/supply`
+ * response may carry. Mirrors `SUPPLY_IDENTIFIER_MAX_LENGTH` in the operator's
+ * decoder (`operator/src/discovery-client/http.ts`), which caps `workClass`,
+ * `contractId` and `contractVersion` at this length and rejects the WHOLE
+ * response when any one class exceeds it. Capping the joined string also caps
+ * both parts, since each part is non-empty. The two values must move together.
+ */
+export const SUPPLY_IDENTIFIER_MAX_LENGTH = 128;
+
 export type SupplyStatus = 'available' | 'zero_supply' | 'unknown';
 export type SupplyReason =
   | 'no_requestable_solver_nets'
@@ -47,7 +57,8 @@ export interface CurrentSupplyResponse {
   reason?: SupplyReason;
   /**
    * How many launched SolverNet rows on this chain carried incomplete manifest
-   * evidence and were therefore excluded from `classes`. Absent when every
+   * evidence, or a work class longer than `SUPPLY_IDENTIFIER_MAX_LENGTH`, and
+   * were therefore excluded from `classes`. Absent when every
    * launched row was usable, and never present unless `status` is `available`
    * — an incomplete row can only ever downgrade a would-be zero to `unknown`
    * (see `buildCurrentSupply`), so it has nothing to mark on the other two.
@@ -58,6 +69,19 @@ export interface CurrentSupplyResponse {
    * as "no supply"; the classes that ARE listed are still proven.
    */
   incompleteManifestRows?: number;
+  /**
+   * How many attempt or verdict rows on this chain had no matching task and
+   * were therefore excluded from `classes`. Absent when every activity row
+   * joined, and never present unless `status` is `available` — an incomplete
+   * row can only ever downgrade a would-be zero to `unknown` (see
+   * `buildCurrentSupply`), so it has nothing to mark on the other two.
+   *
+   * Present, it means `classes` is known-possibly-SHORT: a class whose only
+   * activity rows were the excluded ones is missing entirely. A requester must
+   * therefore read a class's ABSENCE from this response as "no evidence", not
+   * as "no supply"; the classes that ARE listed are still proven.
+   */
+  incompleteActivityRows?: number;
 }
 
 export interface SupplyManifestRow {
@@ -125,7 +149,11 @@ export function resolveSupplyChainId(
 ): SupplyChainIdResolution {
   const chainId = Number(raw);
   if (raw === undefined || raw.trim() === '' || !Number.isSafeInteger(chainId) || chainId <= 0) {
-    return { ok: false, error: 'invalid chainId', detail: 'provide a positive integer ?chainId=' };
+    return {
+      ok: false,
+      error: 'invalid chainId',
+      detail: `provide a positive integer ?chainId=; this indexer serves ${servedChainIds.join(', ')}`,
+    };
   }
   if (!servedChainIds.includes(chainId)) {
     return {
@@ -170,12 +198,18 @@ function baseResult(input: BuildCurrentSupplyInput): Omit<CurrentSupplyResponse,
   };
 }
 
-function unknown(input: BuildCurrentSupplyInput): CurrentSupplyResponse {
+function unknown(input: BuildCurrentSupplyInput, because: string): {
+  response: CurrentSupplyResponse;
+  unknownBecause: string;
+} {
   return {
-    ...baseResult(input),
-    status: 'unknown',
-    reason: 'incomplete_indexer_evidence',
-    classes: [],
+    response: {
+      ...baseResult(input),
+      status: 'unknown',
+      reason: 'incomplete_indexer_evidence',
+      classes: [],
+    },
+    unknownBecause: because,
   };
 }
 
@@ -191,24 +225,38 @@ function validTimestamp(value: bigint): boolean {
   return value > 0n && value <= BigInt(Number.MAX_SAFE_INTEGER);
 }
 
+export interface AssembledCurrentSupply {
+  response: CurrentSupplyResponse;
+  /** Present only when `response.status` is `unknown`. Never part of the HTTP body. */
+  unknownBecause?: string;
+}
+
 /**
  * Aggregate requestable supply from native indexed facts. Unusable event time
  * and orphaned chain tuples make the whole answer unknown — they are read as
  * index corruption, which nothing in the response can be trusted against.
- * Incomplete per-row manifest enrichment is narrower: it excludes its own row
+ * Incomplete per-row manifest enrichment, or an identifier past
+ * `SUPPLY_IDENTIFIER_MAX_LENGTH`, is narrower: it excludes its own row
  * and can only downgrade a would-be `zero_supply` to `unknown`, marked on the
  * result as `incompleteManifestRows`. Neither path ever turns missing evidence
  * into a false zero.
+ *
+ * `unknownBecause` names the first failing guard for server-side logs. It is
+ * not a client field.
  */
-export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSupplyResponse {
+export function assembleCurrentSupply(input: BuildCurrentSupplyInput): AssembledCurrentSupply {
   // An unrenderable `asOfMs` is still answered — as `unknown`, stamped with the
   // real clock. Reporting the caller's own bad value back would throw inside
   // `baseResult` and turn a guarded input into a 503.
-  if (usableAsOfMs(input.asOfMs) === null) return unknown({ ...input, asOfMs: Date.now() });
-  if (!Number.isSafeInteger(input.chainId) || input.chainId <= 0) return unknown(input);
+  if (usableAsOfMs(input.asOfMs) === null) {
+    return unknown({ ...input, asOfMs: Date.now() }, 'unrenderable asOfMs');
+  }
+  if (!Number.isSafeInteger(input.chainId) || input.chainId <= 0) {
+    return unknown(input, 'invalid chainId');
+  }
 
   const base = baseResult(input);
-  if (!input.manifestEvidenceComplete) return unknown(input);
+  if (!input.manifestEvidenceComplete) return unknown(input, 'manifest evidence capped');
   const windowStart = BigInt(Date.parse(base.window.start) / 1_000);
   const windowEnd = BigInt(Date.parse(base.window.end) / 1_000);
   const launched = input.manifests.filter(
@@ -228,20 +276,26 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
   // until its next `MetadataSet` — must not black out a chain whose other
   // classes have complete evidence and real in-window loops, because nothing
   // that row could contain would subtract from them.
+  //
+  // An identifier past the client's decoder cap is excluded the same way.
+  // Anyone can launch a SolverNet with a long contract id, and the client
+  // rejects the whole response over one such class, so emitting it would
+  // blank every class on the chain for every operator.
   const complete = launched.filter((row) => row.manifestEnrichmentStatus === 'ok'
     && row.openRoles.length > 0
     && row.contractId.trim() !== ''
     && row.contractVersion.trim() !== ''
+    && `${row.contractId}.${row.contractVersion}`.length <= SUPPLY_IDENTIFIER_MAX_LENGTH
     && Boolean(row.cidKeccak));
   const incompleteManifestRows = launched.length - complete.length;
 
   const requestable = complete.filter((row) => row.openRoles.includes('solver'));
   if (requestable.length === 0) {
     // An excluded row could have been the requestable one; the zero is unproven.
-    if (incompleteManifestRows > 0) return unknown(input);
-    return { ...base, status: 'zero_supply', reason: 'no_requestable_solver_nets', classes: [] };
+    if (incompleteManifestRows > 0) return unknown(input, 'incomplete launched manifest rows');
+    return { response: { ...base, status: 'zero_supply', reason: 'no_requestable_solver_nets', classes: [] } };
   }
-  if (!input.activityEvidenceComplete) return unknown(input);
+  if (!input.activityEvidenceComplete) return unknown(input, 'activity evidence capped');
 
   const classByDigest = new Map<string, string>();
   const classRows = new Map<string, {
@@ -257,7 +311,7 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
     const workClass = `${row.contractId}.${row.contractVersion}`;
     const digest = row.cidKeccak.toLowerCase();
     const prior = classByDigest.get(digest);
-    if (prior && prior !== workClass) return unknown(input);
+    if (prior && prior !== workClass) return unknown(input, 'contradictory manifest digest');
     classByDigest.set(digest, workClass);
     const aggregate = classRows.get(workClass) ?? {
       contractId: row.contractId,
@@ -276,21 +330,40 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
   for (const row of input.tasks) {
     if (row.chainId !== input.chainId) continue;
     const prior = taskById.get(row.id);
-    if (prior && prior.manifestDigest.toLowerCase() !== row.manifestDigest.toLowerCase()) return unknown(input);
+    if (prior && prior.manifestDigest.toLowerCase() !== row.manifestDigest.toLowerCase()) {
+      return unknown(input, 'contradictory task digest');
+    }
     taskById.set(row.id, row);
   }
 
+  // The route caller passes `attempts` as in-window rows PLUS attempts
+  // referenced by an in-window verdict's task, fetched again WITHOUT the
+  // window filter — so the same physical row can appear twice, and a prior
+  // attempt for an orphaned task can appear out-of-window. Counting distinct
+  // KEYS (rather than incrementing per row) absorbs the route's duplication;
+  // scoping to the window excludes rows that were never window evidence to
+  // begin with, so neither can inflate `incompleteActivityRows` beyond the
+  // physical rows actually excluded from the window's answer.
+  const incompleteAttemptKeys = new Set<string>();
+  const incompleteVerdictKeys = new Set<string>();
   const attemptByKey = new Map<string, SupplyAttemptRow>();
   for (const row of input.attempts) {
     if (row.chainId !== input.chainId) continue;
     if (!validTimestamp(row.createdAtTimestamp) || !Number.isSafeInteger(row.attemptIndex) || row.attemptIndex < 0) {
-      return unknown(input);
+      return unknown(input, 'unusable attempt timestamp or index');
     }
-    const task = taskById.get(row.taskId);
-    if (!task) return unknown(input);
     const key = activityKey(row.chainId, row.taskId, row.attemptIndex);
+    const task = taskById.get(row.taskId);
+    if (!task) {
+      if (row.createdAtTimestamp >= windowStart && row.createdAtTimestamp < windowEnd) {
+        incompleteAttemptKeys.add(key);
+      }
+      continue;
+    }
     const prior = attemptByKey.get(key);
-    if (prior && prior.operator.toLowerCase() !== row.operator.toLowerCase()) return unknown(input);
+    if (prior && prior.operator.toLowerCase() !== row.operator.toLowerCase()) {
+      return unknown(input, 'contradictory attempt operator');
+    }
     attemptByKey.set(key, row);
 
     const workClass = classByDigest.get(task.manifestDigest.toLowerCase());
@@ -309,9 +382,7 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
       || !Number.isSafeInteger(row.verdictIndex)
       || row.verdictIndex < 0
       || !Number.isSafeInteger(row.verdictCode)
-      || row.verdictCode < 0
-      || row.verdictCode > 4
-    ) return unknown(input);
+    ) return unknown(input, 'unusable verdict timestamp or index');
     if (row.createdAtTimestamp < windowStart || row.createdAtTimestamp >= windowEnd) continue;
     // The attempt must exist — a verdict with no attempt row is a broken join
     // and makes the whole answer unknown. Its AGE, however, is ordinary: a task
@@ -319,16 +390,28 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
     // not corruption. Callers therefore supply the attempts referenced by
     // in-window verdicts regardless of when those attempts were created, and an
     // out-of-window attempt still never counts toward `operators` below.
-    const attempt = attemptByKey.get(activityKey(row.chainId, row.taskId, row.attemptIndex));
-    if (!attempt) return unknown(input);
+    // A missing task is narrower: skip the row (do not insert it as live
+    // activity) and refuse only an unproven zero, same monotone rule as
+    // incomplete manifests. Skip the task join BEFORE the attempt lookup so a
+    // skipped attempt cannot black out the chain through the verdict join.
     const task = taskById.get(row.taskId);
-    if (!task) return unknown(input);
+    if (!task) {
+      // Already window-scoped by the `continue` above; verdict identity
+      // includes verdictIndex, so its key namespace cannot collide with an
+      // attempt key of the same chain/task/attemptIndex.
+      incompleteVerdictKeys.add(`${row.chainId}:${row.taskId}:${row.attemptIndex}:${row.verdictIndex}`);
+      continue;
+    }
+    const attempt = attemptByKey.get(activityKey(row.chainId, row.taskId, row.attemptIndex));
+    if (!attempt) return unknown(input, 'verdict with no attempt');
     const workClass = classByDigest.get(task.manifestDigest.toLowerCase());
     if (!workClass) continue;
     const aggregate = classRows.get(workClass)!;
     aggregate.verdicts.add(`${row.chainId}:${row.taskId}:${row.attemptIndex}:${row.verdictIndex}`);
     if (row.createdAtTimestamp > aggregate.latestVerdict) aggregate.latestVerdict = row.createdAtTimestamp;
   }
+
+  const incompleteActivityRows = incompleteAttemptKeys.size + incompleteVerdictKeys.size;
 
   const classes = [...classRows.entries()]
     .filter(([, row]) => row.operators.size > 0 && row.verdicts.size > 0)
@@ -347,13 +430,22 @@ export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSuppl
   if (classes.length === 0) {
     // Same monotone rule at the activity layer: an excluded row could have
     // carried the class that IS live, so the zero stays unproven.
-    if (incompleteManifestRows > 0) return unknown(input);
-    return { ...base, status: 'zero_supply', reason: 'no_recent_completed_loops', classes: [] };
+    if (incompleteManifestRows > 0 || incompleteActivityRows > 0) {
+      return unknown(input, 'incomplete rows with no live class');
+    }
+    return { response: { ...base, status: 'zero_supply', reason: 'no_recent_completed_loops', classes: [] } };
   }
   return {
-    ...base,
-    status: 'available',
-    classes,
-    ...(incompleteManifestRows > 0 ? { incompleteManifestRows } : {}),
+    response: {
+      ...base,
+      status: 'available',
+      classes,
+      ...(incompleteManifestRows > 0 ? { incompleteManifestRows } : {}),
+      ...(incompleteActivityRows > 0 ? { incompleteActivityRows } : {}),
+    },
   };
+}
+
+export function buildCurrentSupply(input: BuildCurrentSupplyInput): CurrentSupplyResponse {
+  return assembleCurrentSupply(input).response;
 }

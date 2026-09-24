@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDoctorCommand } from '@/cli/commands/doctor.js';
 import { runCommand } from '@test/cli.js';
+import { requireConfigPathFromArgs } from '@/config/path-args.js';
 
 function writeFleetState(earningDir: string, services: unknown[]): void {
   mkdirSync(earningDir, { recursive: true });
@@ -53,7 +54,7 @@ const fakeDeps = {
   getConfigPathFromArgs: () => undefined,
   checkClaudeBinary: async () => ({ ok: true, detail: 'fake claude binary' } as any),
   checkRpcNetwork: async () => ({
-    ok: true,
+    ok: true as const,
     network: 'testnet' as const,
     expectedChainId: 84532,
     actualChainId: 84532,
@@ -223,6 +224,23 @@ describe('doctor command (DI integration)', () => {
     expect('JINN_PASSWORD' in env.config!.envOverrides).toBe(false);
     // JINN_RPC_URL was set so it should appear
     expect(env.config!.envOverrides['JINN_RPC_URL']).toBe('set');
+  });
+
+  it('rejects an empty --config instead of loading the default (#4673)', async () => {
+    const cmd = createDoctorCommand({
+      ...fakeDeps,
+      getConfigPathFromArgs: requireConfigPathFromArgs,
+      loadConfig: () => {
+        throw new Error('loadConfig must not run for an empty --config');
+      },
+    });
+    const { envelopes, exits } = await runCommand(cmd, { argv: ['--config='] });
+    expect(envelopes[0]).toMatchObject({
+      code: 'invalid_invocation',
+      details: { field: 'config' },
+    });
+    expect(String((envelopes[0] as { message: string }).message)).toMatch(/empty/i);
+    expect(exits[exits.length - 1]).not.toBe(0);
   });
 });
 

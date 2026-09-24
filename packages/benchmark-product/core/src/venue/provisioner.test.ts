@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -22,13 +22,6 @@ import {
 } from "./provisioner.js";
 import { createGitRepositoryMirror } from "./repository-mirror.js";
 import { readVerdictEnvelope } from "./signing.js";
-import {
-  DEMO1_CLAUDE_HARNESS_ID,
-  DEMO1_CLAUDE_MD_PATH,
-  DEMO1_SKILL_PATH,
-  generateDemo1InstructionArtifacts,
-  type Demo1InstructionArtifacts,
-} from "./demo1-claude.js";
 
 const EVALUATOR_1 = "urn:jinn:benchmark-product:local-venue:evaluator-1";
 const EVALUATOR_2 = "urn:jinn:benchmark-product:local-venue:evaluator-2";
@@ -356,111 +349,13 @@ describe("createLocalProvisioner — repository-work cells", () => {
     await selected.contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
 
     expect(existsSync(join(paths.work, "README.md"))).toBe(true);
-    expect(existsSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toBe(false);
-    expect(existsSync(join(paths.work, DEMO1_SKILL_PATH))).toBe(false);
+    expect(existsSync(join(paths.work, "CLAUDE.md"))).toBe(false);
+    expect(existsSync(join(paths.work, ".jinn-demo1-skill-plugin/skills/demo1/SKILL.md"))).toBe(false);
     writeFileSync(join(paths.work, "README.md"), "upstream\nprofile-backed change\n");
     await selected.contract.harvest(paths, [
       { name: "patch", mediaType: "text/x-diff", required: true },
     ] as never);
     expect(readFileSync(join(paths.out, "patch"), "utf8")).toContain("+profile-backed change");
-  });
-
-  it("places native Claude instructions and extracts byte-identical clean patches for A, B, and no-file C", async () => {
-    const upstream = makeUpstreamRepository();
-    const artifacts = generateDemo1InstructionArtifacts(
-      new TextEncoder().encode("# Frozen source\n\nApply the procedure.\n"),
-      { name: "demo1", description: "Use for repository implementation tasks." },
-    );
-    const task = repositoryWorkTask(upstream.uri, upstream.oid);
-
-    async function run(loadout: unknown): Promise<string> {
-      const root = mkdtempSync(join(tmpdir(), "provisioner-demo1-arm-"));
-      const paths = workspacePathsUnder(root);
-      const requirements: Record<string, unknown> = {
-        harness: { id: "claude-code", version: "2.1.222" },
-        model: { id: "claude-haiku-4-5-20251001" },
-        effort: "high",
-        ...(loadout === undefined ? {} : { loadout }),
-      };
-      const selected = createLocalProvisioner({
-        registry: createEvaluationCellRegistry(),
-        evaluators: [],
-        repositoryMirror: createGitRepositoryMirror(join(root, "mirrors")),
-        demo1Instructions: artifacts,
-      })({
-        task,
-        sealedTaskBytes: new TextEncoder().encode("{}"),
-        dispatchContextBytes: new TextEncoder().encode("{}"),
-        submission: { requirements },
-        attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
-      } as never);
-
-      await selected.contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
-      if (loadout === artifacts.skill) {
-        expect(readFileSync(join(paths.work, DEMO1_SKILL_PATH))).toEqual(Buffer.from(artifacts.skillMd));
-        expect(existsSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toBe(false);
-      } else if (loadout === artifacts.baseline) {
-        expect(readFileSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toEqual(Buffer.from(artifacts.claudeMd));
-        expect(existsSync(join(paths.work, DEMO1_SKILL_PATH))).toBe(false);
-      } else {
-        expect(existsSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toBe(false);
-        expect(existsSync(join(paths.work, DEMO1_SKILL_PATH))).toBe(false);
-      }
-      writeFileSync(join(paths.work, "README.md"), "upstream\nchanged\n");
-      await selected.contract.harvest(paths, [
-        { name: "patch", mediaType: "text/x-diff", required: true },
-      ] as never);
-      return readFileSync(join(paths.out, "patch"), "utf8");
-    }
-
-    const skillPatch = await run(artifacts.skill);
-    const claudeMdPatch = await run(artifacts.baseline);
-    const noFilePatch = await run(undefined);
-    expect(skillPatch).toBe(noFilePatch);
-    expect(claudeMdPatch).toBe(noFilePatch);
-    expect(noFilePatch).toContain("+changed");
-    expect(noFilePatch).not.toContain("CLAUDE.md");
-    expect(noFilePatch).not.toContain("SKILL.md");
-    expect(noFilePatch).not.toContain("jinn-demo1-skill-plugin");
-  });
-
-  it("refuses every Demo-1 arm when the task repository already carries an instruction path", async () => {
-    const upstreamDir = mkdtempSync(join(tmpdir(), "provisioner-demo1-conflict-"));
-    gitIn(upstreamDir, "init", "--quiet", "--initial-branch", "main");
-    gitIn(upstreamDir, "config", "user.email", "test@example.invalid");
-    gitIn(upstreamDir, "config", "user.name", "Test");
-    writeFileSync(join(upstreamDir, "README.md"), "upstream\n");
-    writeFileSync(join(upstreamDir, "CLAUDE.md"), "pre-existing\n");
-    gitIn(upstreamDir, "add", ".");
-    gitIn(upstreamDir, "commit", "--quiet", "-m", "initial");
-    const upstream = { uri: `file://${upstreamDir}`, oid: gitIn(upstreamDir, "rev-parse", "HEAD") };
-    const task = repositoryWorkTask(upstream.uri, upstream.oid);
-    const root = mkdtempSync(join(tmpdir(), "provisioner-demo1-conflict-attempt-"));
-    const artifacts = generateDemo1InstructionArtifacts(new TextEncoder().encode("body\n"), {
-      name: "demo1",
-      description: "Use for repository tasks.",
-    });
-    const requirements = { harness: { id: "claude-code" } };
-    const paths = workspacePathsUnder(root);
-    const selected = createLocalProvisioner({
-      registry: createEvaluationCellRegistry(),
-      evaluators: [],
-      repositoryMirror: createGitRepositoryMirror(join(root, "mirrors")),
-      demo1Instructions: artifacts,
-    })({
-      task,
-      sealedTaskBytes: new TextEncoder().encode("{}"),
-      dispatchContextBytes: new TextEncoder().encode("{}"),
-      submission: { requirements },
-      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
-    } as never);
-
-    await expect(selected.contract.setup(
-      { task, effectiveRequirements: requirements } as never,
-      paths,
-      [],
-    )).rejects.toThrow(/already contains experiment instruction path/u);
-    expect(existsSync(paths.work)).toBe(false);
   });
 
   it("refuses a Task with no repository-state input", async () => {
@@ -635,13 +530,11 @@ describe("createLocalProvisioner — repository-work cells", () => {
       task: TaskSpecification,
       mirror: ReturnType<typeof createGitRepositoryMirror>,
       requirements: Record<string, unknown>,
-      demo1Instructions?: Demo1InstructionArtifacts,
     ) {
       return createLocalProvisioner({
         registry: createEvaluationCellRegistry(),
         evaluators: [],
         repositoryMirror: mirror,
-        ...(demo1Instructions === undefined ? {} : { demo1Instructions }),
       })({
         task,
         sealedTaskBytes: new TextEncoder().encode("{}"),
@@ -710,42 +603,11 @@ describe("createLocalProvisioner — repository-work cells", () => {
       },
     );
 
-    it("harvests a Demo-1 arm's edits and still strips the instruction inventory", async () => {
-      const upstream = makeUpstreamRepository();
-      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-demo1-"));
-      const paths = workspacePathsUnder(root);
-      const mirror = createGitRepositoryMirror(join(root, "mirrors"));
-      const task = repositoryWorkTask(upstream.uri, upstream.oid);
-      const artifacts = generateDemo1InstructionArtifacts(
-        new TextEncoder().encode("# Frozen source\n\nApply the procedure.\n"),
-        { name: "demo1", description: "Use for repository implementation tasks." },
-      );
-      const requirements = {
-        harness: { id: DEMO1_CLAUDE_HARNESS_ID, version: "2.1.222" },
-        model: { id: "claude-haiku-4-5-20251001" },
-        effort: "high",
-        loadout: artifacts.baseline,
-      };
-
-      await provisionerFor(task, mirror, requirements, artifacts)
-        .contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
-      expect(existsSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toBe(true);
-      writeFileSync(join(paths.work, "README.md"), "upstream\nrecovered demo1 change\n");
-
-      const recovered = provisionerFor(task, mirror, requirements, artifacts);
-      const result = await recovered.contract.harvest(paths, [
-        { name: "patch", mediaType: "text/x-diff", required: true },
-      ] as never);
-
-      expect(result.manifest.map((entry) => entry.path)).toEqual(["patch"]);
-      const patch = readFileSync(join(paths.out, "patch"), "utf8");
-      expect(patch).toContain("+recovered demo1 change");
-      expect(patch).not.toContain(DEMO1_CLAUDE_MD_PATH);
-      expect(patch).not.toContain(DEMO1_SKILL_PATH);
-    });
-
     it("reports a recovery-time rebind failure as an executed-attempt failure, not neverExecuted", async () => {
       const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-nomirror-"));
+      const paths = workspacePathsUnder(root);
+      // A checkout directory is present, so the harvest must rebind.
+      mkdirSync(paths.work, { recursive: true });
       const selected = createLocalProvisioner({
         registry: createEvaluationCellRegistry(),
         evaluators: [],
@@ -758,7 +620,7 @@ describe("createLocalProvisioner — repository-work cells", () => {
       } as never);
 
       const failure = await selected.contract
-        .harvest(workspacePathsUnder(root), [
+        .harvest(paths, [
           { name: "patch", mediaType: "text/x-diff", required: true },
         ] as never)
         .catch((error: unknown) => error);
@@ -768,6 +630,36 @@ describe("createLocalProvisioner — repository-work cells", () => {
       expect(failure).not.toBeInstanceOf(ProvisioningRejectedError);
       expect((failure as Error).message).toMatch(/could not rebind its checkout/u);
       expect((failure as Error).message).toMatch(/no repository mirror is configured/u);
+    });
+
+    it.each([
+      ["no mirror is configured", undefined],
+      ["the mirror is unreachable", { ensure: async () => { throw new Error("mirror offline"); } }],
+    ] as const)("collects out/ without resolving the mirror when the checkout is gone and %s", async (_label, mirror) => {
+      // Issue #3654: with no checkout there is nothing to extract and nothing to deregister, so a
+      // recovered harvest must not depend on a mirror it has no use for.
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-recovery-nocheckout-"));
+      const paths = workspacePathsUnder(root);
+      mkdirSync(paths.out, { recursive: true });
+      writeFileSync(join(paths.out, "patch"), "diff --git a/x b/x\n");
+      const selected = createLocalProvisioner({
+        registry: createEvaluationCellRegistry(),
+        evaluators: [],
+        ...(mirror === undefined ? {} : { repositoryMirror: mirror }),
+      })({
+        task: repositoryWorkTask("file:///upstream", "a".repeat(40)),
+        sealedTaskBytes: new TextEncoder().encode("{}"),
+        dispatchContextBytes: new TextEncoder().encode("{}"),
+        submission: { requirements: {} },
+        attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+      } as never);
+
+      const result = await selected.contract.harvest(paths, [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+      ] as never);
+
+      expect(result.manifest.map((entry) => entry.path)).toEqual(["patch"]);
+      expect(existsSync(paths.work)).toBe(false);
     });
 
     it("harvests what out/ holds when a predecessor's teardown already removed the checkout", async () => {
@@ -834,6 +726,76 @@ describe("createLocalProvisioner — repository-work cells", () => {
       expect(result.manifest.map((entry) => entry.path)).toEqual(["summary"]);
       expect(existsSync(join(paths.out, "patch"))).toBe(false);
       expect(result.omissions).toEqual(["patch"]);
+    });
+
+    // Issues #4631 / #4638: `git -C work` walks parent directories. After an interrupted teardown
+    // removes `work/.git`, an enclosing repository at the temp workspace root would otherwise look
+    // like a usable checkout and harvest would extract a patch from the wrong tree.
+    it("omits patch when work/.git is gone but an enclosing repository at the workspace root has HEAD", async () => {
+      const upstream = makeUpstreamRepository();
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-enclosing-repo-"));
+      const paths = workspacePathsUnder(root);
+      const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+      const task = repositoryWorkTask(upstream.uri, upstream.oid);
+      const requirements = {
+        harness: { id: "claude-code", version: "2.1.222", digest: "a".repeat(64) },
+        isolationPolicy: "unrestricted",
+      };
+
+      await provisionerFor(task, mirror, requirements)
+        .contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+      writeFileSync(join(paths.work, "README.md"), "upstream\nenclosing repo\n");
+      writeFileSync(join(paths.out, "summary"), "collected\n");
+
+      gitIn(paths.root, "init", "--quiet", "--initial-branch", "main");
+      gitIn(paths.root, "config", "user.email", "test@example.invalid");
+      gitIn(paths.root, "config", "user.name", "Test");
+      writeFileSync(join(paths.root, "enclosing.txt"), "enclosing\n");
+      gitIn(paths.root, "add", "enclosing.txt");
+      gitIn(paths.root, "commit", "--quiet", "-m", "enclosing");
+      rmSync(join(paths.work, ".git"), { recursive: true, force: true });
+      expect(existsSync(paths.work)).toBe(true);
+
+      const result = await provisionerFor(task, mirror, requirements).contract.harvest(paths, [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+        { name: "summary", mediaType: "text/markdown", required: false },
+      ] as never);
+
+      expect(result.manifest.map((entry) => entry.path)).toEqual(["summary"]);
+      expect(existsSync(join(paths.out, "patch"))).toBe(false);
+      expect(result.omissions).toEqual(["patch"]);
+    });
+
+    // Issues #4631 / #4638: a real `.git` directory whose object store / HEAD is broken is an
+    // infrastructure fault. Harvest must throw, not treat it as an absent checkout and omit patch.
+    it("throws when the checkout still has a real .git directory but HEAD does not resolve", async () => {
+      const upstream = makeUpstreamRepository();
+      const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-broken-git-"));
+      const paths = workspacePathsUnder(root);
+      const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+      const task = repositoryWorkTask(upstream.uri, upstream.oid);
+      const requirements = {
+        harness: { id: "claude-code", version: "2.1.222", digest: "a".repeat(64) },
+        isolationPolicy: "unrestricted",
+      };
+
+      await provisionerFor(task, mirror, requirements)
+        .contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+      writeFileSync(join(paths.out, "summary"), "collected\n");
+      rmSync(join(paths.work, ".git"), { recursive: true, force: true });
+      mkdirSync(join(paths.work, ".git"));
+      writeFileSync(join(paths.work, ".git", "HEAD"), "ref: refs/heads/main\n");
+
+      const failure = await provisionerFor(task, mirror, requirements)
+        .contract.harvest(paths, [
+          { name: "patch", mediaType: "text/x-diff", required: true },
+          { name: "summary", mediaType: "text/markdown", required: false },
+        ] as never)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).not.toBeInstanceOf(ProvisioningRejectedError);
+      expect((failure as Error).message).toMatch(/git /u);
     });
 
     // Issue #3655: a checkout that git cannot even be started against is an infrastructure fault,

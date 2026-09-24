@@ -453,16 +453,27 @@ describe('native-vertical identity CLI surface', () => {
       // against the old flat 60s budget: a ~7% margin that a 4-vCPU CI runner
       // sharing itself with two sibling vitest workers does not have. It went
       // red at 60017ms on CI on 2026-09-05 and reproduced locally on the first
-      // try. A race test's coverage is probabilistic, so the right currency to
-      // spend under load is ITERATIONS, not reliability: a slow host does fewer
-      // races rather than failing at an arbitrary one.
+      // try. That measurement is of the 6-iteration form. On `next`,
+      // 409eab0b5 ("test(operator): bound process identity race runtime",
+      // 2026-09-05) had already cut ITERATIONS 6→3 to leave headroom for the
+      // default suite's parallel workers on two-core CI runners. The wall-clock
+      // budget supersedes that flat cut: it bounds wall time under contention
+      // the way 409eab0b5 wanted, while leaving the extra iterations available
+      // on a host with room. It does not silently revert the cut. A race
+      // test's coverage is probabilistic, so the right currency to spend under
+      // load is ITERATIONS, not reliability: a slow host does fewer races
+      // rather than failing at an arbitrary one.
       //
-      // The next iteration starts only if the SLOWEST one seen so far still
-      // fits in the remaining budget, so the loop cannot overrun by more than
-      // one iteration's worth of surprise; `testTimeout` below is the backstop,
-      // set well clear of the budget so a starved run surfaces as the
-      // exhaustion assertion under the loop rather than as an opaque vitest
-      // timeout that names no cause.
+      // The first iteration is unconditional (`if (iteration > 0 && …)`). The
+      // next iteration starts only if the SLOWEST one seen so far still fits
+      // in the remaining budget, so the loop cannot overrun by more than one
+      // iteration's worth of surprise. A host that cannot finish even one race
+      // surfaces as the 90s `testTimeout` below — that is why the backstop
+      // exists, set well clear of the 60s budget. The exhaustion assertion
+      // under the loop is a defensive invariant if the loop ever completes
+      // zero iterations without throwing; it cannot fire for a starved first
+      // iteration, because that iteration always runs and either finishes
+      // (`completed >= 1`) or overruns the timeout.
       const ITERATIONS = 6;
       const BUDGET_MS = 60_000;
       const startedAt = Date.now();
@@ -504,9 +515,10 @@ describe('native-vertical identity CLI surface', () => {
         slowestMs = Math.max(slowestMs, Date.now() - iterationStartedAt);
       }
 
-      // Assert on exhaustion: a host too starved to finish even one race must
-      // say so here, not leave the reader with a green test that proved
-      // nothing (or an unrelated assertion further down).
+      // Defensive invariant: if the loop ever completes zero iterations
+      // without throwing, say so here. A starved first iteration cannot
+      // reach this — it is unconditional, so it either increments
+      // `completed` or overruns the 90s `testTimeout` above.
       expect(
         completed,
         `no race iteration completed within ${BUDGET_MS}ms — the host is too starved for this test to prove anything`,

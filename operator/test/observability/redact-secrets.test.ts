@@ -214,6 +214,11 @@ describe('redactValue — recursion into nested structures and arrays', () => {
     expect(String(out.s)).toMatch(/redacted:unserializable/);
   });
 
+  it('markers a bigint rather than passing it through (#3746)', () => {
+    const out = redactValue({ amount: 10n }) as Record<string, unknown>;
+    expect(String(out.amount)).toMatch(/redacted:unserializable/);
+  });
+
   it('recurses without a depth cap so a deeply nested secret is still stripped (#3038)', () => {
     let node: Record<string, unknown> = { privateKey: '0x' + '33'.repeat(32) };
     for (let i = 0; i < 20; i++) node = { nested: node };
@@ -411,7 +416,7 @@ describe('redaction — #420 code-review hardening', () => {
 });
 
 // Issue #4426: the free-text URL scanner excluded `]` and `)` from the URL
-// body and had no `i` flag. A bracketed-IPv6 host was truncated at `[`, so
+// body and had no `i` flag. A bracketed-IPv6 host was truncated at `]`, so
 // `new URL` threw and the catch path returned the credentials intact; an
 // uppercase scheme never matched at all. `transport.ts`'s
 // `maskUrlsInMessage` already had the correct pattern — the two now share
@@ -455,5 +460,31 @@ describe('redaction — #4426 free-text URL pattern shared with transport', () =
     expect(out.note).toContain('rpc.example');
     expect(out.note).not.toContain('SECRETpw');
     expect(out.note).not.toContain('SECRETQ');
+  });
+
+  // #4547: the catch path must also apply the parse path's key-segment rules
+  // (`/v<n>/<seg>` and long opaque segments), textually.
+  it('strips a /v<n>/<key> path segment from a bracket-terminated URL that defeats `new URL`', () => {
+    const out = redactValue({
+      note: 'tried [wss://u:pw@rpc.example]/v2/SECRETKEYSECRETKEY01 then',
+    }) as { note: string };
+    expect(out.note).toBe('tried [wss://rpc.example]/v2/<redacted:rpc-key> then');
+  });
+
+  it('strips a key segment and query from an unparseable URL with a template port', () => {
+    const out = redactValue({
+      note: 'x https://u:pw@rpc.example:${PORT}/v3/SECRETKEYSECRETKEY01?apikey=Q y',
+    }) as { note: string };
+    expect(out.note).toBe('x https://rpc.example:${PORT}/v3/<redacted:rpc-key> y');
+  });
+
+  it('strips a long opaque path segment from an unparseable URL', () => {
+    expect(redactRpcUrl('https://rpc.example]/rpc/AbCdEfGhIjKlMnOpQrStUv12/x')).toBe(
+      'https://rpc.example]/rpc/<redacted:rpc-key>/x',
+    );
+  });
+
+  it('bumps REDACTION_VERSION for the catch-path key-segment strip', () => {
+    expect(REDACTION_VERSION).toBe('6');
   });
 });

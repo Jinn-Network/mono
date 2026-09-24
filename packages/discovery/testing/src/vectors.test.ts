@@ -9,7 +9,7 @@ import {
 import type { SourceHeadOutcome } from "@jinn-network/record-discovery-protocol";
 import type { DsseEnvelope } from "@jinn-network/trust-core";
 
-import { vectorEnvelopeToWire } from "./harness.js";
+import { isInvalidHeadEnvelopeVector, vectorEnvelopeToWire } from "./harness.js";
 import { loadVectors, loadVectorsByKind, VECTOR_KINDS } from "./vectors.js";
 
 // Task 10 Step 2: every fixture loads, parses under protocol schemas where
@@ -157,10 +157,14 @@ const allSourceHeadStatusesListed: AllSourceHeadStatusesListed = true;
 
 describe("source-head vectors parse under protocol schemas and expect a SourceHeadOutcome status", () => {
   for (const vector of loadVectorsByKind("source-head")) {
-    it(`"${vector.name}" -- head and signed payload parse; status is a recognized outcome`, () => {
+    it(`"${vector.name}" -- head and signed payload parse, or the vector is the declared invalid-head-envelope case; status is a recognized outcome`, () => {
       const input = vector.input as { head: unknown; headSignature: { payload: string } };
       expect(() => parseSourceHead(input.head)).not.toThrow();
-      expect(() => parseSourceHead(JSON.parse(input.headSignature.payload))).not.toThrow();
+      if (isInvalidHeadEnvelopeVector(vector)) {
+        expect(() => parseWireDsseEnvelope(input.headSignature)).toThrow();
+      } else {
+        expect(() => parseSourceHead(JSON.parse(input.headSignature.payload))).not.toThrow();
+      }
       expect(allSourceHeadStatusesListed).toBe(true);
       expect(SOURCE_HEAD_STATUSES).toContain((vector.expect as { status: string }).status);
     });
@@ -206,9 +210,9 @@ describe("named checks in isolation are represented (design §18)", () => {
     }
   });
 
-  it("source-head-revalidation vectors cover ok and head-origin-mismatch", () => {
+  it("source-head-revalidation vectors cover every SourceHeadOutcome status", () => {
     const statuses = new Set(loadVectorsByKind("source-head").map((vector) => (vector.expect as { status: string }).status));
-    for (const required of ["ok", "head-origin-mismatch"]) {
+    for (const required of SOURCE_HEAD_STATUSES) {
       expect(statuses).toContain(required);
     }
   });
@@ -248,9 +252,10 @@ describe("vector DSSE envelopes are wire-form only after vectorEnvelopeToWire", 
     if (typeof value !== "object" || value === null) return [];
     return Object.entries(value).flatMap(([key, child]) => collectEnvelopes(child, path === "" ? key : `${path}.${key}`));
   }
-  const envelopes = loadVectors().flatMap((vector) =>
-    collectEnvelopes(vector.input, "").map(({ label, envelope }) => ({ vector: vector.name, label, envelope })),
-  );
+  const envelopes = loadVectors()
+    .flatMap((vector) =>
+      collectEnvelopes(vector.input, "").map(({ label, envelope }) => ({ vector: vector.name, label, envelope })),
+    );
 
   it("covers the whole corpus", () => {
     expect(envelopes.length).toBeGreaterThan(0);

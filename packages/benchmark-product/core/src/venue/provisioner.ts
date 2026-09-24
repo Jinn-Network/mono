@@ -16,17 +16,15 @@
  */
 
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { parseCellKey } from "@jinn-network/benchmarking-records";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import {
   harvest as workspaceHarvest,
+  makeDirProvisioner,
   makeWorktreeProvisioner,
-  canonicalLoadoutPath,
-  canonicalLoadoutPin,
   ProvisioningRejectedError,
   STAGED_SEALED_TASK_FILENAME,
   type DeclaredOutputSlot,
@@ -108,17 +106,6 @@ import {
 } from "../runtime/harbor/venue.js";
 import type { RepositoryMirrorPort } from "./repository-mirror.js";
 import { sealVerdictStatement } from "./signing.js";
-import {
-  DEMO1_CLAUDE_HARNESS_ID,
-  DEMO1_CLAUDE_MD_LOADOUT_NAME,
-  DEMO1_CLAUDE_MD_PATH,
-  DEMO1_EXPERIMENT_PATHS,
-  DEMO1_SKILL_LOADOUT_NAME,
-  DEMO1_SKILL_PATH,
-  DEMO1_SKILL_PLUGIN_DIRECTORY,
-  DEMO1_SKILL_PLUGIN_MANIFEST_PATH,
-  type Demo1InstructionArtifacts,
-} from "./demo1-claude.js";
 
 /**
  * Structurally matches `@jinn-network/task-execution-backend-local`'s own `SelectedProvisioner`
@@ -413,7 +400,7 @@ async function runGitOutput(args: readonly string[], env: NodeJS.ProcessEnv): Pr
   child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
   const code = await new Promise<number>((resolve, reject) => {
     child.once("error", reject);
-    child.once("exit", (value) => resolve(value ?? 70));
+    child.once("close", (value) => resolve(value ?? 70));
   });
   if (code !== 0) throw new Error(`git ${args[0] ?? ""} exited ${code}: ${stderr.trim()}`);
   return stdout;
@@ -432,7 +419,6 @@ interface RepositoryWorkProvisionerOptions {
    * persisted Task and Submission, so this resolves to the harness the attempt actually ran.
    */
   readonly requirements: Readonly<Record<string, unknown>>;
-  readonly demo1Instructions?: Demo1InstructionArtifacts;
 }
 
 function harnessId(view: { readonly effectiveRequirements?: Readonly<Record<string, unknown>> }): string | undefined {
@@ -443,73 +429,34 @@ function harnessId(view: { readonly effectiveRequirements?: Readonly<Record<stri
   return typeof id === "string" ? id : undefined;
 }
 
-function digest(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-async function installDemo1Instructions(
-  view: { readonly effectiveRequirements?: Readonly<Record<string, unknown>> },
-  paths: WorkspacePaths,
-  artifacts: Demo1InstructionArtifacts,
-): Promise<void> {
-  for (const path of DEMO1_EXPERIMENT_PATHS) {
-    if (existsSync(join(paths.work, path))) {
-      throw new ProvisioningRejectedError(
-        `Demo-1 task repository already contains experiment instruction path "${path}"`,
-      );
-    }
-  }
-  const rawLoadout = view.effectiveRequirements?.["loadout"];
-  if (rawLoadout === undefined) return;
-  const pin = canonicalLoadoutPin(rawLoadout);
-  const expected = pin.name === DEMO1_SKILL_LOADOUT_NAME
-    ? artifacts.skill
-    : pin.name === DEMO1_CLAUDE_MD_LOADOUT_NAME
-      ? artifacts.baseline
-      : undefined;
-  if (expected === undefined || canonicalLoadoutPin(expected).digest !== pin.digest) {
-    throw new ProvisioningRejectedError(`Demo-1 refuses unregistered loadout "${pin.name}"`);
-  }
-
-  // makeWorktreeProvisioner has already sent these bytes through materializeLoadout's digest
-  // verification at input/<pin.name>. Copying is product-owned placement, and the second hash
-  // check makes the loader-visible bytes identical to the verified staging bytes.
-  const stagedBytes = new Uint8Array(await readFile(canonicalLoadoutPath(paths.input, rawLoadout)));
-  if (digest(stagedBytes) !== pin.digest) {
-    throw new ProvisioningRejectedError(`Demo-1 staged loadout "${pin.name}" changed before placement`);
-  }
-  const destination = pin.name === DEMO1_SKILL_LOADOUT_NAME
-    ? join(paths.work, DEMO1_SKILL_PATH)
-    : join(paths.work, DEMO1_CLAUDE_MD_PATH);
-  await mkdir(dirname(destination), { recursive: true });
-  if (pin.name === DEMO1_SKILL_LOADOUT_NAME) {
-    const manifest = new TextEncoder().encode('{"name":"jinn-demo1-skill","version":"1.0.0"}\n');
-    const manifestPath = join(paths.work, DEMO1_SKILL_PLUGIN_MANIFEST_PATH);
-    await mkdir(dirname(manifestPath), { recursive: true });
-    await writeFile(manifestPath, manifest, { mode: 0o400, flag: "wx" });
-  }
-  await writeFile(destination, stagedBytes, { mode: 0o400, flag: "wx" });
-  if (digest(new Uint8Array(await readFile(destination))) !== pin.digest) {
-    throw new ProvisioningRejectedError(`Demo-1 loader-visible loadout "${pin.name}" failed its copy check`);
-  }
-}
-
-async function removeDemo1Instructions(paths: WorkspacePaths): Promise<void> {
-  await Promise.all([
-    rm(join(paths.work, DEMO1_SKILL_PLUGIN_DIRECTORY), { recursive: true, force: true }),
-    rm(join(paths.work, DEMO1_CLAUDE_MD_PATH), { force: true }),
-  ]);
-}
-
 /**
- * Whether `work` is a git checkout harvest can extract from (issue #3655). Existence is not enough:
- * an interrupted teardown can leave the directory with its `.git` gone or pointing at a pruned
- * admin dir. The top level must be `work` itself because `git -C` searches parent directories, so a
- * checkout that lost its `.git` inside some enclosing repository would otherwise pass; `HEAD` must
- * resolve because extraction reads it. A git refusal means unusable; a failure to run git at all
- * (a spawn error such as ENOENT) is an infrastructure fault and propagates, so it is never
- * harvested as a declared omission.
+ * Whether `work` is a git checkout harvest can extract from (issues #3655, #4631, #4638).
+ *
+ * Always probe with git: do not skip the spawn when `work/.git` is missing, because `git -C`
+ * walks parents and the enclosing-repo case is exactly that walk. Spawn faults (ENOENT and other
+ * errno) still throw. On success, `realpathSync(toplevel)` must equal `realpathSync(work)` or the
+ * checkout is unusable. On a non-zero git exit without errno, treat as unusable only when
+ * `work/.git` is missing or is a gitfile whose gitdir target does not exist; otherwise rethrow —
+ * a real `.git` directory with a broken object store / HEAD is infrastructure, not a declared
+ * omission.
  */
+function isAbsentOrDanglingGit(work: string): boolean {
+  const gitPath = join(work, ".git");
+  if (!existsSync(gitPath)) return true;
+  let contents: string;
+  try {
+    contents = readFileSync(gitPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EISDIR") return false;
+    throw error;
+  }
+  const match = /^gitdir:\s*(.+)\s*$/mu.exec(contents);
+  if (match === null) return false;
+  const target = match[1]!.trim();
+  const resolved = isAbsolute(target) ? target : join(work, target);
+  return !existsSync(resolved);
+}
+
 async function isUsableCheckout(work: string): Promise<boolean> {
   if (!existsSync(work)) return false;
   let output: string;
@@ -522,7 +469,8 @@ async function isUsableCheckout(work: string): Promise<boolean> {
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== undefined) throw error;
-    return false;
+    if (isAbsentOrDanglingGit(work)) return false;
+    throw error;
   }
   try {
     const [topLevel] = output.split("\n");
@@ -533,8 +481,8 @@ async function isUsableCheckout(work: string): Promise<boolean> {
 }
 
 /** Extracts repository changes without touching the real index. */
-async function extractRepositoryPatch(paths: WorkspacePaths, excludeDemo1Instructions: boolean): Promise<void> {
-  const indexPath = join(paths.meta, "demo1-patch.index");
+async function extractRepositoryPatch(paths: WorkspacePaths): Promise<void> {
+  const indexPath = join(paths.meta, "repository-patch.index");
   await rm(indexPath, { force: true });
   const env = {
     ...process.env,
@@ -546,13 +494,6 @@ async function extractRepositoryPatch(paths: WorkspacePaths, excludeDemo1Instruc
   await runGitOutput(["-C", paths.work, "read-tree", "HEAD"], env);
   await runGitOutput([
     "-C", paths.work, "add", "-A", "--", ".",
-    ...(excludeDemo1Instructions
-      ? [
-        `:(exclude)${DEMO1_CLAUDE_MD_PATH}`,
-        `:(exclude)${DEMO1_SKILL_PLUGIN_DIRECTORY}`,
-        `:(exclude)${DEMO1_SKILL_PLUGIN_DIRECTORY}/**`,
-      ]
-      : []),
   ], env);
   const patch = await runGitOutput([
     "-C", paths.work, "diff", "--cached", "--binary", "--full-index", "--no-color", "HEAD", "--",
@@ -590,22 +531,15 @@ function repositoryStateDescriptor(task: TaskSpecification): { uri: string; oid:
 }
 
 /**
- * Derives the two harness-shaped harvest roles from a requirements view. Factored out of `setup`
+ * Derives the repository-editing harvest role from a requirements view. Factored out of `setup`
  * because `harvest` must reach the same conclusion on the recovery path, where no `TaskView` is
  * handed to the contract at all -- see the lazy binding in `repositoryWorkProvisionerContract`.
  */
 function repositoryWorkHarnessRoles(
   view: { readonly effectiveRequirements?: Readonly<Record<string, unknown>> },
-  demo1Instructions: Demo1InstructionArtifacts | undefined,
-): { readonly demo1Claude: boolean; readonly repositoryEditingHarness: boolean } {
+): { readonly repositoryEditingHarness: boolean } {
   const selectedHarness = harnessId(view);
   return {
-    // A normal profile-backed Claude Code arm shares the same public harness id as Demo-1. The
-    // frozen instruction inventory is the product-owned discriminator: venue.ts refuses
-    // configuring a Demo-1 runtime and a general Claude profile together, so its presence means
-    // this is the experiment-specific launcher/provisioner pair. Without it, preserve the
-    // ordinary repository-work path and never demand or remove Demo-1 artifacts.
-    demo1Claude: demo1Instructions !== undefined && selectedHarness === DEMO1_CLAUDE_HARNESS_ID,
     repositoryEditingHarness: selectedHarness === "claude-code" || selectedHarness === "codex",
   };
 }
@@ -622,7 +556,8 @@ function repositoryWorkProvisionerContract(
   options: RepositoryWorkProvisionerOptions,
 ): ProvisionerContract {
   let resolved: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
-  let roles: { readonly demo1Claude: boolean; readonly repositoryEditingHarness: boolean } | undefined;
+  let roles: { readonly repositoryEditingHarness: boolean } | undefined;
+  const runtime = { assertHarnessGroupEmpty: () => undefined, ensureMetaReserve: () => undefined };
 
   /**
    * Resolves the mirror and builds the platform base provisioner. Called by `setup` before the
@@ -651,7 +586,7 @@ function repositoryWorkProvisionerContract(
       dispatchContextBytes: options.dispatchContextBytes,
       referenceRepository: mirrorDir,
       oid,
-      runtime: { assertHarnessGroupEmpty: () => undefined, ensureMetaReserve: () => undefined },
+      runtime,
       fetchInput: async (descriptor) => {
         // The Task's "repository-state" input has no bytes of its own to materialize verbatim
         // -- it is a pointer to the mirror-resolved checkout. The checkout itself lands at
@@ -672,23 +607,9 @@ function repositoryWorkProvisionerContract(
     workspaceKind: (): WorkspaceKind => "worktree",
     async setup(view, paths, grants) {
       const bound = await bind();
-      const { base, mirrorDir } = bound;
+      const { base } = bound;
       await base.setup(view, paths, grants);
-      try {
-        const selectedRoles = repositoryWorkHarnessRoles(view, options.demo1Instructions);
-        roles = selectedRoles;
-        if (selectedRoles.demo1Claude && options.demo1Instructions !== undefined) {
-          await installDemo1Instructions(view, paths, options.demo1Instructions);
-        }
-      } catch (error) {
-        // A product placement refusal happens after the platform has cut the worktree. Clean up
-        // that partial setup immediately; the backend correctly has no harvest phase for a
-        // never-executed attempt.
-        await runGit(["-C", mirrorDir, "worktree", "remove", "--force", paths.work])
-          .catch(() => rm(paths.work, { recursive: true, force: true }));
-        await runGit(["-C", mirrorDir, "worktree", "prune"]).catch(() => undefined);
-        throw error;
-      }
+      roles = repositoryWorkHarnessRoles(view);
       resolved = bound;
     },
     executionEnv: ({ env }) => ({ ...env }),
@@ -698,16 +619,17 @@ function repositoryWorkProvisionerContract(
       // The backend's recovery path (`recoverRef` -> `completeAttempt` in
       // `@jinn-network/task-execution-backend-local`) re-enters harvest for every
       // completion-capable row that carries no journaled `harvested` event -- `harvesting-resume`,
-      // `matching-late`, `corrected` -- and it does so with a contract minted fresh by
-      // `createLocalProvisioner`, whose `setup` recovery never runs. Reading the closure state
-      // that `setup` would have assigned therefore threw on exactly the rows recovery exists to
-      // complete, turning repository edits the harness had already written into a permanent
-      // `blame: infrastructure` loss. Everything `setup` assigned is re-derivable from the sealed
-      // Task and the Submission requirements that `reconstructRecoveryContext` replays verbatim,
-      // so recovery rebuilds it; when `setup` did run, the closure values are reused unchanged.
-      let bound: { readonly base: ProvisionerContract; readonly mirrorDir: string };
+      // `matching-late`, `corrected`, and a live-shim `matching` row -- and it does so with a
+      // contract minted fresh by `createLocalProvisioner`, whose `setup` recovery never runs.
+      // Reading the closure state that `setup` would have assigned therefore threw on exactly the
+      // rows recovery exists to complete, turning repository edits the harness had already written
+      // into a permanent `blame: infrastructure` loss. Everything `setup` assigned is re-derivable
+      // from the sealed Task and the Submission requirements that `reconstructRecoveryContext`
+      // replays verbatim, so recovery rebuilds it; when `setup` did run, the closure values are
+      // reused unchanged.
+      let bound: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
       try {
-        bound = resolved ?? await bind();
+        bound = resolved ?? (existsSync(paths.work) ? await bind() : undefined);
       } catch (error) {
         // `bind` raises `ProvisioningRejectedError`, whose `neverExecuted` is true by
         // construction -- correct at setup, false here: harvest runs only after the harness has
@@ -718,9 +640,19 @@ function repositoryWorkProvisionerContract(
           { cause: error },
         );
       }
-      const { base, mirrorDir } = bound;
-      const { demo1Claude, repositoryEditingHarness } = roles
-        ?? repositoryWorkHarnessRoles({ effectiveRequirements: options.requirements }, options.demo1Instructions);
+      // With no checkout, nothing downstream needs the mirror (#3654): patch extraction is skipped
+      // below, and the delegated harvest is `makeDirProvisioner`'s -- the same one
+      // `makeWorktreeProvisioner` inherits (`{ ...makeDirProvisioner(options), ... }`) -- which
+      // reads only the workspace, never `referenceRepository` or `oid`. The dir provisioner
+      // therefore stands in without resolving a mirror that may be unreachable.
+      const base = bound?.base ?? makeDirProvisioner({
+        sealedTaskBytes: options.sealedTaskBytes,
+        dispatchContextBytes: options.dispatchContextBytes,
+        runtime,
+      });
+      const mirrorDir = bound?.mirrorDir;
+      const { repositoryEditingHarness } = roles
+        ?? repositoryWorkHarnessRoles({ effectiveRequirements: options.requirements });
       try {
         // A resumed harvest can land after a predecessor's `finally` already tore the worktree
         // down. `out/` survives that teardown, so the patch extraction is skipped rather than
@@ -730,14 +662,11 @@ function repositoryWorkProvisionerContract(
         // worktree, not by the directory existing: a half-removed checkout (issue #3655) takes the
         // same path.
         const checkoutPresent = await isUsableCheckout(paths.work);
-        if (demo1Claude) {
-          await removeDemo1Instructions(paths);
-          if (checkoutPresent) await extractRepositoryPatch(paths, true);
-        } else if (repositoryEditingHarness && checkoutPresent && !existsSync(join(paths.out, "patch"))) {
+        if (repositoryEditingHarness && checkoutPresent && !existsSync(join(paths.out, "patch"))) {
           // Claude Code and Codex express their result by editing the checked-out repository.
           // Turn those exact bytes into the profile's required patch output before the generic
           // harvester runs. A launcher-supplied patch remains authoritative when one exists.
-          await extractRepositoryPatch(paths, false);
+          await extractRepositoryPatch(paths);
         }
         // Same normalization contract as the solve path above, for this profile's declared slots.
         // Renames run BEFORE the delegated harvest because harvest stamps each artifact's
@@ -760,11 +689,17 @@ function repositoryWorkProvisionerContract(
         const manifest = result.manifest.filter((entry) => declared.has(entry.path));
         return { manifest, omissions: result.omissions, integrityViolations: result.integrityViolations };
       } finally {
-        // Copies `solverProvisioner`'s teardown in the model referenced above, verbatim in shape:
-        // deregister the worktree, falling back to a forced directory removal, then prune.
-        await runGit(["-C", mirrorDir, "worktree", "remove", "--force", paths.work])
-          .catch(() => rm(paths.work, { recursive: true, force: true }));
-        await runGit(["-C", mirrorDir, "worktree", "prune"]).catch(() => undefined);
+        if (mirrorDir === undefined) {
+          // No mirror was bound, so there is no worktree registration to remove here; a stale one
+          // is cleared by the next `worktree prune` run against that mirror.
+          await rm(paths.work, { recursive: true, force: true });
+        } else {
+          // Copies `solverProvisioner`'s teardown in the model referenced above, verbatim in shape:
+          // deregister the worktree, falling back to a forced directory removal, then prune.
+          await runGit(["-C", mirrorDir, "worktree", "remove", "--force", paths.work])
+            .catch(() => rm(paths.work, { recursive: true, force: true }));
+          await runGit(["-C", mirrorDir, "worktree", "prune"]).catch(() => undefined);
+        }
       }
     },
   };
@@ -1521,8 +1456,6 @@ export interface CreateLocalProvisionerOptions {
    * Absent on venues that serve no repository-work cells; a repository-work cell then refuses
    * typed at setup rather than silently provisioning an empty work tree. */
   readonly repositoryMirror?: RepositoryMirrorPort;
-  /** Demo-1's exact digest-bound skill/CLAUDE.md inventory. Absent keeps the venue unchanged. */
-  readonly demo1Instructions?: Demo1InstructionArtifacts;
 }
 
 export function createLocalProvisioner(
@@ -1580,9 +1513,6 @@ export function createLocalProvisioner(
           task: input.task,
           mirror: options.repositoryMirror,
           requirements: { ...(input.task.requirements ?? {}), ...(input.submission.requirements ?? {}) },
-          ...(options.demo1Instructions === undefined
-            ? {}
-            : { demo1Instructions: options.demo1Instructions }),
         }),
       };
     }

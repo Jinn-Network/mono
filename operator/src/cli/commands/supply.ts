@@ -10,7 +10,11 @@ import {
   createHttpDiscoveryClient,
   type HttpDiscoveryClientOptions,
 } from '../../discovery-client/http.js';
-import type { CurrentSupplyResponse, DiscoveryClient } from '../../discovery-client/types.js';
+import {
+  DiscoveryUnavailableError,
+  type CurrentSupplyResponse,
+  type DiscoveryClient,
+} from '../../discovery-client/types.js';
 
 const CHAIN_ID_BY_NETWORK = { testnet: 84532, mainnet: 8453 } as const;
 
@@ -25,6 +29,10 @@ const PRODUCTION_DEPS: SupplyCommandDeps = {
   getConfigPathFromArgs: defaultGetConfigPathFromArgs,
   createDiscoveryClient: createHttpDiscoveryClient,
 };
+
+function sanitizeHumanIdentifier(value: string): string {
+  return value.replace(/[\u0000-\u001F\u007F-\u009F]/gu, '');
+}
 
 function humanSupply(result: CurrentSupplyResponse): string {
   const window = `${result.window.start} to ${result.window.end}`;
@@ -53,9 +61,15 @@ function humanSupply(result: CurrentSupplyResponse): string {
       + 'evidence and are not represented below. A class missing here is unproven, not absent.',
     );
   }
+  if (result.incompleteActivityRows !== undefined) {
+    lines.push(
+      `Note: ${result.incompleteActivityRows} activity row(s) had no matching task `
+      + 'and are not represented below. A class missing here is unproven, not absent.',
+    );
+  }
   for (const entry of result.classes) {
     lines.push(
-      `${entry.workClass}: ${entry.acceptingSolverNets} accepting SolverNet(s), `
+      `${sanitizeHumanIdentifier(entry.workClass)}: ${entry.acceptingSolverNets} accepting SolverNet(s), `
       + `${entry.claimingOperators} recent operator(s), `
       + `${entry.verdictDeliveries} recent verdict delivery(ies)`,
     );
@@ -131,11 +145,27 @@ Examples:
         result = await deps.createDiscoveryClient({ url: config.discovery.url })
           .getCurrentSupply({ chainId });
       } catch (error) {
+        const code = error instanceof DiscoveryUnavailableError ? error.code : undefined;
+        // `invalid_response` (a decode rejection) means the indexer answered
+        // with a body this client cannot decode. The likeliest cause is an
+        // older client against a newer indexer, but a malformed indexer answer
+        // looks the same from here, so the hint names the cause without
+        // promising that upgrading fixes it. `invalid_request` covers a malformed
+        // discovery.url, a non-positive chainId, or the indexer's own 4xx
+        // refusal — a caller/config problem, so the hint names both
+        // discovery.url and the configured network (chainId is derived from
+        // network, never set directly).
+        const invalid = code === 'invalid_request' || code === 'invalid_response';
+        const hint = code === 'invalid_response'
+          ? 'The indexer answered, but this client could not decode the response. The likeliest cause is an older @jinn-network/operator against a newer indexer; if both run the same release, the indexer served malformed evidence.'
+          : invalid
+            ? 'Fix discovery.url or the configured network; this indexer will not answer that request for the chain network derives.'
+            : 'Retry when the configured discovery indexer is reachable and current.';
         emitEnvelope(
           {
-            code: 'transient_error',
+            code: invalid ? 'invalid_invocation' : 'transient_error',
             message: `Supply lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-            hint: 'Retry when the configured discovery indexer is reachable and current.',
+            hint,
             exampleCli: 'jinn supply',
             details: { chainId },
           },

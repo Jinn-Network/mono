@@ -310,6 +310,8 @@ describe('first-party Base Sepolia public record transport', () => {
       'http://0177.0.0.1/records/x',
       'http://0x7f000001/records/x',
       'http://2130706433/records/x',
+      // A scheme-less locator (#3853).
+      'records/abc', // pins only that no fetch occurs; the scheme-less case below pins the named refusal
     ] as const;
 
     it.each(hostile)('never fetches %s', async (locator) => {
@@ -322,6 +324,30 @@ describe('first-party Base Sepolia public record transport', () => {
 
       await expect(transport.byLocation(locator)).rejects.toThrow();
       expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    // #3853: `new URL()` threw a bare TypeError here, which `reportRefusedRecordDestination` does
+    // not name, so a scheme-less locator was dropped without a warning.
+    it('refuses a scheme-less locator by name, without fetching it', async () => {
+      const fetchImpl = vi.fn(async () => new Response('unreachable'));
+      const transport = createBaseSepoliaRecordTransport({
+        ipfsApiUrl: 'https://ipfs.example.invalid',
+        recordOrigins: [CONFIGURED],
+        fetchImpl,
+      });
+
+      const err = await transport.byLocation('records/abc').catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(NativeRecordDestinationError);
+      expect(err).toMatchObject({ message: expect.stringMatching(/not a resolvable URL/u) });
+      expect(fetchImpl).not.toHaveBeenCalled();
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(reportRefusedRecordDestination('ctx', err)).toBe(true);
+        expect(String(warn.mock.calls.at(-1)?.[0])).toContain('records/abc');
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('keeps a configured loopback serving root working (local deployments)', async () => {
@@ -515,6 +541,28 @@ describe('first-party Base Sepolia public record transport', () => {
         expect(line).toContain('delivery card location');
         expect(line).toContain('http://169.254.169.254/latest/meta-data/');
         expect(line).toContain('it is not contained');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    // #4643: a scheme-less peer locator is not a URL and can carry a newline. Raw interpolation
+    // would split the warn into a second log line; JSON.stringify keeps it one token, matching the
+    // NativeRecordDestinationError message.
+    it('escapes a destination that contains a newline so it cannot spoof a following log line (#4643)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const spoof = 'records.peer.example\n[native-records] spoofed: refused destination';
+        expect(reportRefusedRecordDestination(
+          'peer-announced record location',
+          new NativeRecordDestinationError(spoof, 'it is not an absolute HTTP(S) URL'),
+        )).toBe(true);
+        const line = String(warn.mock.calls.at(-1)?.[0]);
+        expect(line).toBe(
+          `[native-records] peer-announced record location: refused destination ${JSON.stringify(spoof)}: it is not an absolute HTTP(S) URL`,
+        );
+        expect(line.includes('\n')).toBe(false);
+        expect(warn.mock.calls).toHaveLength(1);
       } finally {
         warn.mockRestore();
       }

@@ -10,10 +10,19 @@ import type {
   AnnouncementEntry,
   AvailableAnnouncement,
   WithdrawnAnnouncement,
+  SourceChainRefusalStatus,
   SourceHead,
+  SourceHeadRefusalStatus,
   SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
-import { compareCodeUnitStrings, headPath, parseHeadTimestamp, sealJson } from '@jinn-network/record-discovery-protocol';
+import {
+  compareCodeUnitStrings,
+  headPath,
+  parseHeadTimestamp,
+  sealJson,
+  sourceChainRefusalReason,
+  sourceHeadRefusalReason,
+} from '@jinn-network/record-discovery-protocol';
 import {
   coldSync,
   fetchHead,
@@ -290,9 +299,15 @@ export interface NativeDiscoverySyncReport {
    * the loop and counts nothing, so this stays 0 once the wedge has cleared rather than reading
    * non-zero forever. A crossing counts even when a LATER announcement degrades that same
    * source in the same pass (#4394) -- the crossing is durable and is skipped from then on, so
-   * dropping it with the discarded source result would report it zero times, ever. The durable
+   * dropping it with the discarded source result would report it zero times, ever. That
+   * argument scopes to the DEGRADE path, the one the counter's placement can fix: a crossing
+   * followed in the same pass by a fault `degradedReason` does not classify (local-authority,
+   * trust, identity) makes `sync()` re-throw fail-closed, and the whole report -- this count
+   * with it -- never reaches the caller; the crossing is still durable and skipped from the
+   * next poll on, so on that path it is reported here zero times, ever. The durable
    * `native_discovery_quarantine` row and the `native_discovery_poison_quarantined` event are
-   * the authority for what is quarantined; this is a per-pass summary, not a running total.
+   * the authority for what is quarantined, on that path explicitly so; this is a per-pass
+   * summary, not a running total.
    * Withdrawal-scope quarantine is not a sync-pass event and is not counted here --
    * `drainNativeDiscoveryWithdrawals` owns that lane.
    */
@@ -629,6 +644,24 @@ function appendCursor(url: string, entry: `sha256:${string}`): string {
   return parsed.toString();
 }
 
+/**
+ * The chain outcome's shared reason slug (#3494), best-effort: `NativeDiscoverySource.verify`
+ * is a host-injectable port typed as a bare `{ status: string }` rather than the protocol's
+ * closed `SourceChainOutcome` union (`native-discovery.test.ts`'s "untrustworthy source"
+ * suite deliberately drives it with trust-verifier statuses outside that set, e.g.
+ * `bad-signature`, to prove an unrecognized fault still refuses verbatim rather than
+ * crashing the daemon). Only the canonical statuses the real driver
+ * (`native-discovery-trust.ts`) actually returns share the plugin/sync-path vocabulary;
+ * anything else passes through unchanged.
+ */
+function chainRefusalReason(status: string): string {
+  try {
+    return sourceChainRefusalReason(status as SourceChainRefusalStatus);
+  } catch {
+    return status;
+  }
+}
+
 export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSubmissionCard>(input: {
   readonly store: Store;
   readonly sources: readonly NativeDiscoverySource[];
@@ -848,7 +881,10 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       // future-dated head handled directly above are eligible for the self-source degrade; both
       // are this operator's own clock, and every other status is a trust signal.
       if (revalidated.status !== 'ok' && revalidated.status !== 'stale') {
-        throw new NativeDiscoverySyncError(source, revalidated.status);
+        throw new NativeDiscoverySyncError(
+          source,
+          sourceHeadRefusalReason(revalidated.status as SourceHeadRefusalStatus),
+        );
       }
       // `parseHeadTimestamp` (#3482, #4096): the second operand is this module's own
       // reading of the same `refreshBy` the trust adapter's `isFresh` reads for the
@@ -893,7 +929,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
               + 'degrading this poll rather than refusing this operator its own boot',
           };
         }
-        throw new NativeDiscoverySyncError(source, 'stale');
+        throw new NativeDiscoverySyncError(source, sourceHeadRefusalReason('stale'));
       }
       if (idleHead === 're-signed') {
         // Nothing was adopted, so the position does not move — but the stored instant,
@@ -1020,9 +1056,10 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
             + 'operator its own boot',
         };
       }
+      const chainReason = chainRefusalReason(outcome.status);
       throw new NativeDiscoverySyncError(
         source,
-        outcome.at === undefined ? outcome.status : `${outcome.status} (at: ${outcome.at})`,
+        outcome.at === undefined ? chainReason : `${chainReason} (at: ${outcome.at})`,
       );
     }
 
@@ -1110,7 +1147,9 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
           if (!poisoned.quarantined) throw undecodable;
           // Counted on the pass, not the outcome: the throw above, reached again on a LATER
           // announcement, would discard an outcome-carried count even though this is durable and
-          // is skipped from the next poll on — reporting it zero times, ever (#4394).
+          // is skipped from the next poll on — reporting it zero times, ever (#4394). A fatal
+          // fault later in the same pass still re-throws out of `sync()`, taking the whole
+          // report with it; the ledger row and event are the authority there.
           pass.quarantined += 1;
           continue;
         }

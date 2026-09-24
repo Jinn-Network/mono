@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { DRILL_SPECS, type DrillCheckpoint, type DrillCheckpointSpec } from './checkpoints.js';
 import {
   RunObservationSchema,
+  checkExpectedFinalState,
   checkRequiredEffects,
   compareRuns,
   type RunObservation,
@@ -169,7 +170,10 @@ export async function drillCheckpoint(
     );
   }
   for (const observation of [uninterrupted, recovered]) {
-    const failures = checkRequiredEffects(observation, spec.requiredEffects);
+    const failures = [
+      ...checkRequiredEffects(observation, spec.requiredEffects),
+      ...checkExpectedFinalState(observation, spec.expectedFinalState),
+    ];
     if (failures.length > 0) {
       throw new DrillFailure(checkpoint, `${observation.mode} run: ${failures.join('; ')}`);
     }

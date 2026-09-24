@@ -10,6 +10,12 @@ import { test } from 'node:test';
 // the table back: a profile could widen its declared set, or a whole kind could arrive,
 // with the table silently going stale (#3391).
 //
+// The dated design is frozen. Historical §12 rows for kinds whose facts leaf has since
+// been removed are not current tree membership: RETIRED_RECORD_KINDS is the live
+// annotation, not a spec edit. A kind listed there that still has profile documents is
+// a contradiction. A kind *not* listed there that is missing from the tree still fails.
+// Every kind that still has profile documents must still have a table row.
+//
 // The limit is the one §12 already states of its own `profiles.test.ts` pins, and it is
 // worth restating because this guard does not lift it: these are change-detectors, not
 // completeness proofs. What is proven here is that the table matches the profile
@@ -21,6 +27,18 @@ const specPath = join(root, 'docs', 'superpowers', 'specs', '2026-07-27-record-d
 const factsDir = join(root, 'packages', 'discovery', 'facts');
 
 const TABLE_HEADER_PREFIX = '| Record kind | Leaf | Set | v1 declared |';
+
+// Kinds on the dated §12 rows for `packages/discovery/facts/benchmarking`, removed by
+// #3986. The rows stay in the frozen design; this set is what teaches the live join
+// that they are historical, not a missing leaf.
+export const RETIRED_RECORD_KINDS = new Set([
+  'benchmark/v1',
+  'benchmark-run/v1',
+  'benchmark-matrix/v1',
+  'benchmark-accounting/v1',
+  'benchmark-report/v1',
+  'benchmark-report/v2',
+]);
 
 /**
  * Backticked tokens of one markdown cell. `_none_` is §12's empty marker, and it is the only
@@ -121,49 +139,97 @@ export function readProfiles(profilesRoot = factsDir) {
   return profiles;
 }
 
-const rows = parseAuditTable();
-const profiles = readProfiles();
-
-/** @type {Map<string, typeof profiles>} */
-const byKind = new Map();
-for (const profile of profiles) {
-  if (!byKind.has(profile.kind)) byKind.set(profile.kind, []);
-  byKind.get(profile.kind).push(profile);
+function groupProfilesByKind(profileList) {
+  /** @type {Map<string, typeof profileList>} */
+  const grouped = new Map();
+  for (const profile of profileList) {
+    if (!grouped.has(profile.kind)) grouped.set(profile.kind, []);
+    grouped.get(profile.kind).push(profile);
+  }
+  return grouped;
 }
 
-test('every §12 audit-table row names record kinds that exist in the profile tree', () => {
-  for (const row of rows) {
-    const missing = row.kinds.filter((kind) => !byKind.has(kind));
+function rowIsRetired(row, retiredKinds) {
+  return row.kinds.length > 0 && row.kinds.every((kind) => retiredKinds.has(kind));
+}
+
+function fakeProfile(kind, leaf, referenceBearing, version = 1) {
+  return {
+    leaf,
+    file: `${kind.replace('/', '.')}.json`,
+    kind,
+    profile: `${kind}/facts/v${version}`,
+    version,
+    referenceBearing,
+  };
+}
+
+export function assertTableKindsExistInTree(tableRows, profilesByKind, retiredKinds = RETIRED_RECORD_KINDS) {
+  for (const row of tableRows) {
+    if (rowIsRetired(row, retiredKinds)) {
+      const stillLive = row.kinds.filter((kind) => profilesByKind.has(kind));
+      assert.deepEqual(
+        stillLive,
+        [],
+        `§12 line ${row.line}: retired kind(s) still in tree: ${stillLive.join(', ')}`,
+      );
+      continue;
+    }
+    const retiredOnRow = row.kinds.filter((kind) => retiredKinds.has(kind));
+    const liveOnRow = row.kinds.filter((kind) => !retiredKinds.has(kind));
+    assert.deepEqual(
+      retiredOnRow,
+      [],
+      `§12 line ${row.line}: mixes retired kind(s) ${retiredOnRow.join(', ')} with live kind(s) ${liveOnRow.join(', ')}`,
+    );
+    const missing = row.kinds.filter((kind) => !profilesByKind.has(kind));
     assert.deepEqual(
       missing,
       [],
       `§12 line ${row.line}: table names kind(s) not in tree: ${missing.join(', ')}`,
     );
   }
-});
+}
 
-test('every record kind in the profile tree has exactly one §12 audit-table row', () => {
+export function assertLiveKindsHaveTableRows(tableRows, profilesByKind, retiredKinds = RETIRED_RECORD_KINDS) {
   /** @type {Map<string, number[]>} */
-  const rowsByKind = new Map();
-  for (const row of rows) {
+  const tableLinesByKind = new Map();
+  for (const row of tableRows) {
     for (const kind of row.kinds) {
-      if (!rowsByKind.has(kind)) rowsByKind.set(kind, []);
-      rowsByKind.get(kind).push(row.line);
+      if (!tableLinesByKind.has(kind)) tableLinesByKind.set(kind, []);
+      tableLinesByKind.get(kind).push(row.line);
     }
   }
-  for (const kind of byKind.keys()) {
+  for (const kind of profilesByKind.keys()) {
     assert.ok(
-      rowsByKind.has(kind),
+      !retiredKinds.has(kind),
+      `kind "${kind}" is listed as retired but still has profile documents`,
+    );
+    assert.ok(
+      tableLinesByKind.has(kind),
       `kind "${kind}" is in the tree but has no audit-table row in §12`,
     );
   }
-  for (const [kind, lines] of rowsByKind) {
+  for (const [kind, lines] of tableLinesByKind) {
     assert.equal(lines.length, 1, `kind "${kind}" is named by ${lines.length} §12 rows (lines ${lines.join(', ')})`);
   }
+}
+
+const rows = parseAuditTable();
+const profiles = readProfiles();
+const byKind = groupProfilesByKind(profiles);
+
+test('every §12 audit-table row names record kinds that exist in the profile tree', () => {
+  assertTableKindsExistInTree(rows, byKind);
+});
+
+test('every record kind in the profile tree has exactly one §12 audit-table row', () => {
+  assertLiveKindsHaveTableRows(rows, byKind);
 });
 
 test('each §12 row records the leaf that registers its kinds', () => {
   for (const row of rows) {
+    if (rowIsRetired(row, RETIRED_RECORD_KINDS)) continue;
     for (const kind of row.kinds) {
       for (const profile of byKind.get(kind) ?? []) {
         assert.equal(
@@ -178,6 +244,7 @@ test('each §12 row records the leaf that registers its kinds', () => {
 
 test('each §12 *Set* cell equals the newest profile\'s reference-bearing fields, in document order', () => {
   for (const row of rows) {
+    if (rowIsRetired(row, RETIRED_RECORD_KINDS)) continue;
     const group = orderedGroup(row);
     const newest = group[group.length - 1];
     assert.deepEqual(
@@ -190,6 +257,7 @@ test('each §12 *Set* cell equals the newest profile\'s reference-bearing fields
 
 test('each §12 *v1 declared* cell equals the first profile\'s reference-bearing fields', () => {
   for (const row of rows) {
+    if (rowIsRetired(row, RETIRED_RECORD_KINDS)) continue;
     const group = orderedGroup(row);
     const first = group[0];
     assert.deepEqual(
@@ -205,8 +273,8 @@ test('each §12 *v1 declared* cell equals the first profile\'s reference-bearing
  * `benchmark-report/v1`, `benchmark-report/v2` is one row over two kind URIs — so newest
  * and first are taken across the union.
  */
-function orderedGroup(row) {
-  const group = row.kinds.flatMap((kind) => byKind.get(kind) ?? []).sort((a, b) => a.version - b.version);
+function orderedGroup(row, profilesByKind = byKind) {
+  const group = row.kinds.flatMap((kind) => profilesByKind.get(kind) ?? []).sort((a, b) => a.version - b.version);
   assert.ok(group.length > 0, `§12 line ${row.line}: no profile documents for ${row.kinds.join(', ')}`);
   const versions = group.map((profile) => profile.version);
   assert.equal(
@@ -227,6 +295,17 @@ function syntheticTable(setCell, v1Cell) {
   ].join('\n');
 }
 
+function syntheticRows(bodyRows) {
+  return parseAuditTable(
+    [
+      `${TABLE_HEADER_PREFIX} Revision |`,
+      '| --- | --- | --- | --- | --- |',
+      ...bodyRows,
+      '',
+    ].join('\n'),
+  );
+}
+
 test('a *Set* or *v1 declared* cell must be `_none_` or carry at least one backticked token', () => {
   assert.deepEqual(parseAuditTable(syntheticTable('_none_', '`benchmarkDigest`'))[0].set, []);
   assert.deepEqual(parseAuditTable(syntheticTable('`a`, `b`', '_none_'))[0].set, ['a', 'b']);
@@ -234,4 +313,60 @@ test('a *Set* or *v1 declared* cell must be `_none_` or carry at least one backt
   assert.throws(() => parseAuditTable(syntheticTable('none declared', '_none_')), /_none_/u);
   assert.throws(() => parseAuditTable(syntheticTable('_none_', 'same as Set')), /_none_/u);
   assert.throws(() => parseAuditTable(syntheticTable('', '_none_')), /_none_/u);
+});
+
+test('without a retired-kind annotation, historical §12 rows fail as missing tree membership', () => {
+  assert.throws(
+    () => assertTableKindsExistInTree(rows, byKind, new Set()),
+    /§12 line 1054: table names kind\(s\) not in tree: benchmark\/v1/u,
+  );
+});
+
+test('without a retired-kind annotation, Set and v1 checks fail for missing profiles', () => {
+  const historical = rows.find((row) => row.kinds.includes('benchmark/v1'));
+  assert.ok(historical, 'dated §12 table no longer names benchmark/v1; retarget this regression');
+  assert.throws(
+    () => orderedGroup(historical, byKind),
+    /§12 line 1054: no profile documents for benchmark\/v1/u,
+  );
+});
+
+test('historical §12 rows for retired kinds are not current tree membership', () => {
+  assertTableKindsExistInTree(rows, byKind);
+  for (const kind of RETIRED_RECORD_KINDS) {
+    assert.equal(byKind.has(kind), false, `retired kind "${kind}" unexpectedly has profile documents`);
+    assert.ok(
+      rows.some((row) => row.kinds.includes(kind)),
+      `retired kind "${kind}" is not named by the dated §12 table; drop it from RETIRED_RECORD_KINDS`,
+    );
+  }
+  assert.doesNotThrow(() => assertTableKindsExistInTree(parseAuditTable(syntheticTable('`taskDigests`', '_none_')), new Map()));
+});
+
+test('a live kind without a §12 row still fails', () => {
+  const tableRows = syntheticRows([
+    '| `environment/v1` | `environments` | `image.manifestDigest` | `image.manifestDigest` | prose |',
+  ]);
+  const profilesByKind = groupProfilesByKind([
+    fakeProfile('environment/v1', 'environments', ['image.manifestDigest']),
+    fakeProfile('offer/v1', 'offers', ['subject', 'supersedes']),
+  ]);
+  assert.throws(
+    () => assertLiveKindsHaveTableRows(tableRows, profilesByKind),
+    /kind "offer\/v1" is in the tree but has no audit-table row in §12/u,
+  );
+});
+
+test('a non-retired kind named by §12 but missing from the tree still fails', () => {
+  const tableRows = syntheticRows([
+    '| `environment/v1` | `environments` | `image.manifestDigest` | `image.manifestDigest` | prose |',
+    '| `offer/v1` | `offers` | `subject`, `supersedes` | `subject`, `supersedes` | prose |',
+  ]);
+  const profilesByKind = groupProfilesByKind([
+    fakeProfile('environment/v1', 'environments', ['image.manifestDigest']),
+  ]);
+  assert.throws(
+    () => assertTableKindsExistInTree(tableRows, profilesByKind),
+    /table names kind\(s\) not in tree: offer\/v1/u,
+  );
 });
