@@ -290,14 +290,37 @@ test('Increment 2 moves cli and core onto the demand-gated independent product l
   assert.equal(catalog.releaseGroups['transitional-or-private'].expectedPackageCount, 10);
 });
 
-test('neither newly published name may borrow a receipt for a publish run that never happened', () => {
+test('the checker 0.2.1 selects its own receipt for the attested 0.2.1 stack-canary run', () => {
   // A receipt attests one stack-canary publish: its run URL, per-package integrity and provenance
-  // cannot be fabricated. Registering one for the checker is an operator step after this change, so
-  // until it exists `--apply` refuses and the checker cannot be published (issue #4188).
-  assert.throws(
-    () => loadProductReleasePlatformPin(repoRoot, checkerManifest()),
-    /no immutable platform receipt is registered for @colophon-claims\/check@0\.2\.1/u,
-  );
+  // cannot be fabricated. The checker's receipt is its own row, recorded on operator authorization
+  // (issue #4733), and cites the same real run core 0.1.0 and cli 0.1.0 already cite. The checker
+  // declares the same Jinn dependencies verify 0.2.1 did, so its closure and the registry facts for
+  // that closure are the same 15 rows; the verify 0.2.1 row itself is left untouched.
+  const manifest = checkerManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  assert.equal(pin.decision, 'operator-authorization-2026-09-23-issue-4733');
+  assert.equal(pin.product.packageName, '@colophon-claims/check');
+  assert.equal(pin.product.version, '0.2.1');
+  assert.equal(pin.platformSourceSha, V21_PIN_SHA);
+  assert.equal(pin.platformVersion, V21_PIN_VERSION);
+  assert.equal(pin.stackPublishRunUrl, 'https://github.com/Jinn-Network/mono/actions/runs/33517790412/attempts/2');
+  const legacy = loadProductReleasePlatformPin(repoRoot, legacyVerifyManifest());
+  assert.equal(legacy.decision, 'operator-authorization-2026-08-26');
+  assert.deepEqual(pin.platformPackages, legacy.platformPackages);
+  const patched = transformColophonManifestForPublish(manifest, pin);
+  assert.equal(patched.name, '@colophon-claims/check');
+  assert.equal(patched.version, '0.2.1');
+  for (const section of ['dependencies', 'devDependencies']) {
+    for (const [name, version] of Object.entries(patched[section])) {
+      if (name.startsWith('@jinn-network/')) assert.equal(version, V21_PIN_VERSION, `${section}.${name}`);
+    }
+  }
+  assert.doesNotMatch(JSON.stringify(patched), /portal:/u);
+});
+
+test('the alias may not borrow a receipt for a publish run that never happened', () => {
+  // The alias declares no Jinn dependency, so the workflow never runs `--apply` on it and it has
+  // no receipt to select (issue #4188).
   assert.throws(
     () => loadProductReleasePlatformPin(repoRoot, aliasManifest()),
     /no immutable platform receipt is registered for @colophon-claims\/verify@0\.2\.2/u,
@@ -310,6 +333,7 @@ test('neither newly published name may borrow a receipt for a publish run that n
       '@colophon-claims/verify@0.2.1',
       '@colophon-claims/core@0.1.0',
       '@colophon-claims/cli@0.1.0',
+      '@colophon-claims/check@0.2.1',
     ],
     'a receipt names the publish run it attests, so re-keying one onto another name would forge it',
   );

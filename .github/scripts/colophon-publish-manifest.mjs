@@ -136,6 +136,13 @@ const PRODUCT_RELEASES = {
     receiptSha256: 'a68ee374b0dc7382df32f5d999584bc0ca6af37b3ebbed3f221d39452004f3ee',
     closure: CLI_010_PLATFORM_CLOSURE,
   },
+  '@colophon-claims/check@0.2.1': {
+    decision: 'operator-authorization-2026-09-23-issue-4733',
+    platformSourceSha: '0533a224cf99f06d7facf0c23455f2781a5b9e62',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/33517790412/attempts/2',
+    receiptSha256: 'c3ae4c714b9c742823873c6b6ca7ff00849204cbdaec5b99ca7457d8497e3703',
+    closure: VERIFY_020_PLATFORM_CLOSURE,
+  },
 };
 const PRODUCT_RELEASE_IDS = Object.keys(PRODUCT_RELEASES);
 
@@ -378,7 +385,6 @@ export function applyColophonPublishManifest(manifestPath, pin, options = {}) {
  * It is deliberately not derived from `PRODUCT_RELEASES`. A platform receipt attests one publish
  * run; a registered release is any version this tree may resolve against. `verify@0.1.0` predates
  * the receipt file and `verify@0.2.2` is the alias, which carries no Jinn closure to attest.
- * `check@0.2.1` is the checker about to be published and has no receipt yet (issue #4188).
  */
 const READER_RELEASES = {
   '@colophon-claims/check': ['0.2.1'],
